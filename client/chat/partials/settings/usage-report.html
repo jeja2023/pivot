@@ -1,42 +1,42 @@
 <div id="tab-content-report" class="usage-view admin-only hidden" data-usage-panel="report" role="tabpanel" aria-labelledby="usage-subtab-report">
-    <div class="report-filter-bar" style="margin-bottom: 20px;">
-            <select id="report-unit" class="form-input" style="width: 180px; padding: 6px 12px; height: 36px;">
-                <option value="">所有部门</option>
-            </select>
-            <input type="text" id="report-username" class="form-input" placeholder="搜索用户" style="width: 140px; padding: 6px 12px; height: 36px;">
-            <select id="report-days" class="form-input" style="width: 128px; padding: 6px 12px; height: 36px;">
-                <option value="1">今天</option>
-                <option value="3">近 3 天</option>
-                <option value="7">近 7 天</option>
-                <option value="14">近 14 天</option>
-                <option value="30" selected>近 30 天</option>
-                <option value="90">近 90 天</option>
-                <option value="180">近半年</option>
-                <option value="365">近 1 年</option>
-                <option value="730">近 2 年</option>
-                <option value="custom">自定义</option>
-            </select>
-            <div id="report-custom-range" class="report-custom-range hidden">
-                <input type="date" id="report-start" class="form-input" style="width: 132px; padding: 6px 10px; height: 36px;">
-                <span>至</span>
-                <input type="date" id="report-end" class="form-input" style="width: 132px; padding: 6px 10px; height: 36px;">
-            </div>
-            <button id="report-reset-btn" type="button" class="btn-secondary" style="height: 36px;" data-static-action="reset-report">重置</button>
-            <button id="report-query-btn" class="btn-primary" style="height: 36px;" type="button">生成报表</button>
-            <button id="report-export-btn" type="button" class="btn-secondary" style="height: 36px;" data-static-action="export-report">导出报表</button>
+    <div class="report-filter-bar">
+        <select id="report-unit" class="form-input">
+            <option value="">所有部门</option>
+        </select>
+        <input type="text" id="report-username" class="form-input" placeholder="搜索用户">
+        <select id="report-days" class="form-input">
+            <option value="1">今天</option>
+            <option value="3">近 3 天</option>
+            <option value="7">近 7 天</option>
+            <option value="14">近 14 天</option>
+            <option value="30" selected>近 30 天</option>
+            <option value="90">近 90 天</option>
+            <option value="180">近半年</option>
+            <option value="365">近 1 年</option>
+            <option value="730">近 2 年</option>
+            <option value="custom">自定义</option>
+        </select>
+        <div id="report-custom-range" class="report-custom-range hidden">
+            <input type="date" id="report-start" class="form-input">
+            <span>至</span>
+            <input type="date" id="report-end" class="form-input">
         </div>
-    <div class="stat-card trend-card" style="margin-bottom: 20px;">
-        <h4>Token 使用趋势</h4>
-        <canvas id="report-trend-chart" height="260"></canvas>
+        <button id="report-reset-btn" type="button" class="btn-secondary" data-static-action="reset-report">重置</button>
+        <button id="report-query-btn" class="btn-primary" type="button">生成报表</button>
+        <button id="report-export-btn" type="button" class="btn-secondary" data-static-action="export-report">导出报表</button>
     </div>
-    <div class="report-chart-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="stat-card trend-card">
+        <h4>Token 使用趋势</h4>
+        <canvas id="report-trend-chart" height="150"></canvas>
+    </div>
+    <div class="report-chart-grid">
         <div class="stat-card report-bar-card">
             <h4>用户消耗排行 (Top 10)</h4>
-            <canvas id="report-user-chart" height="250"></canvas>
+            <canvas id="report-user-chart" height="140"></canvas>
         </div>
         <div class="stat-card report-bar-card">
             <h4>部门消耗对比</h4>
-            <canvas id="report-unit-chart" height="250"></canvas>
+            <canvas id="report-unit-chart" height="140"></canvas>
         </div>
     </div>
 </div>

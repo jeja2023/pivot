@@ -66,7 +66,7 @@ window.loadDetails = async function(page = 1) {
         }).join(''));
         renderPagination('details', total, page);
     } catch (e) { showToast('加载明细失败', 'error'); }
-}
+};
 
 window.loadStats = async function(page = pageState.stats || 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
@@ -102,7 +102,8 @@ window.loadStats = async function(page = pageState.stats || 1) {
         renderPagination('stats', 0, 1);
         showToast('加载统计失败', 'error');
     }
-}
+};
+
 const trendChartRetryFrames = {};
 const trendChartRetryCounts = {};
 
@@ -111,9 +112,7 @@ function renderTrendChart(canvasId, data) {
     if (!canvas) return;
     const parentWidth = canvas.parentElement?.clientWidth || 0;
     // 容器尚未完成布局时（所在标签页处于 hidden、缩放容器宽度变量未就绪等），
-    // parentElement.clientWidth 会读到 0。旧逻辑会退化为固定 600px 宽度并“钉死”在画布上，
-    // 视觉上表现为图表突然缩到左侧、右侧大片留白，且不会自动恢复。
-    // 此处改为等待容器获得真实未缩放宽度后再绘制，避免按错误宽度落笔。
+    // parentElement.clientWidth 会读到 0。此处等待容器获得真实未缩放宽度后再绘制。
     if (parentWidth < 1) {
         if (trendChartRetryFrames[canvasId]) window.cancelAnimationFrame(trendChartRetryFrames[canvasId]);
         trendChartRetryCounts[canvasId] = (trendChartRetryCounts[canvasId] || 0) + 1;
@@ -123,7 +122,6 @@ function renderTrendChart(canvasId, data) {
                 renderTrendChart(canvasId, data);
             });
         } else {
-            // 容器长时间不可见，放弃本次绘制；下次进入该页会重新加载并渲染
             trendChartRetryCounts[canvasId] = 0;
         }
         return;
@@ -131,12 +129,13 @@ function renderTrendChart(canvasId, data) {
     trendChartRetryCounts[canvasId] = 0;
 
     const ctx = canvas.getContext('2d');
-    // 统一使用父容器的未缩放布局宽度，避免使用被 CSS scale 二次缩小的 getBoundingClientRect 宽度
     const width = Math.max(parentWidth, 320);
-    const height = Number(canvas.getAttribute('height')) || 220;
+    const height = Number(canvas.getAttribute('height')) || 150;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = width * ratio; canvas.height = height * ratio;
-    canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, width, height);
 
@@ -145,15 +144,19 @@ function renderTrendChart(canvasId, data) {
     const max = Math.max(...values, 1);
     const padLeft = 30;
     const padRight = 18;
-    const padTop = 28;
-    const padBottom = 42;
+    const padTop = height < 180 ? 16 : 28;
+    const padBottom = height < 180 ? 24 : 42;
     const chartW = width - padLeft - padRight;
     const chartH = height - padTop - padBottom;
 
-    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 1;
     for (let i = 0; i <= 3; i++) {
         const y = padTop + chartH * (i / 3);
-        ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(width - padRight, y); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(width - padRight, y);
+        ctx.stroke();
     }
 
     if (values.length === 0) {
@@ -172,15 +175,22 @@ function renderTrendChart(canvasId, data) {
 
     ctx.beginPath();
     points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = '#10a37f'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = '#10a37f';
+    ctx.lineWidth = 2;
+    ctx.stroke();
     
     ctx.fillStyle = 'rgba(16, 163, 127, 0.12)';
     ctx.lineTo(points[points.length - 1].x, height - padBottom);
     ctx.lineTo(points[0].x, height - padBottom);
-    ctx.closePath(); ctx.fill();
+    ctx.closePath();
+    ctx.fill();
 
     ctx.fillStyle = '#10a37f';
-    points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
+    points.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
@@ -213,7 +223,6 @@ function renderTrendChart(canvasId, data) {
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(formatTokenCount(max), padLeft, 14);
 }
-
 
 window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
 window.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
@@ -273,7 +282,7 @@ window.loadLogs = async function(page = 1) {
         }).join(''));
         renderPagination('logs', total, page);
     } catch (e) { showToast('加载日志失败', 'error'); }
-}
+};
 
 window.resetLogFilters = () => {
     ['user', 'action', 'details', 'ip', 'start', 'end'].forEach(f => {
@@ -298,9 +307,9 @@ window.exportLogs = () => {
 window.loadReport = async function() {
     window.bindReportDateFilters?.();
     window.syncReportDateFilters?.();
-    const unit = document.getElementById('report-unit').value || '';
-    const username = document.getElementById('report-username').value || '';
-    const period = document.getElementById('report-days').value || '30';
+    const unit = document.getElementById('report-unit')?.value || '';
+    const username = document.getElementById('report-username')?.value || '';
+    const period = document.getElementById('report-days')?.value || '30';
     const start = document.getElementById('report-start')?.value || '';
     const end = document.getElementById('report-end')?.value || '';
     const params = new URLSearchParams({ unit, username });
@@ -319,10 +328,11 @@ window.loadReport = async function() {
         
         // 动态填充部门下拉框
         const unitSelect = document.getElementById('report-unit');
-        if (unitSelect.options.length <= 1 && data.units) {
+        if (unitSelect && unitSelect.options.length <= 1 && data.units) {
             data.units.forEach(u => {
                 const opt = document.createElement('option');
-                opt.value = u; opt.innerText = u;
+                opt.value = u;
+                opt.innerText = u;
                 unitSelect.appendChild(opt);
             });
             unitSelect.value = unit;
@@ -331,6 +341,8 @@ window.loadReport = async function() {
         renderTrendChart('report-trend-chart', data.trend);
         renderBarChart('report-user-chart', data.byUser, 'nickname', 'username');
         renderBarChart('report-unit-chart', data.byUnit, 'unit', 'unit');
+        window.scheduleSettingsWorkspaceScale?.();
+        setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
     } catch (e) {
         showToast('加载报表失败', 'error');
     }
@@ -363,7 +375,7 @@ window.Pivot?.exposeModule?.('chat.stats', {
 window.syncReportDateFilters = function() {
     const period = document.getElementById('report-days')?.value || '30';
     document.getElementById('report-custom-range')?.classList.toggle('hidden', period !== 'custom');
-}
+};
 
 window.bindReportDateFilters = function() {
     const periodSelect = document.getElementById('report-days');
@@ -377,7 +389,7 @@ window.bindReportDateFilters = function() {
         resetBtn.addEventListener('click', window.resetReportFilters);
     }
     window.syncReportDateFilters();
-}
+};
 
 window.resetReportFilters = function() {
     const unit = document.getElementById('report-unit');
@@ -392,7 +404,7 @@ window.resetReportFilters = function() {
     if (end) end.value = '';
     window.syncReportDateFilters?.();
     window.loadReport?.();
-}
+};
 
 function renderBarChart(canvasId, data, labelField, fallbackField) {
     const canvas = document.getElementById(canvasId);
@@ -401,10 +413,12 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
     const rect = canvas.getBoundingClientRect();
     const parentWidth = canvas.parentElement?.clientWidth || 0;
     const width = Math.max(rect.width || parentWidth || 400, 320);
-    const height = Number(canvas.getAttribute('height')) || 250;
+    const height = Number(canvas.getAttribute('height')) || 140;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = width * ratio; canvas.height = height * ratio;
-    canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, width, height);
 
@@ -418,13 +432,15 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         Math.max(180, Math.floor(width * 0.45))
     );
     const padX = labelColumnWidth;
-    const padY = 20;
+    const padY = height < 180 ? 10 : 20;
     const chartW = width - padX - 60;
     const chartH = height - padY * 2;
 
     if (values.length === 0) {
-        ctx.fillStyle = '#6b7280'; ctx.font = '13px sans-serif';
-        ctx.fillText('暂无数据', padX, height / 2); return;
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('暂无数据', padX, height / 2);
+        return;
     }
 
     const spacing = chartH / Math.max(values.length, 5);
@@ -465,4 +481,3 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         ctx.fillText(formatTokenCount(v), padX + barWidth + 8, y);
     });
 }
-
