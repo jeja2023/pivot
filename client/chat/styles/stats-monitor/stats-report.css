@@ -1,9 +1,24 @@
 /* 拆自 stats-monitor.css。 */
 /* 统计报表卡片、筛选器、用量表与详情表样式。 */
 .usage-page-head {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     padding-bottom: 14px;
+    margin-bottom: 18px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+.usage-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.usage-subtab-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 .settings-subnav {
     display: inline-flex;
@@ -64,10 +79,10 @@
 .report-filter-bar {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
     align-items: center;
     gap: 8px;
-    padding: 8px;
+    padding: 8px 12px;
     border: 1px solid rgba(148, 163, 184, 0.14);
     border-radius: 8px;
     background: #f8fafc;

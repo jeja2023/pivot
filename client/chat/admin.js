@@ -138,6 +138,21 @@ function persistUsageSubtab(subtab) {
     }
 }
 
+const USAGE_SUBTAB_METAS = {
+    stats: {
+        title: '用量统计',
+        desc: '按用户与模型汇总消息、Token、费用估算和最后活跃时间。'
+    },
+    details: {
+        title: '用量明细',
+        desc: '查看每条消息的时间、用户、模型、角色和 Token 消耗明细。'
+    },
+    report: {
+        title: '审计报表',
+        desc: '按部门、用户和时间范围生成 Token 趋势、用户排行和部门消耗对比。'
+    }
+};
+
 function switchUsageSubtab(subtab, options = {}) {
     const target = normalizeUsageSubtab(subtab);
     document.querySelectorAll('[data-usage-subtab]').forEach(button => {
@@ -148,6 +163,14 @@ function switchUsageSubtab(subtab, options = {}) {
     document.querySelectorAll('[data-usage-panel]').forEach(panel => {
         panel.classList.toggle('hidden', panel.dataset.usagePanel !== target);
     });
+    document.querySelectorAll('[data-usage-actions]').forEach(actions => {
+        actions.classList.toggle('hidden', actions.dataset.usageActions !== target);
+    });
+    const meta = USAGE_SUBTAB_METAS[target];
+    const titleEl = document.getElementById('usage-title');
+    const descEl = document.getElementById('usage-desc');
+    if (titleEl && meta) titleEl.textContent = meta.title;
+    if (descEl && meta) descEl.textContent = meta.desc;
     if (!options.skipPersist) persistUsageSubtab(target);
     if (!options.skipLoad) loadTabData(target, options.page || pageState[target] || 1);
     window.scheduleSettingsWorkspaceScale?.();

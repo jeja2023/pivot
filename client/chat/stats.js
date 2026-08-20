@@ -41,7 +41,7 @@ function formatUsageRoleLabel(role) {
 }
 
 window.loadDetails = async function(page = 1) {
-    const titleEl = document.getElementById('details-title');
+    const titleEl = document.getElementById('details-title') || document.getElementById('usage-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
         const res = await apiFetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
@@ -71,7 +71,7 @@ window.loadDetails = async function(page = 1) {
 window.loadStats = async function(page = pageState.stats || 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     pageState.stats = requestedPage;
-    const titleEl = document.getElementById('stats-title');
+    const titleEl = document.getElementById('stats-title') || document.getElementById('usage-title');
     if (titleEl) titleEl.innerText = '用量统计';
     try {
         const params = new URLSearchParams({

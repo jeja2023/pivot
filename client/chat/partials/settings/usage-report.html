@@ -1,10 +1,5 @@
 <div id="tab-content-report" class="usage-view admin-only hidden" data-usage-panel="report" role="tabpanel" aria-labelledby="usage-subtab-report">
-    <div class="settings-page-head usage-panel-head">
-        <div>
-            <h3>审计报表</h3>
-            <p>按部门、用户和时间范围生成 Token 趋势、用户排行和部门消耗对比。</p>
-        </div>
-        <div class="report-filter-bar">
+    <div class="report-filter-bar" style="margin-bottom: 20px;">
             <select id="report-unit" class="form-input" style="width: 180px; padding: 6px 12px; height: 36px;">
                 <option value="">所有部门</option>
             </select>
@@ -30,7 +25,6 @@
             <button id="report-query-btn" class="btn-primary" style="height: 36px;" type="button">生成报表</button>
             <button id="report-export-btn" type="button" class="btn-secondary" style="height: 36px;" data-static-action="export-report">导出报表</button>
         </div>
-    </div>
     <div class="stat-card trend-card" style="margin-bottom: 20px;">
         <h4>Token 使用趋势</h4>
         <canvas id="report-trend-chart" height="260"></canvas>

@@ -135,18 +135,20 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#admin-container')).toBeVisible();
         await page.locator('#tab-usage').click();
 
-        await expect(page.locator('#usage-title')).toHaveText('用量审计');
+        await expect(page.locator('#usage-title')).toHaveText('用量统计');
         await expect(page.locator('#tab-content-stats')).toBeVisible();
         await expect(page.locator('#tab-content-details')).toBeHidden();
         await expect(page.locator('#tab-content-report')).toBeHidden();
 
         await page.locator('#usage-subtab-details').click();
         await expect(page.locator('#usage-subtab-details')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#usage-title')).toHaveText('用量明细');
         await expect(page.locator('#tab-content-stats')).toBeHidden();
         await expect(page.locator('#tab-content-details')).toBeVisible();
 
         await page.locator('#usage-subtab-report').click();
         await expect(page.locator('#usage-subtab-report')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#usage-title')).toHaveText('审计报表');
         await expect(page.locator('#tab-content-details')).toBeHidden();
         await expect(page.locator('#tab-content-report')).toBeVisible();
         await expect(page.locator('#report-query-btn')).toBeVisible();

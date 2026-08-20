@@ -1,14 +1,24 @@
-<!-- 用量审计 -->
+<!-- 用量审计 / 用量中心 -->
 <section id="tab-content-usage" class="admin-tab-content hidden">
     <div class="settings-page-head usage-page-head">
         <div>
-            <h3 id="usage-title">用量审计</h3>
-            <p>集中查看资源消耗汇总、逐条用量记录和管理审计报表。</p>
+            <h3 id="usage-title">用量统计</h3>
+            <p id="usage-desc">按用户与模型汇总消息、Token、费用估算和最后活跃时间。</p>
         </div>
-        <div class="settings-subnav" role="tablist" aria-label="用量审计子页">
-            <button id="usage-subtab-stats" class="settings-subtab active" type="button" data-usage-subtab="stats" role="tab" aria-controls="tab-content-stats" aria-selected="true">用量统计</button>
-            <button id="usage-subtab-details" class="settings-subtab" type="button" data-usage-subtab="details" role="tab" aria-controls="tab-content-details" aria-selected="false">用量明细</button>
-            <button id="usage-subtab-report" class="settings-subtab admin-only hidden" type="button" data-usage-subtab="report" role="tab" aria-controls="tab-content-report" aria-selected="false">审计报表</button>
+        <div class="usage-head-actions">
+            <div class="settings-subnav" role="tablist" aria-label="用量审计子页">
+                <button id="usage-subtab-stats" class="settings-subtab active" type="button" data-usage-subtab="stats" role="tab" aria-controls="tab-content-stats" aria-selected="true">用量统计</button>
+                <button id="usage-subtab-details" class="settings-subtab" type="button" data-usage-subtab="details" role="tab" aria-controls="tab-content-details" aria-selected="false">用量明细</button>
+                <button id="usage-subtab-report" class="settings-subtab admin-only hidden" type="button" data-usage-subtab="report" role="tab" aria-controls="tab-content-report" aria-selected="false">审计报表</button>
+            </div>
+            <div class="usage-subtab-actions" data-usage-actions="stats">
+                <button id="stats-export-btn" class="btn-secondary" type="button">导出汇总</button>
+                <button id="model-cost-export-btn" class="btn-secondary" type="button">导出费用</button>
+                <button id="compliance-export-btn" class="btn-secondary admin-only hidden" type="button">合规审计包</button>
+            </div>
+            <div class="usage-subtab-actions hidden" data-usage-actions="details">
+                <button id="details-export-btn" class="btn-secondary" type="button">导出明细</button>
+            </div>
         </div>
     </div>
     <div id="usage-subtab-panels">
