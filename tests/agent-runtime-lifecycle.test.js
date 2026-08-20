@@ -86,6 +86,10 @@ test('runtime recovery leaves stale awaiting approval runs suspended', async () 
 });
 
 test('an awaiting approval run releases its queue slot to the next run', async () => {
+    const globalQueue = getAgentQueue();
+    const previousMax = globalQueue.getStatus().maxConcurrent;
+    globalQueue.updateMaxConcurrent(0);
+
     const suffix = `${process.pid}-${Date.now()}`;
     const insertUser = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -141,9 +145,6 @@ test('an awaiting approval run releases its queue slot to the next run', async (
         },
         getTimestamp: () => '2026-08-06 10:00:02'
     });
-    const globalQueue = getAgentQueue();
-    const previousMax = globalQueue.getStatus().maxConcurrent;
-    globalQueue.updateMaxConcurrent(0);
 
     try {
         await queue.processQueue();

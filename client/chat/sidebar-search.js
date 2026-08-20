@@ -7,7 +7,7 @@ let sessionBatchMode = false;
 let sessionSearchArchived = false;
 let globalSearchType = 'sessions';
 let globalSearchRequestId = 0;
-// 共享全局：搜索框输入防抖计时器，由后加载的 sidebar.js 使用（两文件共享全局作用域，勿删）
+// 搜索框输入防抖计时器由 sidebar.search 模块内部管理。
 let sessionSearchTimer = null;
 
 function sessionEscapeHtml(value) {
@@ -281,12 +281,32 @@ function setGlobalSearchType(type = 'sessions') {
     globalSearchRequestId += 1;
     if (globalSearchType !== 'sessions' && sessionBatchMode) setSessionBatchMode(false);
     updateGlobalSearchUi();
-    loadSessionSearchResults();
+    refreshSessionSearchResults();
 }
 
 window.Pivot.exposeModule('sidebar.search', {
-    setType: setGlobalSearchType
+    setType: setGlobalSearchType,
+    open: openSessionSearchModal,
+    close: closeSessionSearchModal,
+    refresh: refreshSessionSearchResults,
+    scheduleRefresh: scheduleSessionSearchResults,
+    setBatchMode: setSessionBatchMode,
+    batchAction: runBatchTagAction
 });
+
+function refreshSessionSearchResults() {
+    clearTimeout(sessionSearchTimer);
+    sessionSearchTimer = null;
+    return loadSessionSearchResults();
+}
+
+function scheduleSessionSearchResults() {
+    clearTimeout(sessionSearchTimer);
+    sessionSearchTimer = setTimeout(() => {
+        sessionSearchTimer = null;
+        loadSessionSearchResults();
+    }, 240);
+}
 
 async function loadSessionSearchResults() {
     updateGlobalSearchUi();
@@ -295,7 +315,7 @@ async function loadSessionSearchResults() {
     return loadSessionOnlySearchResults();
 }
 
-window.openSessionSearchModal = function(prefill = '') {
+function openSessionSearchModal(prefill = '') {
     const { modal, input, openButton } = getSessionSearchEls();
     if (!modal) return;
     globalSearchType = 'sessions';
@@ -303,21 +323,25 @@ window.openSessionSearchModal = function(prefill = '') {
     globalSearchRequestId += 1;
     modal.classList.remove('hidden');
     openButton?.classList.add('active');
+    clearTimeout(sessionSearchTimer);
+    sessionSearchTimer = null;
     if (input) {
         input.value = prefill;
         setTimeout(() => input.focus(), 0);
     }
     updateSessionBatchBar();
     updateGlobalSearchUi();
-    loadSessionSearchResults();
-};
+    refreshSessionSearchResults();
+}
 
-window.closeSessionSearchModal = function() {
+function closeSessionSearchModal() {
     const { modal, openButton } = getSessionSearchEls();
     if (sessionBatchMode) setSessionBatchMode(false);
+    clearTimeout(sessionSearchTimer);
+    sessionSearchTimer = null;
     modal?.classList.add('hidden');
     openButton?.classList.remove('active');
-};
+}
 
 function ensureSessionTagTools() {
     const controls = document.querySelector('.session-search-controls') || document.querySelector('.sidebar-ctrls');

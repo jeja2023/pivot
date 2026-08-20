@@ -6,6 +6,10 @@ function markActiveSessionInList(id) {
     });
 };
 
+function getSidebarSearchApi() {
+    return window.Pivot?.moduleApi ? window.Pivot.moduleApi('sidebar.search') : {};
+}
+
 function updateSessionListStatus(text = '') {
     const list = document.getElementById('session-list');
     if (!list) return;
@@ -155,34 +159,34 @@ document.getElementById('session-list')?.addEventListener('click', (event) => {
             updateSessionBatchBar();
             return;
         }
-        const session = sessionMenuData.get(String(id));
-        if (session) {
-            window.selectSession(session.id, session.title);
-        }
+    const session = sessionMenuData.get(String(id));
+    if (session) {
+        window.selectSession(session.id, session.title);
     }
+}
 });
 
 document.addEventListener('click', async (event) => {
     if (event.target.closest('#session-search-open')) {
-        window.openSessionSearchModal?.();
+        getSidebarSearchApi().open?.();
         return;
     }
 
     if (event.target.closest('#session-search-close') || event.target.id === 'session-search-modal') {
-        window.closeSessionSearchModal?.();
+        getSidebarSearchApi().close?.();
         return;
     }
 
     const globalSearchTab = event.target.closest('[data-global-search-type]');
     if (globalSearchTab) {
-        window.Pivot.moduleApi('sidebar.search').setType?.(globalSearchTab.dataset.globalSearchType);
+        getSidebarSearchApi().setType?.(globalSearchTab.dataset.globalSearchType);
         return;
     }
 
     const taskSearchResult = event.target.closest('[data-global-search-task-id]');
     if (taskSearchResult) {
         const runId = taskSearchResult.dataset.globalSearchTaskId;
-        window.closeSessionSearchModal?.();
+        getSidebarSearchApi().close?.();
         await window.openAgentWorkbench?.();
         await window.openAgentRun?.(runId);
         return;
@@ -191,7 +195,7 @@ document.addEventListener('click', async (event) => {
     const workflowSearchResult = event.target.closest('[data-global-search-workflow-id]');
     if (workflowSearchResult) {
         const workflowId = workflowSearchResult.dataset.globalSearchWorkflowId;
-        window.closeSessionSearchModal?.();
+        getSidebarSearchApi().close?.();
         await window.openAgentDagWorkbench?.({ workflowId, editor: true });
         return;
     }
@@ -224,20 +228,20 @@ document.addEventListener('click', async (event) => {
             updateSessionBatchBar();
             return;
         }
-        window.closeSessionSearchModal?.();
+        getSidebarSearchApi().close?.();
         window.selectSession(searchResult.dataset.sessionSearchId, searchResult.dataset.sessionSearchTitle || '新对话');
         return;
     }
 
     if (event.target.closest('#session-search-modal-active')) {
         sessionSearchArchived = false;
-        await loadSessionSearchResults();
+        await getSidebarSearchApi().refresh?.();
         return;
     }
 
     if (event.target.closest('#session-search-modal-archive')) {
         sessionSearchArchived = true;
-        await loadSessionSearchResults();
+        await getSidebarSearchApi().refresh?.();
         return;
     }
 
@@ -250,7 +254,7 @@ document.addEventListener('click', async (event) => {
     const filter = event.target.closest('[data-session-tag-filter]');
     if (filter) {
         const tag = filter.dataset.sessionTagFilter || '';
-        window.openSessionSearchModal?.(`#${tag}`);
+        getSidebarSearchApi().open?.(`#${tag}`);
         return;
     }
 
@@ -302,12 +306,11 @@ document.addEventListener('click', async (event) => {
 });
 
 document.getElementById('session-search-modal-input')?.addEventListener('input', () => {
-    clearTimeout(sessionSearchTimer);
-    sessionSearchTimer = setTimeout(() => loadSessionSearchResults(), 240);
+    getSidebarSearchApi().scheduleRefresh?.();
 });
 
 document.getElementById('session-search-modal-input')?.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') window.closeSessionSearchModal?.();
+    if (event.key === 'Escape') getSidebarSearchApi().close?.();
 });
 
 const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {

@@ -146,6 +146,7 @@ async function main() {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     await client.query(`SET search_path TO "${schema}", public`);
+    await client.query("SET timezone = 'Asia/Shanghai'");
     const bridgeDir = String(process.env.PIVOT_TEST_SYNC_BRIDGE_DIR || '').trim();
     if (bridgeDir) {
         await runFileBridge(client, bridgeDir);

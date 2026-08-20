@@ -8,6 +8,7 @@ if (!/^[a-z_][a-z0-9_]{0,62}$/i.test(schema)) {
 async function withClient(callback) {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
+    await client.query("SET timezone = 'Asia/Shanghai'");
     try { return await callback(client); } finally { await client.end(); }
 }
 

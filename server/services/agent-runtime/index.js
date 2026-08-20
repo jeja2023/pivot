@@ -307,7 +307,6 @@ function getAgentQueue() {
             getTimestamp: getBeijingTimestamp
         });
     }
-    agentQueue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
     return agentQueue;
 }
 
