@@ -32,10 +32,6 @@ services:
       # 优点：更新客户端无需重新构建镜像，保持镜像精简
       - ./downloads:/app/downloads
 
-    # 宿主机互通：允许容器内通过 host.docker.internal 访问宿主机上的 PostgreSQL、Ollama 等服务
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
     # 网络：加入外部共享网络 ai-bridge
     networks:
       - ai-bridge
