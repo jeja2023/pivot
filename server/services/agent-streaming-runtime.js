@@ -33,7 +33,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             await assertRunNotCancelled(runId);
             await deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
-            const modelSpanId = deps.startAgentTraceSpan?.(runId, {
+            const modelSpanId = await deps.startAgentTraceSpan?.(runId, {
                 type: 'model',
                 name: `流式规划模型调用 #${step}`,
                 input: { messageCount: conversation.length, toolCount: tools.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
@@ -66,12 +66,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     '流式工具规划',
                     { signal: deps.signal || null }
                 );
-                deps.finishAgentTraceSpan?.(modelSpanId, {
+                await deps.finishAgentTraceSpan?.(modelSpanId, {
                     output: { responseLength: String(result?.content || '').length, toolCallCount: result?.toolCalls?.length || 0, finishReason: result?.finishReason || '' },
                     durationMs: Date.now() - stepStart
                 });
             } catch (modelError) {
-                deps.finishAgentTraceSpan?.(modelSpanId, {
+                await deps.finishAgentTraceSpan?.(modelSpanId, {
                     status: 'error',
                     errorMessage: modelError.message,
                     durationMs: Date.now() - stepStart
@@ -87,7 +87,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 finishReason: result?.finishReason || null,
                 completed: true
             });
-            recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
+            await recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
             roundsUsed += 1;
             await deps.insertStep(runId, step, {
                 type: 'plan',
@@ -141,7 +141,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     return { completed: true, roundsUsed };
                 }
                 const callStart = Date.now();
-                const toolSpanId = deps.startAgentTraceSpan?.(runId, {
+                const toolSpanId = await deps.startAgentTraceSpan?.(runId, {
                     type: 'tool',
                     name: `工具调用：${call.name}`,
                     input: call.arguments || {},
@@ -172,7 +172,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                     conversation.push(buildToolResultMessage(call.id, compactOutput));
-                    deps.finishAgentTraceSpan?.(toolSpanId, {
+                    await deps.finishAgentTraceSpan?.(toolSpanId, {
                         output: compactOutput,
                         durationMs: Date.now() - callStart
                     });
@@ -190,7 +190,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         durationMs: Date.now() - callStart
                     });
                     conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
-                    deps.finishAgentTraceSpan?.(toolSpanId, {
+                    await deps.finishAgentTraceSpan?.(toolSpanId, {
                         status: 'error',
                         errorMessage: toolErr.message,
                         durationMs: Date.now() - callStart

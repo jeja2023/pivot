@@ -151,7 +151,7 @@ async function recordObservabilityEvent(input = {}) {
             now
         ]);
         if (event && (severity === 'warning' || severity === 'critical')) {
-            sendWebhookAlert(event);
+            await sendWebhookAlert(event);
         }
         return event;
     } catch (e) {

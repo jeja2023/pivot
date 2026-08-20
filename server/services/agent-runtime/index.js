@@ -332,8 +332,8 @@ async function appendRunMetadataList(runId, key, item, limit = 20) {
     await updateRun(runId, { metadata: JSON.stringify({ ...current, [key]: list }), updated_at: getBeijingTimestamp() });
 }
 
-function recordRunRetryReason(runId, input = {}) {
-    appendRunMetadataList(runId, 'retryReasons', {
+async function recordRunRetryReason(runId, input = {}) {
+    await appendRunMetadataList(runId, 'retryReasons', {
         at: getBeijingTimestamp(),
         attempt: input.attempt || null,
         limit: input.limit || null,
@@ -575,7 +575,7 @@ async function softDeleteAgentRun(runId, user, reason = '') {
         throw err;
     }
     const now = getBeijingTimestamp();
-    updateRun(runId, {
+    await updateRun(runId, {
         deleted_at: now,
         deleted_by_user: user.id,
         delete_reason: String(reason || '').trim().slice(0, 500),
@@ -637,7 +637,7 @@ async function insertStep(runId, stepIndex, data = {}) {
             },
             createdAt: data.completedAt || now
         });
-        recordAgentTraceSpan(runId, {
+        await recordAgentTraceSpan(runId, {
             type: data.type || 'note',
             name: data.title || `执行步骤 ${safeStepIndex}`,
             input: data.input,
@@ -1026,7 +1026,7 @@ async function runAgent(runId, user) {
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
             const resumeContext = await buildAgentResumeContext(runId);
             await setRunMetadata(runId, { resumeContext });
-            recordRunRetryReason(runId, {
+            await recordRunRetryReason(runId, {
                 attempt: retryCount + 1,
                 limit: retryLimit,
                 code: e.code || '',
@@ -1388,7 +1388,7 @@ async function createAgentRun({
     }
     enqueueAgentRun(runId, user);
     const run = await getRunForUser(runId, user);
-    publishAgentRunEvent(runId, 'created');
+    await publishAgentRunEvent(runId, 'created');
     return run;
 }
 

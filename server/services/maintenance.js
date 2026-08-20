@@ -457,9 +457,9 @@ function runAnalysisWorkspaceCleanup() {
     }
 }
 
-function runDocumentProcessingCleanup() {
+async function runDocumentProcessingCleanup() {
     try {
-        cleanupExpiredDocumentProcessingFiles();
+        await cleanupExpiredDocumentProcessingFiles();
     } catch (err) {
         logger.warn({ err: err.message }, '文档处理输出清理失败');
     }
@@ -485,7 +485,7 @@ function startMaintenanceTasks() {
     cleanupExpiredRefreshTokens().catch(() => {});
     cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
     runAnalysisWorkspaceCleanup();
-    runDocumentProcessingCleanup();
+    runDocumentProcessingCleanup().catch(() => {});
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
 
@@ -495,7 +495,7 @@ function startMaintenanceTasks() {
         cleanupExpiredRefreshTokens().catch(() => {});
         cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
         runAnalysisWorkspaceCleanup();
-    runDocumentProcessingCleanup();
+        runDocumentProcessingCleanup().catch(() => {});
         backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
         optimizeDatabase().catch(() => {});
     }, DAY_MS).unref();

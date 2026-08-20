@@ -473,7 +473,7 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
 async function processPdfToolOperation({ job, file, files = [], config = {}, onProgress }) {
     const operation = normalizePdfOperation(config.operation);
     const sourceFiles = files.length ? files : [file].filter(Boolean);
-    onProgress?.(10, { operation });
+    await onProgress?.(10, { operation });
     if (operation === PDF_TOOL_OPERATIONS.SPLIT) return { operation, ...(await splitPdf({ job, file, config, onProgress })) };
     if (operation === PDF_TOOL_OPERATIONS.MERGE) return { operation, ...(await mergePdf({ job, file, files: sourceFiles, config, onProgress })) };
     if (operation === PDF_TOOL_OPERATIONS.ROTATE) return { operation, ...(await rotatePdf({ job, file, config, onProgress })) };

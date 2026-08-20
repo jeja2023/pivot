@@ -494,7 +494,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             if (!isNativeStructuredOutputUnsupported(error)) throw error;
             content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
         }
-        recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
         let validation = validateStructuredOutput(content, outputSchema);
         if (validation.issues.length) {
             const repairMessages = [
@@ -508,7 +508,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                 }
             ];
             const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null });
-            recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '');
+            await recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '');
             content = repaired;
             validation = validateStructuredOutput(content, outputSchema);
             if (validation.issues.length) {
@@ -520,7 +520,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
         }
     } else {
         content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
-        recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
     }
     return {
         content,
@@ -588,7 +588,7 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
     const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
     const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
     const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null });
-    recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '');
+    await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '');
     return {
         content,
         text: content,

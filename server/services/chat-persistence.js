@@ -25,7 +25,7 @@ async function persistAssistantTurn({
     if (costTime !== null || tps !== null) {
         await updateLastAssistantStats({ sessionId, userId, costTime, tps });
     }
-    scheduleMemoryExtraction({
+    await scheduleMemoryExtraction({
         userId,
         sessionId,
         messageIds: [userMessageId, assistantMessageId].filter(Boolean),

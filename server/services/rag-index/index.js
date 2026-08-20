@@ -833,7 +833,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             await safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             indexed += batch.length;
             if (typeof onProgress === 'function') {
-                onProgress({
+                await onProgress({
                     indexed: Math.min(indexed, chunks.length),
                     total: chunks.length
                 });
