@@ -604,7 +604,7 @@ function createAdminStatsRouter({
             `SELECT COALESCE(u.unit, '未分配') as unit, SUM(usage.token_count) as tokens
              FROM (${tokenUsageSubquery(innerWhere)}) usage JOIN users u ON usage.user_id = u.id
              ${outerWhere}
-             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC`,
+             GROUP BY COALESCE(u.unit, '未分配') ORDER BY tokens DESC LIMIT 10`,
             [...unionParams, ...outerParams]
         );
 
