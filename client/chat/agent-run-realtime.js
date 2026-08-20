@@ -2,8 +2,19 @@
 // 拆自 agent-runs-list.js。
 // Agent 自动刷新、实时事件和流式面板。
 /* eslint-disable no-undef */
+function isAgentUiVisible() {
+    const detailOpen = typeof isAgentRunDetailModalOpen === 'function' ? isAgentRunDetailModalOpen() : !document.getElementById('agent-run-detail-modal')?.classList.contains('hidden');
+    return Boolean(
+        detailOpen
+        || !document.getElementById('agent-workbench-modal')?.classList.contains('hidden')
+        || !document.getElementById('agent-dag-workbench-modal')?.classList.contains('hidden')
+        || !document.getElementById('automation-assets-view')?.classList.contains('hidden')
+        || !document.getElementById('automation-editor-view')?.classList.contains('hidden')
+    );
+}
+
 function updateAgentAutoRefresh() {
-    const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
+    const modalOpen = isAgentUiVisible();
     const hasActiveRun = agentRunsCache.some(run => isAgentRunActive(run.status));
     if (agentRealtimeConnected) {
         if (agentRefreshTimer) {
@@ -22,7 +33,9 @@ function updateAgentAutoRefresh() {
                 await loadAgentRuns();
                 await loadAgentRuntimeStatus();
                 await loadAgentMetrics();
-                if (activeAgentRunId && isAgentRunDetailModalOpen()) await window.openAgentRun(activeAgentRunId);
+                if (activeAgentRunId && (typeof isAgentRunDetailModalOpen !== 'function' || isAgentRunDetailModalOpen())) {
+                    await window.openAgentRun(activeAgentRunId);
+                }
             } catch (e) {}
         }, 3000);
     }
@@ -32,7 +45,7 @@ function scheduleAgentRealtimeRefresh(payload = {}) {
     clearTimeout(agentRealtimeRefreshTimer);
     agentRealtimeRefreshTimer = setTimeout(async () => {
         try {
-            const modalOpen = !document.getElementById('agent-workbench-modal')?.classList.contains('hidden');
+            const modalOpen = isAgentUiVisible();
             if (!modalOpen) return;
             await Promise.all([
                 loadAgentRuns(),
@@ -41,7 +54,7 @@ function scheduleAgentRealtimeRefresh(payload = {}) {
             ]);
             if (payload.type === 'agent.run') await loadAgentMetrics();
             const runId = payload.run?.id || payload.notification?.run_id || '';
-            if (activeAgentRunId && isAgentRunDetailModalOpen() && (!runId || runId === activeAgentRunId)) {
+            if (activeAgentRunId && (typeof isAgentRunDetailModalOpen !== 'function' || isAgentRunDetailModalOpen()) && (!runId || runId === activeAgentRunId)) {
                 await window.openAgentRun(activeAgentRunId);
             }
         } catch (e) {}

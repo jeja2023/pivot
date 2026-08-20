@@ -353,10 +353,32 @@ async function getRunDetailForUser(runId, user) {
         getAgentTraceForUser(run.id, user),
         summarizeAgentCheckpoints(run.id)
     ]);
+    let effectiveDagNodes = dagNodes || [];
+    if (String(run.run_mode || '').toLowerCase() === 'dag' && effectiveDagNodes.length === 0) {
+        let metadata = run.metadata;
+        if (typeof metadata === 'string') {
+            try { metadata = JSON.parse(metadata); } catch (e) { metadata = {}; }
+        }
+        const nodes = Array.isArray(metadata?.dagSpec?.nodes) ? metadata.dagSpec.nodes : [];
+        if (nodes.length > 0) {
+            effectiveDagNodes = nodes.map(node => ({
+                run_id: run.id,
+                node_key: node.id,
+                title: node.title || node.id,
+                tool_name: node.tool,
+                status: 'pending',
+                input: node.input || {},
+                output: null,
+                depends_on: node.dependsOn || [],
+                condition: node.condition || 'success',
+                attempt_count: 0
+            }));
+        }
+    }
     return {
         run,
         steps: steps || [],
-        dagNodes: dagNodes || [],
+        dagNodes: effectiveDagNodes,
         progress: getRunProgress(run, steps || []),
         trace,
         checkpoints

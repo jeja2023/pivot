@@ -1380,6 +1380,12 @@ async function createAgentRun({
         }
         throw err;
     }
+    if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
+        const { upsertDagNode } = require('../agent-dag-runtime');
+        for (const node of runMetadata.dagSpec.nodes) {
+            await upsertDagNode(runId, node, { status: 'pending' });
+        }
+    }
     enqueueAgentRun(runId, user);
     const run = await getRunForUser(runId, user);
     publishAgentRunEvent(runId, 'created');

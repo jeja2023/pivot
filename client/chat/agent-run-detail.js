@@ -379,7 +379,7 @@ window.openAgentRun = async function(runId, options = {}) {
         checkpoints,
         isActive: isAgentRunActive(run.status)
     });
-    const processExpanded = ['error', 'approval_required', 'running'].includes(runStatus) ? ' open' : '';
+    const processExpanded = ['error', 'approval_required', 'running', 'queued'].includes(runStatus) || String(run.run_mode || '') === 'dag' ? ' open' : '';
     const technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
         `<div><dt>工具权限</dt><dd>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</dd></div>`,
@@ -468,7 +468,11 @@ window.openAgentRun = async function(runId, options = {}) {
         window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
     });
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
-    window.renderPivotCharts?.(detail);
+    if (isAgentRunActive(run.status)) {
+        startAgentWorkflowPreviewPolling(run.id, isPreview);
+    } else {
+        stopAgentWorkflowPreviewPolling();
+    }
     return run;
 };
 
@@ -477,9 +481,11 @@ function stopAgentWorkflowPreviewPolling() {
         clearInterval(agentWorkflowPreviewTimer);
         agentWorkflowPreviewTimer = null;
     }
+    activeAgentWorkflowPreviewRunId = '';
 }
 
-function startAgentWorkflowPreviewPolling(runId) {
+function startAgentWorkflowPreviewPolling(runId, isPreview = false) {
+    if (activeAgentWorkflowPreviewRunId === runId && agentWorkflowPreviewTimer) return;
     stopAgentWorkflowPreviewPolling();
     activeAgentWorkflowPreviewRunId = runId;
     agentWorkflowPreviewTimer = setInterval(async () => {
@@ -488,10 +494,10 @@ function startAgentWorkflowPreviewPolling(runId) {
             return;
         }
         try {
-            const run = await window.openAgentRun(runId, { workflowPreview: true, silent: true });
+            const run = await window.openAgentRun(runId, { workflowPreview: isPreview, silent: true });
             if (run && !isAgentRunActive(run.status)) stopAgentWorkflowPreviewPolling();
         } catch (e) {}
-    }, 3000);
+    }, 2000);
 }
 
 function ensureAgentAuditModal() {
