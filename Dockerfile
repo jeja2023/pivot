@@ -7,12 +7,8 @@ WORKDIR /app
 # 首先复制 package.json
 COPY package*.json ./
 
-# 安装系统级图像处理引擎、Canvas 渲染库、编译工具、时间数据包及 PostgreSQL 客户端 (PGDG 官方源，支持 PG 16/17/18)
+# 安装系统级图像处理引擎、Canvas 渲染库、编译工具、时间数据包及 PostgreSQL 客户端 (PGDG 官方源，支持 PG 16/17)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release \
     tzdata \
     pkg-config \
     libvips-dev \
@@ -25,10 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
-    && install -d /etc/apt/keyrings \
-    && (curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt/ACCC4CF8.asc || curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc) | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt/ bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
+    postgresql-common \
+    && yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置容器时区与国内加速环境变量
