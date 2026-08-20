@@ -1,3 +1,21 @@
+## [v0.1.6] - 2026-08-20
+
+### 工作流计划执行审计日志补齐、立即运行弹窗层级穿透与任务列表过滤状态残留修复
+
+- **工作流与智能体计划执行全链路审计日志补齐 (Workflow & Agent Schedule Audit Logging)**：
+  - **定时调度执行审计落库**：在 `server/services/agent-schedules.js` 的 `runDueAgentSchedules` 定时调度轮询中引入 `enqueueAuditLog`，计划任务触发入队执行时，自动将调度记录写入系统审计日志 `audit_logs`。
+  - **自动化类型精准识别与关联追溯**：在审计日志中精准区分「工作流计划执行（DAG 模式/指定工作流）」与「计划任务执行（普通智能体计划）」，并在详情中完整记录任务 ID、计划 ID、计划名称及对应工作流 ID。
+  - **手动运行与计划配置管理审计标准化**：在 `server/routes/agents.js` 的 `/agents/schedules/:id/run`、`POST /agents/schedules`、`PUT /agents/schedules/:id` 和 `DELETE /agents/schedules/:id` 中，全面标准化写入 `手动运行工作流计划`、`创建工作流计划`、`更新工作流计划` 与 `删除工作流计划` 等规范中文审计动作。
+- **任务运行详情窗口层级优化与弹窗层叠穿透修复 (Run Detail Modal Z-Index & Overlay Stacking Fix)**：
+  - **弹窗层级全面提级**：将工作区任务运行详情弹窗 `#agent-run-detail-modal` 的 `z-index` 从 `1910` 提升至 `2000`（同步更新 `client/chat/partials/workspaces/agent.html`、`client/chat/styles/workspaces/agent/agent-run-detail.css` 与 `client/chat/agent-run-detail.js` 中的 `ensureAgentRunDetailModalVisible`），确保其始终浮动在计划设置弹窗（`z-index: 1940`）与计划编辑弹窗（`z-index: 1950`）之上。
+  - **立即运行交互流转平滑化**：在 `client/chat/agent-schedules.js` 的 `runAgentSchedule` 中，用户在计划弹窗内点击“立即运行”时，自动关闭底层的计划新建/编辑弹窗，任务执行详情窗口置顶聚焦呈现，彻底解决窗口被压在下方的视觉遮挡问题。
+- **计划执行后任务记录列表过滤锁定与状态残留修复 (Schedule Runs Filter Lock & Auto-Reset Fix)**：
+  - **立即运行全局工作台解绑**：修复 `client/chat/agent-schedules.js` 在点击“立即运行”后多余锁定 `scheduleId` 的缺陷，改为直接刷新全局任务列表，使得最新提交的计划运行任务立即出现在列表最顶部。
+  - **筛选切换与数据加载自动重置**：在 `client/chat/agent-run-loaders.js` 的 `loadAgentRuns` 与 `client/chat/agents.js` 的 `bindAgentFilters` 中增加自动解绑机制，当用户在前端切换筛选下拉框（如从计划任务切换至“全部类型”、“自主任务”或“工作流任务”）或点击刷新时，自动重置内存中的 `agentScheduleFilterId` 变量，彻底解决之前其他历史任务被隐藏、必须 F5 刷新整个页面才能重新显示的问题。
+- **自动化测试回归覆盖与用例加固**：
+  - 在 `tests/security-agent.test.js` 中新增针对到期工作流计划自动派发、任务入队及审计日志落库断言的完整测试用例。
+  - 修复 `server/services/agent-schedules.js` 中定时调度原子领占查询的健壮性。
+
 ## [v0.1.5] - 2026-08-20
 
 ### 用量设计一体化看板融合架构、CI 自动化 PostgreSQL 容器测试与测试运行器时区与并发竞态加固

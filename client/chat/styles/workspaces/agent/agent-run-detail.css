@@ -1,5 +1,9 @@
 /* 拆自 agent-runs.css。 */
 /* Agent 运行详情弹窗、进度摘要、最终答案与结构化输出面板样式。 */
+#agent-run-detail-modal {
+    z-index: 2000;
+}
+
 .agent-run-detail {
     flex: 1;
     min-height: 0;

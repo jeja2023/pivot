@@ -56,7 +56,10 @@ function isAgentWorkflowPreviewRun(run = {}, options = {}) {
 
 function ensureAgentRunDetailModalVisible() {
     const modal = document.getElementById('agent-run-detail-modal');
-    if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
+    if (modal) {
+        modal.style.zIndex = '2000';
+        if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    }
     return modal;
 }
 

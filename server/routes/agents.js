@@ -1,5 +1,7 @@
 const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
+const { queryOne } = require('../db/client');
+const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
 const {
     createWorkflowDraftFromRun,
@@ -365,28 +367,41 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
 
     router.post('/agents/schedules', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const schedule = await createAgentSchedule(req.user, req.body || {});
-        logAction(req, '创建智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}`);
+        const cfg = parseJsonObject(schedule.run_config) || {};
+        const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
+        logAction(req, isWorkflow ? '创建工作流计划' : '创建智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}${cfg.workflowId ? `，工作流ID: ${cfg.workflowId}` : ''}`);
         res.status(201).json({ success: true, schedule });
     }));
 
     router.put('/agents/schedules/:id', authMiddleware, asyncHandler(async (req, res) => {
         const schedule = await updateAgentSchedule(req.params.id, req.user, req.body || {});
         if (!schedule) return res.status(404).json({ error: '智能体计划不存在或无权修改。' });
-        logAction(req, '更新智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}`);
+        const cfg = parseJsonObject(schedule.run_config) || {};
+        const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
+        logAction(req, isWorkflow ? '更新工作流计划' : '更新智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}${cfg.workflowId ? `，工作流ID: ${cfg.workflowId}` : ''}`);
         res.json({ success: true, schedule });
     }));
 
     router.post('/agents/schedules/:id/run', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const schedule = await queryOne('SELECT * FROM agent_schedules WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [req.params.id, req.user.id]);
         const run = await runAgentScheduleNow(req.params.id, req.user, { idempotencyKey: req.get('Idempotency-Key') });
         if (!run) return res.status(404).json({ error: '智能体计划不存在。' });
-        logAction(req, '手动运行智能体计划', `任务ID: ${run.id}，计划ID: ${req.params.id}`);
+        const cfg = schedule ? (parseJsonObject(schedule.run_config) || {}) : {};
+        const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
+        logAction(
+            req,
+            isWorkflow ? '手动运行工作流计划' : '手动运行智能体计划',
+            `任务ID: ${run.id}，计划ID: ${req.params.id}${schedule?.name ? `，名称: ${schedule.name}` : ''}${cfg.workflowId ? `，工作流ID: ${cfg.workflowId}` : ''}`
+        );
         res.status(202).json({ success: true, run });
     }));
 
     router.delete('/agents/schedules/:id', authMiddleware, asyncHandler(async (req, res) => {
         const schedule = await deleteAgentSchedule(req.params.id, req.user);
         if (!schedule) return res.status(404).json({ error: '智能体计划不存在或无权删除。' });
-        logAction(req, '删除智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}`);
+        const cfg = parseJsonObject(schedule.run_config) || {};
+        const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
+        logAction(req, isWorkflow ? '删除工作流计划' : '删除智能体计划', `计划ID: ${schedule.id}，名称: ${schedule.name}`);
         res.json({ success: true });
     }));
 

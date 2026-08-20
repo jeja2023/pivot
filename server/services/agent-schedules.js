@@ -8,6 +8,7 @@ const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./ag
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { assertTemplateAccess } = require('./agent-templates');
 const { computeNextCronDate } = require('./cron-expression');
+const { enqueueAuditLog } = require('./db-write-queue');
 const {
     MAX_GOAL_LENGTH,
     parseJsonObject,
@@ -337,14 +338,13 @@ async function runDueAgentSchedules(limit = 20) {
             const changes = await execute(`
                 UPDATE agent_schedules
                 SET claim_token = ?, claim_expires_at = ?, updated_at = ?
-                WHERE id = ? AND status = 'active' AND deleted_at IS NULL AND next_run_at = ?
+                WHERE id = ? AND status = 'active' AND deleted_at IS NULL
                   AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ${currTime})
             `, [
                 claimToken,
                 toBeijingTimestamp(new Date(Date.now() + SCHEDULE_CLAIM_LEASE_MS)),
                 getBeijingTimestamp(),
-                schedule.id,
-                schedule.next_run_at
+                schedule.id
             ]);
             if (changes === 0) continue;
             const run = await runAgentScheduleNow(schedule.id, user, { scheduledFor: schedule.next_run_at });
@@ -368,6 +368,19 @@ async function runDueAgentSchedules(limit = 20) {
                 await createAgentNotificationCallback(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
             } catch (notificationError) {
                 logger.warn({ err: notificationError.message, scheduleId: schedule.id }, '计划通知写入失败');
+            }
+            try {
+                const cfg = parseJsonObject(schedule.run_config) || {};
+                const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
+                enqueueAuditLog({
+                    userId: user.id,
+                    action: isWorkflow ? '工作流计划执行' : '计划任务执行',
+                    details: `任务ID: ${run.id}，计划ID: ${schedule.id}，名称: ${schedule.name}${cfg.workflowId ? `，工作流ID: ${cfg.workflowId}` : ''}`,
+                    ipAddress: '127.0.0.1',
+                    timestamp: getBeijingTimestamp()
+                });
+            } catch (auditError) {
+                logger.warn({ err: auditError.message, scheduleId: schedule.id }, '计划审计日志写入失败');
             }
             created.push(run);
         } catch (e) {

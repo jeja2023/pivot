@@ -317,7 +317,10 @@ async function runAgentSchedule(scheduleId) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
         showToast('计划任务已入队', 'success');
-        await window.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
+        document.getElementById('agent-schedule-editor-modal')?.classList.add('hidden');
+        document.getElementById('agent-workflow-schedule-modal')?.classList.add('hidden');
+        agentScheduleFilterId = '';
+        await window.openAgentWorkbench?.();
         await window.openAgentRun(data.run.id);
     } finally {
         buttons.forEach(button => {

@@ -207,7 +207,12 @@ window.bindAgentFilters = function() {
         const el = document.getElementById(id);
         if (!el || el.dataset.boundAgentFilter === '1') return;
         el.dataset.boundAgentFilter = '1';
-        const reloadFirstPage = () => loadAgentRuns(1).catch(err => showToast(err.message || '任务列表刷新失败', 'error'));
+        const reloadFirstPage = () => {
+            if (id === 'agent-filter-run-type' && el.value !== 'scheduled') {
+                agentScheduleFilterId = '';
+            }
+            loadAgentRuns(1).catch(err => showToast(err.message || '任务列表刷新失败', 'error'));
+        };
         // 文本输入防抖，避免逐键触发请求风暴与响应乱序覆盖；下拉 change 保持即时
         const debouncedReload = window.Pivot && typeof window.Pivot.debounce === 'function'
             ? window.Pivot.debounce(reloadFirstPage, 280)

@@ -1904,3 +1904,48 @@ test('revoked accounts cannot dispatch due automation schedules', async () => {
     assert.deepEqual(await runDueAgentSchedules(10), []);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_runs WHERE user_id = ?').get(userId).count, 0);
 });
+
+test('due automation schedule dispatch records audit log for workflow and agent runs', async () => {
+    const { sql } = require('../server/db/statements');
+    const { flushAllWrites } = require('../server/services/db-write-queue');
+    const suffix = Date.now().toString(36);
+    const userInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`sched_audit_${suffix}`, 'hash', 'Schedule Audit', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+    const user = { id: userId, username: `sched_audit_${suffix}`, role: 'user', unit: 'QA' };
+    sql(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, `Model ${suffix}`, 'https://example.com', `model-${suffix}`);
+    const { createAgentWorkflow, publishAgentWorkflowVersion } = require('../server/services/agent-workflows');
+    const workflow = await createAgentWorkflow(user, {
+        name: `Workflow ${suffix}`,
+        description: '测试工作流',
+        dagSpec: { nodes: [{ id: 'm1', tool: 'models.list', input: {} }] }
+    });
+    await publishAgentWorkflowVersion(workflow.id, user, 1);
+
+    const { createAgentSchedule } = require('../server/services/agent-schedules');
+    const schedule = await createAgentSchedule(user, {
+        name: `Workflow Schedule ${suffix}`,
+        goal: '每日工作流执行任务',
+        frequency: 'daily',
+        timeOfDay: '09:00',
+        runMode: 'dag',
+        dagSpec: { nodes: [{ id: 'models', title: '列出模型', tool: 'models.list', input: {} }] }
+    });
+    const scheduleId = schedule.id;
+    sql("UPDATE agent_schedules SET next_run_at = datetime('now', '+8 hours', '-1 hour') WHERE id = ?").run(scheduleId);
+
+    const dispatched = await runDueAgentSchedules(10);
+    assert.equal(dispatched.some(run => run.schedule_id === scheduleId || run.scheduleId === scheduleId), true);
+    await flushAllWrites();
+    const auditRow = sql('SELECT * FROM audit_logs WHERE user_id = ? AND action = ?').get(userId, '工作流计划执行');
+    assert.ok(auditRow);
+    assert.match(auditRow.details, new RegExp(`计划ID: ${scheduleId}`));
+});
+
+
+

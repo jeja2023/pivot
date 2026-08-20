@@ -291,6 +291,9 @@ async function loadAgentRuns(page = agentRunsPage) {
     const status = document.getElementById('agent-filter-status')?.value || '';
     const runType = document.getElementById('agent-filter-run-type')?.value || '';
     const query = document.getElementById('agent-filter-query')?.value.trim() || '';
+    if (runType !== 'scheduled') {
+        agentScheduleFilterId = '';
+    }
     agentRunsPage = Math.max(Number(page) || 1, 1);
     const params = new URLSearchParams({
         page: String(agentRunsPage),
