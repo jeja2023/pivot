@@ -695,7 +695,7 @@ async function executeAgentHttp(input = {}, user, context = {}) {
         }
         // 优先读取凭据库（支持免重启轮换和按部门授权），未命中时回退到历史环境变量方式
         const envName = `PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`;
-        const stored = resolveCredentialSecret(credentialSecret, user);
+        const stored = await resolveCredentialSecret(credentialSecret, user);
         const secret = stored?.value || process.env[envName];
         if (!secret) {
             throw new Error(`未找到 HTTP 凭据「${credentialSecret}」，请在凭据库创建，或配置环境变量 ${envName}。`);

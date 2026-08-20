@@ -691,11 +691,11 @@ async function runAgent(runId, user) {
     activeRunControllers.set(runId, runController);
     let deadlineTimer = null;
     try {
-        assertRunUserActive(user);
+        await assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
-        ensureAgentTrace(run, {
+        await ensureAgentTrace(run, {
             runMode: run.run_mode,
             modelRouter: run.model_router,
             approvalPolicy: run.approval_policy
@@ -742,7 +742,7 @@ async function runAgent(runId, user) {
                     });
                     logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
                 }
-                recordAgentTraceSpan(runId, {
+                await recordAgentTraceSpan(runId, {
                     type: 'routing',
                     name: '模型路由',
                     input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
@@ -750,7 +750,7 @@ async function runAgent(runId, user) {
                     details: { strategy: routerStrategy }
                 });
             } catch (routerErr) {
-                recordAgentTraceSpan(runId, {
+                await recordAgentTraceSpan(runId, {
                     type: 'routing',
                     name: '模型路由',
                     input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
@@ -820,7 +820,7 @@ async function runAgent(runId, user) {
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg);
             const plannerStartedAt = Date.now();
-            const plannerSpanId = startAgentTraceSpan(runId, {
+            const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',
                 name: `规划模型调用 #${step}`,
                 input: { messageCount: plannerMessages.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
@@ -829,19 +829,19 @@ async function runAgent(runId, user) {
             let plannedText;
             try {
                 plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
-                finishAgentTraceSpan(plannerSpanId, {
+                await finishAgentTraceSpan(plannerSpanId, {
                     output: { responseLength: String(plannedText || '').length },
                     durationMs: Date.now() - plannerStartedAt
                 });
             } catch (plannerError) {
-                finishAgentTraceSpan(plannerSpanId, {
+                await finishAgentTraceSpan(plannerSpanId, {
                     status: 'error',
                     errorMessage: plannerError.message,
                     durationMs: Date.now() - plannerStartedAt
                 });
                 throw plannerError;
             }
-            recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
+            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
@@ -937,7 +937,7 @@ async function runAgent(runId, user) {
             status: 'error'
         });
         const summaryStartedAt = Date.now();
-        const summarySpanId = startAgentTraceSpan(runId, {
+        const summarySpanId = await startAgentTraceSpan(runId, {
             type: 'model',
             name: '生成最终总结',
             input: { observationCount: observations.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
@@ -946,12 +946,12 @@ async function runAgent(runId, user) {
         let answer;
         try {
             answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
-            finishAgentTraceSpan(summarySpanId, {
+            await finishAgentTraceSpan(summarySpanId, {
                 output: { responseLength: String(answer || '').length },
                 durationMs: Date.now() - summaryStartedAt
             });
         } catch (summaryError) {
-            finishAgentTraceSpan(summarySpanId, {
+            await finishAgentTraceSpan(summarySpanId, {
                 status: 'error',
                 errorMessage: summaryError.message,
                 durationMs: Date.now() - summaryStartedAt
@@ -1024,7 +1024,7 @@ async function runAgent(runId, user) {
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
-            const resumeContext = buildAgentResumeContext(runId);
+            const resumeContext = await buildAgentResumeContext(runId);
             await setRunMetadata(runId, { resumeContext });
             recordRunRetryReason(runId, {
                 attempt: retryCount + 1,
@@ -1061,7 +1061,7 @@ async function runAgent(runId, user) {
     } finally {
         if (deadlineTimer) clearTimeout(deadlineTimer);
         if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
-        syncAgentTraceFromRun(runId);
+        await syncAgentTraceFromRun(runId);
     }
 }
 
@@ -1196,11 +1196,11 @@ configureAgentSchedules({
     // 数据变更触发需要执行只读查询，按触发器所属账号解析可用工具后走统一执行入口，
     // 继续保留工具治理、只读校验和连接归属检查
     runPollingTriggers: () => runDuePollingTriggers({
-        executeTool: (toolName, input, triggerUser) => executeToolByName(
+        executeTool: async (toolName, input, triggerUser) => executeToolByName(
             toolName,
             input,
             triggerUser,
-            formatToolList(triggerUser, { toolPolicy: 'all' }),
+            await formatToolList(triggerUser, { toolPolicy: 'all' }),
             { source: 'trigger' }
         )
     }),

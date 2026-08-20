@@ -140,7 +140,7 @@ async function assembleChatContext({
         if (modelContent) {
             req.log.info({ sessionId }, '执行补救措施：将丢失的用户消息存入数据库并加入当前上下文');
             try {
-                saveUserMessage({ sessionId, userId, content: modelContent, modelId });
+                await saveUserMessage({ sessionId, userId, content: modelContent, modelId });
             } catch (dbErr) {
                 req.log.error({ err: dbErr.message }, '补救消息入库失败');
             }

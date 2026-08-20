@@ -281,7 +281,7 @@ async function extractPdfTextOutput({ job, file, config }) {
         await extractDocumentText(filePath, '', file.original_name, { password: config.password }),
         getKnowledgeLimits().extractMaxChars
     );
-    const outputs = createTextOutputs({
+    const outputs = await createTextOutputs({
         userId: job.user_id,
         file,
         job,

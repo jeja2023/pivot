@@ -469,10 +469,10 @@ async function listCachedMcpTools(serverId = null, user = null) {
             WHERE t.server_id = ? AND s.status != 'deleted'
             ORDER BY t.name ASC
         `, [serverId]);
-        return rows
+        const visibleRows = rows
             .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
-            .filter(row => isSharedMcpToolAllowed(row, row.name))
-            .map(formatMcpTool);
+            .filter(row => isSharedMcpToolAllowed(row, row.name));
+        return await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
     }
     const rows = await query(`
         SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
@@ -488,17 +488,18 @@ async function listCachedMcpTools(serverId = null, user = null) {
     `);
     const directLocalTools = listLocalDeviceMcpTools(user);
     const bridgeLocalTools = directLocalTools.length ? [] : listBridgeLocalDeviceMcpTools(user);
+    const visibleRows = rows
+        .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
+        .filter(row => isSharedMcpToolAllowed(row, row.name));
+    const formattedRows = await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
     return [
         ...directLocalTools,
         ...bridgeLocalTools,
-        ...rows
-            .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
-            .filter(row => isSharedMcpToolAllowed(row, row.name))
-            .map(formatMcpTool)
+        ...formattedRows
     ];
 }
 
-function formatMcpTool(row) {
+async function formatMcpTool(row, user = null) {
     let schema = { type: 'object' };
     try {
         schema = JSON.parse(row.input_schema || '{}') || schema;
@@ -509,7 +510,7 @@ function formatMcpTool(row) {
         : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
     const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
     const { getCapabilityToolGovernance } = require('./capability-market');
-    const governance = getCapabilityToolGovernance(packageType, String(row.server_id ?? ''), row.name);
+    const governance = await getCapabilityToolGovernance(packageType, String(row.server_id ?? ''), row.name, user);
     return {
         serverId: row.server_id,
         serverName: row.server_name,
@@ -535,7 +536,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         if (!serverType) throw new Error('本机工具不可用。');
         const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
         const { isToolCapabilityEnabled } = require('./capability-market');
-        if (!isToolCapabilityEnabled(packageType, match[1], toolName, user)) {
+        if (!(await isToolCapabilityEnabled(packageType, match[1], toolName, user))) {
             const err = new Error('该工具已在工具治理中停用。');
             err.status = 403;
             throw err;

@@ -208,13 +208,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     router.get('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
         const resolved = await resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
         if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
-        res.json(getAgentWorkflowDependencyConfiguration(resolved, req.user));
+        res.json(await getAgentWorkflowDependencyConfiguration(resolved, req.user));
     }));
 
     router.put('/agents/workflows/:id/dependencies', authMiddleware, asyncHandler(async (req, res) => {
         const resolved = await resolveAgentWorkflowVersion(req.params.id, req.user, 'published');
         if (!resolved) return res.status(404).json({ error: '共享工作流不存在、无权访问或尚未发布。' });
-        const configuration = saveAgentWorkflowDependencyConfiguration(resolved, req.user, req.body || {});
+        const configuration = await saveAgentWorkflowDependencyConfiguration(resolved, req.user, req.body || {});
         logAction(req, '确认共享工作流依赖映射', `工作流ID: ${resolved.workflow.id}，发布版本: ${resolved.version}`);
         res.json({ success: true, ...configuration });
     }));
@@ -289,32 +289,32 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
 
     // 工作流触发器：入站 Webhook、文件落地和数据变更三类触发方式的管理入口
     router.get('/agents/triggers', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listWorkflowTriggers(req.user) });
+        res.json({ data: await listWorkflowTriggers(req.user) });
     }));
 
     router.post('/agents/triggers', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
-        const { trigger, token } = createWorkflowTrigger(req.user, req.body || {});
+        const { trigger, token } = await createWorkflowTrigger(req.user, req.body || {});
         logAction(req, '创建工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}，方式: ${trigger.trigger_type}`);
         // 明文令牌只在创建时返回一次，之后无法再次查看
         res.status(201).json({ success: true, trigger, token });
     }));
 
     router.put('/agents/triggers/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const trigger = updateWorkflowTrigger(req.params.id, req.user, req.body || {});
+        const trigger = await updateWorkflowTrigger(req.params.id, req.user, req.body || {});
         if (!trigger) return res.status(404).json({ error: '触发器不存在或无权修改。' });
         logAction(req, '更新工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}`);
         res.json({ success: true, trigger });
     }));
 
     router.post('/agents/triggers/:id/rotate-token', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
-        const result = rotateWorkflowTriggerToken(req.params.id, req.user);
+        const result = await rotateWorkflowTriggerToken(req.params.id, req.user);
         if (!result) return res.status(404).json({ error: '触发器不存在或无权操作。' });
         logAction(req, '轮换工作流触发器令牌', `触发器ID: ${result.trigger.id}，名称: ${result.trigger.name}`);
         res.json({ success: true, trigger: result.trigger, token: result.token });
     }));
 
     router.delete('/agents/triggers/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const trigger = deleteWorkflowTrigger(req.params.id, req.user);
+        const trigger = await deleteWorkflowTrigger(req.params.id, req.user);
         if (!trigger) return res.status(404).json({ error: '触发器不存在或无权删除。' });
         logAction(req, '删除工作流触发器', `触发器ID: ${trigger.id}，名称: ${trigger.name}`);
         res.json({ success: true, trigger: { id: trigger.id, name: trigger.name } });
@@ -401,11 +401,11 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/approval-requests', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: listWorkflowApprovalRequests(req.user, { status: req.query.status }) });
+        res.json({ data: await listWorkflowApprovalRequests(req.user, { status: req.query.status }) });
     }));
 
     router.get('/agents/runs/:id/approval-requests', authMiddleware, asyncHandler(async (req, res) => {
-        const requests = listWorkflowApprovalRequests(req.user, { status: req.query.status })
+        const requests = (await listWorkflowApprovalRequests(req.user, { status: req.query.status }))
             .filter(item => String(item.run_id || '') === String(req.params.id || ''));
         res.json({ data: requests });
     }));
@@ -509,7 +509,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     }));
 
     router.get('/agents/runs/:id/trace', authMiddleware, asyncHandler(async (req, res) => {
-        const trace = getAgentTraceForUser(req.params.id, req.user);
+        const trace = await getAgentTraceForUser(req.params.id, req.user);
         if (!trace) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(trace);
     }));

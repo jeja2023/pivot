@@ -42,7 +42,7 @@ function createAuthRouter({
         }
         const { username, password, nickname, unit } = req.body;
         try {
-            const user = register(username, password, nickname, unit);
+            const user = await register(username, password, nickname, unit);
             logAction(req, '用户注册', `注册账号: ${username}`);
             res.json(user);
         } catch (e) {

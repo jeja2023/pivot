@@ -116,7 +116,7 @@ function createChatRouter({
 
     router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
         const { sessionId, costTime, tps } = req.body;
-        updateLastAssistantStats({ sessionId, userId: req.user.id, costTime, tps });
+        await updateLastAssistantStats({ sessionId, userId: req.user.id, costTime, tps });
         res.json({ success: true });
     }));
 

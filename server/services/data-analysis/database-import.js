@@ -9,8 +9,8 @@ const MAX_DB_IMPORT_ROWS = Math.min(MAX_UPLOAD_ROWS, Math.max(1000, Number.parse
 // 本函数不直接连库。limit 受 MAX_DB_IMPORT_ROWS 上限保护。
 async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit, name }) {
     // 延迟引入，避免与 mcp-client 之间形成模块加载环。
-    const { getAccessibleMcpServer } = require('./mcp-client');
-    const { executeDatabaseMcpTool } = require('./database-mcp');
+    const { getAccessibleMcpServer } = require('../mcp-client');
+    const { executeDatabaseMcpTool } = require('../database-mcp');
 
     const serverId = Number(mcpServerId);
     if (!serverId) {
@@ -18,7 +18,7 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
         err.status = 400;
         throw err;
     }
-    const server = getAccessibleMcpServer(serverId, user);
+    const server = await getAccessibleMcpServer(serverId, user);
     if (!server || String(server.base_url || '').indexOf('pivot-db://') !== 0) {
         const err = new Error('服务器可访问数据库不存在或无权访问。');
         err.status = 404;

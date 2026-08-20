@@ -223,7 +223,7 @@ function buildReviewMessages(record, chunk, chunkIndex, chunkCount, instructions
 async function callReviewModel(params) {
     const fitted = fitMessagesToContextBudget(params.messages, params.modelCfg, { maxOutputTokens: params.maxTokens });
     const content = await params.deps.callModelText(params.modelCfg, fitted.messages, { user: params.user, temperature: 0.1, maxTokens: params.maxTokens });
-    params.deps.recordAgentModelUsage(params.user, params.modelCfg, fitted.messages, content, 'agent_content_review', params.context.run?.id || params.context.runId || '');
+    await params.deps.recordAgentModelUsage(params.user, params.modelCfg, fitted.messages, content, 'agent_content_review', params.context.run?.id || params.context.runId || '');
     return { content, contextBudget: fitted.metadata };
 }
 
@@ -322,7 +322,7 @@ async function executeContentReview(input = {}, user, context = {}, injectedDeps
     let artifactWarning = '';
     if (context.run?.id) {
         try {
-            artifact = deps.createOrUpdateRunArtifact({ runId: context.run.id, user, type: 'content_review_report', title: reportTitle, content: reportMarkdown(records, stats, reportTitle), note: '校对 ' + records.length + ' 条记录，发现 ' + (stats.titleIssues + stats.contentIssues) + ' 个问题' });
+            artifact = await deps.createOrUpdateRunArtifact({ runId: context.run.id, user, type: 'content_review_report', title: reportTitle, content: reportMarkdown(records, stats, reportTitle), note: '校对 ' + records.length + ' 条记录，发现 ' + (stats.titleIssues + stats.contentIssues) + ' 个问题' });
         } catch (error) {
             artifactWarning = '完整报告保存失败：' + error.message;
         }

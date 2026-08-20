@@ -399,7 +399,7 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
         err.details = { topology };
         throw err;
     }
-    const contractReport = inspectDagContracts(resolved.dagSpec, formatToolList(user, { toolPolicy: 'all' }));
+    const contractReport = inspectDagContracts(resolved.dagSpec, await formatToolList(user, { toolPolicy: 'all' }));
     if (contractReport.blockers.length) {
         const err = new Error(`发布前检查未通过：${contractReport.blockers[0]}`);
         err.status = 400;
