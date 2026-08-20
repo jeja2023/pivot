@@ -373,6 +373,7 @@ async function loadAgentRuns(page = agentRunsPage) {
         const errorCount = Number(run.error_count || 0);
         const canDelete = !isAgentRunActive(run.status);
         const taskTooltip = buildAgentRunTaskTooltip(run, title, mode, { stepCount, toolCount, errorCount });
+        const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流编排' : '-');
         return `
             <tr class="${run.id === activeAgentRunId ? 'active' : ''}" data-agent-run-id="${agentEscape(run.id)}">
                 <td class="text-center">${(agentRunsPage - 1) * pageSize + index + 1}</td>
@@ -384,7 +385,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 </td>
                 <td><span class="agent-run-type ${runTypeClass}">${agentEscape(runTypeLabel)}</span></td>
                 <td>
-                    <strong class="agent-runs-compact">${agentEscape(run.model_name || '-')}</strong>
+                    <strong class="agent-runs-compact" title="${agentEscape(modelLabel)}">${agentEscape(modelLabel)}</strong>
                 </td>
                 <td>${agentEscape(mode)}</td>
                 <td>${stepCount || '-'}</td>

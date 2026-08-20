@@ -37,20 +37,78 @@ function normalizeRunTypeFilter(value) {
     return '';
 }
 
-async function getRunById(runId, { includeDeleted = false } = {}) {
-    const row = await queryOne(
-        `SELECT * FROM agent_runs WHERE id = ? ${includeDeleted ? '' : 'AND deleted_at IS NULL'}`,
-        [runId]
-    );
-    return row || null;
+async function enrichRunModelNames(runs = []) {
+    if (!Array.isArray(runs) || runs.length === 0) return runs;
+    const missingRuns = runs.filter(r => !r.model_name || r.run_mode === 'dag');
+    if (missingRuns.length === 0) return runs;
+
+    const allModels = await query('SELECT id, name, model_name FROM models').catch(() => []);
+    const modelMap = new Map();
+    allModels.forEach(m => {
+        if (m.id) modelMap.set(String(m.id), m.name);
+        if (m.model_name) modelMap.set(m.model_name, m.name);
+    });
+
+    for (const run of missingRuns) {
+        if (run.run_mode === 'dag') {
+            if (run.model_name && run.model_name !== '-') {
+                continue;
+            }
+            const meta = parseJsonObject(run.metadata) || {};
+            const nodes = Array.isArray(meta?.dagSpec?.nodes) ? meta.dagSpec.nodes : [];
+            const llmNodes = nodes.filter(n => ['agent.llm', 'agent.content_review', 'agent.delegate'].includes(String(n?.tool || '').trim()));
+            if (llmNodes.length === 0) {
+                run.model_name = '无需模型 (纯工具)';
+            } else {
+                const rawModels = llmNodes.map(n => String(n.input?.model || n.input?.modelId || n.input?.model_name || '').trim()).filter(Boolean);
+                const unique = [...new Set(rawModels)];
+                if (unique.length === 0) {
+                    run.model_name = '工作流节点配置';
+                } else if (unique.length === 1) {
+                    run.model_name = modelMap.get(unique[0]) || unique[0];
+                } else {
+                    const names = unique.map(id => modelMap.get(id) || id);
+                    run.model_name = names.length <= 2 ? names.join(' / ') : `多模型 (${names.length}个)`;
+                }
+            }
+        } else if (!run.model_name || run.model_name === '-') {
+            if (run.model_id) {
+                run.model_name = modelMap.get(String(run.model_id)) || String(run.model_id);
+            } else {
+                run.model_name = '-';
+            }
+        }
+    }
+    return runs;
 }
 
-function getRunForUser(runId, userId, { includeDeleted = false } = {}) {
-    return queryOne(`
-        SELECT * FROM agent_runs
-        WHERE id = ? AND user_id = ?
-          ${includeDeleted ? '' : 'AND deleted_at IS NULL'}
+async function getRunById(runId, { includeDeleted = false } = {}) {
+    const row = await queryOne(`
+        SELECT r.*,
+               COALESCE(cm.name, m.name) AS model_name
+        FROM agent_runs r
+        LEFT JOIN models m ON m.id = r.model_id
+        LEFT JOIN models cm ON cm.id = r.chosen_model_id
+        WHERE r.id = ? ${includeDeleted ? '' : 'AND r.deleted_at IS NULL'}
+    `, [runId]);
+    if (!row) return null;
+    await enrichRunModelNames([row]);
+    return row;
+}
+
+async function getRunForUser(runId, userId, { includeDeleted = false } = {}) {
+    const row = await queryOne(`
+        SELECT r.*,
+               COALESCE(cm.name, m.name) AS model_name
+        FROM agent_runs r
+        LEFT JOIN models m ON m.id = r.model_id
+        LEFT JOIN models cm ON cm.id = r.chosen_model_id
+        WHERE r.id = ? AND r.user_id = ?
+          ${includeDeleted ? '' : 'AND r.deleted_at IS NULL'}
     `, [runId, userId]);
+    if (!row) return null;
+    await enrichRunModelNames([row]);
+    return row;
 }
 
 async function listRuns(userId, options = {}) {
@@ -85,7 +143,7 @@ async function listRuns(userId, options = {}) {
     }
     if (searchText) {
         const like = likeOperator();
-        where.push(`(r.title ${like} ? OR r.goal ${like} ? OR m.name ${like} ?)`);
+        where.push(`(r.title ${like} ? OR r.goal ${like} ? OR COALESCE(cm.name, m.name) ${like} ?)`);
         const pattern = `%${searchText}%`;
         params.push(pattern, pattern, pattern);
     }
@@ -95,21 +153,23 @@ async function listRuns(userId, options = {}) {
         SELECT COUNT(*) AS count
         FROM agent_runs r
         LEFT JOIN models m ON m.id = r.model_id
+        LEFT JOIN models cm ON cm.id = r.chosen_model_id
         WHERE ${whereSql}
     `, params);
     const total = Number(totalRow?.count || 0);
 
     const data = await query(`
         WITH filtered_runs AS (
-            SELECT r.id, r.session_id, r.model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
+            SELECT r.id, r.session_id, r.model_id, r.chosen_model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
                    r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
                    r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count,
                    r.max_token_budget, r.export_count, r.template_id, r.schedule_id, r.context_config, r.resume_from_step,
                    r.started_at, r.last_heartbeat_at, r.input_tokens, r.output_tokens, r.total_tokens,
-                   r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
-                   m.name AS model_name
+                   r.cancelled_at, r.created_at, r.updated_at, r.completed_at, r.metadata,
+                   COALESCE(cm.name, m.name) AS model_name
             FROM agent_runs r
             LEFT JOIN models m ON m.id = r.model_id
+            LEFT JOIN models cm ON cm.id = r.chosen_model_id
             WHERE ${whereSql}
             ORDER BY r.created_at DESC
             LIMIT ?
@@ -133,20 +193,22 @@ async function listRuns(userId, options = {}) {
         ORDER BY fr.created_at DESC
     `, [...params, safeLimit, offset]);
 
+    await enrichRunModelNames(data);
+
     return { data, total, page: safePage, limit: safeLimit };
 }
 
-function listDeletedRunsForAdmin(limit = 100) {
+async function listDeletedRunsForAdmin(limit = 100) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
-    return query(`
-        SELECT r.id, r.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, r.session_id, r.model_id,
-               m.name AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
+    const rows = await query(`
+        SELECT r.id, r.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, r.session_id, r.model_id, r.chosen_model_id,
+               COALESCE(cm.name, m.name) AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
                r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.approval_policy,
                r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.max_token_budget, r.export_count,
                r.started_at, r.last_heartbeat_at,
                r.input_tokens, r.output_tokens, r.total_tokens,
                r.cancelled_at, r.created_at, r.updated_at, r.completed_at,
-               r.deleted_at, r.deleted_by_user, r.delete_reason,
+               r.deleted_at, r.deleted_by_user, r.delete_reason, r.metadata,
                COALESCE(NULLIF(du.deleted_username, ''), du.username) AS deleted_by_username, du.nickname AS deleted_by_nickname,
                (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id) AS step_count,
                (SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.id AND s.type = 'tool') AS tool_count,
@@ -155,10 +217,13 @@ function listDeletedRunsForAdmin(limit = 100) {
         LEFT JOIN users u ON u.id = r.user_id
         LEFT JOIN users du ON du.id = r.deleted_by_user
         LEFT JOIN models m ON m.id = r.model_id
+        LEFT JOIN models cm ON cm.id = r.chosen_model_id
         WHERE r.deleted_at IS NOT NULL
         ORDER BY r.deleted_at DESC
         LIMIT ?
     `, [safeLimit]);
+    await enrichRunModelNames(rows);
+    return rows;
 }
 
 async function listSteps(runId) {

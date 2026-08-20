@@ -172,7 +172,7 @@ function renderGlobalTaskResults(tasks) {
     PivotSafeHtml.setHtml(results, tasks.map(task => {
         const title = String(task.title || task.goal || '未命名任务');
         const taskType = task.run_mode === 'dag' ? '工作流任务' : '自主任务';
-        const model = task.model_name || '未指定模型';
+        const model = task.model_name || (task.run_mode === 'dag' ? '工作流编排' : '未指定模型');
         return `
             <button class="global-search-result" type="button" data-global-search-task-id="${sessionEscapeAttr(task.id)}">
                 <span class="global-search-result-main">

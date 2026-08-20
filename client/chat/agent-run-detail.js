@@ -383,8 +383,10 @@ window.openAgentRun = async function(runId, options = {}) {
         isActive: isAgentRunActive(run.status)
     });
     const processExpanded = ['error', 'approval_required', 'running', 'queued'].includes(runStatus) || String(run.run_mode || '') === 'dag' ? ' open' : '';
+    const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流节点配置' : '');
     const technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
+        modelLabel ? `<div><dt>调用模型</dt><dd>${agentEscape(modelLabel)}</dd></div>` : '',
         `<div><dt>工具权限</dt><dd>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</dd></div>`,
         `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)} 条</dd></div>`,
         `<div><dt>工具调用</dt><dd>${Number(progress.toolCount || 0)} 次</dd></div>`,

@@ -1947,5 +1947,76 @@ test('due automation schedule dispatch records audit log for workflow and agent 
     assert.match(auditRow.details, new RegExp(`计划ID: ${scheduleId}`));
 });
 
+test('listRuns enriches model_name for standard, DAG node models, and pure tool workflows', async () => {
+    const { sql } = require('../server/db/statements');
+    const runRepository = require('../server/repositories/agent-runs');
+    const suffix = Date.now().toString(36);
+    const userInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`model_enrich_${suffix}`, 'hash', 'Enrich User', 'QA', 'user', 'active');
+    const userId = Number(userInfo.lastInsertRowid);
+
+    const modelAInfo = sql(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, `Qwen-Model-${suffix}`, 'https://example.com', `qwen-${suffix}`);
+    const modelAId = Number(modelAInfo.lastInsertRowid);
+
+    const modelBInfo = sql(`
+        INSERT INTO models (user_id, name, url, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
+    `).run(userId, `DeepSeek-Model-${suffix}`, 'https://example.com', `deepseek-${suffix}`);
+    const modelBId = Number(modelBInfo.lastInsertRowid);
+
+    // 1. Standard run with model_id
+    const run1Id = `run1-${suffix}`;
+    sql(`
+        INSERT INTO agent_runs (id, user_id, model_id, title, goal, status, run_mode, created_at, updated_at)
+        VALUES (?, ?, ?, 'Standard Task', 'Goal 1', 'completed', 'standard', datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(run1Id, userId, modelAId);
+
+    // 2. DAG run with LLM node using model ID
+    const run2Id = `run2-${suffix}`;
+    sql(`
+        INSERT INTO agent_runs (id, user_id, title, goal, status, run_mode, metadata, created_at, updated_at)
+        VALUES (?, ?, 'DAG LLM Task', 'Goal 2', 'completed', 'dag', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(run2Id, userId, JSON.stringify({
+        dagSpec: {
+            nodes: [
+                { id: 'n1', tool: 'agent.llm', input: { model: String(modelBId) } }
+            ]
+        }
+    }));
+
+    // 3. DAG run with pure tool (no LLM)
+    const run3Id = `run3-${suffix}`;
+    sql(`
+        INSERT INTO agent_runs (id, user_id, title, goal, status, run_mode, metadata, created_at, updated_at)
+        VALUES (?, ?, 'DAG Tool Task', 'Goal 3', 'completed', 'dag', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(run3Id, userId, JSON.stringify({
+        dagSpec: {
+            nodes: [
+                { id: 'n1', tool: 'models.list', input: {} }
+            ]
+        }
+    }));
+
+    const result = await runRepository.listRuns(userId, { limit: 10 });
+    const run1 = result.data.find(r => r.id === run1Id);
+    const run2 = result.data.find(r => r.id === run2Id);
+    const run3 = result.data.find(r => r.id === run3Id);
+
+    assert.ok(run1);
+    assert.equal(run1.model_name, `Qwen-Model-${suffix}`);
+
+    assert.ok(run2);
+    assert.equal(run2.model_name, `DeepSeek-Model-${suffix}`);
+
+    assert.ok(run3);
+    assert.equal(run3.model_name, '无需模型 (纯工具)');
+});
+
+
 
 

@@ -12,8 +12,13 @@
 - **计划执行后任务记录列表过滤锁定与状态残留修复 (Schedule Runs Filter Lock & Auto-Reset Fix)**：
   - **立即运行全局工作台解绑**：修复 `client/chat/agent-schedules.js` 在点击“立即运行”后多余锁定 `scheduleId` 的缺陷，改为直接刷新全局任务列表，使得最新提交的计划运行任务立即出现在列表最顶部。
   - **筛选切换与数据加载自动重置**：在 `client/chat/agent-run-loaders.js` 的 `loadAgentRuns` 与 `client/chat/agents.js` 的 `bindAgentFilters` 中增加自动解绑机制，当用户在前端切换筛选下拉框（如从计划任务切换至“全部类型”、“自主任务”或“工作流任务”）或点击刷新时，自动重置内存中的 `agentScheduleFilterId` 变量，彻底解决之前其他历史任务被隐藏、必须 F5 刷新整个页面才能重新显示的问题。
+- **任务运行记录列表与详情模型展示精准解析 (Task Run History Model Display & Multi-Model Resolution)**：
+  - **动态模型与节点级模型精准解析**：在 `server/repositories/agent-runs.js` 的 `listRuns`、`getRunForUser`、`getRunById` 与 `listDeletedRunsForAdmin` 中增加 `enrichRunModelNames`，同时支持关联路由动态选择模型 `chosen_model_id` 以及工作流 DAG 节点中配置的特定大模型（如 `agent.llm` / `agent.content_review`），精准反查模型库名称并回填至 `model_name`。
+  - **多模式与纯工具工作流语义化展示**：当工作流为纯工具编排时展示「无需模型 (纯工具)」；单节点使用大模型时展示具体模型名称；多节点调用不同大模型时展示「多模型 (N个)」或组合名称；自主任务展示所选模型或路由模型名称。
+  - **前端表格与详情技术概览防空白兜底**：在 `client/chat/agent-run-loaders.js`、`client/chat/sidebar-search.js` 与 `client/chat/agent-run-detail.js` 中增加显示与悬停提示兜底，彻底解决工作流或特定任务在任务运行记录列表中模型列显示为空白或单一破折号的问题。
 - **自动化测试回归覆盖与用例加固**：
   - 在 `tests/security-agent.test.js` 中新增针对到期工作流计划自动派发、任务入队及审计日志落库断言的完整测试用例。
+  - 增加针对普通任务、工作流节点模型及纯工具工作流在 `listRuns` 中模型名称自动解析与富化的专项单测。
   - 修复 `server/services/agent-schedules.js` 中定时调度原子领占查询的健壮性。
 
 ## [v0.1.5] - 2026-08-20
