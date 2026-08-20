@@ -1315,7 +1315,7 @@ async function createAgentRun({
                 err.status = 404;
                 throw err;
             }
-            const resolvedWorkflow = resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
+            const resolvedWorkflow = await resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
             runMetadata.dagSpec = resolvedWorkflow.dagSpec;
             runMetadata.workflowId = resolvedWorkflow.workflow.id;
             runMetadata.workflowName = resolvedWorkflow.workflow.name;
