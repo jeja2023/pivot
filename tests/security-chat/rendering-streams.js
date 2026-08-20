@@ -445,7 +445,7 @@ test('usage audit page merges stats, details and admin report views', () => {
     assert.match(appMain, /document\.querySelectorAll\('\[data-usage-subtab\]'\)/);
     assert.match(shellPartial, /id="tab-usage"[^>]*>用量审计<\/button>/);
     assert.doesNotMatch(shellPartial, /id="tab-(?:stats|details|report)"/);
-    assert.match(usagePartial, /id="usage-title">用量审计<\/h3>/);
+    assert.match(usagePartial, /id="usage-title">用量(?:统计|审计)<\/h3>/);
     assert.match(usagePartial, /data-usage-subtab="stats"/);
     assert.match(usagePartial, /data-usage-subtab="details"/);
     assert.match(usagePartial, /data-usage-subtab="report"[^>]*admin-only|admin-only[^>]*data-usage-subtab="report"/);

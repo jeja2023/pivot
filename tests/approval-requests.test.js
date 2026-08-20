@@ -8,7 +8,7 @@ const {
     runApprovalTimeouts,
     waitForWorkflowApproval
 } = require('../server/services/agent-approval-requests');
-const { db } = require('../server/db');
+const { db } = require('./security-helpers');
 const { encryptSecret } = require('../server/security');
 const { getBeijingTimestamp } = require('../server/time');
 

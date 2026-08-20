@@ -589,7 +589,7 @@ function signatureFor(secret, token, requestId, decision, nonce = '') {
 async function getRequestSecret(row) {
     const slug = String(row.callback_credential_slug || '').trim();
     if (!slug) return '';
-    const owner = await getRunOwner(row.run_id);
+    const owner = (await getRunOwner(row.run_id)) || (row.user_id ? { id: row.user_id } : null);
     return owner ? await resolveCallbackSecretSlug(slug, owner) : '';
 }
 

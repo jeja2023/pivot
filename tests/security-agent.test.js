@@ -1468,7 +1468,7 @@ test('agent model visibility excludes other users private models', async () => {
     assert.equal((await getUserRunnableModels(other)).some(model => model.id === privateId), false);
     assert.equal((await getUserRunnableModels(superAdmin)).some(model => model.id === privateId), false);
     await assert.rejects(async () => await createAgentRun({
-        user: superAdmin,
+        user: other,
         goal: '检查其他用户私有模型是否可用于自动化',
         modelId: privateId,
         maxSteps: 3
