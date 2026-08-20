@@ -241,13 +241,19 @@ async function pgFlushAll() {
         clearTimeout(pgFlushTimer);
         pgFlushTimer = null;
     }
-    // 队列可能在刷新过程中继续积压，循环到清空或不再收敛为止
+    while (pgFlushing) {
+        await pgFlushing;
+    }
     for (let i = 0; i < 50; i += 1) {
-        const before = Object.values(pgQueues).reduce((sum, q) => sum + q.length, 0);
-        if (before === 0) return;
+        const remaining = Object.values(pgQueues).reduce((sum, q) => sum + q.length, 0);
+        if (remaining === 0) return;
         await pgFlush();
+        while (pgFlushing) {
+            await pgFlushing;
+        }
         const after = Object.values(pgQueues).reduce((sum, q) => sum + q.length, 0);
-        if (after >= before) return;
+        if (after === 0) return;
+        if (after >= remaining) return;
     }
 }
 

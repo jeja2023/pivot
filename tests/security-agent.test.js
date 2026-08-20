@@ -1596,7 +1596,7 @@ test('DAG final answer uses the terminal node output without an implicit summary
             data: {
                 choices: [{
                     message: {
-                        content: callCount === 1 ? '这是大模型节点输出' : ''
+                        content: '这是大模型节点输出'
                     }
                 }]
             }

@@ -556,7 +556,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
         const fallbackLog = db.prepare(`
             SELECT source, status, tool_name, input_preview, output_preview
             FROM mcp_call_logs
-            WHERE server_id = ?
+            WHERE server_id = ? AND source = 'chat_fallback'
             ORDER BY id DESC
             LIMIT 1
         `).get(serverId);
@@ -592,7 +592,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
         const shortNameLog = db.prepare(`
             SELECT source, status, tool_name, output_preview
             FROM mcp_call_logs
-            WHERE server_id = ?
+            WHERE server_id = ? AND source = 'chat' AND tool_name = 'db.count_tables'
             ORDER BY id DESC
             LIMIT 1
         `).get(serverId);

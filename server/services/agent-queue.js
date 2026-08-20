@@ -139,12 +139,22 @@ function createAgentQueue({
     }
 
     async function processQueue() {
-        if (isProcessing) return;
+        if (isProcessing || safeMaxConcurrent <= 0) return;
         isProcessing = true;
         try {
             while (activeRunIds.size < safeMaxConcurrent) {
                 const claimed = await claimNextRun();
                 if (!claimed || activeRunIds.has(claimed.id)) break;
+                if (safeMaxConcurrent <= 0 || activeRunIds.size >= safeMaxConcurrent) {
+                    await dbRunner.execute(`
+                        UPDATE agent_runs
+                        SET status = 'queued',
+                            locked_by = NULL,
+                            lock_expires_at = NULL
+                        WHERE id = ? AND locked_by = ?
+                    `, [claimed.id, instanceId]);
+                    break;
+                }
                 const runId = claimed.id;
                 const user = await getRunUser(runId);
                 if (!user) {
