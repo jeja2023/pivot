@@ -68,6 +68,7 @@ try {
     const result = cp.spawnSync(process.execPath, [
         '--test',
         '--test-concurrency=1',
+        '--test-reporter=spec',
         ...testFiles
     ], {
         cwd: root,
