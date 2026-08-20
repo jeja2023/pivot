@@ -1,0 +1,43 @@
+<div id="tab-content-stats" class="usage-view hidden" data-usage-panel="stats" role="tabpanel" aria-labelledby="usage-subtab-stats">
+    <div class="settings-page-head usage-panel-head">
+        <div>
+            <h3 id="stats-title">用量统计</h3>
+            <p>按用户与模型汇总消息、Token、费用估算和最后活跃时间。</p>
+        </div>
+        <div class="export-action-group">
+            <button id="stats-export-btn" class="btn-secondary" type="button">导出汇总</button>
+            <button id="model-cost-export-btn" class="btn-secondary" type="button">导出费用</button>
+            <button id="compliance-export-btn" class="btn-secondary admin-only hidden" type="button">合规审计包</button>
+        </div>
+    </div>
+    <div class="table-container stats-table-wrap">
+        <table class="data-table stats-usage-table">
+            <colgroup>
+                <col class="col-index">
+                <col class="col-user">
+                <col class="col-name">
+                <col class="col-model">
+                <col class="col-message">
+                <col class="col-token">
+                <col class="col-token">
+                <col class="col-total">
+                <col class="col-active">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="text-center">序号</th>
+                    <th>用户</th>
+                    <th>显示名</th>
+                    <th>模型</th>
+                    <th class="text-center">消息数</th>
+                    <th class="text-center">输入 Token</th>
+                    <th class="text-center">输出 Token</th>
+                    <th class="text-center">总 Token</th>
+                    <th>最后活动</th>
+                </tr>
+            </thead>
+            <tbody id="stats-list-body"></tbody>
+        </table>
+    </div>
+    <div id="pagination-stats" class="pagination"></div>
+</div>

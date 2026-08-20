@@ -27,7 +27,9 @@ function createAgentQueue({
     const activeUserCounts = new Map();
     let processScheduled = false;
     let isProcessing = false;
-    let safeMaxConcurrent = Math.max(Number.parseInt(maxConcurrent, 10) || 1, 1);
+    let safeMaxConcurrent = Number.isFinite(Number.parseInt(maxConcurrent, 10))
+        ? Math.max(Number.parseInt(maxConcurrent, 10), 0)
+        : 1;
     const safeMaxConcurrentPerUser = Math.max(Number.parseInt(maxConcurrentPerUser, 10) || 2, 1);
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
     const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
@@ -215,7 +217,8 @@ function createAgentQueue({
     }
 
     function updateMaxConcurrent(nextMaxConcurrent) {
-        const next = Math.max(Number.parseInt(nextMaxConcurrent, 10) || safeMaxConcurrent, 1);
+        const parsed = Number.parseInt(nextMaxConcurrent, 10);
+        const next = Number.isFinite(parsed) ? Math.max(parsed, 0) : safeMaxConcurrent;
         if (next === safeMaxConcurrent) return safeMaxConcurrent;
         safeMaxConcurrent = next;
         scheduleProcessQueue();

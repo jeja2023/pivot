@@ -1,3 +1,26 @@
+## [v0.1.5] - 2026-08-20
+
+### 用量设计一体化看板融合架构、CI 自动化 PostgreSQL 容器测试与测试运行器时区与并发竞态加固
+
+- **用量统计、用量明细与审计报表三合一融合设计 (Usage, Details & Audit Report Integration Design)**：
+  - **架构融合背景**：针对目前系统中「用量统计 (Usage Stats)」、「用量明细 (Usage Details)」与「审计报表 (Audit Reports)」三个功能面板分散、上下文切换繁琐及筛选维度割裂的问题，规划并启动「用量设计 / 统一用量中心 (Usage Analytics & Audit Center)」一体化看板融合设计。
+  - **一体化看板交互规划**：
+    - **宏观统计与趋势概览（融合原用量统计）**：统一展示全平台与部门维度的 Token 总消耗、调用频次、每日/每周/每月趋势折线图、模型调用占比饼图与峰值时段分析。
+    - **多维明细下钻与实时穿透（融合原用量明细）**：在同一页面支持按部门/单位、用户、模型、调用类型与时间范围进行秒级下钻查询，实时展示每笔调用的输入/输出 Token、推理耗时、TPS 速率与计算成本。
+    - **审计报表与一键导出归档（融合原审计报表）**：无缝整合部门用量横向对比、Top 活跃用户消耗排行，并提供一键 CSV 结构化导出（支持 UTF-8 BOM 编码，Excel 打开开箱即用无乱码），形成从“宏观监控 -> 微观下钻 -> 审计出表”的完整闭环。
+  - **数据层与 API 聚合升级**：后端将逐步归并 `/api/stats/report`、`/api/stats/report/export` 与 `/api/stats/usage-breakdown`，利用 PostgreSQL 窗口函数与聚合索引消除重复多表查询，大幅降低数据库 I/O 负载。
+- **GitHub Actions CI 持续集成 PostgreSQL 16 自动化服务容器 (CI PostgreSQL 16 Service Container)**：
+  - 在 `.github/workflows/ci.yml` 中配置官方 `postgres:16` 服务容器与 `pg_isready` 健康检查探针，并在测试运行步骤中自动注入 `TEST_DATABASE_URL` 与 `DATABASE_URL`。
+  - 在 `scripts/run_node_tests.js` 与 `scripts/run_e2e_tests.js` 中增加 CI 环境环境变量自动检测与回退兜底，彻底解决 Linux CI 运行器缺少数据库实例导致的 `Error: PostgreSQL tests require TEST_DATABASE_URL` 报错。
+- **全局跨平台测试运行器时区隔离 (Global Test Runner Timezone Consistency)**：
+  - 在 `.github/workflows/ci.yml` Job 级别全局注入 `TZ=Asia/Shanghai` 与 `PG_TIMEZONE=Asia/Shanghai`。
+  - 在 `scripts/run_node_tests.js`、`scripts/run_e2e_tests.js`、`scripts/setup_pg_test_db.js` 与 `server/db/test-sync-worker.js` 测试同步客户端中统一显式执行 `SET timezone = 'Asia/Shanghai'`，彻底消除 Linux UTC 零时区宿主机因 8 小时时区差导致的时间回读断言失败（如 `2099-01-01` 被误解析为 `2098-12-31 16:00:00`）。
+- **智能体并发队列单例与测试竞态加固 (Agent Queue Concurrency & Test Race Fix)**：
+  - 在 `server/services/agent-runtime/index.js` 中修复 `getAgentQueue()` 单例获取逻辑，移除无条件的 `updateMaxConcurrent` 重置，防止单测中手动暂停队列（`updateMaxConcurrent(0)`）被意外覆盖为默认并发数导致的任务抢占。
+  - 在 `tests/agent-runtime-lifecycle.test.js` 中前置并发限制时序，确保测试用例与全局监听队列互相隔离。
+- **测试报告器升级为 Spec 结构化视图 (Spec Test Reporter with Summary)**：
+  - 在 `scripts/run_node_tests.js` 中启用 `--test-reporter=spec`，在控制台最底部汇总清晰的错误用例名称、文件行号与完整堆栈差异，大幅提升排查效率。
+
 ## [v0.1.4] - 2026-08-19
 
 ### 认证退出与空会话体验优化、可观测性与系统监控布局增强、全链路审计中文化与 PostgreSQL 自动备份加固

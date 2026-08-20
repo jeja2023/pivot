@@ -192,8 +192,11 @@ bind('create-key-btn', () => window.createApiKey());
 bind('pw-update-btn', () => window.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'report', 'stats', 'keys', 'details', 'account'].forEach(tab => {
+['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.switchTab(tab));
+});
+document.querySelectorAll('[data-usage-subtab]').forEach(button => {
+    button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
 });
 bind('admin-modal-close', () => window.closeModal());
 bind('apps-workbench-btn', () => window.openAppsWorkbench?.());
@@ -280,6 +283,8 @@ bind('api-access-toggle', () => window.updateApiAccessSetting?.(), 'change');
 bind('logs-export-btn', () => window.exportLogs());
 bind('report-export-btn', () => window.exportReport?.());
 bind('stats-export-btn', () => window.exportStats());
+bind('model-cost-export-btn', () => window.exportModelCosts?.());
+bind('compliance-export-btn', () => window.exportCompliancePackage?.());
 bind('details-export-btn', () => window.exportDetails());
 
 // 其他

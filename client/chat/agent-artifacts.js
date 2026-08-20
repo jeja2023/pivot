@@ -16,7 +16,7 @@ async function loadAgentArtifacts() {
         </button>
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无沉淀结果</div>');
     list.querySelectorAll('[data-agent-artifact-id]').forEach(btn => {
-        btn.addEventListener('click', () => window.openAgentArtifactVersions(btn.dataset.agentArtifactId));
+        btn.addEventListener('click', () => loadAgentArtifactModal(btn.dataset.agentArtifactId));
     });
 }
 
@@ -130,9 +130,7 @@ async function loadAgentArtifactModal(artifactId) {
     modal.classList.remove('hidden');
 }
 
-window.openAgentArtifactVersions = loadAgentArtifactModal;
-
-window.saveAgentArtifact = async function(runId) {
+async function saveAgentArtifact(runId) {
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/artifacts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,4 +140,10 @@ window.saveAgentArtifact = async function(runId) {
     if (!res.ok) return showToast(data.error || '保存结果失败', 'error');
     showToast('结果已沉淀', 'success');
     await loadAgentArtifacts();
-};
+}
+
+window.Pivot.exposeModule('agent.artifacts', {
+    openVersions: loadAgentArtifactModal,
+    saveFromRun: saveAgentArtifact,
+    refresh: loadAgentArtifacts
+});

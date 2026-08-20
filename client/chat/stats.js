@@ -40,31 +40,6 @@ function formatUsageRoleLabel(role) {
     return '其它调用';
 }
 
-function ensureStatsExportActions() {
-    const exportBtn = document.getElementById('stats-export-btn');
-    if (!exportBtn || document.getElementById('model-cost-export-btn')) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'export-action-group';
-    exportBtn.parentElement?.insertBefore(wrap, exportBtn);
-    wrap.appendChild(exportBtn);
-    const costBtn = document.createElement('button');
-    costBtn.id = 'model-cost-export-btn';
-    costBtn.type = 'button';
-    costBtn.className = 'btn-secondary';
-    costBtn.textContent = '导出费用';
-    costBtn.addEventListener('click', () => window.exportModelCosts?.());
-    wrap.appendChild(costBtn);
-    if (isAdminUser()) {
-        const complianceBtn = document.createElement('button');
-        complianceBtn.id = 'compliance-export-btn';
-        complianceBtn.type = 'button';
-        complianceBtn.className = 'btn-secondary';
-        complianceBtn.textContent = '合规审计包';
-        complianceBtn.addEventListener('click', () => window.exportCompliancePackage?.());
-        wrap.appendChild(complianceBtn);
-    }
-}
-
 window.loadDetails = async function(page = 1) {
     const titleEl = document.getElementById('details-title');
     if (titleEl) titleEl.innerText = '用量明细';
@@ -94,7 +69,6 @@ window.loadDetails = async function(page = 1) {
 }
 
 window.loadStats = async function(page = pageState.stats || 1) {
-    ensureStatsExportActions();
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     pageState.stats = requestedPage;
     const titleEl = document.getElementById('stats-title');

@@ -425,17 +425,33 @@ test('viewing a session record scrolls to bottom', () => {
     assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
 });
 
-test('usage statistics page has pagination controls and cache-bypassed monitor refresh', () => {
+test('usage audit page merges stats, details and admin report views', () => {
     const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
+    const appMain = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'app', 'main.js'), 'utf8');
     const stats = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'stats.js'), 'utf8');
     const statsMonitor = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'stats-monitor.js'), 'utf8');
     const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
-    const reportPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'report.html'), 'utf8');
+    const shellPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'shell-start.html'), 'utf8');
+    const usagePartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'usage.html'), 'utf8');
+    const usageStatsPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'usage-stats.html'), 'utf8');
+    const usageDetailsPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'usage-details.html'), 'utf8');
+    const usageReportPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'usage-report.html'), 'utf8');
     const adminStatsRoute = fs.readFileSync(path.resolve(__dirname, '..', '..', 'server', 'routes', 'admin-stats.js'), 'utf8');
 
     assert.match(adminCore, /stats: 1/);
-    assert.match(adminCore, /if \(tab === 'stats' && window\.loadStats\) loadStats\(page\);/);
-    assert.match(reportPartial, /id="pagination-stats" class="pagination"/);
+    assert.match(adminCore, /const LEGACY_SETTINGS_TAB_ALIASES = new Set\(\['stats', 'details', 'report'\]\)/);
+    assert.match(adminCore, /if \(tab === 'usage'\) \{[\s\S]*getActiveUsageSubtab\(\)/);
+    assert.match(appMain, /\['ops',[\s\S]*'usage',[\s\S]*'account'\]\.forEach/);
+    assert.match(appMain, /document\.querySelectorAll\('\[data-usage-subtab\]'\)/);
+    assert.match(shellPartial, /id="tab-usage"[^>]*>用量审计<\/button>/);
+    assert.doesNotMatch(shellPartial, /id="tab-(?:stats|details|report)"/);
+    assert.match(usagePartial, /id="usage-title">用量审计<\/h3>/);
+    assert.match(usagePartial, /data-usage-subtab="stats"/);
+    assert.match(usagePartial, /data-usage-subtab="details"/);
+    assert.match(usagePartial, /data-usage-subtab="report"[^>]*admin-only|admin-only[^>]*data-usage-subtab="report"/);
+    assert.match(usageStatsPartial, /id="pagination-stats" class="pagination"/);
+    assert.match(usageDetailsPartial, /id="pagination-details" class="pagination"/);
+    assert.match(usageReportPartial, /id="report-trend-chart"/);
     assert.match(stats, /window\.loadStats = async function\(page = pageState\.stats \|\| 1\)/);
     assert.match(stats, /stats\/usage\?\$\{params\.toString\(\)\}/);
     assert.match(stats, /renderPagination\('stats', total, requestedPage\)/);

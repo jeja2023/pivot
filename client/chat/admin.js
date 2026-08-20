@@ -106,15 +106,71 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'stats', 'report', 'keys', 'details', 'memories', 'attachments', 'announcements', 'ops', 'account'];
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'report', 'announcements']);
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'announcements']);
+const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
+
+function normalizeUsageSubtab(subtab) {
+    const target = String(subtab || '').trim();
+    if (target === 'report' && !isAdminUser()) return 'stats';
+    return ['stats', 'details', 'report'].includes(target) ? target : 'stats';
+}
+
+function getUsageSubtab() {
+    try {
+        return normalizeUsageSubtab(sessionStorage.getItem(SETTINGS_USAGE_SUBTAB_STORAGE_KEY));
+    } catch (e) {
+        return 'stats';
+    }
+}
+
+function getActiveUsageSubtab() {
+    const activeButton = document.querySelector('[data-usage-subtab].active');
+    return normalizeUsageSubtab(activeButton?.dataset.usageSubtab || getUsageSubtab());
+}
+
+function persistUsageSubtab(subtab) {
+    try {
+        sessionStorage.setItem(SETTINGS_USAGE_SUBTAB_STORAGE_KEY, normalizeUsageSubtab(subtab));
+    } catch (e) {
+        // 浏览器禁用 sessionStorage 时仅退回默认子页。
+    }
+}
+
+function switchUsageSubtab(subtab, options = {}) {
+    const target = normalizeUsageSubtab(subtab);
+    document.querySelectorAll('[data-usage-subtab]').forEach(button => {
+        const active = button.dataset.usageSubtab === target;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-usage-panel]').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.usagePanel !== target);
+    });
+    if (!options.skipPersist) persistUsageSubtab(target);
+    if (!options.skipLoad) loadTabData(target, options.page || pageState[target] || 1);
+    window.scheduleSettingsWorkspaceScale?.();
+    setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
+    return target;
+}
+
+window.Pivot?.exposeModule?.('settings.usage', {
+    switchSubtab: switchUsageSubtab,
+    getSubtab: getActiveUsageSubtab
+});
 
 function getDefaultSettingsTab() {
     return isAdminUser() ? 'ops' : 'models';
 }
 
 function normalizeSettingsTab(tab) {
-    let target = SETTINGS_TABS.includes(tab) ? tab : getDefaultSettingsTab();
+    const requested = String(tab || '').trim();
+    let target = SETTINGS_TABS.includes(requested) ? requested : getDefaultSettingsTab();
+    if (LEGACY_SETTINGS_TAB_ALIASES.has(requested)) {
+        target = 'usage';
+        persistUsageSubtab(requested);
+    }
     if (ADMIN_ONLY_SETTINGS_TABS.has(target) && !isAdminUser()) target = 'models';
     return target;
 }
@@ -171,8 +227,8 @@ window.openAdminPanel = async (options = {}) => {
     const descEl = adminContainer?.querySelector('.settings-workspace-header p');
     if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
     if (descEl) descEl.innerText = isAdmin
-        ? '集中管理模型、用户、审计、监控、用量、API 接入与账号安全。'
-        : '管理你的模型、附件、用量、API 接入与账号安全。';
+        ? '集中管理模型、用户、审计、监控、用量审计、API 接入与账号安全。'
+        : '管理你的模型、附件、用量审计、API 接入与账号安全。';
 
     if (isAdmin) {
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
@@ -189,9 +245,10 @@ window.openAdminPanel = async (options = {}) => {
 
 window.closeModal = () => window.showMainWorkspace?.('chat');
 
-window.switchTab = async (tab) => {
+window.switchTab = async (tab, options = {}) => {
     await window.ensureAdminFeatureScripts();
-    tab = normalizeSettingsTab(tab);
+    const requestedTab = String(tab || '').trim();
+    tab = normalizeSettingsTab(requestedTab);
     const tabs = SETTINGS_TABS;
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
@@ -200,12 +257,31 @@ window.switchTab = async (tab) => {
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
     window.persistSettingsTab?.(tab);
+    if (tab === 'usage') {
+        const usageSubtab = switchUsageSubtab(options.subtab || (LEGACY_SETTINGS_TAB_ALIASES.has(requestedTab) ? requestedTab : getUsageSubtab()), {
+            skipPersist: false,
+            skipLoad: true
+        });
+        if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
+    }
     window.scheduleSettingsWorkspaceScale?.();
     loadTabData(tab);
     setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
 };
 
 async function loadTabData(tab, page = 1) {
+    if (LEGACY_SETTINGS_TAB_ALIASES.has(tab)) {
+        if (document.getElementById('tab-content-usage') && document.getElementById('tab-content-usage').classList.contains('hidden')) {
+            await window.switchTab('usage', { subtab: tab, page });
+            return;
+        }
+        const usageSubtab = normalizeUsageSubtab(tab);
+        pageState[usageSubtab] = page;
+        if (usageSubtab === 'stats' && window.loadStats) loadStats(page);
+        if (usageSubtab === 'details' && window.loadDetails) loadDetails(page);
+        if (usageSubtab === 'report' && window.loadReport) loadReport();
+        return;
+    }
     pageState[tab] = page;
     if (tab === 'models' && window.loadModels) loadModels(page);
     if (tab === 'users' && window.loadUsers) {
@@ -214,8 +290,12 @@ async function loadTabData(tab, page = 1) {
     }
     if (tab === 'logs' && window.loadLogs) loadLogs(page);
     if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
-    if (tab === 'stats' && window.loadStats) loadStats(page);
-    if (tab === 'report' && window.loadReport) loadReport();
+    if (tab === 'usage') {
+        const usageSubtab = getActiveUsageSubtab();
+        if (usageSubtab === 'stats' && window.loadStats) loadStats(pageState.stats || page);
+        if (usageSubtab === 'details' && window.loadDetails) loadDetails(pageState.details || page);
+        if (usageSubtab === 'report' && window.loadReport) loadReport();
+    }
     if (tab === 'memories' && window.loadMemories) window.loadMemories(page);
     if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
     if (tab === 'announcements' && window.loadAnnouncementsAdmin) window.loadAnnouncementsAdmin(page);

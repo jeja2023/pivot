@@ -120,4 +120,35 @@ test.describe('Pivot browser smoke', () => {
         expect(toolBounds.top).toBeGreaterThanOrEqual(11.5);
         expect(toolBounds.bottom).toBeLessThanOrEqual(toolBounds.viewportHeight - 11.5);
     });
+
+    test('usage audit workspace switches between statistics, details and report', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: {
+                username: 'admin',
+                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
+            }
+        });
+        expect(login.ok()).toBeTruthy();
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+
+        await page.locator('#admin-panel-btn').click();
+        await expect(page.locator('#admin-container')).toBeVisible();
+        await page.locator('#tab-usage').click();
+
+        await expect(page.locator('#usage-title')).toHaveText('用量审计');
+        await expect(page.locator('#tab-content-stats')).toBeVisible();
+        await expect(page.locator('#tab-content-details')).toBeHidden();
+        await expect(page.locator('#tab-content-report')).toBeHidden();
+
+        await page.locator('#usage-subtab-details').click();
+        await expect(page.locator('#usage-subtab-details')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#tab-content-stats')).toBeHidden();
+        await expect(page.locator('#tab-content-details')).toBeVisible();
+
+        await page.locator('#usage-subtab-report').click();
+        await expect(page.locator('#usage-subtab-report')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#tab-content-details')).toBeHidden();
+        await expect(page.locator('#tab-content-report')).toBeVisible();
+        await expect(page.locator('#report-query-btn')).toBeVisible();
+    });
 });

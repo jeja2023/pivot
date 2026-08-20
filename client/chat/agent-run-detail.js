@@ -463,7 +463,7 @@ window.openAgentRun = async function(runId, options = {}) {
     detail.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
         btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });
-    detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.saveAgentArtifact(run.id));
+    detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.Pivot.moduleApi('agent.artifacts').saveFromRun?.(run.id));
     detail.querySelector('[data-agent-add-evaluation]')?.addEventListener('click', () => {
         window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
     });
