@@ -365,7 +365,7 @@ async function runDueAgentSchedules(limit = 20) {
                 WHERE id = ? AND claim_token = ?
             `, [nextRunAt, run.id, getBeijingTimestamp(), getBeijingTimestamp(), schedule.id, claimToken]);
             try {
-                createAgentNotificationCallback(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
+                await createAgentNotificationCallback(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
             } catch (notificationError) {
                 logger.warn({ err: notificationError.message, scheduleId: schedule.id }, '计划通知写入失败');
             }
@@ -389,7 +389,7 @@ async function runDueAgentSchedules(limit = 20) {
                 getBeijingTimestamp(), schedule.id, claimToken
             ]);
             try {
-                createAgentNotificationCallback(user.id, null, paused ? 'error' : 'warning', paused ? '计划任务已暂停' : '计划任务将自动重试', `${schedule.name}: ${e.message}`);
+                await createAgentNotificationCallback(user.id, null, paused ? 'error' : 'warning', paused ? '计划任务已暂停' : '计划任务将自动重试', `${schedule.name}: ${e.message}`);
             } catch (notificationError) {
                 logger.warn({ err: notificationError.message, scheduleId: schedule.id }, '计划错误通知写入失败');
             }

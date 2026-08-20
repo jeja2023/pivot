@@ -303,7 +303,7 @@ async function createTriggerRun(trigger, user, { inputs, goal, dedupeKey }) {
     `, [now, run.id, now, trigger.id]);
     // 与计划任务保持一致：触发入队后写一条用户通知，便于在通知中心追溯来源
     try {
-        createAgentNotificationCallback(user.id, run.id, 'trigger', '触发器已启动工作流', trigger.name);
+        await createAgentNotificationCallback(user.id, run.id, 'trigger', '触发器已启动工作流', trigger.name);
     } catch (notificationError) {
         logger.warn({ err: notificationError.message, triggerId: trigger.id }, '触发器通知写入失败');
     }

@@ -234,7 +234,7 @@ async function saveAgentRunArtifact(runId, user, body = {}) {
         `, [artifactId, content, note, user.id, now]);
         await trx.execute('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?', [versionRow?.id, artifactId]);
     });
-    createAgentNotificationCallback(user.id, runId, 'artifact', '智能体结果已沉淀', title);
+    await createAgentNotificationCallback(user.id, runId, 'artifact', '智能体结果已沉淀', title);
     return await getAgentArtifactForUser(artifactId, user);
 }
 
