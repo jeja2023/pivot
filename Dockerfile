@@ -7,8 +7,12 @@ WORKDIR /app
 # 首先复制 package.json
 COPY package*.json ./
 
-# 安装系统级图像处理引擎、Canvas 渲染库、编译工具及时间数据包
-RUN apt-get update && apt-get install -y \
+# 安装系统级图像处理引擎、Canvas 渲染库、编译工具、时间数据包及 PostgreSQL 客户端 (PGDG 官方源，支持 PG 16/17/18)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
     tzdata \
     pkg-config \
     libvips-dev \
@@ -18,10 +22,13 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libgif-dev \
     librsvg2-dev \
-    postgresql-client \
     python3 \
     make \
     g++ \
+    && install -d /etc/apt/keyrings \
+    && (curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt/ACCC4CF8.asc || curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc) | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt/ bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置容器时区与国内加速环境变量
@@ -34,7 +41,6 @@ ENV SHARP_LIBVIPS_BINARY_HOST=https://npmmirror.com/mirrors/sharp-libvips
 ENV npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
 ENV SHARP_USE_GLOBAL_LIBVIPS=false
-
 
 # 安装生产环境依赖，并确保 DuckDB Linux 原生绑定就位
 # 背景：@duckdb/node-bindings-linux-x64 是 optional 依赖，弱网/TLS 抖动时 npm ci 会“静默跳过”
