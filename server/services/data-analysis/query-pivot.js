@@ -2,6 +2,7 @@
 const {
     MAX_PREVIEW_ROWS,
     MAX_QUERY_LIMIT,
+    DATA_ANALYSIS_QUERY_TIMEOUT_MS,
     MAX_SQL_LEN,
     MAX_PIVOT_ROWS,
     MAX_PIVOT_COLS,
@@ -15,6 +16,7 @@ const {
     withAnalysisSlot,
     recordArtifact,
     createDuckConnection,
+    withDuckTimeout,
     isMetricNumericColumn
 } = require('./shared');
 
@@ -292,7 +294,7 @@ function buildQuerySelectList(row, columns) {
         const source = sqlIdent(column.key);
         const target = sqlIdent(column.name);
         if (numericKeys.has(column.key)) {
-            return `TRY_CAST(NULLIF(regexp_replace(CAST(${source} AS VARCHAR), '[,￥¥$%[:space:]]', '', 'g'), '') AS DOUBLE) AS ${target}`;
+            return `CASE WHEN regexp_matches(trim(CAST(${source} AS VARCHAR)), '%$') THEN TRY_CAST(NULLIF(regexp_replace(CAST(${source} AS VARCHAR), '[,￥¥$%[:space:]]', '', 'g'), '') AS DOUBLE) / 100 ELSE TRY_CAST(NULLIF(regexp_replace(CAST(${source} AS VARCHAR), '[,￥¥$%[:space:]]', '', 'g'), '') AS DOUBLE) END AS ${target}`;
         }
         return `${source} AS ${target}`;
     }).join(', ');
@@ -319,12 +321,13 @@ async function runUserQuery(userId, datasetId, input = {}) {
     const result = await withAnalysisSlot(async () => {
         const { instance, connection } = await createDuckConnection();
         try {
-            await connection.run(`CREATE TABLE data AS SELECT ${selectList} FROM read_parquet(${sqlLiteral(parquetPath)})`);
+            await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${selectList} FROM read_parquet(${sqlLiteral(parquetPath)})`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             // 物化完成后切断外部文件访问，使用户 SQL 无法读取数据集以外的任何文件。
             await connection.run('SET enable_external_access=false');
-            const reader = await connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`);
+            const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             return reader.getRowObjectsJson();
         } catch (err) {
+            if (err?.code === 'ANALYSIS_QUERY_TIMEOUT') throw err;
             const wrapped = new Error(`查询执行失败：${formatQueryExecutionError(err)}`);
             wrapped.status = 400;
             throw wrapped;

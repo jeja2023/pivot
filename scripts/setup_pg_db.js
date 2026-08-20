@@ -60,7 +60,7 @@ async function main() {
     extList.rows.forEach(r => console.log(`   ${r.extname} v${r.extversion}`));
 
     // 自动构建全量 79 张表 Schema 与注入中文数据字典注释
-    const { buildPgSchemaStatements } = require('../server/db/schema/pg');
+    const { buildPgSchemaStatements, normalizeLegacyResidualColumnTypes } = require('../server/db/schema/pg');
     const plan = buildPgSchemaStatements();
 
     console.log('\n正在创建 79 张业务表并注入全量数据字典注释...');
@@ -75,6 +75,7 @@ async function main() {
     for (const sql of plan.residualColumns) {
         await target.query(sql);
     }
+    await normalizeLegacyResidualColumnTypes(target);
     for (const sql of plan.foreignKeys) {
         await target.query(sql);
     }

@@ -5,6 +5,9 @@ const dialect = require('../server/db/dialect');
 const pgSchema = require('../server/db/schema/pg');
 const { toPostgresParams } = require('../server/db/client');
 const { normalizePgTimestamp } = require('../server/db/pg-connection');
+const { parseJsonArray } = require('../server/services/long-term-memory/memory-utils');
+const { serializeMemoryJob } = require('../server/services/long-term-memory/memory-serialization');
+const { mapRagDebugRow } = require('../server/services/rag-debug-history');
 
 test('PostgreSQL placeholder conversion skips quoted text and comments', () => {
     const sql = [
@@ -29,7 +32,11 @@ test('dialect helpers produce valid PostgreSQL SQL expressions', () => {
         dialect.nowOffsetExpr('-180 days'),
         "((now() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '180 days')"
     );
-    assert.strictEqual(dialect.jsonExtract('context_config', '$.model'), "pivot_json_extract(context_config, '{model}')");
+    assert.strictEqual(dialect.jsonExtract('context_config', '$.model'), "pivot_json_extract(context_config::text, '{model}')");
+    assert.strictEqual(
+        dialect.jsonExtract('metadata', '$.workflow.steps[0].name'),
+        "pivot_json_extract(metadata::text, '{workflow,steps,0,name}')"
+    );
     assert.strictEqual(dialect.jsonValid('context_config'), 'TRUE');
     assert.strictEqual(dialect.orderNocase('t.tag'), 'lower(t.tag)');
     assert.strictEqual(dialect.likeOperator(), 'ILIKE');
@@ -61,6 +68,30 @@ test('PG type normalizers properly format timestamp values', () => {
     assert.strictEqual(normalizedDate, '2026-08-18');
 });
 
+test('JSONB readers accept native node-postgres arrays and objects', () => {
+    assert.deepEqual(parseJsonArray([101, 102]), [101, 102]);
+    assert.deepEqual(parseJsonArray('[101, 102]'), [101, 102]);
+
+    const job = serializeMemoryJob({
+        id: 1,
+        message_ids: [101, 102],
+        result: { inserted: 2, extractor: 'heuristic' }
+    });
+    assert.deepEqual(job.messageIds, [101, 102]);
+    assert.deepEqual(job.result, { inserted: 2, extractor: 'heuristic' });
+
+    const debugRow = mapRagDebugRow({
+        id: 2,
+        scope_json: { collectionId: 3 },
+        selected_chunk_ids: [7, 8],
+        scores_json: [{ chunkId: 7, score: 0.9 }],
+        queue_json: { pending: 1 }
+    });
+    assert.deepEqual(debugRow.scope, { collectionId: 3 });
+    assert.deepEqual(debugRow.selectedChunkIds, [7, 8]);
+    assert.deepEqual(debugRow.queue, { pending: 1 });
+});
+
 test('dynamic PostgreSQL schema generator produces complete 79-table DDL matching SQLite base schema', () => {
     const plan = pgSchema.buildPgSchemaStatements();
     assert.ok(plan);
@@ -80,6 +111,25 @@ test('dynamic PostgreSQL schema generator produces complete 79-table DDL matchin
         assert.match(ddl, /embedding\s+vector/i, `${tableName}.embedding must use pgvector`);
         assert.doesNotMatch(ddl, /embedding\s+TEXT/i, `${tableName}.embedding must not fall back to TEXT`);
     }
+
+    const jsonbColumns = {
+        agent_runs: ['context_config', 'metadata'],
+        knowledge_entities: ['aliases'],
+        memories: ['source_message_ids'],
+        memory_extraction_jobs: ['message_ids', 'result'],
+        rag_debug_queries: ['scope_json', 'selected_chunk_ids', 'scores_json', 'queue_json']
+    };
+    for (const [tableName, columns] of Object.entries(jsonbColumns)) {
+        const ddl = plan.tables.find(t => t.includes(`CREATE TABLE IF NOT EXISTS ${tableName}`));
+        assert.ok(ddl, `${tableName} table DDL must exist`);
+        for (const column of columns) {
+            assert.match(ddl, new RegExp(`${column}\\s+JSONB`, 'i'), `${tableName}.${column} must use JSONB`);
+        }
+    }
+    assert.match(
+        plan.residualColumns.find(sql => sql.includes('analysis_datasets')) || '',
+        /active_version.*BIGINT DEFAULT 1/i
+    );
 
     // Check table and column comments
     assert.ok(Array.isArray(plan.comments), 'comments must be an array');

@@ -113,53 +113,55 @@ function runSeeds() {
 // ── PostgreSQL 异步 seed ──────────────────────────────────────────────────
 
 async function runSeedsPg() {
-    const { queryOne, execute } = require('./client');
+    const { transaction } = require('./client');
 
-    async function createInitialAdminAccount() {
-        const credential = buildInitialAdminCredential();
-        await execute(
-            'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            ['admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp()]
-        );
-        logInitialAdminCredential(credential);
-    }
+    await transaction(async (trx) => {
+        // 启动可能由多个实例同时触发；事务级 advisory lock 让默认数据只会有一个实例执行。
+        await trx.execute("SELECT pg_advisory_xact_lock(hashtext(?))", ['pivot.initial_seed']);
 
-    async function ensureBuiltInAdminAccount() {
-        const admin = await queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = ?', ['admin']);
-        if (!admin) { await createInitialAdminAccount(); return; }
-        const needsRepair = admin.role !== 'admin' || admin.status === 'disabled' || admin.deleted_at;
-        if (!needsRepair) return;
-        await execute(`
-            UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
-                nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
-                unit = COALESCE(NULLIF(unit, ''), '智枢科技')
-            WHERE id = ?
-        `, [admin.id]);
-        logger.warn({ username: 'admin', userId: admin.id }, '[PG] 已修复内置 admin 账号');
-    }
-
-    const promptRow = await queryOne('SELECT COUNT(*) AS count FROM prompts');
-    if (Number(promptRow?.count) === 0) {
-        const defaultPrompts = [
-            ['中英文翻译官', '你是一个精通中英文翻译的助手，能够地道、准确地在两种语言间切换，并保持原有的语气。', '翻译', 'role', 'chat,agent,workflow', '适合需要固定翻译角色的对话、任务和工作流节点。'],
-            ['代码助手', '你是一个资深的软件工程师，擅长编写简洁、高效、安全的代码，并能给出详尽的注释和优化建议。', '编程', 'role', 'chat,agent,workflow', '用于代码审阅、实现建议和工程说明。'],
-            ['周报专家', '你擅长总结工作成果，能将零散的任务描述转化为结构清晰、重点突出的专业周报。', '办公', 'output', 'chat,agent,workflow', '规定输出为清晰、可复用的周报结构。'],
-            ['文案润色', '你是一个文字编辑专家，能对给出的文本进行修辞优化、逻辑理顺，使其更具感染力和专业性。', '创作', 'method', 'chat,agent,workflow', '适合把写作风格和润色标准沉淀为规范。']
-        ];
-        for (const p of defaultPrompts) {
-            await execute(
-                'INSERT INTO prompts (name, content, category, type, target_surfaces, description) VALUES (?, ?, ?, ?, ?, ?)',
-                p
+        async function createInitialAdminAccount() {
+            const credential = buildInitialAdminCredential();
+            await trx.execute(
+                'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                ['admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp()]
             );
+            logInitialAdminCredential(credential);
         }
-    }
 
-    const userRow = await queryOne('SELECT COUNT(*) AS count FROM users');
-    if (Number(userRow?.count) === 0) {
-        await createInitialAdminAccount();
-    } else {
-        await ensureBuiltInAdminAccount();
-    }
+        async function ensureBuiltInAdminAccount() {
+            const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = ?', ['admin']);
+            if (!admin) { await createInitialAdminAccount(); return; }
+            const needsRepair = admin.role !== 'admin' || admin.status === 'disabled' || admin.deleted_at;
+            if (!needsRepair) return;
+            await trx.execute(`
+                UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
+                    nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
+                    unit = COALESCE(NULLIF(unit, ''), '智枢科技')
+                WHERE id = ?
+            `, [admin.id]);
+            logger.warn({ username: 'admin', userId: admin.id }, '[PG] 已修复内置 admin 账号');
+        }
+
+        const promptRow = await trx.queryOne('SELECT COUNT(*) AS count FROM prompts');
+        if (Number(promptRow?.count) === 0) {
+            const defaultPrompts = [
+                ['中英文翻译官', '你是一个精通中英文翻译的助手，能够地道、准确地在两种语言间切换，并保持原有的语气。', '翻译', 'role', 'chat,agent,workflow', '适合需要固定翻译角色的对话、任务和工作流节点。'],
+                ['代码助手', '你是一个资深的软件工程师，擅长编写简洁、高效、安全的代码，并能给出详尽的注释和优化建议。', '编程', 'role', 'chat,agent,workflow', '用于代码审阅、实现建议和工程说明。'],
+                ['周报专家', '你擅长总结工作成果，能将零散的任务描述转化为结构清晰、重点突出的专业周报。', '办公', 'output', 'chat,agent,workflow', '规定输出为清晰、可复用的周报结构。'],
+                ['文案润色', '你是一个文字编辑专家，能对给出的文本进行修辞优化、逻辑理顺，使其更具感染力和专业性。', '创作', 'method', 'chat,agent,workflow', '适合把写作风格和润色标准沉淀为规范。']
+            ];
+            for (const p of defaultPrompts) {
+                await trx.execute(
+                    'INSERT INTO prompts (name, content, category, type, target_surfaces, description) VALUES (?, ?, ?, ?, ?, ?)',
+                    p
+                );
+            }
+        }
+
+        const userRow = await trx.queryOne('SELECT COUNT(*) AS count FROM users');
+        if (Number(userRow?.count) === 0) await createInitialAdminAccount();
+        else await ensureBuiltInAdminAccount();
+    });
 }
 
 module.exports = {

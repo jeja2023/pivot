@@ -42,7 +42,11 @@ function createAgentQueue({
         processScheduled = true;
         setImmediate(async () => {
             processScheduled = false;
-            await processQueue();
+            try {
+                await processQueue();
+            } catch (err) {
+                logger.error({ err: err.message }, '智能体队列调度失败');
+            }
         });
     }
 

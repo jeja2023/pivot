@@ -26,6 +26,10 @@ const MAX_QUERY_LIMIT = 5000;
 const MAX_SQL_LEN = 5000;
 const MAX_PIVOT_ROWS = 200;
 const MAX_PIVOT_COLS = 50;
+const DATA_ANALYSIS_QUERY_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.DATA_ANALYSIS_QUERY_TIMEOUT_MS || '60000', 10) || 60000);
+const DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT = /^[0-9]+(?:\.[0-9]+)?\s*(?:MB|GB|TB)$/i.test(String(process.env.DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT || '1GB').trim())
+    ? String(process.env.DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT || '1GB').trim()
+    : '1GB';
 const CHART_PALETTES = {
     teal: ['#0f766e', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'],
     business: ['#2563eb', '#0f766e', '#7c3aed', '#0891b2', '#d97706', '#dc2626'],
@@ -122,6 +126,36 @@ function normalizeCell(value) {
     return String(value).trim();
 }
 
+// 仅用于发送给大模型的观测数据。原始 Parquet、查询结果和导出结果保持不变。
+const SENSITIVE_ANALYSIS_FIELD_RE = /(身份证|证件号|手机号|手机号码|电话|邮箱|email|e-mail|phone|mobile|password|密码|secret|token|api[_ -]?key|银行卡|卡号|住址|地址|姓名|真实姓名|出生日期|生日)/i;
+const SENSITIVE_ANALYSIS_VALUE_RES = [
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/i,
+    /^(?:\+?86[- ]?)?1[3-9]\d{9}$/,
+    /^\d{17}[\dXx]$/
+];
+
+function isSensitiveAnalysisField(name) {
+    return SENSITIVE_ANALYSIS_FIELD_RE.test(String(name || ''));
+}
+
+function redactAnalysisValue(value) {
+    if (value === null || value === undefined || value === '') return value;
+    const text = String(value);
+    return SENSITIVE_ANALYSIS_VALUE_RES.some(pattern => pattern.test(text)) ? '[已脱敏]' : value;
+}
+
+function redactAnalysisRows(rows, columns = []) {
+    const source = Array.isArray(rows) ? rows : [];
+    const sensitiveKeys = new Set((Array.isArray(columns) ? columns : []).filter(column => isSensitiveAnalysisField(column?.name)).map(column => column.key));
+    return source.map(row => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+        return Object.fromEntries(Object.entries(row).map(([key, value]) => [
+            key,
+            sensitiveKeys.has(key) || isSensitiveAnalysisField(key) ? '[已脱敏]' : redactAnalysisValue(value)
+        ]));
+    });
+}
+
 const IDENTIFIER_FIELD_RE = /(^|[\s_-])(id|uuid|guid|code|no|num|number|key|编号|序号|学号|工号|账号|账户|单号|订单号|证件号|身份证|手机号|电话|卡号|条码|编码|代码)([\s_-]|$)/i;
 const METRIC_FIELD_RE = /(成绩|分数|总分|得分|评分|金额|价格|单价|总价|数量|个数|人数|次数|销量|销售额|收入|利润|成本|费用|余额|库存|率|占比|比例|时长|耗时|年龄|高度|重量|面积|体积|温度|均值|平均|合计|小计|score|grade|amount|price|qty|quantity|count|total|sum|avg|average|rate|ratio|percent|cost|revenue|profit|sales|income|balance|duration|age|weight|height|area|volume|temperature)/i;
 const CJK_IDENTIFIER_FIELD_RE = /(编号|序号|学号|工号|账号|账户|单号|订单号|证件号|身份证|手机号|电话|卡号|条码|编码|代码)/;
@@ -177,6 +211,11 @@ function serializeDataset(row) {
         fileSize: row.file_size,
         rowCount: row.row_count,
         columnCount: row.column_count,
+        sourceRowCount: row.source_row_count || row.row_count || 0,
+        sourceColumnCount: row.source_column_count || row.column_count || 0,
+        truncated: Number(row.truncated) === 1 || row.truncated === true,
+        scopeUnknown: Number(row.truncated) === 2,
+        truncationReason: row.truncation_reason || '',
         status: row.status,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -212,7 +251,29 @@ async function createDuckConnection() {
     });
     const connection = await instance.connect();
     await connection.run(`SET temp_directory=${sqlLiteral(tempRoot)}`);
+    await connection.run(`SET memory_limit=${sqlLiteral(DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT)}`);
     return { instance, connection };
+}
+
+async function withDuckTimeout(connection, operation, timeoutMs = DATA_ANALYSIS_QUERY_TIMEOUT_MS) {
+    let timer;
+    try {
+        return await Promise.race([
+            operation(),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    try { connection.interrupt?.(); } catch (_err) { /* connection is closed in caller finally */ }
+                    const err = new Error(`数据分析查询超时（>${timeoutMs}ms），请缩小查询范围或增加筛选条件。`);
+                    err.status = 408;
+                    err.code = 'ANALYSIS_QUERY_TIMEOUT';
+                    reject(err);
+                }, timeoutMs);
+                if (typeof timer.unref === 'function') timer.unref();
+            })
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 async function duckReadAll(sql) {
@@ -333,6 +394,8 @@ module.exports = {
     MAX_SQL_LEN,
     MAX_PIVOT_ROWS,
     MAX_PIVOT_COLS,
+    DATA_ANALYSIS_QUERY_TIMEOUT_MS,
+    DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT,
     CHART_PALETTES,
     CHART_COLORS,
     EXPORT_RETENTION_MS,
@@ -349,6 +412,9 @@ module.exports = {
     normalizeDatasetName,
     normalizeHeader,
     normalizeCell,
+    isSensitiveAnalysisField,
+    redactAnalysisValue,
+    redactAnalysisRows,
     isProfileNumberColumn,
     isIdentifierLikeColumn,
     isMetricNumericColumn,
@@ -359,6 +425,7 @@ module.exports = {
     getDatasetForUser,
     getDatasetPaths,
     createDuckConnection,
+    withDuckTimeout,
     duckReadAll,
     withAnalysisSlot,
     parquetToRows,

@@ -41,9 +41,11 @@ function serializeMemoryJob(row) {
         maxAttempts: Number(row.max_attempts || 0),
         lockedAt: row.locked_at || null,
         lastError: row.last_error || '',
-        result: row.result ? (() => {
-            try { return JSON.parse(row.result); } catch (_err) { return null; }
-        })() : null,
+        result: row.result
+            ? (typeof row.result === 'object' ? row.result : (() => {
+                try { return JSON.parse(row.result); } catch (_err) { return null; }
+            })())
+            : null,
         createdAt: row.created_at || null,
         updatedAt: row.updated_at || null,
         nextRunAt: row.next_run_at || null,

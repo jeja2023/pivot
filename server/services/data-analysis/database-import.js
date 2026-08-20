@@ -42,7 +42,16 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
     }
     const rows = Array.isArray(result?.rows) ? result.rows : (Array.isArray(result) ? result : []);
     const datasetName = name || trimmedTable || `${server.name || '数据库'}导入`;
-    return createDatasetFromRows({ user, name: datasetName, rows, sourceType: 'database' });
+    return createDatasetFromRows({
+        user,
+        name: datasetName,
+        rows,
+        sourceType: 'database',
+        sourceRowCount: result?.total ?? result?.rowCount ?? rows.length,
+        sourceColumnCount: rows[0] && typeof rows[0] === 'object' ? Object.keys(rows[0]).length : 0,
+        truncated: result?.truncated === true,
+        truncationReason: result?.truncated ? `数据库查询达到导入上限 ${safeLimit} 行` : ''
+    });
 }
 
 module.exports = {

@@ -54,8 +54,9 @@ function sanitizeRows(rows) {
         name: header,
         index
     }));
-    const dataRows = sourceRows.slice(headerIndex + 1)
+    const allDataRows = sourceRows.slice(headerIndex + 1)
         .filter(row => Array.isArray(row) && row.some(cell => String(cell ?? '').trim() !== ''))
+    const dataRows = allDataRows
         .slice(0, MAX_UPLOAD_ROWS)
         .map(row => {
             const item = {};
@@ -69,7 +70,21 @@ function sanitizeRows(rows) {
         err.status = 400;
         throw err;
     }
-    return { columns, rows: dataRows, truncated: sourceRows.length > MAX_UPLOAD_ROWS + headerIndex + 1 };
+    const truncatedRows = allDataRows.length > MAX_UPLOAD_ROWS;
+    const truncatedColumns = firstUseful.length > MAX_UPLOAD_COLUMNS;
+    return {
+        columns,
+        rows: dataRows,
+        sourceRowCount: allDataRows.length,
+        sourceColumnCount: firstUseful.length,
+        truncated: truncatedRows || truncatedColumns,
+        truncatedRows,
+        truncatedColumns,
+        truncationReason: [
+            truncatedRows ? `行数超过上限 ${MAX_UPLOAD_ROWS}` : '',
+            truncatedColumns ? `列数超过上限 ${MAX_UPLOAD_COLUMNS}` : ''
+        ].filter(Boolean).join('；')
+    };
 }
 
 function readSpreadsheet(filePath, originalName) {
@@ -113,12 +128,30 @@ async function importCsvToParquet(sourcePath, parquetPath) {
         const rowCount = Number((await connection.runAndReadAll(
             `SELECT COUNT(*) AS n FROM read_parquet(${sqlLiteral(parquetPath)})`
         )).getRowObjectsJson()[0]?.n || 0);
+        const sourceRowCount = Number((await connection.runAndReadAll(
+            `SELECT GREATEST(COUNT(*) - 1, 0) AS n FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true)`
+        )).getRowObjectsJson()[0]?.n || 0);
+        const sourceColumnCount = fieldKeys.length;
+        const truncatedRows = sourceRowCount > MAX_UPLOAD_ROWS;
+        const truncatedColumns = sourceColumnCount > MAX_UPLOAD_COLUMNS;
         if (!rowCount) {
             const err = new Error('表格中没有可分析的数据行。');
             err.status = 400;
             throw err;
         }
-        return { columns, rowCount };
+        return {
+            columns,
+            rowCount,
+            sourceRowCount,
+            sourceColumnCount,
+            truncated: truncatedRows || truncatedColumns,
+            truncatedRows,
+            truncatedColumns,
+            truncationReason: [
+                truncatedRows ? `行数超过上限 ${MAX_UPLOAD_ROWS}` : '',
+                truncatedColumns ? `列数超过上限 ${MAX_UPLOAD_COLUMNS}` : ''
+            ].filter(Boolean).join('；')
+        };
     } finally {
         connection.closeSync();
         instance.closeSync();
@@ -230,12 +263,24 @@ async function importSqliteToParquet(sourcePath, parquetPath) {
         appender.closeSync();
         appender = null;
         await connection.run(`COPY imported TO ${sqlLiteral(parquetPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`);
+        const sourceRowCount = Number(sqliteDb.prepare(`SELECT COUNT(*) AS n FROM ${sqliteIdent(selected.tableName)}`).get()?.n || rowCount);
+        const sourceColumnCount = selected.rawColumns.length;
+        const truncatedRows = sourceRowCount > MAX_UPLOAD_ROWS || truncated;
+        const truncatedColumns = sourceColumnCount > MAX_UPLOAD_COLUMNS;
         return {
             columns,
             rowCount,
+            sourceRowCount,
+            sourceColumnCount,
             tableName: selected.tableName,
             tableCount: 1,
-            truncated
+            truncated: truncatedRows || truncatedColumns,
+            truncatedRows,
+            truncatedColumns,
+            truncationReason: [
+                truncatedRows ? `行数超过上限 ${MAX_UPLOAD_ROWS}` : '',
+                truncatedColumns ? `列数超过上限 ${MAX_UPLOAD_COLUMNS}` : ''
+            ].filter(Boolean).join('；')
         };
     } finally {
         if (appender) appender.closeSync();
@@ -253,17 +298,29 @@ async function ingestUpload({ datasetDir, file, ext }) {
     const parquetPath = resolveInside(datasetDir, 'data.parquet');
     let columns;
     let rowCount;
+    let sourceRowCount;
+    let sourceColumnCount;
+    let truncated = false;
+    let truncationReason = '';
     let sheetName = '';
     let sourceType;
     if (ext === '.csv') {
         const meta = await importCsvToParquet(sourcePath, parquetPath);
         columns = meta.columns;
         rowCount = meta.rowCount;
+        sourceRowCount = meta.sourceRowCount;
+        sourceColumnCount = meta.sourceColumnCount;
+        truncated = meta.truncated;
+        truncationReason = meta.truncationReason;
         sourceType = 'csv';
     } else if (['.sqlite', '.sqlite3', '.db'].includes(ext)) {
         const meta = await importSqliteToParquet(sourcePath, parquetPath);
         columns = meta.columns;
         rowCount = meta.rowCount;
+        sourceRowCount = meta.sourceRowCount;
+        sourceColumnCount = meta.sourceColumnCount;
+        truncated = meta.truncated;
+        truncationReason = meta.truncationReason;
         sheetName = meta.tableName || '';
         sourceType = 'sqlite';
     } else {
@@ -271,6 +328,10 @@ async function ingestUpload({ datasetDir, file, ext }) {
         await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
         columns = parsed.columns;
         rowCount = parsed.rows.length;
+        sourceRowCount = parsed.sourceRowCount;
+        sourceColumnCount = parsed.sourceColumnCount;
+        truncated = parsed.truncated;
+        truncationReason = parsed.truncationReason;
         sheetName = parsed.sheetName || '';
         sourceType = parsed.sourceType;
         parsed.rows = null; // 释放整表行数组，降低后续内存峰值。
@@ -278,7 +339,10 @@ async function ingestUpload({ datasetDir, file, ext }) {
     const profile = await profileViaSql(parquetPath, columns, rowCount);
     const previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
     const fileSize = file.size || fs.statSync(sourcePath).size;
-    return { sourceName, sourcePath, parquetPath, columns, rowCount, sheetName, sourceType, profile, previewRows, fileSize };
+    return {
+        sourceName, sourcePath, parquetPath, columns, rowCount, sheetName, sourceType,
+        profile, previewRows, fileSize, sourceRowCount, sourceColumnCount, truncated, truncationReason
+    };
 }
 
 async function importDataset({ user, file, name }) {
@@ -307,9 +371,10 @@ async function importDataset({ user, file, name }) {
         await execute(`
             INSERT INTO analysis_datasets (
                 id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
-                row_count, column_count, columns_json, profile_json, preview_json,
+                row_count, column_count, source_row_count, source_column_count, truncated, truncation_reason,
+                columns_json, profile_json, preview_json,
                 sheet_name, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
         `, [
             datasetId,
             user.id,
@@ -321,6 +386,10 @@ async function importDataset({ user, file, name }) {
             toProjectRelative(ingest.parquetPath),
             ingest.rowCount,
             ingest.columns.length,
+            ingest.sourceRowCount || ingest.rowCount,
+            ingest.sourceColumnCount || ingest.columns.length,
+            ingest.truncated ? 1 : 0,
+            ingest.truncationReason || '',
             JSON.stringify(ingest.columns),
             JSON.stringify(ingest.profile),
             JSON.stringify(ingest.previewRows),
@@ -441,8 +510,8 @@ function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmp
     return { removed };
 }
 
-// 历史记录：返回某数据集的图表/比对/导出 artifacts，供前端「历史」Tab 消费。
-// chart 类型解析出 content 供前端一键重渲染；其余类型仅返回元信息。
+// 历史记录：返回某数据集的图表、AI 分析、比对、导出等 artifacts，供前端「历史」Tab 消费。
+// chart 类型解析出 content 供前端一键重渲染，ai_analysis 类型解析出可回放的分析结果。
 async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
     await getDatasetForUser(userId, datasetId); // 校验归属，越权抛 404
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
@@ -463,12 +532,13 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
             hasFile: !!row.file_path
         };
         if (row.type === 'chart') item.chart = jsonParse(row.content, null);
+        if (row.type === 'ai_analysis') item.analysis = jsonParse(row.content, null);
         return item;
     });
 }
 
 // 从内存数据行构建数据集，用于数据库导入等非文件源
-async function createDatasetFromRows({ user, name, rows, sourceType = 'database' }) {
+async function createDatasetFromRows({ user, name, rows, sourceType = 'database', sourceRowCount = null, sourceColumnCount = null, truncated = false, truncationReason = '' }) {
     ensureAnalysisDirs();
     const sourceRows = Array.isArray(rows) ? rows : [];
     if (!sourceRows.length) {
@@ -506,6 +576,15 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
         });
         return item;
     });
+    const sourceRowsCount = Number.isFinite(Number(sourceRowCount)) ? Number(sourceRowCount) : sourceRows.length;
+    const sourceColumnsCount = Number.isFinite(Number(sourceColumnCount)) ? Number(sourceColumnCount) : headerNames.length;
+    const truncatedRows = sourceRowsCount > dataRows.length || sourceRows.length > MAX_UPLOAD_ROWS;
+    const truncatedColumns = sourceColumnsCount > columns.length;
+    const datasetTruncated = !!truncated || truncatedRows || truncatedColumns;
+    const datasetTruncationReason = truncationReason || [
+        truncatedRows ? `行数超过上限 ${MAX_UPLOAD_ROWS}` : '',
+        truncatedColumns ? `列数超过上限 ${MAX_UPLOAD_COLUMNS}` : ''
+    ].filter(Boolean).join('；');
 
     const datasetId = analysisId('ds');
     const datasetName = normalizeDatasetName('', name);
@@ -525,6 +604,10 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
                 parquetPath,
                 columns: exportColumns,
                 rowCount: dataRows.length,
+                sourceRowCount: sourceRowsCount,
+                sourceColumnCount: sourceColumnsCount,
+                truncated: datasetTruncated,
+                truncationReason: datasetTruncationReason,
                 sheetName: '',
                 sourceType,
                 profile,
@@ -536,9 +619,10 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
         await execute(`
             INSERT INTO analysis_datasets (
                 id, user_id, name, original_name, file_type, file_size, source_path, parquet_path,
-                row_count, column_count, columns_json, profile_json, preview_json,
+                row_count, column_count, source_row_count, source_column_count, truncated, truncation_reason,
+                columns_json, profile_json, preview_json,
                 sheet_name, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
         `, [
             datasetId,
             user.id,
@@ -550,6 +634,10 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
             toProjectRelative(ingest.parquetPath),
             ingest.rowCount,
             ingest.columns.length,
+            ingest.sourceRowCount,
+            ingest.sourceColumnCount,
+            ingest.truncated ? 1 : 0,
+            ingest.truncationReason || '',
             JSON.stringify(ingest.columns),
             JSON.stringify(ingest.profile),
             JSON.stringify(ingest.previewRows),

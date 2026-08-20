@@ -202,12 +202,12 @@
             PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">暂无历史记录，生成图表 / 数据透视 / 比对 / 导出后会显示在这里</div>');
             return;
         }
-        const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询' };
+        const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询', ai_analysis: 'AI 分析' };
         PivotSafeHtml.setHtml(box, items.map((item, index) => {
-            const clickable = item.type === 'chart' && item.chart;
+            const clickable = (item.type === 'chart' && item.chart) || (item.type === 'ai_analysis' && item.analysis);
             const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
             return `
-                <div class="data-analysis-history-item${clickable ? ' is-chart' : ''}" ${attrs}>
+                <div class="data-analysis-history-item${clickable ? ` is-${item.type}` : ''}" ${attrs}>
                     <span class="data-analysis-history-type data-analysis-history-type-${esc(item.type)}">${esc(typeLabel[item.type] || item.type)}</span>
                     <strong>${esc(item.title)}</strong>
                     <small>${esc(item.createdAt || '')}${clickable ? ' · 点击重新查看' : ''}</small>

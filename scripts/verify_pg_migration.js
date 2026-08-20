@@ -131,6 +131,14 @@ async function verify() {
             label: '孤儿法规条文（无对应版本）',
             sql: `SELECT COUNT(*) AS c FROM regulation_articles a LEFT JOIN regulation_versions v ON a.version_id = v.id WHERE v.id IS NULL`
         },
+        {
+            label: '消息无效模型引用',
+            sql: `SELECT COUNT(*) AS c FROM messages m LEFT JOIN models model ON m.model_id = model.id WHERE m.model_id IS NOT NULL AND model.id IS NULL`
+        },
+        {
+            label: '会话无效分叉消息引用',
+            sql: `SELECT COUNT(*) AS c FROM sessions s LEFT JOIN messages m ON s.forked_from_message_id = m.id WHERE s.forked_from_message_id IS NOT NULL AND m.id IS NULL`
+        },
     ];
     for (const { label, sql } of orphanChecks) {
         try {

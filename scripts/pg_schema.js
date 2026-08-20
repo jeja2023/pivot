@@ -4,7 +4,7 @@
  * 用法: DATABASE_URL=... node scripts/pg_schema.js
  */
 const { Pool } = require('pg');
-const { buildPgSchemaStatements } = require('../server/db/schema/pg');
+const { buildPgSchemaStatements, normalizeLegacyResidualColumnTypes } = require('../server/db/schema/pg');
 
 const pgUrl = process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot';
 const pool = new Pool({
@@ -52,7 +52,11 @@ async function main() {
         }
 
         // 4. 补遗留列与外键约束
-        console.log(`\n【4/6】补建外键约束 (共 ${plan.foreignKeys.length} 条)...`);
+        console.log(`\n【4/6】补遗留列并补建外键约束 (共 ${plan.foreignKeys.length} 条)...`);
+        for (const sql of plan.residualColumns) {
+            await client.query(sql);
+        }
+        await normalizeLegacyResidualColumnTypes(client);
         for (const sql of plan.foreignKeys) {
             await client.query(sql);
         }

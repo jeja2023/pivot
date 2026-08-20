@@ -326,8 +326,11 @@ async function runRelationalTool(adapter, client, name, ctx) {
     if (name === 'db.run_readonly_query') {
         const readonly = assertReadonlySql(input.sql);
         const governance = assertSqlGovernance(readonly, cfg);
-        const sql = applySqlLimit(readonly, limit, adapter.dialect);
-        return decorate({ rows: maskSensitiveRows(await adapter.runQuery(client, sql), cfg), limit }, {
+        // 多取一行用于准确标记导入/分析结果是否触达上限，返回给调用方时仍严格限制为 limit 行。
+        const sql = applySqlLimit(readonly, limit + 1, adapter.dialect);
+        const rawRows = maskSensitiveRows(await adapter.runQuery(client, sql), cfg);
+        const truncated = rawRows.length > limit;
+        return decorate({ rows: truncated ? rawRows.slice(0, limit) : rawRows, limit, truncated }, {
             operation: 'readonly_sql',
             tables: governance.tables
         });

@@ -12,6 +12,7 @@ const sqlitePath = process.env.SQLITE_DB_PATH || path.resolve(__dirname, '../dat
 const pgUrl = process.env.DATABASE_URL;
 const sqliteTz = process.env.SQLITE_TIMEZONE || 'Asia/Shanghai';
 const startFromTable = process.env.START_FROM_TABLE || null;
+const repairOrphanForeignKeys = String(process.env.REPAIR_ORPHAN_FOREIGN_KEYS || '').trim().toLowerCase() === 'true';
 
 if (!pgUrl) {
     console.error('❌ [Fatal] 未配置 DATABASE_URL 环境变量');
@@ -121,6 +122,114 @@ const VECTOR_COLUMNS = {
     memories:         ['embedding'],
     regulation_articles: ['embedding'],
 };
+
+function quoteIdentifier(identifier) {
+    return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+/**
+ * 普通业务账号不能关闭约束触发器时，暂存外键定义。导入完成后以 NOT VALID
+ * 恢复，因此存量历史数据不阻断迁移，而后续写入仍受约束保护。
+ */
+async function loadForeignKeys(client) {
+    const result = await client.query(`
+        SELECT DISTINCT
+            tc.table_name,
+            tc.constraint_name,
+            pg_get_constraintdef(con.oid) AS definition
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_schema = kcu.constraint_schema
+         AND tc.constraint_name = kcu.constraint_name
+         AND tc.table_name = kcu.table_name
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_schema = ccu.constraint_schema
+         AND tc.constraint_name = ccu.constraint_name
+        JOIN pg_constraint con
+          ON con.conname = tc.constraint_name
+         AND con.conrelid = format('%I.%I', tc.constraint_schema, tc.table_name)::regclass
+        WHERE tc.table_schema = current_schema()
+          AND tc.constraint_type = 'FOREIGN KEY'
+        ORDER BY tc.table_name, tc.constraint_name
+    `);
+    return result.rows.map(row => ({
+        ...row,
+        // pg_get_constraintdef() 在约束本身未验证时可能包含 NOT VALID；
+        // 恢复时统一由本工具追加，避免生成重复语法。
+        definition: String(row.definition || '').replace(/\s+NOT VALID\s*$/i, ''),
+    }));
+}
+
+async function dropForeignKeys(client, foreignKeys) {
+    for (const fk of foreignKeys) {
+        await client.query(
+            `ALTER TABLE ${quoteIdentifier(fk.table_name)} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(fk.constraint_name)}`
+        );
+    }
+}
+
+async function restoreForeignKeys(client, foreignKeys) {
+    for (const fk of foreignKeys) {
+        const exists = await client.query(`
+            SELECT 1
+            FROM pg_constraint con
+            JOIN pg_class rel ON rel.oid = con.conrelid
+            JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+            WHERE ns.nspname = current_schema()
+              AND rel.relname = $1
+              AND con.conname = $2
+            LIMIT 1
+        `, [fk.table_name, fk.constraint_name]);
+        if (exists.rowCount) continue;
+
+        await client.query(
+            `ALTER TABLE ${quoteIdentifier(fk.table_name)}
+             ADD CONSTRAINT ${quoteIdentifier(fk.constraint_name)} ${fk.definition} NOT VALID`
+        );
+        try {
+            await client.query(
+                `ALTER TABLE ${quoteIdentifier(fk.table_name)}
+                 VALIDATE CONSTRAINT ${quoteIdentifier(fk.constraint_name)}`
+            );
+        } catch (err) {
+            // SQLite 历史数据可能存在孤儿引用。保留 NOT VALID 外键可保护后续写入，
+            // 同时把无法验证的约束记录下来，避免迁移因存量脏数据失败。
+            if (err.code !== '23503') throw err;
+            console.warn(`   ⚠️ 外键 ${fk.table_name}.${fk.constraint_name} 含历史孤儿引用，保留 NOT VALID`);
+        }
+    }
+}
+
+/**
+ * 可选的数据修复：只处理允许 NULL 的历史外键，将不再存在的引用置空。
+ * 默认关闭以保持迁移逐字段无损；测试库或已批准的数据治理窗口可显式开启，
+ * 以取得全部外键的 VALID 状态而不删除业务记录。
+ */
+async function repairNullableOrphanForeignKeys(client) {
+    const repairs = [
+        { table: 'messages', column: 'model_id', refTable: 'models', refColumn: 'id' },
+        { table: 'sessions', column: 'forked_from_message_id', refTable: 'messages', refColumn: 'id' },
+    ];
+
+    let repairedRows = 0;
+    for (const repair of repairs) {
+        const result = await client.query(`
+            UPDATE ${quoteIdentifier(repair.table)} AS child
+            SET ${quoteIdentifier(repair.column)} = NULL
+            WHERE child.${quoteIdentifier(repair.column)} IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ${quoteIdentifier(repair.refTable)} AS parent
+                  WHERE parent.${quoteIdentifier(repair.refColumn)} = child.${quoteIdentifier(repair.column)}
+              )
+        `);
+        if (result.rowCount) {
+            repairedRows += result.rowCount;
+            console.warn(`  🩹 已清理 ${repair.table}.${repair.column} 的 ${result.rowCount} 条失效历史引用`);
+        }
+    }
+    return repairedRows;
+}
 
 // ── 序列重置：兼容 SERIAL 与 GENERATED ALWAYS AS IDENTITY ─────────────
 async function resetSequence(client, tableName, pkName) {
@@ -327,13 +436,25 @@ async function main() {
     console.log(`  时区基准      : ${sqliteTz}`);
     console.log(`  目标数据库    : ${pgUrl.replace(/:[^@]+@/, ':***@')}`);
     if (startFromTable) console.log(`  ⚡ 断点续传从 : [${startFromTable}]`);
+    if (repairOrphanForeignKeys) console.log('  🩹 已启用可空外键孤儿引用修复');
     const t0 = Date.now();
 
+    let foreignKeysDisabled = false;
+    let suspendedForeignKeys = [];
+    let foreignKeysRestored = true;
     try {
         await client.query(`SET timezone = '${sqliteTz}'`);
         // 关闭外键约束检查，迁移完成后再开启
         // sessions.forked_from_message_id 等循环 FK 在数据全部导入后才能满足
-        await client.query('SET session_replication_role = replica');
+        // 普通业务账号通常没有修改 session_replication_role 的权限；此时
+        // 依赖父表优先的拓扑顺序正常导入，不应因为权限不足阻断迁移。
+        try {
+            await client.query('SET session_replication_role = replica');
+            foreignKeysDisabled = true;
+        } catch (err) {
+            if (err.code !== '42501') throw err;
+            console.warn('  ⚠️ 当前账号无权关闭 session_replication_role，将按外键拓扑顺序导入');
+        }
 
         if (!startFromTable) {
             const tablesRes = await client.query(
@@ -353,17 +474,47 @@ async function main() {
             startIdx = idx;
         }
 
+        if (!foreignKeysDisabled) {
+            suspendedForeignKeys = await loadForeignKeys(client);
+            foreignKeysRestored = false;
+            await dropForeignKeys(client, suspendedForeignKeys);
+            console.log(`  🔗 已暂时移除 ${suspendedForeignKeys.length} 条外键，导入后将以 NOT VALID 恢复`);
+        }
+
         for (let i = startIdx; i < TABLE_TOPOLOGY.length; i++) {
             await migrateTable(TABLE_TOPOLOGY[i], client);
         }
 
+        if (repairOrphanForeignKeys) await repairNullableOrphanForeignKeys(client);
+
+        if (!foreignKeysDisabled) {
+            await restoreForeignKeys(client, suspendedForeignKeys);
+            foreignKeysRestored = true;
+        }
+
         // 恢复外键约束检查
-        await client.query('SET session_replication_role = DEFAULT');
+        if (foreignKeysDisabled) await client.query('SET session_replication_role = DEFAULT');
 
         console.log('\n╔══════════════════════════════════════════════════╗');
         console.log(`║  🎉 全量迁移成功！耗时: ${((Date.now() - t0) / 1000).toFixed(2)}s`);
         console.log('╚══════════════════════════════════════════════════╝');
     } catch (err) {
+        if (foreignKeysDisabled) {
+            try {
+                await client.query('SET session_replication_role = DEFAULT');
+            } catch (resetErr) {
+                console.error(`  ❌ 迁移失败后的外键触发器恢复失败: ${resetErr.message}`);
+            }
+        }
+        if (!foreignKeysDisabled && !foreignKeysRestored && suspendedForeignKeys.length) {
+            try {
+                await restoreForeignKeys(client, suspendedForeignKeys);
+                foreignKeysRestored = true;
+                console.warn('  ⚠️ 迁移失败，已尝试恢复暂存外键约束');
+            } catch (restoreErr) {
+                console.error(`  ❌ 迁移失败后的外键恢复也失败: ${restoreErr.message}`);
+            }
+        }
         console.error('\n❌ [Fatal] 迁移中断:', err.message);
         process.exit(1);
     } finally {

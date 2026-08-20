@@ -711,6 +711,34 @@
     font-weight: 700;
 }
 
+.data-analysis-truncated-badge,
+.data-analysis-complete-badge,
+.data-analysis-unknown-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 18px;
+    margin-top: 3px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 0.64rem;
+    font-weight: 700;
+}
+
+.data-analysis-truncated-badge {
+    background: #fff7ed;
+    color: #c2410c;
+}
+
+.data-analysis-complete-badge {
+    background: #f0fdf4;
+    color: #15803d;
+}
+
+.data-analysis-unknown-badge {
+    background: #f1f5f9;
+    color: #475569;
+}
+
 .data-analysis-break-text {
     white-space: normal;
     word-break: break-all;
@@ -892,11 +920,13 @@
     font-size: 0.68rem;
 }
 
-.data-analysis-history-item.is-chart {
+.data-analysis-history-item.is-chart,
+.data-analysis-history-item.is-ai_analysis {
     cursor: pointer;
 }
 
-.data-analysis-history-item.is-chart:hover {
+.data-analysis-history-item.is-chart:hover,
+.data-analysis-history-item.is-ai_analysis:hover {
     border-color: #0f766e;
     background: #f0fdfa;
 }

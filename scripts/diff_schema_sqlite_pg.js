@@ -22,6 +22,7 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const { Pool } = require('pg');
+const { PG_JSONB_COLUMNS, PG_VECTOR_COLUMNS } = require('../server/db/schema/pg');
 
 const sqlitePath = process.env.SQLITE_DB_PATH || path.resolve(__dirname, '../data/chat.db');
 const pgUrl = process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot';
@@ -35,13 +36,19 @@ const IGNORED_TABLE_PATTERNS = [
 
 // SQLite 声明类型 → 期望的 PG 类型（information_schema.data_type 取值）
 const EXPECTED_TYPE_MAP = {
-    'INTEGER': ['bigint'],
+    'INTEGER': ['bigint', 'integer', 'smallint'],
     'TEXT': ['text', 'character varying'],
     'REAL': ['double precision'],
     'DATETIME': ['timestamp with time zone'],
     'BLOB': ['bytea'],
     '': ['text'], // SQLite 无类型声明列
 };
+
+function expectedPgTypes(table, column, normalizedSqliteType) {
+    if (PG_JSONB_COLUMNS[table]?.includes(column)) return ['jsonb'];
+    if (PG_VECTOR_COLUMNS[table]?.includes(column)) return ['USER-DEFINED'];
+    return EXPECTED_TYPE_MAP[normalizedSqliteType] || [];
+}
 
 function isIgnoredTable(name) {
     return IGNORED_TABLE_PATTERNS.some(pattern => pattern.test(name));
@@ -181,7 +188,7 @@ async function main() {
                 missingColumns.push(`${column} (${meta.declaredType || 'untyped'})`);
                 continue;
             }
-            const expected = EXPECTED_TYPE_MAP[meta.normalizedType];
+            const expected = expectedPgTypes(table, column, meta.normalizedType);
             if (expected && !expected.includes(pgColumn.dataType)) {
                 typeMismatches.push(
                     `${column}: SQLite ${meta.declaredType || 'untyped'} → PG ${pgColumn.dataType} (期望 ${expected.join('/')})`

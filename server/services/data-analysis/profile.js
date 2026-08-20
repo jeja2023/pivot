@@ -6,9 +6,8 @@ const {
     sqlLiteral
 } = require('./shared');
 
-// 数值清洗表达式：镜像旧 toFiniteNumber 的去千分位/货币符号/百分号/空白逻辑（近似，
-// 不处理百分比 /100 与括号负数）。日期形态只认明确的 YYYY-(MM)-(DD)，与旧 inferKind 对齐。
-const SQL_NUMERIC_CLEAN = "regexp_replace(v, '[,￥¥$%[:space:]]', '', 'g')";
+// 数值清洗表达式：保留旧的千分位/货币清洗，同时把显式百分号统一转换为 0~1 比例。
+const SQL_NUMERIC_CLEAN = "CASE WHEN regexp_matches(trim(v), '%$') THEN TRY_CAST(regexp_replace(v, '[,￥¥$%[:space:]]', '', 'g') AS DOUBLE) / 100 ELSE TRY_CAST(regexp_replace(v, '[,￥¥$%[:space:]]', '', 'g') AS DOUBLE) END";
 const SQL_DATE_PATTERN = '[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}([ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?)?(Z|[+-][0-9]{2}:?[0-9]{2})?';
 
 // 统一画像：直接在 DuckDB 内对 parquet 计算字段画像，CSV/Excel 两条导入路径共用，
@@ -24,7 +23,7 @@ async function profileViaSql(parquetPath, columns, totalRows) {
                 WITH base AS (${nonEmpty}),
                 prepared AS (
                     SELECT v,
-                        TRY_CAST(${SQL_NUMERIC_CLEAN} AS DOUBLE) AS numv,
+                        ${SQL_NUMERIC_CLEAN} AS numv,
                         regexp_full_match(v, '${SQL_DATE_PATTERN}') AS is_date_raw,
                         lower(v) IN ('true', 'false', '是', '否', 'yes', 'no') AS is_bool
                     FROM base

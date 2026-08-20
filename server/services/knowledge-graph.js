@@ -779,7 +779,7 @@ async function findQueryEntities(userId, queryText, limit = GRAPH_CONTEXT_ENTITY
     const tokenParams = [];
     terms.slice(0, 8).forEach(term => {
         const like = `%${String(term).toLowerCase()}%`;
-        tokenClauses.push('(LOWER(e.normalized_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(COALESCE(e.aliases, \'\')) LIKE ?)');
+        tokenClauses.push("(LOWER(e.normalized_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(COALESCE(e.aliases::text, '')) LIKE ?)");
         tokenParams.push(like, like, like);
     });
     const rows = await query(`
@@ -957,8 +957,7 @@ async function mergeEntities({ userId, sourceEntityId, targetEntityId }) {
     await execute('DELETE FROM knowledge_relations WHERE target_entity_id = ?', [sourceId]);
     await execute('DELETE FROM knowledge_relations WHERE source_entity_id = target_entity_id');
 
-    const aliases = new Set();
-    try { JSON.parse(target.aliases || '[]').forEach(alias => aliases.add(alias)); } catch (_) {}
+    const aliases = new Set(parseEntityAliases(target.aliases));
     aliases.add(source.name);
     await execute('UPDATE knowledge_entities SET aliases = ?, updated_at = ?, deleted_at = ? WHERE id = ? AND user_id = ?', [
         JSON.stringify([...aliases].slice(0, 20)), getBeijingTimestamp(), getBeijingTimestamp(), sourceId, userId

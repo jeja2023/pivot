@@ -27,12 +27,17 @@ function nowOffsetExpr(offset) {
 }
 
 function jsonPathToPostgres(path = '$') {
-    return String(path || '$')
-        .replace(/^\$\.?/, '')
-        .split('.')
-        .map(part => part.trim())
-        .filter(Boolean)
-        .join(',');
+    const source = String(path || '$').trim();
+    const normalized = source.replace(/^\$\.?/, '');
+    if (!normalized) return '';
+    const parts = [];
+    const matcher = /(?:^|\.)([^.\[\]]+)|\[(?:"([^"]+)"|'([^']+)'|(\d+))\]/g;
+    let match;
+    while ((match = matcher.exec(normalized))) {
+        const part = match[1] ?? match[2] ?? match[3] ?? match[4];
+        if (part) parts.push(part.trim());
+    }
+    return parts.join(',');
 }
 
 /**
@@ -41,7 +46,7 @@ function jsonPathToPostgres(path = '$') {
  */
 function jsonExtract(column, path = '$') {
     const pgPath = jsonPathToPostgres(path);
-    return pgPath ? `pivot_json_extract(${column}, '{${pgPath}}')` : `(${column}::text)`;
+    return pgPath ? `pivot_json_extract(${column}::text, '{${pgPath}}')` : `(${column}::text)`;
 }
 
 /**

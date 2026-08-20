@@ -33,6 +33,7 @@
     const syncPivotAggregationControls = (...args) => app.syncPivotAggregationControls(...args);
     const applyPivotRecommendations = (...args) => app.applyPivotRecommendations(...args);
     const runAi = (...args) => app.runAi(...args);
+    const renderAgentResult = (...args) => app.renderAgentResult(...args);
 
     function activateTab(tab) {
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
@@ -277,6 +278,9 @@
                     state.chart = item.chart;
                     activateTab('chart');
                     renderChart();
+                } else if (item && item.analysis) {
+                    activateTab('ai');
+                    renderAgentResult(document.getElementById('data-analysis-ai-result'), item.analysis);
                 }
                 return;
             }

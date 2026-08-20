@@ -1186,7 +1186,10 @@ async function getAgentRuntimeStatus(user = null) {
 async function syncAgentRuntimeConcurrency() {
     const queue = getAgentQueue();
     queue.updateMaxConcurrent?.(getAgentMaxConcurrentRuns());
-    queue.processQueue?.();
+    const processing = queue.processQueue?.();
+    if (processing && typeof processing.catch === 'function') {
+        processing.catch(err => logger.warn({ err: err.message }, '智能体队列并发配置同步失败'));
+    }
     return await queue.getStatus();
 }
 

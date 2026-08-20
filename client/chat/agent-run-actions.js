@@ -45,24 +45,36 @@ window.createAgentRun = async function() {
     if (!payload.goal) return showToast('请先填写任务目标', 'error');
     if (!payload.modelId) return showToast('请选择模型', 'error');
     if (payload._invalid) return;
-    if (preflight.status === 'blocked') {
-        const blockerMsg = preflight.blockers?.length ? `任务预检未通过：${preflight.blockers[0]}` : '任务预检未通过，请先处理阻断项';
-        return showToast(blockerMsg, 'error');
+    const runBtn = document.getElementById('agent-run-btn');
+    if (runBtn) {
+        if (runBtn.disabled) return;
+        runBtn.disabled = true;
     }
-    const res = await apiFetch(`${API_BASE}/agents/runs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) return showToast(data.error || '任务创建失败', 'error');
-    showToast('自主任务已入队', 'success');
-    document.getElementById('agent-goal-input').value = '';
-    const titleInput = document.getElementById('agent-title-input');
-    if (titleInput) titleInput.value = '';
-    await Promise.all([loadAgentRuns(1), loadAgentNotifications()]);
-    window.setTaskComposerOpen?.(false);
-    await window.openAgentRun(data.run.id);
+    try {
+        const preflight = await preflightAgentPayload(payload);
+        if (preflight?.status === 'blocked') {
+            const blockerMsg = preflight.blockers?.length ? `任务预检未通过：${preflight.blockers[0]}` : '任务预检未通过，请先处理阻断项';
+            return showToast(blockerMsg, 'error');
+        }
+        const res = await apiFetch(`${API_BASE}/agents/runs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.error || '任务创建失败', 'error');
+        showToast('自主任务已入队', 'success');
+        document.getElementById('agent-goal-input').value = '';
+        const titleInput = document.getElementById('agent-title-input');
+        if (titleInput) titleInput.value = '';
+        await Promise.all([loadAgentRuns(1), loadAgentNotifications()]);
+        window.setTaskComposerOpen?.(false);
+        await window.openAgentRun(data.run.id);
+    } catch (e) {
+        showToast(e.message || '任务创建失败', 'error');
+    } finally {
+        if (runBtn) runBtn.disabled = false;
+    }
 };
 
 async function saveCurrentAgentTaskAsSchedule() {

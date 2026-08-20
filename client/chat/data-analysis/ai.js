@@ -86,6 +86,16 @@
                 }).join('')}
             </details>
         ` : '';
+        const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+        const scopeNotice = data.scope === 'profile'
+            ? '<div class="data-analysis-ai-scope-notice">本回答基于数据集字段画像与统计摘要，未执行逐行查询，不应视为精确全量结论。</div>'
+            : '';
+        const evidenceHtml = evidence.length ? `
+            <details class="data-analysis-ai-evidence">
+                <summary>数据依据（${evidence.length} 次查询）</summary>
+                ${evidence.map(item => `<div class="data-analysis-ai-evidence-item"><code>${esc(item.sql || '')}</code><span>返回 ${esc(item.rowCount)} 行${item.truncated ? '，结果已截断' : ''}</span></div>`).join('')}
+            </details>
+        ` : (data.scope === 'profile' ? '' : '<div class="data-analysis-ai-no-evidence">本次回答未获得可验证的 SQL 查询依据。</div>');
         const chartsHtml = charts.length ? `<div class="data-analysis-ai-charts">${charts.map(chart => `
             <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(chart))}">
                 <div class="pivot-echart-title">${esc(chart.title || '图表')}</div>
@@ -95,8 +105,10 @@
             </div>
         `).join('')}</div>` : '';
         PivotSafeHtml.setHtml(box, `
+            ${scopeNotice}
             <div class="data-analysis-ai-answer">${renderMarkdown(data.answer || 'AI 未返回有效内容')}</div>
             ${chartsHtml}
+            ${evidenceHtml}
             ${stepsHtml}
         `);
         if (charts.length) window.renderPivotCharts?.(box);
@@ -133,7 +145,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ datasetId: dataset.id, prompt, model })
                     });
-                    if (result) PivotSafeHtml.setHtml(result, renderMarkdown(data.content || 'AI 未返回有效内容'));
+                    if (result) PivotSafeHtml.setHtml(result, `${data.analysisScope === 'profile' ? '<div class="data-analysis-ai-scope-notice">本回答基于字段画像与统计摘要，未执行逐行查询。</div>' : ''}${renderMarkdown(data.content || 'AI 未返回有效内容')}`);
                     return;
                 }
                 const res = await apiFetch(`${API}/ai`, {

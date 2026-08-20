@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.7-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.9-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,7 +11,7 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.7
+## 最新版本：0.1.9
 
 （详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)）
 
@@ -423,9 +423,11 @@ npm run check:external -- --live
 
 系统启动时会自动执行 PostgreSQL schema 校验与元数据注释注入，所有历史业务表与字段均幂等兼容。
 
-### v0.1.7 PostgreSQL 运行兼容说明
+### v0.1.8 PostgreSQL 迁移与运行兼容说明
 
-`knowledge_chunks`、`memories` 与 `regulation_articles` 的 `embedding` 列在 PostgreSQL 中使用 `pgvector` 的 `vector` 类型。已完成迁移且上述列已为 `vector` 的环境升级应用即可，无需再次迁移数据；部署账号必须能够使用已安装的 `vector` 扩展。知识库召回、法规相似条文、法规批注/查阅日志和数据变更触发器均已按 PostgreSQL 的类型与异步参数规则完成回归验证。
+`knowledge_chunks`、`memories` 与 `regulation_articles` 的 `embedding` 列在 PostgreSQL 中使用 `pgvector` 的 `vector` 类型；智能体配置、长期记忆来源、RAG 调试记录和知识图谱别名等结构化字段使用 `JSONB`。应用层已经兼容 node-postgres 返回的原生 JSON 对象和数组。
+
+常规迁移保持逐字段无损；如需治理允许为空的历史外键孤儿引用，可在已批准的数据治理窗口执行 `REPAIR_ORPHAN_FOREIGN_KEYS=true node -r dotenv/config scripts/migrate_sqlite_to_pg.js`。该模式仅清空失效引用，不删除业务记录，随后使用 `node -r dotenv/config scripts/verify_pg_migration.js` 与 `node -r dotenv/config scripts/diff_schema_sqlite_pg.js` 校验数据和 schema。
 
 ## 目录结构
 
@@ -451,4 +453,4 @@ npm run check:external -- --live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.7
+**当前版本**：v0.1.9

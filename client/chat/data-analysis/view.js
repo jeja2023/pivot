@@ -391,12 +391,17 @@
         const pageRows = state.datasets.slice(startIndex, startIndex + pageSize);
         PivotSafeHtml.setHtml(body, pageRows.map((dataset, offset) => {
             const rowIndex = startIndex + offset;
+            const scopeBadge = dataset.scopeUnknown
+                ? `<span class="data-analysis-unknown-badge" title="${esc(dataset.truncationReason || '历史数据范围未知')}">范围未知</span>`
+                : dataset.truncated
+                ? `<span class="data-analysis-truncated-badge" title="${esc(dataset.truncationReason || '数据集已达到导入上限')}">已截断</span>`
+                : '<span class="data-analysis-complete-badge">当前范围完整</span>';
             return (
                 '<tr>' +
                     '<td class="text-center data-analysis-row-index">' + (rowIndex + 1) + '</td>' +
                     '<td class="data-analysis-dataset-name">' + esc(dataset.name) + '</td>' +
                     '<td class="data-analysis-break-text">' + esc(dataset.originalName || '-') + '</td>' +
-                    '<td>' + fmtNumber(dataset.rowCount) + ' \u884c / ' + fmtNumber(dataset.columnCount) + ' \u5217</td>' +
+                    '<td>' + fmtNumber(dataset.rowCount) + ' \u884c / ' + fmtNumber(dataset.columnCount) + ' \u5217<br>' + scopeBadge + '</td>' +
                     '<td><span class="data-analysis-file-type">' + esc(dataset.fileType || '\u8868\u683c') + '</span></td>' +
                     '<td class="data-analysis-muted-cell">' + esc(dataset.createdAt || '-') + '</td>' +
                     '<td class="text-center"><div class="data-analysis-table-actions">' +

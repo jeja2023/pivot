@@ -389,6 +389,46 @@ const migrations = [
             db.exec('UPDATE agent_schedules SET interval_minutes = 0 WHERE interval_minutes IS NULL');
         }
     },
+    {
+        id: '202608200001_analysis_dataset_scope_metadata',
+        description: 'Record source size and truncation metadata for data analysis datasets.',
+        up(db) {
+            const columns = db.pragma('table_info(analysis_datasets)');
+            if (!columns.length) return;
+            const existing = new Set(columns.map(column => column.name));
+            if (!existing.has('source_row_count')) {
+                db.exec('ALTER TABLE analysis_datasets ADD COLUMN source_row_count INTEGER DEFAULT 0');
+            }
+            if (!existing.has('source_column_count')) {
+                db.exec('ALTER TABLE analysis_datasets ADD COLUMN source_column_count INTEGER DEFAULT 0');
+            }
+            if (!existing.has('truncated')) {
+                db.exec('ALTER TABLE analysis_datasets ADD COLUMN truncated INTEGER DEFAULT 0');
+            }
+            if (!existing.has('truncation_reason')) {
+                db.exec("ALTER TABLE analysis_datasets ADD COLUMN truncation_reason TEXT DEFAULT ''");
+            }
+            db.exec("UPDATE analysis_datasets SET source_row_count = row_count WHERE source_row_count IS NULL OR source_row_count = 0");
+            db.exec("UPDATE analysis_datasets SET source_column_count = column_count WHERE source_column_count IS NULL OR source_column_count = 0");
+            db.exec("UPDATE analysis_datasets SET truncated = 2, truncation_reason = '历史数据：迁移前未记录来源范围，无法确认是否截断' WHERE truncated = 0 AND (source_row_count = row_count OR source_row_count IS NULL)");
+            db.exec("UPDATE analysis_datasets SET truncated = 0 WHERE truncated IS NULL");
+            db.exec("UPDATE analysis_datasets SET truncation_reason = '' WHERE truncation_reason IS NULL");
+        },
+        async upPg(client) {
+            await client.query(`
+                ALTER TABLE analysis_datasets
+                    ADD COLUMN IF NOT EXISTS source_row_count INTEGER DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS source_column_count INTEGER DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS truncated INTEGER DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS truncation_reason TEXT DEFAULT '';
+                UPDATE analysis_datasets
+                SET source_row_count = COALESCE(NULLIF(source_row_count, 0), row_count),
+                    source_column_count = COALESCE(NULLIF(source_column_count, 0), column_count),
+                    truncated = CASE WHEN COALESCE(truncated, 0) = 0 THEN 2 ELSE truncated END,
+                    truncation_reason = CASE WHEN COALESCE(truncated, 0) = 0 THEN '历史数据：迁移前未记录来源范围，无法确认是否截断' ELSE COALESCE(truncation_reason, '') END
+            `);
+        }
+    },
     ...regulationsMigrations
 ];
 

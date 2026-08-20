@@ -34,6 +34,16 @@ const PG_VECTOR_COLUMNS = {
     regulation_articles: ['embedding'],
 };
 
+// 迁移后的 PostgreSQL 库以原生 JSONB 保存这些结构化字段。新建库也必须
+// 使用同一物理类型，避免 node-postgres 的返回值在测试与生产间发生漂移。
+const PG_JSONB_COLUMNS = {
+    agent_runs: ['context_config', 'metadata'],
+    knowledge_entities: ['aliases'],
+    memories: ['source_message_ids'],
+    memory_extraction_jobs: ['message_ids', 'result'],
+    rag_debug_queries: ['scope_json', 'selected_chunk_ids', 'scores_json', 'queue_json'],
+};
+
 /**
  * 生产 SQLite 库中物理存在、但当前代码已不再引用的历史遗留列。
  * 全量数据迁移使用 `SELECT *` 抽取，PG 侧缺列会直接导致 INSERT 失败，
@@ -41,7 +51,7 @@ const PG_VECTOR_COLUMNS = {
  */
 const LEGACY_RESIDUAL_COLUMNS = [
     ['models', 'disable_chat_thinking', 'BIGINT DEFAULT 0'],
-    ['analysis_datasets', 'active_version', "TEXT DEFAULT ''"],
+    ['analysis_datasets', 'active_version', 'BIGINT DEFAULT 1'],
 ];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -75,6 +85,17 @@ function convertVectorColumnTypes(text) {
     return columns.reduce((ddl, column) => ddl.replace(
         new RegExp(`^(\\s*${column}\\s+)TEXT(?:\\s+DEFAULT\\s+'')?`, 'gim'),
         '$1vector'
+    ), text);
+}
+
+function convertJsonbColumnTypes(text) {
+    const tableMatch = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(text);
+    const columns = PG_JSONB_COLUMNS[tableMatch?.[1]];
+    if (!columns) return text;
+
+    return columns.reduce((ddl, column) => ddl.replace(
+        new RegExp(`^(\\s*${column}\\s+)TEXT\\b`, 'gim'),
+        '$1JSONB'
     ), text);
 }
 
@@ -224,7 +245,7 @@ function buildPgSchemaStatements() {
 
     for (const statement of tableStatements) {
         const { ddl, foreignKeys: fks } = stripForeignKeys(statement);
-        tables.push(convertVectorColumnTypes(convertColumnTypes(ddl)));
+        tables.push(convertJsonbColumnTypes(convertVectorColumnTypes(convertColumnTypes(ddl))));
         foreignKeys.push(...fks);
     }
 
@@ -267,6 +288,42 @@ async function syncIdentitySequences(client) {
         }
     } catch (err) {
         logger.warn({ err: err.message }, '[PG] 自增序列自愈校准跳过');
+    }
+}
+
+async function normalizeLegacyResidualColumnTypes(client) {
+    // 早期 PG 测试库曾把该 SQLite INTEGER 遗留列创建为 TEXT；仅使用
+    // ADD COLUMN IF NOT EXISTS 无法收敛已经存在的错误物理类型。
+    try {
+        await client.query(`
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'analysis_datasets'
+                      AND column_name = 'active_version'
+                      AND data_type <> 'bigint'
+                ) THEN
+                    ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" DROP DEFAULT;
+                    ALTER TABLE "analysis_datasets"
+                        ALTER COLUMN "active_version" TYPE BIGINT
+                        USING CASE
+                            WHEN trim("active_version"::text) ~ '^[+-]?[0-9]+$'
+                            THEN trim("active_version"::text)::bigint
+                            ELSE NULL
+                        END;
+                    ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" SET DEFAULT 1;
+                END IF;
+            END $$;
+        `);
+    } catch (err) {
+        if (err.code === '42501') {
+            logger.warn({ err: err.message }, '[PG] 遗留列类型校准权限不足，保留现有列类型');
+        } else {
+            throw err;
+        }
     }
 }
 
@@ -322,6 +379,8 @@ async function initSchemaPg() {
                 }
             }
         }
+
+        await normalizeLegacyResidualColumnTypes(client);
 
         for (const sql of plan.foreignKeys) {
             try {
@@ -380,8 +439,12 @@ async function initSchemaPg() {
 module.exports = {
     initSchemaPg,
     buildPgSchemaStatements,
+    normalizeLegacyResidualColumnTypes,
     convertColumnTypes,
     convertVectorColumnTypes,
+    convertJsonbColumnTypes,
     stripForeignKeys,
+    PG_VECTOR_COLUMNS,
+    PG_JSONB_COLUMNS,
     PG_NOW,
 };

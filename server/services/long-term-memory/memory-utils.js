@@ -84,6 +84,7 @@ function normalizeSourceMessageIds(ids = []) {
 }
 
 function parseJsonArray(value) {
+    if (Array.isArray(value)) return value;
     try {
         const parsed = JSON.parse(value || '[]');
         return Array.isArray(parsed) ? parsed : [];

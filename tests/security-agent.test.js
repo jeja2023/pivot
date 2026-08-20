@@ -1476,6 +1476,7 @@ test('agent model visibility excludes other users private models', async () => {
 });
 
 test('enterprise agent templates schedules artifacts and resume are user scoped', async () => {
+    const parseMaybeJson = value => (value && typeof value === 'object' ? value : JSON.parse(value || '{}'));
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1521,7 +1522,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     assert.equal(run.schedule_id, schedule.id);
     assert.equal(run.template_id, template.id);
     assert.equal(run.max_steps, 60);
-    assert.equal(JSON.parse(run.context_config).mode, 'knowledge');
+    assert.equal(parseMaybeJson(run.context_config).mode, 'knowledge');
     await cancelAgentRun(run.id, user);
     const scheduledRuns = (await listRuns(user, { limit: 30, runType: 'scheduled' })).data;
     const freeRuns = (await listRuns(user, { limit: 30, runType: 'free' })).data;
@@ -1562,7 +1563,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     });
     await cancelAgentRun(dagRun.id, user);
     const dagResumed = await resumeAgentRun(dagRun.id, user);
-    const dagMetadata = JSON.parse(dagResumed.metadata || '{}');
+    const dagMetadata = parseMaybeJson(dagResumed.metadata);
     assert.equal(dagMetadata.dagSpec.nodes[0].tool, 'models.list');
     await cancelAgentRun(dagResumed.id, user);
 });
@@ -2016,7 +2017,6 @@ test('listRuns enriches model_name for standard, DAG node models, and pure tool 
     assert.ok(run3);
     assert.equal(run3.model_name, '无需模型 (纯工具)');
 });
-
 
 
 
