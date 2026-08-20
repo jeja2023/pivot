@@ -1,15 +1,21 @@
 const { assert, db, getBeijingTimestamp, test } = require('../security-helpers');
+const { sql } = require('../../server/db/statements');
 
 const {
     countActualRegulationArticles,
+    createRegulationAnnotation,
     createSavedSearch,
     deriveRegulationTitleFromFilename,
     deriveRegulationVersionLabelFromFilename,
     getRegulationDocumentDetail,
     listRegulationDocuments,
     listRegulationFacets,
+    listRegulationAccessLogs,
+    listRegulationAnnotations,
     listSavedSearches,
     parseRegulationArticles,
+    findSimilarRegulationArticles,
+    recordRegulationAccess,
     searchRegulationArticles,
     updateRegulationDocument
 } = require('../../server/services/regulations');
@@ -100,4 +106,45 @@ test('regulation list, facets, search and saved searches work correctly', async 
 
     const matches = await searchRegulationArticles({ query: 'Test' });
     assert.ok(Array.isArray(matches));
+});
+
+test('regulation vectors and collaboration queries use PostgreSQL-compatible columns', async () => {
+    const now = getBeijingTimestamp();
+    const docId = sql(`
+        INSERT INTO regulation_documents (
+            title, category, issuing_body, jurisdiction, status, current_version_id, version_count, article_count,
+            created_by_user, updated_by_user, created_at, updated_at
+        ) VALUES (?, '测试分类', '测试机构', '全国', 'active', NULL, 0, 0, 1, 1, ?, ?)
+    `).run('PostgreSQL compatibility regulation', now, now).lastInsertRowid;
+    const versionId = sql(`
+        INSERT INTO regulation_versions (
+            document_id, version_label, source_name, source_path, source_size,
+            source_hash, source_format, extracted_text, summary, article_count,
+            uploaded_by_user, created_at, updated_at
+        ) VALUES (?, 'v1', 'compatibility.txt', 'uploads/regulations/compatibility.txt', 0, '', 'txt', '', '', 0, 1, ?, ?)
+    `).run(docId, now, now).lastInsertRowid;
+    sql('UPDATE regulation_documents SET current_version_id = ?, version_count = 1 WHERE id = ?').run(versionId, docId);
+
+    const insertArticle = sql(`
+        INSERT INTO regulation_articles (
+            document_id, version_id, sort_order, article_label, article_title, content, embedding, created_at
+        ) VALUES (?, ?, ?, ?, '', ?, ?, ?)
+    `);
+    const sourceArticleId = insertArticle.run(docId, versionId, 1, '第一条', '向量源条文', '[1,0,0]', now).lastInsertRowid;
+    const candidateArticleId = insertArticle.run(docId, versionId, 2, '第二条', '向量候选条文', '[0.9,0.1,0]', now).lastInsertRowid;
+
+    const similar = await findSimilarRegulationArticles({ articleId: sourceArticleId, limit: 10 });
+    assert.ok(similar.some(article => Number(article.article_id) === Number(candidateArticleId)));
+
+    const annotation = await createRegulationAnnotation({ articleId: sourceArticleId, userId: 1, content: '兼容性批注' });
+    assert.ok(annotation?.id);
+    const annotations = await listRegulationAnnotations({ articleId: sourceArticleId });
+    assert.equal(annotations.length, 1);
+    assert.ok(Object.hasOwn(annotations[0], 'user_name'));
+    assert.strictEqual(annotations[0].user_email, null);
+
+    await recordRegulationAccess({ userId: 1, documentId: docId, action: 'view', detail: 'compatibility check' });
+    const accessLogs = await listRegulationAccessLogs({ documentId: docId });
+    assert.equal(accessLogs.total, 1);
+    assert.ok(Object.hasOwn(accessLogs.data[0], 'user_name'));
 });

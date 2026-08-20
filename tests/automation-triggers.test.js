@@ -27,6 +27,7 @@ const {
     saveAgentWorkflowDependencyConfiguration
 } = require('../server/services/agent-workflow-dependencies');
 const { normalizeSlug } = require('../server/services/workflow-credentials');
+const { configureAgentTriggers, pollDatabaseTrigger } = require('../server/services/agent-triggers');
 
 function at(text) {
     return new Date(text.replace(' ', 'T'));
@@ -413,4 +414,60 @@ test('凭据加解密可逆且密文不含明文', () => {
     assert.equal(decryptSecret(encrypted), plain);
     // 重复加密不会二次包装，保证轮换时旧密文可以直接搬运
     assert.equal(encryptSecret(encrypted), encrypted);
+});
+
+test('数据库触发器在持有租约时可推进水位线', async () => {
+    const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const userInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, 'hash', 'Trigger Owner', 'QA', 'user', 'active')
+    `).run(`trigger_owner_${suffix}`);
+    const userId = Number(userInfo.lastInsertRowid);
+    const workflowInfo = sql(`
+        INSERT INTO agent_workflows (user_id, name, scope, allowed_units)
+        VALUES (?, 'Database Trigger Workflow', 'personal', '')
+    `).run(userId);
+    const workflowId = Number(workflowInfo.lastInsertRowid);
+    const versionInfo = sql(`
+        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, created_by)
+        VALUES (?, 1, ?, ?)
+    `).run(workflowId, JSON.stringify({ nodes: [{ id: 'start', tool: 'workflow.input', input: {} }] }), userId);
+    const versionId = Number(versionInfo.lastInsertRowid);
+    sql('UPDATE agent_workflows SET current_version_id = ?, published_version_id = ? WHERE id = ?')
+        .run(versionId, versionId, workflowId);
+
+    const claimToken = `lease_${suffix}`;
+    const triggerInfo = sql(`
+        INSERT INTO agent_workflow_triggers (
+            user_id, workflow_id, name, trigger_type, status, config_json, watermark, claim_token
+        ) VALUES (?, ?, 'Database compatibility trigger', 'database', 'active', ?, '', ?)
+    `).run(userId, workflowId, JSON.stringify({
+        connectionId: 'test-connection',
+        query: 'SELECT * FROM source WHERE updated_at > {{watermark}}',
+        watermarkField: 'updated_at',
+        inputName: 'rows'
+    }), claimToken);
+    const triggerId = Number(triggerInfo.lastInsertRowid);
+
+    try {
+        configureAgentTriggers({
+            createAgentRun: async () => ({ id: `trigger-run-${suffix}` }),
+            createAgentNotification: async () => null
+        });
+        const trigger = sql('SELECT * FROM agent_workflow_triggers WHERE id = ?').get(triggerId);
+        const created = await pollDatabaseTrigger(trigger, async (toolName, payload) => {
+            assert.equal(toolName, 'db.run_readonly_query');
+            assert.match(payload.sql, /updated_at >/);
+            return { structuredContent: { rows: [{ updated_at: '2026-08-20 12:00:00', id: 1 }] } };
+        });
+
+        assert.equal(created.length, 1);
+        const updated = sql('SELECT watermark, claim_token, last_error FROM agent_workflow_triggers WHERE id = ?').get(triggerId);
+        assert.equal(updated.watermark, '2026-08-20 12:00:00');
+        assert.equal(updated.claim_token, claimToken);
+        assert.equal(updated.last_error, null);
+    } finally {
+        sql('DELETE FROM agent_workflows WHERE id = ?').run(workflowId);
+        sql('DELETE FROM users WHERE id = ?').run(userId);
+    }
 });

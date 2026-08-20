@@ -7,6 +7,10 @@ const {
     normalizeRegulationId
 } = require('./shared');
 
+// users 表不再包含历史的 name/email 列。保留 user_email 输出字段为 NULL，
+// 以免旧客户端读取该字段时发生结构性变化。
+const USER_DISPLAY_NAME_SQL = "COALESCE(NULLIF(u.nickname, ''), NULLIF(u.deleted_username, ''), u.username)";
+
 async function createRegulationAnnotation({ articleId, userId, content }) {
     const aid = normalizeRegulationId(articleId);
     const uid = normalizeRegulationId(userId);
@@ -24,7 +28,7 @@ async function listRegulationAnnotations({ articleId }) {
     const aid = normalizeRegulationId(articleId);
     if (!aid) return [];
     return await query(`
-        SELECT a.*, u.name as user_name, u.email as user_email
+        SELECT a.*, ${USER_DISPLAY_NAME_SQL} AS user_name, NULL AS user_email
         FROM regulation_article_annotations a
         LEFT JOIN users u ON a.user_id = u.id
         WHERE a.article_id = ?
@@ -80,7 +84,7 @@ async function listRegulationAccessLogs({ documentId = null, userId = null, limi
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
     const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
     const rows = await query(`
-        SELECT l.*, u.name as user_name, d.title as document_title
+        SELECT l.*, ${USER_DISPLAY_NAME_SQL} AS user_name, d.title as document_title
         FROM regulation_access_logs l
         LEFT JOIN users u ON l.user_id = u.id
         LEFT JOIN regulation_documents d ON l.document_id = d.id

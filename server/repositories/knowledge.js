@@ -144,7 +144,6 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
         WHERE c.embedding IS NOT NULL
-          AND c.embedding != ''
           ${ownerFilter}
           AND d.status = 'ready'
           AND d.deleted_at IS NULL

@@ -73,6 +73,14 @@ test('dynamic PostgreSQL schema generator produces complete 79-table DDL matchin
     assert.strictEqual(regDocDdl.includes('effective_date_normalized'), false);
     assert.strictEqual(regDocDdl.includes('expire_date'), false);
 
+    // 已迁移的生产表使用 pgvector；测试库的 DDL 也必须保持同一物理类型。
+    for (const tableName of ['knowledge_chunks', 'memories', 'regulation_articles']) {
+        const ddl = plan.tables.find(t => t.includes(`CREATE TABLE IF NOT EXISTS ${tableName}`));
+        assert.ok(ddl, `${tableName} table DDL must exist`);
+        assert.match(ddl, /embedding\s+vector/i, `${tableName}.embedding must use pgvector`);
+        assert.doesNotMatch(ddl, /embedding\s+TEXT/i, `${tableName}.embedding must not fall back to TEXT`);
+    }
+
     // Check table and column comments
     assert.ok(Array.isArray(plan.comments), 'comments must be an array');
     assert.ok(plan.comments.length >= 79, 'Must generate comments for all 79 tables');

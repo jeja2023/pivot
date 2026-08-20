@@ -1,3 +1,15 @@
+## [v0.1.7] - 2026-08-20
+
+### PostgreSQL 向量类型、法规协作与异步触发器兼容性修复
+
+- **pgvector Schema 与运行时查询对齐 (pgvector Schema & Runtime Alignment)**：
+  - PostgreSQL Schema 生成器将 `knowledge_chunks`、`memories` 与 `regulation_articles` 的 `embedding` 列明确生成为 `vector`，与已迁移生产库的物理列类型一致；SQLite 权威 DDL 仍保持 TEXT 序列化语义。
+  - 知识库候选召回和法规相似条文查询移除 SQLite 专属的 `embedding != ''` 判断，统一以 `embedding IS NOT NULL` 识别有效向量，避免 PostgreSQL 将空字符串转换为 vector 时抛出 `22P02`。
+  - `pgvector` 现在被视为 Schema 初始化的必需扩展：扩展不可用时启动会返回明确错误；`pg_trgm` 仍允许降级为顺序扫描。
+- **法规协作用户字段兼容 (Regulation Collaboration User Fields)**：法规批注与查阅日志查询不再读取已不存在的 `users.name` / `users.email`，显示名按 `nickname`、`deleted_username`、`username` 回退；保留 `user_email: null` 以兼容已有接口响应结构。
+- **异步数据库触发器参数推断修复 (Async Database Trigger Parameter Typing)**：数据变更触发器推进水位线时改为通过 `claim_token = ?` 校验租约所有权，移除 PostgreSQL 无法推断参数类型的 `? IS NULL` 条件，避免轮询任务在已创建运行后因 `42P18` 失败。
+- **回归验证与发布说明**：新增 pgvector DDL、法规向量/协作查询和数据库触发器持锁水位线回归测试；`npm run check`、`npm run lint` 与隔离 PostgreSQL 全量测试 `480/480` 均通过。本版本不要求对已完成迁移且向量列已为 `vector` 的生产库执行额外数据迁移。
+
 ## [v0.1.6] - 2026-08-20
 
 ### 工作流计划执行审计日志补齐、立即运行弹窗层级穿透与任务列表过滤状态残留修复

@@ -166,7 +166,7 @@ async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
                d.title AS document_title, d.category, d.issuing_body
         FROM regulation_articles a
         JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
-        WHERE a.id != ? AND a.embedding != '' AND d.deleted_at IS NULL
+        WHERE a.id != ? AND a.embedding IS NOT NULL AND d.deleted_at IS NULL
         LIMIT 1000
     `, [aid]);
     const withScore = candidates.map(c => {

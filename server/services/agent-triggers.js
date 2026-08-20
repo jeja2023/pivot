@@ -508,8 +508,8 @@ async function pollDatabaseTrigger(trigger, executeTool) {
         await execute(`
             UPDATE agent_workflow_triggers
             SET watermark = ?, updated_at = ?
-            WHERE id = ? AND (? IS NULL OR claim_token = ?)
-        `, [nextWatermark, getBeijingTimestamp(), trigger.id, trigger.claim_token || null, trigger.claim_token || null]);
+            WHERE id = ? AND claim_token = ?
+        `, [nextWatermark, getBeijingTimestamp(), trigger.id, trigger.claim_token || null]);
         return [run];
     } catch (err) {
         await recordTriggerError(trigger.id, err.message);

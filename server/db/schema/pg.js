@@ -16,8 +16,8 @@
  *                                       （规避 SQLite 允许、PG 不允许的前向引用）
  *   FTS5 虚拟表 + 触发器              → 不建，改用 pg_trgm GIN 索引
  *
- * 向量列（embedding）本轮仍保持 TEXT：应用层现有 `embedding != ''` 判断与
- * JS 端余弦计算依赖字符串语义。原生 vector 化属 RAG 专项，另行推进。
+ * 向量列（embedding）转换为 pgvector 的 vector 类型。应用层仍在 JS 端计算
+ * 余弦相似度，但 pg 驱动会将 vector 读取为 `[1,2,...]` 文本，可继续 JSON 解析。
  */
 const { getPgPool } = require('../pg-connection');
 const { baseTablesSql, baseIndexesSql } = require('./base');
@@ -25,6 +25,14 @@ const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
+
+// SQLite 将向量序列化为 TEXT；迁移后的 PostgreSQL 物理表使用 pgvector。
+// 保持显式白名单，避免把其他业务 TEXT 列误转换为 vector。
+const PG_VECTOR_COLUMNS = {
+    knowledge_chunks: ['embedding'],
+    memories: ['embedding'],
+    regulation_articles: ['embedding'],
+};
 
 /**
  * 生产 SQLite 库中物理存在、但当前代码已不再引用的历史遗留列。
@@ -54,6 +62,20 @@ function convertColumnTypes(text) {
         .replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
         .replace(/\bINTEGER\b/gi, 'BIGINT')
         .replace(/\bREAL\b/gi, 'DOUBLE PRECISION');
+}
+
+/**
+ * 对已迁移为 pgvector 的表覆写 SQLite 源 DDL 中的向量列类型。
+ */
+function convertVectorColumnTypes(text) {
+    const tableMatch = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(text);
+    const columns = PG_VECTOR_COLUMNS[tableMatch?.[1]];
+    if (!columns) return text;
+
+    return columns.reduce((ddl, column) => ddl.replace(
+        new RegExp(`^(\\s*${column}\\s+)TEXT(?:\\s+DEFAULT\\s+'')?`, 'gim'),
+        '$1vector'
+    ), text);
 }
 
 /**
@@ -202,7 +224,7 @@ function buildPgSchemaStatements() {
 
     for (const statement of tableStatements) {
         const { ddl, foreignKeys: fks } = stripForeignKeys(statement);
-        tables.push(convertColumnTypes(ddl));
+        tables.push(convertVectorColumnTypes(convertColumnTypes(ddl)));
         foreignKeys.push(...fks);
     }
 
@@ -253,11 +275,14 @@ async function initSchemaPg() {
     const client = await getPgPool().connect();
 
     try {
-        // 扩展安装可能因权限不足失败，单独处理且不阻断建表
+        // pgvector 是 embedding 列的必需类型；pg_trgm 则允许降级为顺序扫描。
         for (const sql of plan.extensions) {
             try {
                 await client.query(sql);
             } catch (err) {
+                if (sql.includes('CREATE EXTENSION IF NOT EXISTS vector')) {
+                    throw new Error(`[PG Schema] pgvector 扩展安装失败，无法创建 embedding 列: ${err.message}`);
+                }
                 logger.warn({ sql, err: err.message }, '[PG] 扩展安装失败，相关能力将不可用');
             }
         }
@@ -356,6 +381,7 @@ module.exports = {
     initSchemaPg,
     buildPgSchemaStatements,
     convertColumnTypes,
+    convertVectorColumnTypes,
     stripForeignKeys,
     PG_NOW,
 };
