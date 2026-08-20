@@ -266,7 +266,7 @@ function createAttachmentsRouter({
             where += ' AND a.deleted_at IS NULL';
         }
         if (keyword) {
-            where += ' AND a.file_name LIKE ?';
+            where += ' AND a.file_name ILIKE ?';
             params.push(`%${keyword}%`);
         }
         const rows = await query(`

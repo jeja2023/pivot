@@ -134,7 +134,7 @@ function createSessionsRouter({
         let params = [req.user.id, archived];
 
         if (keyword) {
-            queryStr += ` AND s.title LIKE ? `;
+            queryStr += ` AND s.title ILIKE ? `;
             params.push(`%${keyword}%`);
         }
         if (tagList.length > 0) {
@@ -179,7 +179,7 @@ function createSessionsRouter({
             let countQuery = `SELECT COUNT(*) as count FROM sessions s WHERE s.user_id = ? AND ${SESSION_ARCHIVED_EXPR} = ? AND s.deleted_at IS NULL`;
             const countParams = [req.user.id, archived];
             if (keyword) {
-                countQuery += ` AND s.title LIKE ?`;
+                countQuery += ` AND s.title ILIKE ?`;
                 countParams.push(`%${keyword}%`);
             }
             if (tagList.length > 0) {

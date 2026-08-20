@@ -226,6 +226,28 @@ function buildPgSchemaStatements() {
     };
 }
 
+async function syncIdentitySequences(client) {
+    try {
+        const seqs = await client.query(`
+            SELECT table_name, column_name, pg_get_serial_sequence('"' || table_name || '"', column_name) AS seq_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND column_name = 'id'
+              AND pg_get_serial_sequence('"' || table_name || '"', column_name) IS NOT NULL
+        `);
+        for (const row of seqs.rows) {
+            if (!row.seq_name) continue;
+            try {
+                await client.query(`
+                    SELECT setval($1, COALESCE((SELECT MAX("id") FROM "${row.table_name}"), 1), true)
+                `, [row.seq_name]);
+            } catch (_) {}
+        }
+    } catch (err) {
+        logger.warn({ err: err.message }, '[PG] 自增序列自愈校准跳过');
+    }
+}
+
 async function initSchemaPg() {
     const plan = buildPgSchemaStatements();
     const client = await getPgPool().connect();
@@ -316,6 +338,9 @@ async function initSchemaPg() {
                 logger.warn({ err: err.message }, '[PG] pg_trgm 全文索引创建失败，全文检索将退化为顺序扫描');
             }
         }
+
+        // 自动自愈校准全量主键自增序列，彻底杜绝数据迁移或备份还原后主键冲突
+        await syncIdentitySequences(client);
     } finally {
         client.release();
     }

@@ -574,7 +574,7 @@ function createAdminStatsRouter({
             outerParams.push(unit);
         }
         if (username) {
-            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
+            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ?");
             outerParams.push(`%${username}%`);
         }
 
@@ -642,7 +642,7 @@ function createAdminStatsRouter({
             outerParams.push(unit);
         }
         if (username) {
-            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
+            outerConditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ?");
             outerParams.push(`%${username}%`);
         }
 
@@ -983,7 +983,7 @@ function createAdminStatsRouter({
         const params = [];
 
         if (keyword) {
-            conditions.push("(COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ? OR u.nickname LIKE ? OR l.model_name LIKE ? OR l.request_messages LIKE ? OR l.response_text LIKE ?)");
+            conditions.push("(COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ? OR u.nickname ILIKE ? OR l.model_name ILIKE ? OR l.request_messages ILIKE ? OR l.response_text ILIKE ?)");
             const like = `%${keyword}%`;
             params.push(like, like, like, like, like);
         }

@@ -251,7 +251,7 @@ function createAnnouncementsRouter({
             params.push(status);
         }
         if (search) {
-            conditions.push('(a.title LIKE ? OR a.content LIKE ?)');
+            conditions.push('(a.title ILIKE ? OR a.content ILIKE ?)');
             params.push(`%${search}%`, `%${search}%`);
         }
         const where = `WHERE ${conditions.join(' AND ')}`;

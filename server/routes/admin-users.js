@@ -164,14 +164,14 @@ function createAdminUsersRouter({
         const { username, action, details, ip, start, end } = req.query;
         let conditions = [];
         let params = [];
-        if (username) { conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?"); params.push(`%${username}%`); }
+        if (username) { conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ?"); params.push(`%${username}%`); }
         if (action) {
             const actionValues = getAuditActionFilterValues(action);
             conditions.push(`al.action IN (${actionValues.map(() => '?').join(', ')})`);
             params.push(...actionValues);
         }
-        if (details) { conditions.push("al.details LIKE ?"); params.push(`%${details}%`); }
-        if (ip) { conditions.push("al.ip_address LIKE ?"); params.push(`%${ip}%`); }
+        if (details) { conditions.push("al.details ILIKE ?"); params.push(`%${details}%`); }
+        if (ip) { conditions.push("al.ip_address ILIKE ?"); params.push(`%${ip}%`); }
         if (start) { conditions.push("al.timestamp >= ?"); params.push(start + ' 00:00:00'); }
         if (end) { conditions.push("al.timestamp <= ?"); params.push(end + ' 23:59:59'); }
 
@@ -408,7 +408,7 @@ function createAdminUsersRouter({
         let params = [];
 
         if (username) {
-            conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) LIKE ?");
+            conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ?");
             params.push(`%${username}%`);
         }
         if (action) {
@@ -417,11 +417,11 @@ function createAdminUsersRouter({
             params.push(...actionValues);
         }
         if (details) {
-            conditions.push("l.details LIKE ?");
+            conditions.push("l.details ILIKE ?");
             params.push(`%${details}%`);
         }
         if (ip) {
-            conditions.push("l.ip_address LIKE ?");
+            conditions.push("l.ip_address ILIKE ?");
             params.push(`%${ip}%`);
         }
         if (start) {
