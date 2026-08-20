@@ -102,7 +102,7 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
             },
             timeout: 60000
         });
-        newTitle = sanitizeGeneratedTitle(response.data.choices[0]?.message?.content, fallbackTitle);
+        newTitle = sanitizeGeneratedTitle(response?.data?.choices?.[0]?.message?.content, fallbackTitle);
     } catch (e) {
         logger.warn({ sessionId, err: e.message, fallbackTitle }, '会话标题生成失败，已使用本地兜底标题');
     }
