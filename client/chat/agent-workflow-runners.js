@@ -138,11 +138,20 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
         const preflight = await preflightAgentPayload(payload);
         if (preflight.status === 'blocked') {
             setAgentWorkflowRunConsoleStatus('预检未通过，请先处理阻断项。', 'error');
-            if (payload.workflowId && preflight.dependencies?.binding?.status === 'blocked') {
+            const isSharedRecipientWorkflow = Boolean(
+                payload.workflowId &&
+                preflight.dependencies?.binding?.required &&
+                preflight.dependencies?.binding?.can_configure &&
+                preflight.dependencies?.binding?.status === 'blocked'
+            );
+            if (isSharedRecipientWorkflow) {
                 await window.Pivot.moduleApi('agent.automation').openWorkflowDependencies?.(payload.workflowId);
                 return null;
             }
-            showToast('工作流预检未通过，请先处理阻断项', 'error');
+            const blockerMessage = preflight.blockers?.length
+                ? `工作流预检未通过：${preflight.blockers[0]}`
+                : '工作流预检未通过，请先处理阻断项';
+            showToast(blockerMessage, 'error');
             return null;
         }
         setAgentWorkflowRunConsoleStatus(`正在创建任务：${agentWorkflowRunSourceLabel(sourceMode)}...`, 'running');
