@@ -9,6 +9,9 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+      PG_TIMEZONE: Asia/Shanghai
 
     services:
       postgres:
