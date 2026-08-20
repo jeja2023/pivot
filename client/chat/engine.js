@@ -147,11 +147,16 @@ async function syncChatLocalMcpBridgeBeforeSend() {
 function startChatLocalMcpBridgeHeartbeat() {
     if (chatLocalMcpHeartbeatStarted) return;
     chatLocalMcpHeartbeatStarted = true;
-    const tick = () => registerChatLocalMcpBridgeDirectly().catch(error => {
-        console.debug?.('[pivot] 聊天页本机执行器心跳等待中', error?.message || error);
-    });
+    const bridgeState = inspectChatLocalMcpDesktopBridge();
+    if (!bridgeState.ready) return;
+    const tick = () => {
+        if (!inspectChatLocalMcpDesktopBridge().ready) return;
+        return registerChatLocalMcpBridgeDirectly().catch(error => {
+            console.debug?.('[pivot] 聊天页本机执行器心跳等待中', error?.message || error);
+        });
+    };
     setTimeout(tick, 2000);
-    setInterval(tick, 15000);
+    setInterval(tick, 60000);
 }
 
 if (document.readyState === 'loading') {

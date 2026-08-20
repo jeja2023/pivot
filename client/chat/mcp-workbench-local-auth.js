@@ -20,7 +20,7 @@ const MCP_LOCAL_AUTH_TYPES = [
 
 let mcpLocalAuthorizationStatusCache = null;
 let mcpLocalAuthorizationActiveType = 'local_database';
-const MCP_LOCAL_EXECUTION_HEARTBEAT_MS = 15000;
+const MCP_LOCAL_EXECUTION_HEARTBEAT_MS = 60000;
 const MCP_LOCAL_EXECUTION_RETRY_MS = 5000;
 let mcpLocalExecutionLoopStarted = false;
 let mcpLocalExecutionLoopRunning = false;

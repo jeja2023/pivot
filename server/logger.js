@@ -109,6 +109,8 @@ const httpLogger = pinoHttp({
             const url = (req.url || '').split(/[?#]/)[0];
             return /\.(css|js|png|jpg|jpeg|gif|ico|svg|woff2?|map)$/i.test(url) || 
                    url === '/api/health' || 
+                   url === '/api/mcp/local-device/heartbeat' || 
+                   url === '/api/mcp/local-device/tasks/next' || 
                    url === '/favicon.ico' ||
                    url === '/favicon.png' ||
                    url === '/common/logo.png' ||
@@ -119,9 +121,9 @@ const httpLogger = pinoHttp({
     customLogLevel: (req, res, err) => {
         if (err || res.statusCode >= 500) return 'error';
         if (res.statusCode >= 400) return 'warn';
-        // 屏蔽已手动记录详细信息的接口，避免重复
+        // 屏蔽已手动记录详细信息的接口与高频心跳，避免刷屏
         const url = (req.url || '').split(/[?#]/)[0];
-        if (url === '/api/models/test' && res.statusCode === 200) return 'trace';
+        if ((url === '/api/models/test' || url === '/api/mcp/local-device/heartbeat') && res.statusCode === 200) return 'trace';
         // 成功的 GET/OPTIONS 请求通常不需要持续关注
         if (req.method === 'GET' || req.method === 'OPTIONS') return 'trace';
         return 'info';
