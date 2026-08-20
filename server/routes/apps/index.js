@@ -21,6 +21,7 @@ const {
 } = require('../../services/model-runtime');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
+const { callModelTextWithBudget } = require('../../services/model-text-call');
 const {
     buildChatCompletionsUrl,
     buildModelHeaders
@@ -54,7 +55,12 @@ const {
     runPivot,
     runSummary,
     runUserQuery,
-    softDeleteDataset
+    softDeleteDataset,
+    createSemanticAnalysisJob,
+    getSemanticJobDetail,
+    listSemanticAnalysisJobs,
+    retrySemanticAnalysisJob,
+    cancelSemanticAnalysisJob
 } = require('../../services/data-analysis');
 
 // 剥离推理型模型可能内联在正文里的思考块（<think>…</think>）。
@@ -227,49 +233,6 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
 
 // 单次非流式模型调用，返回正文文本（供 AI 工具调用循环多轮使用）。
 // 自带配额/上下文预算/并发与用量统计，调用方负责循环与工具执行。
-async function callAppsModelText({ modelCfg, user, messages, source, maxTokens = 900, temperature = 0.2, maxOutputTokensCap = 0, signal = null, timeout = undefined }) {
-    const requestedOutputTokens = Math.max(maxTokens, Number(modelCfg.max_tokens) || 0);
-    const outputTokens = maxOutputTokensCap > 0
-        ? Math.min(requestedOutputTokens, maxOutputTokensCap)
-        : requestedOutputTokens;
-    let upstreamMessages = messages;
-    const budgetResult = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: outputTokens });
-    upstreamMessages = budgetResult.messages;
-    const payloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
-
-    await aiSemaphore.acquire();
-    let endpointRelease = null;
-    const startedAt = Date.now();
-    try {
-        endpointRelease = await acquireModelSlot(modelCfg);
-        const response = await forwardChatCompletion({
-            modelCfg,
-            user,
-            url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true }),
-            data: { model: modelCfg.model_name, messages: payloadMessages, stream: false, temperature, max_tokens: outputTokens },
-            headers: buildModelHeaders(modelCfg),
-            stream: false,
-            signal,
-            ...(timeout ? { timeout } : {})
-        });
-        const content = extractCompletionContent(response.data);
-        const usage = normalizeTokenUsage({
-            inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
-            outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
-            totalTokens: response.data?.usage?.total_tokens
-        });
-        recordModelTokenUsage(user.id, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
-        recordModelSuccess(modelCfg, Date.now() - startedAt);
-        return content;
-    } catch (e) {
-        recordModelFailure(modelCfg, e);
-        throw e;
-    } finally {
-        if (endpointRelease) endpointRelease();
-        aiSemaphore.release();
-    }
-}
-
 const ANALYSIS_AGENT_MAX_STEPS = Math.max(1, Math.min(5, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_MAX_STEPS || '3', 10) || 3));
 const ANALYSIS_AGENT_MAX_CALLS = Math.max(ANALYSIS_AGENT_MAX_STEPS, Math.min(6, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_MAX_CALLS || String(ANALYSIS_AGENT_MAX_STEPS + 1), 10) || ANALYSIS_AGENT_MAX_STEPS + 1));
 const ANALYSIS_AGENT_MAX_OUTPUT_TOKENS = Math.max(256, Math.min(2400, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_MAX_OUTPUT_TOKENS || '1200', 10) || 1200));
@@ -381,7 +344,7 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
         const releaseQuota = await reserveAnalysisQuota(userId, modelCfg, estimatedTokens);
         quotaReleases.push(releaseQuota);
         modelCallCount += 1;
-        return callAppsModelText({
+        const result = await callModelTextWithBudget({
             modelCfg,
             user: req.user,
             messages: currentMessages,
@@ -392,6 +355,7 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
             signal: abortController.signal,
             timeout: ANALYSIS_AGENT_CALL_TIMEOUT_MS
         });
+        return result.content;
     };
 
     logAction(req, '数据分析 AI 深度分析', `数据集: ${datasetId}，模型: ${modelCfg.name}`);
@@ -601,6 +565,46 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
         const limit = Number.parseInt(req.query.limit, 10) || 30;
         res.json({ artifacts: await listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
+    }));
+
+    router.post('/apps/data-analysis/datasets/:id/semantic-analysis', authMiddleware, asyncHandler(async (req, res) => {
+        const body = req.body || {};
+        const job = await createSemanticAnalysisJob({
+            user: req.user,
+            datasetId: req.params.id,
+            textField: body.textField || body.contentField,
+            idField: body.idField || '',
+            instruction: body.instruction || body.prompt,
+            modelId: body.model || body.modelId || null,
+            batchTokens: body.batchTokens,
+            maxOutputTokens: body.maxOutputTokens
+        });
+        logAction(req, '数据分析-创建全量语义分析任务', `数据集: ${req.params.id}，任务: ${job.id}`);
+        res.status(202).json({ success: true, job });
+    }));
+
+    router.get('/apps/data-analysis/datasets/:id/semantic-analysis/jobs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ jobs: await listSemanticAnalysisJobs(req.user.id, req.params.id, { limit: req.query.limit }) });
+    }));
+
+    router.get('/apps/data-analysis/semantic-analysis/jobs/:jobId', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ job: await getSemanticJobDetail(req.user.id, req.params.jobId, { includeBatches: req.query.includeBatches === 'true' }) });
+    }));
+
+    router.get('/apps/data-analysis/semantic-analysis/jobs/:jobId/results', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ job: await getSemanticJobDetail(req.user.id, req.params.jobId, { includeBatches: true }) });
+    }));
+
+    router.post('/apps/data-analysis/semantic-analysis/jobs/:jobId/retry', authMiddleware, asyncHandler(async (req, res) => {
+        const job = await retrySemanticAnalysisJob(req.user.id, req.params.jobId);
+        logAction(req, '数据分析-重试全量语义分析任务', `任务: ${req.params.jobId}`);
+        res.status(202).json({ success: true, job });
+    }));
+
+    router.post('/apps/data-analysis/semantic-analysis/jobs/:jobId/cancel', authMiddleware, asyncHandler(async (req, res) => {
+        const job = await cancelSemanticAnalysisJob(req.user.id, req.params.jobId);
+        logAction(req, '数据分析-取消全量语义分析任务', `任务: ${req.params.jobId}`);
+        res.json({ success: true, job });
     }));
 
     router.get('/apps/data-analysis/datasets/:id/export.csv', authMiddleware, asyncHandler(async (req, res) => {

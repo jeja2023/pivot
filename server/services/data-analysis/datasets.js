@@ -459,6 +459,18 @@ async function purgeDatasetArtifacts(userId, datasetId) {
 
 async function softDeleteDataset(userId, datasetId) {
     const row = await getDatasetForUser(userId, datasetId);
+    // 数据文件即将被移除，主动取消仍在运行的全量语义任务，避免 worker 对失效 Parquet 重试。
+    await execute(`
+        UPDATE analysis_semantic_jobs
+        SET status = 'cancelled', locked_at = NULL, completed_at = ?, updated_at = ?
+        WHERE user_id = ? AND dataset_id = ? AND status IN ('queued', 'running')
+    `, [getBeijingTimestamp(), getBeijingTimestamp(), userId, datasetId]);
+    await execute(`
+        UPDATE analysis_semantic_batches
+        SET status = 'cancelled', locked_at = NULL, updated_at = ?
+        WHERE job_id IN (SELECT id FROM analysis_semantic_jobs WHERE user_id = ? AND dataset_id = ?)
+          AND status IN ('queued', 'running')
+    `, [getBeijingTimestamp(), userId, datasetId]);
     await execute(`
         UPDATE analysis_datasets
         SET deleted_at = ?, status = 'deleted', updated_at = ?
@@ -533,6 +545,7 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
         };
         if (row.type === 'chart') item.chart = jsonParse(row.content, null);
         if (row.type === 'ai_analysis') item.analysis = jsonParse(row.content, null);
+        if (row.type === 'ai_full_text_analysis') item.semantic = jsonParse(row.content, null);
         return item;
     });
 }

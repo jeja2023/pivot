@@ -228,3 +228,41 @@
             <div id="mcp-local-auth-body" class="mcp-local-auth-body"></div>
         </div>
     </div>
+
+    <!-- 工具单步测试调试面板 -->
+    <div id="mcp-tool-test-modal" class="modal-overlay hidden" style="z-index: 1920;">
+        <div class="modal mcp-tool-test-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-tool-test-title">
+            <div class="mcp-edit-header">
+                <div>
+                    <h3 id="mcp-tool-test-title">工具单步测试</h3>
+                    <p id="mcp-tool-test-subtitle">填入测试入参直接运行工具并查看输出结果</p>
+                </div>
+                <button id="mcp-tool-test-close-btn" class="btn-secondary workspace-modal-close" type="button">关闭</button>
+            </div>
+            <div class="mcp-tool-test-body">
+                <input type="hidden" id="mcp-tool-test-name">
+                <div class="mcp-tool-test-section">
+                    <div class="mcp-tool-test-head">
+                        <label for="mcp-tool-test-input"><strong>测试入参 (JSON)</strong></label>
+                        <div class="mcp-tool-test-actions">
+                            <button id="mcp-tool-test-fill-sample-btn" class="btn-secondary" type="button">填入测试样例</button>
+                            <button id="mcp-tool-test-format-btn" class="btn-secondary" type="button">格式化 JSON</button>
+                        </div>
+                    </div>
+                    <textarea id="mcp-tool-test-input" class="form-input mcp-code-editor" rows="6" placeholder='{\n  "param": "value"\n}'></textarea>
+                    <div id="mcp-tool-test-schema-hint" class="mcp-tool-test-schema-hint"></div>
+                </div>
+                <div class="mcp-tool-test-section">
+                    <div class="mcp-tool-test-head">
+                        <strong>执行结果</strong>
+                        <span id="mcp-tool-test-status" class="mcp-tool-test-status"></span>
+                    </div>
+                    <pre id="mcp-tool-test-result" class="mcp-tool-test-result-box">点击下方“运行测试”查看工具返回结果...</pre>
+                </div>
+            </div>
+            <div class="mcp-tool-test-footer">
+                <button id="mcp-tool-test-cancel-btn" class="btn-secondary" type="button">取消</button>
+                <button id="mcp-tool-test-run-btn" class="btn-primary" type="button">运行测试</button>
+            </div>
+        </div>
+    </div>

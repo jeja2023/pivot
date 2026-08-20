@@ -2,10 +2,168 @@
 (function () {
     const app = window.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
-    const { API, state, html, esc, activeDataset } = app;
+    const { API, state, html, esc, fmtNumber, activeDataset } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
     const guardButton = (...args) => app.guardButton(...args);
     const toast = (...args) => app.toast(...args);
+    const setSelectOptions = (...args) => app.setSelectOptions(...args);
+    const buildOptions = (...args) => app.buildOptions(...args);
+
+    const semanticStatusLabels = {
+        queued: '排队中',
+        running: '分析中',
+        succeeded: '已完成',
+        failed: '失败',
+        cancelled: '已取消'
+    };
+
+    function clearSemanticPoll() {
+        if (state.semanticPollTimer) {
+            clearInterval(state.semanticPollTimer);
+            state.semanticPollTimer = null;
+        }
+    }
+
+    function renderSemanticControls() {
+        const dataset = activeDataset();
+        const columns = dataset?.columns || [];
+        if (!document.getElementById('data-analysis-semantic-field')) return;
+        const profile = Array.isArray(dataset?.profile) ? dataset.profile : [];
+        const textColumns = columns.filter(column => profile.find(item => item.key === column.key && item.type === 'text'));
+        const textOptions = buildOptions(textColumns.length ? textColumns : columns, { includeEmpty: true, emptyLabel: '请选择文本字段' });
+        setSelectOptions('data-analysis-semantic-field', textOptions, document.getElementById('data-analysis-semantic-field')?.value || textColumns[0]?.key || columns[0]?.key || '');
+        setSelectOptions('data-analysis-semantic-id-field', buildOptions(columns, { includeEmpty: true, emptyLabel: '按行号标识' }));
+
+        const job = state.semanticJob;
+        const status = document.getElementById('data-analysis-semantic-status');
+        const progress = document.getElementById('data-analysis-semantic-progress');
+        const report = document.getElementById('data-analysis-semantic-report');
+        const run = document.getElementById('data-analysis-semantic-run');
+        const cancel = document.getElementById('data-analysis-semantic-cancel');
+        const retry = document.getElementById('data-analysis-semantic-retry');
+        if (!job) {
+            if (status) status.textContent = '未创建任务';
+            if (progress) PivotSafeHtml.setHtml(progress, '');
+            if (report) PivotSafeHtml.setHtml(report, '');
+            cancel?.classList.add('hidden');
+            retry?.classList.add('hidden');
+            if (run) run.disabled = false;
+            return;
+        }
+        if (status) {
+            status.textContent = semanticStatusLabels[job.status] || job.status;
+            status.dataset.status = job.status;
+        }
+        const completed = Number(job.completedBatches || 0);
+        const total = Number(job.totalBatches || 0);
+        const percent = Math.max(0, Math.min(100, Number(job.progress || 0)));
+        if (progress) {
+            PivotSafeHtml.setHtml(progress, `
+                <div class="data-analysis-semantic-progress-meta"><span>${esc(job.status === 'succeeded' ? '全部记录已完成' : `已完成 ${completed}/${total || '?'} 批`)}</span><span>${percent}%</span></div>
+                <div class="data-analysis-semantic-progress-track"><span style="width:${percent}%"></span></div>
+                <div class="data-analysis-semantic-progress-detail">覆盖 ${fmtNumber(job.analyzedRows || job.totalRows)} 行，${fmtNumber(job.totalChars)} 字符${job.lastError ? `；${esc(job.lastError)}` : ''}</div>
+            `);
+        }
+        if (report) {
+            const text = String(job.report || job.result?.report || '');
+            PivotSafeHtml.setHtml(report, text ? `<div class="data-analysis-semantic-report-title">全量汇总报告</div>${renderMarkdown(text)}` : '');
+        }
+        const active = ['queued', 'running'].includes(job.status);
+        run && (run.disabled = active);
+        cancel?.classList.toggle('hidden', !active);
+        retry?.classList.toggle('hidden', job.status !== 'failed' && job.status !== 'cancelled');
+    }
+
+    async function loadSemanticJobs(datasetId = activeDataset()?.id) {
+        clearSemanticPoll();
+        state.semanticJobs = [];
+        state.semanticJob = null;
+        if (!datasetId) {
+            renderSemanticControls();
+            return;
+        }
+        try {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}/semantic-analysis/jobs?limit=20`);
+            state.semanticJobs = Array.isArray(data.jobs) ? data.jobs : [];
+            state.semanticJob = state.semanticJobs[0] || null;
+            renderSemanticControls();
+            if (state.semanticJob && ['queued', 'running'].includes(state.semanticJob.status)) startSemanticPoll(state.semanticJob.id);
+        } catch (e) {
+            console.warn('[data-analysis] 加载全量语义分析任务失败', e);
+            renderSemanticControls();
+        }
+    }
+
+    async function refreshSemanticJob(jobId) {
+        const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(jobId)}`);
+        if (state.semanticJob?.id !== jobId) return;
+        state.semanticJob = data.job || state.semanticJob;
+        const index = state.semanticJobs.findIndex(item => item.id === jobId);
+        if (index >= 0) state.semanticJobs[index] = { ...state.semanticJobs[index], ...state.semanticJob, batches: undefined };
+        renderSemanticControls();
+        if (!['queued', 'running'].includes(state.semanticJob.status)) clearSemanticPoll();
+    }
+
+    function startSemanticPoll(jobId) {
+        clearSemanticPoll();
+        let busy = false;
+        state.semanticPollTimer = setInterval(async () => {
+            if (busy) return;
+            busy = true;
+            try { await refreshSemanticJob(jobId); } catch (e) { console.warn('[data-analysis] 轮询全量语义分析任务失败', e); } finally { busy = false; }
+        }, 2500);
+    }
+
+    async function runSemanticAnalysis() {
+        const dataset = activeDataset();
+        if (!dataset) return toast('请选择分析数据集', 'warning');
+        const textField = document.getElementById('data-analysis-semantic-field')?.value;
+        const instruction = document.getElementById('data-analysis-semantic-instruction')?.value.trim();
+        if (!textField) return toast('请选择文本字段', 'warning');
+        if (!instruction) return toast('请填写全量语义分析要求', 'warning');
+        await guardButton('data-analysis-semantic-run', '创建中…', async () => {
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/semantic-analysis`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    textField,
+                    idField: document.getElementById('data-analysis-semantic-id-field')?.value || '',
+                    instruction,
+                    batchTokens: document.getElementById('data-analysis-semantic-batch-tokens')?.value || 24000,
+                    model: document.getElementById('model-selector')?.value || ''
+                })
+            });
+            state.semanticJob = data.job;
+            state.semanticJobs = [data.job, ...state.semanticJobs.filter(item => item.id !== data.job.id)];
+            renderSemanticControls();
+            startSemanticPoll(data.job.id);
+            toast('全量语义分析任务已启动');
+        });
+    }
+
+    async function cancelSemanticAnalysis() {
+        const job = state.semanticJob;
+        if (!job) return;
+        await guardButton('data-analysis-semantic-cancel', '取消中…', async () => {
+            const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
+            state.semanticJob = data.job;
+            clearSemanticPoll();
+            renderSemanticControls();
+            toast('全量语义分析任务已取消');
+        });
+    }
+
+    async function retrySemanticAnalysis() {
+        const job = state.semanticJob;
+        if (!job) return;
+        await guardButton('data-analysis-semantic-retry', '重试中…', async () => {
+            const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(job.id)}/retry`, { method: 'POST' });
+            state.semanticJob = data.job;
+            renderSemanticControls();
+            startSemanticPoll(job.id);
+            toast('失败批次已重新排队');
+        });
+    }
 
     // 打字机回放：把已完成的文本分块增量渲染，模拟流式逐字输出（仅前端，不改后端）。
     // 帧数固定（约 120 帧），与文本长度无关，保证长短答案的回放时长都可控（约 2 秒）。
@@ -194,6 +352,11 @@
         runAiAgent,
         renderAgentResult,
         replayAgentResult,
-        runAi
+        runAi,
+        renderSemanticControls,
+        loadSemanticJobs,
+        runSemanticAnalysis,
+        cancelSemanticAnalysis,
+        retrySemanticAnalysis
     });
 })();

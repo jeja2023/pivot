@@ -34,6 +34,9 @@
     const applyPivotRecommendations = (...args) => app.applyPivotRecommendations(...args);
     const runAi = (...args) => app.runAi(...args);
     const renderAgentResult = (...args) => app.renderAgentResult(...args);
+    const runSemanticAnalysis = (...args) => app.runSemanticAnalysis(...args);
+    const cancelSemanticAnalysis = (...args) => app.cancelSemanticAnalysis(...args);
+    const retrySemanticAnalysis = (...args) => app.retrySemanticAnalysis(...args);
 
     function activateTab(tab) {
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
@@ -281,6 +284,21 @@
                 } else if (item && item.analysis) {
                     activateTab('ai');
                     renderAgentResult(document.getElementById('data-analysis-ai-result'), item.analysis);
+                } else if (item && item.semantic) {
+                    activateTab('ai');
+                    state.semanticJob = {
+                        id: item.semantic.jobId || '',
+                        status: 'succeeded',
+                        totalRows: item.semantic.coverage?.totalRows || 0,
+                        analyzedRows: item.semantic.coverage?.analyzedRows || 0,
+                        totalChars: item.semantic.coverage?.totalChars || 0,
+                        totalBatches: item.semantic.coverage?.totalBatches || 0,
+                        completedBatches: item.semantic.coverage?.completedBatches || 0,
+                        progress: 100,
+                        report: item.semantic.report || '',
+                        result: item.semantic
+                    };
+                    app.renderSemanticControls?.();
                 }
                 return;
             }
@@ -360,6 +378,18 @@
             }
             if (event.target.closest('#data-analysis-ai-run')) {
                 await runAi();
+                return;
+            }
+            if (event.target.closest('#data-analysis-semantic-run')) {
+                await runSemanticAnalysis();
+                return;
+            }
+            if (event.target.closest('#data-analysis-semantic-cancel')) {
+                await cancelSemanticAnalysis();
+                return;
+            }
+            if (event.target.closest('#data-analysis-semantic-retry')) {
+                await retrySemanticAnalysis();
                 return;
             }
         });

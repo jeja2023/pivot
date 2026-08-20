@@ -466,13 +466,339 @@ window.openMcpToolsModal = async function (serverId) {
                         <span>${mcpEscape(mcpToolRiskLabel(riskLevel))}</span>
                         ${approvalRequired ? '<span>需审批</span>' : ''}
                     </div>
+                    <div class="mcp-tool-actions">
+                        <button class="btn-secondary mcp-tool-test-btn" type="button" data-mcp-test-tool="${mcpEscape(toolFullName)}" data-mcp-tool-title="${mcpEscape(mcpToolTitle(tool))}">单步测试</button>
+                    </div>
                 </div>
             `;
     }).join('')}
         </div>
     ` : '<div class="mcp-empty-panel compact"><strong>暂无可用工具</strong><span>请先刷新该服务，或确认它已启用并完成连接。</span></div>');
+    list.querySelectorAll('[data-mcp-test-tool]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const toolName = btn.dataset.mcpTestTool;
+            const toolTitle = btn.dataset.mcpToolTitle;
+            const toolObj = tools.find(t => (t.fullName || t.name) === toolName);
+            window.openMcpToolTestModal(toolName, toolTitle, toolObj);
+        });
+    });
     modal.classList.remove('hidden');
 };
+
+const MCP_TOOL_SAMPLE_INPUTS = {
+    'viz.build_chart': {
+        chartType: 'bar',
+        title: '销售业绩统计',
+        rows: [
+            { month: '1月', sales: 120 },
+            { month: '2月', sales: 190 },
+            { month: '3月', sales: 300 }
+        ],
+        xField: 'month',
+        yFields: ['sales']
+    },
+    'viz.build_table': {
+        title: '客户清单',
+        rows: [
+            { id: 1, name: '张三', department: '研发部', status: '在职' },
+            { id: 2, name: '李四', department: '市场部', status: '在职' }
+        ]
+    },
+    'data.profile_rows': {
+        rows: [
+            { id: 1, age: 28, city: '北京', score: 95.5 },
+            { id: 2, age: 34, city: '上海', score: 88.0 },
+            { id: 3, age: null, city: '广州', score: 72.5 }
+        ]
+    },
+    'data.filter_rows': {
+        rows: [
+            { name: '任务A', priority: 'high', done: false },
+            { name: '任务B', priority: 'low', done: true },
+            { name: '任务C', priority: 'high', done: true }
+        ],
+        filters: [{ field: 'priority', operator: 'equals', value: 'high' }]
+    },
+    'data.group_summary': {
+        rows: [
+            { category: '电子', price: 2999 },
+            { category: '电子', price: 1499 },
+            { category: '服装', price: 199 }
+        ],
+        groupBy: ['category'],
+        metrics: [{ field: 'price', agg: 'sum' }, { field: 'price', agg: 'count' }]
+    },
+    'doc.chunk_text': {
+        text: '这是第一段新闻内容。\n\n这是第二段新闻内容，包含更多详细信息。\n\n这是第三段总结。',
+        maxChunkChars: 100
+    },
+    'doc.extract_outline': {
+        content: '# 第一章 系统概述\n\n系统由前端与后端组成。\n\n## 1.1 架构设计\n\n采用微内核架构。\n\n# 第二章 部署指南'
+    },
+    'doc.extract_key_values': {
+        text: '姓名：张三\n职位：高级工程师\n入职日期：2024-01-15'
+    },
+    'format.to_markdown_table': {
+        rows: [
+            { 序号: 1, 模块: '认证中心', 状态: '正常' },
+            { 序号: 2, 模块: '模型网关', 状态: '正常' }
+        ]
+    },
+    'format.to_json': {
+        value: 'key1=value1\nkey2=value2',
+        pretty: true
+    },
+    'system.health': {},
+    'system.modelRuntime': {},
+    'models.list': {},
+    'rag.search': {
+        query: '系统部署要求',
+        limit: 3
+    },
+    'db.list_tables': {},
+    'db.count_tables': {},
+    'db.describe_table': {
+        tableName: 'users'
+    },
+    'db.run_readonly_query': {
+        sql: 'SELECT 1 AS test_status, current_timestamp AS test_time;'
+    },
+    'db.group_count': {
+        tableName: 'users',
+        field: 'role'
+    },
+    'reports.list_files': {
+        limit: 5
+    },
+    'im.list_allowed_targets': {},
+    'im.send_markdown': {
+        target: 'test_group',
+        content: '**测试消息**：智枢工具单步测试'
+    }
+};
+
+function generateDefaultSampleInput(schema) {
+    const props = schema?.properties || {};
+    const sample = {};
+    Object.entries(props).forEach(([key, spec]) => {
+        if (spec.default !== undefined) {
+            sample[key] = spec.default;
+        } else if (spec.type === 'string') {
+            sample[key] = spec.enum ? spec.enum[0] : 'test';
+        } else if (spec.type === 'number' || spec.type === 'integer') {
+            sample[key] = spec.minimum !== undefined ? spec.minimum : 1;
+        } else if (spec.type === 'boolean') {
+            sample[key] = true;
+        } else if (spec.type === 'array') {
+            sample[key] = [];
+        } else if (spec.type === 'object') {
+            sample[key] = {};
+        }
+    });
+    return sample;
+}
+
+function fillMcpToolSampleInput(toolFullName, schema) {
+    const inputEl = document.getElementById('mcp-tool-test-input');
+    if (!inputEl) return;
+    const shortName = String(toolFullName || '').replace(/^mcp\.\d+\./, '');
+    let sample = MCP_TOOL_SAMPLE_INPUTS[shortName] || MCP_TOOL_SAMPLE_INPUTS[toolFullName];
+    if (!sample) {
+        let parsedSchema = schema;
+        if (!parsedSchema) {
+            const raw = document.getElementById('mcp-tool-test-name')?.dataset?.toolSchema;
+            try { parsedSchema = JSON.parse(raw); } catch (_) {}
+        }
+        sample = generateDefaultSampleInput(parsedSchema);
+    }
+    inputEl.value = JSON.stringify(sample, null, 2);
+}
+
+function openMcpToolTestModal(toolFullName, toolTitle, toolObj) {
+    bindMcpToolTestModalControls();
+    const modal = document.getElementById('mcp-tool-test-modal');
+    if (!modal) return;
+    const titleEl = document.getElementById('mcp-tool-test-title');
+    const subtitleEl = document.getElementById('mcp-tool-test-subtitle');
+    const nameEl = document.getElementById('mcp-tool-test-name');
+    const statusEl = document.getElementById('mcp-tool-test-status');
+    const resultEl = document.getElementById('mcp-tool-test-result');
+    const schemaHintEl = document.getElementById('mcp-tool-test-schema-hint');
+
+    if (titleEl) titleEl.textContent = `工具单步测试 · ${toolTitle || toolFullName}`;
+    if (subtitleEl) subtitleEl.textContent = `工具标识：${toolFullName}`;
+    if (nameEl) {
+        nameEl.value = toolFullName;
+        nameEl.dataset.toolSchema = JSON.stringify(toolObj?.input_schema || toolObj?.inputSchema || {});
+    }
+    if (statusEl) {
+        statusEl.className = 'mcp-tool-test-status';
+        statusEl.textContent = '';
+    }
+    if (resultEl) resultEl.textContent = '点击下方“运行测试”查看工具返回结果...';
+
+    const schema = toolObj?.input_schema || toolObj?.inputSchema || {};
+    const req = Array.isArray(schema.required) ? schema.required : [];
+    const props = schema.properties || {};
+    const propNames = Object.keys(props);
+    if (schemaHintEl) {
+        schemaHintEl.textContent = propNames.length
+            ? `入参字段：${propNames.map(k => `${k}${req.includes(k) ? ' (必填)' : ''}`).join('、')}`
+            : '当前工具不需要额外必填参数。';
+    }
+
+    fillMcpToolSampleInput(toolFullName, schema);
+    modal.classList.remove('hidden');
+}
+
+async function runMcpToolTest() {
+    const nameEl = document.getElementById('mcp-tool-test-name');
+    const inputEl = document.getElementById('mcp-tool-test-input');
+    const statusEl = document.getElementById('mcp-tool-test-status');
+    const resultEl = document.getElementById('mcp-tool-test-result');
+    const runBtn = document.getElementById('mcp-tool-test-run-btn');
+    const toolName = nameEl?.value?.trim();
+    if (!toolName) return showToast('未指定待测工具名称', 'error');
+
+    let inputPayload = {};
+    const rawInput = inputEl?.value?.trim();
+    if (rawInput) {
+        try {
+            inputPayload = JSON.parse(rawInput);
+        } catch (e) {
+            if (statusEl) {
+                statusEl.className = 'mcp-tool-test-status error';
+                statusEl.textContent = 'JSON 格式错误';
+            }
+            if (resultEl) resultEl.textContent = `参数 JSON 解析失败：${e.message}`;
+            return showToast('测试入参不是合法的 JSON 格式', 'error');
+        }
+    }
+
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.textContent = '执行中...';
+    }
+    if (statusEl) {
+        statusEl.className = 'mcp-tool-test-status';
+        statusEl.textContent = '正在调用工具...';
+    }
+    if (resultEl) resultEl.textContent = '请求发送中，请稍候...';
+
+    const startTime = Date.now();
+    try {
+        const res = await apiFetch(`${API_BASE}/mcp/tools/call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: toolName, input: inputPayload })
+        });
+        const duration = Date.now() - startTime;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+            const errMsg = data.error || '工具调用返回错误';
+            if (statusEl) {
+                statusEl.className = 'mcp-tool-test-status error';
+                statusEl.textContent = `执行失败 (${duration}ms)`;
+            }
+            if (resultEl) resultEl.textContent = `错误状态：${res.status}\n错误信息：${errMsg}`;
+            return;
+        }
+        if (statusEl) {
+            statusEl.className = 'mcp-tool-test-status success';
+            statusEl.textContent = `执行成功 (${duration}ms)`;
+        }
+        if (resultEl) {
+            const formatted = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+            resultEl.textContent = formatted;
+        }
+    } catch (err) {
+        const duration = Date.now() - startTime;
+        if (statusEl) {
+            statusEl.className = 'mcp-tool-test-status error';
+            statusEl.textContent = `网络错误 (${duration}ms)`;
+        }
+        if (resultEl) resultEl.textContent = `调用异常：${err.message}`;
+    } finally {
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.textContent = '运行测试';
+        }
+    }
+}
+
+function bindMcpToolTestModalControls() {
+    const modal = document.getElementById('mcp-tool-test-modal');
+    if (!modal || modal.dataset.boundMcpToolTestModal === '1') return;
+    modal.dataset.boundMcpToolTestModal = '1';
+
+    const closeModal = () => modal.classList.add('hidden');
+    document.getElementById('mcp-tool-test-close-btn')?.addEventListener('click', closeModal);
+    document.getElementById('mcp-tool-test-cancel-btn')?.addEventListener('click', closeModal);
+    document.getElementById('mcp-tool-test-run-btn')?.addEventListener('click', () => runMcpToolTest());
+    document.getElementById('mcp-tool-test-fill-sample-btn')?.addEventListener('click', () => {
+        const name = document.getElementById('mcp-tool-test-name')?.value;
+        fillMcpToolSampleInput(name);
+        showToast('已填入测试样例参数', 'success');
+    });
+    document.getElementById('mcp-tool-test-format-btn')?.addEventListener('click', () => {
+        const inputEl = document.getElementById('mcp-tool-test-input');
+        if (!inputEl?.value?.trim()) return;
+        try {
+            inputEl.value = JSON.stringify(JSON.parse(inputEl.value), null, 2);
+            showToast('JSON 已格式化', 'success');
+        } catch (e) {
+            showToast('JSON 格式有误，无法格式化', 'error');
+        }
+    });
+    modal.addEventListener('click', event => {
+        if (event.target === modal) closeModal();
+    });
+}
+
+async function runMcpBatchHealthCheck() {
+    const btn = document.getElementById('mcp-health-check-btn');
+    const originalText = btn ? btn.textContent : '连通性自检';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '正在检测...';
+    }
+    try {
+        const servers = (mcpServersCache || []).filter(s => s.status !== 'paused');
+        if (!servers.length) {
+            showToast('当前没有启用的工具服务需要检测', 'info');
+            return;
+        }
+        let successCount = 0;
+        let failCount = 0;
+        await Promise.all(servers.map(async server => {
+            try {
+                const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(server.id)}/diagnose`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success !== false) {
+                    successCount += 1;
+                    server.last_error = null;
+                } else {
+                    failCount += 1;
+                    server.last_error = data.error || '连通失败';
+                }
+            } catch (e) {
+                failCount += 1;
+                server.last_error = e.message || '网络连接异常';
+            }
+        }));
+        showToast(`已完成 ${servers.length} 个服务自检：${successCount} 个正常，${failCount} 个异常`, failCount > 0 ? 'warning' : 'success');
+        await window.loadMcpWorkbench();
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+}
 
 window.ensureMcpSystemService = async function (type, button) {
     const service = mcpBuiltinServices.find(item => item.type === type);
@@ -541,6 +867,7 @@ async function loadMcpGovernance() {
         </div>
         <div class="governance-metrics">
             <button id="mcp-refresh-btn" class="btn-secondary" type="button">刷新</button>
+            <button id="mcp-health-check-btn" class="btn-secondary" type="button">连通性自检</button>
             <span><b>${active}</b>可用服务</span>
             <span><b>${errors}</b>需要处理</span>
             <span><b>${unchecked}</b>待刷新</span>
@@ -550,6 +877,7 @@ async function loadMcpGovernance() {
         ${notes.length ? `<div class="governance-list mcp-safety-notes">${notes.map(item => `<span>${mcpEscape(item)}</span>`).join('')}</div>` : ''}
     `);
     panel.querySelector('#mcp-refresh-btn')?.addEventListener('click', () => window.loadMcpWorkbench?.());
+    panel.querySelector('#mcp-health-check-btn')?.addEventListener('click', () => window.runMcpBatchHealthCheck?.());
 }
 
 function collectMcpDatabasePayload(mode = 'create') {
@@ -997,7 +1325,11 @@ async function openMcpShareModal(serverId) {
 };
 
 window.Pivot?.exposeModule?.('mcp.workbench', {
-    openMcpShareModal
+    openMcpShareModal,
+    openMcpToolTestModal,
+    runMcpToolTest,
+    runMcpBatchHealthCheck,
+    fillMcpToolSampleInput
 });
 
 window.loadMcpWorkbench = async function () {

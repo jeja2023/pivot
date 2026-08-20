@@ -127,9 +127,11 @@
     color: #1e293b;
 }
 
-.mcp-governance-panel .governance-metrics #mcp-refresh-btn {
+.mcp-governance-panel .governance-metrics .btn-secondary,
+.mcp-governance-panel .governance-metrics #mcp-refresh-btn,
+.mcp-governance-panel .governance-metrics #mcp-health-check-btn {
     height: 24px;
-    padding: 0 10px;
+    padding: 0 8px;
     border-radius: 6px;
     font-size: 0.68rem;
     font-weight: 700;
@@ -139,10 +141,17 @@
     cursor: pointer;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
     transition: all 0.2s ease;
-    margin-right: 6px;
+    margin-right: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    line-height: 1;
 }
 
-.mcp-governance-panel .governance-metrics #mcp-refresh-btn:hover {
+.mcp-governance-panel .governance-metrics .btn-secondary:hover,
+.mcp-governance-panel .governance-metrics #mcp-refresh-btn:hover,
+.mcp-governance-panel .governance-metrics #mcp-health-check-btn:hover {
     border-color: var(--primary);
     background: #ecfdf5;
     color: var(--primary);
@@ -344,4 +353,109 @@
     color: #475569;
     background: #ffffff;
     font-family: inherit;
+}
+
+.mcp-tool-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.mcp-tool-test-btn {
+    height: 22px;
+    padding: 0 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.mcp-tool-test-modal {
+    width: min(680px, calc(100vw - 32px));
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.mcp-tool-test-body {
+    flex: 1 1 auto;
+    padding: 14px 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.mcp-tool-test-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mcp-tool-test-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.8rem;
+}
+
+.mcp-tool-test-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mcp-tool-test-actions button {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+}
+
+.mcp-tool-test-schema-hint {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.mcp-tool-test-status {
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.mcp-tool-test-status.success {
+    color: #059669;
+}
+
+.mcp-tool-test-status.error {
+    color: #dc2626;
+}
+
+.mcp-tool-test-result-box {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 6px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-family: Consolas, 'SFMono-Regular', monospace;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.mcp-tool-test-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+    background: #f8fafc;
 }

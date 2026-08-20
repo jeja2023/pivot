@@ -10,6 +10,7 @@
     const renderCompare = (...args) => app.renderCompare(...args);
     const renderQueryFields = (...args) => app.renderQueryFields(...args);
     const renderPivotControls = (...args) => app.renderPivotControls(...args);
+    const renderSemanticControls = (...args) => app.renderSemanticControls?.(...args);
 
     async function fetchJson(url, options = {}) {
         const res = await apiFetch(url, options);
@@ -40,6 +41,8 @@
             state.query = null;
             state.pivot = null;
             state.artifacts = [];
+            state.semanticJobs = [];
+            state.semanticJob = null;
             state.visualQuery = {
                 logicalOperator: 'AND',
                 filters: [
@@ -61,6 +64,8 @@
         state.query = null;
         state.pivot = null;
         state.artifacts = [];
+        state.semanticJobs = [];
+        state.semanticJob = null;
         state.visualQuery = {
             logicalOperator: 'AND',
             filters: [
@@ -72,6 +77,7 @@
         };
         render();
         await loadSummary(id);
+        if (typeof app.loadSemanticJobs === 'function') await app.loadSemanticJobs(id);
     }
 
     async function loadSummary(id) {
@@ -138,6 +144,7 @@
         renderCompare();
         renderQueryFields();
         renderPivotControls();
+        renderSemanticControls();
     }
 
     app.showDataAnalysisApp = async function (options = {}) {

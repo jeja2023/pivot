@@ -92,10 +92,10 @@ test('JSONB readers accept native node-postgres arrays and objects', () => {
     assert.deepEqual(debugRow.queue, { pending: 1 });
 });
 
-test('dynamic PostgreSQL schema generator produces complete 79-table DDL matching SQLite base schema', () => {
+test('dynamic PostgreSQL schema generator produces complete 81-table DDL matching SQLite base schema', () => {
     const plan = pgSchema.buildPgSchemaStatements();
     assert.ok(plan);
-    assert.strictEqual(plan.tables.length, 79, 'Generated PG schema must contain 79 CREATE TABLE statements');
+    assert.strictEqual(plan.tables.length, 81, 'Generated PG schema must contain 81 CREATE TABLE statements');
     assert.ok(plan.indexes.length > 50, 'Generated PG schema must contain index statements');
 
     // Check regulation_documents columns do not contain deprecated dropped columns

@@ -446,6 +446,104 @@
     border-radius: 8px;
 }
 
+.data-analysis-semantic-box {
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.82);
+}
+
+.data-analysis-semantic-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.data-analysis-semantic-heading h5 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.95rem;
+}
+
+.data-analysis-semantic-heading p {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.data-analysis-semantic-status {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.data-analysis-semantic-status[data-status="succeeded"] { color: #15803d; }
+.data-analysis-semantic-status[data-status="running"] { color: #2563eb; }
+.data-analysis-semantic-status[data-status="failed"] { color: #b91c1c; }
+
+.data-analysis-semantic-instruction {
+    min-height: 88px;
+    margin-top: 10px;
+    resize: vertical;
+}
+
+.data-analysis-semantic-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.data-analysis-semantic-progress {
+    margin-top: 14px;
+}
+
+.data-analysis-semantic-progress-meta,
+.data-analysis-semantic-progress-detail {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.data-analysis-semantic-progress-detail {
+    justify-content: flex-start;
+    margin-top: 5px;
+}
+
+.data-analysis-semantic-progress-track {
+    height: 7px;
+    margin-top: 7px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(148, 163, 184, 0.25);
+}
+
+.data-analysis-semantic-progress-track span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #2563eb;
+    transition: width 0.25s ease;
+}
+
+.data-analysis-semantic-report {
+    margin-top: 14px;
+    color: var(--text-main);
+}
+
+.data-analysis-semantic-report-title {
+    margin-bottom: 8px;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 800;
+}
+
 .data-analysis-ai-result {
     width: 100%;
     max-width: none !important;

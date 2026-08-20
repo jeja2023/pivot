@@ -133,7 +133,8 @@
 .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn,
 .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.btn-primary,
 .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
-.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish {
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish,
+.pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-llm {
     border-color: rgba(148, 163, 184, 0.34);
     background: #fff;
     color: var(--text-main);
@@ -182,19 +183,6 @@
 .pivot-dag-toolbar-btn.btn-primary {
     padding: 0 12px;
     box-shadow: 0 3px 8px rgba(16, 163, 127, 0.22);
-}
-
-.pivot-dag-toolbar-btn.is-llm {
-    border-color: #0f8f72;
-    background: #10a37f;
-    color: #fff;
-    font-weight: 800;
-}
-
-.pivot-dag-toolbar-btn.is-llm:hover,
-.pivot-dag-toolbar-btn.is-llm:focus-visible {
-    border-color: #047857;
-    background: #07866a;
 }
 
 .pivot-dag-toolbar-btn-icon {
@@ -347,7 +335,9 @@ body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.btn-primary,
 body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
 .dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-template,
 body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish,
-.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish {
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-publish,
+body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-llm,
+.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn.is-llm {
     border-color: rgba(148, 163, 184, 0.32);
     background: #111827;
     color: var(--text-main);

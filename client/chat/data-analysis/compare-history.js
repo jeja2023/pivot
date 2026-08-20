@@ -202,9 +202,9 @@
             PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">暂无历史记录，生成图表 / 数据透视 / 比对 / 导出后会显示在这里</div>');
             return;
         }
-        const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询', ai_analysis: 'AI 分析' };
+        const typeLabel = { chart: '图表', pivot: '透视', comparison: '比对', export: '导出', query: '查询', ai_analysis: 'AI 分析', ai_full_text_analysis: '全量语义分析' };
         PivotSafeHtml.setHtml(box, items.map((item, index) => {
-            const clickable = (item.type === 'chart' && item.chart) || (item.type === 'ai_analysis' && item.analysis);
+            const clickable = (item.type === 'chart' && item.chart) || (item.type === 'ai_analysis' && item.analysis) || (item.type === 'ai_full_text_analysis' && item.semantic);
             const attrs = clickable ? `data-data-analysis-history="${index}" role="button" tabindex="0"` : '';
             return `
                 <div class="data-analysis-history-item${clickable ? ` is-${item.type}` : ''}" ${attrs}>

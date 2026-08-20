@@ -131,3 +131,30 @@ test('content review schema exposes complete configurable limits', () => {
     assert.equal(tool.input_schema.properties.chunkTokens.minimum, 512);
     assert.equal(tool.input_schema.properties.chunkTokens.maximum, 12000);
 });
+
+test('content review hardened input parser accepts raw string and single object with common fields', () => {
+    const { rowsFromReviewInput, normalizeReviewRecords, parseModelJson } = require('../server/services/agent-content-review');
+    
+    // 纯文本字符串输入
+    const strRows = rowsFromReviewInput('今天去按装空调');
+    assert.equal(strRows.length, 1);
+    assert.equal(strRows[0].content, '今天去按装空调');
+    
+    const strRecords = normalizeReviewRecords({ records: '今天去按装空调' });
+    assert.equal(strRecords.length, 1);
+    assert.equal(strRecords[0].cleanContent, '今天去按装空调');
+
+    // 单对象包含 text 字段
+    const objRows = rowsFromReviewInput({ text: '这是一段文本', title: '测试' });
+    assert.equal(objRows.length, 1);
+    const objRecords = normalizeReviewRecords({ records: { text: '这是一段文本', title: '测试' } });
+    assert.equal(objRecords[0].cleanContent, '这是一段文本');
+    assert.equal(objRecords[0].title, '测试');
+
+    // 带 <think> 标签的推理模型输出解析
+    const thinkOutput = '<think>我来检查一下错别字：按装应该为安装。</think>\n```json\n{"issues": [{"field": "content", "category": "错别字", "original": "按装", "suggestion": "安装", "reason": "同音别字", "confidence": "certain"}]}\n```';
+    const parsed = parseModelJson(thinkOutput);
+    assert.ok(parsed);
+    assert.equal(Array.isArray(parsed.issues), true);
+    assert.equal(parsed.issues[0].original, '按装');
+});

@@ -1219,6 +1219,64 @@ function baseTablesSql() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS analysis_semantic_jobs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            dataset_id TEXT NOT NULL,
+            model_id INTEGER,
+            text_field TEXT NOT NULL,
+            id_field TEXT DEFAULT '',
+            instruction TEXT NOT NULL,
+            status TEXT DEFAULT 'queued',
+            total_rows INTEGER DEFAULT 0,
+            analyzed_rows INTEGER DEFAULT 0,
+            total_chars INTEGER DEFAULT 0,
+            total_batches INTEGER DEFAULT 0,
+            completed_batches INTEGER DEFAULT 0,
+            succeeded_batches INTEGER DEFAULT 0,
+            failed_batches INTEGER DEFAULT 0,
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            options_json TEXT DEFAULT '{}',
+            result_json TEXT DEFAULT '{}',
+            report_text TEXT DEFAULT '',
+            last_error TEXT DEFAULT '',
+            locked_at DATETIME,
+            next_run_at DATETIME,
+            started_at DATETIME,
+            completed_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (dataset_id) REFERENCES analysis_datasets(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_semantic_batches (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            batch_index INTEGER NOT NULL,
+            segment_start INTEGER NOT NULL,
+            segment_end INTEGER NOT NULL,
+            row_start INTEGER DEFAULT 0,
+            row_end INTEGER DEFAULT 0,
+            segment_count INTEGER DEFAULT 0,
+            row_count INTEGER DEFAULT 0,
+            char_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'queued',
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            result_text TEXT DEFAULT '',
+            result_json TEXT DEFAULT '{}',
+            last_error TEXT DEFAULT '',
+            locked_at DATETIME,
+            started_at DATETIME,
+            completed_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (job_id) REFERENCES analysis_semantic_jobs(id) ON DELETE CASCADE,
+            UNIQUE (job_id, batch_index)
+        );
+
         CREATE TABLE IF NOT EXISTS capability_packages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             package_key TEXT UNIQUE NOT NULL,
@@ -1329,6 +1387,10 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_user ON mcp_builtin_configs(user_id, service_type, status);
         CREATE INDEX IF NOT EXISTS idx_analysis_datasets_user ON analysis_datasets(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_artifacts_user ON analysis_artifacts(user_id, dataset_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_user_status ON analysis_semantic_jobs(user_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_dataset ON analysis_semantic_jobs(dataset_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_due ON analysis_semantic_jobs(status, next_run_at, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_semantic_batches_job_status ON analysis_semantic_batches(job_id, status, batch_index);
         CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);

@@ -8,10 +8,11 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { parsePositiveInt } = require('../number');
 const { cleanupSoftDeletedStorage } = require('./storage-gc');
-const { cleanupAnalysisWorkspace } = require('./data-analysis');
+const { cleanupAnalysisWorkspace, processSemanticAnalysisJobs } = require('./data-analysis');
 const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing/cleanup');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SEMANTIC_WORKER_INTERVAL_MS = Math.max(5000, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_WORKER_INTERVAL_MS || '10000', 10) || 10000);
 
 const maintenanceState = {
     startedAt: null,
@@ -488,6 +489,11 @@ function startMaintenanceTasks() {
     runDocumentProcessingCleanup().catch(() => {});
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
+    processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务恢复失败'));
+
+    setInterval(() => {
+        processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务轮询失败'));
+    }, SEMANTIC_WORKER_INTERVAL_MS).unref();
 
     setInterval(() => {
         cleanupOldLogs(retentionDays).catch(() => {});

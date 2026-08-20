@@ -5,6 +5,7 @@ const compare = require('./data-analysis/compare');
 const queryPivot = require('./data-analysis/query-pivot');
 const exportsService = require('./data-analysis/export');
 const databaseImport = require('./data-analysis/database-import');
+const semanticAnalysis = require('./data-analysis/semantic-analysis');
 
 module.exports = {
     MAX_PREVIEW_ROWS: shared.MAX_PREVIEW_ROWS,
@@ -19,5 +20,6 @@ module.exports = {
     ...compare,
     ...queryPivot,
     ...exportsService,
-    ...databaseImport
+    ...databaseImport,
+    ...semanticAnalysis
 };

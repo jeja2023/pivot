@@ -1,3 +1,38 @@
+## [v0.1.11] - 2026-08-20
+
+### 数据分析全量长文本语义分析任务与工具库调试治理升级
+
+- **全量覆盖**：新增全量语义分析任务，按估算 Token 自动切分文本字段，不再把整列长文本一次性放入模型上下文，也不会抽样或跳过记录。
+- **超长单元格处理**：单个单元格超过批次预算时继续拆分为多个文本分块，保留记录标识、分块序号和完整字符覆盖。
+- **异步任务持久化**：新增 `analysis_semantic_jobs`、`analysis_semantic_batches` 表，保存任务、批次、进度、失败原因、重试次数、结果和最终报告；PostgreSQL 启动 schema 初始化自动创建。
+- **后台恢复与治理**：后台 worker 支持排队、运行锁、过期锁恢复、批次级重试、任务取消和服务重启续跑；模型调用复用统一上下文预算、端点并发、Token 统计和每日额度检查。
+- **结果完整性校验**：批次必须逐一返回预期记录/分块结果，缺失任一结果会失败并重试；任务详情默认只返回进度，完整批次结果通过独立结果接口获取，避免轮询再次放大上下文和响应体。
+- **数据分析界面**：智能分析页新增文本字段、记录标识字段、批次 Token 预算、全量任务启动/取消/重试、进度条和最终报告展示。
+- **工具库单步测试工作台 (Tool Test Runner)**：在工具列表每个工具卡片增加「单步测试」入口，支持智能测试样例一键填入、Schema 参数提示、JSON 自动格式化与实时耗时结果回显。
+- **工具连通性一键自检 (Batch Health Check)**：在工具治理工具栏新增轻量化「连通性自检」功能，支持一键批量探测全部已配置数据库与外部 MCP 服务的在线状态。
+- **回归验证**：新增批次覆盖与上下界测试，PostgreSQL schema 合同测试更新为 81 张表；相关服务语法检查、代码规范和全量自动化测试通过。
+
+## [v0.1.10] - 2026-08-20
+
+### 富文本内容校对全链路加固、推理模型兼容与工作流编排节点主题统一
+
+- **富文本与文字校对全向兼容加固 (Content Review Input Hardening)**：
+  - 增强 `server/services/agent-content-review.js` 中的 `rowsFromReviewInput` 与 `normalizeReviewRecords`，全面支持纯文本字符串输入（如直接传入单段正文）、单对象输入以及标准记录数组；
+  - 扩展正文字段别名回退表（支持 `content`、`body`、`text`、`value`、`news_content`、`article_content`、`html`、`body_html`、`raw`、`raw_text`、`article`、`description`、`message`、`input` 等），彻底杜绝因上游字段未匹配导致空内容校对的误报假象。
+- **强化校对 Prompt 提示词工程与小模型防偷懒 (Prompt Few-Shot & Defect Guidance)**：
+  - 明确同音别字（如“按装”→“安装”、“设配”→“设备”）、形近字、错漏字、语序搭配不当、标点误用等细粒度排查指引；
+  - 提供标准 JSON 示范结构，强制大模型逐句扫描原文，消除本地小尺寸模型的偷懒空输出。
+- **推理模型思考标签深度清洗 (Reasoning Model Think Tags Stripping)**：
+  - 增加 `stripThinkTags`，在解析模型响应前自动剥离 `<think>...</think>` / `<thought>...</thought>` 思考块及 Markdown 代码块，全面兼容 DeepSeek-R1 / QwQ 等推理型模型。
+- **证据链模糊匹配与引号清洗 (Evidence Matching Quote Cleaning)**：
+  - 增加 `cleanEvidenceQuotes`，在比对大模型找出的错别字原文依据时，自动剥离大模型习惯性添加的外层引号、书名号及句末标点，避免真实识别到的错别字被系统误杀过滤。
+- **工作流节点选择主题样式统一 (Workflow DAG Node Picker Theme Alignment)**：
+  - 移除 `client/chat/styles/workspaces/agent/agent-dag-toolbar.css` 中 `.pivot-dag-toolbar-btn.is-llm` 的绿色背景（`#10a37f`）与深绿 hover 状态，使大模型与富文本校对节点在亮色与深色模式下与所有其他预设节点保持统一的背景色与交互质感。
+- **新建任务面板运行任务按钮状态与前置校验修复 (New Task Panel Run Button Guard)**：
+  - 修复 `client/chat/agent-run-actions.js` 中因未先等待 `preflightAgentPayload` 导致的 `ReferenceError: preflight is not defined` 异常，完善按钮禁用与防重复提交机制。
+- **回归覆盖与校验 (Regression Tests)**：
+  - 新增 `tests/agent-content-review-node.test.js` 中针对纯文本输入、多字段对象输入及推理模型思考块解析的单元测试；全局校验与语法检查全部通过。
+
 ## [v0.1.9] - 2026-08-20
 
 ### 数据分析大模型治理、证据链与 PostgreSQL 迁移后兼容性升级
