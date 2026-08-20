@@ -99,7 +99,9 @@ function getBackupDir() {
 
 function getPgDumpBin() {
     const configured = String(process.env.PG_DUMP_BIN || '').trim();
-    if (configured) return configured;
+    if (configured && configured !== 'pg_dump') {
+        return configured;
+    }
     if (process.platform === 'win32') {
         const commonWinPaths = [
             'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe',
@@ -119,7 +121,7 @@ function getPgDumpBin() {
             }
         }
     }
-    return 'pg_dump';
+    return configured || 'pg_dump';
 }
 
 function getPgDumpTimeoutMs() {
