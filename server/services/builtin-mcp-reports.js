@@ -13,7 +13,8 @@ function getXlsx() {
 const {
     getRequiredBuiltinConfigAsync,
     isPathInside,
-    getExtension
+    getExtension,
+    buildReportDataSource
 } = require('./builtin-mcp-common');
 
 function listReportTools() {
@@ -88,16 +89,27 @@ async function resolveReportFile(config, fileRef) {
 
     for (const item of candidates) {
         if (!item.root) continue;
-        const root = path.resolve(item.root);
+        const configuredRoot = path.resolve(item.root);
+        let root;
+        try {
+            root = await fs.promises.realpath(configuredRoot);
+        } catch (e) {
+            continue;
+        }
         const target = path.resolve(root, String(item.relative || '').replace(/^[/\\]+/, ''));
         if (!isPathInside(root, target)) continue;
         let stat;
         try {
+            const linkStat = await fs.promises.lstat(target);
+            if (linkStat.isSymbolicLink?.()) continue;
             stat = await fs.promises.stat(target);
         } catch (e) {
             continue;
         }
         if (!stat.isFile()) continue;
+        let realTarget;
+        try { realTarget = await fs.promises.realpath(target); } catch (e) { continue; }
+        if (!isPathInside(root, realTarget)) continue;
         const ext = getExtension(target);
         if (!config.extensions.includes(ext)) {
             const err = new Error(`当前报表文件能力不允许读取 .${ext} 文件。`);
@@ -109,7 +121,7 @@ async function resolveReportFile(config, fileRef) {
             err.status = 413;
             throw err;
         }
-        return { root, target, relative: path.relative(root, target), ext, size: stat.size, updatedAt: stat.mtime.toISOString() };
+        return { root, target: realTarget, relative: path.relative(root, realTarget), ext, size: stat.size, updatedAt: stat.mtime.toISOString() };
     }
     const err = new Error('在已配置的报表目录中未找到指定文件。');
     err.status = 404;
@@ -120,11 +132,20 @@ async function listReportFiles(config, query = '', limit = 50) {
     const needle = String(query || '').trim().toLowerCase();
     const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const results = [];
-    const queue = config.roots.map((root, rootIndex) => ({ dir: root, root: path.resolve(root), rootIndex }));
+    const queue = [];
+    const visitedDirectories = new Set();
+    for (const [rootIndex, configuredRoot] of config.roots.entries()) {
+        try {
+            const root = await fs.promises.realpath(path.resolve(configuredRoot));
+            queue.push({ dir: root, root, rootIndex });
+        } catch (e) { /* ignore unavailable roots */ }
+    }
     const extensionSet = new Set(config.extensions);
     let scanned = 0;
     for (let queueIndex = 0; queueIndex < queue.length && results.length < max && scanned < 5000; queueIndex += 1) {
         const current = queue[queueIndex];
+        if (visitedDirectories.has(current.dir)) continue;
+        visitedDirectories.add(current.dir);
         scanned += 1;
         let entries = [];
         try {
@@ -136,18 +157,24 @@ async function listReportFiles(config, query = '', limit = 50) {
             if (entry.name.startsWith('.')) continue;
             const absolute = path.resolve(current.dir, entry.name);
             if (!isPathInside(current.root, absolute)) continue;
+            let linkStat;
+            try { linkStat = await fs.promises.lstat(absolute); } catch (e) { continue; }
+            if (linkStat.isSymbolicLink?.()) continue;
+            let realAbsolute;
+            try { realAbsolute = await fs.promises.realpath(absolute); } catch (e) { continue; }
+            if (!isPathInside(current.root, realAbsolute)) continue;
             if (entry.isDirectory()) {
-                queue.push({ ...current, dir: absolute });
+                queue.push({ ...current, dir: realAbsolute });
                 continue;
             }
             if (!entry.isFile()) continue;
-            const ext = getExtension(entry.name);
+            const ext = getExtension(realAbsolute);
             if (!extensionSet.has(ext)) continue;
-            const relative = path.relative(current.root, absolute);
+            const relative = path.relative(current.root, realAbsolute);
             if (needle && !relative.toLowerCase().includes(needle)) continue;
             let stat;
             try {
-                stat = await fs.promises.stat(absolute);
+                stat = await fs.promises.stat(realAbsolute);
             } catch (e) {
                 continue;
             }
@@ -180,16 +207,29 @@ async function readWorkbookRows(file, sheetName, maxRows) {
         const buffer = await fs.promises.readFile(file.target);
         workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
     }
-    const selectedSheet = sheetName && workbook.Sheets[sheetName] ? sheetName : workbook.SheetNames[0];
+    const requestedSheet = String(sheetName || '').trim();
+    const selectedSheet = requestedSheet && workbook.Sheets[requestedSheet] ? requestedSheet : workbook.SheetNames[0];
+    const warnings = requestedSheet && selectedSheet !== requestedSheet
+        ? [`工作表 ${requestedSheet} 不存在，已使用第一个工作表 ${selectedSheet || '(空)' }。`]
+        : [];
     const sheet = workbook.Sheets[selectedSheet];
+    if (!sheet) {
+        return { workbook, selectedSheet: '', headers: [], rows: [], warnings: [...warnings, '工作簿没有可读取的工作表。'] };
+    }
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-    const headers = (rows[0] || []).map((cell, index) => String(cell || `column_${index + 1}`).trim() || `column_${index + 1}`);
+    const usedHeaders = new Map();
+    const headers = (rows[0] || []).map((cell, index) => {
+        const base = String(cell || `column_${index + 1}`).trim() || `column_${index + 1}`;
+        const count = (usedHeaders.get(base) || 0) + 1;
+        usedHeaders.set(base, count);
+        return count === 1 ? base : `${base}_${count}`;
+    });
     const objects = rows.slice(1).map(row => {
         const item = {};
         headers.forEach((header, index) => { item[header] = row[index] ?? ''; });
         return item;
     });
-    return { workbook, selectedSheet, headers, rows: objects };
+    return { workbook, selectedSheet, headers, rows: objects, warnings };
 }
 
 async function readTextPreview(file, maxRows) {
@@ -228,10 +268,13 @@ async function queryReportTable(config, input = {}) {
         return item;
     });
     return {
+        source: buildReportDataSource('服务器报表目录'),
         file: { path: input.path, relativePath: file.relative, extension: file.ext },
         selectedSheet: table.selectedSheet,
         columns: wantedColumns.length ? wantedColumns : table.headers,
         rowCount: rows.length,
+        warnings: table.warnings || [],
+        provenance: { file: file.relative, sheet: table.selectedSheet || '', generatedAt: new Date().toISOString() },
         rows,
         allRows: filteredRows
     };
@@ -247,25 +290,34 @@ async function executeReportConfigTool(config, name, input = {}) {
         if (['csv', 'xls', 'xlsx'].includes(file.ext)) {
             const table = await readWorkbookRows(file, input.sheet, sampleRows);
             return {
+                source: buildReportDataSource('服务器报表目录'),
                 file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
                 sheets: table.workbook.SheetNames,
                 selectedSheet: table.selectedSheet,
                 columns: table.headers,
+                warnings: table.warnings || [],
+                provenance: { file: file.relative, sheet: table.selectedSheet || '', generatedAt: new Date().toISOString() },
                 sampleRows: table.rows.slice(0, sampleRows)
             };
         }
         if (file.ext === 'json') {
             const value = JSON.parse(await fs.promises.readFile(file.target, 'utf8'));
             return {
+                source: buildReportDataSource('服务器报表目录'),
                 file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
                 type: Array.isArray(value) ? 'array' : typeof value,
                 keys: value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).slice(0, 100) : [],
+                warnings: [],
+                provenance: { file: file.relative, sheet: '', generatedAt: new Date().toISOString() },
                 sample: Array.isArray(value) ? value.slice(0, sampleRows) : value
             };
         }
         const preview = await readTextPreview(file, sampleRows);
         return {
+            source: buildReportDataSource('服务器报表目录'),
             file: { path: input.path, relativePath: file.relative, extension: file.ext, size: file.size, updatedAt: file.updatedAt },
+            warnings: [],
+            provenance: { file: file.relative, sheet: '', generatedAt: new Date().toISOString() },
             ...preview
         };
     }
@@ -288,8 +340,9 @@ async function executeReportConfigTool(config, name, input = {}) {
             })
         ]);
         return {
-            left: { file: left.file, sheets: left.sheets || [], columns: left.columns || [] },
-            right: { file: right.file, sheets: right.sheets || [], columns: right.columns || [] },
+            source: buildReportDataSource('服务器报表目录'),
+            left: { source: left.source, file: left.file, sheets: left.sheets || [], columns: left.columns || [], warnings: left.warnings || [], provenance: left.provenance || null },
+            right: { source: right.source, file: right.file, sheets: right.sheets || [], columns: right.columns || [], warnings: right.warnings || [], provenance: right.provenance || null },
             commonColumns: (left.columns || []).filter(col => (right.columns || []).includes(col)),
             onlyLeftColumns: (left.columns || []).filter(col => !(right.columns || []).includes(col)),
             onlyRightColumns: (right.columns || []).filter(col => !(left.columns || []).includes(col))

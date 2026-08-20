@@ -78,6 +78,12 @@ const pgQueues = {
     mcpCallLogs: [],
     modelUsageEvents: [],
 };
+const pgQueueDropped = {
+    auditLogs: 0,
+    apiCallLogs: 0,
+    mcpCallLogs: 0,
+    modelUsageEvents: 0,
+};
 
 let pgFlushTimer = null;
 let pgFlushing = null;
@@ -103,6 +109,7 @@ function pgEnqueue(queueName, item) {
     if (!queue) throw new Error(`未知数据库写入队列： ${queueName}`);
     if (queue.length >= QUEUE_LIMITS[queueName]) {
         queue.shift();
+        pgQueueDropped[queueName] += 1;
         logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, '[PG] 写入队列溢出，已丢弃最早任务');
     }
     queue.push(item);
@@ -259,6 +266,14 @@ function pgQueueStatus() {
     return Object.fromEntries(Object.entries(pgQueues).map(([name, queue]) => [name, queue.length]));
 }
 
+function pgQueueDiagnostics() {
+    return Object.fromEntries(Object.entries(pgQueues).map(([name, queue]) => [name, {
+        pending: queue.length,
+        dropped: pgQueueDropped[name] || 0,
+        max: QUEUE_LIMITS[name]
+    }]));
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 function enqueueAuditLog(item) {
     return pgEnqueue('auditLogs', item);
@@ -299,6 +314,10 @@ function getQueueStatus() {
     return pgQueueStatus();
 }
 
+function getQueueDiagnostics() {
+    return pgQueueDiagnostics();
+}
+
 module.exports = {
     enqueueAuditLog,
     enqueueApiCallLog,
@@ -308,6 +327,7 @@ module.exports = {
     flushWriteQueue,
     getPendingModelUsageTotal,
     getQueueStatus,
+    getQueueDiagnostics,
 };
 
 // 退出前落库

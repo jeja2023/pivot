@@ -6,7 +6,8 @@
 const {
     toFiniteNumber,
     normalizeInputRows,
-    inferValueKind
+    inferValueKind,
+    buildInlineDataSource
 } = require('./builtin-mcp-common');
 
 function listDataProcessingTools() {
@@ -47,7 +48,8 @@ function listDataProcessingTools() {
                     groupBy: { type: 'string' },
                     valueField: { type: 'string' },
                     aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
-                    limit: { type: 'number', minimum: 1, maximum: 5000 }
+                    limit: { type: 'number', minimum: 1, maximum: 5000, description: '最多参与计算的输入行数。' },
+                    outputLimit: { type: 'number', minimum: 1, maximum: 5000, description: '最多返回的分组数。' }
                 },
                 required: ['rows', 'groupBy']
             }
@@ -71,6 +73,7 @@ function listDataProcessingTools() {
 
 function executeDataProcessingTool(_server, name, input = {}) {
     if (name === 'data.profile_rows') {
+        const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
         const fields = rows.reduce((cols, row) => {
             Object.keys(row || {}).forEach(key => {
@@ -94,9 +97,10 @@ function executeDataProcessingTool(_server, name, input = {}) {
                 samples: Array.from(new Set(values.map(value => String(value)).filter(Boolean))).slice(0, 5)
             };
         });
-        return { type: 'data_profile', rowCount: rows.length, fields: profile };
+        return { type: 'data_profile', source: buildInlineDataSource(), rowCount: rows.length, originalRowCount: requestedRows, limitApplied: rows.length < requestedRows, warnings: rows.length < requestedRows ? ['输入行数超过工具上限，已截断。'] : [], fields: profile };
     }
     if (name === 'data.filter_rows') {
+        const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
         const filters = input.filters && typeof input.filters === 'object' ? input.filters : {};
         const exact = String(input.matchMode || input.match_mode || 'contains').toLowerCase() === 'exact';
@@ -105,9 +109,10 @@ function executeDataProcessingTool(_server, name, input = {}) {
             const needle = String(expected ?? '').toLowerCase();
             return exact ? actual === needle : actual.includes(needle);
         }));
-        return { type: 'data_filter', rowCount: filtered.length, rows: filtered };
+        return { type: 'data_filter', source: buildInlineDataSource(), rowCount: filtered.length, originalRowCount: requestedRows, limitApplied: rows.length < requestedRows, warnings: rows.length < requestedRows ? ['输入行数超过工具上限，已截断。'] : [], rows: filtered };
     }
     if (name === 'data.group_summary') {
+        const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
         const groupBy = String(input.groupBy || input.group_by || '').trim();
         if (!groupBy) {
@@ -133,9 +138,18 @@ function executeDataProcessingTool(_server, name, input = {}) {
             if (aggregation === 'max') value = values.length ? Math.max(...values) : 0;
             return { [groupBy]: key, value, count: groupRows.length };
         });
-        return { type: 'data_group_summary', groupBy, valueField, aggregation, rows: items };
+        const outputLimit = Math.min(Math.max(Number(input.outputLimit || input.output_limit) || 5000, 1), 5000);
+        return {
+            type: 'data_group_summary', source: buildInlineDataSource(), groupBy, valueField, aggregation,
+            rowCount: Math.min(items.length, outputLimit),
+            originalRowCount: requestedRows,
+            limitApplied: rows.length < requestedRows || items.length > outputLimit,
+            warnings: rows.length < requestedRows || items.length > outputLimit ? ['结果受输入或输出行数上限限制。'] : [],
+            rows: items.slice(0, outputLimit)
+        };
     }
     if (name === 'data.normalize_fields') {
+        const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
         const renameMap = input.renameMap && typeof input.renameMap === 'object' ? input.renameMap : {};
         const trimStrings = input.trimStrings !== false;
@@ -144,7 +158,11 @@ function executeDataProcessingTool(_server, name, input = {}) {
             acc[nextKey] = trimStrings && typeof value === 'string' ? value.trim() : value;
             return acc;
         }, {}));
-        return { type: 'data_normalized_rows', rowCount: normalized.length, rows: normalized };
+        return {
+            type: 'data_normalized_rows', source: buildInlineDataSource(), rowCount: normalized.length,
+            originalRowCount: requestedRows, limitApplied: rows.length < requestedRows,
+            warnings: rows.length < requestedRows ? ['输入行数超过工具上限，已截断。'] : [], rows: normalized
+        };
     }
     throw new Error(`不支持的数据工具操作: ${name}`);
 }

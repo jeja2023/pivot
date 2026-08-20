@@ -13,6 +13,7 @@ const { safeJsonGet } = require('../../services/safe-http-client');
 const { debugRetrieveContext } = require('../../services/rag-index');
 const {
     executeMcpTool,
+    recordMcpCallLog,
     getAccessibleMcpServer,
     listCachedMcpTools,
     listMcpServers,
@@ -873,9 +874,21 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         } else if (!(await isToolCapabilityEnabled('builtin_tool', name, name, req.user))) {
             return res.status(403).json({ error: '该系统工具已在工具治理中停用。' });
         }
-        const result = name.startsWith('mcp.')
-            ? await executeMcpTool(name, req.body?.input || {}, req.user)
-            : await executeBuiltInTool(name, req.body?.input || {}, req.user);
+        const startedAt = Date.now();
+        let result;
+        try {
+            result = name.startsWith('mcp.')
+                ? await executeMcpTool(name, req.body?.input || {}, req.user)
+                : await executeBuiltInTool(name, req.body?.input || {}, req.user);
+            if (!name.startsWith('mcp.')) {
+                recordMcpCallLog({ user: req.user, serverId: null, toolName: name, source: 'manual', durationMs: Date.now() - startedAt, input: req.body?.input, output: result });
+            }
+        } catch (error) {
+            if (!name.startsWith('mcp.')) {
+                recordMcpCallLog({ user: req.user, serverId: null, toolName: name, source: 'manual', status: 'error', durationMs: Date.now() - startedAt, input: req.body?.input, error });
+            }
+            throw error;
+        }
         logAction(req, '调用工具', name);
         res.json({ success: true, result });
     }));
@@ -907,7 +920,15 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 if (!(await isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user))) {
                     throw new Error('该系统工具已在工具治理中停用。');
                 }
-                const result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
+                const startedAt = Date.now();
+                let result;
+                try {
+                    result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
+                    recordMcpCallLog({ user: req.user, serverId: null, toolName: params?.name, source: 'rpc', durationMs: Date.now() - startedAt, input: params?.arguments, output: result });
+                } catch (error) {
+                    recordMcpCallLog({ user: req.user, serverId: null, toolName: params?.name, source: 'rpc', status: 'error', durationMs: Date.now() - startedAt, input: params?.arguments, error });
+                    throw error;
+                }
                 return sendJsonRpc(res, id, {
                     content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]
                 });

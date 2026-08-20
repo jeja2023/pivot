@@ -47,6 +47,13 @@ async function buildSafeAxiosOptions(url, options = {}) {
         timeout: options.timeout,
         proxy: false,
         responseType: options.responseType || 'json',
+        // 外部工具/Webhook 返回体必须有硬上限，避免恶意或异常服务造成内存和上下文耗尽。
+        maxContentLength: Number.isFinite(Number(options.maxContentLength))
+            ? Math.max(1024, Number(options.maxContentLength))
+            : 4 * 1024 * 1024,
+        maxBodyLength: Number.isFinite(Number(options.maxBodyLength))
+            ? Math.max(1024, Number(options.maxBodyLength))
+            : 4 * 1024 * 1024,
         validateStatus: options.validateStatus,
         signal: options.signal,
         ...agents

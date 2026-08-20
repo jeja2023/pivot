@@ -80,17 +80,28 @@ function createTimeoutError(connection, timeoutMs, phase = 'database connection 
     return err;
 }
 
-function withOperationTimeout(promise, timeoutMs, connection, phase) {
+function throwIfAborted(signal) {
+    if (!signal?.aborted) return;
+    if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
+    const err = new Error('数据库操作已取消。');
+    err.name = 'AbortError';
+    throw err;
+}
+
+function withOperationTimeout(promise, timeoutMs, connection, phase, options = {}) {
     let timer;
-    // 增加外层超时缓冲时间，让驱动底层自身的超时逻辑先触发，从而返回更具体的错误原因而不是通用超时
-    const outerTimeoutMs = timeoutMs + 5000;
+    // 外层超时是统一的请求边界；超时同时触发 AbortSignal，不能只拒绝外层 Promise。
+    const outerTimeoutMs = Math.max(1000, Number(timeoutMs) || 20000);
     const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(createTimeoutError(connection, timeoutMs, phase)), outerTimeoutMs);
+        timer = setTimeout(() => {
+            try { options.onTimeout?.(); } catch (e) { /* cancellation is best effort */ }
+            reject(createTimeoutError(connection, timeoutMs, phase));
+        }, outerTimeoutMs);
     });
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
-async function withPostgres(connection, handler) {
+async function withPostgres(connection, handler, signal) {
     const { Client } = optionalRequire('pg', 'Install it with npm install pg.');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
@@ -109,21 +120,29 @@ async function withPostgres(connection, handler) {
         lookup: databaseSafeLookup(owner)
     });
     let connected = false;
+    const abort = () => {
+        // pg query receives the signal; ending the client also covers connect/driver versions
+        // that do not implement AbortSignal on Client#query.
+        client.end().catch(() => {});
+    };
     try {
         await client.connect();
         connected = true;
+        throwIfAborted(signal);
+        signal?.addEventListener('abort', abort, { once: true });
         return await handler(client);
     } finally {
+        signal?.removeEventListener('abort', abort);
         // 即使超时先于 connect 完成（race 失败），也确保底层连接被关闭，避免句柄泄漏。
         try {
             await client.end();
         } catch (e) {
-            if (connected) throw e;
+            if (connected && !signal?.aborted) throw e;
         }
     }
 }
 
-async function withMysql(connection, handler) {
+async function withMysql(connection, handler, signal) {
     const mysql = optionalRequire('mysql2/promise', 'Install it with npm install mysql2.');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
@@ -139,9 +158,14 @@ async function withMysql(connection, handler) {
         ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : undefined,
         connectTimeout: timeoutMs
     });
+    let abort;
     try {
+        abort = () => { try { client.destroy(); } catch (e) { /* best effort */ } };
+        throwIfAborted(signal);
+        signal?.addEventListener('abort', abort, { once: true });
         return await handler(client);
     } finally {
+        signal?.removeEventListener('abort', abort);
         // 确保连接句柄在超时胜出时也被释放。
         try {
             await client.end();
@@ -151,7 +175,7 @@ async function withMysql(connection, handler) {
     }
 }
 
-async function withSqlServer(connection, handler) {
+async function withSqlServer(connection, handler, signal) {
     const sql = optionalRequire('mssql', 'Install it with npm install mssql.');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
@@ -172,16 +196,21 @@ async function withSqlServer(connection, handler) {
         requestTimeout: timeoutMs
     });
     let connected = false;
+    let abort;
     try {
         await pool.connect();
         connected = true;
+        throwIfAborted(signal);
+        abort = () => { pool.close().catch(() => {}); };
+        signal?.addEventListener('abort', abort, { once: true });
         return await handler(pool);
     } finally {
+        signal?.removeEventListener('abort', abort);
         // 即使超时先于 connect 完成（race 失败），也确保连接池被关闭，避免句柄泄漏。
         try {
             await pool.close();
         } catch (e) {
-            if (connected) throw e;
+            if (connected && !signal?.aborted) throw e;
         }
     }
 }
@@ -227,7 +256,7 @@ const RELATIONAL_DIALECTS = {
         dialect: 'postgres',
         timeoutPhase: 'PostgreSQL database query',
         withConnection: withPostgres,
-        runQuery: async (client, sql, params = []) => (await client.query(sql, params)).rows,
+        runQuery: async (client, sql, params = [], signal) => (await client.query({ text: sql, values: params, signal })).rows,
         listTablesSql: (schema) => ({
             sql: `
                 SELECT table_schema, table_name, table_type
@@ -252,8 +281,8 @@ const RELATIONAL_DIALECTS = {
         dialect: 'mysql',
         timeoutPhase: 'MySQL database query',
         withConnection: withMysql,
-        runQuery: async (client, sql, params = []) => {
-            const [rows] = await client.query(sql, params);
+        runQuery: async (client, sql, params = [], signal, timeoutMs) => {
+            const [rows] = await client.query({ sql, values: params, timeout: timeoutMs });
             return rows;
         },
         listTablesSql: (schema) => ({
@@ -308,27 +337,28 @@ const RELATIONAL_DIALECTS = {
 
 // 5 个关系型工具的统一分发：治理 + 取行 + 脱敏 + 成本装饰只写一份，方言差异全部走 adapter。
 async function runRelationalTool(adapter, client, name, ctx) {
-    const { cfg, schema, table, limit, input, decorate } = ctx;
+    const { cfg, schema, table, limit, input, decorate, signal } = ctx;
+    const runQuery = (sql, params = []) => adapter.runQuery(client, sql, params, signal, cfg.query_timeout_ms);
 
     if (name === 'db.list_tables') {
         const { sql, params } = adapter.listTablesSql(schema);
-        return filterTableRows(await adapter.runQuery(client, sql, params), cfg);
+        return filterTableRows(await runQuery(sql, params), cfg);
     }
     if (name === 'db.count_tables') {
         const { sql, params } = adapter.listTablesSql(schema);
-        return summarizeTableRows(filterTableRows(await adapter.runQuery(client, sql, params), cfg));
+        return summarizeTableRows(filterTableRows(await runQuery(sql, params), cfg));
     }
     if (name === 'db.describe_table') {
         assertTableAllowed(cfg, table);
         const { sql, params } = adapter.describeTableSql(table, schema);
-        return filterDescribeRows(await adapter.runQuery(client, sql, params), cfg, table);
+        return filterDescribeRows(await runQuery(sql, params), cfg, table);
     }
     if (name === 'db.run_readonly_query') {
         const readonly = assertReadonlySql(input.sql);
         const governance = assertSqlGovernance(readonly, cfg);
         // 多取一行用于准确标记导入/分析结果是否触达上限，返回给调用方时仍严格限制为 limit 行。
         const sql = applySqlLimit(readonly, limit + 1, adapter.dialect);
-        const rawRows = maskSensitiveRows(await adapter.runQuery(client, sql), cfg);
+        const rawRows = maskSensitiveRows(await runQuery(sql), cfg);
         const truncated = rawRows.length > limit;
         return decorate({ rows: truncated ? rawRows.slice(0, limit) : rawRows, limit, truncated }, {
             operation: 'readonly_sql',
@@ -339,7 +369,7 @@ async function runRelationalTool(adapter, client, name, ctx) {
         assertTableAllowed(cfg, table);
         assertFieldAllowed(cfg, table, input.groupBy || input.group_by);
         const query = buildGroupCountSql({ ...input, limit }, adapter.dialect, schema);
-        return decorate({ ...query, rows: maskSensitiveRows(await adapter.runQuery(client, query.sql), cfg) }, {
+        return decorate({ ...query, rows: maskSensitiveRows(await runQuery(query.sql), cfg) }, {
             operation: 'group_count',
             tables: [table],
             fields: [input.groupBy || input.group_by]
@@ -360,11 +390,12 @@ async function executeSqlTool(connection, name, input = {}) {
         ...result,
         ...buildDatabaseCost(cfg, { limit, ...details })
     });
-    const ctx = { cfg, schema, table, limit, input, decorate };
+    const controller = new AbortController();
+    const ctx = { cfg, schema, table, limit, input, decorate, signal: controller.signal };
 
-    const run = adapter.withConnection(cfg, client => runRelationalTool(adapter, client, name, ctx));
+    const run = adapter.withConnection(cfg, client => runRelationalTool(adapter, client, name, ctx), controller.signal);
     return adapter.timeoutPhase
-        ? withOperationTimeout(run, cfg.query_timeout_ms, cfg, adapter.timeoutPhase)
+        ? withOperationTimeout(run, cfg.query_timeout_ms, cfg, adapter.timeoutPhase, { onTimeout: () => controller.abort() })
         : run;
 }
 
@@ -435,7 +466,7 @@ async function executeMongoTool(connection, name, input = {}) {
         } finally {
             await client.close();
         }
-    })(), cfg.query_timeout_ms || timeoutMs, cfg, 'MongoDB database query');
+    })(), cfg.query_timeout_ms || timeoutMs, cfg, 'MongoDB database query', { onTimeout: () => client.close().catch(() => {}) });
 }
 
 async function testDatabaseConnection(connection) {
@@ -449,22 +480,28 @@ async function testDatabaseConnection(connection) {
         })), timeoutMs, testConnection, 'SQLite connection test');
     }
     if (testConnection.database_type === 'postgres') {
-        return withOperationTimeout(withPostgres(testConnection, async client => {
+        const controller = new AbortController();
+        const run = withPostgres(testConnection, async client => {
             await client.query('SELECT 1 AS ok');
             return { database_type: testConnection.database_type };
-        }), timeoutMs, testConnection, 'PostgreSQL connection test');
+        }, controller.signal);
+        return withOperationTimeout(run, timeoutMs, testConnection, 'PostgreSQL connection test', { onTimeout: () => controller.abort() });
     }
     if (testConnection.database_type === 'mysql') {
-        return withOperationTimeout(withMysql(testConnection, async client => {
+        const controller = new AbortController();
+        const run = withMysql(testConnection, async client => {
             await client.query({ sql: 'SELECT 1 AS ok', timeout: timeoutMs });
             return { database_type: testConnection.database_type };
-        }), timeoutMs, testConnection, 'MySQL connection test');
+        }, controller.signal);
+        return withOperationTimeout(run, timeoutMs, testConnection, 'MySQL connection test', { onTimeout: () => controller.abort() });
     }
     if (testConnection.database_type === 'sqlserver') {
-        return withOperationTimeout(withSqlServer(testConnection, async pool => {
+        const controller = new AbortController();
+        const run = withSqlServer(testConnection, async pool => {
             await pool.request().query('SELECT 1 AS ok');
             return { database_type: testConnection.database_type };
-        }), timeoutMs, testConnection, 'SQL Server connection test');
+        }, controller.signal);
+        return withOperationTimeout(run, timeoutMs, testConnection, 'SQL Server connection test', { onTimeout: () => controller.abort() });
     }
     if (testConnection.database_type === 'mongodb') {
         const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
@@ -490,7 +527,7 @@ async function testDatabaseConnection(connection) {
             } finally {
                 await client.close();
             }
-        })(), timeoutMs, testConnection, 'MongoDB connection test');
+        })(), timeoutMs, testConnection, 'MongoDB connection test', { onTimeout: () => client.close().catch(() => {}) });
     }
     throw new Error(`不支持的数据库类型: ${testConnection.database_type}`);
 }

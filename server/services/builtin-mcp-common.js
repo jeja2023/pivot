@@ -295,6 +295,28 @@ function inferValueKind(value) {
     return 'text';
 }
 
+function buildInlineDataSource(name = '工具输入数据') {
+    return {
+        id: 'inline',
+        type: 'imported_dataset',
+        name,
+        executionLocation: 'server',
+        ownerScope: 'personal',
+        workflowAvailability: 'available'
+    };
+}
+
+function buildReportDataSource(name = '服务器报表目录') {
+    return {
+        id: 'report-directory',
+        type: 'server_report_dir',
+        name,
+        executionLocation: 'server',
+        ownerScope: 'personal',
+        workflowAvailability: 'available'
+    };
+}
+
 module.exports = {
     BUILTIN_MCP_PREFIXES,
     SUPPORTED_REPORT_EXTENSIONS,
@@ -322,5 +344,7 @@ module.exports = {
     escapeMarkdownCell,
     buildTableBlock,
     textInput,
-    inferValueKind
+    inferValueKind,
+    buildInlineDataSource,
+    buildReportDataSource
 };

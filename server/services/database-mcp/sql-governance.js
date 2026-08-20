@@ -109,15 +109,59 @@ function buildGroupCountSql(input = {}, dialect = 'postgres', fallbackSchema = '
 }
 
 function applySqlLimit(sql, limit, dialect) {
+    const text = String(sql || '').trim();
+    const boundedLimit = clampLimit(limit, 100);
     if (
-        /\blimit\s+\d+\b/i.test(sql)
-        || /^\s*select\s+top\s*(?:\(\s*\d+\s*\)|\d+\b)/i.test(sql)
-        || /^\s*(show|describe|desc|explain)\b/i.test(sql)
-    ) return sql;
+        /\blimit\s+\d+\b/i.test(text)
+        || /^\s*select\s+top\s*(?:\(\s*\d+\s*\)|\d+\b)/i.test(text)
+        || /^\s*(show|describe|desc|explain)\b/i.test(text)
+    ) return text;
     if (dialect === 'sqlserver') {
-        return sql.replace(/^\s*select\s+/i, `SELECT TOP (${limit}) `);
+        // SQL Server CTE 必须以分号/;WITH 开始，TOP 需要注入到 CTE 最终 SELECT。
+        // 无法可靠定位最终 SELECT 时拒绝执行，避免绕过 max_rows。
+        if (/^with\b/i.test(text)) {
+            const selectIndex = findTopLevelSelectAfterWith(text);
+            if (selectIndex < 0) {
+                const err = new Error('SQL Server CTE 查询无法安全应用行数限制，请改写为明确的 SELECT。');
+                err.status = 400;
+                throw err;
+            }
+            return `${text.slice(0, selectIndex)}SELECT TOP (${boundedLimit}) ${text.slice(selectIndex + 6).trimStart()}`;
+        }
+        return text.replace(/^\s*select\s+/i, `SELECT TOP (${boundedLimit}) `);
     }
-    return `${sql}\nLIMIT ${limit}`;
+    return `${text}\nLIMIT ${boundedLimit}`;
+}
+
+function findTopLevelSelectAfterWith(sql) {
+    let depth = 0;
+    let quote = '';
+    let lineComment = false;
+    let blockComment = false;
+    for (let index = 0; index < sql.length; index += 1) {
+        const ch = sql[index];
+        const next = sql[index + 1];
+        if (lineComment) {
+            if (ch === '\n' || ch === '\r') lineComment = false;
+            continue;
+        }
+        if (blockComment) {
+            if (ch === '*' && next === '/') { blockComment = false; index += 1; }
+            continue;
+        }
+        if (quote) {
+            if (ch === quote && sql[index + 1] === quote) { index += 1; continue; }
+            if (ch === quote) quote = '';
+            continue;
+        }
+        if (ch === '-' && next === '-') { lineComment = true; index += 1; continue; }
+        if (ch === '/' && next === '*') { blockComment = true; index += 1; continue; }
+        if (ch === '\'' || ch === '"' || ch === '`') { quote = ch; continue; }
+        if (ch === '(') { depth += 1; continue; }
+        if (ch === ')') { depth = Math.max(0, depth - 1); continue; }
+        if (depth === 0 && /^select\b/i.test(sql.slice(index))) return index;
+    }
+    return -1;
 }
 
 function hasTableAllowlist(cfg = {}) {
@@ -128,11 +172,31 @@ function hasFieldAllowlist(cfg = {}) {
     return cfg.field_allowlist && typeof cfg.field_allowlist === 'object' && Object.keys(cfg.field_allowlist).length > 0;
 }
 
+function defaultPolicySchema(cfg = {}) {
+    const configured = normalizePolicyIdentifier(cfg.schema || '');
+    if (configured) return configured;
+    return String(cfg.database_type || '').toLowerCase() === 'postgres' ? 'public' : '';
+}
+
 function isTableAllowed(cfg = {}, table = '') {
     if (!hasTableAllowlist(cfg)) return true;
     const target = normalizePolicyIdentifier(table);
-    const targetBase = baseIdentifier(table);
-    return cfg.table_allowlist.some(item => item === target || baseIdentifier(item) === targetBase);
+    if (!target) return false;
+    return cfg.table_allowlist.some(item => {
+        const allowed = normalizePolicyIdentifier(item);
+        if (!allowed) return false;
+        // A qualified reference must match a qualified policy exactly. This prevents
+        // public.users from authorizing private.users with the same base name.
+        if (target.includes('.') || allowed.includes('.')) {
+            if (target === allowed) return true;
+            const defaultSchema = defaultPolicySchema(cfg);
+            if (!defaultSchema) return false;
+            if (!target.includes('.') && allowed === `${defaultSchema}.${target}`) return true;
+            if (!allowed.includes('.') && target === `${defaultSchema}.${allowed}`) return true;
+            return false;
+        }
+        return target === allowed;
+    });
 }
 
 function assertTableAllowed(cfg = {}, table = '') {
@@ -149,11 +213,18 @@ function allowedFieldsForTable(cfg = {}, table = '') {
     const fields = cfg.field_allowlist || {};
     const key = normalizePolicyIdentifier(table);
     const base = baseIdentifier(table);
-    return Array.from(new Set([
+    const values = [
         ...(fields['*'] || []),
-        ...(fields[key] || []),
-        ...(fields[base] || [])
-    ].map(normalizePolicyIdentifier).filter(Boolean)));
+        ...(fields[key] || [])
+    ];
+    if (!key.includes('.')) {
+        values.push(...(fields[base] || []));
+    } else {
+        const defaultSchema = defaultPolicySchema(cfg);
+        const [schemaName] = key.split('.');
+        if (defaultSchema && schemaName === defaultSchema) values.push(...(fields[base] || []));
+    }
+    return Array.from(new Set(values.map(normalizePolicyIdentifier).filter(Boolean)));
 }
 
 function assertFieldAllowed(cfg = {}, table = '', field = '') {
@@ -168,7 +239,9 @@ function assertFieldAllowed(cfg = {}, table = '', field = '') {
 }
 
 function getTableNameFromRow(row = {}) {
-    return row.table_name || row.name || row.TABLE_NAME || row.table || '';
+    const schema = row.table_schema || row.schema || row.TABLE_SCHEMA || '';
+    const table = row.table_name || row.name || row.TABLE_NAME || row.table || '';
+    return schema && table ? `${schema}.${table}` : table;
 }
 
 function getColumnNameFromRow(row = {}) {
@@ -250,6 +323,32 @@ function splitTopLevelCsv(text = '') {
     return parts;
 }
 
+const SQL_EXPRESSION_KEYWORDS = new Set([
+    'all', 'and', 'any', 'as', 'asc', 'between', 'by', 'case', 'desc', 'distinct',
+    'else', 'end', 'false', 'filter', 'from', 'group', 'having', 'in', 'is', 'like',
+    'not', 'null', 'on', 'or', 'over', 'partition', 'select', 'then', 'true', 'when',
+    'where', 'window', 'with'
+]);
+
+function extractExpressionFieldRefs(expression = '') {
+    const text = String(expression || '')
+        .replace(/'([^']|'')*'/g, ' ')
+        .replace(/["`]/g, '');
+    const refs = [];
+    const pattern = /\b[A-Za-z_][\w$]*(?:\s*\.\s*[A-Za-z_][\w$]*){0,2}\b/g;
+    let match;
+    while ((match = pattern.exec(text))) {
+        const compact = match[0].replace(/\s+/g, '');
+        const next = text.slice(pattern.lastIndex).match(/^\s*(.)/)?.[1] || '';
+        const parts = compact.split('.');
+        if (SQL_EXPRESSION_KEYWORDS.has(compact.toLowerCase()) || next === '(') continue;
+        const field = parts[parts.length - 1];
+        const qualifier = parts.length > 1 ? parts[parts.length - 2] : '';
+        if (!refs.some(ref => ref.field === field && ref.qualifier === qualifier)) refs.push({ field, qualifier });
+    }
+    return refs;
+}
+
 function extractSqlTables(sql = '') {
     const tables = [];
     const text = String(sql || '').replace(/["'`]/g, '');
@@ -262,23 +361,50 @@ function extractSqlTables(sql = '') {
     return tables;
 }
 
-function extractSelectFields(sql = '') {
+function extractSelectFieldRefs(sql = '') {
     const text = String(sql || '').trim();
     const match = text.match(/^\s*select\s+(.+?)\s+from\s+/is);
     if (!match) return [];
     return splitTopLevelCsv(match[1]).map(item => {
-        const withoutAlias = item
-            .replace(/\s+as\s+[A-Za-z_][\w$]*$/i, '')
-            .replace(/\s+[A-Za-z_][\w$]*$/i, '')
-            .trim();
-        if (withoutAlias === '*') return '*';
-        const identifierMatch = withoutAlias.match(/^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?$/);
-        return identifierMatch ? baseIdentifier(identifierMatch[0]) : '';
+        let withoutAlias = item.replace(/\s+as\s+[A-Za-z_][\w$]*$/i, '').trim();
+        // 仅对函数闭合括号后的隐式别名做兼容处理；表达式末尾的真实字段
+        // （例如 amount + secret）必须保留并继续经过字段白名单校验。
+        const implicitAlias = withoutAlias.match(/^(.*\))\s+[A-Za-z_][\w$]*$/s);
+        if (implicitAlias) withoutAlias = implicitAlias[1].trim();
+        if (withoutAlias === '*') return { field: '*', qualifier: '', expression: false };
+        const wildcardMatch = withoutAlias.match(/^([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\.\*$/);
+        if (wildcardMatch) return { field: '*', qualifier: normalizePolicyIdentifier(wildcardMatch[1]), expression: false };
+        const identifierMatch = withoutAlias.match(/^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*){0,2}$/);
+        if (!identifierMatch) return { field: '__expression__', qualifier: '', expression: true, refs: extractExpressionFieldRefs(withoutAlias) };
+        const normalized = normalizePolicyIdentifier(identifierMatch[0]);
+        const parts = normalized.split('.');
+        if (parts[parts.length - 1] === '*') return { field: '*', qualifier: parts[parts.length - 2] || '', expression: false };
+        return { field: parts[parts.length - 1], qualifier: parts.length > 1 ? parts[parts.length - 2] : '', expression: false };
     }).filter(Boolean);
+}
+
+function extractSelectFields(sql = '') {
+    return extractSelectFieldRefs(sql).map(item => item.field);
+}
+
+function extractSqlTableRefs(sql = '') {
+    const text = String(sql || '').replace(/["'`]/g, '');
+    const refs = [];
+    const reserved = new Set(['join', 'left', 'right', 'inner', 'outer', 'full', 'cross', 'where', 'group', 'order', 'having', 'limit', 'on', 'union']);
+    const pattern = /\b(?:from|join)\s+([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)(?:\s+(?:as\s+)?([A-Za-z_][\w$]*))?/ig;
+    let match;
+    while ((match = pattern.exec(text))) {
+        const table = normalizePolicyIdentifier(match[1]);
+        const candidateAlias = normalizePolicyIdentifier(match[2] || '');
+        const alias = candidateAlias && !reserved.has(candidateAlias) ? candidateAlias : baseIdentifier(table);
+        if (table && !refs.some(item => item.table === table && item.alias === alias)) refs.push({ table, alias });
+    }
+    return refs;
 }
 
 function assertSqlGovernance(sql = '', cfg = {}) {
     const tables = extractSqlTables(sql);
+    const refs = extractSqlTableRefs(sql);
     if (hasTableAllowlist(cfg) && /^\s*select\b/i.test(sql) && tables.length === 0) {
         const err = new Error('表白名单已启用，复杂 SQL 需要改写为能明确识别 FROM/JOIN 表名的查询。');
         err.status = 403;
@@ -286,8 +412,8 @@ function assertSqlGovernance(sql = '', cfg = {}) {
     }
     tables.forEach(table => assertTableAllowed(cfg, table));
     if (hasFieldAllowlist(cfg)) {
-        const fields = extractSelectFields(sql);
-        if (fields.includes('*')) {
+        const fields = extractSelectFieldRefs(sql);
+        if (fields.some(item => item.field === '*')) {
             const err = new Error('字段白名单已启用，请使用明确字段名，不能 SELECT *。');
             err.status = 403;
             throw err;
@@ -297,16 +423,22 @@ function assertSqlGovernance(sql = '', cfg = {}) {
             err.status = 403;
             throw err;
         }
-        fields.forEach(field => {
-            if (!/^\d+$/.test(field)) {
-                const allowed = tables.length
-                    ? tables.some(table => {
-                        try {
-                            assertFieldAllowed(cfg, table, field);
-                            return true;
-                        } catch (e) {
-                            return false;
-                        }
+        fields.forEach(fieldRef => {
+            const expressionRefs = fieldRef.expression ? fieldRef.refs : [fieldRef];
+            // COUNT(*) and constant-only expressions do not expose a source field.
+            if (!expressionRefs.length) return;
+            expressionRefs.forEach(expressionRef => {
+                const field = expressionRef.field;
+                if (/^\d+$/.test(field)) return;
+                const matchingRefs = expressionRef.qualifier
+                    ? refs.filter(ref => ref.alias === expressionRef.qualifier || baseIdentifier(ref.table) === expressionRef.qualifier)
+                    : refs;
+                // Unqualified fields are ambiguous in joins. Require them to be allowed
+                // by every referenced table; qualified fields must resolve to one table.
+                const candidates = matchingRefs.length ? matchingRefs : (expressionRef.qualifier ? [] : refs);
+                const allowed = candidates.length
+                    ? candidates.every(ref => {
+                        try { assertFieldAllowed(cfg, ref.table, field); return true; } catch (e) { return false; }
                     })
                     : allowedFieldsForTable(cfg, '*').includes(normalizePolicyIdentifier(field));
                 if (!allowed) {
@@ -314,7 +446,7 @@ function assertSqlGovernance(sql = '', cfg = {}) {
                     err.status = 403;
                     throw err;
                 }
-            }
+            });
         });
     }
     return { tables };
@@ -370,6 +502,8 @@ module.exports = {
     maskSensitiveRows,
     splitTopLevelCsv,
     extractSqlTables,
+    extractSqlTableRefs,
+    extractSelectFieldRefs,
     extractSelectFields,
     assertSqlGovernance,
     buildDatabaseCost

@@ -49,8 +49,9 @@ async function formatToolList(user, options = {}) {
             description: `[${tool.serverName}] ${tool.description || tool.name}`,
             input_schema: tool.input_schema,
             source: 'mcp',
-            risk: 'high',
-            requiresApproval: true,
+            risk: tool.governance?.riskLevel || 'high',
+            requiresApproval: Boolean(tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
+            governance: tool.governance || {},
             serverName: tool.serverName,
             owner: tool.owner || null
         }))
@@ -108,6 +109,19 @@ function buildGenericDatabaseTools(tools = []) {
         });
     return [...grouped.entries()].map(([name, items]) => {
         const first = items[0] || {};
+        const governance = items.reduce((current, item) => {
+            const next = item.governance || {};
+            if (!current) return next;
+            return {
+                ...current,
+                riskLevel: next.riskLevel === 'high' || current.riskLevel === 'high'
+                    ? 'high'
+                    : next.riskLevel === 'medium' || current.riskLevel === 'medium' ? 'medium' : 'low',
+                approvalRequired: Boolean(current.approvalRequired || next.approvalRequired),
+                enabled: Boolean(current.enabled && next.enabled)
+            };
+        }, null) || {};
+        const risk = governance.riskLevel || 'low';
         const connections = items.map(tool => ({
             serverId: String(tool.serverId ?? ''),
             connectionId: String(tool.serverId ?? ''),
@@ -122,8 +136,9 @@ function buildGenericDatabaseTools(tools = []) {
             description: first.description || name,
             input_schema: buildDatabaseToolSchema(first.input_schema, connections),
             source: 'mcp',
-            risk: 'low',
-            requiresApproval: false,
+            risk,
+            requiresApproval: Boolean(governance.approvalRequired || risk === 'high'),
+            governance,
             serverName: 'Database connections',
             databaseTool: true,
             databaseConnections: connections

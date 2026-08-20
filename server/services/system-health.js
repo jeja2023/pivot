@@ -80,6 +80,24 @@ function checkDiskUsage(dir) {
     };
 }
 
+function checkWriteQueue() {
+    try {
+        const { getQueueDiagnostics } = require('./db-write-queue');
+        const queues = getQueueDiagnostics();
+        const pending = Object.values(queues).reduce((sum, item) => sum + Number(item.pending || 0), 0);
+        const dropped = Object.values(queues).reduce((sum, item) => sum + Number(item.dropped || 0), 0);
+        return {
+            status: dropped > 0 ? 'degraded' : 'ok',
+            pending,
+            dropped,
+            queues,
+            message: dropped > 0 ? `写入队列累计丢弃 ${dropped} 条记录` : `写入队列待处理 ${pending} 条记录`
+        };
+    } catch (e) {
+        return { status: 'error', message: e.message };
+    }
+}
+
 function overallStatus(checks) {
     const statuses = checks.map(item => item.status);
     if (statuses.includes('error')) return 'error';
@@ -120,7 +138,8 @@ function getSystemHealthSnapshot(options = {}) {
         { name: 'dataDir', ...checkWritableDirectory('Data directory', dataDir) },
         { name: 'uploadsDir', ...checkWritableDirectory('Uploads directory', uploadDir) },
         { name: 'memory', ...checkMemory() },
-        { name: 'disk', ...checkDiskUsage(dataDir) }
+        { name: 'disk', ...checkDiskUsage(dataDir) },
+        { name: 'writeQueue', ...checkWriteQueue() }
     ];
 
     const snapshot = {
@@ -137,6 +156,7 @@ module.exports = {
     checkDatabase,
     checkDiskUsage,
     checkMemory,
+    checkWriteQueue,
     checkWritableDirectory,
     getPublicSystemHealthSnapshot,
     getSystemHealthSnapshot,

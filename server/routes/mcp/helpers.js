@@ -89,10 +89,14 @@ function normalizeExternalServerConfig(payload = {}) {
     const authMode = String(pickConfigValue(payload, current, 'auth_mode', 'authMode', 'auto')).toLowerCase();
     const allowedAuthMode = ['auto', 'bearer', 'x-api-key', 'none'].includes(authMode) ? authMode : 'auto';
     const timeoutMs = Math.max(1000, Math.min(Number(pickConfigValue(payload, current, 'timeout_ms', 'timeoutMs', 20000)) || 20000, 120000));
+    const protocolMode = ['legacy', 'standard'].includes(String(pickConfigValue(payload, current, 'protocol_mode', 'protocolMode', 'legacy')).toLowerCase())
+        ? String(pickConfigValue(payload, current, 'protocol_mode', 'protocolMode', 'legacy')).toLowerCase()
+        : 'legacy';
     return {
         ...current,
         healthCheckUrl: String(pickConfigValue(payload, current, 'health_check_url', 'healthCheckUrl', '')).trim(),
         timeoutMs,
+        protocolMode,
         authMode: allowedAuthMode,
         validateToolSchema: parseBoolean(
             pickConfigValue(payload, current, 'validate_tool_schema', 'validateToolSchema', current.validateToolSchema),

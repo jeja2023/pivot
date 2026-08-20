@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -18,9 +18,10 @@
     "check:no-new-raw-sql": "node scripts/check_no_new_raw_sql.js",
     "audit:policy": "node scripts/check_audit_policy.js",
     "check:safe-html": "node scripts/check_safe_html_usage.js",
+    "check:async_db_calls": "node scripts/check_async_db_calls.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
-    "check": "npm run check:text && npm run check:large-files && npm run check:architecture && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:large-files && npm run check:architecture && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test": "npm run check && npm run lint && npm run test:all",
     "verify": "npm test",

@@ -43,6 +43,7 @@ const { enqueueMcpCallLog } = require('./db-write-queue');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
+const externalMcpSessions = new Map();
 const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.list_tables',
     'db.count_tables',
@@ -353,12 +354,14 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         config = {};
     }
     const timeoutMs = Math.max(1000, Math.min(Number(config.timeoutMs || config.timeout_ms || MCP_TIMEOUT_MS) || MCP_TIMEOUT_MS, 120000));
+    const protocolMode = String(config.protocolMode || config.protocol_mode || 'legacy').toLowerCase() === 'standard' ? 'standard' : 'legacy';
     const authMode = String(config.authMode || config.auth_mode || 'auto').toLowerCase();
     const headers = {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        'Accept': protocolMode === 'standard' ? 'application/json, text/event-stream' : 'application/json',
         'User-Agent': 'Pivot-MCP-Client/1.0'
     };
+    if (protocolMode === 'standard') headers['MCP-Protocol-Version'] = '2024-11-05';
     if (server.api_key && authMode !== 'none') {
         if (authMode === 'bearer') headers.Authorization = `Bearer ${server.api_key}`;
         else if (authMode === 'x-api-key') headers['x-api-key'] = server.api_key;
@@ -367,12 +370,12 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
             headers['x-api-key'] = server.api_key;
         }
     }
-    // 调用时再次校验出站地址，拦截 loopback/link-local/云元数据等 SSRF 目标（含 DNS rebinding）。
-    const response = await safeJsonPost(url, {
+    const sessionKey = String(server.id || url);
+    const send = async (requestMethod, requestParams, requestHeaders, notification = false) => safeJsonPost(url, {
         jsonrpc: '2.0',
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        method,
-        params
+        ...(notification ? {} : { id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
+        method: requestMethod,
+        params: requestParams
     }, {
         user,
         assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
@@ -380,14 +383,52 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
             allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
             allowExplicitLoopbackForAdmin: true
         }),
-        headers,
+        headers: requestHeaders,
         timeout: timeoutMs,
-        signal: options.signal || null
+        signal: options.signal || null,
+        maxContentLength: 4 * 1024 * 1024
     });
-    if (response.data?.error) {
-        throw new Error(response.data.error.message || JSON.stringify(response.data.error));
+    const parseResponse = (response, strict = protocolMode === 'standard') => {
+        let data = response.data;
+        if (typeof data === 'string') {
+            const events = data.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).filter(Boolean);
+            const candidate = events.at(-1) || data.trim();
+            try { data = JSON.parse(candidate); } catch (e) { throw new Error('MCP 服务返回了无法解析的 JSON-RPC 响应。'); }
+        }
+        if (!data || (strict && data.jsonrpc !== '2.0')) throw new Error('MCP 服务返回了无效的 JSON-RPC 响应。');
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        return data.result;
+    };
+    if (protocolMode === 'standard' && method !== 'initialize' && !externalMcpSessions.has(sessionKey)) {
+        const initResponse = await send('initialize', {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            clientInfo: { name: 'Pivot-MCP-Client', version: '0.1.12' }
+        }, headers);
+        parseResponse(initResponse, true);
+        const initHeaders = initResponse.headers || {};
+        const sessionId = initHeaders['mcp-session-id'] || initHeaders['Mcp-Session-Id'];
+        if (sessionId) externalMcpSessions.set(sessionKey, String(sessionId));
+        const sessionHeaders = { ...headers };
+        if (sessionId) sessionHeaders['Mcp-Session-Id'] = String(sessionId);
+        await send('notifications/initialized', {}, sessionHeaders, true);
     }
-    return response.data?.result;
+    if (protocolMode === 'standard') {
+        const sessionId = externalMcpSessions.get(sessionKey);
+        if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+    }
+    const response = await send(method, params, headers);
+    const result = parseResponse(response);
+    if (protocolMode === 'standard' && method === 'initialize') {
+        const sessionId = response.headers?.['mcp-session-id'] || response.headers?.['Mcp-Session-Id'];
+        const initializedHeaders = { ...headers };
+        if (sessionId) {
+            externalMcpSessions.set(sessionKey, String(sessionId));
+            initializedHeaders['Mcp-Session-Id'] = String(sessionId);
+        }
+        await send('notifications/initialized', {}, initializedHeaders, true);
+    }
+    return result;
 }
 
 async function upsertToolCache(serverId, tools = []) {
@@ -590,8 +631,18 @@ async function executeMcpTool(fullName, input, user, options = {}) {
     const serverType = String(server.base_url || '').startsWith('pivot-db://')
         ? 'database_connection'
         : 'mcp_server';
+    // 工具缓存是服务当前实际暴露能力的唯一目录。执行前重新校验，避免
+    // 通过猜测工具名调用远程服务未声明、已删除或尚未刷新进缓存的工具。
+    const cachedTools = await listCachedMcpTools(Number(server.id), user);
+    const cachedTool = cachedTools.find(tool => String(tool.name || '') === String(match[2] || ''));
+    if (!cachedTool) {
+        const err = new Error('工具不在当前 MCP 服务缓存中，请先刷新工具列表。');
+        err.status = 404;
+        err.code = 'MCP_TOOL_NOT_CACHED';
+        throw err;
+    }
     const { isToolCapabilityEnabled } = require('./capability-market');
-    if (!(await isToolCapabilityEnabled(serverType, String(server.id), match[2], user))) {
+    if (!(await isToolCapabilityEnabled(serverType, String(server.id), cachedTool.name, user))) {
         const err = new Error('该工具已在工具治理中停用。');
         err.status = 403;
         throw err;

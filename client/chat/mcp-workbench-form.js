@@ -147,6 +147,8 @@ function applyMcpRecommendedDefaults(type, mode = 'create') {
         setValueIfEmpty('timeout-ms', '20000', mode);
         const authMode = mcpFormEl('auth-mode', mode);
         if (authMode && !authMode.value) authMode.value = 'auto';
+        const protocolMode = mcpFormEl('protocol-mode', mode);
+        if (protocolMode && !protocolMode.value) protocolMode.value = 'legacy';
     }
     if (type === 'database') {
         setValueIfEmpty('db-max-rows', '200', mode);
@@ -218,7 +220,7 @@ function hasMcpDbAdvancedConfig(database = {}) {
 
 function setMcpFormDefaults(mode = 'create', type = 'external') {
     [
-        'id', 'name', 'url', 'key', 'health-check-url', 'timeout-ms', 'auth-mode',
+        'id', 'name', 'url', 'key', 'health-check-url', 'timeout-ms', 'auth-mode', 'protocol-mode',
         'example-prompts', 'desc', 'db-host', 'db-port', 'db-name', 'db-user',
         'db-password', 'db-schema', 'db-max-rows', 'db-table-allowlist',
         'db-field-allowlist', 'db-sensitive-fields', 'db-row-policy-hint',
@@ -376,6 +378,7 @@ function fillMcpForm(server, mode = 'create') {
         mcpFormEl('health-check-url', mode).value = serverConfig.healthCheckUrl || '';
         mcpFormEl('timeout-ms', mode).value = serverConfig.timeoutMs || '';
         mcpFormEl('auth-mode', mode).value = serverConfig.authMode || 'auto';
+        mcpFormEl('protocol-mode', mode).value = serverConfig.protocolMode || 'legacy';
         mcpFormEl('validate-tool-schema', mode).checked = Boolean(serverConfig.validateToolSchema);
         mcpFormEl('example-prompts', mode).value = (serverConfig.examplePrompts || []).join('\n');
     }

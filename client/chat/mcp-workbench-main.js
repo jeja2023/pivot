@@ -494,8 +494,9 @@ const MCP_TOOL_SAMPLE_INPUTS = {
             { month: '2月', sales: 190 },
             { month: '3月', sales: 300 }
         ],
-        xField: 'month',
-        yFields: ['sales']
+        xAxis: 'month',
+        yAxis: 'sales',
+        aggregation: 'sum'
     },
     'viz.build_table': {
         title: '客户清单',
@@ -517,7 +518,8 @@ const MCP_TOOL_SAMPLE_INPUTS = {
             { name: '任务B', priority: 'low', done: true },
             { name: '任务C', priority: 'high', done: true }
         ],
-        filters: [{ field: 'priority', operator: 'equals', value: 'high' }]
+        filters: { priority: 'high' },
+        matchMode: 'exact'
     },
     'data.group_summary': {
         rows: [
@@ -525,15 +527,16 @@ const MCP_TOOL_SAMPLE_INPUTS = {
             { category: '电子', price: 1499 },
             { category: '服装', price: 199 }
         ],
-        groupBy: ['category'],
-        metrics: [{ field: 'price', agg: 'sum' }, { field: 'price', agg: 'count' }]
+        groupBy: 'category',
+        valueField: 'price',
+        aggregation: 'sum'
     },
     'doc.chunk_text': {
         text: '这是第一段新闻内容。\n\n这是第二段新闻内容，包含更多详细信息。\n\n这是第三段总结。',
-        maxChunkChars: 100
+        maxChars: 200
     },
     'doc.extract_outline': {
-        content: '# 第一章 系统概述\n\n系统由前端与后端组成。\n\n## 1.1 架构设计\n\n采用微内核架构。\n\n# 第二章 部署指南'
+        text: '# 第一章 系统概述\n\n系统由前端与后端组成。\n\n## 1.1 架构设计\n\n采用微内核架构。\n\n# 第二章 部署指南'
     },
     'doc.extract_key_values': {
         text: '姓名：张三\n职位：高级工程师\n入职日期：2024-01-15'
@@ -558,14 +561,14 @@ const MCP_TOOL_SAMPLE_INPUTS = {
     'db.list_tables': {},
     'db.count_tables': {},
     'db.describe_table': {
-        tableName: 'users'
+        table: 'users'
     },
     'db.run_readonly_query': {
         sql: 'SELECT 1 AS test_status, current_timestamp AS test_time;'
     },
     'db.group_count': {
-        tableName: 'users',
-        field: 'role'
+        table: 'users',
+        groupBy: 'role'
     },
     'reports.list_files': {
         limit: 5
@@ -573,7 +576,7 @@ const MCP_TOOL_SAMPLE_INPUTS = {
     'im.list_allowed_targets': {},
     'im.send_markdown': {
         target: 'test_group',
-        content: '**测试消息**：智枢工具单步测试'
+        markdown: '**测试消息**：智枢工具单步测试'
     }
 };
 
@@ -998,6 +1001,7 @@ function collectMcpExternalPayload(mode = 'create') {
         health_check_url: mcpFormEl('health-check-url', mode)?.value.trim(),
         timeout_ms: mcpFormEl('timeout-ms', mode)?.value,
         auth_mode: mcpFormEl('auth-mode', mode)?.value || 'auto',
+        protocol_mode: mcpFormEl('protocol-mode', mode)?.value || 'legacy',
         validate_tool_schema: mcpFormEl('validate-tool-schema', mode)?.checked || false,
         example_prompts: mcpFormEl('example-prompts', mode)?.value || ''
     };

@@ -54,6 +54,10 @@
                             <option value="x-api-key">x-api-key</option>
                             <option value="none">不发送密钥</option>
                         </select>
+                        <select id="mcp-edit-protocol-mode" class="form-input" title="外部 MCP 协议模式">
+                            <option value="legacy">兼容 JSON-RPC（无会话）</option>
+                            <option value="standard">标准 MCP HTTP（初始化会话）</option>
+                        </select>
                         <label class="mcp-shared-row mcp-inline-check">
                             <input type="checkbox" id="mcp-edit-validate-tool-schema"> 校验工具 Schema
                         </label>
