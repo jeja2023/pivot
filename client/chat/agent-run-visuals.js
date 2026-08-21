@@ -152,6 +152,18 @@ function agentDagNodeDisplayTitle(node = {}) {
     return looksTechnical ? agentToolTitle(tool || key || title) : title;
 }
 
+function agentDagConditionLabel(condition) {
+    const raw = String(condition || '').trim().toLowerCase();
+    if (!raw || raw === 'none' || raw === 'null' || raw === 'undefined') return '无限制';
+    const labels = {
+        success: '上游成功时',
+        always: '始终执行',
+        failure: '上游失败时',
+        error: '上游异常时'
+    };
+    return labels[raw] || condition;
+}
+
 function agentDagNodeMarkup(node, index = null) {
     const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
@@ -200,7 +212,7 @@ function agentDagNodeMarkup(node, index = null) {
                             <span><em>前置步骤</em><strong>${agentEscape(depText)}</strong></span>
                             <span><em>尝试次数</em><strong>${Number(node.attempt_count || 0)} 次</strong></span>
                             <span><em>耗时</em><strong>${agentEscape(agentRunDurationLabel(node.duration_ms))}</strong></span>
-                            <span><em>执行条件</em><strong>${agentEscape(node.condition || '无')}</strong></span>
+                            <span><em>执行条件</em><strong>${agentEscape(agentDagConditionLabel(node.condition))}</strong></span>
                         </div>
                         ${(input || output) ? `
                             <div class="agent-dag-node-folders">

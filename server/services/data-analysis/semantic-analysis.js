@@ -32,6 +32,12 @@ const DEFAULT_BATCH_TOKEN_BUDGET = 24000;
 const MAX_BATCH_TOKEN_BUDGET = 60000;
 const DEFAULT_BATCH_MAX_ATTEMPTS = 3;
 const MAX_BATCH_SEGMENTS = Math.max(5, Math.min(60, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_SEGMENTS || '30', 10) || 30));
+// 每个结果项都需要 row_id、chunk 和 result。为输出 JSON 预留固定空间后，
+// 按每个分块的保守输出成本限制子批次大小，避免 30 个分块在 2400 tokens
+// 的输出上限下被模型截断。实际响应仍会经过完整性校验和递归拆分。
+const SEMANTIC_OUTPUT_RESERVE_TOKENS = 512;
+const SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT = 96;
+const SEMANTIC_SPLIT_MAX_DEPTH = 8;
 const JOB_STALE_LOCK_MINUTES = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_STALE_LOCK_MINUTES || '30', 10) || 30);
 const JOB_MAX_ATTEMPTS = Math.max(1, Math.min(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_ATTEMPTS || '3', 10) || 3));
 const JOB_WORKER_LIMIT = 1;
@@ -461,15 +467,58 @@ function normalizeBatchResult(content, expectedSegments = []) {
     }));
     const missing = Array.from(expectedKeys).filter(key => !returnedKeys.has(key));
     if (!parsed || !Array.isArray(parsed.items) || missing.length > 0) {
-        const err = new Error(`模型未完整返回本批语义结果，缺少 ${missing.length || expectedSegments.length} 个记录/分块。`);
+        const missingSegments = expectedSegments.filter(segment => !returnedKeys.has(JSON.stringify([String(segment.rowId), segment.chunkIndex])));
+        const missingCount = missingSegments.length || expectedSegments.length;
+        const err = new Error(`模型未完整返回本批语义结果，缺少 ${missingCount} 个记录/分块。`);
         err.code = 'SEMANTIC_BATCH_INCOMPLETE';
         err.status = 502;
+        err.missingSegments = missingSegments;
+        err.partial = parsed && Array.isArray(parsed.items) ? parsed : null;
         throw err;
     }
     return {
         parsed: parsed || null,
         summary: clampText(summary || content || '模型未返回批次摘要。', 1800),
         itemCount: items.length
+    };
+}
+
+function semanticBatchOutputLimit(maxOutputTokens) {
+    const outputBudget = Math.max(256, Number.parseInt(maxOutputTokens, 10) || 2400);
+    const available = outputBudget - SEMANTIC_OUTPUT_RESERVE_TOKENS;
+    return Math.max(1, Math.min(MAX_BATCH_SEGMENTS, Math.floor(available / SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT)));
+}
+
+function buildSemanticSubBatch(batch, segments) {
+    const rows = Array.from(new Set(segments.map(segment => segment.rowNo)));
+    return {
+        ...batch,
+        segments,
+        segment_count: segments.length,
+        row_count: rows.length,
+        char_count: segments.reduce((sum, segment) => sum + segment.charCount, 0)
+    };
+}
+
+function mergeSemanticBatchResults(left, right) {
+    const items = [
+        ...(Array.isArray(left?.parsed?.items) ? left.parsed.items : []),
+        ...(Array.isArray(right?.parsed?.items) ? right.parsed.items : [])
+    ];
+    const summary = [left?.summary, right?.summary].filter(Boolean).join('\n');
+    const usage = {
+        inputTokens: Number(left?.usage?.inputTokens || 0) + Number(right?.usage?.inputTokens || 0),
+        outputTokens: Number(left?.usage?.outputTokens || 0) + Number(right?.usage?.outputTokens || 0),
+        totalTokens: Number(left?.usage?.totalTokens || 0) + Number(right?.usage?.totalTokens || 0)
+    };
+    const parsed = { batch_summary: summary, items };
+    return {
+        parsed,
+        summary: clampText(summary || '模型未返回批次摘要。', 1800),
+        itemCount: items.length,
+        responseText: JSON.stringify(parsed),
+        usage,
+        contextBudget: left?.contextBudget || right?.contextBudget || null
     };
 }
 
@@ -493,6 +542,79 @@ function buildBatchMessages(job, batch, options) {
         JSON.stringify(entries)
     ].join('\n');
     return [{ role: 'system', content: system }, { role: 'user', content: user }];
+}
+
+async function analyzeSemanticBatchSegments({ job, batch, segments, options, user, model, depth = 0 }) {
+    const maxOutputTokens = options.maxOutputTokens || 2400;
+    const outputLimit = semanticBatchOutputLimit(maxOutputTokens);
+    if (segments.length > outputLimit && depth < SEMANTIC_SPLIT_MAX_DEPTH) {
+        const splitAt = Math.ceil(segments.length / 2);
+        const left = await analyzeSemanticBatchSegments({
+            job,
+            batch,
+            segments: segments.slice(0, splitAt),
+            options,
+            user,
+            model,
+            depth: depth + 1
+        });
+        const right = await analyzeSemanticBatchSegments({
+            job,
+            batch,
+            segments: segments.slice(splitAt),
+            options,
+            user,
+            model,
+            depth: depth + 1
+        });
+        return mergeSemanticBatchResults(left, right);
+    }
+
+    const payload = buildSemanticSubBatch(batch, segments);
+    const messages = buildBatchMessages(job, payload, { totalBatches: options.totalBatches });
+    await ensureSemanticQuota(user, model, messages, maxOutputTokens);
+    const response = await callModelTextWithBudget({
+        modelCfg: model,
+        user,
+        messages,
+        source: 'data_analysis_semantic_batch',
+        maxTokens: maxOutputTokens,
+        maxOutputTokensCap: maxOutputTokens,
+        temperature: 0.1
+    });
+    try {
+        const normalized = normalizeBatchResult(response.content, segments);
+        return {
+            ...normalized,
+            responseText: response.content,
+            usage: response.usage,
+            contextBudget: response.contextBudget
+        };
+    } catch (err) {
+        if (err.code !== 'SEMANTIC_BATCH_INCOMPLETE' || segments.length <= 1 || depth >= SEMANTIC_SPLIT_MAX_DEPTH) throw err;
+        // 截断响应通常已经消耗了全部输出预算。将原批次二分后重新请求，
+        // 比重复发送同样的 30 个分块更可能在模型上限内得到完整 JSON。
+        const splitAt = Math.ceil(segments.length / 2);
+        const left = await analyzeSemanticBatchSegments({
+            job,
+            batch,
+            segments: segments.slice(0, splitAt),
+            options,
+            user,
+            model,
+            depth: depth + 1
+        });
+        const right = await analyzeSemanticBatchSegments({
+            job,
+            batch,
+            segments: segments.slice(splitAt),
+            options,
+            user,
+            model,
+            depth: depth + 1
+        });
+        return mergeSemanticBatchResults(left, right);
+    }
 }
 
 async function ensureSemanticQuota(user, model, messages, maxOutputTokens) {
@@ -568,21 +690,17 @@ async function processSemanticAnalysisJob(job) {
             return;
         }
         try {
-            const messages = buildBatchMessages(job, batchPayload, { totalBatches: batches.length });
-            await ensureSemanticQuota(user, model, messages, options.maxOutputTokens || 1200);
-            const response = await callModelTextWithBudget({
-                modelCfg: model,
+            const normalized = await analyzeSemanticBatchSegments({
+                job,
+                batch: batchPayload,
+                segments: batchPayload.segments,
+                options: { ...options, totalBatches: batches.length },
                 user,
-                messages,
-                source: 'data_analysis_semantic_batch',
-                maxTokens: options.maxOutputTokens || 1200,
-                maxOutputTokensCap: options.maxOutputTokens || 1200,
-                temperature: 0.1
+                model
             });
-            const normalized = normalizeBatchResult(response.content, batchPayload.segments);
             await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.succeeded, {
-                resultText: response.content,
-                result: { ...normalized, usage: response.usage, contextBudget: response.contextBudget }
+                resultText: normalized.responseText,
+                result: normalized
             });
             await execute(`
                 UPDATE analysis_semantic_jobs
@@ -719,5 +837,7 @@ module.exports = {
     cancelSemanticAnalysisJob,
     triggerSemanticAnalysisWorker,
     buildSemanticSegments,
-    normalizeBatchTokenBudget
+    normalizeBatchTokenBudget,
+    normalizeBatchResult,
+    semanticBatchOutputLimit
 };

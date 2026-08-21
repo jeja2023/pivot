@@ -48,10 +48,24 @@ const agentToolDisplayMap = {
     flow_rule: { title: '流程规则', description: '按照工作流规则推进任务。' },
     'agent.llm': { title: '大模型节点', description: '在工作流中调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。' },
     'agent.content_review': { title: '富文本内容校对', description: '清洗富文本记录，按上下文预算逐条校对并生成完整报告。' },
+    'agent.delegate': { title: '委派智能体', description: '调用独立模型运行具名专家，返回专家结果并自动附带结构化交接上下文。' },
+    'agent.handoff': { title: '智能体交接', description: '将已有结论、证据、风险和待决问题整理为结构化交接文档。' },
+    'agent.code': { title: '代码执行', description: '在受限沙箱中执行 JavaScript 代码对数据进行转换与计算。' },
+    'agent.http': { title: 'HTTP 请求', description: '调用外部 REST API 并返回状态码与响应数据。' },
+    'agent.merge': { title: '变量聚合', description: '把多个上游节点的输出合并为一个结构化对象。' },
+    'workflow.input': { title: '工作流输入', description: '声明并读取运行参数，支持类型转换与默认值。' },
+    'workflow.output': { title: '工作流输出', description: '声明工作流最终输出，便于按名称读取交付结果。' },
+    'workflow.condition': { title: '条件路由', description: '比较输入值并返回匹配路由，供下游条件分支引用。' },
+    'workflow.approval': { title: '人工审批', description: '暂停工作流等待指定人员审批，支持多级审批与超时策略。' },
+    'workflow.foreach': { title: '循环 / 批处理', description: '对列表逐项执行受限转换并汇总结果。' },
+    'workflow.subworkflow': { title: '子工作流', description: '调用另一个已发布工作流。' },
+    'workflow.delay': { title: '延时等待', description: '挂起工作流到指定时间后继续执行。' },
+    'report.compose': { title: '报告编排', description: '将摘要和章节组装为结构化 Markdown 报告。' },
     'rag.search': { title: '知识库检索', description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。' },
     'sessions.search': { title: '会话检索', description: '按关键词检索当前用户的历史会话内容。' },
     'sessions.recent': { title: '最近会话', description: '列出当前用户最近的未删除会话。' },
     'knowledge.list': { title: '知识库文档', description: '列出当前用户的知识库文档及索引状态。' },
+    'knowledge.graph.query': { title: '知识图谱查询', description: '查询知识图谱中的实体与关联关系。' },
     'models.list': { title: '可用模型', description: '列出当前用户可以使用的模型。' },
     'system.health': { title: '系统健康', description: '查看数据库、存储、内存和磁盘健康状态。' },
     'system.modelRuntime': { title: '模型运行状态', description: '查看模型端点队列、熔断器和监控状态。' },
@@ -63,7 +77,21 @@ const agentToolDisplayMap = {
     'db.list_collections': { title: '列出集合', description: '列出 MongoDB 数据库集合。' },
     'db.count_collections': { title: '统计集合数量', description: '统计 MongoDB 数据库中的集合数量。' },
     'db.sample_collection': { title: '读取集合样本', description: '读取 MongoDB 集合的小样本，辅助理解字段结构。' },
-    'db.aggregate': { title: 'Mongo 聚合查询', description: '执行只读统计分析聚合管道。' }
+    'db.aggregate': { title: 'Mongo 聚合查询', description: '执行只读统计分析聚合管道。' },
+    'reports.list_files': { title: '列出报表文件', description: '列出授权目录中的 Excel/CSV 报表文件。' },
+    'reports.read_file_summary': { title: '读取文件摘要', description: '读取报表文件结构、工作表列表和字段信息。' },
+    'reports.query_table': { title: '查询报表数据', description: '对指定数据表或 Sheet 进行结构化查询与过滤。' },
+    'reports.compare_files': { title: '比对报表差异', description: '比对两个报表文件或 Sheet 之间的数据变动。' },
+    'im.list_allowed_targets': { title: '列出通讯录目标', description: '列出允许发送消息的用户或群组。' },
+    'im.send_user_message': { title: '发送私聊消息', description: '向指定用户发送即时通讯消息。' },
+    'im.send_group_message': { title: '发送群组消息', description: '向指定群组发送即时通讯消息。' },
+    'im.send_markdown': { title: '发送富文本通知', description: '向用户或群组发送 Markdown 格式通知。' },
+    'code.python_execute': { title: 'Python 脚本执行', description: '在隔离沙箱中执行 Python 数据处理与建模脚本。' },
+    'code.duckdb_query': { title: 'DuckDB 高性能查询', description: '使用 DuckDB 列式引擎对多格式数据进行快速 SQL 分析。' },
+    'browser.navigate': { title: '浏览器访问页面', description: '在受控浏览器沙箱中打开目标页面。' },
+    'browser.extract_text': { title: '网页内容提取', description: '提取当前网页的正文结构与关键文本。' },
+    'filesystem.read_workspace': { title: '读取工作区文件', description: '读取任务受控工作区内的文件内容。' },
+    'filesystem.write_workspace': { title: '写入工作区文件', description: '在任务受控工作区内安全保存生成的文件。' }
 };
 
 function agentToolShortName(toolOrName) {
@@ -144,6 +172,10 @@ function agentStepTitle(step) {
     if (raw === 'tool') return `调用工具：${agentToolTitle(step?.tool_name)}`;
     if (raw === 'dag_node') return `工作流节点：${agentToolTitle(step?.tool_name)}`;
     if (raw === 'control') return '任务控制';
+    if (raw === 'thought') return '思考推理';
+    if (raw === 'action') return '执行动作';
+    if (raw === 'approval') return '人工审批';
+    if (raw === 'note') return '执行记录';
     if (raw === 'Planning') return '规划下一步';
     if (raw.startsWith('Tool failed: ')) return `工具调用失败：${agentToolTitle(raw.replace('Tool failed: ', ''))}`;
     if (raw.startsWith('Tool: ')) return `调用工具：${agentToolTitle(raw.replace('Tool: ', ''))}`;

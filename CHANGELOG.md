@@ -1,3 +1,20 @@
+## [v0.1.14] - 2026-08-21
+
+### 工作流与自主任务执行面板全量中文化、富文本步骤详情与长文本语义批次加固
+
+- **富文本内容校对步骤详情中文化**：
+  - 全面补齐 `agent.content_review` 产物及指标字典（`stats` → 指标统计、`records` → 校对明细、`artifact` → 任务产物、`reviewComplete` → 校对完成、`sourceRowCount` → 原始数据行数、`processedRecords` → 已处理记录数、`incompleteRecords` → 未完整处理记录数、`titleIssues` → 标题问题数、`contentIssues` → 正文问题数、`chunkTokens` → 分块 Token 预算、`overlapTokens` → 重叠 Token 数 等）。
+  - 产物类型（`content_review_report` → 内容校对报告）、问题类别（错别字、标点符号、敏感词汇等）与字段名实现标准化中文直译，杜绝原英文驼峰与枚举泄露。
+- **任务执行面板与工作流节点中文化**：
+  - 覆盖所有 48+ 种工作流与内置工具（`agent.delegate` → 委派智能体、`agent.handoff` → 智能体交接、`workflow.condition` → 条件路由、`workflow.approval` → 人工审批、`report.compose` → 报告编排、`rag.search` → 知识库检索、`code.python_execute` → Python 脚本执行 等）标准中文标题与用途说明。
+  - DAG 节点执行条件（`condition`：`success` → 上游成功时、`always` → 始终执行、`failure` → 上游失败时、空 → 无限制）与 24 种生命周期状态（`queued`、`planning`、`executing`、`waiting_approval`、`continued_error`、`issues_found`、`passed` 等）全面本地化。
+  - 引入动态子词与复合后缀智能翻译机制，对任意动态扩展字段（`*Count`、`*List`、`*Name`、`*Type`、`*Status`、`*Percent` 等）自动按语义组合翻译。
+- **全量长文本语义分析批次拆分与恢复加固**：
+  - 语义分析批次自动根据 Token 输出预算动态计算子批次上限，在单批次记录较多时递归拆分并发处理，避免超出模型最大输出长度。
+  - 新增截断响应（`SEMANTIC_BATCH_INCOMPLETE`）自动二分重试与结果合并机制，保证极端长文本下的结果完整性。
+- **回归与自动化测试**：
+  - 新增前端中文化专项测试 `tests/client-agent-chinese-ui.test.js`；全量测试套件扩充至 `510/510` 全部通过；静态规范检查与 ESLint 零警告通过。
+
 ## [v0.1.13] - 2026-08-21
 
 ### 全自主 Agent 执行治理、桌面执行面与 PostgreSQL 生产闭环

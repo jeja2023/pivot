@@ -92,24 +92,47 @@ function agentNotificationBody(item) {
 function agentStatusLabel(status) {
     const map = {
         awaiting_approval: '等待审批',
+        approval_required: '待审批',
+        waiting_approval: '待审批',
         queued: '排队中',
+        planning: '规划中',
+        executing: '执行中',
+        observing: '观察中',
+        diagnosing: '诊断中',
+        replanning: '重规划中',
+        resuming: '恢复中',
+        pending: '待执行',
         running: '运行中',
         completed: '已完成',
         completed_with_errors: '完成但有错误',
+        continued_error: '失败后继续',
+        issues_found: '存在问题',
+        passed: '未发现问题',
+        incomplete: '未完整处理',
+        success: '成功',
         error: '失败',
+        failed: '失败',
         cancelled: '已停止',
-        approval_required: '待审批'
+        skipped: '已跳过',
+        deleted: '已删除'
     };
-    return map[status] || status || '-';
+    return map[String(status || '').trim().toLowerCase()] || status || '-';
 }
 
 function isAgentRunActive(status) {
-    return status === 'queued' || status === 'running' || status === 'approval_required' || status === 'awaiting_approval';
+    return status === 'queued' || status === 'running' || status === 'approval_required' || status === 'awaiting_approval' || status === 'waiting_approval';
 }
 
 function agentRunModeLabel(mode) {
-    const map = { standard: '标准模式', deep: '深度模式', audit: '审查模式', dag: '工作流' };
-    return map[mode] || '标准模式';
+    const map = {
+        standard: '标准模式',
+        deep: '深度模式',
+        audit: '审查模式',
+        dag: '工作流',
+        free: '自主任务',
+        scheduled: '计划任务'
+    };
+    return map[String(mode || '').trim().toLowerCase()] || '标准模式';
 }
 
 function agentToolPolicyLabel(policy) {
