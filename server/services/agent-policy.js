@@ -18,12 +18,19 @@ function normalizeAllowlist(value) {
 
 function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null } = {}) {
     const tool = normalizeToolContract(rawTool);
-    if (tool.name === 'agent.content_review' && input && typeof input === 'object') {
-        if (!input.records) {
-            input.records = input.rows ?? input.data ?? input.items ?? input.content ?? input.text ?? input.articles ?? input.news_list ?? input.results;
+    if (input && typeof input === 'object') {
+        if (input.model !== undefined && input.model !== null) {
+            input.model = typeof input.model === 'object'
+                ? String(input.model.id || input.model.model_name || input.model.name || '')
+                : String(input.model);
         }
-        if (!input.model) {
-            input.model = run.model_id || run.modelId || '';
+        if (tool.name === 'agent.content_review') {
+            if (!input.records) {
+                input.records = input.rows ?? input.data ?? input.items ?? input.content ?? input.text ?? input.articles ?? input.news_list ?? input.results;
+            }
+            if (!input.model || typeof input.model !== 'string' || !input.model.trim()) {
+                input.model = String(run.model_id || run.modelId || '');
+            }
         }
     }
     const policy = String(run.tool_policy || run.toolPolicy || 'all');

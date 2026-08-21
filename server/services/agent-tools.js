@@ -81,7 +81,7 @@ function getBuiltInToolDefinitions(user) {
                 records: { description: '待校对记录，支持记录数组、structuredContent、rows、data 或对应的上游变量引用。' },
                 rows: { description: '待校对记录数组（records 别名）。' },
                 data: { description: '待校对记录数组（records 别名）。' },
-                model: { type: 'string', description: '可选模型 ID 或 model_name；留空时默认使用当前任务模型。' },
+                model: { description: '可选模型 ID 或 model_name；留空时默认使用当前任务模型。' },
                 idField: { type: 'string', default: 'id', maxLength: 128, description: '记录唯一标识字段。' },
                 titleField: { type: 'string', default: 'title', maxLength: 128, description: '记录标题字段。' },
                 contentField: { type: 'string', default: 'content', maxLength: 128, description: '包含 HTML、富文本或普通正文的字段。' },

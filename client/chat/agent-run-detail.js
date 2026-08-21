@@ -382,7 +382,7 @@ window.openAgentRun = async function(runId, options = {}) {
         checkpoints,
         isActive: isAgentRunActive(run.status)
     });
-    const processExpanded = ['error', 'approval_required', 'running', 'queued'].includes(runStatus) || String(run.run_mode || '') === 'dag' ? ' open' : '';
+    const processExpanded = ' open';
     const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流节点配置' : '');
     const technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
@@ -502,7 +502,7 @@ function startAgentWorkflowPreviewPolling(runId, isPreview = false) {
             const run = await window.openAgentRun(runId, { workflowPreview: isPreview, silent: true });
             if (run && !isAgentRunActive(run.status)) stopAgentWorkflowPreviewPolling();
         } catch (e) {}
-    }, 2000);
+    }, 1500);
 }
 
 function ensureAgentAuditModal() {

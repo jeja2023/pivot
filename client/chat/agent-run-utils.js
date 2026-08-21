@@ -119,8 +119,13 @@ function agentStatusLabel(status) {
     return map[String(status || '').trim().toLowerCase()] || status || '-';
 }
 
+const AGENT_ACTIVE_STATUS_SET = new Set([
+    'queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming',
+    'approval_required', 'awaiting_approval', 'waiting_approval'
+]);
+
 function isAgentRunActive(status) {
-    return status === 'queued' || status === 'running' || status === 'approval_required' || status === 'awaiting_approval' || status === 'waiting_approval';
+    return AGENT_ACTIVE_STATUS_SET.has(String(status || '').trim().toLowerCase());
 }
 
 function agentRunModeLabel(mode) {
