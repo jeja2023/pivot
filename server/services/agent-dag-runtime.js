@@ -4,6 +4,8 @@ const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWor
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
 const { listDagNodes, listSteps } = require('./agent-runs');
+const { recordAgentToolCall } = require('./agent-tool-audit');
+const { diagnoseError } = require('./agent-diagnosis');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { inspectDagTopology, normalizeDagSpec, parseJsonObject } = require('./agent-validators');
 const {
@@ -263,7 +265,7 @@ async function upsertDagNode(runId, node, patch = {}) {
     return inserted?.id;
 }
 
-async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, executionContext = {} }, deps) {
+async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex = 0, executionContext = {} }, deps) {
     const startedAt = Date.now();
     const startedAtText = getBeijingTimestamp();
     let lastError = null;
@@ -273,6 +275,9 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         attempted = attempt;
         await deps.assertRunNotCancelled(run.id);
         try {
+            executionContext.autonomous = true;
+            executionContext.stepId = `${run.id}:${node.id}:${attempt}`;
+            executionContext.stepIndex = stepIndex;
             const remainingRunMs = Math.max(deadline - Date.now(), 1);
             const nodeOwnsDeadline = policy.timeoutMs < remainingRunMs;
             const output = await deps.withTimeout(
@@ -284,6 +289,21 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                     timeoutCode: nodeOwnsDeadline ? 'AGENT_NODE_TIMEOUT' : 'AGENT_TIMEOUT'
                 }
             );
+            try {
+                await recordAgentToolCall({
+                    runId: run.id,
+                    stepId: `${run.id}:${node.id}:${attempt}`,
+                    toolName: node.tool,
+                    input: resolvedInput,
+                    output,
+                    policyDecision: 'allow',
+                    status: 'success',
+                    durationMs: Date.now() - startedAt,
+                    attempt
+                });
+            } catch (auditError) {
+                throw auditError;
+            }
             return {
                 ok: true,
                 output,
@@ -308,6 +328,24 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             });
             if (attempt >= attempts) break;
         }
+    }
+    try {
+        await recordAgentToolCall({
+            runId: run.id,
+            stepId: `${run.id}:${node.id}:${attempted || 1}`,
+            toolName: node.tool,
+            input: resolvedInput,
+            output: { error: lastError?.message || '执行失败' },
+            policyDecision: lastError?.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+            status: 'error',
+            errorCategory: diagnoseError(lastError || new Error('DAG 节点执行失败')).category,
+            errorMessage: lastError?.message || '执行失败',
+            durationMs: Date.now() - startedAt,
+            attempt: attempted || 1
+        });
+    } catch (auditError) {
+        auditError.cause = lastError;
+        throw auditError;
     }
     return {
         ok: false,
@@ -406,12 +444,15 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
                 dagInputs,
                 workflowApprovalResult,
                 workflowDelayResult,
+                budget: deps.taskBudget,
+                approvalGranted: true,
+                allowApproval: true,
                 executeSubworkflow: childInput => executeSubworkflowDag({
                     input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack
                 })
             };
             const result = await executeDagNodeWithPolicy({
-                run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, executionContext
+                run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: 0, executionContext
             }, deps);
             if (result.ok) {
                 states.set(node.id, { status: 'completed', input: resolvedInput, output: result.output, compactOutput: clampText(result.output, 12000) });
@@ -578,6 +619,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             : batchController.signal;
         const batchResults = await Promise.allSettled(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {
             batchSignal.throwIfAborted();
+            deps.taskBudget?.consumeStep();
             const nodeStepIndex = stepIndex;
             stepIndex += 1;
             const selectedTool = findAgentToolByName(node.tool, toolList);
@@ -658,13 +700,18 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 const executionContext = {
                     dagInputs,
                     signal: batchSignal,
+                    budget: deps.taskBudget,
+                    // Reaching this point means the approval helper either found
+                    // a prior grant or determined that this tool is safe to run.
+                    approvalGranted: true,
+                    allowApproval: true,
                     workflowApprovalResult,
                     workflowDelayResult,
                     executeSubworkflow: childInput => executeSubworkflowDag({
                         input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: subworkflowStack
                     })
                 };
-                const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, executionContext }, deps);
+                const result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: nodeStepIndex, executionContext }, deps);
                 await deps.assertRunNotCancelled(run.id);
                 if (!result.ok) {
                     result.error.dagAttempt = result.attempt;

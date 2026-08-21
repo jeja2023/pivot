@@ -122,6 +122,9 @@ const {
     syncAgentTraceFromRun
 } = require('../agent-traces');
 const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
+const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
+const { diagnoseError } = require('../agent-diagnosis');
+const { recordAgentToolCall } = require('../agent-tool-audit');
 const {
     configureAgentApprovalRequests,
     runApprovalTimeouts,
@@ -137,12 +140,13 @@ const { createApprovalHelpers } = require('./approvals');
 
 let agentQueue = null;
 const activeRunControllers = new Map();
+const taskBudgetsBySignal = new WeakMap();
 let agentRecoveryTimer = null;
 const createAgentNotification = createAgentNotificationFactory({
     getTimestamp: getBeijingTimestamp,
     publishUserEvent
 });
-const { shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers({
+const { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers({
     getRunMetadata,
     normalizeApprovalPolicy,
     getTimestamp: getBeijingTimestamp,
@@ -163,7 +167,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
         'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
         'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
-        'input_tokens', 'output_tokens', 'total_tokens'
+        'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
     ];
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (entries.length === 0) return 0;
@@ -229,7 +233,7 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
         'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
         'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
-        'input_tokens', 'output_tokens', 'total_tokens'
+        'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
     ];
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (!entries.length) return 0;
@@ -397,6 +401,8 @@ async function createChildRunFromExisting(run, user) {
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
         maxTokenBudget: run.max_token_budget,
+        budgetConfig: parseJsonObject(run.budget_config) || {},
+        networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,
         scheduleId: run.schedule_id,
         contextConfig: parseJsonObject(run.context_config) || {},
@@ -497,6 +503,8 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
         maxTokenBudget: run.max_token_budget,
+        budgetConfig: parseJsonObject(run.budget_config) || {},
+        networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,
         scheduleId: run.schedule_id,
         contextConfig: parseJsonObject(run.context_config) || {},
@@ -546,6 +554,8 @@ async function resumeAgentRun(runId, user) {
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
         maxTokenBudget: run.max_token_budget,
+        budgetConfig: parseJsonObject(run.budget_config) || {},
+        networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,
         scheduleId: run.schedule_id,
         contextConfig: parseJsonObject(run.context_config) || {},
@@ -660,7 +670,8 @@ async function insertStep(runId, stepIndex, data = {}) {
     }
 }
 
-function getAgentRuntimeDeps(signal = null) {
+function getAgentRuntimeDeps(signal = null, taskBudget = null) {
+    const effectiveTaskBudget = taskBudget || taskBudgetsBySignal.get(signal) || null;
     return {
         agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
@@ -669,6 +680,7 @@ function getAgentRuntimeDeps(signal = null) {
         createAgentNotification,
         getAgentRunTitle,
         getRunMetadata,
+        isApprovalGranted,
         insertStep,
         isMissingFinalAnswer,
         listSteps,
@@ -682,7 +694,8 @@ function getAgentRuntimeDeps(signal = null) {
         startAgentTraceSpan,
         updateRun,
         withTimeout,
-        signal
+        signal,
+        taskBudget: effectiveTaskBudget
     };
 }
 
@@ -690,6 +703,7 @@ async function runAgent(runId, user) {
     const runController = new AbortController();
     activeRunControllers.set(runId, runController);
     let deadlineTimer = null;
+    let taskBudget = null;
     try {
         await assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
@@ -702,6 +716,12 @@ async function runAgent(runId, user) {
         });
         assertRunNotCancelled(runId);
         const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
+        const budgetConfig = parseJsonObject(run.budget_config) || {};
+        taskBudget = new TaskBudget(normalizeTaskBudget(budgetConfig), {
+            startedAt: Date.now(),
+            enabled: true
+        });
+        taskBudgetsBySignal.set(runController.signal, taskBudget);
         deadlineTimer = setTimeout(() => {
             const error = new Error('智能体运行超时。');
             error.code = 'AGENT_TIMEOUT';
@@ -714,6 +734,7 @@ async function runAgent(runId, user) {
                 err.code = 'AGENT_TIMEOUT';
                 throw err;
             }
+            taskBudget.assertWithin();
         };
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
         const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
@@ -790,13 +811,14 @@ async function runAgent(runId, user) {
         assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
         await updateRun(runId, {
-            status: 'running',
+            status: 'planning',
             started_at: run.started_at || startedAt,
             last_heartbeat_at: startedAt,
             updated_at: startedAt
         });
 
         if (dagRun) {
+            await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
             await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps(runController.signal));
             return;
         }
@@ -808,13 +830,15 @@ async function runAgent(runId, user) {
         if (isStreamingToolsEnabled()) {
             const streamingResult = await tryRunAgentStreaming({
                 run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
-            }, getAgentRuntimeDeps(runController.signal));
+            }, getAgentRuntimeDeps(runController.signal, taskBudget));
             if (streamingResult?.completed) return;
             roundsUsed = Math.min(Math.max(Number(streamingResult?.roundsUsed || 0), 0), maxSteps);
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
         for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
+            taskBudget.consumeStep();
+            await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
@@ -841,7 +865,7 @@ async function runAgent(runId, user) {
                 });
                 throw plannerError;
             }
-            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId);
+            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, { budget: taskBudget });
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
@@ -854,7 +878,7 @@ async function runAgent(runId, user) {
             });
 
             if (plan.action === 'final' || !plan.tool) {
-                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal: runController.signal });
+                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal: runController.signal, budget: taskBudget });
                 await updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
@@ -868,15 +892,23 @@ async function runAgent(runId, user) {
 
             const startedAt = Date.now();
             try {
+                await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
                 await assertRunUserActive(user);
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = findAgentToolByName(plan.tool, toolList);
-                if (await maybePauseForApproval(run, selectedTool, plan.input || {})) return;
+                const approvalKey = `${runId}:${step}:${plan.tool}`;
+                if (await maybePauseForApproval(run, selectedTool, plan.input || {}, approvalKey)) return;
                 const toolContext = {
                     run,
                     modelCfg,
+                    autonomous: true,
+                    stepId: `${runId}:${step}`,
+                    stepIndex: step,
+                    budget: taskBudget,
+                    approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, plan.input || {}),
+                    allowApproval: isApprovalGranted(run, plan.tool, approvalKey, plan.input || {}),
                     waitForWorkflowDelay,
                     delayKey: plan.tool === 'workflow.delay'
                         ? stableWorkflowDelayKey(plan.tool, step, plan.input || {})
@@ -891,6 +923,7 @@ async function runAgent(runId, user) {
                 assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 const compactOutput = compactToolOutputForModel(output, modelCfg);
+                await updateRun(runId, { status: 'observing', updated_at: getBeijingTimestamp() });
                 observations.push({
                     step,
                     tool: plan.tool,
@@ -905,24 +938,77 @@ async function runAgent(runId, user) {
                     output: compactOutput,
                     durationMs: Date.now() - startedAt
                 });
+                try {
+                    await recordAgentToolCall({
+                        runId,
+                        stepId: `${runId}:${step}`,
+                        toolName: plan.tool,
+                        input: plan.input || {},
+                        output: compactOutput,
+                        policyDecision: 'allow',
+                        status: 'success',
+                        durationMs: Date.now() - startedAt
+                    });
+                } catch (auditError) {
+                    throw auditError;
+                }
+                taskBudget.recordSuccess();
             } catch (toolErr) {
                 if (toolErr.code === 'AGENT_APPROVAL_REQUIRED') throw toolErr;
+                if (toolErr.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {
+                    const now = getBeijingTimestamp();
+                    await setRunMetadata(runId, {
+                        pendingApproval: {
+                            tool: plan.tool,
+                            key: `${runId}:${step}:${plan.tool}`,
+                            input: plan.input || {},
+                            inputHash: approvalInputHash(plan.input || {}),
+                            requestedAt: now,
+                            expiresAt: getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
+                            recovery: true
+                        }
+                    });
+                    await updateRun(runId, { status: 'approval_required', error_message: '检测到未完成的非幂等工具调用，需要重新审批。', updated_at: now, last_heartbeat_at: now });
+                    await createAgentNotification(run.user_id, run.id, 'approval', '恢复任务需要重新审批', plan.tool);
+                    return;
+                }
+                await updateRun(runId, { status: 'diagnosing', updated_at: getBeijingTimestamp() });
                 observations.push({
                     step,
                     tool: plan.tool,
                     input: plan.input || {},
                     error: toolErr.message
                 });
+                const diagnosis = diagnoseError(toolErr, { tool: plan.tool, step });
+                taskBudget.recordError();
                 await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
                     input: plan.input || {},
-                    output: { error: toolErr.message },
+                    output: { error: toolErr.message, diagnosis },
                     errorMessage: toolErr.message,
                     status: 'error',
                     durationMs: Date.now() - startedAt
                 });
+                try {
+                    await recordAgentToolCall({
+                        runId,
+                        stepId: `${runId}:${step}`,
+                        toolName: plan.tool,
+                        input: plan.input || {},
+                        output: { error: toolErr.message, diagnosis },
+                        policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+                        status: 'error',
+                        errorCategory: diagnosis.category,
+                        errorMessage: toolErr.message,
+                        durationMs: Date.now() - startedAt
+                    });
+                } catch (auditError) {
+                    auditError.cause = toolErr;
+                    throw auditError;
+                }
+                if (step < maxSteps) await updateRun(runId, { status: 'replanning', updated_at: getBeijingTimestamp() });
             }
         }
 
@@ -945,7 +1031,7 @@ async function runAgent(runId, user) {
         });
         let answer;
         try {
-            answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
+            answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal, budget: taskBudget }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
             await finishAgentTraceSpan(summarySpanId, {
                 output: { responseLength: String(answer || '').length },
                 durationMs: Date.now() - summaryStartedAt
@@ -979,7 +1065,7 @@ async function runAgent(runId, user) {
                         await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
                             modelCfg.id, getBeijingTimestamp(), runId
                         ]);
-                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
+                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal, budget: taskBudget }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
                     }
                 } catch (escErr) {
                     logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
@@ -1061,6 +1147,9 @@ async function runAgent(runId, user) {
     } finally {
         if (deadlineTimer) clearTimeout(deadlineTimer);
         if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
+        if (taskBudget) {
+            try { await updateRun(runId, { usage_stats: JSON.stringify(taskBudget.snapshot()), updated_at: getBeijingTimestamp() }); } catch (_) {}
+        }
         await syncAgentTraceFromRun(runId);
     }
 }
@@ -1074,12 +1163,12 @@ async function recoverAgentRuns() {
     const cutoff = getBeijingTimestamp(new Date(Date.now() - (AGENT_STALE_RUNNING_MINUTES * 60 * 1000)));
     const staleRunning = await query(`
         SELECT id FROM agent_runs
-        WHERE status = 'running'
+        WHERE status IN ('running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming')
           AND deleted_at IS NULL
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
     `, [cutoff]);
     for (const run of staleRunning) {
-        const changed = await updateRunCas(run.id, ['running'], {
+        const changed = await updateRunCas(run.id, ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming'], {
             status: 'error',
             error_message: '服务已重启或心跳超时，任务已标记为失败。',
             completed_at: now,
@@ -1157,8 +1246,20 @@ async function approveAgentTool(runId, user, approve = true) {
     const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
     if (pending.key) approvedApprovalKeys.add(pending.key);
     else if (pending.tool) approvedTools.add(pending.tool);
+    const approvalGrant = {
+        tool: pending.tool || '',
+        key: pending.key || '',
+        inputHash: pending.inputHash || approvalInputHash(pending.input || {}),
+        grantedAt: now,
+        expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000))
+    };
+    const approvalGrants = Array.isArray(metadata.approvalGrants)
+        ? metadata.approvalGrants.filter(item => item && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()))
+        : [];
+    approvalGrants.push(approvalGrant);
     await setRunMetadata(runId, {
         pendingApproval: null,
+        approvalGrants,
         approvedTools: [...approvedTools],
         approvedApprovalKeys: [...approvedApprovalKeys]
     });
@@ -1250,6 +1351,8 @@ async function createAgentRun({
     toolTimeoutMs = AGENT_TOOL_TIMEOUT_MS,
     retryLimit = 1,
     maxTokenBudget = 0,
+    budgetConfig = {},
+    networkPolicy = {},
     templateId = null,
     scheduleId = null,
     contextConfig = {},
@@ -1344,9 +1447,13 @@ async function createAgentRun({
                 id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
                 priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
                 retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
-                metadata, model_router, created_at, updated_at
+                metadata, model_router, budget_config, usage_stats, network_policy, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
         `, [
             runId,
             user.id,
@@ -1373,6 +1480,9 @@ async function createAgentRun({
             normalizePositiveInt(resumeFromStep, 0, 0, 999),
             JSON.stringify(runMetadata),
             normalizedRouter,
+            JSON.stringify(normalizeTaskBudget(budgetConfig)),
+            JSON.stringify({}),
+            JSON.stringify(networkPolicy || {}),
             now,
             now
         ]);

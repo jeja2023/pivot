@@ -8,11 +8,12 @@ const Sqlite = require('better-sqlite3');
 const Module = require('node:module');
 
 const migrations = require('../server/db/migrations');
-const { runVersionedMigrations } = require('../server/db/migrations/runner');
+const { hasMigration, runVersionedMigrations } = require('../server/db/migrations/runner');
 
 const migrationId = '202606260001_rag_search_content_backfill';
 const deletedUsernameMigrationId = '202607150001_release_deleted_usernames';
 const refreshTokenMigrationId = '202607310001_hash_refresh_tokens';
+const agentExecutionLedgerMigrationId = '202608210002_agent_execution_ledger';
 const sampleText = 'alpha \u4e2d\u6587 \u68c0\u7d22';
 const legacyText = 'legacy \u4e2d\u6587 \u5206\u5757';
 
@@ -65,6 +66,20 @@ function withDbModuleConnection(relativePath, database, callback) {
         });
     }
 }
+
+test('legacy SQLite runner skips PostgreSQL-only migrations', () => {
+    const db = new Sqlite(':memory:');
+    try {
+        const migration = migrations.find(item => item.id === agentExecutionLedgerMigrationId);
+        assert.ok(migration);
+        assert.equal(migration.up, undefined);
+        assert.equal(typeof migration.upPg, 'function');
+        assert.deepEqual(runVersionedMigrations(db, [migration]), []);
+        assert.equal(hasMigration(db, agentExecutionLedgerMigrationId), false);
+    } finally {
+        db.close();
+    }
+});
 
 test('versioned migrations upgrade legacy RAG chunk snapshots idempotently', () => {
     const db = new Sqlite(':memory:');

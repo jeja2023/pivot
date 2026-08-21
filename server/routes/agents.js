@@ -19,6 +19,9 @@ const {
 } = require('../services/agent-workflow-dependencies');
 const { getAgentTraceForUser } = require('../services/agent-traces');
 const { listAgentCheckpointsForUser } = require('../services/agent-checkpoints');
+const { listAgentToolCalls } = require('../services/agent-tool-audit');
+const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
+const { disableAgentSkill, listAgentSkillsForUser, registerAgentSkill } = require('../services/agent-skills');
 const {
     createAgentEvalSuite,
     deleteAgentEvalSuite,
@@ -96,6 +99,31 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
+    }));
+
+    router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listAgentSkillsForUser(req.user, { includeDisabled: req.query.includeDisabled === 'true' }) });
+    }));
+
+    router.post('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
+        const allowedPermissions = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '')
+            .split(',').map(item => item.trim()).filter(Boolean);
+        const skill = await registerAgentSkill(req.user, req.body?.manifest || req.body?.manifestYaml, req.body?.instructions || '', {
+            // The client cannot widen the permission set. An empty server-side
+            // allowlist intentionally rejects manifests that request privileges.
+            allowedPermissions,
+            requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false' || req.body?.requireSignature === true,
+            publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
+        });
+        logAction(req, '注册 Agent Skill', `Skill: ${skill.name}`);
+        res.status(201).json({ success: true, skill });
+    }));
+
+    router.post('/agents/skills/:name/disable', authMiddleware, asyncHandler(async (req, res) => {
+        const changes = await disableAgentSkill(req.params.name, req.user);
+        if (!changes) return res.status(404).json({ error: 'Skill 不存在或无权操作。' });
+        logAction(req, '停用 Agent Skill', `Skill: ${req.params.name}`);
+        res.json({ success: true });
     }));
 
     router.post('/agents/tools/test', authMiddleware, asyncHandler(async (req, res) => {
@@ -502,6 +530,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
             toolTimeoutMs: req.body?.toolTimeoutMs,
             retryLimit: req.body?.retryLimit,
             maxTokenBudget: req.body?.maxTokenBudget,
+            budgetConfig: req.body?.budgetConfig || req.body?.budget_config,
+            networkPolicy: req.body?.networkPolicy || req.body?.network_policy,
             templateId: req.body?.templateId,
             scheduleId: null,
             dedupeKey: req.get('Idempotency-Key') ? `manual:${String(req.get('Idempotency-Key')).trim().slice(0, 180)}` : null,
@@ -533,6 +563,25 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const checkpoints = await listAgentCheckpointsForUser(req.params.id, req.user, { limit: req.query.limit });
         if (!checkpoints) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json({ data: checkpoints });
+    }));
+
+    router.get('/agents/runs/:id/tool-calls', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        res.json({ data: await listAgentToolCalls(req.params.id, { limit: req.query.limit }) });
+    }));
+
+    router.post('/agents/runs/:id/trace/compile', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const calls = await listAgentToolCalls(req.params.id, { limit: req.body?.limit || 500 });
+        const draft = compileTraceToWorkflow(calls, {
+            title: req.body?.title,
+            variables: req.body?.variables,
+            filterExploration: req.body?.filterExploration !== false
+        });
+        logAction(req, '从智能体 Trace 编译工作流草稿', `任务ID: ${req.params.id}，节点数: ${draft.nodes.length}`);
+        res.json({ success: true, draft });
     }));
 
     router.post('/agents/runs/:id/workflow-draft', authMiddleware, asyncHandler(async (req, res) => {

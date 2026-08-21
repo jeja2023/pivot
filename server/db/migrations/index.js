@@ -429,6 +429,157 @@ const migrations = [
             `);
         }
     },
+    {
+        id: '202608210001_autonomous_agent_runtime_contracts',
+        description: 'Add autonomous Agent budget, tool governance audit, and Skill registry contracts.',
+        up(db) {
+            const runColumns = db.pragma('table_info(agent_runs)');
+            if (runColumns.length) {
+                const existing = new Set(runColumns.map(column => column.name));
+                if (!existing.has('budget_config')) db.exec("ALTER TABLE agent_runs ADD COLUMN budget_config TEXT DEFAULT '{}'");
+                if (!existing.has('usage_stats')) db.exec("ALTER TABLE agent_runs ADD COLUMN usage_stats TEXT DEFAULT '{}'");
+            }
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS agent_tool_calls (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    step_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    capability TEXT DEFAULT 'agent.execute',
+                    risk_level INTEGER DEFAULT 0,
+                    policy_decision TEXT NOT NULL,
+                    policy_version TEXT DEFAULT 'v1',
+                    approval_id TEXT,
+                    idempotent INTEGER DEFAULT 0,
+                    input_payload TEXT DEFAULT '{}',
+                    input_hash TEXT,
+                    output_payload_ref TEXT,
+                    output_hash TEXT,
+                    status TEXT NOT NULL,
+                    error_category TEXT,
+                    error_message TEXT,
+                    duration_ms INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(run_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool ON agent_tool_calls(tool_name);
+                CREATE TABLE IF NOT EXISTS agent_skills (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    version TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    publisher TEXT DEFAULT '',
+                    digest TEXT NOT NULL,
+                    manifest_yaml TEXT NOT NULL,
+                    instructions_md TEXT DEFAULT '',
+                    scope TEXT DEFAULT 'user',
+                    user_id INTEGER,
+                    status TEXT DEFAULT 'enabled',
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_skills_user ON agent_skills(user_id, status, updated_at);
+            `);
+        },
+        async upPg(client) {
+            await client.query(`
+                ALTER TABLE agent_runs
+                    ADD COLUMN IF NOT EXISTS budget_config JSONB DEFAULT '{}'::jsonb,
+                    ADD COLUMN IF NOT EXISTS usage_stats JSONB DEFAULT '{}'::jsonb;
+                CREATE TABLE IF NOT EXISTS agent_tool_calls (
+                    id VARCHAR(64) PRIMARY KEY,
+                    run_id VARCHAR(64) NOT NULL,
+                    step_id VARCHAR(64) NOT NULL,
+                    tool_name VARCHAR(128) NOT NULL,
+                    capability VARCHAR(128) DEFAULT 'agent.execute',
+                    risk_level INTEGER DEFAULT 0,
+                    policy_decision VARCHAR(32) NOT NULL,
+                    policy_version VARCHAR(32) DEFAULT 'v1',
+                    approval_id VARCHAR(64),
+                    idempotent BOOLEAN DEFAULT FALSE,
+                    input_payload JSONB DEFAULT '{}'::jsonb,
+                    input_hash VARCHAR(64),
+                    output_payload_ref TEXT,
+                    output_hash VARCHAR(64),
+                    status VARCHAR(32) NOT NULL,
+                    error_category VARCHAR(32),
+                    error_message TEXT,
+                    duration_ms INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(run_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool ON agent_tool_calls(tool_name);
+                CREATE TABLE IF NOT EXISTS agent_skills (
+                    id VARCHAR(64) PRIMARY KEY,
+                    name VARCHAR(128) UNIQUE NOT NULL,
+                    version VARCHAR(32) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT DEFAULT '',
+                    publisher VARCHAR(128) DEFAULT '',
+                    digest VARCHAR(64) NOT NULL,
+                    manifest_yaml TEXT NOT NULL,
+                    instructions_md TEXT DEFAULT '',
+                    scope VARCHAR(32) DEFAULT 'user',
+                    user_id VARCHAR(64),
+                    status VARCHAR(32) DEFAULT 'enabled',
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_skills_user ON agent_skills(user_id, status, updated_at);
+                COMMENT ON TABLE agent_tool_calls IS '智能体工具调用治理与执行审计表';
+                COMMENT ON TABLE agent_skills IS '企业级 Skill 清单与供应链校验登记表';
+            `);
+        }
+    },
+    {
+        id: '202608210002_agent_execution_ledger',
+        description: 'Add idempotent tool execution ledger, network policy persistence, and Skill tenant ownership.',
+        async upPg(client) {
+            await client.query(`
+                ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS network_policy JSONB DEFAULT '{}'::jsonb;
+                CREATE TABLE IF NOT EXISTS agent_run_checkpoints (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    checkpoint_id VARCHAR(128) NOT NULL UNIQUE,
+                    run_id VARCHAR(128) NOT NULL,
+                    step_index INTEGER DEFAULT 0,
+                    checkpoint_type VARCHAR(32) DEFAULT 'step',
+                    status VARCHAR(32) DEFAULT 'completed',
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
+                );
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS operation_key VARCHAR(255);
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS tool_name VARCHAR(128) DEFAULT '';
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS input_hash VARCHAR(64) DEFAULT '';
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS idempotent BOOLEAN DEFAULT FALSE;
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ;
+                ALTER TABLE agent_run_checkpoints ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 1;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_checkpoints_operation_key ON agent_run_checkpoints(operation_key) WHERE operation_key IS NOT NULL;
+                ALTER TABLE agent_skills DROP CONSTRAINT IF EXISTS agent_skills_name_key;
+                UPDATE agent_skills SET user_id = NULL WHERE user_id IS NOT NULL AND TRIM(user_id) !~ '^[0-9]+$';
+                ALTER TABLE agent_skills ALTER COLUMN user_id TYPE BIGINT USING NULLIF(TRIM(user_id), '')::bigint;
+                ALTER TABLE agent_skills ADD COLUMN IF NOT EXISTS owner_key VARCHAR(255) DEFAULT '';
+                UPDATE agent_skills SET owner_key = CASE WHEN scope IN ('global', 'shared') THEN 'scope:' || scope ELSE 'user:' || COALESCE(user_id::text, '') END WHERE owner_key IS NULL OR owner_key = '';
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_skills_owner_name ON agent_skills(owner_key, name);
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_skills_user_id_fkey') THEN
+                        ALTER TABLE agent_skills ADD CONSTRAINT agent_skills_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                    END IF;
+                END $$;
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_tool_calls_run_id_fkey') THEN
+                        ALTER TABLE agent_tool_calls ADD CONSTRAINT agent_tool_calls_run_id_fkey FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE;
+                    END IF;
+                END $$;
+                ALTER TABLE agent_tool_calls ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 1;
+                ALTER TABLE agent_tool_calls ADD COLUMN IF NOT EXISTS operation_key VARCHAR(255);
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_operation ON agent_tool_calls(operation_key);
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_input_gin ON agent_tool_calls USING gin(input_payload);
+            `);
+        }
+    },
     ...regulationsMigrations
 ];
 

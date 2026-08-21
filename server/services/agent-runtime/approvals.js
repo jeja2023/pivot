@@ -1,3 +1,9 @@
+const crypto = require('crypto');
+
+function approvalInputHash(input) {
+    return crypto.createHash('sha256').update(JSON.stringify(input ?? {})).digest('hex');
+}
+
 function createApprovalHelpers({
     getRunMetadata,
     normalizeApprovalPolicy,
@@ -8,15 +14,23 @@ function createApprovalHelpers({
     listSteps,
     createAgentNotification
 }) {
-    function isApprovalGranted(run, toolName, approvalKey = '') {
+    function isApprovalGranted(run, toolName, approvalKey = '', input = {}) {
         const metadata = getRunMetadata(run);
+        const hash = approvalInputHash(input);
+        const grants = Array.isArray(metadata.approvalGrants) ? metadata.approvalGrants : [];
+        const exactGrant = grants.find(grant => grant
+            && grant.tool === toolName
+            && String(grant.key || '') === String(approvalKey || '')
+            && grant.inputHash === hash
+            && (!grant.expiresAt || Date.parse(grant.expiresAt) > Date.now()));
+        if (grants.length) return Boolean(exactGrant);
         const approvedTools = Array.isArray(metadata.approvedTools) ? metadata.approvedTools : [];
         const approvedKeys = Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : [];
         return (approvalKey && approvedKeys.includes(approvalKey)) || approvedTools.includes(toolName);
     }
 
-    function shouldPauseForApproval(run, tool, approvalKey = '') {
-        if (!tool || isApprovalGranted(run, tool.name, approvalKey)) return false;
+    function shouldPauseForApproval(run, tool, approvalKey = '', input = {}) {
+        if (!tool || isApprovalGranted(run, tool.name, approvalKey, input)) return false;
         if (tool.alwaysRequiresApproval) return true;
         if (tool.source !== 'mcp') return false;
         const policy = normalizeApprovalPolicy(run.approval_policy);
@@ -26,7 +40,7 @@ function createApprovalHelpers({
 
     async function maybePauseForApproval(run, tool, input, approvalKey = '') {
         const scopedKey = String(approvalKey || '').trim();
-        if (!shouldPauseForApproval(run, tool, scopedKey)) return false;
+        if (!shouldPauseForApproval(run, tool, scopedKey, input)) return false;
         const now = getTimestamp();
         await setRunMetadata(run.id, {
             pendingApproval: {
@@ -34,6 +48,8 @@ function createApprovalHelpers({
                 key: scopedKey,
                 title: tool.title || tool.name,
                 requestedAt: now,
+                expiresAt: getTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
+                inputHash: approvalInputHash(input),
                 input
             }
         });
@@ -55,7 +71,7 @@ function createApprovalHelpers({
         return true;
     }
 
-    return { isApprovalGranted, shouldPauseForApproval, maybePauseForApproval };
+    return { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval };
 }
 
 module.exports = { createApprovalHelpers };

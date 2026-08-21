@@ -403,7 +403,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         const initResponse = await send('initialize', {
             protocolVersion: '2024-11-05',
             capabilities: { tools: {} },
-            clientInfo: { name: 'Pivot-MCP-Client', version: '0.1.12' }
+            clientInfo: { name: 'Pivot-MCP-Client', version: '0.1.13' }
         }, headers);
         parseResponse(initResponse, true);
         const initHeaders = initResponse.headers || {};

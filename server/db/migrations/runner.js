@@ -47,6 +47,7 @@ function runVersionedMigrations(db, migrations = [], options = {}) {
     return migrations
         .slice()
         .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .filter(migration => typeof migration?.up === 'function')
         .filter(migration => runVersionedMigration(db, migration, options))
         .map(migration => migration.id);
 }

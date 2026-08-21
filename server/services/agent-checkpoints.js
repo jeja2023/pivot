@@ -1,9 +1,13 @@
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 
 const MAX_CHECKPOINT_STATE_LENGTH = 120000;
 const CHECKPOINT_TYPES = new Set(['plan', 'tool', 'dag', 'approval', 'control']);
+
+function checkpointInputHash(input) {
+    return createHash('sha256').update(JSON.stringify(input ?? {})).digest('hex');
+}
 
 function parseCheckpointState(value) {
     if (!value) return {};
@@ -47,6 +51,52 @@ async function recordAgentCheckpoint(runId, data = {}) {
     } catch (e) {
         return null;
     }
+}
+
+async function beginAgentToolCheckpoint(runId, data = {}) {
+    if (!runId || !data.operationKey || !data.toolName) return { created: false, replay: false };
+    const operationKey = String(data.operationKey).slice(0, 255);
+    const existing = await queryOne('SELECT * FROM agent_run_checkpoints WHERE operation_key = ?', [operationKey]);
+    if (existing) {
+        const state = parseCheckpointState(existing.state);
+        if (String(existing.status) === 'completed') return { created: false, replay: true, output: state.output, checkpointId: existing.checkpoint_id };
+        if (String(existing.status) === 'pending' && !data.idempotent && data.approvalGranted !== true) {
+            const error = new Error('检测到未完成的非幂等工具调用，必须重新审批后才能继续。');
+            error.code = 'AGENT_RECOVERY_REQUIRES_APPROVAL';
+            error.category = 'policy';
+            error.operationKey = operationKey;
+            throw error;
+        }
+        await execute(`UPDATE agent_run_checkpoints SET status = 'pending', attempt = COALESCE(attempt, 1) + 1, state = ? WHERE operation_key = ?`, [
+            serializeCheckpointState({ toolName: data.toolName, input: data.input || {}, inputHash: data.inputHash || checkpointInputHash(data.input), recovery: true, approvalGranted: data.approvalGranted === true }), operationKey
+        ]);
+        return { created: false, replay: false, checkpointId: existing.checkpoint_id, recovered: true };
+    }
+    const checkpointId = randomUUID();
+    await execute(`
+        INSERT INTO agent_run_checkpoints (
+            checkpoint_id, run_id, step_index, checkpoint_type, status, state, created_at,
+            operation_key, tool_name, input_hash, idempotent, attempt
+        ) VALUES (?, ?, ?, 'tool', 'pending', ?, ?, ?, ?, ?, ?, 1)
+    `, [
+        checkpointId, runId, Math.max(Number(data.stepIndex) || 0, 0),
+        serializeCheckpointState({ toolName: data.toolName, input: data.input || {}, inputHash: data.inputHash || checkpointInputHash(data.input) }),
+        data.createdAt || getBeijingTimestamp(), operationKey, String(data.toolName).slice(0, 128), data.inputHash || checkpointInputHash(data.input), Boolean(data.idempotent)
+    ]);
+    return { created: true, replay: false, checkpointId };
+}
+
+async function completeAgentToolCheckpoint(operationKey, output, options = {}) {
+    if (!operationKey) return false;
+    const row = await queryOne('SELECT state FROM agent_run_checkpoints WHERE operation_key = ?', [String(operationKey)]);
+    const current = parseCheckpointState(row?.state);
+    const next = { ...current, output, committed: true, committedAt: getBeijingTimestamp() };
+    const changed = await execute(`
+        UPDATE agent_run_checkpoints
+        SET status = 'completed', state = ?, committed_at = ?, created_at = COALESCE(created_at, ?)
+        WHERE operation_key = ? AND status = 'pending'
+    `, [serializeCheckpointState(next), options.committedAt || getBeijingTimestamp(), options.createdAt || getBeijingTimestamp(), String(operationKey)]);
+    return changed > 0;
 }
 
 async function listAgentCheckpoints(runId, options = {}) {
@@ -125,6 +175,9 @@ async function summarizeAgentCheckpoints(runId) {
 
 module.exports = {
     buildAgentResumeContext,
+    beginAgentToolCheckpoint,
+    checkpointInputHash,
+    completeAgentToolCheckpoint,
     getLatestAgentCheckpoint,
     listAgentCheckpoints,
     listAgentCheckpointsForUser,

@@ -2,6 +2,7 @@ const { queryOne, execute } = require('../db/client');
 const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
+const { normalizeTaskBudget } = require('./agent-budget');
 const {
     buildChatCompletionsUrl,
     buildModelHeaders
@@ -151,7 +152,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
     });
 }
 
-async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '') {
+async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '', options = {}) {
     const inputTokens = estimateTokens(JSON.stringify(messages || []));
     const outputTokens = estimateTokens(output || '');
     recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
@@ -165,12 +166,22 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 updated_at = ?
             WHERE id = ?
         `, [inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId]);
-        const run = await queryOne('SELECT max_token_budget, total_tokens FROM agent_runs WHERE id = ?', [runId]);
+        const run = await queryOne('SELECT max_token_budget, total_tokens, budget_config FROM agent_runs WHERE id = ?', [runId]);
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
             const err = new Error(`智能体任务已超过模型用量上限 ${run.max_token_budget}`);
             err.code = 'AGENT_BUDGET_EXCEEDED';
             throw err;
         }
+        let budgetConfig = {};
+        try { budgetConfig = typeof run?.budget_config === 'string' ? JSON.parse(run.budget_config || '{}') : (run?.budget_config || {}); } catch (_) {}
+        const budget = normalizeTaskBudget(budgetConfig);
+        if (Number.isFinite(budget.max_tokens_total) && Number(budget.max_tokens_total) >= 0 && Number(run?.total_tokens || 0) > budget.max_tokens_total) {
+            const err = new Error(`智能体任务已超过总 Token 预算 ${budget.max_tokens_total}`);
+            err.code = 'AGENT_BUDGET_EXCEEDED';
+            err.category = 'resource';
+            throw err;
+        }
+        if (options.budget?.recordTokens) options.budget.recordTokens(inputTokens + outputTokens);
     }
     return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }

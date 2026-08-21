@@ -307,8 +307,23 @@ async function runAgentScheduleNow(scheduleId, user, options = {}) {
         dedupeKey,
         metadata: scheduledFor ? { scheduledFor } : {}
     });
-    await execute('UPDATE agent_schedules SET last_run_at = ?, last_run_id = ?, updated_at = ? WHERE id = ?', [
-        getBeijingTimestamp(), run.id, getBeijingTimestamp(), schedule.id
+    const now = getBeijingTimestamp();
+    const shouldAdvanceDueSchedule = !scheduledFor
+        && schedule.status === 'active'
+        && schedule.next_run_at
+        && String(schedule.next_run_at) <= now;
+    const nextRunAt = shouldAdvanceDueSchedule
+        ? computeNextScheduleRun(
+            schedule.frequency,
+            schedule.time_of_day,
+            schedule.day_of_week,
+            now,
+            schedule.cron_expression,
+            schedule.interval_minutes
+        )
+        : schedule.next_run_at;
+    await execute('UPDATE agent_schedules SET last_run_at = ?, last_run_id = ?, next_run_at = ?, updated_at = ? WHERE id = ?', [
+        now, run.id, nextRunAt, now, schedule.id
     ]);
     return run;
 }

@@ -2,6 +2,8 @@ const { clampText, executeBuiltInTool } = require('./agent-tools');
 const { executeMcpTool } = require('./mcp-client');
 const { estimateTokens } = require('../llm');
 const { getModelContextBudget } = require('./context-budget');
+const { enforceToolPolicy } = require('./agent-policy');
+const { beginAgentToolCheckpoint, checkpointInputHash, completeAgentToolCheckpoint } = require('./agent-checkpoints');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -112,10 +114,44 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         err.status = 403;
         throw err;
     }
-    if (safeName.startsWith('mcp.')) {
-        return executeMcpTool(safeName, input, user, { source: context.source || 'agent', signal: context.signal || null });
+    // All tool execution paths pass through this guard.  A caller may only
+    // acknowledge an approval after the runtime has created the approval
+    // request; it cannot bypass a deny decision by calling this helper directly.
+    const policyRun = context.run || { tool_policy: 'all', approval_policy: 'approve_all_mcp' };
+    enforceToolPolicy({
+        run: policyRun,
+        tool,
+        input,
+        user,
+        budget: context.budget || null,
+        allowApproval: context.allowApproval === true || context.approvalGranted === true
+    });
+    if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName)) {
+        const error = new Error('自主 Agent 禁止在服务端进程内执行动态代码；请使用桌面 Worker 沙箱。');
+        error.code = 'AGENT_SANDBOX_REQUIRED';
+        error.category = 'policy';
+        throw error;
     }
-    if (tool.databaseTool && safeName.startsWith('db.')) {
+    const runId = context.run?.id || context.runId;
+    const operationKey = runId
+        ? String(context.operationKey || `${runId}:${context.stepId || context.node?.id || 'step'}:${safeName}:${checkpointInputHash(input)}`)
+        : '';
+    if (operationKey) {
+        const checkpoint = await beginAgentToolCheckpoint(runId, {
+            operationKey,
+            stepIndex: context.stepIndex || context.step || 0,
+            toolName: safeName,
+            input,
+            inputHash: checkpointInputHash(input),
+            idempotent: tool.idempotent,
+            approvalGranted: context.approvalGranted === true
+        });
+        if (checkpoint.replay) return checkpoint.output;
+    }
+    let output;
+    if (safeName.startsWith('mcp.')) {
+        output = await executeMcpTool(safeName, input, user, { source: context.source || 'agent', signal: context.signal || null });
+    } else if (tool.databaseTool && safeName.startsWith('db.')) {
         const rawConnectionId = input?.connectionId ?? input?.connection_id ?? input?.databaseConnectionId ?? input?.database_connection_id ?? input?.mcpServerId ?? input?.mcp_server_id;
         const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
         const selectedConnectionId = String(rawConnectionId ?? '').trim()
@@ -136,9 +172,12 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         delete toolInput.database_connection_id;
         delete toolInput.mcpServerId;
         delete toolInput.mcp_server_id;
-        return executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
+        output = await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
+    } else {
+        output = await executeBuiltInTool(safeName, input, user, context);
     }
-    return executeBuiltInTool(safeName, input, user, context);
+    if (operationKey) await completeAgentToolCheckpoint(operationKey, output);
+    return output;
 }
 
 module.exports = {

@@ -4,6 +4,7 @@ const { buildAgentToolSchemas } = require('./agent-tool-catalog');
 const { normalizeMaxSteps, normalizePositiveInt } = require('./agent-validators');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const { compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { recordAgentToolCall } = require('./agent-tool-audit');
 
 // v0.0.49 开始支持 Agent 运行中的流式工具调用。
 function isStreamingToolsEnabled() {
@@ -87,7 +88,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 finishReason: result?.finishReason || null,
                 completed: true
             });
-            await recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId);
+            await recordAgentModelUsage(user, modelCfg, conversation, result?.content || '', 'agent_planner_streaming', runId, { budget: deps.taskBudget });
             roundsUsed += 1;
             await deps.insertStep(runId, step, {
                 type: 'plan',
@@ -102,7 +103,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             });
 
             if (!result?.hasToolCalls) {
-                const answer = result?.content || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId);
+                const answer = result?.content || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { budget: deps.taskBudget });
                 await deps.updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
@@ -134,6 +135,19 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         errorMessage: message,
                         status: 'error'
                     });
+                    await recordAgentToolCall({
+                        runId,
+                        stepId: `${runId}:${step}:${call.id || call.name}`,
+                        operationKey: `${runId}:${step}:${call.id || call.name}`,
+                        toolName: call.name,
+                        input: call.arguments || {},
+                        output: { error: message },
+                        policyDecision: 'allow',
+                        status: 'error',
+                        errorCategory: 'permission',
+                        errorMessage: message,
+                        durationMs: 0
+                    });
                     continue;
                 }
                 if (await deps.maybePauseForApproval(run, selectedTool, call.arguments || {})) {
@@ -153,6 +167,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         signal => executeToolByName(call.name, args, user, toolList, {
                             run,
                             modelCfg,
+                            autonomous: true,
+                            stepId: `${runId}:${step}:${call.id || call.name}`,
+                            stepIndex: step,
+                            budget: deps.taskBudget || null,
+                            approvalGranted: Boolean(deps.getRunMetadata?.(run)?.approvedTools?.includes(call.name)),
+                            allowApproval: Boolean(deps.getRunMetadata?.(run)?.approvedTools?.includes(call.name)),
                             signal,
                             waitForWorkflowDelay: deps.waitForWorkflowDelay,
                             delayKey: call.name === 'workflow.delay' ? `${call.name}:stream:${step}:${call.id || 'call'}` : ''
@@ -171,6 +191,17 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         output: compactOutput,
                         durationMs: Date.now() - callStart
                     });
+                    await recordAgentToolCall({
+                        runId,
+                        stepId: `${runId}:${step}:${call.id || call.name}`,
+                        operationKey: `${runId}:${step}:${call.id || call.name}`,
+                        toolName: call.name,
+                        input: call.arguments || {},
+                        output: compactOutput,
+                        policyDecision: 'allow',
+                        status: 'success',
+                        durationMs: Date.now() - callStart
+                    });
                     conversation.push(buildToolResultMessage(call.id, compactOutput));
                     await deps.finishAgentTraceSpan?.(toolSpanId, {
                         output: compactOutput,
@@ -187,6 +218,19 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         output: { error: toolErr.message },
                         errorMessage: toolErr.message,
                         status: 'error',
+                        durationMs: Date.now() - callStart
+                    });
+                    await recordAgentToolCall({
+                        runId,
+                        stepId: `${runId}:${step}:${call.id || call.name}`,
+                        operationKey: `${runId}:${step}:${call.id || call.name}`,
+                        toolName: call.name,
+                        input: call.arguments || {},
+                        output: { error: toolErr.message },
+                        policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+                        status: 'error',
+                        errorCategory: toolErr.category || 'unknown',
+                        errorMessage: toolErr.message,
                         durationMs: Date.now() - callStart
                     });
                     conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));

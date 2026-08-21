@@ -29,6 +29,7 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.1.13 (2026-08-21) 完成 Pivot 全自主 Agent 执行治理：状态机、队列租约、心跳恢复、预算熔断、网络策略、工具 PEP、审批恢复、幂等账本和持久化检查点形成统一运行闭环；浏览器、数据适配器和 Skill 增加隔离、白名单、签名和工作区 jail；桌面端新增显式审批的 JSONL Worker 与 IPC 执行面；Trace 支持依赖编译，审计大结果使用 Blob 引用；周期计划手动运行推进下一次执行时间；执行账本迁移收口为 PostgreSQL-only。全量 Node 回归 505/505，迁移专项 6/6，Agent/PG 契约 18/18，`npm run check` 与 ESLint 通过。
 - v0.1.5 (2026-08-20) 规划启动用量设计一体化看板融合架构、完成 CI 自动化 PostgreSQL 容器测试与测试运行器时区与并发竞态加固：规划将分散的「用量统计」、「用量明细」与「审计报表」三合一融合为统一的「用量中心 / 用量设计」看板，打通从宏观用量监控、微观明细穿透下钻到审计报表与一键 CSV 结构化导出的全流程闭环；GitHub Actions CI 配置 PostgreSQL 16 自动化服务容器与健康检查，测试运行器支持 CI 数据库连接自动回退；全局注入 `TZ=Asia/Shanghai` 与 `PG_TIMEZONE=Asia/Shanghai` 时区隔离并消除 8 小时断言偏差；修复 `getAgentQueue()` 单例覆盖导致的并发测试抢占竞态；测试运行器启用 `--test-reporter=spec` 错误详情汇总。全量 Node 测试 476/476、`npm run check` 与 ESLint 100% 通过。
 - v0.1.4 (2026-08-19) 完成认证退出与空会话体验优化、可观测性与监控单行布局增强、全链路审计中文化、审计报表导出与 PostgreSQL 自动备份加固：CSRF 豁免 `/auth/logout` 且前端异步等待实现单次退出；空会话恢复静默重置避免错误 Toast；监控面板列宽自适应彻底消除 PostgreSQL 标签截断；慢查询与告警条目增加时间戳并重构为单行流式布局，排除大模型正常推理耗时；全模块（知识库/知识图谱等）补齐审计日志并完成操作与详情全量中文化；新增审计报表 CSV 导出功能（涵盖每日 Token 趋势、用户消耗排行与部门消耗对比）；`pg_dump` 备份实现 Windows 常见路径自动查找与应用 Schema 范围保护。全量 457 个 JS 检查与 ESLint 0 错误 0 警告通过。
 - v0.1.3 (2026-08-19) 完成 PostgreSQL 运维备份、E2E 环境隔离、异步生命周期等待、GPU 容错与跨平台启动优化：接入原生 `pg_dump` 自定义格式热备份引擎，支持超时、环境变量凭据隔离与按天数/版本轮转清理；PostgreSQL 参数占位符引入词法状态机；E2E 测试实现独立 Schema、随机端口与服务隔离；修复 Webhook 异步分发等待与 Electron 本地服务 `initPromise` 初始化等待；GPU 显存水位增加递增校验与安全回退；移除 Windows 专有 `chcp` 前缀支持跨平台/Docker 启动。新增 18 项专项回归，全量 Node 测试 476/476、`npm run check` 与 ESLint 100% 通过。
@@ -95,7 +96,7 @@ This document records optimization work that is intentionally staged instead of 
 - Permission capability payloads now expose policy object types, data classification levels, and organization/team placeholders.
 - Deployment profile payloads describe SQLite WAL single-node defaults, provider contract status, and the Postgres/object-storage/distributed-queue/distributed-lock prerequisites for multi-node mode.
 - CI 使用 `npm run audit:policy` 拦截新增 high/critical 依赖告警；豁免必须登记理由与复查日期，到期自动失效，上游已有修复版本时一律不接受豁免（`tests/audit-policy.test.js` 覆盖该机制）。生产依赖当前无豁免项。
-- CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件，476 项测试 100% 全部通过）。
+- CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件，505 项测试 100% 全部通过）。
 - E2E smoke coverage has a runnable Playwright path through `npm run test:e2e`；`npm run check:e2e-smoke` 保持脚手架检查。支持 `PIVOT_E2E_ISOLATED=true` 启用独立 PostgreSQL Schema、临时目录与随机端口隔离运行。
 - 内置工具库（Built-in MCP）的分发层、格式转换、数据处理与报表目录授权边界已有回归覆盖（`tests/security-builtin-mcp.test.js`），含路径穿越、非白名单扩展名与 CSV 编码断言。
 - 数据库持久化全面支持 PostgreSQL 生产级连接池、79 表元数据字典、参数占位符安全词法转换与原生 `pg_dump`（自定义格式、超时控制、环境变量凭据脱敏、版本/保留天数轮转）热备份体系。

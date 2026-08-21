@@ -12,6 +12,7 @@ const { safeJsonRequest } = require('./safe-http-client');
 const { resolveCredentialSecret } = require('./workflow-credentials');
 const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
+const { assertNetworkPolicyUrl, normalizeNetworkPolicy } = require('./agent-network-policy');
 const {
     normalizeJsonSchema,
     schemaHasRules,
@@ -677,6 +678,21 @@ function executeAgentCode(input = {}) {
 async function executeAgentHttp(input = {}, user, context = {}) {
     const url = String(input.url || '').trim();
     if (!url) throw new Error('HTTP 节点需要填写请求 URL。');
+    let networkPolicy = context.run?.network_policy || context.run?.networkPolicy;
+    if (typeof networkPolicy === 'string') {
+        try { networkPolicy = JSON.parse(networkPolicy); } catch (_) { networkPolicy = null; }
+    }
+    if (context.autonomous === true && (!networkPolicy || typeof networkPolicy !== 'object')) {
+        const error = new Error('自主 Agent 网络请求必须绑定任务级网络白名单。');
+        error.code = 'AGENT_NETWORK_POLICY_REQUIRED';
+        error.category = 'policy';
+        throw error;
+    }
+    if (networkPolicy || input.networkPolicy || input.network_policy) {
+        await assertNetworkPolicyUrl(url, normalizeNetworkPolicy(networkPolicy || input.networkPolicy || input.network_policy), {
+            requireAllowlist: context.autonomous === true
+        });
+    }
     const method = String(input.method || 'GET').trim().toLowerCase();
     const allowedMethods = ['get', 'post', 'put', 'delete', 'patch'];
     if (!allowedMethods.includes(method)) {

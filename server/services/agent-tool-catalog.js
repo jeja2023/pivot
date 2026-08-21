@@ -8,6 +8,7 @@ const {
     normalizeToolAllowlist,
     normalizeToolPolicy
 } = require('./agent-validators');
+const { normalizeToolContract } = require('./agent-contracts');
 
 async function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
@@ -56,7 +57,21 @@ async function formatToolList(user, options = {}) {
             owner: tool.owner || null
         }))
         .filter(tool => isAllowed(tool.name, 'mcp'));
-    return [...builtIns, ...databaseTools, ...mcpTools];
+    return [...builtIns, ...databaseTools, ...mcpTools].map(tool => {
+        const contract = normalizeToolContract(tool);
+        return {
+            ...tool,
+            version: contract.version,
+            capabilities: contract.capabilities,
+            risk_level: contract.risk_level,
+            idempotent: contract.idempotent,
+            side_effect: contract.side_effect,
+            network: contract.network,
+            approval_required: contract.approval_required,
+            timeout: contract.timeout,
+            output_schema: contract.output_schema
+        };
+    });
 }
 
 function cloneJson(value, fallback = {}) {

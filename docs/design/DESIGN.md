@@ -3,8 +3,8 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-08-09
-- Release baseline: v0.0.259
+- Last refreshed: 2026-08-21
+- Release baseline: v0.1.13
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。
@@ -12,6 +12,9 @@
   - `client/chat/share-target-tree.js`、`client/chat/rag-documents.js`、`client/chat/mcp-workbench-main.js`：工作流、知识库和工具库共享目标树、单位/个人联动与批量选择。
   - `client/chat/dag-core.js`、`client/chat/dag-wizard-fields.js`、`client/chat/dag-wizard-input.js`、`server/services/agent-content-review.js`：富文本校对节点的模型选择、结构化记录输入、运行时别名和报告交付契约。
   - `server/services/unit-visibility.js`、`server/services/share-targets.js`、`server/services/agent-workflow-dependencies.js`：单位/个人共享判定、候选目标和接收者依赖绑定规则。
+  - `server/services/agent-runtime/state-machine.js`、`server/services/agent-queue.js`、`server/services/agent-checkpoints.js`：自主任务状态、队列租约、恢复和幂等检查点。
+  - `server/services/agent-policy.js`、`server/services/agent-budget.js`、`server/services/agent-network-policy.js`、`server/services/agent-tool-runtime.js`：工具执行前策略、预算、网络和副作用边界。
+  - `desktop/agent-runtime/worker.js`、`desktop/agent-runtime/broker.js`：桌面本机能力的显式审批、命令白名单和工作区隔离执行面。
   - `tests/agent-content-review-node.test.js`、`tests/security-agent.test.js`、`tests/recipient-permissions-http.test.js`、`tests/e2e/workflow-version.spec.js`：富文本节点、接收者 HTTP 权限和发布版本失效回归证据。
   - `使用帮助.md`：普通用户在会话、应用、任务、自动化、知识库、工具库和个人设置中的实际使用路径。
   - `开发规范.md`：工程落地规则、UI 复用硬约束、测试和门禁。
@@ -236,6 +239,10 @@
   - 新建自主任务的快捷目标属于配置预设，只填入目标和推荐策略，不应绕过用户确认直接启动；当前配置可以保存为模板复用。
   - 最大执行轮次属于高级安全边界，默认按运行模式自动选择而不是使用偏小的固定值；标准模式 30 轮，深度模式 60 轮，审查模式 50 轮，人工配置受对应模式上限约束。单次任务 Token 上限独立控制累计输入和输出，留空或 `0` 表示不限。
   - 达到执行轮次或 Token 上限时必须保留已有结果并明确提示可能不完整；运行详情应区分模型“执行轮次”和持久化“执行记录”，工作流 DAG 继续以节点记录为主。
+  - 自主任务必须把“正在规划、正在执行、等待审批、已完成、部分完成或失败”作为可理解的运行状态呈现；恢复、重试和重复唤醒不能制造重复的外部副作用。
+  - 工具调用先经过权限、风险、预算、网络和副作用策略，再进入具体执行器；只读操作可按输入哈希和操作键幂等重放，写操作恢复必须显示审批和影响范围。
+  - 涉及本机文件、数据库、命令或浏览器时，必须明确执行位置；桌面 Worker 使用授权工作区、命令白名单、超时、输出上限和网络白名单，不能把服务器路径或隐式权限带入本机执行。
+  - 运行详情应提供结果优先的摘要，同时保留步骤、审批、策略决定、重试、用量和审计引用；大结果通过安全 Blob 引用展示，不把完整敏感载荷直接铺在页面。
   - 工作流名称和简介在资产列表中独立编辑，详情页专注节点编排；节点名称允许就地编辑，但提交边界必须清晰，不能因逐字保存导致焦点丢失。
   - 节点输出统一提供格式化文本、纯文本和结构化数据三种用户模式；结构化数据绑定 JSON Schema，并以可视化编辑、预览、校验和字段选择降低使用门槛。
   - 下游引用应根据上游 Schema 提供字段选择器；表格和文件产物属于 JSON 数据与文件引用的展示层，不引入 YAML/XML 作为内部承载格式。

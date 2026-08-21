@@ -21,7 +21,10 @@ const MAX_STEPS_BY_RUN_MODE = Object.freeze({
     audit: 60,
     dag: 60
 });
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'approval_required', 'awaiting_approval']);
+const ACTIVE_STATUSES = new Set([
+    'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
+    'running', 'approval_required', 'awaiting_approval', 'waiting_approval', 'resuming'
+]);
 const MAX_GOAL_LENGTH = 2000;
 const MAX_DAG_NODES = 100;
 const MAX_DAG_DEPENDENCIES = 50;

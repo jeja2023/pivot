@@ -2,6 +2,7 @@ const { query, queryOne, execute } = require('../db/client');
 const { nowExpr } = require('../db/dialect');
 
 const DEFAULT_LOCK_MS = 24 * 60 * 60 * 1000;
+const ACTIVE_RUN_STATUSES = ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required'];
 
 function createAgentQueue({
     logger = { info() {}, warn() {}, error() {} },
@@ -101,9 +102,9 @@ function createAgentQueue({
                 updated_at = ?
             WHERE id = ?
               AND locked_by = ?
-              AND status = 'running'
+              AND status IN (${ACTIVE_RUN_STATUSES.map(() => '?').join(', ')})
               AND deleted_at IS NULL
-        `, [lockExpiresAt(), now, now, runId, instanceId]);
+        `, [lockExpiresAt(), now, now, runId, instanceId, ...ACTIVE_RUN_STATUSES]);
         if (changes === 0) {
             logger.warn({ runId, instanceId }, '跳过智能体运行锁续期：持锁者或状态已变更');
         }

@@ -8,6 +8,7 @@ const { loadDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
+const { runDesktopWorker } = require('./agent-runtime');
 
 let mainWindow = null;
 let pivotServer = null;
@@ -618,6 +619,15 @@ ipcMain.handle('pivot-local-auth:execute-tool', async (event, payload) => {
     } catch (error) {
         return { success: false, error: normalizeLocalMcpExecutionError(error) };
     }
+});
+ipcMain.handle('pivot-agent:run-worker', async (event, payload = {}) => {
+    assertTrustedIpcSender(event);
+    configureLocalAuthorizationEnvironment();
+    return runDesktopWorker({
+        ...payload,
+        approved: payload.approved === true,
+        workspaceRoot: payload.workspaceRoot || path.join(app.getPath('userData'), 'agent-workspaces')
+    });
 });
 ipcMain.handle('pivot-desktop:retry', async (event) => {
     assertTrustedIpcSender(event);
