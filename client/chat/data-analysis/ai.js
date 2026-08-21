@@ -24,6 +24,38 @@
         }
     }
 
+    function isActiveSemanticJob(job) {
+        return Boolean(job && ['queued', 'running'].includes(job.status));
+    }
+
+    // 智能分析结果只属于当前页面会话。离开页面时清理临时展示内容；
+    // 已结束的全量任务回到历史记录中，只有仍在运行的任务保留进度入口。
+    function resetAiWorkspace() {
+        clearSemanticPoll();
+        state.aiWorkspaceEpoch = Number(state.aiWorkspaceEpoch || 0) + 1;
+        state.aiBusy = false;
+        const result = document.getElementById('data-analysis-ai-result');
+        if (result) PivotSafeHtml.setHtml(result, '');
+        const prompt = document.getElementById('data-analysis-ai-prompt');
+        if (prompt) prompt.value = '';
+        const deep = document.getElementById('data-analysis-ai-deep');
+        if (deep) deep.checked = false;
+        const run = document.getElementById('data-analysis-ai-run');
+        if (run) {
+            run.disabled = false;
+            run.textContent = '生成建议';
+        }
+        if (!isActiveSemanticJob(state.semanticJob)) {
+            state.semanticJob = null;
+            renderSemanticControls();
+        }
+    }
+
+    function resumeAiWorkspace() {
+        renderSemanticControls();
+        if (isActiveSemanticJob(state.semanticJob)) startSemanticPoll(state.semanticJob.id);
+    }
+
     function renderSemanticControls() {
         const dataset = activeDataset();
         const columns = dataset?.columns || [];
@@ -85,7 +117,7 @@
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}/semantic-analysis/jobs?limit=20`);
             state.semanticJobs = Array.isArray(data.jobs) ? data.jobs : [];
-            state.semanticJob = state.semanticJobs[0] || null;
+            state.semanticJob = state.semanticJobs.find(isActiveSemanticJob) || null;
             renderSemanticControls();
             if (state.semanticJob && ['queued', 'running'].includes(state.semanticJob.status)) startSemanticPoll(state.semanticJob.id);
         } catch (e) {
@@ -167,10 +199,10 @@
 
     // 打字机回放：把已完成的文本分块增量渲染，模拟流式逐字输出（仅前端，不改后端）。
     // 帧数固定（约 120 帧），与文本长度无关，保证长短答案的回放时长都可控（约 2 秒）。
-    function typewriterReplay(el, fullText, render) {
+    function typewriterReplay(el, fullText, render, shouldContinue = () => true) {
         return new Promise(resolve => {
             const text = String(fullText || '');
-            if (!el) { resolve(); return; }
+            if (!el || !shouldContinue()) { resolve(); return; }
             // 用户偏好减少动效时直接整段渲染，不做打字机。
             const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             if (reduceMotion || text.length <= 12) {
@@ -181,6 +213,7 @@
             const chunkSize = Math.max(3, Math.ceil(text.length / 120));
             let i = 0;
             const step = () => {
+                if (!shouldContinue()) { resolve(); return; }
                 i = Math.min(text.length, i + chunkSize);
                 PivotSafeHtml.setHtml(el, render(text.slice(0, i)));
                 if (i >= text.length) { resolve(); return; }
@@ -191,18 +224,20 @@
     }
 
     // 深度分析回放：先用打字机逐字回放最终答案，回放结束后再补齐执行过程与内联图表。
-    async function replayAgentResult(box, data) {
+    async function replayAgentResult(box, data, shouldContinue = () => true) {
         if (!box) return;
         const answer = String(data && data.answer ? data.answer : 'AI 未返回有效内容');
         PivotSafeHtml.setHtml(box, '<div class="data-analysis-ai-answer"></div>');
         const answerEl = box.querySelector('.data-analysis-ai-answer');
-        await typewriterReplay(answerEl, answer, text => renderMarkdown(text));
+        await typewriterReplay(answerEl, answer, text => renderMarkdown(text), shouldContinue);
+        if (!shouldContinue()) return;
         // 最终完整渲染：答案 + 图表 + 执行过程，并初始化图表（图表需在 DOM 落定后挂载）。
         renderAgentResult(box, data);
     }
 
     // 深度分析：调用后端 ReAct 工具调用接口，渲染答案 + 执行过程 + 内联图表。
     async function runAiAgent(dataset, prompt, model, result) {
+        const workspaceEpoch = Number(state.aiWorkspaceEpoch || 0);
         state.aiBusy = true;
         if (result) PivotSafeHtml.setHtml(result, '<div class="data-analysis-ai-thinking">AI 正在查询数据并分析…</div>');
         await guardButton('data-analysis-ai-run', '分析中…', async () => {
@@ -212,12 +247,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mode: 'agent', datasetId: dataset.id, prompt, model })
                 });
-                await replayAgentResult(result, data);
+                if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
+                await replayAgentResult(result, data, () => workspaceEpoch === Number(state.aiWorkspaceEpoch || 0));
             } catch (e) {
+                if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
                 if (result) PivotSafeHtml.setHtml(result, `<div class="data-analysis-empty">深度分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);
                 toast(e && e.message ? e.message : '深度分析失败', 'error');
             } finally {
-                state.aiBusy = false;
+                if (workspaceEpoch === Number(state.aiWorkspaceEpoch || 0)) state.aiBusy = false;
             }
         });
     }
@@ -285,6 +322,7 @@
         }
         if (state.aiBusy) return;
         const result = document.getElementById('data-analysis-ai-result');
+        const workspaceEpoch = Number(state.aiWorkspaceEpoch || 0);
         const model = document.getElementById('model-selector')?.value || '';
         const deep = document.getElementById('data-analysis-ai-deep')?.checked;
         if (deep) {
@@ -303,6 +341,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ datasetId: dataset.id, prompt, model })
                     });
+                    if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
                     if (result) PivotSafeHtml.setHtml(result, `${data.analysisScope === 'profile' ? '<div class="data-analysis-ai-scope-notice">本回答基于字段画像与统计摘要，未执行逐行查询。</div>' : ''}${renderMarkdown(data.content || 'AI 未返回有效内容')}`);
                     return;
                 }
@@ -320,6 +359,7 @@
                 let full = '';
                 const parser = createBrowserSseParser({
                     onData(p) {
+                        if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
                         let data = null;
                         try { data = JSON.parse(p); } catch (_e) { return; }
                         const chunk = data?.content ?? data?.choices?.[0]?.delta?.content ?? '';
@@ -338,12 +378,14 @@
                     }
                     parser.write(decoder.decode(value, { stream: true }));
                 }
+                if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
                 if (result) PivotSafeHtml.setHtml(result, renderMarkdown(full.trim() || 'AI 未返回有效内容'));
             } catch (e) {
+                if (workspaceEpoch !== Number(state.aiWorkspaceEpoch || 0)) return;
                 if (result) PivotSafeHtml.setHtml(result, `<div class="data-analysis-empty">AI 分析失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);
                 toast(e && e.message ? e.message : 'AI 分析失败', 'error');
             } finally {
-                state.aiBusy = false;
+                if (workspaceEpoch === Number(state.aiWorkspaceEpoch || 0)) state.aiBusy = false;
             }
         });
     }
@@ -353,6 +395,8 @@
         renderAgentResult,
         replayAgentResult,
         runAi,
+        resetAiWorkspace,
+        resumeAiWorkspace,
         renderSemanticControls,
         loadSemanticJobs,
         runSemanticAnalysis,

@@ -4,11 +4,22 @@ const path = require('path');
 const fs = require('fs');
 const { getClientIp } = require('./http');
 
+const os = require('os');
 const isProduction = process.env.NODE_ENV === 'production';
-const logDir = process.env.LOG_DIR
-    ? path.resolve(process.env.LOG_DIR)
-    : path.resolve(__dirname, '../logs');
-if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+function resolveSafeLogDir() {
+    if (process.env.LOG_DIR) return path.resolve(process.env.LOG_DIR);
+    const candidate = path.resolve(__dirname, '../logs');
+    if (candidate.includes('.asar')) {
+        return path.join(os.tmpdir(), 'pivot-logs');
+    }
+    return candidate;
+}
+const logDir = resolveSafeLogDir();
+try {
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+} catch (_err) {
+    // 忽略只读或虚拟文件系统路径下的创建失败
+}
 
 // 敏感字段脱敏配置
 const redactFields = [

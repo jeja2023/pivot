@@ -751,6 +751,9 @@ window.getStoredPrintWorkspaceSession = function() {
 
 window.showMainWorkspace = function(view = 'chat') {
     const target = ['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
+    if (document.body?.dataset.activeWorkspace === 'apps' && target !== 'apps') {
+        window.PivotDataAnalysis?.resetAiWorkspace?.();
+    }
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {

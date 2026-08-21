@@ -11,6 +11,8 @@
     const renderQueryFields = (...args) => app.renderQueryFields(...args);
     const renderPivotControls = (...args) => app.renderPivotControls(...args);
     const renderSemanticControls = (...args) => app.renderSemanticControls?.(...args);
+    const resetAiWorkspace = (...args) => app.resetAiWorkspace?.(...args);
+    const resumeAiWorkspace = (...args) => app.resumeAiWorkspace?.(...args);
 
     async function fetchJson(url, options = {}) {
         const res = await apiFetch(url, options);
@@ -34,6 +36,7 @@
     }
 
     async function loadDatasetDetail(id) {
+        if (String(id || '') !== String(state.activeId || '')) resetAiWorkspace();
         if (!id) {
             state.activeId = '';
             state.summary = null;
@@ -152,6 +155,7 @@
         if (!view) return;
         const requestedDatasetId = String(options?.datasetId || '').trim();
         const requestedTab = String(options?.tab || options?.view || 'overview').trim() || 'overview';
+        resetAiWorkspace();
         if (requestedDatasetId) state.activeId = requestedDatasetId;
         sessionStorage.setItem('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
@@ -165,6 +169,7 @@
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
+        resumeAiWorkspace();
     };
 
     Object.assign(app, {

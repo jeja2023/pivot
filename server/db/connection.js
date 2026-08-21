@@ -1,12 +1,23 @@
 const path = require('path');
 const fs = require('fs');
 
-const dataDir = process.env.DATA_DIR
-    ? path.resolve(process.env.DATA_DIR)
-    : path.join(__dirname, '../../data');
+const os = require('os');
+function resolveSafeDataDir() {
+    if (process.env.DATA_DIR) return path.resolve(process.env.DATA_DIR);
+    const candidate = path.join(__dirname, '../../data');
+    if (candidate.includes('.asar')) {
+        return path.join(os.tmpdir(), 'pivot-data');
+    }
+    return candidate;
+}
+const dataDir = resolveSafeDataDir();
 
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+try {
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+} catch (_err) {
+    // 忽略只读或虚拟文件系统路径下的创建失败
 }
 
 // PostgreSQL runtime 不暴露同步 db。测试启动器可显式开启同步兼容 facade，

@@ -456,6 +456,7 @@ function setStoredAppsActiveApp(appId) {
 
 function showAppsHome() {
     setStoredAppsActiveApp('');
+    window.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.remove('hidden');
     document.getElementById('official-writing-view')?.classList.add('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -469,6 +470,7 @@ function showAppsHome() {
 
 function showOfficialWritingApp() {
     setStoredAppsActiveApp('official-writing');
+    window.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');

@@ -37,14 +37,19 @@
     const runSemanticAnalysis = (...args) => app.runSemanticAnalysis(...args);
     const cancelSemanticAnalysis = (...args) => app.cancelSemanticAnalysis(...args);
     const retrySemanticAnalysis = (...args) => app.retrySemanticAnalysis(...args);
+    const resetAiWorkspace = (...args) => app.resetAiWorkspace?.(...args);
+    const resumeAiWorkspace = (...args) => app.resumeAiWorkspace?.(...args);
 
     function activateTab(tab) {
+        const previousTab = document.querySelector('.data-analysis-tab.active')?.dataset.dataAnalysisTab;
+        if (previousTab === 'ai' && tab !== 'ai') resetAiWorkspace();
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
             button.classList.toggle('active', button.dataset.dataAnalysisTab === tab);
         });
         document.querySelectorAll('.data-analysis-tab-panel').forEach(panel => {
             panel.classList.toggle('hidden', panel.id !== `data-analysis-${tab}-panel`);
         });
+        if (tab === 'ai') resumeAiWorkspace();
         // 切换 Tab 时同步更新顶部标题和简介
         updateToolbarHeader(tab);
     }

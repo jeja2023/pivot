@@ -4,6 +4,20 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
+
+// 提前初始化桌面环境基础路径，避免引入 server 模块时因 asar 路径导致 ENOTDIR
+function initEarlyDesktopEnv() {
+    try {
+        const userData = app.getPath('userData');
+        process.env.PIVOT_DESKTOP = 'true';
+        if (!process.env.LOG_DIR) process.env.LOG_DIR = path.join(userData, 'logs');
+        if (!process.env.DATA_DIR) process.env.DATA_DIR = path.join(userData, 'data');
+        if (!process.env.PIVOT_UPLOAD_DIR) process.env.PIVOT_UPLOAD_DIR = path.join(userData, 'uploads');
+        if (!process.env.PIVOT_ANALYSIS_DIR) process.env.PIVOT_ANALYSIS_DIR = path.join(userData, 'data', 'analysis');
+    } catch (_) {}
+}
+initEarlyDesktopEnv();
+
 const { loadDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');

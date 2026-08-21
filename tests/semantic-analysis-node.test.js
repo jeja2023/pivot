@@ -47,6 +47,22 @@ test('全量语义分析识别缺失分块并暴露可恢复信息', () => {
     );
 });
 
+test('全量语义分析兼容常见结果字段和原始标识回传', () => {
+    const expected = [
+        { rowNo: 7, rowId: '订单-7#7', chunkIndex: 0 },
+        { rowNo: 8, rowId: '订单-8#8', chunkIndex: 1 }
+    ];
+    const normalized = normalizeBatchResult(JSON.stringify({
+        summary: 'ok',
+        results: [
+            { row_id: '订单-7', chunk: '1/1', result: 'a' },
+            { row_no: 8, chunk_index: 1, result: 'b' }
+        ]
+    }), expected);
+    assert.equal(normalized.itemCount, 2);
+    assert.equal(normalized.parsed.items.length, 2);
+});
+
 test('全量语义分析输出预算会限制子批次大小', () => {
     assert.ok(semanticBatchOutputLimit(2400) < 30);
     assert.equal(semanticBatchOutputLimit(6000), 30);

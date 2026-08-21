@@ -592,6 +592,7 @@
 
     async function showPdfToolsApp() {
         const view = ensureView();
+        window.PivotDataAnalysis?.resetAiWorkspace?.();
         sessionStorage.setItem('pivot_apps_active_app', 'pdf-tools');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');

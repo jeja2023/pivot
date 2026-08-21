@@ -340,6 +340,7 @@
 
             async function showRegulationsApp() {
                 await ensureModuleReadiness();
+                window.PivotDataAnalysis?.resetAiWorkspace?.();
                 sessionStorage.setItem('pivot_apps_active_app', 'regulations');
                 document.getElementById('apps-home-view')?.classList.add('hidden');
                 document.getElementById('official-writing-view')?.classList.add('hidden');
