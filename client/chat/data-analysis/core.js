@@ -97,6 +97,7 @@
         setBusy(true, '正在导入数据集...');
         try {
             const data = await fetchJson(`${API}/datasets`, { method: 'POST', body: form });
+            resetAiWorkspace();
             state.activeId = data.dataset?.id || '';
             toast('数据集已导入');
             await loadDatasets({ keepActive: true });

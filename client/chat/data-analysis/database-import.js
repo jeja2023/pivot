@@ -76,6 +76,7 @@
                     name: finalName.trim()
                 })
             });
+            app.resetAiWorkspace?.();
             state.activeId = data.dataset?.id || '';
             toast('服务器数据库数据已导入');
             await loadDatasets({ keepActive: true });

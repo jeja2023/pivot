@@ -232,6 +232,7 @@
                     toast('数据集已删除');
                     if (state.activeId === datasetId) {
                         state.activeId = '';
+                        resetAiWorkspace();
                     }
                     await loadDatasets({ keepActive: false });
                 } catch (e) {

@@ -45,6 +45,8 @@
             run.disabled = false;
             run.textContent = '生成建议';
         }
+        const instruction = document.getElementById('data-analysis-semantic-instruction');
+        if (instruction && !isActiveSemanticJob(state.semanticJob)) instruction.value = '';
         if (!isActiveSemanticJob(state.semanticJob)) {
             state.semanticJob = null;
             renderSemanticControls();
