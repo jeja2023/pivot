@@ -334,10 +334,10 @@ function reportSummary(records, stats, artifact, maxChars, reportTitle) {
 
 async function executeContentReview(input = {}, user, context = {}, injectedDeps = {}) {
     const deps = { callModelText, recordAgentModelUsage, createOrUpdateRunArtifact, ...injectedDeps };
-    const modelId = String(input.model ?? input.modelId ?? input.model_id ?? context.modelCfg?.id ?? context.run?.model_id ?? '').trim();
-    const modelCfg = await getRunnableModelForUserAsync(modelId, user);
+    const modelId = String(input.model ?? input.modelId ?? input.model_id ?? context.modelCfg?.id ?? context.run?.model_id ?? context.run?.modelId ?? '').trim();
+    const modelCfg = (await getRunnableModelForUserAsync(modelId, user)) || context.modelCfg;
     if (!modelCfg) throw new Error('内容校对节点需要选择当前用户可用的模型。');
-    const rawRecords = input.records ?? input.rows ?? input.data;
+    const rawRecords = input.records ?? input.rows ?? input.data ?? input.items ?? input.content ?? input.text ?? input.articles ?? input.news_list ?? input.results;
     const allRows = rowsFromReviewInput(rawRecords);
     const inputMetadata = reviewInputMetadata(rawRecords);
     const sources = normalizeReviewRecords(input);

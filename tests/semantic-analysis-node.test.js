@@ -67,3 +67,28 @@ test('全量语义分析输出预算会限制子批次大小', () => {
     assert.ok(semanticBatchOutputLimit(2400) < 30);
     assert.equal(semanticBatchOutputLimit(6000), 30);
 });
+
+test('全量语义分析单分块单对象格式及顶层数组格式健壮解析', () => {
+    const expectedSingle = [
+        { rowNo: 1, rowId: 'row-1', chunkIndex: 0, chunkCount: 1 }
+    ];
+    const normalizedSingle = normalizeBatchResult(JSON.stringify({
+        batch_summary: '单条摘要',
+        result: '单条分析结论'
+    }), expectedSingle);
+    assert.equal(normalizedSingle.itemCount, 1);
+    assert.equal(normalizedSingle.parsed.items[0].result, '单条分析结论');
+    assert.equal(normalizedSingle.parsed.items[0].row_id, 'row-1');
+
+    const expectedMulti = [
+        { rowNo: 1, rowId: 'r-1', chunkIndex: 0, chunkCount: 1 },
+        { rowNo: 2, rowId: 'r-2', chunkIndex: 0, chunkCount: 1 }
+    ];
+    const normalizedArray = normalizeBatchResult(JSON.stringify([
+        { row_id: 'r-1', chunk: '1/1', result: '第一条' },
+        { row_id: 'r-2', chunk: '1/1', result: '第二条' }
+    ]), expectedMulti);
+    assert.equal(normalizedArray.itemCount, 2);
+    assert.equal(normalizedArray.parsed.items[1].result, '第二条');
+});
+

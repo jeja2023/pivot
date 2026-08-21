@@ -18,6 +18,14 @@ function normalizeAllowlist(value) {
 
 function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null } = {}) {
     const tool = normalizeToolContract(rawTool);
+    if (tool.name === 'agent.content_review' && input && typeof input === 'object') {
+        if (!input.records) {
+            input.records = input.rows ?? input.data ?? input.items ?? input.content ?? input.text ?? input.articles ?? input.news_list ?? input.results;
+        }
+        if (!input.model) {
+            input.model = run.model_id || run.modelId || '';
+        }
+    }
     const policy = String(run.tool_policy || run.toolPolicy || 'all');
     const allowlist = normalizeAllowlist(run.tool_allowlist || run.toolAllowlist);
     const reasons = [];

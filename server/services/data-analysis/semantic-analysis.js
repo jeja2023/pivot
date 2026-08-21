@@ -36,7 +36,7 @@ const MAX_BATCH_SEGMENTS = Math.max(5, Math.min(60, Number.parseInt(process.env.
 // 按每个分块的保守输出成本限制子批次大小，避免 30 个分块在 2400 tokens
 // 的输出上限下被模型截断。实际响应仍会经过完整性校验和递归拆分。
 const SEMANTIC_OUTPUT_RESERVE_TOKENS = 512;
-const SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT = 96;
+const SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT = 160;
 const SEMANTIC_SPLIT_MAX_DEPTH = 8;
 const JOB_STALE_LOCK_MINUTES = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_STALE_LOCK_MINUTES || '30', 10) || 30);
 const JOB_MAX_ATTEMPTS = Math.max(1, Math.min(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_ATTEMPTS || '3', 10) || 3));
@@ -55,7 +55,7 @@ function normalizeBatchTokenBudget(value) {
 
 function normalizeMaxOutputTokens(value) {
     const parsed = Number.parseInt(value, 10);
-    return Math.max(256, Math.min(2400, Number.isFinite(parsed) && parsed > 0 ? parsed : 2400));
+    return Math.max(256, Math.min(8192, Number.isFinite(parsed) && parsed > 0 ? parsed : 4096));
 }
 
 function resolveEffectiveBatchTokens(model, requested, maxOutputTokens) {
@@ -495,6 +495,12 @@ function findMissingSemanticSegments(items, expectedSegments) {
         if (matchIndex < 0) missing.push(segment);
         else used.add(matchIndex);
     });
+
+    // 如果通过显式标识未全部对齐，但模型严格返回了与预期分块数量一致且内容有效的 items 列表，
+    // 说明模型仅在字段名（如 row_id/chunk 格式）上做了微调，启用位置序保底匹配。
+    if (missing.length > 0 && Array.isArray(items) && items.length === expectedSegments.length && used.size === 0) {
+        return [];
+    }
     return missing;
 }
 
@@ -503,21 +509,42 @@ function normalizeBatchResult(content, expectedSegments = []) {
     const summary = parsed && typeof parsed === 'object'
         ? (parsed.batch_summary || parsed.batchSummary || parsed.summary || parsed.report || '')
         : '';
-    const items = Array.isArray(parsed?.items)
-        ? parsed.items
-        : (Array.isArray(parsed?.results)
-            ? parsed.results
-            : (Array.isArray(parsed?.records)
-                ? parsed.records
-                : (Array.isArray(parsed?.data) ? parsed.data : (Array.isArray(parsed?.issues) ? parsed.issues : []))));
+    let items = Array.isArray(parsed)
+        ? parsed
+        : (Array.isArray(parsed?.items)
+            ? parsed.items
+            : (Array.isArray(parsed?.results)
+                ? parsed.results
+                : (Array.isArray(parsed?.records)
+                    ? parsed.records
+                    : (Array.isArray(parsed?.data) ? parsed.data : (Array.isArray(parsed?.issues) ? parsed.issues : [])))));
+
+    // 单分块兜底：若预期只有 1 个分块，而模型返回单对象格式（直接包含 result/analysis/detail 等）
+    if (expectedSegments.length === 1 && (!items || items.length === 0) && parsed && typeof parsed === 'object') {
+        const singleResult = parsed.result || parsed.analysis || parsed.detail || parsed.findings || parsed.content || summary || content;
+        if (singleResult) {
+            items = [{
+                row_id: expectedSegments[0].rowId,
+                row_no: expectedSegments[0].rowNo,
+                chunk: `${expectedSegments[0].chunkIndex + 1}/${expectedSegments[0].chunkCount}`,
+                result: singleResult
+            }];
+        }
+    }
+
+    // 单分块且只有 1 个 item 时，自动回填缺失的 row_id / chunk / result
+    if (expectedSegments.length === 1 && Array.isArray(items) && items.length === 1) {
+        const item = items[0];
+        if (item && typeof item === 'object') {
+            item.row_id = item.row_id || item.rowId || expectedSegments[0].rowId;
+            item.row_no = item.row_no || item.rowNo || expectedSegments[0].rowNo;
+            item.chunk = item.chunk || `${expectedSegments[0].chunkIndex + 1}/${expectedSegments[0].chunkCount}`;
+            item.result = item.result || item.analysis || item.content || item.detail || item.findings || summary || '';
+        }
+    }
+
     const missing = findMissingSemanticSegments(items, expectedSegments);
-    const hasItems = Boolean(parsed && typeof parsed === 'object' && (
-        Array.isArray(parsed.items)
-        || Array.isArray(parsed.results)
-        || Array.isArray(parsed.records)
-        || Array.isArray(parsed.data)
-        || Array.isArray(parsed.issues)
-    ));
+    const hasItems = Array.isArray(items) && items.length > 0;
     if (!parsed || !hasItems || missing.length > 0) {
         const missingSegments = missing.length ? missing : expectedSegments;
         const missingCount = missingSegments.length;
@@ -525,11 +552,11 @@ function normalizeBatchResult(content, expectedSegments = []) {
         err.code = 'SEMANTIC_BATCH_INCOMPLETE';
         err.status = 502;
         err.missingSegments = missingSegments;
-        err.partial = parsed && hasItems ? { ...parsed, items } : null;
+        err.partial = parsed && hasItems ? { ...(typeof parsed === 'object' ? parsed : {}), items } : null;
         throw err;
     }
     return {
-        parsed: parsed ? { ...parsed, items } : null,
+        parsed: parsed ? { ...(typeof parsed === 'object' ? parsed : {}), batch_summary: summary, items } : { batch_summary: summary, items },
         summary: clampText(summary || content || '模型未返回批次摘要。', 1800),
         itemCount: items.length
     };

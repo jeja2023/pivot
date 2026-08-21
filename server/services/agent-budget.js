@@ -12,7 +12,7 @@ const DEFAULT_BUDGET = Object.freeze({
     max_consecutive_errors: 3,
     max_runtime_seconds: 1800,
     max_python_timeout_seconds: 30,
-    max_tokens_total: 128000,
+    max_tokens_total: Math.max(128000, Number.parseInt(process.env.AGENT_TASK_MAX_TOKENS_TOTAL || '500000', 10) || 500000),
     risk_budget: 20,
     // Approval remains the gate for risky calls; this bounded default prevents
     // every ordinary MCP read/write from being rejected before approval.

@@ -30,8 +30,8 @@ function compactToolOutputForModel(value, modelCfg = {}, options = {}) {
     const targetTokens = Number.isFinite(configured) && configured > 0
         ? Math.min(configured, MAX_TOOL_CONTEXT_TOKENS)
         : Math.min(
-            budget.unbounded ? 48000 : Math.max(2000, Math.floor(budget.inputBudget * 0.55)),
-            MAX_TOOL_CONTEXT_TOKENS
+            budget.unbounded ? 24000 : Math.max(2000, Math.floor(budget.inputBudget * 0.45)),
+            24000
         );
     const structured = value?.structuredContent && typeof value.structuredContent === 'object'
         ? value.structuredContent
