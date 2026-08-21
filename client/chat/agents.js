@@ -161,6 +161,9 @@ window.openAgentWorkbench = async function(options = {}) {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
     window.setTaskComposerOpen(Boolean(options.create));
+    // 智能体脚本按需加载；登录时如果尚未进入工作区，实时脚本不会参与初始化。
+    // 在脚本就绪后补建 SSE，确保新任务的状态和执行步骤无需手动刷新即可显示。
+    window.initAgentRealtime?.();
     await window.loadAgentWorkbench();
     // 智能体工作区脚本按需加载，主程序初始化时可能还找不到快速目标按钮。
     window.bindAgentGoalTemplates?.();

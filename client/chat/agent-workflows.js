@@ -258,6 +258,7 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
 window.openAgentDagWorkbench = async function(options = {}) {
     closeAgentConfigModal();
     window.showMainWorkspace?.('agent-dag');
+    window.initAgentRealtime?.();
     const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
     window.bindUnifiedAutomationTabs?.();
@@ -289,6 +290,7 @@ window.openAgentDagWorkbench = async function(options = {}) {
         }
     }
     window.bindAgentDagWorkbench?.();
+    window.updateAgentAutoRefresh?.();
 };
 
 window.closeAgentDagWorkbench = async function() {
@@ -297,6 +299,7 @@ window.closeAgentDagWorkbench = async function() {
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
     window.showMainWorkspace?.('chat');
+    window.updateAgentAutoRefresh?.();
 };
 
 window.bindAgentDagWorkbench = function() {

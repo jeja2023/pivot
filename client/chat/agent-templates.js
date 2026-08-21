@@ -40,7 +40,7 @@ function applyAgentTemplate(template) {
 async function loadAgentTemplates() {
     const list = document.getElementById('agent-template-list');
     if (!list) return;
-    const res = await apiFetch(`${API_BASE}/agents/templates`);
+    const res = await apiFetch(`${API_BASE}/agents/templates`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '模板库加载失败');
     agentTemplatesCache = data.data || [];

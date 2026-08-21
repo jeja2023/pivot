@@ -81,7 +81,7 @@ function getBuiltInToolDefinitions(user) {
                 records: { description: '待校对记录，支持记录数组、structuredContent、rows、data 或对应的上游变量引用。' },
                 rows: { description: '待校对记录数组（records 别名）。' },
                 data: { description: '待校对记录数组（records 别名）。' },
-                model: { description: '可选模型 ID 或 model_name；留空时默认使用当前任务模型。' },
+                model: { type: 'string', description: '模型 ID 或 model_name；留空时使用当前任务模型。' },
                 idField: { type: 'string', default: 'id', maxLength: 128, description: '记录唯一标识字段。' },
                 titleField: { type: 'string', default: 'title', maxLength: 128, description: '记录标题字段。' },
                 contentField: { type: 'string', default: 'content', maxLength: 128, description: '包含 HTML、富文本或普通正文的字段。' },
@@ -93,7 +93,7 @@ function getBuiltInToolDefinitions(user) {
                 concurrency: { type: 'integer', minimum: 1, maximum: 6, default: 2, description: '同时校对的记录数。' },
                 maxSummaryChars: { type: 'integer', minimum: 4000, maximum: 120000, default: 30000, description: '节点直接返回的结果摘要字符上限。' },
                 reportTitle: { type: 'string', default: '新闻内容校对报告', maxLength: 120, description: '完整报告和任务产物标题。' }
-            }, [])
+            }, ['records', 'model'])
         },
         {
             name: 'agent.delegate',

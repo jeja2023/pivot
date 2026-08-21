@@ -83,7 +83,7 @@ async function loadAgentEvaluationSuites(options = {}) {
     if (!options.silent && !agentEvalSuitesCache.length) {
         PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state compact">正在加载评测集...</div>');
     }
-    const response = await apiFetch(`${API_BASE}/agents/evaluations/suites`);
+    const response = await apiFetch(`${API_BASE}/agents/evaluations/suites`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || '评测集加载失败');
     agentEvalSuitesCache = data.data || [];
@@ -147,18 +147,18 @@ async function loadAgentEvalRun(evalRunId, options = {}) {
     activeAgentEvalRunId = evalRunId;
     const target = document.getElementById('agent-eval-run-detail');
     if (target && !options.silent) PivotSafeHtml.setHtml(target, '<div class="empty-state compact">正在回收评测结果...</div>');
-    const response = await apiFetch(`${API_BASE}/agents/evaluations/runs/${encodeURIComponent(evalRunId)}`);
+    const response = await apiFetch(`${API_BASE}/agents/evaluations/runs/${encodeURIComponent(evalRunId)}`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return showToast(data.error || '评测结果加载失败', 'error');
     renderAgentEvalRunDetail(data);
-    if (data.run?.status === 'running' && activeAgentEvalRunId === evalRunId) {
+    if (['queued', 'running'].includes(String(data.run?.status || '').toLowerCase()) && activeAgentEvalRunId === evalRunId) {
         agentEvalRunTimer = setTimeout(() => {
             if (activeAgentConfigSection === 'evaluations' && activeAgentEvalRunId === evalRunId) {
                 loadAgentEvalRun(evalRunId, { silent: true }).catch(() => {});
             }
         }, 3000);
-    } else {
-        await loadAgentEvaluationSuites({ silent: true });
+    } else if (!options.skipSuites) {
+        await loadAgentEvaluationSuites({ silent: true, keepDetail: false });
     }
 }
 
@@ -202,7 +202,7 @@ function renderAgentEvalSuiteDetail(payload = {}) {
     target.querySelectorAll('[data-agent-eval-run-id]').forEach(button => {
         button.addEventListener('click', () => loadAgentEvalRun(button.dataset.agentEvalRunId));
     });
-    if (latest) loadAgentEvalRun(latest.id, { silent: true }).catch(() => {});
+    if (latest) loadAgentEvalRun(latest.id, { silent: true, skipSuites: true }).catch(() => {});
 }
 
 async function loadAgentEvalSuite(suiteId, options = {}) {
@@ -211,7 +211,7 @@ async function loadAgentEvalSuite(suiteId, options = {}) {
     renderAgentEvalSuiteList();
     const target = document.getElementById('agent-eval-suite-detail');
     if (target && !options.silent) PivotSafeHtml.setHtml(target, '<div class="empty-state compact">正在加载评测详情...</div>');
-    const response = await apiFetch(`${API_BASE}/agents/evaluations/suites/${encodeURIComponent(suiteId)}`);
+    const response = await apiFetch(`${API_BASE}/agents/evaluations/suites/${encodeURIComponent(suiteId)}`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return showToast(data.error || '评测集加载失败', 'error');
     renderAgentEvalSuiteDetail(data);

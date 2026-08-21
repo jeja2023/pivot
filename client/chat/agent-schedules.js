@@ -4,7 +4,7 @@
 async function loadAgentSchedules() {
     const automationList = document.getElementById('automation-schedule-assets-list');
     if (!automationList) return;
-    const res = await apiFetch(`${API_BASE}/agents/schedules`);
+    const res = await apiFetch(`${API_BASE}/agents/schedules`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '计划队列加载失败');
     agentSchedulesCache = data.data || [];
@@ -377,7 +377,7 @@ function deleteAgentSchedule(scheduleId) {
 async function loadAgentNotifications() {
     const list = document.getElementById('agent-notification-list');
     if (!list) return;
-    const res = await apiFetch(`${API_BASE}/agents/notifications?limit=8`);
+    const res = await apiFetch(`${API_BASE}/agents/notifications?limit=8`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '通知加载失败');
     const items = data.data || [];

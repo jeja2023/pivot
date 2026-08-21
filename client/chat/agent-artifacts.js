@@ -4,7 +4,7 @@
 async function loadAgentArtifacts() {
     const list = document.getElementById('agent-artifact-list');
     if (!list) return;
-    const res = await apiFetch(`${API_BASE}/agents/artifacts?limit=8`);
+    const res = await apiFetch(`${API_BASE}/agents/artifacts?limit=8`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '结果沉淀加载失败');
     agentArtifactsCache = data.data || [];

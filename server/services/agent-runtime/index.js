@@ -8,6 +8,7 @@ const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
 const { createAgentQueue } = require('../agent-queue');
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
+const { normalizeToolInput } = require('../agent-policy');
 const { publishUserEvent } = require('../realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('../model-router');
 const { getModelEndpointRuntimeStatus } = require('../model-runtime');
@@ -891,6 +892,11 @@ async function runAgent(runId, user) {
             }
 
             const startedAt = Date.now();
+            const effectivePlanInput = normalizeToolInput(plan.tool, plan.input || {}, {
+                ...run,
+                model_id: run.model_id ?? modelCfg?.id,
+                chosen_model_id: run.chosen_model_id ?? modelCfg?.id
+            });
             try {
                 await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
                 await assertRunUserActive(user);
@@ -899,7 +905,7 @@ async function runAgent(runId, user) {
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = findAgentToolByName(plan.tool, toolList);
                 const approvalKey = `${runId}:${step}:${plan.tool}`;
-                if (await maybePauseForApproval(run, selectedTool, plan.input || {}, approvalKey)) return;
+                if (await maybePauseForApproval(run, selectedTool, effectivePlanInput, approvalKey)) return;
                 const toolContext = {
                     run,
                     modelCfg,
@@ -907,15 +913,15 @@ async function runAgent(runId, user) {
                     stepId: `${runId}:${step}`,
                     stepIndex: step,
                     budget: taskBudget,
-                    approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, plan.input || {}),
-                    allowApproval: isApprovalGranted(run, plan.tool, approvalKey, plan.input || {}),
+                    approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
+                    allowApproval: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
                     waitForWorkflowDelay,
                     delayKey: plan.tool === 'workflow.delay'
-                        ? stableWorkflowDelayKey(plan.tool, step, plan.input || {})
+                        ? stableWorkflowDelayKey(plan.tool, step, effectivePlanInput)
                         : ''
                 };
                 const output = await withTimeout(
-                    signal => executeToolByName(plan.tool, plan.input || {}, user, toolList, { ...toolContext, signal }),
+                    signal => executeToolByName(plan.tool, effectivePlanInput, user, toolList, { ...toolContext, signal }),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                     `执行工具：${plan.tool}`,
                     { signal: runController.signal }
@@ -927,14 +933,14 @@ async function runAgent(runId, user) {
                 observations.push({
                     step,
                     tool: plan.tool,
-                    input: plan.input || {},
+                    input: effectivePlanInput,
                     output: compactOutput
                 });
                 await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行完成：${plan.tool}`,
                     toolName: plan.tool,
-                    input: plan.input || {},
+                    input: effectivePlanInput,
                     output: compactOutput,
                     durationMs: Date.now() - startedAt
                 });
@@ -943,7 +949,7 @@ async function runAgent(runId, user) {
                         runId,
                         stepId: `${runId}:${step}`,
                         toolName: plan.tool,
-                        input: plan.input || {},
+                        input: effectivePlanInput,
                         output: compactOutput,
                         policyDecision: 'allow',
                         status: 'success',
@@ -961,8 +967,8 @@ async function runAgent(runId, user) {
                         pendingApproval: {
                             tool: plan.tool,
                             key: `${runId}:${step}:${plan.tool}`,
-                            input: plan.input || {},
-                            inputHash: approvalInputHash(plan.input || {}),
+                            input: effectivePlanInput,
+                            inputHash: approvalInputHash(effectivePlanInput),
                             requestedAt: now,
                             expiresAt: getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
                             recovery: true
@@ -976,7 +982,7 @@ async function runAgent(runId, user) {
                 observations.push({
                     step,
                     tool: plan.tool,
-                    input: plan.input || {},
+                    input: effectivePlanInput,
                     error: toolErr.message
                 });
                 const diagnosis = diagnoseError(toolErr, { tool: plan.tool, step });
@@ -985,7 +991,7 @@ async function runAgent(runId, user) {
                     type: 'tool',
                     title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
-                    input: plan.input || {},
+                    input: effectivePlanInput,
                     output: { error: toolErr.message, diagnosis },
                     errorMessage: toolErr.message,
                     status: 'error',
@@ -996,7 +1002,7 @@ async function runAgent(runId, user) {
                         runId,
                         stepId: `${runId}:${step}`,
                         toolName: plan.tool,
-                        input: plan.input || {},
+                        input: effectivePlanInput,
                         output: { error: toolErr.message, diagnosis },
                         policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
                         status: 'error',

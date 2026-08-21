@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-08-21
-- Release baseline: v0.1.14
+- Release baseline: v0.1.15
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。

@@ -16,23 +16,45 @@ function normalizeAllowlist(value) {
     return [];
 }
 
+function normalizeModelReference(value) {
+    if (value && typeof value === 'object') {
+        return String(value.id ?? value.model_id ?? value.modelId ?? value.model_name ?? value.name ?? '').trim();
+    }
+    if (typeof value === 'number') return String(value);
+    if (typeof value !== 'string') return value;
+    const text = value.trim();
+    if (!text || !/^[{[]/.test(text)) return value;
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') return normalizeModelReference(parsed);
+    } catch (e) {
+        // Keep the original text; the schema validator will report a useful error.
+    }
+    return value;
+}
+
+function normalizeToolInput(toolName, input = {}, run = {}) {
+    const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const normalized = { ...source };
+    ['model', 'modelId', 'model_id'].forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+            normalized[key] = normalizeModelReference(normalized[key]);
+        }
+    });
+    if (String(toolName || '').trim() === 'agent.content_review'
+        && (!normalized.model || typeof normalized.model !== 'string' || !normalized.model.trim())) {
+        normalized.model = String(run.chosen_model_id ?? run.model_id_selected ?? run.model_id ?? run.modelId ?? '').trim();
+    }
+    if (String(toolName || '').trim() === 'agent.content_review' && !normalized.records) {
+        normalized.records = normalized.rows ?? normalized.data ?? normalized.items ?? normalized.content
+            ?? normalized.text ?? normalized.articles ?? normalized.news_list ?? normalized.results;
+    }
+    return normalized;
+}
+
 function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null } = {}) {
     const tool = normalizeToolContract(rawTool);
-    if (input && typeof input === 'object') {
-        if (input.model !== undefined && input.model !== null) {
-            input.model = typeof input.model === 'object'
-                ? String(input.model.id || input.model.model_name || input.model.name || '')
-                : String(input.model);
-        }
-        if (tool.name === 'agent.content_review') {
-            if (!input.records) {
-                input.records = input.rows ?? input.data ?? input.items ?? input.content ?? input.text ?? input.articles ?? input.news_list ?? input.results;
-            }
-            if (!input.model || typeof input.model !== 'string' || !input.model.trim()) {
-                input.model = String(run.model_id || run.modelId || '');
-            }
-        }
-    }
+    input = normalizeToolInput(tool.name, input, run);
     const policy = String(run.tool_policy || run.toolPolicy || 'all');
     const allowlist = normalizeAllowlist(run.tool_allowlist || run.toolAllowlist);
     const reasons = [];
@@ -81,5 +103,7 @@ module.exports = {
     PolicyError,
     enforceToolPolicy,
     evaluateToolPolicy,
-    normalizeAllowlist
+    normalizeAllowlist,
+    normalizeModelReference,
+    normalizeToolInput
 };

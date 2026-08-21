@@ -33,7 +33,8 @@ function bindAgentRunTitleTooltip(list = document.getElementById('agent-runs-lis
 }
 
 function isAgentRunDetailModalOpen() {
-    return !document.getElementById('agent-run-detail-modal')?.classList.contains('hidden');
+    const modal = document.getElementById('agent-run-detail-modal');
+    return Boolean(modal && !modal.classList.contains('hidden'));
 }
 
 function agentRunMetadata(run = {}) {
@@ -321,7 +322,11 @@ function closeAgentRunDetailModal() {
 
 window.closeAgentRunDetailModal = closeAgentRunDetailModal;
 
+let agentRunDetailRequestId = 0;
+let agentRunDetailRefreshInFlight = false;
+
 window.openAgentRun = async function(runId, options = {}) {
+    const requestId = ++agentRunDetailRequestId;
     activeAgentRunId = runId;
     const modal = ensureAgentRunDetailModalVisible();
     const detail = document.getElementById('agent-run-detail');
@@ -332,8 +337,10 @@ window.openAgentRun = async function(runId, options = {}) {
     });
     modal?.classList.remove('hidden');
     if (!options.silent) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
     const data = await res.json();
+    // 轮询和 SSE 可能同时触发详情请求，只接受最后一次请求的结果。
+    if (requestId !== agentRunDetailRequestId || activeAgentRunId !== runId) return null;
     if (!res.ok) {
         PivotSafeHtml.setHtml(detail, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
         return null;
@@ -498,10 +505,14 @@ function startAgentWorkflowPreviewPolling(runId, isPreview = false) {
             stopAgentWorkflowPreviewPolling();
             return;
         }
+        if (agentRunDetailRefreshInFlight) return;
+        agentRunDetailRefreshInFlight = true;
         try {
             const run = await window.openAgentRun(runId, { workflowPreview: isPreview, silent: true });
             if (run && !isAgentRunActive(run.status)) stopAgentWorkflowPreviewPolling();
-        } catch (e) {}
+        } catch (e) {} finally {
+            agentRunDetailRefreshInFlight = false;
+        }
     }, 1500);
 }
 

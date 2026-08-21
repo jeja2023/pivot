@@ -4,6 +4,7 @@ const {
     MEMORY_TYPES,
     MIN_MEMORY_CONTENT_CHARS,
     MODEL_EXTRACTION_TIMEOUT_MS,
+    MODEL_EXTRACTION_MAX_OUTPUT_TOKENS,
     MODEL_EXTRACTION_MAX_CANDIDATES,
     MODEL_EXTRACTION_DISABLED,
     clamp,
@@ -14,6 +15,35 @@ const {
     fingerprintMemory,
     contentText
 } = require('./memory-utils');
+
+const MODEL_EXTRACTION_FAILURE_COOLDOWN_MS = Math.max(
+    10000,
+    Number.parseInt(process.env.LONG_TERM_MEMORY_LLM_FAILURE_COOLDOWN_MS, 10) || 120000
+);
+const modelExtractionCooldowns = new Map();
+
+function modelExtractionKey(modelCfg = {}) {
+    return String(modelCfg.id || modelCfg.url || modelCfg.model_name || modelCfg.name || 'default');
+}
+
+function isModelExtractionCircuitOpen(modelCfg = {}) {
+    const key = modelExtractionKey(modelCfg);
+    const until = Number(modelExtractionCooldowns.get(key) || 0);
+    if (!until) return false;
+    if (until <= Date.now()) {
+        modelExtractionCooldowns.delete(key);
+        return false;
+    }
+    return true;
+}
+
+function markModelExtractionTimeout(modelCfg = {}) {
+    modelExtractionCooldowns.set(modelExtractionKey(modelCfg), Date.now() + MODEL_EXTRACTION_FAILURE_COOLDOWN_MS);
+}
+
+function clearModelExtractionCooldown(modelCfg = {}) {
+    modelExtractionCooldowns.delete(modelExtractionKey(modelCfg));
+}
 
 function normalizeExtractorCandidates(rawCandidates = [], context = {}) {
     const sourceMessageIds = normalizeSourceMessageIds(context.sourceMessageIds);
@@ -69,6 +99,13 @@ function extractModelMessageText(data) {
     return contentText(message);
 }
 
+function isModelExtractionTimeoutError(error) {
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || error || '').toLowerCase();
+    return ['ECONNABORTED', 'ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(code)
+        || /timeout|timed out|超时/.test(message);
+}
+
 function buildExtractorMessages(messages = []) {
     const source = messages
         .filter(message => ['user', 'assistant'].includes(message?.role))
@@ -110,6 +147,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
             messages: buildExtractorMessages(messages),
             temperature: 0,
             stream: false,
+            max_tokens: MODEL_EXTRACTION_MAX_OUTPUT_TOKENS,
             response_format: { type: 'json_object' }
         }
     });
@@ -193,6 +231,10 @@ module.exports = {
     normalizeExtractorCandidates,
     parseExtractorJson,
     extractModelMessageText,
+    isModelExtractionTimeoutError,
+    isModelExtractionCircuitOpen,
+    markModelExtractionTimeout,
+    clearModelExtractionCooldown,
     buildExtractorMessages,
     extractMemoryCandidatesWithModel,
     buildCandidate,

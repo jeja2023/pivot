@@ -7,6 +7,7 @@ const { listDagNodes, listSteps } = require('./agent-runs');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { normalizeToolInput } = require('./agent-policy');
 const { inspectDagTopology, normalizeDagSpec, parseJsonObject } = require('./agent-validators');
 const {
     normalizeJsonSchema,
@@ -414,7 +415,11 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
             }
             const selectedTool = findAgentToolByName(node.tool, toolList);
             if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
-            const resolvedInput = resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap });
+            const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap }), {
+                ...childRun,
+                model_id: childRun.model_id ?? modelCfg?.id,
+                chosen_model_id: childRun.chosen_model_id ?? modelCfg?.id
+            });
             const approvalKey = `${node.tool}:subworkflow:${childStack.join('.')}:${node.id}`;
             let workflowApprovalResult = null;
             let workflowDelayResult = null;
@@ -623,11 +628,15 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             const nodeStepIndex = stepIndex;
             stepIndex += 1;
             const selectedTool = findAgentToolByName(node.tool, toolList);
-            const resolvedInput = resolveDagNodeInput(node, {
+            const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, {
                 goal: run.goal,
                 inputs: dagInputs,
                 states,
                 nodeMap
+            }), {
+                ...run,
+                model_id: run.model_id ?? modelCfg?.id,
+                chosen_model_id: run.chosen_model_id ?? modelCfg?.id
             });
             const explicitInputSchema = normalizeJsonSchema(node.inputSchema || node.input_schema || {});
             const inputSchema = schemaHasRules(explicitInputSchema)

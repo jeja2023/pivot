@@ -143,7 +143,7 @@ async function loadAgentModelRouters() {
 
 async function loadAgentTools() {
     const list = document.getElementById('agent-tool-list');
-    const res = await apiFetch(`${API_BASE}/agents/tools`);
+    const res = await apiFetch(`${API_BASE}/agents/tools`, { cache: 'no-store' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
     const seenToolKeys = new Set();
@@ -197,7 +197,7 @@ async function loadAgentTools() {
 async function loadAgentRuntimeStatus() {
     const target = document.getElementById('agent-runtime-status');
     if (!target) return;
-    const res = await apiFetch(`${API_BASE}/agents/runtime`);
+    const res = await apiFetch(`${API_BASE}/agents/runtime`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         PivotSafeHtml.setHtml(target, '');
@@ -213,7 +213,7 @@ async function loadAgentRuntimeStatus() {
 async function loadAgentMetrics() {
     const target = document.getElementById('agent-metrics');
     if (!target) return;
-    const res = await apiFetch(`${API_BASE}/agents/metrics?days=7`);
+    const res = await apiFetch(`${API_BASE}/agents/metrics?days=7`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         PivotSafeHtml.setHtml(target, '');
@@ -303,7 +303,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     if (runType) params.set('runType', runType);
     if (query) params.set('query', query);
     if (agentScheduleFilterId) params.set('scheduleId', agentScheduleFilterId);
-    const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`);
+    const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`, { cache: 'no-store' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '任务列表加载失败');
     agentRunsCache = data.data || [];

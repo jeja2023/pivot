@@ -4,6 +4,7 @@ const { buildAgentToolSchemas } = require('./agent-tool-catalog');
 const { normalizeMaxSteps, normalizePositiveInt } = require('./agent-validators');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
 const { compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { normalizeToolInput } = require('./agent-policy');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 
 // v0.0.49 开始支持 Agent 运行中的流式工具调用。
@@ -150,7 +151,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     });
                     continue;
                 }
-                if (await deps.maybePauseForApproval(run, selectedTool, call.arguments || {})) {
+                const args = normalizeToolInput(call.name, call.arguments || {}, {
+                    ...run,
+                    model_id: run.model_id ?? modelCfg?.id,
+                    chosen_model_id: run.chosen_model_id ?? modelCfg?.id
+                });
+                if (await deps.maybePauseForApproval(run, selectedTool, args)) {
                     // 保持运行处于待审批状态；审批通过后由恢复流程继续。
                     return { completed: true, roundsUsed };
                 }
@@ -158,11 +164,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 const toolSpanId = await deps.startAgentTraceSpan?.(runId, {
                     type: 'tool',
                     name: `工具调用：${call.name}`,
-                    input: call.arguments || {},
+                    input: args,
                     details: { step, toolName: call.name, source: 'streaming_tool_call' }
                 });
                 try {
-                    const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
                     const output = await deps.withTimeout(
                         signal => executeToolByName(call.name, args, user, toolList, {
                             run,
@@ -196,7 +201,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         stepId: `${runId}:${step}:${call.id || call.name}`,
                         operationKey: `${runId}:${step}:${call.id || call.name}`,
                         toolName: call.name,
-                        input: call.arguments || {},
+                        input: args,
                         output: compactOutput,
                         policyDecision: 'allow',
                         status: 'success',
@@ -209,12 +214,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     });
                 } catch (toolErr) {
                     if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(toolErr.code)) throw toolErr;
-                    observations.push({ step, tool: call.name, input: call.arguments || {}, error: toolErr.message });
+                    observations.push({ step, tool: call.name, input: args, error: toolErr.message });
                     await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
                         type: 'tool',
                         title: `工具执行失败：${call.name}`,
                         toolName: call.name,
-                        input: call.arguments || {},
+                        input: args,
                         output: { error: toolErr.message },
                         errorMessage: toolErr.message,
                         status: 'error',
@@ -225,7 +230,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         stepId: `${runId}:${step}:${call.id || call.name}`,
                         operationKey: `${runId}:${step}:${call.id || call.name}`,
                         toolName: call.name,
-                        input: call.arguments || {},
+                        input: args,
                         output: { error: toolErr.message },
                         policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
                         status: 'error',

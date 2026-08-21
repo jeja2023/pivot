@@ -200,7 +200,7 @@ async function loadAgentWorkflows() {
     const select = document.getElementById('agent-workflow-select');
     if (!select) return;
     try {
-        const res = await apiFetch(`${API_BASE}/agents/workflows`);
+        const res = await apiFetch(`${API_BASE}/agents/workflows`, { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '已保存工作流加载失败');
         agentWorkflowsCache = data.data || [];

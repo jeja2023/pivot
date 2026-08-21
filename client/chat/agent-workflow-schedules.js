@@ -179,7 +179,7 @@ async function loadAgentWorkflowSchedules() {
     const list = document.getElementById('agent-workflow-schedule-list');
     if (!workflow || !list) return;
     PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state">正在加载计划...</div>');
-    const res = await apiFetch(`${API_BASE}/agents/schedules`);
+    const res = await apiFetch(`${API_BASE}/agents/schedules`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         PivotSafeHtml.setHtml(list, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '计划加载失败')}</div>`);

@@ -3,7 +3,9 @@
 // Agent 自动刷新、实时事件和流式面板。
 /* eslint-disable no-undef */
 function isAgentUiVisible() {
-    const detailOpen = typeof isAgentRunDetailModalOpen === 'function' ? isAgentRunDetailModalOpen() : !document.getElementById('agent-run-detail-modal')?.classList.contains('hidden');
+    const detailOpen = typeof isAgentRunDetailModalOpen === 'function'
+        ? isAgentRunDetailModalOpen()
+        : isAgentElementVisible('agent-run-detail-modal');
     return Boolean(
         detailOpen
         || !document.getElementById('agent-workbench-modal')?.classList.contains('hidden')
@@ -13,51 +15,83 @@ function isAgentUiVisible() {
     );
 }
 
+function isAgentElementVisible(id) {
+    const element = document.getElementById(id);
+    return Boolean(element && !element.classList.contains('hidden'));
+}
+
+let agentRealtimePollInFlight = false;
+let agentRefreshTimerIntervalMs = 0;
+
+async function refreshAgentVisibleState(payload = {}) {
+    if (agentRealtimePollInFlight) return;
+    agentRealtimePollInFlight = true;
+    try {
+        const tasks = [];
+        const agentVisible = isAgentElementVisible('agent-workbench-modal')
+            || (typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen());
+        const dagVisible = isAgentElementVisible('agent-dag-workbench-modal');
+        const configSection = document.getElementById('agent-config-modal')?.dataset.agentConfigSection || '';
+
+        if (agentVisible) {
+            if (typeof loadAgentRuns === 'function') tasks.push(loadAgentRuns());
+            if (typeof loadAgentRuntimeStatus === 'function') tasks.push(loadAgentRuntimeStatus());
+            if (typeof loadAgentMetrics === 'function') tasks.push(loadAgentMetrics());
+            if (typeof loadAgentNotifications === 'function') tasks.push(loadAgentNotifications());
+            if (configSection === 'templates' && typeof loadAgentTemplates === 'function') tasks.push(loadAgentTemplates());
+            if (configSection === 'results') {
+                if (typeof loadAgentArtifacts === 'function') tasks.push(loadAgentArtifacts());
+                if (typeof loadAgentTools === 'function') tasks.push(loadAgentTools());
+            }
+        }
+        if (dagVisible) {
+            if (typeof loadAgentWorkflows === 'function') tasks.push(loadAgentWorkflows());
+            if (typeof loadAgentSchedules === 'function') tasks.push(loadAgentSchedules());
+            if (isAgentElementVisible('agent-workflow-schedule-modal') && typeof loadAgentWorkflowSchedules === 'function') tasks.push(loadAgentWorkflowSchedules());
+        }
+        if (configSection === 'evaluations' && typeof loadAgentEvaluationSuites === 'function') {
+            tasks.push(loadAgentEvaluationSuites({ keepDetail: true, silent: true }));
+        }
+        await Promise.allSettled(tasks);
+
+        const runId = payload.run?.id || payload.notification?.run_id || '';
+        if (activeAgentRunId && typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen() && (!runId || runId === activeAgentRunId)) {
+            try {
+                await window.openAgentRun(activeAgentRunId, { silent: true });
+            } catch (e) {}
+        }
+    } finally {
+        agentRealtimePollInFlight = false;
+    }
+}
+
 function updateAgentAutoRefresh() {
     const modalOpen = isAgentUiVisible();
-    const hasActiveRun = agentRunsCache.some(run => isAgentRunActive(run.status));
-    if (agentRealtimeConnected) {
-        if (agentRefreshTimer) {
-            clearInterval(agentRefreshTimer);
-            agentRefreshTimer = null;
-        }
+    if (!currentUser) {
+        if (agentRefreshTimer) clearInterval(agentRefreshTimer);
+        agentRefreshTimer = null;
+        agentRefreshTimerIntervalMs = 0;
         return;
     }
-    if (agentRefreshTimer && (!modalOpen || !hasActiveRun)) {
+    const intervalMs = agentRealtimeConnected ? 5000 : 2500;
+    if (agentRefreshTimer && (!modalOpen || agentRefreshTimerIntervalMs !== intervalMs)) {
         clearInterval(agentRefreshTimer);
         agentRefreshTimer = null;
+        agentRefreshTimerIntervalMs = 0;
     }
-    if (!agentRefreshTimer && modalOpen && hasActiveRun) {
+    // SSE 是低延迟通道，但轮询仍作为兜底，覆盖任务、工作流、计划和评测面板。
+    if (!agentRefreshTimer && modalOpen) {
+        agentRefreshTimerIntervalMs = intervalMs;
         agentRefreshTimer = setInterval(async () => {
-            try {
-                await loadAgentRuns();
-                await loadAgentRuntimeStatus();
-                await loadAgentMetrics();
-                if (activeAgentRunId && (typeof isAgentRunDetailModalOpen !== 'function' || isAgentRunDetailModalOpen())) {
-                    await window.openAgentRun(activeAgentRunId);
-                }
-            } catch (e) {}
-        }, 3000);
+            await refreshAgentVisibleState();
+        }, intervalMs);
     }
 }
 
 function scheduleAgentRealtimeRefresh(payload = {}) {
     clearTimeout(agentRealtimeRefreshTimer);
     agentRealtimeRefreshTimer = setTimeout(async () => {
-        try {
-            const modalOpen = isAgentUiVisible();
-            if (!modalOpen) return;
-            await Promise.all([
-                loadAgentRuns(),
-                loadAgentRuntimeStatus(),
-                loadAgentNotifications()
-            ]);
-            if (payload.type === 'agent.run') await loadAgentMetrics();
-            const runId = payload.run?.id || payload.notification?.run_id || '';
-            if (activeAgentRunId && (typeof isAgentRunDetailModalOpen !== 'function' || isAgentRunDetailModalOpen()) && (!runId || runId === activeAgentRunId)) {
-                await window.openAgentRun(activeAgentRunId);
-            }
-        } catch (e) {}
+        await refreshAgentVisibleState(payload);
     }, 300);
 }
 
@@ -83,6 +117,7 @@ window.initAgentRealtime = function() {
         agentRealtimeConnected = false;
         updateAgentAutoRefresh();
     };
+    updateAgentAutoRefresh();
 };
 
 function handleAgentStreamingEvent(event) {
@@ -150,6 +185,9 @@ function renderAgentStreamingPanel(payload) {
 window.closeAgentRealtime = function() {
     if (agentRealtimeRefreshTimer) clearTimeout(agentRealtimeRefreshTimer);
     agentRealtimeRefreshTimer = null;
+    if (agentRefreshTimer) clearInterval(agentRefreshTimer);
+    agentRefreshTimer = null;
+    agentRefreshTimerIntervalMs = 0;
     agentRealtimeConnected = false;
     if (agentRealtimeSource) {
         agentRealtimeSource.close();

@@ -17,6 +17,7 @@ const {
     DEFAULT_MAX_INJECTED_MEMORIES,
     MIN_MEMORY_CONTENT_CHARS,
     EXTRACTION_TIMEOUT_MS,
+    MODEL_EXTRACTION_TIMEOUT_MS,
     MEMORY_JOB_STATUS,
     DEFAULT_MEMORY_JOB_MAX_ATTEMPTS,
     MEMORY_JOB_STALE_LOCK_MINUTES,
@@ -37,7 +38,11 @@ const { serializeMemory, serializeMemoryJob, buildMemoryJobDedupeKey } = require
 
 const {
     extractMemoryCandidatesWithModel,
-    extractMemoryCandidatesFromMessages
+    extractMemoryCandidatesFromMessages,
+    isModelExtractionTimeoutError,
+    isModelExtractionCircuitOpen,
+    markModelExtractionTimeout,
+    clearModelExtractionCooldown
 } = require('./memory-extraction');
 const { memoryPairSimilarity, mergeMemoryContent } = require('./memory-merge');
 const {
@@ -885,13 +890,29 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     `, [userId, sessionId, ...ids]);
     let extractor = 'heuristic';
     let candidates = [];
-    if (modelCfg?.url) {
+    let modelFallbackReason = null;
+    if (modelCfg?.url && !isModelExtractionCircuitOpen(modelCfg)) {
         try {
             candidates = await extractMemoryCandidatesWithModel(messages, { sessionId, user, modelCfg });
             if (candidates.length > 0) extractor = 'model';
+            clearModelExtractionCooldown(modelCfg);
         } catch (err) {
-            logger.warn({ userId, sessionId, err: err.message }, '长期记忆模型抽取失败，已回退到启发式规则');
+            const timedOut = isModelExtractionTimeoutError(err);
+            modelFallbackReason = timedOut ? 'timeout' : 'error';
+            if (timedOut) markModelExtractionTimeout(modelCfg);
+            const logContext = {
+                userId,
+                sessionId,
+                modelId: modelCfg.id || null,
+                timeoutMs: MODEL_EXTRACTION_TIMEOUT_MS,
+                errorCode: err.code || null,
+                err: err.message
+            };
+            if (timedOut) logger.debug(logContext, '长期记忆模型抽取超时，已回退到启发式规则');
+            else logger.warn(logContext, '长期记忆模型抽取失败，已回退到启发式规则');
         }
+    } else if (modelCfg?.url) {
+        modelFallbackReason = 'cooldown';
     }
     if (candidates.length === 0) {
         candidates = extractMemoryCandidatesFromMessages(messages, { sessionId });
@@ -906,6 +927,7 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     return {
         candidates: candidates.length,
         extractor,
+        modelFallbackReason,
         inserted: results.filter(item => item.inserted).length,
         merged: results.filter(item => item.merged).length,
         skipped: results.filter(item => item.skipped).length

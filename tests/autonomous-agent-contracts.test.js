@@ -11,6 +11,7 @@ const { parseSkillManifest, validateSkillManifest } = require('../server/service
 const { canTransitionAgentRunStatus } = require('../server/services/agent-runtime/state-machine');
 const { assertWorkerConfiguration } = require('../desktop/agent-runtime');
 const { putAgentBlob } = require('../server/services/agent-blob-store');
+const { isModelExtractionTimeoutError, buildExtractorMessages } = require('../server/services/long-term-memory/memory-extraction');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -45,6 +46,38 @@ test('PEP denies disallowed MCP and requires approval for risky calls', () => {
     assert.equal(evaluateToolPolicy({ run: { tool_policy: 'builtin_only' }, tool: { name: 'mcp.1.x', source: 'mcp' } }).decision, 'denied');
     assert.equal(evaluateToolPolicy({ run: { approval_policy: 'approve_all_mcp' }, tool: { name: 'mcp.1.x', source: 'mcp', input_schema: { type: 'object' } }, input: {} }).decision, 'require_approval');
     assert.throws(() => enforceToolPolicy({ run: { approval_policy: 'approve_all_mcp' }, tool: { name: 'mcp.1.x', source: 'mcp', input_schema: { type: 'object' } }, input: {} }), /人工审批/);
+});
+
+test('content review policy normalizes model references before contract validation', () => {
+    const result = evaluateToolPolicy({
+        run: { model_id: 42 },
+        tool: {
+            name: 'agent.content_review',
+            input_schema: {
+                type: 'object',
+                required: ['records', 'model'],
+                properties: {
+                    records: {},
+                    model: { type: 'string' }
+                }
+            }
+        },
+        input: {
+            data: [{ id: 1, content: '待校对内容' }],
+            model: { id: 7, name: '校对模型' }
+        }
+    });
+    assert.equal(result.decision, 'allow');
+    assert.equal(result.input.model, '7');
+    assert.deepEqual(result.input.records, [{ id: 1, content: '待校对内容' }]);
+});
+
+test('long-term memory model extraction classifies timeout as a fallback', () => {
+    assert.equal(isModelExtractionTimeoutError(Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' })), true);
+    assert.equal(isModelExtractionTimeoutError(new Error('invalid response')), false);
+    const messages = buildExtractorMessages([{ id: 1, role: 'user', content: '我偏好中文回答。' }]);
+    assert.equal(messages.length, 2);
+    assert.match(messages[0].content, /Return only JSON/);
 });
 
 test('diagnosis maps policy, network and schema errors', () => {
