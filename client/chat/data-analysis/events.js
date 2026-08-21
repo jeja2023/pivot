@@ -386,6 +386,10 @@
                 await runAi();
                 return;
             }
+            if (event.target.closest('#data-analysis-ai-stop')) {
+                app.stopAi?.();
+                return;
+            }
             if (event.target.closest('#data-analysis-semantic-run')) {
                 await runSemanticAnalysis();
                 return;

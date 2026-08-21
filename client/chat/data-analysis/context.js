@@ -19,6 +19,7 @@
         overviewPage: 1,
         overviewPageSize: 10,
         aiBusy: false,
+        aiAbortController: null,
         aiWorkspaceEpoch: 0,
         queryMode: 'visual',
         visualQuery: {

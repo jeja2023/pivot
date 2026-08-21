@@ -240,7 +240,10 @@
                             <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
                             <div class="data-analysis-ai-actions">
                                 <label class="data-analysis-ai-toggle"><input type="checkbox" id="data-analysis-ai-deep"> 深度分析（可查询数据 / 生成图表）</label>
-                                <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                                <div class="data-analysis-ai-buttons">
+                                    <button id="data-analysis-ai-stop" class="btn-danger-outline hidden" type="button">停止生成</button>
+                                    <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                                </div>
                             </div>
                         </div>
                         <div id="data-analysis-ai-result" class="data-analysis-ai-result message-content"></div>

@@ -441,7 +441,14 @@
     cursor: pointer;
 }
 
-.data-analysis-ai-box .btn-primary {
+.data-analysis-ai-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.data-analysis-ai-box .btn-primary,
+.data-analysis-ai-box .btn-danger-outline {
     height: 30px;
     padding: 0 14px;
     border-radius: 6px;
