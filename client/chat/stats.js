@@ -252,9 +252,11 @@ window.loadLogs = async function(page = 1) {
         const start = document.getElementById('log-filter-start')?.value || '';
         const end = document.getElementById('log-filter-end')?.value || '';
         
+        pageState.logs = page;
+        const limit = pageState.limit || 15;
         const params = new URLSearchParams({
             page,
-            limit: pageState.limit,
+            limit,
             username,
             action,
             details,
@@ -264,13 +266,23 @@ window.loadLogs = async function(page = 1) {
         });
 
         const res = await apiFetch(`${API_BASE}/admin/logs?${params.toString()}`, { headers: authHeaders() });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { data, total } = await res.json();
-        PivotSafeHtml.setHtml(document.getElementById('log-list-body'), data.map((l, i) => {
+        const tbody = document.getElementById('log-list-body');
+        if (!tbody) return;
+
+        if (!Array.isArray(data) || data.length === 0) {
+            renderTableMessage(tbody, 7, '暂无审计日志记录');
+            renderPagination('logs', 0, page);
+            return;
+        }
+
+        PivotSafeHtml.setHtml(tbody, data.map((l, i) => {
             const username = l.username || '系统';
             const displayName = l.nickname || (l.username ? '-' : '系统');
             return `
                 <tr>
-                    <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
+                    <td class="text-center">${(page - 1) * limit + i + 1}</td>
                     <td>${escapeHtml(formatDateToCN(l.timestamp))}</td>
                     <td title="${escapeHtml(username)}">${escapeHtml(username)}</td>
                     <td title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</td>
@@ -280,7 +292,7 @@ window.loadLogs = async function(page = 1) {
                 </tr>
             `;
         }).join(''));
-        renderPagination('logs', total, page);
+        renderPagination('logs', total || data.length, page);
     } catch (e) { showToast('加载日志失败', 'error'); }
 };
 

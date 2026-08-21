@@ -208,27 +208,37 @@ async function pgFlush() {
 
     pgFlushing = (async () => {
         try {
-            let hasError = false;
-            for (const queueName of Object.keys(pgQueues)) {
-                if (pgQueues[queueName].length === 0) continue;
-                try {
-                    await pgFlushQueue(queueName);
-                } catch (err) {
-                    hasError = true;
-                    logger.warn(
-                        { err: err.message, queueName, pending: pgQueues[queueName].length },
-                        '[PG] 写入队列刷新失败，稍后重试'
-                    );
+            while (true) {
+                const hasPending = Object.values(pgQueues).some(q => q.length > 0);
+                if (!hasPending) break;
+
+                let hasError = false;
+                for (const queueName of Object.keys(pgQueues)) {
+                    if (pgQueues[queueName].length === 0) continue;
+                    try {
+                        await pgFlushQueue(queueName);
+                    } catch (err) {
+                        hasError = true;
+                        logger.warn(
+                            { err: err.message, queueName, pending: pgQueues[queueName].length },
+                            '[PG] 写入队列刷新失败，稍后重试'
+                        );
+                    }
                 }
-            }
-            if (hasError) {
-                pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
-                pgSchedule(pgRetryDelayMs);
-            } else {
-                pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
+                if (hasError) {
+                    pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
+                    pgSchedule(pgRetryDelayMs);
+                    break;
+                } else {
+                    pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
+                }
             }
         } finally {
             pgFlushing = null;
+            const stillPending = Object.values(pgQueues).some(q => q.length > 0);
+            if (stillPending && !pgFlushTimer) {
+                pgSchedule();
+            }
         }
     })();
 

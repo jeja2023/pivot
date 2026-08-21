@@ -13,6 +13,7 @@ const {
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
+const { flushAllWrites } = require('../services/db-write-queue');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
 const { archiveDeletedUsernameAsync } = require('../services/user-identity');
 const {
@@ -161,14 +162,16 @@ function createAdminUsersRouter({
     }));
 
     router.get('/admin/logs/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        await flushAllWrites().catch(() => {});
         const { username, action, details, ip, start, end } = req.query;
         let conditions = [];
         let params = [];
         if (username) { conditions.push("COALESCE(NULLIF(u.deleted_username, ''), u.username) ILIKE ?"); params.push(`%${username}%`); }
         if (action) {
             const actionValues = getAuditActionFilterValues(action);
-            conditions.push(`al.action IN (${actionValues.map(() => '?').join(', ')})`);
-            params.push(...actionValues);
+            const placeholders = actionValues.map(() => '?').join(', ');
+            conditions.push(`(al.action ILIKE ? ${actionValues.length > 0 ? `OR al.action IN (${placeholders})` : ''})`);
+            params.push(`%${action}%`, ...actionValues);
         }
         if (details) { conditions.push("al.details ILIKE ?"); params.push(`%${details}%`); }
         if (ip) { conditions.push("al.ip_address ILIKE ?"); params.push(`%${ip}%`); }
@@ -181,7 +184,7 @@ function createAdminUsersRouter({
             FROM audit_logs al
             LEFT JOIN users u ON al.user_id = u.id
             ${whereClause}
-            ORDER BY al.timestamp DESC
+            ORDER BY al.timestamp DESC NULLS LAST, al.id DESC
             LIMIT 10000
         `, params);
 
@@ -399,6 +402,7 @@ function createAdminUsersRouter({
     }));
 
     router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        await flushAllWrites().catch(() => {});
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 10;
         const offset = (page - 1) * limit;
@@ -413,8 +417,9 @@ function createAdminUsersRouter({
         }
         if (action) {
             const actionValues = getAuditActionFilterValues(action);
-            conditions.push(`l.action IN (${actionValues.map(() => '?').join(', ')})`);
-            params.push(...actionValues);
+            const placeholders = actionValues.map(() => '?').join(', ');
+            conditions.push(`(l.action ILIKE ? ${actionValues.length > 0 ? `OR l.action IN (${placeholders})` : ''})`);
+            params.push(`%${action}%`, ...actionValues);
         }
         if (details) {
             conditions.push("l.details ILIKE ?");
@@ -440,7 +445,7 @@ function createAdminUsersRouter({
             FROM audit_logs l
             LEFT JOIN users u ON l.user_id = u.id
             ${whereClause}
-            ORDER BY l.timestamp DESC
+            ORDER BY l.timestamp DESC NULLS LAST, l.id DESC
             LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
 
