@@ -60,8 +60,12 @@ function selectAutomationWorkflow(workflowId) {
 function setAutomationTab(tab = 'workflows') {
     activeAutomationTab = tab === 'schedules' ? 'schedules' : 'workflows';
     window.syncAutomationPrimaryTabs?.(activeAutomationTab);
-    document.getElementById('automation-workflows-panel')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
-    document.getElementById('automation-schedules-panel')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
+    const workflowsPanel = document.getElementById('automation-workflows-panel');
+    const schedulesPanel = document.getElementById('automation-schedules-panel');
+    workflowsPanel?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
+    schedulesPanel?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
+    workflowsPanel?.setAttribute('aria-hidden', activeAutomationTab === 'workflows' ? 'false' : 'true');
+    schedulesPanel?.setAttribute('aria-hidden', activeAutomationTab === 'schedules' ? 'false' : 'true');
     document.getElementById('automation-new-workflow-btn')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
     document.getElementById('automation-new-schedule-btn')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
     const input = document.getElementById('automation-assets-search-input');
@@ -262,12 +266,17 @@ window.openAgentDagWorkbench = async function(options = {}) {
     const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
     window.bindUnifiedAutomationTabs?.();
-    await Promise.all([
-        loadAgentModels(),
-        agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
-        loadAgentWorkflows(),
-        loadAgentSchedules()
-    ]);
+    try {
+        await Promise.all([
+            loadAgentModels(),
+            agentToolsCache.length ? Promise.resolve() : loadAgentTools(),
+            loadAgentWorkflows(),
+            loadAgentSchedules()
+        ]);
+    } catch (error) {
+        showToast(error.message || '自动化资产加载失败', 'error');
+        return false;
+    }
     if (incomingDraft) {
         pendingAgentWorkflowDraft = null;
         newAgentWorkflow({
@@ -339,12 +348,27 @@ window.bindAgentDagWorkbench = function() {
         newWorkflowBtn.dataset.boundAutomationNew = '1';
         newWorkflowBtn.addEventListener('click', () => showAutomationWorkflowEditor());
     }
+    const automationResourcesBtn = document.getElementById('automation-resources-btn');
+    if (automationResourcesBtn && automationResourcesBtn.dataset.boundAutomationResources !== '1') {
+        automationResourcesBtn.dataset.boundAutomationResources = '1';
+        automationResourcesBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.automationResources').open?.());
+    }
     const refreshAutomationBtn = document.getElementById('automation-refresh-btn');
     if (refreshAutomationBtn && refreshAutomationBtn.dataset.boundAutomationRefresh !== '1') {
         refreshAutomationBtn.dataset.boundAutomationRefresh = '1';
         refreshAutomationBtn.addEventListener('click', async () => {
-            await Promise.all([loadAgentWorkflows(), loadAgentSchedules()]);
-            showToast('自动化资产已刷新', 'success');
+            if (refreshAutomationBtn.disabled) return;
+            refreshAutomationBtn.disabled = true;
+            refreshAutomationBtn.setAttribute('aria-busy', 'true');
+            try {
+                await Promise.all([loadAgentWorkflows(), loadAgentSchedules()]);
+                showToast('自动化资产已刷新', 'success');
+            } catch (error) {
+                showToast(error.message || '自动化资产刷新失败', 'error');
+            } finally {
+                refreshAutomationBtn.disabled = false;
+                refreshAutomationBtn.removeAttribute('aria-busy');
+            }
         });
     }
     const closeAutomationBtn = document.getElementById('automation-close-btn');

@@ -141,6 +141,16 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(ragDocs, /正在上传并向量化文档/);
     assert.match(ragDocs, /正在测试召回效果/);
     assert.match(ragDocs, /暂无知识库文档/);
+    assert.match(ragDocs, /Promise\.allSettled/);
+    assert.match(ragDocs, /rag-workbench-state/);
+    assert.match(ragDocs, /ragActionLocks/);
+    assert.match(ragDocs, /data-knowledge-modal-close/);
+    assert.match(knowledgePartial, /knowledge-workbench-state/);
+    assert.match(knowledgePartial, /aria-labelledby="knowledge-workbench-title"/);
+    assert.match(ragDebugPartial, /data-knowledge-modal/);
+    assert.match(adminExtraModals, /rag-chunk-overlap-help/);
+    assert.match(adminSettings, /validateRagSettings/);
+    assert.match(adminSettings, /updateRagChunkOverlapLimit/);
     assert.match(ragCore, /data-rag-debug-chat/);
     assert.match(ragCore, /pivot_chat_rag_enabled/);
     assert.match(chatShellPartial, /chat-tool-status/);
@@ -172,6 +182,11 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(mcpPartial, /刷新工具/);
     assert.match(mcpWorkbench, /refreshMcpTools/);
     assert.match(mcpWorkbench, /已刷新 .* 个工具/);
+    assert.match(mcpWorkbench, /mcp-workbench-state/);
+    assert.match(mcpWorkbench, /mcpActionLocks/);
+    assert.doesNotMatch(mcpWorkbench, /title\.textContent\s*=\s*`\$\{mcpEscape/);
+    assert.match(mcpForm, /bindMcpModalAccessibility/);
+    assert.match(mcpPartial, /aria-labelledby="mcp-tools-title"/);
     assert.match(mcpForm, /\.\.\.mcpBuiltinServices\.map\(item => item\.type\)/);
     assert.match(mcpForm, /reports-max-file-mb', '20'/);
     assert.match(mcpForm, /db-max-rows', '200'/);
@@ -183,6 +198,27 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.doesNotMatch(mcpCss, /\.mcp-next-step-action/);
     assert.match(mcpCss, /\.mcp-config-helper/);
     assert.doesNotMatch(mcpGovernanceCss, /\.mcp-tool-governance-details/);
+});
+
+test('应用中心入口支持恢复、存储降级和失败重试', () => {
+    const appCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'apps-workbench-core.js'), 'utf8');
+    const appRag = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'apps-workbench-rag.js'), 'utf8');
+    const appsPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'workspaces', 'apps.html'), 'utf8');
+    const appsShell = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'apps', 'apps-shell.css'), 'utf8');
+    const appWorkspaces = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'app-workspaces.js'), 'utf8');
+    assert.match(appCore, /getAppsSessionValue/);
+    assert.match(appCore, /setAppsSessionValue/);
+    assert.match(appCore, /setAppsWorkbenchState/);
+    assert.match(appCore, /retryApp/);
+    assert.match(appCore, /exposeModule\?\.\('workspaces\.apps'/);
+    assert.match(appRag, /showRegulationsAppFromRegistry\(\)\.catch/);
+    assert.match(appRag, /setAppsWorkbenchVisibility/);
+    assert.match(appRag, /getStoredAppsActiveApp\(\) === 'ocr'/);
+    assert.match(appsPartial, /role="region"/);
+    assert.match(appsPartial, /aria-hidden="true"/);
+    assert.match(appsPartial, /apps-workbench-state/);
+    assert.match(appsShell, /\.apps-workbench-state/);
+    assert.match(appWorkspaces, /key === 'apps'.*aria-hidden/s);
 });
 
 test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息', () => {

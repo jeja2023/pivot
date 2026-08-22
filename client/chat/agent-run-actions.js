@@ -2,6 +2,42 @@
 // 拆自 agent-runs-list.js。
 // Agent 运行载荷组装与变更操作。
 /* eslint-disable no-undef */
+const agentRunActionLocks = new Set();
+
+function createAgentIdempotencyKey() {
+    return globalThis.crypto?.randomUUID?.()
+        || `agent-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function setAgentRunActionBusy(runId, selectors, busy) {
+    const id = String(runId);
+    document.querySelectorAll(selectors).forEach(button => {
+        const buttonRunId = String(button.dataset.agentCancel || button.dataset.agentApprove || button.dataset.agentReject
+            || button.dataset.agentRerun || button.dataset.agentResume || button.dataset.agentDagRerunNode
+            || button.dataset.agentCreateWorkflowDraft || button.dataset.agentRunDelete || '');
+        const matchesCurrentDag = button.dataset.agentDagRerunNode && String(activeAgentRunId || '') === id;
+        if (buttonRunId !== id && !matchesCurrentDag) return;
+        button.disabled = busy;
+        if (busy) button.setAttribute('aria-busy', 'true');
+        else button.removeAttribute('aria-busy');
+    });
+}
+
+async function runAgentActionOnce(key, runId, selectors, task, fallbackMessage) {
+    if (agentRunActionLocks.has(key)) return null;
+    agentRunActionLocks.add(key);
+    setAgentRunActionBusy(runId, selectors, true);
+    try {
+        return await task();
+    } catch (error) {
+        showToast(error.message || fallbackMessage, 'error');
+        return null;
+    } finally {
+        agentRunActionLocks.delete(key);
+        setAgentRunActionBusy(runId, selectors, false);
+    }
+}
+
 function getSelectedAgentToolAllowlist() {
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
     if (!checked.length) return ['__none__'];
@@ -58,7 +94,10 @@ window.createAgentRun = async function() {
         }
         const res = await apiFetch(`${API_BASE}/agents/runs`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Idempotency-Key': createAgentIdempotencyKey()
+            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -90,56 +129,66 @@ async function saveCurrentAgentTaskAsSchedule() {
 }
 
 window.approveAgentRun = async function(runId, approve = true) {
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approve })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '审批处理失败', 'error');
-    showToast(approve ? '已批准工具调用，任务继续排队' : '已拒绝工具调用', 'success');
-    await loadAgentRuns();
-    await window.openAgentRun(runId);
+    await runAgentActionOnce(`approval:${runId}:${approve}`, runId, '[data-agent-approve], [data-agent-reject]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approve })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '审批处理失败');
+        showToast(approve ? '已批准工具调用，任务继续排队' : '已拒绝工具调用', 'success');
+        await loadAgentRuns();
+        await window.openAgentRun(runId);
+    }, '审批处理失败');
 };
 
 window.cancelAgentRun = function(runId) {
     showConfirm('停止自主任务', '确定停止这个正在执行的自主任务吗？', async () => {
-        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '停止失败', 'error');
-        showToast('自主任务已停止', 'success');
-        await loadAgentRuns();
-        const stillExists = agentRunsCache.some(run => run.id === runId);
-        if (stillExists) await window.openAgentRun(runId);
+        await runAgentActionOnce(`cancel:${runId}`, runId, '[data-agent-cancel]', async () => {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '停止失败');
+            showToast('自主任务已停止', 'success');
+            await loadAgentRuns();
+            const stillExists = agentRunsCache.some(run => run.id === runId);
+            if (stillExists) await window.openAgentRun(runId);
+        }, '停止失败');
     });
 };
 
 window.cancelAgentWorkflowPreviewRun = function(runId) {
     showConfirm('停止预览运行', '确定停止这次工作流预览运行吗？', async () => {
-        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '停止失败', 'error');
-        showToast('预览运行已停止', 'success');
-        await window.openAgentRun(runId, { workflowPreview: true });
+        await runAgentActionOnce(`preview-cancel:${runId}`, runId, '[data-agent-cancel]', async () => {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '停止失败');
+            showToast('预览运行已停止', 'success');
+            await window.openAgentRun(runId, { workflowPreview: true });
+        }, '停止失败');
     });
 };
 
 window.rerunAgentRun = async function(runId) {
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '重新运行失败', 'error');
-    showToast('已创建新的自主任务', 'success');
-    await loadAgentRuns(1);
-    await window.openAgentRun(data.run.id);
+    await runAgentActionOnce(`rerun:${runId}`, runId, '[data-agent-rerun]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '重新运行失败');
+        showToast('已创建新的自主任务', 'success');
+        await loadAgentRuns(1);
+        await window.openAgentRun(data.run.id);
+    }, '重新运行失败');
 };
 
 window.resumeAgentRun = async function(runId) {
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '断点续跑失败', 'error');
-    showToast('已从上次执行位置创建续跑任务', 'success');
-    await loadAgentRuns(1);
-    await window.openAgentRun(data.run.id);
+    await runAgentActionOnce(`resume:${runId}`, runId, '[data-agent-resume]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '断点续跑失败');
+        showToast('已从上次执行位置创建续跑任务', 'success');
+        await loadAgentRuns(1);
+        await window.openAgentRun(data.run.id);
+    }, '断点续跑失败');
 };
 
 window.createWorkflowDraftFromAgentRun = async function(runId) {
@@ -157,26 +206,30 @@ window.createWorkflowDraftFromAgentRun = async function(runId) {
 };
 
 window.rerunAgentDagNode = async function(runId, nodeId = '') {
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/dag/rerun`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodeId })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '节点重跑失败', 'error');
-    showToast('已创建节点重跑任务', 'success');
-    await loadAgentRuns(1);
-    await window.openAgentRun(data.run.id);
+    await runAgentActionOnce(`dag-rerun:${runId}:${nodeId}`, runId, '[data-agent-dag-rerun-node]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/dag/rerun`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nodeId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '节点重跑失败');
+        showToast('已创建节点重跑任务', 'success');
+        await loadAgentRuns(1);
+        await window.openAgentRun(data.run.id);
+    }, '节点重跑失败');
 };
 
 window.deleteAgentRun = function(runId) {
     showConfirm('移除任务记录', '确定从任务列表移除这条任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
-        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '移除记录失败', 'error');
-        showToast('任务记录已移除', 'success');
-        closeAgentRunDetailModal();
-        await loadAgentRuns();
+        await runAgentActionOnce(`delete:${runId}`, runId, '[data-agent-run-delete]', async () => {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '移除记录失败');
+            showToast('任务记录已移除', 'success');
+            closeAgentRunDetailModal();
+            await loadAgentRuns();
+        }, '移除记录失败');
     });
 };
 
@@ -193,6 +246,7 @@ window.showAgentRunAudit = async function() {
         const body = modal.querySelector('#agent-audit-body');
         if (body) PivotSafeHtml.setHtml(body, renderAgentAuditRows(data.data || []));
         modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
     } catch (e) {
         showToast(e.message || '删除审计加载失败', 'error');
     }

@@ -265,12 +265,17 @@ document.getElementById('api-keys-body')?.addEventListener('click', (event) => {
 
 window.openApiCallLogsModal = function() {
     if (!isSuperAdminUser()) return;
-    document.getElementById('api-call-logs-modal')?.classList.remove('hidden');
+    const modal = document.getElementById('api-call-logs-modal');
+    modal?.classList.remove('hidden');
+    modal?.setAttribute('aria-hidden', 'false');
+    document.getElementById('api-call-log-search')?.focus();
     window.loadApiCallLogs?.(1);
 }
 
 window.closeApiCallLogsModal = function() {
-    document.getElementById('api-call-logs-modal')?.classList.add('hidden');
+    const modal = document.getElementById('api-call-logs-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 }
 
 window.loadApiCallLogs = async function(page = 1) {
@@ -371,19 +376,28 @@ window.createApiKey = function() {
     document.getElementById('new-key-name').value = '我的第三方密钥';
     document.getElementById('key-input-view').classList.remove('hidden');
     document.getElementById('key-result-view').classList.add('hidden');
-    document.getElementById('key-modal').classList.remove('hidden');
+    const modal = document.getElementById('key-modal');
+    modal?.classList.remove('hidden');
+    modal?.setAttribute('aria-hidden', 'false');
+    document.getElementById('new-key-name')?.focus();
 }
 
 window.confirmCreateKey = async function() {
+    const button = document.querySelector('[data-static-action="confirm-create-key"]');
     const name = document.getElementById('new-key-name').value || '未命名密钥';
+    if (button) {
+        button.disabled = true;
+        button.dataset.originalText = button.innerText;
+        button.innerText = '正在创建…';
+    }
     try {
         const res = await apiFetch(`${API_BASE}/auth/keys`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
         });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `创建密钥失败（HTTP ${res.status}）`);
         
         // 显示结果视图
         document.getElementById('generated-key-text').innerText = data.key;
@@ -393,11 +407,18 @@ window.confirmCreateKey = async function() {
         loadApiKeys();
     } catch (e) {
         showToast(e.message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerText = button.dataset.originalText || '确定创建';
+        }
     }
 }
 
 window.closeKeyModal = function() {
-    document.getElementById('key-modal').classList.add('hidden');
+    const modal = document.getElementById('key-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 }
 
 window.copyGeneratedKey = function() {
@@ -461,17 +482,31 @@ window.updatePassword = async function() {
     const passwordError = window.getPasswordValidationMessage?.(newPassword, '新密码') || '';
     if (passwordError) return showToast(passwordError, 'error');
 
+    const button = document.getElementById('pw-update-btn');
+    if (button) {
+        button.disabled = true;
+        button.dataset.originalText = button.innerText;
+        button.innerText = '正在更新…';
+    }
     try {
         const res = await apiFetch(`${API_BASE}/settings/password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ oldPassword, newPassword })
         });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `密码修改失败（HTTP ${res.status}）`);
+        document.getElementById('pw-old').value = '';
+        document.getElementById('pw-new').value = '';
+        document.getElementById('pw-confirm').value = '';
         showToast('密码修改成功，请重新登录');
         setTimeout(() => window.logout(), 1500);
     } catch (e) {
         showToast(e.message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerText = button.dataset.originalText || '立即更新密码';
+        }
     }
 }

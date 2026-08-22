@@ -584,7 +584,7 @@
     function startPolling() {
         if (state.timer) return;
         state.timer = window.setInterval(() => {
-            if (sessionStorage.getItem('pivot_apps_active_app') !== 'pdf-tools') return;
+            if (window.getAppsSessionValue?.('pivot_apps_active_app') !== 'pdf-tools') return;
             const active = state.jobs.some(job => job.status === 'pending' || job.status === 'processing');
             if (active) loadJobs({ keepActive: true }).catch(() => {});
         }, 4000);
@@ -593,7 +593,7 @@
     async function showPdfToolsApp() {
         const view = ensureView();
         window.PivotDataAnalysis?.resetAiWorkspace?.();
-        sessionStorage.setItem('pivot_apps_active_app', 'pdf-tools');
+        window.setAppsSessionValue?.('pivot_apps_active_app', 'pdf-tools');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('data-analysis-view')?.classList.add('hidden');

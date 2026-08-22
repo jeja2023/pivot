@@ -1,5 +1,5 @@
 <!-- 应用中心 -->
-    <section id="apps-workbench-modal" class="main-workspace-view apps-workspace-view hidden">
+    <section id="apps-workbench-modal" class="main-workspace-view apps-workspace-view hidden" role="region" aria-labelledby="apps-workspace-title" aria-hidden="true">
         <div class="workspace-modal apps-workspace-modal">
             <div class="workspace-modal-header">
                 <div>
@@ -12,6 +12,7 @@
                 </div>
             </div>
             <div class="workspace-modal-body apps-workspace-body">
+                <div id="apps-workbench-state" class="apps-workbench-state" role="status" aria-live="polite" aria-atomic="true" hidden></div>
                 <div id="apps-home-view" class="apps-home-view">
                     <div class="workspace-panel apps-panel">
                         <div id="apps-grid" class="apps-grid" aria-live="polite"></div>

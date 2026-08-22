@@ -86,11 +86,15 @@ function openAgentDagJsonModal() {
     const textarea = document.getElementById('agent-dag-spec');
     if (!modal || !textarea) return;
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
     textarea.focus();
 }
 
 function closeAgentDagJsonModal() {
-    document.getElementById('agent-dag-json-modal')?.classList.add('hidden');
+    const modal = document.getElementById('agent-dag-json-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
 }
 
 function syncAgentDagJsonToCanvas() {

@@ -6,6 +6,48 @@ function mcpFormEl(name, mode = 'create') {
     return document.getElementById(`${mcpFormPrefix(mode)}-${name}`);
 }
 
+function setMcpModalVisibility(modalOrId, open, { focusSelector = '', returnFocus = true } = {}) {
+    const modal = typeof modalOrId === 'string' ? document.getElementById(modalOrId) : modalOrId;
+    if (!modal) return null;
+    if (open) {
+        if (returnFocus && document.activeElement && document.activeElement !== document.body) {
+            modal.dataset.mcpReturnFocusId = document.activeElement.id || '';
+        }
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        const focusTarget = focusSelector ? modal.querySelector(focusSelector) : modal.querySelector('button, input, select, textarea');
+        window.setTimeout(() => focusTarget?.focus?.(), 0);
+    } else {
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        if (returnFocus) {
+            const id = modal.dataset.mcpReturnFocusId;
+            if (id) document.getElementById(id)?.focus?.();
+        }
+    }
+    return modal;
+}
+
+function bindMcpModalAccessibility() {
+    if (document.documentElement.dataset.mcpModalA11yBound === '1') return;
+    document.documentElement.dataset.mcpModalA11yBound = '1';
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        const openOverlays = [...document.querySelectorAll('.mcp-workspace-view, #mcp-edit-modal, #mcp-share-modal, #mcp-tools-modal, #mcp-local-auth-modal, #mcp-tool-test-modal')]
+            .filter(el => !el.classList.contains('hidden'));
+        const current = openOverlays[openOverlays.length - 1];
+        if (!current || current.id === 'mcp-workbench-modal') return;
+        const closeButton = current.querySelector('[id$="-close-btn"], [id$="-cancel-btn"]');
+        closeButton?.click?.();
+        event.preventDefault();
+    });
+}
+
+window.Pivot?.exposeModule?.('mcp.modal', {
+    setMcpModalVisibility,
+    bindMcpModalAccessibility
+});
+
 const MCP_CONFIG_HELPERS = {
     external: {
         title: '外部工具服务',
@@ -251,6 +293,15 @@ function setMcpFormDefaults(mode = 'create', type = 'external') {
 }
 
 function bindMcpFormControls(mode = 'create') {
+    const editModal = document.getElementById('mcp-edit-modal');
+    const closeButton = document.getElementById('mcp-edit-close-btn');
+    if (editModal && closeButton && closeButton.dataset.boundMcpClose !== '1') {
+        closeButton.dataset.boundMcpClose = '1';
+        closeButton.addEventListener('click', () => window.closeMcpEditModal?.());
+        editModal.addEventListener('click', event => {
+            if (event.target === editModal) window.closeMcpEditModal?.();
+        });
+    }
     const sourceType = mcpFormEl('source-type', mode);
     if (sourceType && sourceType.dataset.boundMcpSource !== '1') {
         sourceType.dataset.boundMcpSource = '1';
@@ -291,17 +342,18 @@ function bindMcpToolsModalControls() {
     const modal = document.getElementById('mcp-tools-modal');
     if (!modal || modal.dataset.boundMcpToolsModal === '1') return;
     modal.dataset.boundMcpToolsModal = '1';
-    document.getElementById('mcp-tools-close-btn')?.addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('mcp-tools-close-btn')?.addEventListener('click', () => setMcpModalVisibility(modal, false));
     document.getElementById('mcp-tools-refresh-btn')?.addEventListener('click', async event => {
         const id = event.currentTarget?.dataset?.mcpServerId;
         if (id) await window.refreshMcpTools(id, { keepToolsModalOpen: true });
     });
     modal.addEventListener('click', event => {
-        if (event.target === modal) modal.classList.add('hidden');
+        if (event.target === modal) setMcpModalVisibility(modal, false);
     });
 }
 
 window.openMcpWorkbench = async function() {
+    bindMcpModalAccessibility();
     window.showMainWorkspace?.('mcp');
     const panel = document.getElementById('mcp-workbench-modal');
     if (!panel) return;
@@ -320,11 +372,11 @@ window.closeMcpWorkbench = function() {
 };
 
 window.closeMcpEditModal = function() {
-    document.getElementById('mcp-edit-modal')?.classList.add('hidden');
+    setMcpModalVisibility('mcp-edit-modal', false);
 };
 
 window.closeMcpToolsModal = function() {
-    document.getElementById('mcp-tools-modal')?.classList.add('hidden');
+    setMcpModalVisibility('mcp-tools-modal', false);
 };
 
 function setMcpEditTitle(title = '编辑工具服务') {
@@ -360,7 +412,7 @@ window.openMcpCreateModal = function(type = 'external') {
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    modal.classList.remove('hidden');
+    setMcpModalVisibility(modal, true, { focusSelector: '#mcp-edit-name' });
 };
 
 function fillMcpForm(server, mode = 'create') {
@@ -441,6 +493,6 @@ window.openMcpEditModal = function(serverId) {
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    modal.classList.remove('hidden');
+    setMcpModalVisibility(modal, true, { focusSelector: '#mcp-edit-name' });
 };
 

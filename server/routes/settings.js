@@ -120,6 +120,25 @@ function getSettings() {
     return getAppSettingsMap();
 }
 
+// The settings page only needs configuration metadata. Never send stored
+// credentials or opaque tokens back to a browser, even when the caller is an
+// administrator. The write endpoints still use the private settings map.
+const SENSITIVE_SETTING_KEY_RE = /(?:api[_-]?key|secret|password|token|credential|webhook)/i;
+
+function getPublicSettings() {
+    const settings = getSettings();
+    return Object.fromEntries(Object.entries(settings).map(([key, metadata]) => {
+        if (!SENSITIVE_SETTING_KEY_RE.test(key)) return [key, metadata];
+        return [key, {
+            ...metadata,
+            value: '',
+            enabled: Boolean(metadata?.value),
+            configured: Boolean(metadata?.value),
+            redacted: true
+        }];
+    }));
+}
+
 async function saveUserEmbeddingSettings(req, updates) {
     const now = getBeijingTimestamp();
     const changed = [];
@@ -162,7 +181,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             permissions: getPermissionCapabilities(req.user),
-            settings
+            settings: getPublicSettings()
         };
         if (isAdmin(req.user)) {
             payload.runtimeConfig = buildRuntimeConfigSnapshot();
@@ -271,7 +290,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             memoryConfig: getMemoryConfig(settings),
             runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
-            settings
+            settings: getPublicSettings()
         });
     }));
 
@@ -358,7 +377,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             embeddingConfig: getPublicEmbeddingConfig(),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
-            settings
+            settings: getPublicSettings()
         });
     }));
 

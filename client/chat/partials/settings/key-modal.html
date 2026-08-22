@@ -1,11 +1,11 @@
-<div id="key-modal" class="modal-overlay hidden" style="z-index: 5000;">
+<div id="key-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="key-modal-title" style="z-index: 5000;">
         <div class="modal" style="width: 550px; padding: 30px; position: relative;">
             <button type="button" class="btn-secondary settings-dialog-close"
                 data-static-action="close-key-modal">关闭</button>
             <div id="key-input-view">
-                <h3 style="margin-bottom: 20px;">新建 API Key</h3>
+                <h3 id="key-modal-title" style="margin-bottom: 20px;">新建 API Key</h3>
                 <div class="form-item" style="margin-bottom: 20px;">
-                    <label>密钥名称</label>
+                    <label for="new-key-name">密钥名称</label>
                     <input type="text" id="new-key-name" class="form-input" placeholder="例如：沉浸式翻译" style="width: 100%;">
                 </div>
                 <button type="button" data-static-action="confirm-create-key" class="btn-primary"

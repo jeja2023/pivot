@@ -8,10 +8,10 @@ function isAgentUiVisible() {
         : isAgentElementVisible('agent-run-detail-modal');
     return Boolean(
         detailOpen
-        || !document.getElementById('agent-workbench-modal')?.classList.contains('hidden')
-        || !document.getElementById('agent-dag-workbench-modal')?.classList.contains('hidden')
-        || !document.getElementById('automation-assets-view')?.classList.contains('hidden')
-        || !document.getElementById('automation-editor-view')?.classList.contains('hidden')
+        || isAgentElementVisible('agent-workbench-modal')
+        || isAgentElementVisible('agent-dag-workbench-modal')
+        || isAgentElementVisible('automation-assets-view')
+        || isAgentElementVisible('automation-editor-view')
     );
 }
 

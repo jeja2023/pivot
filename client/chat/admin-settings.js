@@ -1,8 +1,71 @@
+let settingsLoadSequence = 0;
+
+function setSettingsInitialValues(selector = '') {
+    document.querySelectorAll(selector).forEach(input => {
+        input.dataset.settingsInitial = String(input.value ?? '');
+    });
+}
+
+function settingsHasUnsavedChanges() {
+    return [...document.querySelectorAll('[data-settings-initial]')].some(input => (
+        String(input.value ?? '') !== input.dataset.settingsInitial
+    ));
+}
+
+function clearSettingsDirty() {
+    document.querySelectorAll('[data-settings-initial]').forEach(input => {
+        input.dataset.settingsInitial = String(input.value ?? '');
+    });
+}
+
+function setSettingsLoadState(state = '', message = '', { retry = false } = {}) {
+    const el = document.getElementById('settings-load-state');
+    if (!el) return;
+    el.dataset.state = state;
+    el.replaceChildren();
+    el.hidden = !message;
+    if (!message) return;
+    const text = document.createElement('span');
+    text.textContent = message;
+    el.appendChild(text);
+    if (retry) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary settings-state-retry';
+        button.textContent = '重试';
+        button.addEventListener('click', () => loadSettings());
+        el.appendChild(button);
+    }
+}
+
+function setSettingsTabState(state = '', message = '', { retry = false, tab = '', page = 1 } = {}) {
+    const el = document.getElementById('settings-tab-state');
+    if (!el) return;
+    el.dataset.state = state;
+    el.replaceChildren();
+    el.hidden = !message;
+    if (!message) return;
+    const text = document.createElement('span');
+    text.textContent = message;
+    el.appendChild(text);
+    if (retry) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary settings-state-retry';
+        button.textContent = '重试';
+        button.addEventListener('click', () => window.loadTabData?.(tab, page));
+        el.appendChild(button);
+    }
+}
+
 async function loadSettings() {
+    const requestId = ++settingsLoadSequence;
+    setSettingsLoadState('loading', '正在加载设置…');
     try {
         const res = await apiFetch(`${API_BASE}/settings`);
-        if (!res.ok) throw new Error('系统设置加载失败');
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `系统设置加载失败（HTTP ${res.status}）`);
+        if (requestId !== settingsLoadSequence) return false;
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
@@ -13,13 +76,59 @@ async function loadSettings() {
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? 300;
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? 500;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
+        updateRagChunkOverlapLimit();
+        setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         window.applyUploadRuntimeLimits?.(data.uploadLimits);
         updateRuntimeSettingsForm(data.runtimeConfig);
         updateApiAccessState(data.apiAccessEnabled === true);
         updateEmbeddingSettingsForm(data.embeddingConfig);
-    } catch (e) {
-        showToast(e.message || '系统设置加载失败', 'error');
+        setSettingsLoadState('', '');
+        return true;
+    } catch (error) {
+        if (requestId !== settingsLoadSequence) return false;
+        const message = error.message || '系统设置加载失败';
+        setSettingsLoadState('error', message, { retry: true });
+        showToast(message, 'error');
+        return false;
     }
+}
+
+window.Pivot?.exposeModule?.('settings.core', {
+    clearSettingsDirty,
+    loadSettings,
+    setSettingsLoadState,
+    setSettingsTabState,
+    settingsHasUnsavedChanges
+}, [
+    { globalName: 'clearSettingsDirty', exportName: 'clearSettingsDirty' },
+    { globalName: 'loadSettings', exportName: 'loadSettings' },
+    { globalName: 'setSettingsLoadState', exportName: 'setSettingsLoadState' },
+    { globalName: 'setSettingsTabState', exportName: 'setSettingsTabState' },
+    { globalName: 'settingsHasUnsavedChanges', exportName: 'settingsHasUnsavedChanges' }
+]);
+
+function updateRagChunkOverlapLimit() {
+    const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
+    const overlapInput = document.getElementById('setting-rag-chunk-overlap');
+    if (!chunkSizeInput || !overlapInput) return;
+    const chunkSize = Number.parseInt(chunkSizeInput.value, 10);
+    if (!Number.isFinite(chunkSize)) return;
+    const maxOverlap = Math.max(0, Math.floor(chunkSize / 2));
+    overlapInput.max = String(maxOverlap);
+    if (Number(overlapInput.value) > maxOverlap) overlapInput.value = String(maxOverlap);
+}
+
+function validateRagSettings() {
+    const score = Number(document.getElementById('setting-rag-score-threshold')?.value);
+    const topK = Number.parseInt(document.getElementById('setting-rag-top-k')?.value, 10);
+    const candidate = Number.parseInt(document.getElementById('setting-rag-candidate-limit')?.value, 10);
+    const chunkSize = Number.parseInt(document.getElementById('setting-rag-chunk-size')?.value, 10);
+    const overlap = Number.parseInt(document.getElementById('setting-rag-chunk-overlap')?.value, 10);
+    if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error('相似度阈值需在 0 到 1 之间');
+    if (!Number.isInteger(topK) || topK < 1 || topK > 10) throw new Error('Top K 需在 1 到 10 之间');
+    if (!Number.isInteger(candidate) || candidate < Math.max(topK, 20) || candidate > 1000) throw new Error(`候选数量至少为 ${Math.max(topK, 20)}`);
+    if (!Number.isInteger(chunkSize) || chunkSize < 200 || chunkSize > 2000) throw new Error('分块长度需在 200 到 2000 之间');
+    if (!Number.isInteger(overlap) || overlap < 0 || overlap > Math.floor(chunkSize / 2)) throw new Error('重叠字符数不能超过分块长度的一半');
 }
 
 async function updateMemoryStatus(memoryId, status) {
@@ -91,7 +200,7 @@ window.updateLongTermMemoryEnabled = async function(enabled) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '长期记忆设置保存失败');
         if (toggle) toggle.checked = data.enabled !== false;
         renderEnhancedMemorySummary(data.summary);
@@ -161,10 +270,14 @@ window.openMemoryEditModal = function(memory) {
     salienceInput.value = Number(memory.salience || 0).toFixed(2);
     confidenceInput.value = Number(memory.confidence || 0).toFixed(2);
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    contentInput.focus();
 };
 
 window.closeMemoryEditModal = function() {
-    document.getElementById('memory-edit-modal')?.classList.add('hidden');
+    const modal = document.getElementById('memory-edit-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 };
 
 function renderMemorySource(data = {}) {
@@ -197,6 +310,7 @@ window.openMemorySourceModal = async function(memoryId) {
     const body = document.getElementById('memory-source-body');
     if (body) PivotSafeHtml.setHtml(body, '<p class="muted">正在加载...</p>');
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
     try {
         const data = await fetchMemorySource(memoryId);
         renderMemorySource(data);
@@ -207,7 +321,9 @@ window.openMemorySourceModal = async function(memoryId) {
 };
 
 window.closeMemorySourceModal = function() {
-    document.getElementById('memory-source-modal')?.classList.add('hidden');
+    const modal = document.getElementById('memory-source-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 };
 
 function renderMemoryMergeSuggestions(suggestions = []) {
@@ -547,11 +663,21 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
     const byKey = runtimeItemsByKey(runtimeConfig);
     document.querySelectorAll('[data-runtime-key]').forEach(input => {
         const key = input.dataset.runtimeKey;
+        if (!input.id && key) input.id = `runtime-setting-${key}`;
+        const formItem = input.closest('.form-item');
+        const label = formItem?.querySelector('label');
+        const hintEl = formItem?.querySelector('.runtime-key-note');
+        if (label && input.id) label.htmlFor = input.id;
+        if (hintEl && input.id) {
+            if (!hintEl.id) hintEl.id = `${input.id}-hint`;
+            input.setAttribute('aria-describedby', hintEl.id);
+        }
         const item = byKey[key];
         if (!item) return;
         input.min = item.min ?? input.min;
         input.max = item.max ?? input.max;
         input.value = isRuntimeHumanIntKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
+        input.dataset.settingsInitial = String(input.value ?? '');
         const hint = getRuntimeItemHint(item);
         input.title = hint ? `${item.label}。${hint} 范围 ${item.min} - ${item.max}` : `${item.label}，范围 ${item.min} - ${item.max}`;
     });
@@ -586,7 +712,7 @@ window.saveRuntimeSettings = async function(source = null) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '运行时配置保存失败');
         updateRuntimeSettingsForm(data.runtimeConfig);
         showToast('并发与上下文配置已保存');
@@ -639,7 +765,7 @@ window.updateApiAccessSetting = async function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ api_access_enabled: enabled })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'API 接入设置保存失败');
         updateApiAccessState(data.apiAccessEnabled === true);
         window.loadApiKeys?.();
@@ -659,7 +785,7 @@ function getEmbeddingModelValue() {
 }
 
 document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.saveRuntimeSettings?.(event));
-document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => loadSettings());
+document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.loadSettings?.());
 document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.loadMemories?.());
 document.getElementById('long-term-memory-toggle')?.addEventListener('change', (event) => {
     window.updateLongTermMemoryEnabled?.(event.target.checked === true);
@@ -691,26 +817,50 @@ document.getElementById('memory-select-all')?.addEventListener('change', (event)
         input.checked = event.target.checked === true;
     });
 });
-document.getElementById('memory-bulk-enable-btn')?.addEventListener('click', async () => {
+document.getElementById('memory-bulk-enable-btn')?.addEventListener('click', async (event) => {
     const ids = selectedMemoryIds();
     if (!ids.length) return showToast('请先选择记忆', 'warning');
-    await bulkUpdateMemoryStatus(ids, 'active');
-    showToast('选中记忆已恢复');
-    await window.loadMemories?.();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await bulkUpdateMemoryStatus(ids, 'active');
+        showToast('选中记忆已恢复');
+        await window.loadMemories?.();
+    } catch (error) {
+        showToast(error.message || '批量恢复失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
 });
-document.getElementById('memory-bulk-disable-btn')?.addEventListener('click', async () => {
+document.getElementById('memory-bulk-disable-btn')?.addEventListener('click', async (event) => {
     const ids = selectedMemoryIds();
     if (!ids.length) return showToast('请先选择记忆', 'warning');
-    await bulkUpdateMemoryStatus(ids, 'disabled');
-    showToast('选中记忆已禁用');
-    await window.loadMemories?.();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await bulkUpdateMemoryStatus(ids, 'disabled');
+        showToast('选中记忆已禁用');
+        await window.loadMemories?.();
+    } catch (error) {
+        showToast(error.message || '批量禁用失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
 });
-document.getElementById('memory-bulk-delete-btn')?.addEventListener('click', async () => {
+document.getElementById('memory-bulk-delete-btn')?.addEventListener('click', async (event) => {
     const ids = selectedMemoryIds();
     if (!ids.length) return showToast('请先选择记忆', 'warning');
-    await bulkUpdateMemoryStatus(ids, 'deleted');
-    showToast('选中记忆已删除');
-    await window.loadMemories?.();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await bulkUpdateMemoryStatus(ids, 'deleted');
+        showToast('选中记忆已删除');
+        await window.loadMemories?.();
+    } catch (error) {
+        showToast(error.message || '批量删除失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
 });
 document.getElementById('memory-jobs-panel')?.addEventListener('click', async (event) => {
     const retryButton = event.target?.closest?.('#memory-jobs-retry-btn');
@@ -841,7 +991,7 @@ window.fetchEmbeddingModels = async () => {
             throw new Error(`服务器返回了非 JSON 内容（可能是 404/500 页面）：${text.slice(0, 100)}...`);
         }
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) throw new Error(data.error || '获取向量模型列表失败');
         if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
 
@@ -889,6 +1039,7 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
             : '环境变量/默认值';
         embeddingStatusEl.innerText = `HTTP 服务 · ${keyStatus} · 来源：${source}`;
     }
+    setSettingsInitialValues('#setting-rag-embedding-url, #setting-rag-embedding-model');
 }
 
 window.saveSettings = async () => {
@@ -898,6 +1049,8 @@ window.saveSettings = async () => {
     const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
     const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
     try {
+        updateRagChunkOverlapLimit();
+        validateRagSettings();
         const payload = {};
         if (scoreInput) payload.rag_score_threshold = scoreInput.value;
         if (topKInput) payload.rag_top_k = topKInput.value;
@@ -910,7 +1063,7 @@ window.saveSettings = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '系统设置保存失败');
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? scoreInput.value;
         if (topKInput) topKInput.value = data.ragConfig?.topK ?? topKInput.value;
@@ -918,6 +1071,7 @@ window.saveSettings = async () => {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.embeddingConfig);
+        setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         showToast(isSuperAdminUser() ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
         showToast(e.message || '系统设置保存失败', 'error');
@@ -934,6 +1088,8 @@ window.saveEmbeddingSettings = async () => {
     if (!embeddingUrlInput || !embeddingModelInput) return;
     if (saveBtn) saveBtn.disabled = true;
     try {
+        updateRagChunkOverlapLimit();
+        validateRagSettings();
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
@@ -962,11 +1118,12 @@ window.saveEmbeddingSettings = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '检索配置保存失败');
         updateEmbeddingSettingsForm(data.embeddingConfig);
+        setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         showToast(isSuperAdminUser() ? '系统检索配置已保存' : '个人检索配置已保存');
-        if (modal) modal.classList.add('hidden');
+        if (modal) window.setKnowledgeModalVisibility?.(modal, false);
     } catch (e) {
         showToast(e.message || '检索配置保存失败', 'error');
     } finally {
@@ -1032,12 +1189,12 @@ window.bindEmbeddingModalEvents = function() {
     if (openBtn.dataset.boundEmbeddingOpen !== '1') {
         openBtn.dataset.boundEmbeddingOpen = '1';
         openBtn.addEventListener('click', () => {
-            modal.classList.remove('hidden');
+            window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#setting-rag-score-threshold' });
         });
     }
     if (cancelBtn && cancelBtn.dataset.boundEmbeddingCancel !== '1') {
         cancelBtn.dataset.boundEmbeddingCancel = '1';
-        cancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+        cancelBtn.addEventListener('click', () => window.setKnowledgeModalVisibility?.(modal, false));
     }
     
     if (testBtn) {
@@ -1070,6 +1227,10 @@ window.bindEmbeddingModalEvents = function() {
     }
 };
 
+document.addEventListener('input', event => {
+    if (event.target?.id === 'setting-rag-chunk-size') updateRagChunkOverlapLimit();
+});
+
 window.bindRagDebugModalEvents = function() {
     const openBtn = document.getElementById('rag-debug-modal-open-btn');
     const closeBtn = document.getElementById('rag-debug-modal-close');
@@ -1077,18 +1238,18 @@ window.bindRagDebugModalEvents = function() {
     if (!openBtn || !modal) return;
 
     openBtn.onclick = () => {
-        modal.classList.remove('hidden');
+        window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-debug-query' });
         // 如果是空的，自动填充默认参数
         if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
         window.loadRagDebugHistory?.();
     };
     
     if (closeBtn) {
-        closeBtn.onclick = () => modal.classList.add('hidden');
+        closeBtn.onclick = () => window.setKnowledgeModalVisibility?.(modal, false);
     }
     
     modal.onclick = (e) => {
-        if (e.target === modal) modal.classList.add('hidden');
+        if (e.target === modal) window.setKnowledgeModalVisibility?.(modal, false);
     };
 };
 

@@ -578,6 +578,7 @@ function bindAppsWorkbenchEvents() {
 
 window.openAppsWorkbench = function() {
     window.showMainWorkspace?.('apps');
+    window.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
     if (getStoredAppsActiveApp() === 'official-writing') {
         showOfficialWritingApp();
@@ -590,17 +591,9 @@ window.openAppsWorkbench = function() {
             showAppsHome();
         }
     } else if (getStoredAppsActiveApp() === 'ocr') {
-        if (typeof showOcrAppFromRegistry === 'function') {
-            showOcrAppFromRegistry().catch(() => showAppsHome());
-        } else {
-            showAppsHome();
-        }
+        showOcrAppFromRegistry().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'pdf-tools') {
-        if (typeof showPdfToolsAppFromRegistry === 'function') {
-            showPdfToolsAppFromRegistry().catch(() => showAppsHome());
-        } else {
-            showAppsHome();
-        }
+        showPdfToolsAppFromRegistry().catch(() => showAppsHome());
     } else {
         showAppsHome();
     }
@@ -609,6 +602,7 @@ window.openAppsWorkbench = function() {
 window.closeAppsWorkbench = function() {
     setStoredAppsActiveApp('');
     showAppsHome();
+    window.setAppsWorkbenchVisibility?.(false);
     window.showMainWorkspace?.('chat');
 };
 

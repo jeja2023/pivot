@@ -280,7 +280,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     }));
 
     router.get('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: await listAgentWorkflows(req.user) });
+        const data = await listAgentWorkflows(req.user, { query: req.query.query });
+        res.json({ data, total: data.length });
     }));
 
     router.get('/agents/workflows/share-options', authMiddleware, asyncHandler(async (req, res) => {

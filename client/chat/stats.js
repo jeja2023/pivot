@@ -234,11 +234,15 @@ window.exportCompliancePackage = () => {
 };
 
 window.openMonitorRoutesModal = () => {
-    document.getElementById('monitor-routes-modal')?.classList.remove('hidden');
+    const modal = document.getElementById('monitor-routes-modal');
+    modal?.classList.remove('hidden');
+    modal?.setAttribute('aria-hidden', 'false');
 };
 
 window.closeMonitorRoutesModal = () => {
-    document.getElementById('monitor-routes-modal')?.classList.add('hidden');
+    const modal = document.getElementById('monitor-routes-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 };
 
 window.exportStats = () => downloadFileByFetch(`${API_BASE}/stats/usage/export`, 'usage_stats.csv');

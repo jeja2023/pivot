@@ -2,7 +2,7 @@ const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { encryptSecret, decryptSecret } = require('../security');
-const { canAccessSharedResource, normalizeShareSettings } = require('./unit-visibility');
+const { canAccessSharedResource, normalizeShareSettings, parseAllowedUserIds } = require('./unit-visibility');
 const { filterExistingShareUserIds } = require('./share-targets');
 
 const MAX_CREDENTIALS_PER_USER = 20;
@@ -61,6 +61,7 @@ function formatCredential(row, user) {
         description: row.description || '',
         scope: row.scope || 'private',
         allowed_units: row.allowed_units ? String(row.allowed_units).split(',').filter(Boolean) : [],
+        allowed_user_ids: parseAllowedUserIds(row.allowed_user_ids),
         version: Number(row.version || 1),
         is_owner: isOwner,
         owner_name: row.owner_name || '',
@@ -105,12 +106,12 @@ async function createWorkflowCredential(user, body = {}) {
     const row = await queryOne(`
         INSERT INTO workflow_credentials (
             user_id, name, slug, description, secret_value, scope, allowed_units,
-            version, use_count, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            allowed_user_ids, version, use_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
         RETURNING id
     `, [
         user.id, data.name, data.slug, data.description,
-        encryptSecret(secret), data.scope, data.allowedUnits, now, now
+        encryptSecret(secret), data.scope, data.allowedUnits, data.allowedUserIds, now, now
     ]);
     logger.info({ userId: user.id, slug: data.slug }, '工作流凭据已创建');
     const created = await queryOne('SELECT * FROM workflow_credentials WHERE id = ?', [row?.id]);
@@ -131,9 +132,9 @@ async function updateWorkflowCredential(credentialId, user, body = {}) {
     const now = getBeijingTimestamp();
     await execute(`
         UPDATE workflow_credentials
-        SET name = ?, slug = ?, description = ?, scope = ?, allowed_units = ?, updated_at = ?
+        SET name = ?, slug = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ?
-    `, [data.name, data.slug, data.description, data.scope, data.allowedUnits, now, current.id]);
+    `, [data.name, data.slug, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, current.id]);
     const updated = await queryOne('SELECT * FROM workflow_credentials WHERE id = ?', [current.id]);
     return formatCredential(updated, user);
 }

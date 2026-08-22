@@ -17,6 +17,15 @@
 }
 
 @media (max-width: 680px) {
+    .mcp-workbench-state {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .mcp-workbench-state .btn-secondary {
+        width: 100%;
+    }
+
     .mcp-tool-grid,
     .mcp-tools-grid {
         grid-template-columns: 1fr;
@@ -33,6 +42,24 @@
 
     .mcp-edit-modal {
         width: min(560px, calc(100vw - 24px));
+        max-height: calc(100vh - 16px);
+    }
+
+    .mcp-edit-form {
+        max-height: calc(100vh - 88px);
+        padding: 12px;
+    }
+
+    .mcp-edit-header {
+        padding: 12px;
+    }
+
+    .mcp-edit-actions {
+        position: sticky;
+        bottom: -12px;
+        margin: 2px -12px -12px;
+        padding: 10px 12px;
+        background: var(--surface, rgba(248, 250, 252, 0.97));
     }
 
     .mcp-form-row,

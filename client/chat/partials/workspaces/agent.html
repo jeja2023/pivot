@@ -13,9 +13,9 @@
                 </div>
             </div>
             <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
-                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-selected="true">任务运行</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-selected="false">工作流</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-selected="false">计划任务</button>
+                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务运行</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-controls="automation-schedules-panel" aria-selected="false" tabindex="-1">计划任务</button>
             </div>
             <div class="agent-workbench">
                 <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog" aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
@@ -268,8 +268,8 @@
                 </div>
             </div>
         </div>
-        <div id="agent-config-modal" class="modal-overlay hidden" style="z-index: 1900;">
-            <div class="modal agent-config-modal">
+        <div id="agent-config-modal" class="modal-overlay hidden" style="z-index: 1900;" role="dialog" aria-modal="true" aria-labelledby="agent-config-modal-title" aria-hidden="true">
+            <div class="modal agent-config-modal" role="document">
                 <div class="agent-config-modal-head">
                     <h3 id="agent-config-modal-title">高级设置</h3>
                     <button id="agent-config-modal-close" class="btn-secondary" type="button">关闭</button>
@@ -277,8 +277,8 @@
                 <div id="agent-config-modal-body" class="agent-config-modal-body"></div>
             </div>
         </div>
-        <div id="agent-run-detail-modal" class="modal-overlay hidden" style="z-index: 2000;">
-            <div class="modal agent-run-detail-modal">
+        <div id="agent-run-detail-modal" class="modal-overlay hidden" style="z-index: 2000;" role="dialog" aria-modal="true" aria-labelledby="agent-run-detail-title" aria-hidden="true">
+            <div class="modal agent-run-detail-modal" role="document">
                 <div class="agent-config-modal-head">
                     <h3 id="agent-run-detail-title">任务详情</h3>
                     <button id="agent-run-detail-close" class="btn-secondary" type="button">关闭</button>

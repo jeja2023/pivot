@@ -31,6 +31,12 @@
     transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
+.app-card:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+    transform: none;
+}
+
 .app-card:hover,
 .app-card:focus-visible {
     border-color: rgba(16, 185, 129, 0.38);
@@ -106,4 +112,24 @@
     border-radius: 8px;
     background: rgba(248, 250, 252, 0.74);
     font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+    .apps-grid {
+        grid-template-columns: 1fr;
+        padding: 2px;
+    }
+
+    .app-card {
+        min-height: 112px;
+        padding: 12px;
+    }
+
+    .app-card-topline {
+        align-items: flex-start;
+    }
+
+    .app-card-topline strong {
+        white-space: normal;
+    }
 }

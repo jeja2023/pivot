@@ -16,6 +16,7 @@ const {
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
 const { syncAgentRuntimeConcurrency } = require('../../server/services/agent-runtime');
 const {
+    deleteAppSettingAsync,
     getAppSettingRow,
     getAppSettingsMap,
     refreshAppSettingsCache,
@@ -202,6 +203,39 @@ test('设置接口仅向管理员返回全局运行参数', async () => {
     assert.equal(adminRes.statusCode, 200);
     assert.ok(adminRes.body.runtimeConfig?.items?.length > 0);
     assert.equal(adminRes.body.uploadLimits?.maxAttachmentsPerMessage, getUploadRuntimeConfig().maxAttachmentsPerMessage);
+});
+
+test('设置接口只返回脱敏后的 app_settings 元数据', async () => {
+    const key = 'rag_embedding_api_key';
+    const previous = getAppSettingRow(key);
+    await setAppSettingAsync(key, 'settings-page-secret', { updatedBy: 1 });
+    try {
+        const router = createSettingsRouter({
+            authMiddleware: (_req, _res, next) => next(),
+            adminMiddleware: (_req, _res, next) => next(),
+            logAction: () => {}
+        });
+        const route = router.stack.find(layer => layer.route?.path === '/settings' && layer.route?.methods?.get);
+        const res = createJsonResponse();
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), {
+            user: { id: 42, username: 'alice', role: 'user', unit: 'QA' },
+            headers: {}
+        }, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.settings?.[key]?.value, '');
+        assert.equal(res.body.settings?.[key]?.redacted, true);
+        assert.equal(JSON.stringify(res.body).includes('settings-page-secret'), false);
+    } finally {
+        if (previous) {
+            await setAppSettingAsync(key, previous.value, {
+                updatedAt: previous.updated_at,
+                updatedBy: previous.updated_by
+            });
+        } else {
+            await deleteAppSettingAsync(key);
+        }
+        await refreshAppSettingsCache();
+    }
 });
 
 test('非内置 admin 管理员不能修改全局运行参数', async () => {

@@ -212,6 +212,8 @@ const adminFeatureScripts = [
 ];
 
 let adminFeatureLoadPromise = null;
+let settingsTabLoadSequence = 0;
+let settingsPanelOpenSequence = 0;
 
 const loadScriptOnce = (src) => {
     if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
@@ -240,10 +242,18 @@ window.ensureAdminFeatureScripts = async () => {
 };
 
 window.openAdminPanel = async (options = {}) => {
-    await window.ensureAdminFeatureScripts();
+    const openSequence = ++settingsPanelOpenSequence;
+    try {
+        await window.ensureAdminFeatureScripts();
+    } catch (error) {
+        window.setSettingsLoadState?.('error', error.message || '设置模块加载失败', { retry: true });
+        showToast(error.message || '设置模块加载失败', 'error');
+        return;
+    }
     const adminContainer = document.getElementById('admin-container');
     window.showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
+    adminContainer?.setAttribute('aria-hidden', 'false');
     const isAdmin = isAdminUser();
     const isSuperAdmin = isSuperAdminUser();
     const titleEl = adminContainer?.querySelector('.settings-workspace-header h3');
@@ -261,20 +271,42 @@ window.openAdminPanel = async (options = {}) => {
     document.querySelectorAll('.super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
-    await loadSettings();
+    const loaded = await window.loadSettings?.();
+    if (openSequence !== settingsPanelOpenSequence || loaded === false) return;
     const targetTab = options.restore ? normalizeSettingsTab(window.getStoredSettingsTab?.()) : getDefaultSettingsTab();
     await window.switchTab(targetTab);
 };
 
-window.closeModal = () => window.showMainWorkspace?.('chat');
+window.closeModal = () => {
+    document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
+    return window.showMainWorkspace?.('chat');
+};
 
 window.switchTab = async (tab, options = {}) => {
     await window.ensureAdminFeatureScripts();
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
+    const currentTab = document.querySelector('.admin-tab.active')?.id?.replace(/^tab-/, '');
+    if (!options.skipDirtyCheck && currentTab && currentTab !== tab && window.settingsHasUnsavedChanges?.()) {
+        const confirmed = await (window.showConfirm?.(
+            '放弃未保存修改？',
+            '当前设置还有未保存的修改，切换分区会丢失这些内容。'
+        ) ?? Promise.resolve(window.confirm('当前设置还有未保存的修改，确定切换分区吗？')));
+        if (!confirmed) return false;
+        window.clearSettingsDirty?.();
+    }
     const tabs = SETTINGS_TABS;
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
-    document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.admin-tab').forEach(b => {
+        const active = b.id === `tab-${tab}`;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+        b.tabIndex = active ? 0 : -1;
+    });
+    document.querySelectorAll('.admin-tab-content').forEach(panel => {
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-hidden', panel.id !== `tab-content-${tab}` ? 'true' : 'false');
+    });
     document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
 
     document.getElementById(`tab-${tab}`)?.classList.add('active');
@@ -288,53 +320,65 @@ window.switchTab = async (tab, options = {}) => {
         if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
     }
     window.scheduleSettingsWorkspaceScale?.();
-    loadTabData(tab);
+    await loadTabData(tab);
     setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
 };
 
 async function loadTabData(tab, page = 1) {
-    if (LEGACY_SETTINGS_TAB_ALIASES.has(tab)) {
-        if (document.getElementById('tab-content-usage') && document.getElementById('tab-content-usage').classList.contains('hidden')) {
-            await window.switchTab('usage', { subtab: tab, page });
-            return;
+    const loadSequence = ++settingsTabLoadSequence;
+    window.setSettingsTabState?.('loading', '正在加载设置数据…');
+    try {
+        if (LEGACY_SETTINGS_TAB_ALIASES.has(tab)) {
+            if (document.getElementById('tab-content-usage') && document.getElementById('tab-content-usage').classList.contains('hidden')) {
+                await window.switchTab('usage', { subtab: tab, page });
+                return true;
+            }
+            const usageSubtab = normalizeUsageSubtab(tab);
+            pageState[usageSubtab] = page;
+            if (usageSubtab === 'stats' && window.loadStats) await loadStats(page);
+            if (usageSubtab === 'details' && window.loadDetails) await loadDetails(page);
+            if (usageSubtab === 'report' && window.loadReport) await loadReport();
+        } else {
+            pageState[tab] = page;
+            if (tab === 'models' && window.loadModels) await loadModels(page);
+            if (tab === 'users' && window.loadUsers) {
+                await loadUsers(page);
+                setTimeout(() => window.ensureUserRecordButtons?.(), 0);
+            }
+            if (tab === 'logs' && window.loadLogs) await loadLogs(page);
+            if (tab === 'monitor' && window.loadMonitorSummary) await loadMonitorSummary();
+            if (tab === 'usage') {
+                const usageSubtab = getActiveUsageSubtab();
+                if (usageSubtab === 'stats' && window.loadStats) await loadStats(pageState.stats || page);
+                if (usageSubtab === 'details' && window.loadDetails) await loadDetails(pageState.details || page);
+                if (usageSubtab === 'report' && window.loadReport) await loadReport();
+            }
+            if (tab === 'memories' && window.loadMemories) await window.loadMemories(page);
+            if (tab === 'attachments' && window.loadAttachments) await loadAttachments(page);
+            if (tab === 'announcements' && window.loadAnnouncementsAdmin) await window.loadAnnouncementsAdmin(page);
+            if (tab === 'tool-policy' && window.loadToolPolicy) await window.loadToolPolicy();
+            if (tab === 'ops' && window.loadOpsSummary) await loadOpsSummary();
+            if (tab === 'details' && window.loadDetails) await loadDetails(page);
+            if (tab === 'apiCallLogs' && window.loadApiCallLogs) await loadApiCallLogs(page);
+            if (tab === 'userRecords' && window.loadUserRecordMessages) await loadUserRecordMessages(page);
+            if (tab === 'keys' && window.loadApiKeys) {
+                await loadApiKeys();
+                const displayEl = document.getElementById('api-base-url-display');
+                if (displayEl) {
+                    // 优先使用后端配置的公网 URL，否则根据当前访问地址智能生成
+                    const origin = window.publicUrl || window.location.origin;
+                    displayEl.innerText = `${origin}/v1`;
+                }
+            }
         }
-        const usageSubtab = normalizeUsageSubtab(tab);
-        pageState[usageSubtab] = page;
-        if (usageSubtab === 'stats' && window.loadStats) loadStats(page);
-        if (usageSubtab === 'details' && window.loadDetails) loadDetails(page);
-        if (usageSubtab === 'report' && window.loadReport) loadReport();
-        return;
-    }
-    pageState[tab] = page;
-    if (tab === 'models' && window.loadModels) loadModels(page);
-    if (tab === 'users' && window.loadUsers) {
-        loadUsers(page);
-        setTimeout(() => window.ensureUserRecordButtons?.(), 0);
-    }
-    if (tab === 'logs' && window.loadLogs) loadLogs(page);
-    if (tab === 'monitor' && window.loadMonitorSummary) loadMonitorSummary();
-    if (tab === 'usage') {
-        const usageSubtab = getActiveUsageSubtab();
-        if (usageSubtab === 'stats' && window.loadStats) loadStats(pageState.stats || page);
-        if (usageSubtab === 'details' && window.loadDetails) loadDetails(pageState.details || page);
-        if (usageSubtab === 'report' && window.loadReport) loadReport();
-    }
-    if (tab === 'memories' && window.loadMemories) window.loadMemories(page);
-    if (tab === 'attachments' && window.loadAttachments) loadAttachments(page);
-    if (tab === 'announcements' && window.loadAnnouncementsAdmin) window.loadAnnouncementsAdmin(page);
-    if (tab === 'tool-policy' && window.loadToolPolicy) window.loadToolPolicy();
-    if (tab === 'ops' && window.loadOpsSummary) loadOpsSummary();
-    if (tab === 'details' && window.loadDetails) loadDetails(page);
-    if (tab === 'apiCallLogs' && window.loadApiCallLogs) loadApiCallLogs(page);
-    if (tab === 'userRecords' && window.loadUserRecordMessages) loadUserRecordMessages(page);
-    if (tab === 'keys' && window.loadApiKeys) {
-        loadApiKeys();
-        const displayEl = document.getElementById('api-base-url-display');
-        if (displayEl) {
-            // 优先使用后端配置的公网 URL，否则根据当前访问地址智能生成
-            const origin = window.publicUrl || window.location.origin;
-            displayEl.innerText = `${origin}/v1`;
-        }
+        if (loadSequence === settingsTabLoadSequence) window.setSettingsTabState?.('', '');
+        return true;
+    } catch (error) {
+        if (loadSequence !== settingsTabLoadSequence) return false;
+        const message = error.message || '设置数据加载失败';
+        window.setSettingsTabState?.('error', message, { retry: true, tab, page });
+        showToast(message, 'error');
+        return false;
     }
 }
 window.loadTabData = loadTabData;
@@ -356,9 +400,9 @@ window.fetchRemoteModels = async function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, api_key: apiKey, id })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
 
-        if (!data.success) throw new Error(data.error);
+        if (!res.ok || !data.success) throw new Error(data.error || `获取模型列表失败（HTTP ${res.status}）`);
         if (!data.models || data.models.length === 0) throw new Error('未获取到可用模型');
 
         // 填充下拉框
@@ -383,3 +427,22 @@ window.fetchRemoteModels = async function() {
         showToast(e.message, 'error');
     }
 };
+
+document.addEventListener('keydown', event => {
+    const current = event.target?.closest?.('.admin-sidebar [role="tab"]');
+    if (!current) return;
+    const tabs = [...document.querySelectorAll('.admin-sidebar [role="tab"]')]
+        .filter(button => !button.classList.contains('hidden') && !button.disabled);
+    const index = tabs.indexOf(current);
+    if (index < 0) return;
+    let nextIndex = index;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = tabs.length - 1;
+    if (nextIndex === index) return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    next.focus();
+    next.click();
+});

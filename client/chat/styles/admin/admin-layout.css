@@ -183,7 +183,29 @@
     overflow: visible;
 }
 .settings-workspace-view .table-container {
-    overflow-x: hidden;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+.settings-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 30px;
+    padding: 5px 14px;
+    color: var(--text-muted);
+    background: rgba(248, 250, 252, 0.96);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    font-size: 0.78rem;
+}
+.settings-state[data-state="error"] {
+    color: var(--danger);
+    background: rgba(254, 242, 242, 0.96);
+}
+.settings-state-retry {
+    min-height: 26px;
+    padding: 0 10px;
+    font-size: 0.74rem;
 }
 .admin-content h3 {
     margin: 0 0 14px;
@@ -974,6 +996,26 @@
 }
 
 @media (max-width: 760px) {
+    .settings-workspace-view .admin-layout {
+        flex-direction: column;
+        overflow: auto;
+    }
+    .settings-workspace-view .admin-sidebar {
+        width: 100%;
+        flex: 0 0 auto;
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px;
+    }
+    .settings-workspace-view .admin-tab {
+        flex: 0 0 auto;
+        min-width: max-content;
+    }
+    .settings-workspace-view .admin-content {
+        min-height: 0;
+        padding: 14px;
+    }
     .global-params-tab .global-params-list,
     .global-params-tab .global-params-row,
     .global-params-tab .global-params-context-row {
@@ -1006,4 +1048,54 @@
         justify-content: flex-start;
         white-space: normal;
     }
+}
+
+body.dark-mode .settings-workspace-view,
+.dark-mode .settings-workspace-view {
+    background: #0b1220;
+}
+body.dark-mode .settings-workspace-view .settings-workspace-header,
+.dark-mode .settings-workspace-view .settings-workspace-header,
+body.dark-mode .settings-workspace-view .admin-content,
+.dark-mode .settings-workspace-view .admin-content {
+    background: #111827;
+    color: #e5e7eb;
+}
+body.dark-mode .settings-workspace-view .admin-layout,
+.dark-mode .settings-workspace-view .admin-layout {
+    background: #0b1220;
+}
+body.dark-mode .settings-workspace-view .admin-sidebar,
+.dark-mode .settings-workspace-view .admin-sidebar {
+    background: rgba(17, 24, 39, 0.92);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+body.dark-mode .settings-workspace-view .admin-tab,
+.dark-mode .settings-workspace-view .admin-tab {
+    color: #cbd5e1;
+}
+body.dark-mode .settings-workspace-view .admin-tab:hover,
+.dark-mode .settings-workspace-view .admin-tab:hover {
+    background: rgba(148, 163, 184, 0.14);
+    color: #6ee7b7;
+}
+body.dark-mode .global-params-tab .global-params-section,
+.dark-mode .global-params-tab .global-params-section {
+    background: #172033;
+    border-color: rgba(148, 163, 184, 0.2);
+}
+body.dark-mode .global-params-tab .global-params-section-desc,
+.dark-mode .global-params-tab .global-params-section-desc,
+body.dark-mode .global-params-tab .form-item label,
+.dark-mode .global-params-tab .form-item label {
+    color: #cbd5e1;
+}
+body.dark-mode .settings-state,
+.dark-mode .settings-state {
+    background: #172033;
+    border-color: rgba(148, 163, 184, 0.2);
+}
+body.dark-mode .settings-state[data-state="error"],
+.dark-mode .settings-state[data-state="error"] {
+    background: rgba(127, 29, 29, 0.35);
 }

@@ -830,6 +830,27 @@ const migrations = [
             `);
         }
     },
+    {
+        id: '202608220008_workflow_credential_user_visibility',
+        description: 'Persist individual user targets for shared workflow credentials.',
+        up(db) {
+            const columns = db.pragma('table_info(workflow_credentials)');
+            if (!columns.length) return;
+            if (!columns.some(column => column.name === 'allowed_user_ids')) {
+                db.exec("ALTER TABLE workflow_credentials ADD COLUMN allowed_user_ids TEXT DEFAULT ''");
+            }
+            db.exec("UPDATE workflow_credentials SET allowed_user_ids = '' WHERE allowed_user_ids IS NULL");
+        },
+        async upPg(client) {
+            await client.query(`
+                ALTER TABLE workflow_credentials
+                ADD COLUMN IF NOT EXISTS allowed_user_ids TEXT DEFAULT '';
+                UPDATE workflow_credentials
+                SET allowed_user_ids = ''
+                WHERE allowed_user_ids IS NULL;
+            `);
+        }
+    },
     ...regulationsMigrations
 ];
 

@@ -1,5 +1,28 @@
 /* 工作流库与版本辅助函数，拆自 agents.js。 */
 /* global showAutomationWorkflowEditor, renderAutomationAssetCenter, agentWorkflowReadOnly */
+let agentWorkflowsLoadSequence = 0;
+const agentWorkflowModalOpeners = new WeakMap();
+
+function setAgentWorkflowLibraryModalVisibility(modal, isOpen, focusTarget = null) {
+    if (!modal) return;
+    if (isOpen) {
+        const active = document.activeElement;
+        if (active && active !== document.body && !modal.contains(active)) {
+            agentWorkflowModalOpeners.set(modal, active);
+        }
+    }
+    modal.classList.toggle('hidden', !isOpen);
+    modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    if (isOpen) {
+        requestAnimationFrame(() => {
+            (focusTarget || modal.querySelector('button, input, textarea, select'))?.focus?.();
+        });
+    } else {
+        const opener = agentWorkflowModalOpeners.get(modal);
+        agentWorkflowModalOpeners.delete(modal);
+        if (opener?.isConnected) opener.focus();
+    }
+}
 
 
 
@@ -199,9 +222,11 @@ function renderAgentWorkflowLibrary() {
 async function loadAgentWorkflows() {
     const select = document.getElementById('agent-workflow-select');
     if (!select) return;
+    const requestId = ++agentWorkflowsLoadSequence;
     try {
         const res = await apiFetch(`${API_BASE}/agents/workflows`, { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
+        if (requestId !== agentWorkflowsLoadSequence) return false;
         if (!res.ok) throw new Error(data.error || '已保存工作流加载失败');
         agentWorkflowsCache = data.data || [];
         renderAgentWorkflowLibrary();
@@ -223,7 +248,7 @@ function bindAgentWorkflowMetadataModal() {
     const modal = document.getElementById('agent-workflow-metadata-modal');
     if (!modal || modal.dataset.boundAgentWorkflowMetadataModal === '1') return;
     modal.dataset.boundAgentWorkflowMetadataModal = '1';
-    const close = () => modal.classList.add('hidden');
+    const close = () => setAgentWorkflowLibraryModalVisibility(modal, false);
     document.getElementById('agent-workflow-metadata-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-metadata-cancel-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-metadata-save-btn')?.addEventListener('click', saveAgentWorkflowMetadata);
@@ -244,11 +269,8 @@ function openAgentWorkflowMetadata(workflowId) {
     name.value = workflow.name || '';
     description.value = workflow.description || '';
     setAgentWorkflowMetadataError('');
-    modal.classList.remove('hidden');
-    requestAnimationFrame(() => {
-        name.focus();
-        name.select();
-    });
+    setAgentWorkflowLibraryModalVisibility(modal, true, name);
+    requestAnimationFrame(() => name.select());
 }
 
 async function saveAgentWorkflowMetadata() {
@@ -280,7 +302,7 @@ async function saveAgentWorkflowMetadata() {
             agentWorkflowDraftName = data.workflow?.name || name;
             agentWorkflowDraftDescription = data.workflow?.description || description;
         }
-        modal.classList.add('hidden');
+        setAgentWorkflowLibraryModalVisibility(modal, false);
         renderAgentWorkflowLibrary();
         renderAutomationAssetCenter();
         showToast('工作流信息已保存', 'success');
@@ -395,7 +417,7 @@ function bindAgentWorkflowShareModal() {
     const modal = document.getElementById('agent-workflow-share-modal');
     if (!modal || modal.dataset.boundAgentWorkflowShareModal === '1') return;
     modal.dataset.boundAgentWorkflowShareModal = '1';
-    const close = () => modal.classList.add('hidden');
+    const close = () => setAgentWorkflowLibraryModalVisibility(modal, false);
     document.getElementById('agent-workflow-share-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-share-cancel-btn')?.addEventListener('click', close);
     modal.querySelectorAll('input[name="agent-workflow-share-scope"]').forEach(input => {
@@ -451,7 +473,7 @@ async function openAgentWorkflowShare(workflowId) {
     const scope = modal.querySelector(`input[name="agent-workflow-share-scope"][value="${workflow.scope === 'shared' ? 'shared' : 'personal'}"]`);
     if (scope) scope.checked = true;
     save.disabled = true;
-    modal.classList.remove('hidden');
+    setAgentWorkflowLibraryModalVisibility(modal, true, save);
     try {
         const options = await loadAgentWorkflowShareOptions();
         agentWorkflowShareState.options = options;
@@ -498,7 +520,7 @@ async function saveAgentWorkflowSharing() {
         if (!res.ok) throw new Error(data.error || '共享设置保存失败');
         const index = agentWorkflowsCache.findIndex(item => String(item.id) === String(workflow.id));
         if (index >= 0 && data.workflow) agentWorkflowsCache[index] = data.workflow;
-        modal.classList.add('hidden');
+        setAgentWorkflowLibraryModalVisibility(modal, false);
         renderAgentWorkflowLibrary();
         renderAutomationAssetCenter();
         showToast(scope === 'shared' ? '工作流共享设置已保存' : '已取消工作流共享', 'success');
@@ -596,7 +618,7 @@ function bindAgentWorkflowDependencyModal() {
     const modal = document.getElementById('agent-workflow-dependency-modal');
     if (!modal || modal.dataset.boundAgentWorkflowDependencyModal === '1') return;
     modal.dataset.boundAgentWorkflowDependencyModal = '1';
-    const close = () => modal.classList.add('hidden');
+    const close = () => setAgentWorkflowLibraryModalVisibility(modal, false);
     document.getElementById('agent-workflow-dependency-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-dependency-cancel-btn')?.addEventListener('click', close);
     modal.addEventListener('change', event => {
@@ -620,7 +642,7 @@ async function openAgentWorkflowDependencies(workflowId = '') {
     setAgentWorkflowDependencyError('');
     PivotSafeHtml.setHtml(list, '<div class="agent-workflow-dependency-empty">正在加载可用依赖...</div>');
     save.disabled = true;
-    modal.classList.remove('hidden');
+    setAgentWorkflowLibraryModalVisibility(modal, true, save);
     try {
         const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(id)}/dependencies`);
         const data = await res.json().catch(() => ({}));
@@ -665,7 +687,7 @@ async function saveAgentWorkflowDependencies() {
         if (!res.ok) throw new Error(data.error || '依赖映射保存失败');
         agentWorkflowDependencyState.configuration = data;
         renderAgentWorkflowDependencies(data);
-        modal.classList.add('hidden');
+        setAgentWorkflowLibraryModalVisibility(modal, false);
         showToast('工作流依赖映射已确认', 'success');
         return data;
     } catch (error) {

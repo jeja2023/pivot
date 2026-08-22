@@ -10,9 +10,9 @@
                                     <input id="long-term-memory-toggle" type="checkbox">
                                     <span>启用</span>
                                 </label>
-                                <button id="memory-export-btn" class="btn-secondary">导出</button>
-                                <button id="memory-merge-suggestions-btn" class="btn-secondary">合并建议</button>
-                                <button id="memory-refresh-btn" class="btn-secondary">刷新</button>
+                                <button id="memory-export-btn" type="button" class="btn-secondary">导出</button>
+                                <button id="memory-merge-suggestions-btn" type="button" class="btn-secondary">合并建议</button>
+                                <button id="memory-refresh-btn" type="button" class="btn-secondary">刷新</button>
                             </div>
                         </div>
                         <div class="memory-governance-shell">
@@ -39,10 +39,10 @@
                                         </select>
                                     </div>
                                     <div class="memory-filter-actions">
-                                        <button id="memory-archive-expired-btn" class="btn-secondary">归档过期</button>
-                                        <button id="memory-bulk-enable-btn" class="btn-secondary">恢复选中</button>
-                                        <button id="memory-bulk-disable-btn" class="btn-secondary">禁用选中</button>
-                                        <button id="memory-bulk-delete-btn" class="btn-danger-outline">删除选中</button>
+                                        <button id="memory-archive-expired-btn" type="button" class="btn-secondary">归档过期</button>
+                                        <button id="memory-bulk-enable-btn" type="button" class="btn-secondary">恢复选中</button>
+                                        <button id="memory-bulk-disable-btn" type="button" class="btn-secondary">禁用选中</button>
+                                        <button id="memory-bulk-delete-btn" type="button" class="btn-danger-outline">删除选中</button>
                                     </div>
                                 </div>
                                 <div id="memory-jobs-panel" class="memory-jobs-panel"></div>
@@ -79,10 +79,10 @@
                             </div>
                             <div id="pagination-memories" class="pagination"></div>
                         </div>
-                        <div id="memory-edit-modal" class="modal-overlay hidden" style="z-index: 5250;">
+                        <div id="memory-edit-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="memory-edit-title" style="z-index: 5250;">
                             <div class="modal model-modal memory-modal memory-edit-modal">
                                 <div class="model-modal-header memory-modal-header">
-                                    <h3>编辑记忆</h3>
+                                    <h3 id="memory-edit-title">编辑记忆</h3>
                                 </div>
                                 <form id="memory-edit-form" class="model-form memory-edit-form">
                                     <input type="hidden" id="memory-edit-id">
@@ -116,7 +116,7 @@
                                 </form>
                             </div>
                         </div>
-                        <div id="memory-source-modal" class="modal-overlay hidden" style="z-index: 5260;">
+                        <div id="memory-source-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-label="来源" style="z-index: 5260;">
                             <div class="modal model-modal memory-modal memory-source-modal">
                                 <div class="model-modal-header memory-modal-header">
                                     <h3>来源</h3>

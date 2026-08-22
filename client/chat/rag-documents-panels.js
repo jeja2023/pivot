@@ -9,14 +9,16 @@ const ensureRagDetailModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-detail-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.dataset.knowledgeModal = '1';
+    modal.setAttribute('aria-hidden', 'true');
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal rag-detail-modal">
+        <div class="modal rag-detail-modal" role="dialog" aria-modal="true" aria-labelledby="rag-detail-title">
             <div class="rag-detail-header">
                 <div>
                     <h3 id="rag-detail-title">知识库文档详情</h3>
                     <p id="rag-detail-subtitle" class="model-modal-desc"></p>
                 </div>
-                <button type="button" id="rag-detail-close-btn" class="btn-danger-outline">关闭</button>
+                <button type="button" id="rag-detail-close-btn" class="btn-danger-outline" data-knowledge-modal-close aria-label="关闭文档详情">关闭</button>
             </div>
             <div id="rag-detail-meta" class="rag-detail-meta"></div>
             <div id="rag-detail-chunks" class="rag-detail-chunks"></div>
@@ -25,7 +27,7 @@ const ensureRagDetailModal = () => {
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-detail-close-btn')) {
-            modal.classList.add('hidden');
+            window.setKnowledgeModalVisibility?.(modal, false);
         }
     });
     return modal;
@@ -38,14 +40,16 @@ const ensureRagAuditModal = () => {
     modal = document.createElement('div');
     modal.id = 'rag-audit-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.dataset.knowledgeModal = '1';
+    modal.setAttribute('aria-hidden', 'true');
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal rag-detail-modal">
+        <div class="modal rag-detail-modal" role="dialog" aria-modal="true" aria-labelledby="rag-audit-title">
             <div class="rag-detail-header">
                 <div>
-                    <h3>知识库删除审计</h3>
+                    <h3 id="rag-audit-title">知识库删除审计</h3>
                     <p class="model-modal-desc">仅 admin 权限层级可见，保留用户删除后的文档元数据、源文件路径与索引状态。</p>
                 </div>
-                <button type="button" id="rag-audit-close-btn" class="btn-danger-outline">关闭</button>
+                <button type="button" id="rag-audit-close-btn" class="btn-danger-outline" data-knowledge-modal-close aria-label="关闭删除审计">关闭</button>
             </div>
             <div class="table-container rag-audit-table-wrap">
                 <table class="data-table compact-table">
@@ -68,7 +72,7 @@ const ensureRagAuditModal = () => {
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-audit-close-btn')) {
-            modal.classList.add('hidden');
+            window.setKnowledgeModalVisibility?.(modal, false);
         }
     });
     return modal;
@@ -149,7 +153,7 @@ const showRagDetailModal = (data) => {
             `).join('')
             : '<div class="rag-debug-empty">暂无可预览分块</div>');
     }
-    modal.classList.remove('hidden');
+    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-detail-close-btn' });
 };
 
 window.showKnowledgeDocAudit = async () => {
@@ -164,7 +168,7 @@ window.showKnowledgeDocAudit = async () => {
         const modal = ensureRagAuditModal();
         const body = modal.querySelector('#rag-audit-body');
         if (body) PivotSafeHtml.setHtml(body, renderRagAuditRows(data.data || []));
-        modal.classList.remove('hidden');
+        window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-audit-close-btn' });
     } catch (e) {
         showToast(e.message || '删除审计加载失败', 'error');
     }
@@ -172,7 +176,11 @@ window.showKnowledgeDocAudit = async () => {
 
 const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const el = document.getElementById('rag-summary');
-    if (!el || !summary) return;
+    if (!el) return;
+    if (!summary || summary.error) {
+        PivotSafeHtml.setHtml(el, '');
+        return;
+    }
     const signals = quality && !quality.error ? (quality.signals || {}) : {};
     const hasQuality = quality && !quality.error;
     const hasGraphSummary = graphSummary && !graphSummary.error;
@@ -232,7 +240,11 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
 
 const renderRagQualityReport = (report) => {
     const el = document.getElementById('rag-quality-report');
-    if (!el || !report) return;
+    if (!el) return;
+    if (!report || report.error) {
+        PivotSafeHtml.setHtml(el, '');
+        return;
+    }
     const overview = report.overview || {};
     const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
     const visibleProblems = problemDocs.filter(doc => doc.status === 'error' || Number(doc.chunk_count || 0) === 0).slice(0, 3);

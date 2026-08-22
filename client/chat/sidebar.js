@@ -183,6 +183,21 @@ document.addEventListener('click', async (event) => {
         return;
     }
 
+    if (event.target.closest('#session-search-modal-clear')) {
+        const input = document.getElementById('session-search-modal-input');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        getSidebarSearchApi().refresh?.();
+        return;
+    }
+
+    if (event.target.closest('[data-global-search-retry]')) {
+        getSidebarSearchApi().refresh?.();
+        return;
+    }
+
     const taskSearchResult = event.target.closest('[data-global-search-task-id]');
     if (taskSearchResult) {
         const runId = taskSearchResult.dataset.globalSearchTaskId;
@@ -235,12 +250,16 @@ document.addEventListener('click', async (event) => {
 
     if (event.target.closest('#session-search-modal-active')) {
         sessionSearchArchived = false;
+        event.target.closest('#session-search-modal-active')?.setAttribute('aria-selected', 'true');
+        document.getElementById('session-search-modal-archive')?.setAttribute('aria-selected', 'false');
         await getSidebarSearchApi().refresh?.();
         return;
     }
 
     if (event.target.closest('#session-search-modal-archive')) {
         sessionSearchArchived = true;
+        event.target.closest('#session-search-modal-archive')?.setAttribute('aria-selected', 'true');
+        document.getElementById('session-search-modal-active')?.setAttribute('aria-selected', 'false');
         await getSidebarSearchApi().refresh?.();
         return;
     }
@@ -311,6 +330,7 @@ document.getElementById('session-search-modal-input')?.addEventListener('input',
 
 document.getElementById('session-search-modal-input')?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') getSidebarSearchApi().close?.();
+    if (event.key === 'Enter') getSidebarSearchApi().refresh?.();
 });
 
 const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {

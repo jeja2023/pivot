@@ -397,9 +397,24 @@ async function openMcpLocalAuthorizationCenter(initialType = 'local_database') {
     const modal = document.getElementById('mcp-local-auth-modal');
     if (!modal) return showToast('本机授权中心未就绪。', 'error');
     mcpLocalAuthorizationActiveType = mcpLocalAuthConfig(initialType).type;
-    modal.classList.remove('hidden');
+    const modalApi = window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
+    if (typeof modalApi.setMcpModalVisibility === 'function') {
+        modalApi.setMcpModalVisibility(modal, true, { focusSelector: '#mcp-local-auth-close-btn' });
+    } else {
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+    }
     const closeButton = document.getElementById('mcp-local-auth-close-btn');
-    closeButton?.addEventListener('click', closeMcpLocalAuthorizationCenter, { once: true });
+    if (closeButton && closeButton.dataset.boundMcpClose !== '1') {
+        closeButton.dataset.boundMcpClose = '1';
+        closeButton.addEventListener('click', closeMcpLocalAuthorizationCenter);
+    }
+    if (modal.dataset.boundMcpOverlay !== '1') {
+        modal.dataset.boundMcpOverlay = '1';
+        modal.addEventListener('click', event => {
+            if (event.target === modal) closeMcpLocalAuthorizationCenter();
+        });
+    }
     const body = document.getElementById('mcp-local-auth-body');
     if (body) PivotSafeHtml.setHtml(body, '<div class="mcp-empty-panel compact"><strong>正在读取本机授权状态</strong><span>请稍候。</span></div>');
     const status = await getMcpLocalAuthorizationStatus({ refresh: true });
@@ -407,7 +422,13 @@ async function openMcpLocalAuthorizationCenter(initialType = 'local_database') {
 }
 
 function closeMcpLocalAuthorizationCenter() {
-    document.getElementById('mcp-local-auth-modal')?.classList.add('hidden');
+    const modal = document.getElementById('mcp-local-auth-modal');
+    const modalApi = window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
+    if (typeof modalApi.setMcpModalVisibility === 'function') modalApi.setMcpModalVisibility(modal, false);
+    else {
+        modal?.classList.add('hidden');
+        modal?.setAttribute('aria-hidden', 'true');
+    }
 }
 
 window.Pivot?.exposeModule?.('mcp.localAuth', {

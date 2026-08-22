@@ -5,6 +5,91 @@ let ragCollections = [];
 let ragTags = [];
 let ragDocsCache = [];
 const ragTagsByCollection = new Map();
+const ragActionLocks = new Set();
+const knowledgeModalFocus = new Map();
+const ragControlLoadErrors = new Set();
+let ragDocsLoadSequence = 0;
+
+function setKnowledgeWorkbenchState(state = '', message = '', { retry = false } = {}) {
+    const el = document.getElementById('rag-workbench-state');
+    if (!el) return;
+    el.dataset.state = state || '';
+    el.hidden = !message;
+    PivotSafeHtml.setHtml(el, '');
+    if (!message) return;
+    const text = document.createElement('span');
+    text.textContent = message;
+    el.appendChild(text);
+    if (retry) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary knowledge-state-retry';
+        button.textContent = '重试';
+        button.addEventListener('click', () => window.loadKnowledgeDocs?.());
+        el.appendChild(button);
+    }
+}
+
+function syncRagSelectAllState() {
+    const selectAll = document.getElementById('rag-select-all');
+    const checks = [...document.querySelectorAll('.rag-doc-check')];
+    if (!selectAll) return;
+    const checkedCount = checks.filter(input => input.checked).length;
+    selectAll.checked = checks.length > 0 && checkedCount === checks.length;
+    selectAll.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+}
+
+function setKnowledgeModalVisibility(modalOrId, open, { focusSelector = '' } = {}) {
+    const modal = typeof modalOrId === 'string' ? document.getElementById(modalOrId) : modalOrId;
+    if (!modal) return;
+    if (open) {
+        if (!knowledgeModalFocus.has(modal) && document.activeElement && document.activeElement !== document.body) {
+            knowledgeModalFocus.set(modal, document.activeElement);
+        }
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        window.requestAnimationFrame?.(() => {
+            const target = modal.querySelector(focusSelector || '[autofocus], [role="dialog"] button, [role="dialog"] input, [role="dialog"] select, [role="dialog"] textarea');
+            target?.focus?.();
+        });
+        return;
+    }
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    const previous = knowledgeModalFocus.get(modal);
+    knowledgeModalFocus.delete(modal);
+    if (previous?.isConnected) previous.focus?.();
+};
+
+window.Pivot?.exposeModule?.('rag.documents', {
+    setKnowledgeModalVisibility,
+    syncRagSelectAllState
+}, [
+    { globalName: 'setKnowledgeModalVisibility', exportName: 'setKnowledgeModalVisibility' },
+    { globalName: 'syncRagSelectAllState', exportName: 'syncRagSelectAllState' }
+]);
+
+if (!document.documentElement.dataset.knowledgeModalEscapeBound) {
+    document.documentElement.dataset.knowledgeModalEscapeBound = '1';
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        const openModals = [...document.querySelectorAll('.modal-overlay[data-knowledge-modal]:not(.hidden)')];
+        const modal = openModals.at(-1);
+        const closeButton = modal?.querySelector('[data-knowledge-modal-close]');
+        if (!closeButton) return;
+        event.preventDefault();
+        closeButton.click();
+    });
+}
+
+async function fetchKnowledgeJson(url, options = {}) {
+    const response = await apiFetch(url, options);
+    const data = await response.json().catch(() => null);
+    if (!response.ok || data?.error) {
+        throw new Error(data?.error || `请求失败（HTTP ${response.status}）`);
+    }
+    return data;
+}
 
 function normalizeRagCollectionId(value) {
     const id = Number.parseInt(value, 10);
@@ -266,12 +351,14 @@ window.loadKnowledgeCollections = async function () {
         if (handleRagUnauthorizedResponse(res)) return ragCollections;
         if (!res.ok || data.error) throw new Error(data.error || '专题库加载失败');
         ragCollections = Array.isArray(data.data) ? data.data : [];
+        ragControlLoadErrors.delete('专题库');
         updateRagCollectionControls();
         filterWritableRagCollectionSelects();
         window.updateChatToolReadiness?.({ silent: true });
         return ragCollections;
     } catch (e) {
         console.error('加载知识库专题失败', e);
+        ragControlLoadErrors.add('专题库');
         return ragCollections;
     }
 };
@@ -301,11 +388,13 @@ window.loadKnowledgeTags = async function (collectionId = '', { updateControls =
         if (handleRagUnauthorizedResponse(res)) return getRagTagsForCollection(key);
         if (!res.ok || data.error) throw new Error(data.error || '标签加载失败');
         setRagTagsForCollection(key, data.data);
+        ragControlLoadErrors.delete('标签');
         if (updateControls) updateRagTagControls();
         window.updateChatToolReadiness?.({ silent: true });
         return getRagTagsForCollection(key);
     } catch (e) {
         console.error('加载知识库标签失败', e);
+        ragControlLoadErrors.add('标签');
         return getRagTagsForCollection(key);
     }
 };
@@ -395,10 +484,14 @@ async function openKnowledgeCollectionShareModal() {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'knowledge-share-modal';
-        modal.className = 'modal-overlay knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+        modal.className = 'modal-overlay hidden knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+        modal.dataset.knowledgeModal = '1';
+        modal.setAttribute('aria-hidden', 'true');
         document.body.appendChild(modal);
     } else {
-        modal.className = 'modal-overlay knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+        modal.className = 'modal-overlay hidden knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
+        modal.dataset.knowledgeModal = '1';
+        modal.setAttribute('aria-hidden', 'true');
     }
 
     const current = data.data?.collection || collection;
@@ -420,7 +513,7 @@ async function openKnowledgeCollectionShareModal() {
                     <h3 id="knowledge-share-title">分享专题库</h3>
                     <p id="knowledge-share-subtitle">设置哪些单位或个人可以只读检索与问答该专题库。</p>
                 </div>
-                <button type="button" class="btn-danger-outline" data-knowledge-share-close>关闭</button>
+                <button type="button" class="btn-danger-outline" data-knowledge-share-close data-knowledge-modal-close>关闭</button>
             </div>
             <div class="agent-workflow-share-body">
                 <div class="agent-workflow-share-summary">
@@ -485,10 +578,13 @@ async function openKnowledgeCollectionShareModal() {
     `);
 
     const closeButtons = modal.querySelectorAll('[data-knowledge-share-close]');
-    closeButtons.forEach(btn => btn.addEventListener('click', () => modal.classList.add('hidden')));
-    modal.addEventListener('click', e => {
-        if (e.target === modal) modal.classList.add('hidden');
-    });
+    closeButtons.forEach(btn => btn.addEventListener('click', () => window.setKnowledgeModalVisibility?.(modal, false)));
+    if (modal.dataset.boundKnowledgeShareOverlay !== '1') {
+        modal.dataset.boundKnowledgeShareOverlay = '1';
+        modal.addEventListener('click', e => {
+            if (e.target === modal) window.setKnowledgeModalVisibility?.(modal, false);
+        });
+    }
 
     const setKnowledgeError = (msg = '') => {
         const errEl = modal.querySelector('#knowledge-share-error');
@@ -570,7 +666,7 @@ async function openKnowledgeCollectionShareModal() {
                 const saveData = await saveRes.json().catch(() => ({}));
                 if (!saveRes.ok) throw new Error(saveData.error || '共享设置保存失败');
 
-                modal.classList.add('hidden');
+                window.setKnowledgeModalVisibility?.(modal, false);
                 showToast('专题库共享设置已更新', 'success');
                 await window.loadKnowledgeCollections?.();
                 window.loadKnowledgeDocs(1);
@@ -582,7 +678,7 @@ async function openKnowledgeCollectionShareModal() {
         });
     }
 
-    modal.classList.remove('hidden');
+    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '[name="knowledge-share-scope"]' });
 };
 
 function renderRagDocsPagination(total, page, limit) {
@@ -623,10 +719,13 @@ function updateRagDebugSamples(docs = []) {
 }
 
 window.loadKnowledgeDocs = async (page = ragDocsPage) => {
+    const requestSequence = ++ragDocsLoadSequence;
+    ragDocsPage = Math.max(Number(page) || 1, 1);
+    setKnowledgeWorkbenchState('loading', '正在加载知识库…');
     try {
-        ragDocsPage = Math.max(Number(page) || 1, 1);
         await window.loadKnowledgeCollections?.();
         await window.refreshRagTagControlsForSelectedCollections?.();
+        if (requestSequence !== ragDocsLoadSequence) return;
         const activeCollectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
         const activeTag = normalizeRagTag(document.getElementById('rag-tag-filter')?.value);
         const collectionQuery = activeCollectionId ? `&collectionId=${encodeURIComponent(activeCollectionId)}` : '';
@@ -635,21 +734,24 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
         if (activeCollectionId) summaryQuery.set('collectionId', activeCollectionId);
         if (activeTag) summaryQuery.set('tag', activeTag);
         const summaryUrl = `${API_BASE}/rag/summary${summaryQuery.toString() ? `?${summaryQuery.toString()}` : ''}`;
-        const [res, summaryRes, qualityRes, graphSummaryRes] = await Promise.all([
-            apiFetch(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}${collectionQuery}${tagQuery}`, { headers: authHeaders() }),
-            apiFetch(summaryUrl, { headers: authHeaders() }),
-            apiFetch(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
-            apiFetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
+        const [docsResult, summaryResult, qualityResult, graphSummaryResult] = await Promise.allSettled([
+            fetchKnowledgeJson(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}${collectionQuery}${tagQuery}`, { headers: authHeaders() }),
+            fetchKnowledgeJson(summaryUrl, { headers: authHeaders() }),
+            fetchKnowledgeJson(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
+            fetchKnowledgeJson(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
         ]);
-        const payload = await res.json();
+        if (requestSequence !== ragDocsLoadSequence) return;
+        if (docsResult.status !== 'fulfilled') throw docsResult.reason || new Error('文档列表加载失败');
+        const payload = docsResult.value || {};
         const docs = Array.isArray(payload) ? payload : (payload.data || []);
+        if (!Array.isArray(docs)) throw new Error('文档列表响应格式无效');
         ragDocsCache = docs;
         const total = Array.isArray(payload) ? docs.length : Number(payload.total || docs.length);
         const pageSize = Array.isArray(payload) ? RAG_DOCS_PAGE_SIZE : Number(payload.limit || RAG_DOCS_PAGE_SIZE);
         const pageNo = Array.isArray(payload) ? ragDocsPage : Number(payload.page || ragDocsPage);
-        const summary = await summaryRes.json().catch(() => null);
-        const quality = await qualityRes.json().catch(() => null);
-        const graphSummary = await graphSummaryRes.json().catch(() => null);
+        const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+        const quality = qualityResult.status === 'fulfilled' ? qualityResult.value : null;
+        const graphSummary = graphSummaryResult.status === 'fulfilled' ? graphSummaryResult.value : null;
         renderRagSummary(summary, quality, graphSummary);
         renderRagQualityReport(quality);
         updateRagDebugSamples(docs);
@@ -681,10 +783,23 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
             const doc = getCachedKnowledgeDoc(toggle.dataset.ragId);
             if (doc?.read_only === true || doc?.can_edit === false) toggle.disabled = true;
         });
+        if (body) body.dataset.loaded = '1';
+        syncRagSelectAllState();
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
+        const secondaryFailures = [summaryResult, qualityResult, graphSummaryResult]
+            .filter(result => result.status !== 'fulfilled').length;
+        const controlFailures = ragControlLoadErrors.size;
+        const partialMessage = [...ragControlLoadErrors, ...(secondaryFailures ? ['统计'] : [])].join('、');
+        setKnowledgeWorkbenchState(
+            secondaryFailures || controlFailures ? 'partial' : '',
+            secondaryFailures || controlFailures ? `文档已加载，但${partialMessage || '部分数据'}暂不可用。` : '',
+            { retry: secondaryFailures > 0 || controlFailures > 0 }
+        );
     } catch (e) {
         console.error('加载知识库失败', e);
+        if (requestSequence !== ragDocsLoadSequence) return;
+        setKnowledgeWorkbenchState('error', e.message || '知识库加载失败，请重试。', { retry: true });
     }
 };
 
@@ -693,6 +808,7 @@ window.openKnowledgeWorkbench = async function () {
     window.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
+    panel.setAttribute('aria-hidden', 'false');
     const toolbar = panel.querySelector('.knowledge-toolbar');
     if (toolbar && !toolbar.querySelector('#rag-share-collection-btn')) {
         const button = document.createElement('button');
@@ -731,6 +847,7 @@ window.openKnowledgeWorkbench = async function () {
 
 window.closeKnowledgeWorkbench = function () {
     closeKnowledgeGraphModal();
+    document.getElementById('knowledge-workbench-modal')?.setAttribute('aria-hidden', 'true');
     window.showMainWorkspace?.('chat');
 };
 
@@ -740,14 +857,16 @@ function ensureKnowledgeUploadModal() {
         modal = document.createElement('div');
         modal.id = 'knowledge-upload-modal';
         modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-upload-modal-overlay';
+        modal.dataset.knowledgeModal = '1';
+        modal.setAttribute('aria-hidden', 'true');
         PivotSafeHtml.setHtml(modal, `
-            <div class="modal rag-detail-modal knowledge-upload-modal">
+            <div class="modal rag-detail-modal knowledge-upload-modal" role="dialog" aria-modal="true" aria-labelledby="knowledge-upload-title">
                 <div class="rag-detail-header">
                     <div>
-                        <h3>上传文档</h3>
+                        <h3 id="knowledge-upload-title">上传文档</h3>
                         <p class="model-modal-desc">选择或拖拽文件到下方区域，确认无误后点击「开始上传」。上传后系统会自动索引文档内容。</p>
                     </div>
-                    <button type="button" id="knowledge-upload-close-btn" class="btn-danger-outline">关闭</button>
+                    <button type="button" id="knowledge-upload-close-btn" class="btn-danger-outline" data-knowledge-modal-close aria-label="关闭上传文档弹窗">关闭</button>
                 </div>
                 <div class="knowledge-upload-meta">
                     <div class="knowledge-upload-field">
@@ -794,12 +913,16 @@ window.openKnowledgeUploadModal = async function () {
     await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
     updateRagTagControls();
     renderKnowledgeUploadQueue();
-    modal.classList.remove('hidden');
+    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-upload-zone' });
 };
 
 window.closeKnowledgeUploadModal = function () {
+    if (knowledgeUploading) {
+        showToast('文档正在上传，请等待当前任务完成后再关闭', 'info');
+        return;
+    }
     const modal = document.getElementById('knowledge-upload-modal');
-    modal?.classList.add('hidden');
+    window.setKnowledgeModalVisibility?.(modal, false);
     // 关闭即清空待上传队列，避免下次打开残留。
     knowledgeUploadQueue = [];
     renderKnowledgeUploadQueue();
@@ -811,10 +934,12 @@ function ensureKnowledgeDocMetaModal() {
         modal = document.createElement('div');
         modal.id = 'knowledge-doc-meta-modal';
         modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-doc-meta-modal-overlay';
+        modal.dataset.knowledgeModal = '1';
+        modal.setAttribute('aria-hidden', 'true');
         PivotSafeHtml.setHtml(modal, `
-            <div class="modal model-modal knowledge-doc-meta-modal">
+            <div class="modal model-modal knowledge-doc-meta-modal" role="dialog" aria-modal="true" aria-labelledby="knowledge-doc-meta-title">
                 <div class="model-modal-header">
-                    <h3>整理文档</h3>
+                    <h3 id="knowledge-doc-meta-title">整理文档</h3>
                     <p id="knowledge-doc-meta-name" class="model-modal-desc"></p>
                 </div>
                 <div class="model-form">
@@ -826,12 +951,12 @@ function ensureKnowledgeDocMetaModal() {
                         </select>
                     </div>
                     <div class="form-item">
-                        <label>标签</label>
-                        <div id="knowledge-doc-meta-tags-list" class="knowledge-tag-picker" aria-label="文档标签"></div>
+                        <span id="knowledge-doc-meta-tags-label" class="knowledge-upload-field-label">标签</span>
+                        <div id="knowledge-doc-meta-tags-list" class="knowledge-tag-picker" aria-labelledby="knowledge-doc-meta-tags-label"></div>
                     </div>
                 </div>
                 <div class="model-modal-actions">
-                    <button type="button" id="knowledge-doc-meta-cancel-btn" class="btn-secondary">取消</button>
+                    <button type="button" id="knowledge-doc-meta-cancel-btn" class="btn-secondary" data-knowledge-modal-close>取消</button>
                     <button type="button" id="knowledge-doc-meta-save-btn" class="btn-primary">保存</button>
                 </div>
             </div>
@@ -869,16 +994,21 @@ window.openKnowledgeDocMetaModal = async function (id) {
     const collectionId = normalizeRagCollectionId(doc.collection_id);
     await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
     setRagTagCheckboxes(tagsList, getRagDocTags(doc), collectionId);
-    modal.classList.remove('hidden');
+    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-doc-meta-collection' });
 };
 
 window.closeKnowledgeDocMetaModal = function () {
-    document.getElementById('knowledge-doc-meta-modal')?.classList.add('hidden');
+    window.setKnowledgeModalVisibility?.(document.getElementById('knowledge-doc-meta-modal'), false);
 };
 
 window.saveKnowledgeDocMeta = async function () {
     const docId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-id')?.value);
     if (!docId) return showToast('未找到文档，请刷新后重试', 'error');
+    const lockKey = `meta:${docId}`;
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
+    const saveButton = document.getElementById('knowledge-doc-meta-save-btn');
+    if (saveButton) saveButton.disabled = true;
     const collectionId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-collection')?.value);
     const tags = getSelectedRagTagCheckboxes('knowledge-doc-meta-tags-list');
     try {
@@ -906,6 +1036,9 @@ window.saveKnowledgeDocMeta = async function () {
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档整理失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
+        if (saveButton) saveButton.disabled = false;
     }
 };
 
@@ -933,6 +1066,11 @@ function bindKnowledgeUploadZone(root = document) {
     });
 
     const scope = root.querySelector ? root : document;
+    const fileInput = document.getElementById('rag-upload-input');
+    if (fileInput && fileInput.dataset.boundKnowledgeInput !== '1') {
+        fileInput.dataset.boundKnowledgeInput = '1';
+        fileInput.addEventListener('change', () => window.addKnowledgeUploadFiles(fileInput.files));
+    }
     const submitBtn = scope.querySelector('#knowledge-upload-submit-btn');
     if (submitBtn && submitBtn.dataset.bound !== '1') {
         submitBtn.dataset.bound = '1';
@@ -960,6 +1098,9 @@ const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-do
 window.batchReindexKnowledgeDocs = async () => {
     const docIds = getSelectedRagDocIds();
     if (docIds.length === 0) return showToast('请选择文档', 'error');
+    const lockKey = 'batch-reindex';
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/batch-reindex`, {
             method: 'POST',
@@ -972,6 +1113,8 @@ window.batchReindexKnowledgeDocs = async () => {
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量重建失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
     }
 };
 
@@ -980,6 +1123,9 @@ window.batchDeleteKnowledgeDocs = async () => {
     if (docIds.length === 0) return showToast('请选择文档', 'error');
     const confirmed = await ragConfirm('批量删除知识库文档', `确定删除选中的 ${docIds.length} 个知识库文档吗？大模型将不再参考这些文档。`);
     if (!confirmed) return;
+    const lockKey = 'batch-delete';
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/batch-delete`, {
             method: 'POST',
@@ -992,12 +1138,21 @@ window.batchDeleteKnowledgeDocs = async () => {
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量删除失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
     }
 };
 
 window.toggleKnowledgeDocEnabled = async (id, enabled) => {
+    const docId = normalizeRagCollectionId(id);
+    if (!docId) return;
+    const lockKey = `enabled:${docId}`;
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
+    const toggle = document.querySelector(`.rag-enable-toggle[data-rag-id="${docId}"]`);
+    if (toggle) toggle.disabled = true;
     try {
-        const res = await apiFetch(`${API_BASE}/rag/docs/${id}/enabled`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${docId}/enabled`, {
             method: 'PUT',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
@@ -1007,7 +1162,11 @@ window.toggleKnowledgeDocEnabled = async (id, enabled) => {
         showToast(enabled ? '文档已启用' : '文档已停用');
         window.loadKnowledgeDocs();
     } catch (e) {
+        if (toggle) toggle.checked = !enabled;
         showToast(e.message || '启停失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
+        if (toggle && document.body.contains(toggle)) toggle.disabled = false;
     }
 };
 
@@ -1437,8 +1596,13 @@ window.uploadKnowledgeDoc = (selectedFile = null) => {
 };
 
 window.reindexKnowledgeDoc = async (id) => {
+    const docId = normalizeRagCollectionId(id);
+    if (!docId) return;
+    const lockKey = `reindex:${docId}`;
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
     try {
-        const res = await apiFetch(`${API_BASE}/rag/docs/${id}/reindex`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${docId}/reindex`, {
             method: 'POST',
             headers: authHeaders()
         });
@@ -1448,24 +1612,33 @@ window.reindexKnowledgeDoc = async (id) => {
         window.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '重新索引失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
     }
 };
 
 window.deleteKnowledgeDoc = async (id) => {
+    const docId = normalizeRagCollectionId(id);
+    if (!docId) return;
     const confirmed = await ragConfirm('删除知识库文档', '确定要从知识库中移除该文档吗？大模型将不再参考此文档。');
     if (!confirmed) return;
+    const lockKey = `delete:${docId}`;
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
 
     try {
-        const res = await apiFetch(`${API_BASE}/rag/docs/${id}`, {
+        const res = await apiFetch(`${API_BASE}/rag/docs/${docId}`, {
             method: 'DELETE',
             headers: authHeaders()
         });
-        if (res.ok) {
-            showToast('文档已移除');
-            window.loadKnowledgeDocs();
-        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '删除失败');
+        showToast('文档已移除');
+        window.loadKnowledgeDocs();
     } catch (e) {
         showToast('删除失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
     }
 };
 

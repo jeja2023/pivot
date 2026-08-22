@@ -1,6 +1,9 @@
 // 已发布工作流的计划任务管理。
 /* eslint-disable no-undef */
 let agentWorkflowSchedulesCache = [];
+let agentWorkflowSchedulesLoadSequence = 0;
+const agentWorkflowScheduleActionLocks = new Set();
+let agentWorkflowScheduleEditorOpener = null;
 
 function parseAgentWorkflowScheduleConfig(schedule) {
     const value = schedule?.run_config;
@@ -39,11 +42,15 @@ function ensureAgentWorkflowScheduleModal() {
     modal.id = 'agent-workflow-schedule-modal';
     modal.className = 'modal-overlay hidden';
     modal.style.zIndex = '1940';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('aria-labelledby', 'agent-workflow-schedule-title');
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal agent-workflow-schedule-modal">
+        <div class="modal agent-workflow-schedule-modal" role="document">
             <div class="agent-config-modal-head">
                 <div>
-                    <h3>工作流计划任务</h3>
+                    <h3 id="agent-workflow-schedule-title">工作流计划任务</h3>
                     <span id="agent-workflow-schedule-subtitle"></span>
                 </div>
                 <button id="agent-workflow-schedule-close" class="btn-secondary" type="button">关闭</button>
@@ -110,7 +117,7 @@ function ensureAgentWorkflowScheduleModal() {
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
         if (event.target.closest('#agent-workflow-schedule-close')) {
-            modal.classList.add('hidden');
+            setAgentWorkflowScheduleModalVisibility(false);
         }
     });
     modal.querySelector('#agent-workflow-schedule-frequency')?.addEventListener('change', syncAgentWorkflowScheduleFrequencyUi);
@@ -120,6 +127,19 @@ function ensureAgentWorkflowScheduleModal() {
         createAgentWorkflowSchedule();
     });
     return modal;
+}
+
+function setAgentWorkflowScheduleModalVisibility(isOpen) {
+    const modal = document.getElementById('agent-workflow-schedule-modal');
+    if (!modal) return;
+    modal.classList.toggle('hidden', !isOpen);
+    modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    if (isOpen) {
+        document.getElementById('agent-workflow-schedule-name')?.focus();
+    } else if (agentWorkflowScheduleEditorOpener?.isConnected) {
+        agentWorkflowScheduleEditorOpener.focus();
+        agentWorkflowScheduleEditorOpener = null;
+    }
 }
 
 function syncAgentWorkflowScheduleFrequencyUi() {
@@ -178,9 +198,11 @@ async function loadAgentWorkflowSchedules() {
     const workflow = selectedAgentWorkflow();
     const list = document.getElementById('agent-workflow-schedule-list');
     if (!workflow || !list) return;
+    const requestId = ++agentWorkflowSchedulesLoadSequence;
     PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state">正在加载计划...</div>');
     const res = await apiFetch(`${API_BASE}/agents/schedules`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
+    if (requestId !== agentWorkflowSchedulesLoadSequence) return false;
     if (!res.ok) {
         PivotSafeHtml.setHtml(list, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '计划加载失败')}</div>`);
         return;
@@ -211,11 +233,14 @@ async function openAgentWorkflowSchedules() {
         : '使用发布版运行，无额外输入变量';
     setAgentWorkflowScheduleFormStatus();
     syncAgentWorkflowScheduleFrequencyUi();
-    modal.classList.remove('hidden');
+    if (!modal.contains(document.activeElement)) agentWorkflowScheduleEditorOpener = document.activeElement;
+    setAgentWorkflowScheduleModalVisibility(true);
     await loadAgentWorkflowSchedules();
 }
 
 async function createAgentWorkflowSchedule() {
+    const lockKey = 'create';
+    if (agentWorkflowScheduleActionLocks.has(lockKey)) return;
     const workflow = selectedAgentWorkflow();
     if (!workflow?.can_edit) return showToast('共享工作流不能由接收方管理计划任务', 'warning');
     if (!workflow?.published_version) return showToast('请先发布工作流，再创建生产计划', 'warning');
@@ -228,6 +253,7 @@ async function createAgentWorkflowSchedule() {
     if (frequency === 'interval' && (intervalMinutes < 5 || intervalMinutes > 1440)) {
         return setAgentWorkflowScheduleFormStatus('执行间隔必须在 5 分钟到 24 小时之间', 'error');
     }
+    agentWorkflowScheduleActionLocks.add(lockKey);
     const submit = document.getElementById('agent-workflow-schedule-create');
     submit?.setAttribute('disabled', 'disabled');
     setAgentWorkflowScheduleFormStatus('正在检查发布版...', 'running');
@@ -259,6 +285,7 @@ async function createAgentWorkflowSchedule() {
     } catch (e) {
         setAgentWorkflowScheduleFormStatus(e.message || '计划创建失败', 'error');
     } finally {
+        agentWorkflowScheduleActionLocks.delete(lockKey);
         submit?.removeAttribute('disabled');
     }
 }
@@ -282,26 +309,54 @@ function agentWorkflowScheduleUpdatePayload(schedule, status) {
 }
 
 async function toggleAgentWorkflowSchedule(scheduleId) {
-    const schedule = agentWorkflowSchedulesCache.find(item => String(item.id) === String(scheduleId));
-    if (!schedule) return;
-    const status = schedule.status === 'paused' ? 'active' : 'paused';
-    const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(agentWorkflowScheduleUpdatePayload(schedule, status))
+    const lockKey = `toggle:${scheduleId}`;
+    if (agentWorkflowScheduleActionLocks.has(lockKey)) return;
+    agentWorkflowScheduleActionLocks.add(lockKey);
+    const buttons = [...document.querySelectorAll('[data-agent-workflow-schedule-toggle]')]
+        .filter(button => button.dataset.agentWorkflowScheduleToggle === String(scheduleId));
+    buttons.forEach(button => {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '计划状态更新失败', 'error');
-    showToast(status === 'paused' ? '计划已暂停' : '计划已启用', 'success');
-    await Promise.all([loadAgentWorkflowSchedules(), loadAgentSchedules()]);
+    try {
+        const schedule = agentWorkflowSchedulesCache.find(item => String(item.id) === String(scheduleId));
+        if (!schedule) return;
+        const status = schedule.status === 'paused' ? 'active' : 'paused';
+        const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(agentWorkflowScheduleUpdatePayload(schedule, status))
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || '计划状态更新失败', 'error');
+        showToast(status === 'paused' ? '计划已暂停' : '计划已启用', 'success');
+        await Promise.all([loadAgentWorkflowSchedules(), loadAgentSchedules()]);
+    } catch (error) {
+        showToast(error.message || '计划状态更新失败', 'error');
+    } finally {
+        agentWorkflowScheduleActionLocks.delete(lockKey);
+        buttons.forEach(button => {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+        });
+    }
 }
 
 function deleteAgentWorkflowSchedule(scheduleId) {
     showConfirm('删除工作流计划', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
-        const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '计划删除失败', 'error');
-        showToast('工作流计划已删除', 'success');
-        await Promise.all([loadAgentWorkflowSchedules(), loadAgentSchedules()]);
+        const lockKey = `delete:${scheduleId}`;
+        if (agentWorkflowScheduleActionLocks.has(lockKey)) return;
+        agentWorkflowScheduleActionLocks.add(lockKey);
+        try {
+            const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return showToast(data.error || '计划删除失败', 'error');
+            showToast('工作流计划已删除', 'success');
+            await Promise.all([loadAgentWorkflowSchedules(), loadAgentSchedules()]);
+        } catch (error) {
+            showToast(error.message || '计划删除失败', 'error');
+        } finally {
+            agentWorkflowScheduleActionLocks.delete(lockKey);
+        }
     });
 }

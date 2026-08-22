@@ -1,11 +1,17 @@
 // Agent 计划任务
 // 拆自 agents.js。
 /* eslint-disable no-undef */
+let agentSchedulesLoadSequence = 0;
+const agentScheduleActionLocks = new Set();
+let agentScheduleEditorOpener = null;
+
 async function loadAgentSchedules() {
     const automationList = document.getElementById('automation-schedule-assets-list');
     if (!automationList) return;
+    const requestId = ++agentSchedulesLoadSequence;
     const res = await apiFetch(`${API_BASE}/agents/schedules`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
+    if (requestId !== agentSchedulesLoadSequence) return false;
     if (!res.ok) throw new Error(data.error || '计划队列加载失败');
     agentSchedulesCache = data.data || [];
     window.Pivot.moduleApi('agent.automation').renderAssetCenter?.();
@@ -67,15 +73,32 @@ function syncAgentScheduleEditorUi() {
     if (hint) hint.textContent = source === 'workflow' ? '按工作流发布版运行' : '由 AI 根据目标自主规划执行';
 }
 
+function setAgentScheduleEditorVisibility(isOpen) {
+    const modal = document.getElementById('agent-schedule-editor-modal');
+    if (!modal) return;
+    modal.classList.toggle('hidden', !isOpen);
+    modal.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    if (isOpen) {
+        document.getElementById('agent-schedule-editor-name')?.focus();
+    } else if (agentScheduleEditorOpener?.isConnected) {
+        agentScheduleEditorOpener.focus();
+        agentScheduleEditorOpener = null;
+    }
+}
+
 function ensureAgentScheduleEditorModal() {
     let modal = document.getElementById('agent-schedule-editor-modal');
     if (modal) return modal;
     modal = document.createElement('div');
     modal.id = 'agent-schedule-editor-modal';
     modal.className = 'modal-overlay hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('aria-labelledby', 'agent-schedule-editor-title');
     modal.style.zIndex = '1950';
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal agent-schedule-editor-modal">
+        <div class="modal agent-schedule-editor-modal" role="document">
             <div class="agent-config-modal-head">
                 <div>
                     <h3 id="agent-schedule-editor-title">新建计划</h3>
@@ -161,7 +184,7 @@ function ensureAgentScheduleEditorModal() {
         </div>
     `);
     document.body.appendChild(modal);
-    const close = () => modal.classList.add('hidden');
+    const close = () => setAgentScheduleEditorVisibility(false);
     modal.addEventListener('click', event => {
         if (event.target.closest('#agent-schedule-editor-close, #agent-schedule-editor-cancel')) close();
     });
@@ -217,8 +240,8 @@ function openAgentScheduleEditor(scheduleId = '', options = {}) {
     document.getElementById('agent-schedule-editor-active').checked = schedule?.status !== 'paused';
     setAgentScheduleEditorStatus();
     syncAgentScheduleEditorUi();
-    modal.classList.remove('hidden');
-    document.getElementById('agent-schedule-editor-name')?.focus();
+    if (!modal.contains(document.activeElement)) agentScheduleEditorOpener = document.activeElement;
+    setAgentScheduleEditorVisibility(true);
 }
 
 function agentScheduleEditorPayload() {
@@ -300,6 +323,9 @@ async function runAgentScheduleLegacy(scheduleId) {
 
 async function runAgentSchedule(scheduleId) {
     const targetId = String(scheduleId);
+    const lockKey = `run:${targetId}`;
+    if (agentScheduleActionLocks.has(lockKey)) return;
+    agentScheduleActionLocks.add(lockKey);
     const buttons = [...document.querySelectorAll('[data-agent-workflow-schedule-run], [data-automation-schedule-run]')]
         .filter(button => button.dataset.agentWorkflowScheduleRun === targetId || button.dataset.automationScheduleRun === targetId);
     const key = typeof crypto?.randomUUID === 'function'
@@ -322,7 +348,10 @@ async function runAgentSchedule(scheduleId) {
         agentScheduleFilterId = '';
         await window.openAgentWorkbench?.();
         await window.openAgentRun(data.run.id);
+    } catch (error) {
+        showToast(error.message || '计划运行失败', 'error');
     } finally {
+        agentScheduleActionLocks.delete(lockKey);
         buttons.forEach(button => {
             button.disabled = false;
             button.removeAttribute('aria-busy');
@@ -331,6 +360,16 @@ async function runAgentSchedule(scheduleId) {
 }
 
 async function toggleAgentSchedule(scheduleId) {
+    const lockKey = `toggle:${scheduleId}`;
+    if (agentScheduleActionLocks.has(lockKey)) return;
+    agentScheduleActionLocks.add(lockKey);
+    const buttons = [...document.querySelectorAll('[data-automation-schedule-toggle], [data-agent-workflow-schedule-toggle]')]
+        .filter(button => button.dataset.automationScheduleToggle === String(scheduleId) || button.dataset.agentWorkflowScheduleToggle === String(scheduleId));
+    buttons.forEach(button => {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+    });
+    try {
     const schedule = agentSchedulesCache.find(item => String(item.id) === String(scheduleId));
     if (!schedule) return;
     const config = parseAgentScheduleConfig(schedule);
@@ -356,6 +395,15 @@ async function toggleAgentSchedule(scheduleId) {
     if (!res.ok) return showToast(data.error || '计划状态更新失败', 'error');
     showToast(status === 'paused' ? '计划已暂停' : '计划已启用', 'success');
     await loadAgentSchedules();
+    } catch (error) {
+        showToast(error.message || '计划状态更新失败', 'error');
+    } finally {
+        agentScheduleActionLocks.delete(lockKey);
+        buttons.forEach(button => {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+        });
+    }
 }
 
 async function openAgentScheduleRuns(scheduleId) {
@@ -366,11 +414,20 @@ async function openAgentScheduleRuns(scheduleId) {
 
 function deleteAgentSchedule(scheduleId) {
     showConfirm('删除计划任务', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
-        const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '删除计划失败', 'error');
-        showToast('计划已删除', 'success');
-        await loadAgentSchedules();
+        const lockKey = `delete:${scheduleId}`;
+        if (agentScheduleActionLocks.has(lockKey)) return;
+        agentScheduleActionLocks.add(lockKey);
+        try {
+            const res = await apiFetch(`${API_BASE}/agents/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return showToast(data.error || '删除计划失败', 'error');
+            showToast('计划已删除', 'success');
+            await loadAgentSchedules();
+        } catch (error) {
+            showToast(error.message || '删除计划失败', 'error');
+        } finally {
+            agentScheduleActionLocks.delete(lockKey);
+        }
     });
 }
 
@@ -389,9 +446,18 @@ async function loadAgentNotifications() {
     `).join('') : '<div class="empty-state agent-empty-state compact">暂无通知</div>');
     list.querySelectorAll('[data-agent-notification-id]').forEach(btn => {
         btn.addEventListener('click', async () => {
-            await apiFetch(`${API_BASE}/agents/notifications/${encodeURIComponent(btn.dataset.agentNotificationId)}/read`, { method: 'POST' });
-            if (btn.dataset.agentNotificationRun) await window.openAgentRun(btn.dataset.agentNotificationRun);
-            await loadAgentNotifications();
+            if (btn.disabled) return;
+            btn.disabled = true;
+            try {
+                const res = await apiFetch(`${API_BASE}/agents/notifications/${encodeURIComponent(btn.dataset.agentNotificationId)}/read`, { method: 'POST' });
+                if (!res.ok) throw new Error('通知状态更新失败');
+                if (btn.dataset.agentNotificationRun) await window.openAgentRun(btn.dataset.agentNotificationRun);
+                await loadAgentNotifications();
+            } catch (error) {
+                showToast(error.message || '通知状态更新失败', 'error');
+            } finally {
+                btn.disabled = false;
+            }
         });
     });
 }

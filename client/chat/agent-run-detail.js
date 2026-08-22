@@ -195,20 +195,20 @@ function agentRunActionMarkup(run = {}, options = {}) {
     const { isPreview = false, canCancel = false, canApprove = false, canRerun = false,
         canCreateWorkflowDraft = false, checkpoints = {}, isActive = false } = options;
     const actions = [];
-    if (canCancel) actions.push(`<button class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止任务</button>`);
-    if (canApprove) actions.push(`<button class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准并继续</button>`);
-    if (canApprove) actions.push(`<button class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝工具</button>`);
-    if (canRerun) actions.push(`<button class="btn-primary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>`);
+    if (canCancel) actions.push(`<button type="button" class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止任务</button>`);
+    if (canApprove) actions.push(`<button type="button" class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准并继续</button>`);
+    if (canApprove) actions.push(`<button type="button" class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝工具</button>`);
+    if (canRerun) actions.push(`<button type="button" class="btn-primary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>`);
     if (!isPreview && !isActive && (run.final_answer || run.error_message)) {
-        actions.push(`<button class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>`);
+        actions.push(`<button type="button" class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>`);
     }
-    if (!isPreview && !isActive) actions.push(`<button class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出结果</button>`);
+    if (!isPreview && !isActive) actions.push(`<button type="button" class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出结果</button>`);
     const secondary = [];
     if (canRerun) {
-        secondary.push(`<button class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">${Number(checkpoints.total || 0) ? '从检查点继续' : '从断点继续'}</button>`);
+        secondary.push(`<button type="button" class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">${Number(checkpoints.total || 0) ? '从检查点继续' : '从断点继续'}</button>`);
     }
-    if (canCreateWorkflowDraft) secondary.push(`<button class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
-    if (!isPreview && !isActive) secondary.push(`<button class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
+    if (canCreateWorkflowDraft) secondary.push(`<button type="button" class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
+    if (!isPreview && !isActive) secondary.push(`<button type="button" class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
     return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary class="btn-secondary">更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
 }
 
@@ -311,6 +311,7 @@ function closeAgentRunDetailModal() {
     const detail = document.getElementById('agent-run-detail');
     const closingPreview = activeAgentRunId === activeAgentWorkflowPreviewRunId;
     modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
     if (detail) PivotSafeHtml.setHtml(detail, '');
     document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
     if (closingPreview) {
@@ -336,6 +337,7 @@ window.openAgentRun = async function(runId, options = {}) {
         row.classList.toggle('active', active);
     });
     modal?.classList.remove('hidden');
+    modal?.setAttribute('aria-hidden', 'false');
     if (!options.silent) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
     const data = await res.json();
@@ -522,11 +524,15 @@ function ensureAgentAuditModal() {
     modal = document.createElement('div');
     modal.id = 'agent-audit-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('aria-labelledby', 'agent-audit-title');
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal rag-detail-modal agent-audit-modal">
+        <div class="modal rag-detail-modal agent-audit-modal" role="document">
             <div class="rag-detail-header">
                 <div>
-                    <h3>任务删除审计</h3>
+                    <h3 id="agent-audit-title">任务删除审计</h3>
                     <p class="model-modal-desc">仅 admin 权限层级可查看，普通用户移除的任务记录会保留在这里。</p>
                 </div>
                 <button type="button" id="agent-audit-close-btn" class="btn-danger-outline">关闭</button>
@@ -554,6 +560,7 @@ function ensureAgentAuditModal() {
     modal.addEventListener('click', (event) => {
         if (event.target.closest('#agent-audit-close-btn')) {
             modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
         }
     });
     return modal;

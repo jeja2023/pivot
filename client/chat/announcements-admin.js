@@ -33,15 +33,20 @@
         const title = document.getElementById('announcement-modal-title');
         if (title) title.textContent = row.id ? '编辑公告' : '新建公告';
         modal?.classList.remove('hidden');
+        modal?.setAttribute('aria-hidden', 'false');
         setTimeout(() => document.getElementById('announcement-title')?.focus(), 0);
     }
 
     function closeAnnouncementModal() {
-        document.getElementById('announcement-modal')?.classList.add('hidden');
+        const modal = document.getElementById('announcement-modal');
+        modal?.classList.add('hidden');
+        modal?.setAttribute('aria-hidden', 'true');
     }
 
     function closeAnnouncementDetailModal() {
-        document.getElementById('announcement-detail-modal')?.classList.add('hidden');
+        const modal = document.getElementById('announcement-detail-modal');
+        modal?.classList.add('hidden');
+        modal?.setAttribute('aria-hidden', 'true');
     }
 
     function resetAnnouncementForm(row = {}) {
@@ -132,7 +137,9 @@
             `).join(''));
         }
         if (content) content.textContent = row.content || '';
-        document.getElementById('announcement-detail-modal')?.classList.remove('hidden');
+        const modal = document.getElementById('announcement-detail-modal');
+        modal?.classList.remove('hidden');
+        modal?.setAttribute('aria-hidden', 'false');
     }
 
     window.loadAnnouncementsAdmin = async function (page = 1) {

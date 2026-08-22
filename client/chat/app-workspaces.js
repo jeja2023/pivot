@@ -652,6 +652,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/agent-run-actions.js',
         '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js',
+        '/chat/agent-automation-resources.js',
         '/chat/agent-workflow-versions.js',
         '/chat/agent-workflow-editor.js',
         '/chat/agent-workflow-core.js',
@@ -774,7 +775,9 @@ window.showMainWorkspace = function(view = 'chat') {
         }
     }
     Object.entries(viewMap).forEach(([key, id]) => {
-        document.getElementById(id)?.classList.toggle('hidden', key !== target);
+        const panel = document.getElementById(id);
+        panel?.classList.toggle('hidden', key !== target);
+        if (key === 'apps') panel?.setAttribute('aria-hidden', key === target ? 'false' : 'true');
     });
     document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
         const view = btn.dataset.workspaceView;
@@ -824,8 +827,12 @@ window.updateSettingsWorkspaceScale = function() {
     const verticalPadding = (parseFloat(contentStyle.paddingTop) || 0) + (parseFloat(contentStyle.paddingBottom) || 0);
     const availableWidth = Math.max(1, content.clientWidth - horizontalPadding - 2);
     const availableHeight = Math.max(1, content.clientHeight - verticalPadding - 2);
-    const layoutWidth = Math.max(baseWidth, availableWidth);
-    const scale = Math.min(1, availableWidth / baseWidth);
+    // Narrow settings panes use their real width so controls remain readable.
+    // Wide tables keep their own horizontal scroll instead of shrinking the
+    // entire page to an unusable thumbnail.
+    const useResponsiveCanvas = availableWidth < 1100;
+    const layoutWidth = useResponsiveCanvas ? availableWidth : Math.max(baseWidth, availableWidth);
+    const scale = useResponsiveCanvas ? 1 : Math.min(1, availableWidth / baseWidth);
     const stageWidth = Math.max(1, Math.ceil(layoutWidth * scale));
     const isMonitorTabActive = content.classList.contains('is-monitor-tab-active');
     stage.style.removeProperty('--settings-stage-height');

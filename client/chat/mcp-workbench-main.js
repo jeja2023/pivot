@@ -1,4 +1,49 @@
 // 聊天工具库工作台数据加载与操作 Chat MCP workbench data loading and actions
+let mcpWorkbenchLoadPromise = null;
+const mcpActionLocks = new Set();
+const mcpModalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
+
+function setMcpWorkbenchState(kind = '', message = '') {
+    const state = document.getElementById('mcp-workbench-state');
+    if (!state) return;
+    state.className = `mcp-workbench-state${kind ? ` is-${kind}` : ''}`;
+    state.hidden = !message;
+    if (!message) {
+        state.textContent = '';
+        return;
+    }
+    if (kind === 'error') {
+        PivotSafeHtml.setHtml(state, `<span>${mcpEscape(message)}</span><button type="button" class="btn-secondary" data-mcp-retry>重试</button>`);
+        state.querySelector('[data-mcp-retry]')?.addEventListener('click', () => window.loadMcpWorkbench?.());
+    } else {
+        state.textContent = message;
+    }
+}
+
+async function withMcpActionLock(key, button, busyText, action) {
+    if (mcpActionLocks.has(key)) return null;
+    mcpActionLocks.add(key);
+    const originalText = button?.textContent || '';
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        if (busyText) button.textContent = busyText;
+    }
+    try {
+        return await action();
+    } catch (error) {
+        showToast(error?.message || '工具库操作失败，请稍后重试', 'error');
+        return null;
+    } finally {
+        mcpActionLocks.delete(key);
+        if (button) {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            if (busyText) button.textContent = originalText;
+        }
+    }
+}
+
 function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
     const badge = count ? `${count} 个` : service.badge;
     const cardMeta = metaText || (count ? '可继续添加连接' : '配置后可查看工具');
@@ -207,7 +252,7 @@ async function loadMcpServers() {
     if (!dataSourcesBox && !notificationsBox && !list) return;
 
     const res = await apiFetch(`${API_BASE}/mcp/servers`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '工具服务加载失败');
     mcpServersCache = data.data || [];
     const datasetSummary = await loadMcpDatasetSummary();
@@ -342,8 +387,8 @@ async function loadMcpServers() {
     }));
     container.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools)));
     container.querySelectorAll('[data-mcp-share]').forEach(btn => btn.addEventListener('click', () => openMcpShareModal(btn.dataset.mcpShare)));
-    container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus)));
-    container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete)));
+    container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn)));
+    container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete, btn)));
     container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
         btn.addEventListener('click', async () => {
             await window.openAdminPanel?.({ restore: false });
@@ -379,7 +424,7 @@ function renderMcpSystemServices() {
         btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools));
     });
     box.querySelectorAll('[data-mcp-toggle]').forEach(btn => {
-        btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus));
+        btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn));
     });
 }
 window.openMcpSystemConfig = function (type) {
@@ -415,7 +460,7 @@ window.openMcpSystemConfig = function (type) {
     document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    modal.classList.remove('hidden');
+    mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-edit-name' });
 };
 
 window.openMcpToolsModal = async function (serverId) {
@@ -427,8 +472,10 @@ window.openMcpToolsModal = async function (serverId) {
     const title = document.getElementById('mcp-tools-title');
     const list = document.getElementById('mcp-tools-list');
     if (!modal || !title || !list) return;
+    mcpModalApi().bindMcpModalAccessibility?.();
     const fallbackTools = mcpFallbackToolsForServer(server);
     let tools = mcpToolsForServer(server.id, fallbackTools);
+    PivotSafeHtml.setHtml(list, '<div class="mcp-empty-panel compact"><strong>正在读取工具列表...</strong><span>正在同步服务能力，请稍候。</span></div>');
     try {
         const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(server.id)}/tools`);
         const data = await res.json().catch(() => ({}));
@@ -436,7 +483,7 @@ window.openMcpToolsModal = async function (serverId) {
     } catch (e) {
         // 弹窗治理可使用本地缓存兜底；刷新按钮仍可重新拉取工具。
     }
-    title.textContent = `${mcpEscape(mcpCleanServiceName(server.name || '工具服务'))} 的可用工具`;
+    title.textContent = `${mcpCleanServiceName(server.name || '工具服务')} 的可用工具`;
     const refreshButton = document.getElementById('mcp-tools-refresh-btn');
     if (refreshButton) {
         refreshButton.dataset.mcpServerId = server.id;
@@ -482,7 +529,7 @@ window.openMcpToolsModal = async function (serverId) {
             window.openMcpToolTestModal(toolName, toolTitle, toolObj);
         });
     });
-    modal.classList.remove('hidden');
+    mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-tools-refresh-btn' });
 };
 
 const MCP_TOOL_SAMPLE_INPUTS = {
@@ -619,6 +666,7 @@ function fillMcpToolSampleInput(toolFullName, schema) {
 
 function openMcpToolTestModal(toolFullName, toolTitle, toolObj) {
     bindMcpToolTestModalControls();
+    mcpModalApi().bindMcpModalAccessibility?.();
     const modal = document.getElementById('mcp-tool-test-modal');
     if (!modal) return;
     const titleEl = document.getElementById('mcp-tool-test-title');
@@ -651,7 +699,7 @@ function openMcpToolTestModal(toolFullName, toolTitle, toolObj) {
     }
 
     fillMcpToolSampleInput(toolFullName, schema);
-    modal.classList.remove('hidden');
+    mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-tool-test-input' });
 }
 
 async function runMcpToolTest() {
@@ -734,7 +782,7 @@ function bindMcpToolTestModalControls() {
     if (!modal || modal.dataset.boundMcpToolTestModal === '1') return;
     modal.dataset.boundMcpToolTestModal = '1';
 
-    const closeModal = () => modal.classList.add('hidden');
+    const closeModal = () => mcpModalApi().setMcpModalVisibility?.(modal, false);
     document.getElementById('mcp-tool-test-close-btn')?.addEventListener('click', closeModal);
     document.getElementById('mcp-tool-test-cancel-btn')?.addEventListener('click', closeModal);
     document.getElementById('mcp-tool-test-run-btn')?.addEventListener('click', () => runMcpToolTest());
@@ -760,15 +808,21 @@ function bindMcpToolTestModalControls() {
 
 async function runMcpBatchHealthCheck() {
     const btn = document.getElementById('mcp-health-check-btn');
+    if (mcpActionLocks.has('batch-health-check')) return;
+    mcpActionLocks.add('batch-health-check');
     const originalText = btn ? btn.textContent : '连通性自检';
     if (btn) {
         btn.disabled = true;
         btn.textContent = '正在检测...';
     }
     try {
-        const servers = (mcpServersCache || []).filter(s => s.status !== 'paused');
+        const servers = (mcpServersCache || []).filter(s => (
+            s.status !== 'paused'
+            && mcpShouldShowAsWorkbenchServer(s)
+            && s.read_only !== true
+        ));
         if (!servers.length) {
-            showToast('当前没有启用的工具服务需要检测', 'info');
+            showToast('当前没有可诊断的工具服务', 'info');
             return;
         }
         let successCount = 0;
@@ -796,6 +850,7 @@ async function runMcpBatchHealthCheck() {
         showToast(`已完成 ${servers.length} 个服务自检：${successCount} 个正常，${failCount} 个异常`, failCount > 0 ? 'warning' : 'success');
         await window.loadMcpWorkbench();
     } finally {
+        mcpActionLocks.delete('batch-health-check');
         if (btn) {
             btn.disabled = false;
             btn.textContent = originalText;
@@ -831,7 +886,7 @@ window.ensureMcpSystemService = async function (type, button) {
 async function loadMcpTools() {
     const box = document.getElementById('mcp-tool-cache');
     const res = await apiFetch(`${API_BASE}/mcp/tools`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '工具加载失败');
     mcpToolsCache = data.tools || [];
     if (box) PivotSafeHtml.setHtml(box, '');
@@ -847,7 +902,8 @@ async function loadMcpGovernance() {
     const gov = await govRes.json().catch(() => ({}));
     const logs = await logsRes.json().catch(() => ({}));
     if (!govRes.ok || !logsRes.ok) {
-        PivotSafeHtml.setHtml(panel, '');
+        PivotSafeHtml.setHtml(panel, '<div class="mcp-governance-empty">治理概览暂不可用，工具列表仍可继续使用。<button type="button" class="btn-secondary" data-mcp-retry-governance>重试治理概览</button></div>');
+        panel.querySelector('[data-mcp-retry-governance]')?.addEventListener('click', () => loadMcpGovernance());
         return;
     }
     panel.className = 'workspace-governance-panel mcp-governance-panel';
@@ -969,26 +1025,17 @@ window.testMcpDatabaseConnection = async function (mode = 'create') {
     if (error) return showToast(error, 'error');
 
     const button = mcpFormEl('test-db-btn', mode);
-    const originalText = button?.textContent || '测试连接';
-    if (button) {
-        button.disabled = true;
-        button.textContent = '测试中...';
-    }
-    try {
+    return withMcpActionLock(`database-test-${mode}`, button, '测试中...', async () => {
         const res = await apiFetch(`${API_BASE}/mcp/database-connections/test`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
-        if (!res.ok) return showToast(formatMcpDatabaseError(data, '服务器可访问数据库测试失败'), 'error');
-        return showToast('服务器可访问数据库测试通过', 'success');
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.textContent = originalText;
-        }
-    }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(formatMcpDatabaseError(data, '服务器可访问数据库测试失败'));
+        showToast('服务器可访问数据库测试通过', 'success');
+        return data;
+    });
 };
 
 function collectMcpExternalPayload(mode = 'create') {
@@ -1055,13 +1102,8 @@ window.diagnoseMcpServer = async function (mode = 'edit', options = {}) {
         }
         : { sourceType };
     const button = options.action === 'test' ? mcpFormEl('test-im-btn', mode) : mcpFormEl('diagnose-btn', mode);
-    const originalText = button?.textContent || '配置诊断';
-    if (button) {
-        button.disabled = true;
-        button.textContent = options.action === 'test' ? '发送中...' : '诊断中...';
-    }
-    if (panel) panel.textContent = '正在诊断...';
-    try {
+    return withMcpActionLock(`diagnose-${mode}-${id}-${options.action || 'check'}`, button, options.action === 'test' ? '发送中...' : '诊断中...', async () => {
+        if (panel) panel.textContent = '正在诊断...';
         const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/diagnose`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1071,19 +1113,17 @@ window.diagnoseMcpServer = async function (mode = 'edit', options = {}) {
         if (!res.ok || data.success === false) {
             const message = data.error || data.message || '配置诊断失败';
             if (panel) panel.textContent = message;
-            return showToast(message, 'error');
+            throw new Error(message);
         }
         if (panel) panel.textContent = renderMcpDiagnostics(data);
         showToast(options.action === 'test' ? '测试发送完成' : '配置诊断完成', 'success');
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.textContent = originalText;
-        }
-    }
+        return data;
+    });
 };
 
 window.saveMcpServer = async function (mode = 'create') {
+    const saveButton = mcpFormEl('save-btn', mode);
+    if (mcpActionLocks.has(`save-${mode}`)) return;
     const id = mcpFormEl('id', mode)?.value;
     const sourceType = mcpFormEl('source-type', mode)?.value || 'external';
     let payload = collectMcpExternalPayload(mode);
@@ -1101,61 +1141,87 @@ window.saveMcpServer = async function (mode = 'create') {
     } else if (!payload.name || !payload.base_url) {
         return showToast('请填写服务名称和URL', 'error');
     }
-    const res = await apiFetch(endpoint, {
-        method: id ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+    return withMcpActionLock(`save-${mode}`, saveButton, '保存中...', async () => {
+        const res = await apiFetch(endpoint, {
+            method: id ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(formatMcpDatabaseError(data, '保存失败'));
+        showToast('工具服务已保存', 'success');
+        if (mode === 'edit') {
+            window.closeMcpEditModal();
+        } else {
+            window.resetMcpForm();
+        }
+        await window.loadMcpWorkbench();
+        return data;
     });
-    const data = await res.json();
-    if (!res.ok) return showToast(formatMcpDatabaseError(data, '保存失败'), 'error');
-    showToast('工具服务已保存', 'success');
-    if (mode === 'edit') {
-        window.closeMcpEditModal();
-    } else {
-        window.resetMcpForm();
-    }
-    await window.loadMcpWorkbench();
 };
 
 window.refreshMcpTools = async function (id, options = {}) {
+    const refreshButton = options.button || document.getElementById('mcp-tools-refresh-btn');
+    if (mcpActionLocks.has(`refresh-${id}`)) return;
+    mcpActionLocks.add(`refresh-${id}`);
     const isLocalDevice = mcpIsLocalDeviceServerId(id);
     let localFallbackCount = 0;
-    if (isLocalDevice) {
-        const registration = await window.syncMcpLocalExecutionBridge?.().catch(() => null);
-        const status = registration?.status || await (window.getMcpLocalAuthorizationStatus?.({ refresh: true, silent: true }) || Promise.resolve(null));
-        localFallbackCount = mcpLocalAuthorizedFallbackTools(status).length;
+    const originalText = refreshButton?.textContent || '刷新工具';
+    if (refreshButton) {
+        refreshButton.disabled = true;
+        refreshButton.textContent = '刷新中...';
     }
-    const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) return showToast(data.error || '刷新失败', 'error');
-    const refreshedCount = Number(data.tools?.length || 0);
-    const visibleCount = isLocalDevice ? Math.max(refreshedCount, localFallbackCount) : refreshedCount;
-    showToast(isLocalDevice ? `已同步本机工具 ${visibleCount} 个` : `已刷新 ${visibleCount} 个工具`, 'success');
-    await window.loadMcpWorkbench();
-    if (options.keepToolsModalOpen) window.openMcpToolsModal(id);
+    try {
+        if (isLocalDevice) {
+            const registration = await (window.syncMcpLocalExecutionBridge ? window.syncMcpLocalExecutionBridge() : Promise.resolve(null)).catch(() => null);
+            const status = registration?.status || await (window.getMcpLocalAuthorizationStatus?.({ refresh: true, silent: true }) || Promise.resolve(null));
+            localFallbackCount = mcpLocalAuthorizedFallbackTools(status).length;
+        }
+        const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '刷新失败');
+        const refreshedCount = Number(data.tools?.length || 0);
+        const visibleCount = isLocalDevice ? Math.max(refreshedCount, localFallbackCount) : refreshedCount;
+        showToast(isLocalDevice ? `已同步本机工具 ${visibleCount} 个` : `已刷新 ${visibleCount} 个工具`, 'success');
+        await window.loadMcpWorkbench();
+        if (options.keepToolsModalOpen) window.openMcpToolsModal(id);
+    } catch (error) {
+        showToast(error.message || '刷新失败', 'error');
+    } finally {
+        mcpActionLocks.delete(`refresh-${id}`);
+        if (refreshButton) {
+            refreshButton.disabled = false;
+            refreshButton.textContent = originalText;
+        }
+    }
 };
 
-window.toggleMcpServerStatus = async function (id, nextStatus = 'paused') {
+window.toggleMcpServerStatus = async function (id, nextStatus = 'paused', button = null) {
     const server = mcpServersCache.find(item => String(item.id) === String(id));
     if (!server) return showToast('未找到工具服务', 'error');
-    const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus === 'paused' ? 'paused' : 'active' })
+    return withMcpActionLock(`status-${id}`, button, '', async () => {
+        const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: nextStatus === 'paused' ? 'paused' : 'active' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(formatMcpDatabaseError(data, '状态更新失败'));
+        showToast(nextStatus === 'paused' ? '工具服务已停用' : '工具服务已启用', 'success');
+        await window.loadMcpWorkbench();
+        return data;
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(formatMcpDatabaseError(data, '状态更新失败'), 'error');
-    showToast(nextStatus === 'paused' ? '工具服务已停用' : '工具服务已启用', 'success');
-    await window.loadMcpWorkbench();
 };
 
-window.deleteMcpServer = function (id) {
+window.deleteMcpServer = function (id, button = null) {
     showConfirm('删除工具服务', '确定删除这个工具服务吗？', async () => {
-        const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return showToast(data.error || '删除失败', 'error');
-        showToast('工具服务已删除', 'success');
-        await window.loadMcpWorkbench();
+        await withMcpActionLock(`delete-${id}`, button, '删除中...', async () => {
+            const res = await apiFetch(`${API_BASE}/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '删除失败');
+            showToast('工具服务已删除', 'success');
+            await window.loadMcpWorkbench();
+        });
     });
 };
 
@@ -1180,7 +1246,8 @@ function bindMcpShareModal() {
     const modal = document.getElementById('mcp-share-modal');
     if (!modal || modal.dataset.bound === 'true') return;
     modal.dataset.bound = 'true';
-    const close = () => modal.classList.add('hidden');
+    mcpModalApi().bindMcpModalAccessibility?.();
+    const close = () => mcpModalApi().setMcpModalVisibility?.(modal, false);
     document.getElementById('mcp-share-close-btn')?.addEventListener('click', close);
     document.getElementById('mcp-share-cancel-btn')?.addEventListener('click', close);
     modal.addEventListener('click', event => {
@@ -1325,7 +1392,7 @@ async function openMcpShareModal(serverId) {
 
     setMcpShareTargetsEnabled();
 
-    modal.classList.remove('hidden');
+    mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: 'input[name="mcp-share-scope"]' });
 };
 
 window.Pivot?.exposeModule?.('mcp.workbench', {
@@ -1337,14 +1404,25 @@ window.Pivot?.exposeModule?.('mcp.workbench', {
 });
 
 window.loadMcpWorkbench = async function () {
-    try {
-        await loadMcpGovernance();
-        await window.syncMcpLocalExecutionBridge?.().catch(() => null);
-        await loadMcpTools();
-        await loadMcpServers();
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
+    if (mcpWorkbenchLoadPromise) return mcpWorkbenchLoadPromise;
+    setMcpWorkbenchState('loading', '正在加载工具库...');
+    mcpWorkbenchLoadPromise = (async () => {
+        try {
+            await loadMcpGovernance();
+            await (window.syncMcpLocalExecutionBridge
+                ? window.syncMcpLocalExecutionBridge()
+                : Promise.resolve(null)).catch(() => null);
+            await loadMcpTools();
+            await loadMcpServers();
+            setMcpWorkbenchState('', '');
+        } catch (e) {
+            setMcpWorkbenchState('error', e?.message || '工具库加载失败，请重试。');
+            showToast(e?.message || '工具库加载失败，请重试', 'error');
+        } finally {
+            mcpWorkbenchLoadPromise = null;
+        }
+    })();
+    return mcpWorkbenchLoadPromise;
 };
 
 function renderMcpSourceActionPanel(cards = [], { title = '', description = '' } = {}) {

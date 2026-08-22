@@ -48,6 +48,7 @@ function makeButton(label, title, onClick, options = {}) {
             btn.disabled = true;
             btn.setAttribute('aria-disabled', 'true');
         }
+        if (options.runSource) btn.classList.add(`agent-workflow-run-${options.runSource}`);
         if (typeof onClick === 'function') btn.addEventListener('click', onClick);
         return btn;
     }
@@ -146,8 +147,8 @@ function renderDagToolbar(ctx) {
                 makeButton('发布当前版本', '保存并发布当前工作流版本', () => window.publishSelectedAgentWorkflow?.('current'))
             ], 'is-publish-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('运行', [
-                makeButton('预览运行', '使用当前画布快照运行一次', () => window.runAgentWorkflowPreview?.()),
-                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.runAgentWorkflowPublished?.())
+                makeButton('预览运行', '使用当前画布快照运行一次', () => window.runAgentWorkflowPreview?.(), { runSource: 'draft' }),
+                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.runAgentWorkflowPublished?.(), { runSource: 'published' })
             ], 'is-run-group'));
             const toolbarStatus = document.createElement('div');
             toolbarStatus.className = 'pivot-dag-toolbar-status';

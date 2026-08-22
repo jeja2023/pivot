@@ -967,6 +967,7 @@ function baseTablesSql() {
             secret_value TEXT NOT NULL,
             scope TEXT DEFAULT 'personal',
             allowed_units TEXT DEFAULT '',
+            allowed_user_ids TEXT DEFAULT '',
             version INTEGER DEFAULT 1,
             previous_value TEXT,
             previous_expires_at DATETIME,

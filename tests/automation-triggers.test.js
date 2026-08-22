@@ -26,7 +26,12 @@ const {
     resolveAgentWorkflowDependencyBindings,
     saveAgentWorkflowDependencyConfiguration
 } = require('../server/services/agent-workflow-dependencies');
-const { normalizeSlug } = require('../server/services/workflow-credentials');
+const {
+    createWorkflowCredential,
+    listWorkflowCredentials,
+    normalizeSlug,
+    updateWorkflowCredential
+} = require('../server/services/workflow-credentials');
 const { configureAgentTriggers, pollDatabaseTrigger } = require('../server/services/agent-triggers');
 
 function at(text) {
@@ -414,6 +419,53 @@ test('凭据加解密可逆且密文不含明文', () => {
     assert.equal(decryptSecret(encrypted), plain);
     // 重复加密不会二次包装，保证轮换时旧密文可以直接搬运
     assert.equal(encryptSecret(encrypted), encrypted);
+});
+
+test('工作流凭据按个人共享会持久化且列表不返回密文', async () => {
+    const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const ownerInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, 'hash', 'Credential Owner', 'QA', 'user', 'active')
+    `).run(`credential_owner_${suffix}`);
+    const receiverInfo = sql(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, 'hash', 'Credential Receiver', 'Other QA', 'user', 'active')
+    `).run(`credential_receiver_${suffix}`);
+    const owner = { id: Number(ownerInfo.lastInsertRowid), username: `credential_owner_${suffix}`, role: 'user', unit: 'QA' };
+    const receiver = { id: Number(receiverInfo.lastInsertRowid), username: `credential_receiver_${suffix}`, role: 'user', unit: 'Other QA' };
+    const slug = `PERSONAL_SHARE_${suffix.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
+    let credentialId = null;
+    try {
+        const created = await createWorkflowCredential(owner, {
+            name: '个人共享凭据',
+            slug,
+            secretValue: 'do-not-return-this-secret',
+            scope: 'shared',
+            allowedUserIds: [receiver.id]
+        });
+        credentialId = Number(created.id);
+        assert.deepEqual(created.allowed_user_ids, [receiver.id]);
+
+        const stored = sql('SELECT allowed_user_ids, secret_value FROM workflow_credentials WHERE id = ?').get(credentialId);
+        assert.equal(stored.allowed_user_ids, String(receiver.id));
+        assert.equal(stored.secret_value.includes('do-not-return-this-secret'), false);
+
+        const visible = await listWorkflowCredentials(receiver);
+        const received = visible.find(item => Number(item.id) === credentialId);
+        assert.deepEqual(received?.allowed_user_ids, [receiver.id]);
+        assert.equal(JSON.stringify(received).includes('do-not-return-this-secret'), false);
+
+        const updated = await updateWorkflowCredential(credentialId, owner, {
+            name: '个人共享凭据（已更新）',
+            slug,
+            scope: 'shared',
+            allowedUserIds: [receiver.id]
+        });
+        assert.deepEqual(updated.allowed_user_ids, [receiver.id]);
+    } finally {
+        if (credentialId) sql('DELETE FROM workflow_credentials WHERE id = ?').run(credentialId);
+        sql('DELETE FROM users WHERE id IN (?, ?)').run(owner.id, receiver.id);
+    }
 });
 
 test('数据库触发器在持有租约时可推进水位线', async () => {

@@ -2,6 +2,8 @@
 // 拆自 agent-runs-list.js。
 // Agent 模型、工具加载器和运行列表渲染。
 /* eslint-disable no-undef */
+let agentRunsLoadSequence = 0;
+
 async function loadAgentModels() {
     const loaded = typeof window.loadSelectableModels === 'function'
         ? await window.loadSelectableModels()
@@ -144,7 +146,7 @@ async function loadAgentModelRouters() {
 async function loadAgentTools() {
     const list = document.getElementById('agent-tool-list');
     const res = await apiFetch(`${API_BASE}/agents/tools`, { cache: 'no-store' });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '工具列表加载失败');
     const seenToolKeys = new Set();
     const visibleTools = (data.tools || [])
@@ -288,6 +290,7 @@ function renderAgentRunsPagination(page = agentRunsPage, total = agentRunsTotal,
 async function loadAgentRuns(page = agentRunsPage) {
     const list = document.getElementById('agent-runs-list');
     if (!list) return;
+    const requestId = ++agentRunsLoadSequence;
     const status = document.getElementById('agent-filter-status')?.value || '';
     const runType = document.getElementById('agent-filter-run-type')?.value || '';
     const query = document.getElementById('agent-filter-query')?.value.trim() || '';
@@ -305,6 +308,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     if (agentScheduleFilterId) params.set('scheduleId', agentScheduleFilterId);
     const res = await apiFetch(`${API_BASE}/agents/runs?${params.toString()}`, { cache: 'no-store' });
     const data = await res.json();
+    if (requestId !== agentRunsLoadSequence) return false;
     if (!res.ok) throw new Error(data.error || '任务列表加载失败');
     agentRunsCache = data.data || [];
     agentRunsTotal = Number(data.total || agentRunsCache.length || 0);

@@ -158,7 +158,7 @@
         const requestedTab = String(options?.tab || options?.view || 'overview').trim() || 'overview';
         resetAiWorkspace();
         if (requestedDatasetId) state.activeId = requestedDatasetId;
-        sessionStorage.setItem('pivot_apps_active_app', 'data-analysis');
+        window.setAppsSessionValue?.('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('regulations-view')?.classList.add('hidden');

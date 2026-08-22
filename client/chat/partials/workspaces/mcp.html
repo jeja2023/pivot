@@ -1,15 +1,16 @@
 <!-- 工具库工作台 -->
-    <section id="mcp-workbench-modal" class="main-workspace-view mcp-workspace-view hidden">
+    <section id="mcp-workbench-modal" class="main-workspace-view mcp-workspace-view hidden" aria-labelledby="mcp-workbench-title">
         <div class="workspace-modal mcp-workspace-modal">
             <div class="workspace-modal-header">
                 <div>
-                    <h3>工具库</h3>
+                    <h3 id="mcp-workbench-title">工具库</h3>
                     <p>按数据来源、处理工具、输出动作和治理扩展组织工具；每张卡片都会说明执行位置、归属范围、风险和自动化状态。</p>
                 </div>
-                <button id="mcp-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
+                <button id="mcp-modal-close" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭工具库">关闭</button>
             </div>
             <div class="workspace-modal-body">
                 <div id="mcp-governance-panel" class="workspace-governance-panel"></div>
+                <div id="mcp-workbench-state" class="mcp-workbench-state" role="status" aria-live="polite" hidden></div>
                 <div class="mcp-layout">
                     <div class="mcp-list-wrap">
                         <div id="mcp-data-sources" class="mcp-server-list"></div>
@@ -23,14 +24,15 @@
     </section>
 
     <!-- 管理与配置面板 (符合第39条复用规范) -->
-    <div id="mcp-edit-modal" class="modal-overlay hidden" style="z-index: 1900;">
-        <div class="modal mcp-edit-modal">
+    <div id="mcp-edit-modal" class="modal-overlay hidden" style="z-index: 1900;" aria-hidden="true">
+        <div class="modal mcp-edit-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-edit-title">
             <div class="mcp-edit-header">
-                <h3>编辑工具服务</h3>
+                <h3 id="mcp-edit-title">编辑工具服务</h3>
+                <button id="mcp-edit-close-btn" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭工具服务配置">关闭</button>
             </div>
             <div class="mcp-edit-form">
                 <input type="hidden" id="mcp-edit-id">
-                <select id="mcp-edit-source-type" class="form-input" disabled>
+                <select id="mcp-edit-source-type" class="form-input" aria-label="工具服务类型" disabled>
                     <option value="external">外部工具服务（技术同事提供）</option>
                     <option value="database">服务器可访问数据库</option>
                     <option value="reports">服务器可访问报表目录</option>
@@ -38,23 +40,23 @@
                     <option value="report">报告编排</option>
                     <option value="im">IM 通知</option>
                 </select>
-                <input id="mcp-edit-name" class="form-input" placeholder="服务名称">
+                <input id="mcp-edit-name" class="form-input" placeholder="服务名称" aria-label="服务名称" autocomplete="off" required>
                 <div id="mcp-edit-helper" class="mcp-config-helper" aria-live="polite"></div>
                 <div id="mcp-edit-external-fields" class="mcp-field-group">
-                    <input id="mcp-edit-url" class="form-input" placeholder="外部工具服务地址，由技术同事提供，例如 http://localhost:8787/mcp">
-                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="访问密钥，可选；没有就留空">
+                    <input id="mcp-edit-url" class="form-input" type="url" placeholder="外部工具服务地址，由技术同事提供，例如 http://localhost:8787/mcp" aria-label="外部工具服务地址" autocomplete="url">
+                    <input id="mcp-edit-key" class="form-input" type="password" placeholder="访问密钥，可选；没有就留空" aria-label="访问密钥" autocomplete="new-password">
                     <div class="mcp-form-row">
-                        <input id="mcp-edit-health-check-url" class="form-input" placeholder="健康检查 URL，可选">
-                        <input id="mcp-edit-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="调用超时 ms，默认 20000">
+                        <input id="mcp-edit-health-check-url" class="form-input" type="url" placeholder="健康检查 URL，可选" aria-label="健康检查地址" autocomplete="url">
+                        <input id="mcp-edit-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="调用超时 ms，默认 20000" aria-label="调用超时时间（毫秒）">
                     </div>
                     <div class="mcp-form-row">
-                        <select id="mcp-edit-auth-mode" class="form-input">
+                        <select id="mcp-edit-auth-mode" class="form-input" aria-label="鉴权方式">
                             <option value="auto">自动鉴权</option>
                             <option value="bearer">Bearer Token</option>
                             <option value="x-api-key">x-api-key</option>
                             <option value="none">不发送密钥</option>
                         </select>
-                        <select id="mcp-edit-protocol-mode" class="form-input" title="外部 MCP 协议模式">
+                        <select id="mcp-edit-protocol-mode" class="form-input" title="外部 MCP 协议模式" aria-label="外部工具协议模式">
                             <option value="legacy">兼容 JSON-RPC（无会话）</option>
                             <option value="standard">标准 MCP HTTP（初始化会话）</option>
                         </select>
@@ -66,25 +68,25 @@
                 </div>
                 <div id="mcp-edit-db-fields" class="mcp-field-group mcp-db-field-group hidden">
                     <div class="mcp-form-row">
-                        <select id="mcp-edit-db-type" class="form-input">
+                        <select id="mcp-edit-db-type" class="form-input" aria-label="数据库类型">
                             <option value="postgres">PostgreSQL</option>
                             <option value="mysql">MySQL / MariaDB</option>
                             <option value="sqlserver">SQL Server</option>
                             <option value="sqlite">SQLite</option>
                             <option value="mongodb">MongoDB</option>
                         </select>
-                        <input id="mcp-edit-db-port" class="form-input" type="number" placeholder="端口">
+                        <input id="mcp-edit-db-port" class="form-input" type="number" placeholder="端口" aria-label="数据库端口">
                     </div>
-                    <input id="mcp-edit-db-host" class="form-input" placeholder="服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器">
-                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填服务器文件路径">
+                    <input id="mcp-edit-db-host" class="form-input" placeholder="服务器可访问主机，例如 10.0.0.8；localhost 指 Pivot 服务器" aria-label="数据库主机">
+                    <input id="mcp-edit-db-name" class="form-input" placeholder="数据库名；SQLite 填服务器文件路径" aria-label="数据库名称或 SQLite 文件路径" required>
                     <div class="mcp-form-tip">localhost / 127.0.0.1 指 Pivot 服务器，不是你的电脑；生产库建议使用只读账号。</div>
                     <div class="mcp-form-row">
-                        <input id="mcp-edit-db-user" class="form-input" placeholder="用户名">
-                        <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码">
+                        <input id="mcp-edit-db-user" class="form-input" placeholder="用户名" aria-label="数据库用户名" autocomplete="username">
+                        <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码" aria-label="数据库密码" autocomplete="current-password">
                     </div>
                     <div class="mcp-form-row">
-                        <input id="mcp-edit-db-schema" class="form-input" placeholder="数据分组/Schema，可选；不确定就留空">
-                        <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数">
+                        <input id="mcp-edit-db-schema" class="form-input" placeholder="数据分组/Schema，可选；不确定就留空" aria-label="数据库 Schema">
+                        <input id="mcp-edit-db-max-rows" class="form-input" type="number" min="1" max="1000" placeholder="最大返回行数" aria-label="最大返回行数">
                     </div>
                     <label class="mcp-shared-row mcp-db-inline-option">
                         <input type="checkbox" id="mcp-edit-db-ssl"> 启用 SSL / TLS
@@ -95,12 +97,12 @@
                             <small>表白名单、字段白名单、脱敏与超时</small>
                         </summary>
                         <div class="mcp-db-advanced-grid">
-                            <textarea id="mcp-edit-db-table-allowlist" class="form-input" placeholder="允许访问的表/集合白名单，每行一个；留空表示不限制"></textarea>
-                            <textarea id="mcp-edit-db-field-allowlist" class="form-input" placeholder="字段白名单，可写 users:id,name 或 users.id；启用后 SQL 需显式列名"></textarea>
-                            <textarea id="mcp-edit-db-sensitive-fields" class="form-input" placeholder="敏感字段，每行一个，例如 phone、email、id_card，返回结果会脱敏"></textarea>
+                            <textarea id="mcp-edit-db-table-allowlist" class="form-input" placeholder="允许访问的表/集合白名单，每行一个；留空表示不限制" aria-label="表或集合白名单"></textarea>
+                            <textarea id="mcp-edit-db-field-allowlist" class="form-input" placeholder="字段白名单，可写 users:id,name 或 users.id；启用后 SQL 需显式列名" aria-label="字段白名单"></textarea>
+                            <textarea id="mcp-edit-db-sensitive-fields" class="form-input" placeholder="敏感字段，每行一个，例如 phone、email、id_card，返回结果会脱敏" aria-label="敏感字段列表"></textarea>
                             <div class="mcp-form-row">
-                                <input id="mcp-edit-db-row-policy-hint" class="form-input" placeholder="行级权限提示，例如 仅查询当前部门数据">
-                                <input id="mcp-edit-db-query-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="查询超时 ms，默认 20000">
+                                <input id="mcp-edit-db-row-policy-hint" class="form-input" placeholder="行级权限提示，例如 仅查询当前部门数据" aria-label="行级权限提示">
+                                <input id="mcp-edit-db-query-timeout-ms" class="form-input" type="number" min="1000" max="120000" placeholder="查询超时 ms，默认 20000" aria-label="查询超时时间（毫秒）">
                             </div>
                             <label class="mcp-shared-row">
                                 <input type="checkbox" id="mcp-edit-db-sql-cost-estimate" checked> 返回 SQL 成本估计提示
@@ -109,7 +111,7 @@
                     </details>
                 </div>
                 <div id="mcp-edit-reports-fields" class="mcp-field-group hidden">
-                    <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="服务器可访问报表目录，每行一个，例如 D:\reports 或 \\nas\share\reports"></textarea>
+                    <textarea id="mcp-edit-reports-roots" class="form-input" placeholder="服务器可访问报表目录，每行一个，例如 D:\reports 或 \\nas\share\reports" aria-label="报表目录列表"></textarea>
                     <div class="mcp-form-tip">这里填写的是服务器路径或服务器能访问的共享目录；不支持跳出授权根目录。</div>
                     <div class="mcp-form-row">
                         <input id="mcp-edit-reports-extensions" class="form-input" placeholder="允许扩展名：csv,xlsx,xls,json,txt,md">
@@ -118,12 +120,12 @@
                     <input id="mcp-edit-reports-max-rows" class="form-input" type="number" min="1" max="5000" placeholder="单次最大读取行数，默认 500">
                 </div>
                 <div id="mcp-edit-im-fields" class="mcp-field-group hidden">
-                    <input id="mcp-edit-im-endpoint-url" class="form-input" placeholder="局域网聊天工具接收地址，由技术同事提供，例如 http://10.0.0.8:9000/api/message">
+                    <input id="mcp-edit-im-endpoint-url" class="form-input" type="url" placeholder="局域网聊天工具接收地址，由技术同事提供，例如 http://10.0.0.8:9000/api/message" aria-label="消息接收地址" autocomplete="url">
                     <div class="mcp-form-row">
                         <input id="mcp-edit-im-auth-header" class="form-input" placeholder="认证 Header，默认 Authorization">
                         <input id="mcp-edit-im-token" class="form-input" type="password" placeholder="Token / 密钥，可选">
                     </div>
-                    <textarea id="mcp-edit-im-allowed-targets" class="form-input" placeholder="允许发送目标，每行一个；可写 user:zhangsan 或 group:ops"></textarea>
+                    <textarea id="mcp-edit-im-allowed-targets" class="form-input" placeholder="允许发送目标，每行一个；可写 user:zhangsan 或 group:ops" aria-label="允许发送目标"></textarea>
                     <div class="mcp-form-row">
                         <input id="mcp-edit-im-default-target" class="form-input" placeholder="默认目标，可选">
                         <input id="mcp-edit-im-max-message-length" class="form-input" type="number" min="100" max="10000" placeholder="消息最大长度，默认 2000">
@@ -137,7 +139,7 @@
                     </div>
                 </div>
                 <div id="mcp-edit-diagnostics" class="mcp-diagnostics-panel" aria-live="polite"></div>
-                <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选"></textarea>
+                <textarea id="mcp-edit-desc" class="form-input" placeholder="说明，可选" aria-label="服务说明"></textarea>
                 <label class="mcp-shared-row super-admin-only hidden">
                     <input type="checkbox" id="mcp-edit-shared"> 作为全局共享服务
                 </label>
@@ -152,7 +154,7 @@
         </div>
     </div>
 
-    <div id="mcp-share-modal" class="modal-overlay hidden agent-workflow-share-modal-overlay" style="z-index: 1915;">
+    <div id="mcp-share-modal" class="modal-overlay hidden agent-workflow-share-modal-overlay" style="z-index: 1915;" aria-hidden="true">
         <div class="modal agent-workflow-share-modal mcp-share-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-share-title">
             <div class="agent-workflow-share-head">
                 <div>
@@ -207,8 +209,8 @@
         </div>
     </div>
 
-    <div id="mcp-tools-modal" class="modal-overlay hidden" style="z-index: 1910;">
-        <div class="modal mcp-tools-modal">
+    <div id="mcp-tools-modal" class="modal-overlay hidden" style="z-index: 1910;" aria-hidden="true">
+        <div class="modal mcp-tools-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-tools-title">
             <div class="mcp-edit-header">
                 <h3 id="mcp-tools-title">可用工具</h3>
                 <div class="mcp-tools-header-actions">
@@ -220,11 +222,11 @@
         </div>
     </div>
 
-    <div id="mcp-local-auth-modal" class="modal-overlay hidden mcp-local-auth-overlay">
-        <div class="modal mcp-local-auth-modal">
+    <div id="mcp-local-auth-modal" class="modal-overlay hidden mcp-local-auth-overlay" aria-hidden="true">
+        <div class="modal mcp-local-auth-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-local-auth-title">
             <div class="mcp-edit-header">
                 <div>
-                    <h3>本机授权中心</h3>
+                    <h3 id="mcp-local-auth-title">本机授权中心</h3>
                     <p>授权本机数据库或报表目录后，后续工具调用仍由桌面端或本地助手只读执行。</p>
                 </div>
                 <button id="mcp-local-auth-close-btn" class="btn-secondary workspace-modal-close" type="button">关闭</button>
@@ -234,7 +236,7 @@
     </div>
 
     <!-- 工具单步测试调试面板 -->
-    <div id="mcp-tool-test-modal" class="modal-overlay hidden" style="z-index: 1920;">
+    <div id="mcp-tool-test-modal" class="modal-overlay hidden" style="z-index: 1920;" aria-hidden="true">
         <div class="modal mcp-tool-test-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-tool-test-title">
             <div class="mcp-edit-header">
                 <div>

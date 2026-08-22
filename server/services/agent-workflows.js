@@ -222,10 +222,16 @@ async function getAgentWorkflowForUser(workflowId, user) {
     return formatAgentWorkflow(row, user);
 }
 
-async function listAgentWorkflows(user) {
-    const rows = await workflowRepository.listWorkflowsForUser(user.id);
+async function listAgentWorkflows(user, options = {}) {
+    const searchText = String(options.query || '').trim().toLowerCase();
+    const rows = await workflowRepository.listWorkflowsForUser(user.id, searchText ? 200 : 100, searchText);
     return (rows || [])
         .filter(row => assertWorkflowAccess(row, user, false))
+        .filter(row => !searchText || [row.name, row.description, row.current_version, row.published_version]
+            .filter(value => value !== undefined && value !== null)
+            .join(' ')
+            .toLowerCase()
+            .includes(searchText))
         .slice(0, 100)
         .map(row => formatAgentWorkflow(row, user));
 }

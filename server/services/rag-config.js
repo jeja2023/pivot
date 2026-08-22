@@ -95,7 +95,7 @@ function getPublicEmbeddingConfig(userId = null) {
 function getRagConfig(overrides = {}, userId = null) {
     const ragLimits = getRagLimits();
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
-    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 6, 1, ragLimits.topKMax || 10);
+    const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, ragLimits.topKMax || 10);
     const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, ragLimits.candidateLimitMax || 1000);
     const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, ragLimits.chunkSizeMax || 2000);
     const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
@@ -185,7 +185,7 @@ function toRagSettingValue(key, value) {
         return String(clampNumber(value, 0.4, 0, 1));
     }
     if (key === RAG_CONFIG_KEYS.topK) {
-        return String(clampInteger(value, 6, 1, ragLimits.topKMax || 10));
+        return String(clampInteger(value, 3, 1, ragLimits.topKMax || 10));
     }
     if (key === RAG_CONFIG_KEYS.candidateLimit) {
         return String(clampInteger(value, 300, 20, ragLimits.candidateLimitMax || 1000));

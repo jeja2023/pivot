@@ -9,6 +9,7 @@ let globalSearchType = 'sessions';
 let globalSearchRequestId = 0;
 // 搜索框输入防抖计时器由 sidebar.search 模块内部管理。
 let sessionSearchTimer = null;
+let lastSearchFocusElement = null;
 
 function sessionEscapeHtml(value) {
     if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(value);
@@ -18,6 +19,22 @@ function sessionEscapeHtml(value) {
 function sessionEscapeAttr(value) {
     if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeAttr(value);
     return sessionEscapeHtml(value).replace(/"/g, '&quot;');
+}
+
+function sessionHighlightText(value, query = '') {
+    const text = String(value || '').replace(/<[^>]*>/g, '');
+    const terms = String(query || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+    if (!terms.length) return sessionEscapeHtml(text);
+    const matcher = new RegExp(terms.map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'giu');
+    let output = '';
+    let cursor = 0;
+    for (const match of text.matchAll(matcher)) {
+        const index = Number(match.index || 0);
+        output += sessionEscapeHtml(text.slice(cursor, index));
+        output += `<mark>${sessionEscapeHtml(match[0])}</mark>`;
+        cursor = index + match[0].length;
+    }
+    return output + sessionEscapeHtml(text.slice(cursor));
 }
 
 function parseSessionSearchValue(value) {
@@ -39,7 +56,8 @@ function getSessionSearchEls() {
         activeTab: document.getElementById('session-search-modal-active'),
         archiveTab: document.getElementById('session-search-modal-archive'),
         sessionScope: document.getElementById('session-search-scope'),
-        openButton: document.getElementById('session-search-open')
+        openButton: document.getElementById('session-search-open'),
+        clearButton: document.getElementById('session-search-modal-clear')
     };
 }
 
@@ -49,7 +67,7 @@ function setSessionSearchStatus(text = '') {
 }
 
 function renderSessionSearchResults(sessions) {
-    const { results } = getSessionSearchEls();
+    const { input, results } = getSessionSearchEls();
     if (!results) return;
     if (!sessions.length) {
         PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的会话</div>');
@@ -69,10 +87,9 @@ function renderSessionSearchResults(sessions) {
         const timeText = window.formatSessionListTime ? window.formatSessionListTime(rawTime) : '';
         const timeTitle = window.formatChatDateTime ? window.formatChatDateTime(rawTime) : String(rawTime || '');
         const tagsHtml = String(s.tags || '').split(',').filter(Boolean).map(tag => `<em>${sessionEscapeHtml(tag)}</em>`).join('');
-        const snippet = String(s.snippet || '').replace(/<\/?b>/g, '');
-        const metaParts = [
-            snippet
-        ].filter(Boolean);
+        const snippet = String(s.snippet || '').replace(/<\/?b>/gi, '');
+        const snippetHtml = sessionHighlightText(snippet, parseSessionSearchValue(input?.value || '').keyword);
+        const metaParts = [snippet].filter(Boolean);
         const msgCount = Number(s.msg_count || 0);
         const checked = selectedSessionIds.has(String(s.id)) ? 'checked' : '';
         const selectedClass = checked ? ' selected' : '';
@@ -90,7 +107,7 @@ function renderSessionSearchResults(sessions) {
                         <span>${sessionEscapeHtml(title)}</span>
                         <small>${sessionEscapeHtml(msgCount ? `${msgCount} 条消息` : '0 条消息')}</small>
                     </span>
-                    ${metaParts.length ? `<span class="session-search-meta">${sessionEscapeHtml(metaParts.join(' · '))}</span>` : ''}
+                    ${metaParts.length ? `<span class="session-search-meta">${snippetHtml}</span>` : ''}
                     </span>
                     <span class="session-search-time" title="${sessionEscapeAttr(timeTitle)}">${sessionEscapeHtml(timeText)}</span>
                 </button>
@@ -107,9 +124,12 @@ function renderSessionSearchResults(sessions) {
 async function loadSessionOnlySearchResults() {
     const { input, activeTab, archiveTab, results } = getSessionSearchEls();
     if (!results) return;
+    const requestId = ++globalSearchRequestId;
     const { keyword, tag } = parseSessionSearchValue(input?.value || '');
     activeTab?.classList.toggle('active', !sessionSearchArchived);
     archiveTab?.classList.toggle('active', sessionSearchArchived);
+    activeTab?.setAttribute('aria-selected', sessionSearchArchived ? 'false' : 'true');
+    archiveTab?.setAttribute('aria-selected', sessionSearchArchived ? 'true' : 'false');
     setSessionSearchStatus('正在搜索...');
     try {
         const params = new URLSearchParams({
@@ -119,11 +139,23 @@ async function loadSessionOnlySearchResults() {
             archived: String(sessionSearchArchived),
             page: '1'
         });
-        const listReq = apiFetch(`${API_BASE}/sessions?${params.toString()}`).then(res => res.json());
+        const listReq = apiFetch(`${API_BASE}/sessions?${params.toString()}`).then(async res => {
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '会话搜索失败');
+            return data;
+        });
         const contentReq = keyword
-            ? apiFetch(`${API_BASE}/sessions/search/content?keyword=${encodeURIComponent(keyword)}`).then(res => res.json()).catch(() => ({ data: [] }))
+            ? apiFetch(`${API_BASE}/sessions/search/content?keyword=${encodeURIComponent(keyword)}`).then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '消息内容搜索失败');
+                return data;
+            }).catch(error => {
+                console.warn('消息内容搜索不可用，将仅展示标题匹配:', error);
+                return { data: [], contentSearchFailed: true };
+            })
             : Promise.resolve({ data: [] });
         const [listData, contentData] = await Promise.all([listReq, contentReq]);
+        if (requestId !== globalSearchRequestId || globalSearchType !== 'sessions') return;
         const merged = new Map();
         (listData.data || []).forEach(item => merged.set(String(item.id), item));
         (contentData.data || [])
@@ -136,12 +168,36 @@ async function loadSessionOnlySearchResults() {
         const sessions = Array.from(merged.values()).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
         renderSessionSearchResults(sessions);
         updateSessionBatchBar();
-        setSessionSearchStatus(sessions.length ? `共找到 ${sessions.length} 个会话` : '');
+        const total = Number(listData.total || sessions.length);
+        const partialLabel = contentData.contentSearchFailed && keyword ? '（消息内容搜索暂不可用）' : '';
+        setSessionSearchStatus(sessions.length
+            ? `共找到 ${total}${total > sessions.length ? `，当前展示 ${sessions.length} 条` : ''} 个会话${partialLabel}`
+            : `未找到匹配的会话${partialLabel}`);
     } catch (error) {
+        if (requestId !== globalSearchRequestId || globalSearchType !== 'sessions') return;
         console.error('搜索会话失败:', error);
-        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">搜索失败，请稍后重试</div>');
-        setSessionSearchStatus('');
+        renderSearchState('搜索失败，请检查网络后重试', { retry: true });
+        setSessionSearchStatus('搜索未完成');
+    } finally {
+        if (requestId === globalSearchRequestId) setSearchBusy(false);
     }
+}
+
+function setSearchBusy(busy) {
+    const { input, clearButton } = getSessionSearchEls();
+    input?.toggleAttribute('aria-busy', Boolean(busy));
+    if (clearButton) clearButton.disabled = Boolean(busy) && !String(input?.value || '').trim();
+}
+
+function renderSearchState(message, { retry = false } = {}) {
+    const { results } = getSessionSearchEls();
+    if (!results) return;
+    PivotSafeHtml.setHtml(results, `
+        <div class="session-search-empty">
+            <span>${sessionEscapeHtml(message)}</span>
+            ${retry ? '<button type="button" class="session-search-retry" data-global-search-retry="1">重试</button>' : ''}
+        </div>
+    `);
 }
 
 function globalSearchStatusLabel(status) {
@@ -166,7 +222,7 @@ function renderGlobalTaskResults(tasks) {
     const { results } = getSessionSearchEls();
     if (!results) return;
     if (!tasks.length) {
-        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的任务</div>');
+        renderSearchState('没有找到匹配的任务');
         return;
     }
     PivotSafeHtml.setHtml(results, tasks.map(task => {
@@ -189,7 +245,7 @@ function renderGlobalWorkflowResults(workflows) {
     const { results } = getSessionSearchEls();
     if (!results) return;
     if (!workflows.length) {
-        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">没有找到匹配的工作流</div>');
+        renderSearchState('没有找到匹配的工作流');
         return;
     }
     PivotSafeHtml.setHtml(results, workflows.map(workflow => {
@@ -213,6 +269,7 @@ async function loadGlobalTaskSearchResults() {
     const requestId = ++globalSearchRequestId;
     const query = String(input?.value || '').trim();
     setSessionSearchStatus('正在搜索...');
+    setSearchBusy(true);
     try {
         const params = new URLSearchParams({ page: '1', limit: '50' });
         if (query) params.set('query', query);
@@ -222,12 +279,14 @@ async function loadGlobalTaskSearchResults() {
         if (requestId !== globalSearchRequestId || globalSearchType !== 'tasks') return;
         const tasks = data.data || [];
         renderGlobalTaskResults(tasks);
-        setSessionSearchStatus(tasks.length ? `共找到 ${Number(data.total || tasks.length)} 个任务` : '');
+        setSessionSearchStatus(tasks.length ? `共找到 ${Number(data.total || tasks.length)} 个任务` : '未找到匹配的任务');
     } catch (error) {
         if (requestId !== globalSearchRequestId) return;
         console.error('搜索任务失败:', error);
-        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">任务搜索失败，请稍后重试</div>');
-        setSessionSearchStatus('');
+        renderSearchState('任务搜索失败，请检查网络后重试', { retry: true });
+        setSessionSearchStatus('搜索未完成');
+    } finally {
+        if (requestId === globalSearchRequestId) setSearchBusy(false);
     }
 }
 
@@ -235,35 +294,39 @@ async function loadGlobalWorkflowSearchResults() {
     const { input, results } = getSessionSearchEls();
     if (!results) return;
     const requestId = ++globalSearchRequestId;
-    const query = String(input?.value || '').trim().toLowerCase();
+    const query = String(input?.value || '').trim();
     setSessionSearchStatus('正在搜索...');
+    setSearchBusy(true);
     try {
-        const res = await apiFetch(`${API_BASE}/agents/workflows`);
+        const params = new URLSearchParams({ limit: '100' });
+        if (query) params.set('query', query);
+        const res = await apiFetch(`${API_BASE}/agents/workflows?${params.toString()}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '工作流搜索失败');
         if (requestId !== globalSearchRequestId || globalSearchType !== 'workflows') return;
-        const workflows = (data.data || []).filter(workflow => !query || [
-            workflow.name,
-            workflow.description,
-            workflow.current_version,
-            workflow.published_version
-        ].filter(value => value !== undefined && value !== null).join(' ').toLowerCase().includes(query));
+        const workflows = data.data || [];
         renderGlobalWorkflowResults(workflows);
-        setSessionSearchStatus(workflows.length ? `共找到 ${workflows.length} 个工作流` : '');
+        const total = Number(data.total || workflows.length);
+        setSessionSearchStatus(workflows.length
+            ? `共找到 ${total}${total > workflows.length ? `，当前展示 ${workflows.length} 条` : ''} 个工作流`
+            : '未找到匹配的工作流');
     } catch (error) {
         if (requestId !== globalSearchRequestId) return;
         console.error('搜索工作流失败:', error);
-        PivotSafeHtml.setHtml(results, '<div class="session-search-empty">工作流搜索失败，请稍后重试</div>');
-        setSessionSearchStatus('');
+        renderSearchState('工作流搜索失败，请检查网络后重试', { retry: true });
+        setSessionSearchStatus('搜索未完成');
+    } finally {
+        if (requestId === globalSearchRequestId) setSearchBusy(false);
     }
 }
 
 function updateGlobalSearchUi() {
-    const { input, sessionScope } = getSessionSearchEls();
+    const { input, sessionScope, clearButton } = getSessionSearchEls();
     document.querySelectorAll('[data-global-search-type]').forEach(button => {
         const isActive = button.dataset.globalSearchType === globalSearchType;
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.tabIndex = isActive ? 0 : -1;
     });
     sessionScope?.classList.toggle('hidden', globalSearchType !== 'sessions');
     document.getElementById('session-tag-tools')?.classList.toggle('hidden', globalSearchType !== 'sessions');
@@ -273,7 +336,9 @@ function updateGlobalSearchUi() {
             tasks: '搜索任务名称或目标',
             workflows: '搜索工作流名称、说明或版本'
         }[globalSearchType];
+        input.setAttribute('aria-label', input.placeholder);
     }
+    if (clearButton) clearButton.classList.toggle('hidden', !String(input?.value || '').length);
 }
 
 function setGlobalSearchType(type = 'sessions') {
@@ -318,10 +383,14 @@ async function loadSessionSearchResults() {
 function openSessionSearchModal(prefill = '') {
     const { modal, input, openButton } = getSessionSearchEls();
     if (!modal) return;
+    lastSearchFocusElement = document.activeElement && document.activeElement !== document.body
+        ? document.activeElement
+        : openButton;
     globalSearchType = 'sessions';
     sessionSearchArchived = false;
     globalSearchRequestId += 1;
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
     openButton?.classList.add('active');
     clearTimeout(sessionSearchTimer);
     sessionSearchTimer = null;
@@ -340,8 +409,35 @@ function closeSessionSearchModal() {
     clearTimeout(sessionSearchTimer);
     sessionSearchTimer = null;
     modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
     openButton?.classList.remove('active');
+    globalSearchRequestId += 1;
+    if (lastSearchFocusElement && document.contains(lastSearchFocusElement)) lastSearchFocusElement.focus();
+    lastSearchFocusElement = null;
 }
+
+document.addEventListener('keydown', (event) => {
+    const { modal } = getSessionSearchEls();
+    if (!modal || modal.classList.contains('hidden')) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSessionSearchModal();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [...modal.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter(node => node.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
 
 function ensureSessionTagTools() {
     const controls = document.querySelector('.session-search-controls') || document.querySelector('.sidebar-ctrls');

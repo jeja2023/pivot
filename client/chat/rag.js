@@ -78,15 +78,15 @@ const getRagStatusLabel = (status) => {
 const renderRagActions = (doc) => {
     const buttons = [];
     const canEdit = doc.can_edit !== false && doc.read_only !== true;
-    buttons.push(`<button class="btn-secondary rag-detail-btn" data-rag-id="${doc.id}">详情</button>`);
-    buttons.push(`<button class="btn-secondary rag-doc-meta-btn" data-rag-id="${doc.id}">整理</button>`);
+    buttons.push(`<button type="button" class="btn-secondary rag-detail-btn" data-rag-id="${doc.id}" title="查看文档详情">详情</button>`);
+    buttons.push(`<button type="button" class="btn-secondary rag-doc-meta-btn" data-rag-id="${doc.id}" title="整理专题库和标签">整理</button>`);
     if (Number(doc.chunk_count || 0) > 0) {
-        buttons.push(`<button class="btn-secondary rag-doc-graph-btn" data-rag-id="${doc.id}">图谱</button>`);
+        buttons.push(`<button type="button" class="btn-secondary rag-doc-graph-btn" data-rag-id="${doc.id}" title="查看文档知识图谱">图谱</button>`);
     }
     if (doc.status === 'error' && doc.source_path) {
-        buttons.push(`<button class="btn-secondary rag-reindex-btn" data-rag-id="${doc.id}">重试</button>`);
+        buttons.push(`<button type="button" class="btn-secondary rag-reindex-btn" data-rag-id="${doc.id}" title="重新建立文档索引">重试</button>`);
     }
-    buttons.push(`<button class="btn-danger rag-delete-btn" data-rag-id="${doc.id}">删除</button>`);
+    buttons.push(`<button type="button" class="btn-danger rag-delete-btn" data-rag-id="${doc.id}" title="从知识库移除文档">删除</button>`);
     return (canEdit ? buttons : buttons.filter(button => !/rag-doc-meta-btn|rag-reindex-btn|rag-delete-btn/.test(button))).join('');
 };
 
@@ -418,6 +418,7 @@ document.addEventListener('focusout', (event) => {
 document.addEventListener('change', async (event) => {
     if (event.target?.id === 'rag-select-all') {
         document.querySelectorAll('.rag-doc-check').forEach(input => { input.checked = event.target.checked; });
+        window.syncRagSelectAllState?.();
         return;
     }
     if (event.target?.id === 'rag-collection-filter') {
@@ -435,6 +436,10 @@ document.addEventListener('change', async (event) => {
     const enableToggle = event.target.closest?.('.rag-enable-toggle');
     if (enableToggle) {
         window.toggleKnowledgeDocEnabled(enableToggle.dataset.ragId, enableToggle.checked);
+        return;
+    }
+    if (event.target.closest?.('.rag-doc-check')) {
+        window.syncRagSelectAllState?.();
         return;
     }
     if (['rag-graph-type', 'rag-graph-quality'].includes(event.target?.id)) {

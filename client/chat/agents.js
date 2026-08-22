@@ -125,6 +125,7 @@ window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
         const isActive = button.dataset.automationSection === activeSection;
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.tabIndex = isActive ? 0 : -1;
     });
 };
 
@@ -133,16 +134,20 @@ window.bindUnifiedAutomationTabs = function() {
         if (button.dataset.boundAutomationSection === '1') return;
         button.dataset.boundAutomationSection = '1';
         button.addEventListener('click', async () => {
-            const section = button.dataset.automationSection;
-            const isWorkflowEditorOpen = document.body?.dataset.activeWorkspace === 'agent-dag'
-                && !document.getElementById('automation-editor-view')?.classList.contains('hidden');
-            if (isWorkflowEditorOpen && section === 'workflows') return;
-            if (isWorkflowEditorOpen && typeof confirmAgentWorkflowDiscard === 'function') {
-                const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
-                if (!confirmed) return;
+            try {
+                const section = button.dataset.automationSection;
+                const isWorkflowEditorOpen = document.body?.dataset.activeWorkspace === 'agent-dag'
+                    && !document.getElementById('automation-editor-view')?.classList.contains('hidden');
+                if (isWorkflowEditorOpen && section === 'workflows') return;
+                if (isWorkflowEditorOpen && typeof confirmAgentWorkflowDiscard === 'function') {
+                    const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
+                    if (!confirmed) return;
+                }
+                if (section === 'tasks') return window.openAgentWorkbench?.();
+                return window.openAgentDagWorkbench?.({ tab: section });
+            } catch (error) {
+                showToast(error.message || '自动化页面加载失败', 'error');
             }
-            if (section === 'tasks') return window.openAgentWorkbench?.();
-            return window.openAgentDagWorkbench?.({ tab: section });
         });
     });
 };
@@ -274,6 +279,7 @@ function closeAgentConfigModal() {
     activeAgentConfigSection = '';
     if (modal) delete modal.dataset.agentConfigSection;
     modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
 }
 
 function openAgentConfigSection(sectionKey) {
@@ -289,6 +295,7 @@ function openAgentConfigSection(sectionKey) {
     section.open = true;
     body.appendChild(section);
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
     if (sectionKey === 'evaluations') {
         const evaluations = agentEvaluationsApi();
         evaluations.bind?.();

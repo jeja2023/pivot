@@ -1,12 +1,12 @@
 <!-- 知识库工作台 -->
-<section id="knowledge-workbench-modal" class="main-workspace-view knowledge-workspace-view hidden">
+<section id="knowledge-workbench-modal" class="main-workspace-view knowledge-workspace-view hidden" aria-labelledby="knowledge-workbench-title" aria-hidden="true">
     <div class="workspace-modal knowledge-workspace-modal">
         <div class="workspace-modal-header">
             <div>
-                <h3>知识库</h3>
+                <h3 id="knowledge-workbench-title">知识库</h3>
                 <p>管理项目资料、索引状态和召回测试，让聊天与智能体可以稳定使用私有文档。</p>
             </div>
-            <button id="knowledge-modal-close" class="btn-secondary workspace-modal-close">关闭</button>
+            <button id="knowledge-modal-close" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭知识库工作台">关闭</button>
         </div>
         <div class="workspace-modal-body">
             <div class="workspace-panel knowledge-panel">
@@ -14,49 +14,50 @@
                     <input type="file" id="rag-upload-input" class="hidden" multiple
                         accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp">
                     <div class="knowledge-toolbar-filters" aria-label="知识库范围">
-                        <select id="rag-collection-filter" class="form-input knowledge-collection-filter" title="按专题库筛选">
+                        <select id="rag-collection-filter" class="form-input knowledge-collection-filter" title="按专题库筛选" aria-label="按专题库筛选">
                             <option value="">全部专题库</option>
                         </select>
-                        <select id="rag-tag-filter" class="form-input knowledge-tag-filter" title="按标签筛选">
+                        <select id="rag-tag-filter" class="form-input knowledge-tag-filter" title="按标签筛选" aria-label="按标签筛选">
                             <option value="">全部标签</option>
                         </select>
                     </div>
                     <div class="knowledge-toolbar-actions">
                         <button id="rag-refresh-btn" class="btn-secondary knowledge-refresh-btn" title="刷新知识库" aria-label="刷新知识库">刷新</button>
-                        <button id="rag-upload-btn" class="btn-primary knowledge-upload-btn">上传文档</button>
+                        <button id="rag-upload-btn" class="btn-primary knowledge-upload-btn" type="button">上传文档</button>
                         <details class="knowledge-action-menu">
                             <summary class="btn-secondary">内容管理</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="内容管理">
-                                <button id="rag-create-collection-btn" class="btn-secondary" role="menuitem">新建专题库</button>
-                                <button id="rag-create-tag-btn" class="btn-secondary" role="menuitem">新建标签</button>
+                                <button id="rag-create-collection-btn" class="btn-secondary" type="button" role="menuitem">新建专题库</button>
+                                <button id="rag-create-tag-btn" class="btn-secondary" type="button" role="menuitem">新建标签</button>
                             </div>
                         </details>
                         <details class="knowledge-action-menu">
                             <summary class="btn-secondary">检索与图谱</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="检索与图谱">
-                                <button id="rag-embedding-modal-open-btn" class="btn-secondary" role="menuitem">检索配置</button>
-                                <button id="rag-debug-modal-open-btn" class="btn-secondary" role="menuitem">召回测试</button>
-                                <button id="rag-graph-open-btn" class="btn-secondary" role="menuitem">知识图谱</button>
+                                <button id="rag-embedding-modal-open-btn" class="btn-secondary" type="button" role="menuitem">检索配置</button>
+                                <button id="rag-debug-modal-open-btn" class="btn-secondary" type="button" role="menuitem">召回测试</button>
+                                <button id="rag-graph-open-btn" class="btn-secondary" type="button" role="menuitem">知识图谱</button>
                             </div>
                         </details>
                         <details class="knowledge-action-menu">
                             <summary class="btn-secondary">批量治理</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="批量治理">
-                                <button id="rag-batch-reindex-btn" class="btn-secondary" role="menuitem">批量重建</button>
-                                <button id="rag-batch-delete-btn" class="btn-secondary" role="menuitem">批量删除</button>
-                                <button id="rag-retry-failed-btn" class="btn-secondary" role="menuitem">重试失败</button>
-                                <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden" role="menuitem">删除审计</button>
+                                <button id="rag-batch-reindex-btn" class="btn-secondary" type="button" role="menuitem">批量重建</button>
+                                <button id="rag-batch-delete-btn" class="btn-secondary" type="button" role="menuitem">批量删除</button>
+                                <button id="rag-retry-failed-btn" class="btn-secondary" type="button" role="menuitem">重试失败</button>
+                                <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden" type="button" role="menuitem">删除审计</button>
                             </div>
                         </details>
                     </div>
                 </div>
+                <div id="rag-workbench-state" class="knowledge-workbench-state" role="status" aria-live="polite" aria-atomic="true" hidden></div>
                 <div id="rag-summary" class="rag-summary"></div>
                 <div id="rag-quality-report" class="workspace-governance-panel"></div>
                 <div class="table-container workspace-table-wrap">
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all">
+                                <th style="width: 42px;" class="text-center"><input type="checkbox" id="rag-select-all" aria-label="选择当前页全部文档">
                                 </th>
                                 <th style="width: 50px;" class="text-center">序号</th>
                                 <th style="width: auto;">文档名称</th>

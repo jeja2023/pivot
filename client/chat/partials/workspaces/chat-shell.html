@@ -129,19 +129,19 @@
             </div>
         </aside>
 
-        <div id="session-search-modal" class="modal-overlay session-search-modal hidden" style="z-index: 1800;">
-            <div class="modal session-search-dialog">
+        <div id="session-search-modal" class="modal-overlay session-search-modal hidden" style="z-index: 1800;" aria-hidden="true">
+            <div class="modal session-search-dialog" role="dialog" aria-modal="true" aria-labelledby="session-search-title">
                 <div class="session-search-head">
                     <div>
-                        <h3>全局搜索</h3>
+                        <h3 id="session-search-title">全局搜索</h3>
                         <p>搜索会话、任务和工作流。</p>
                     </div>
                     <button id="session-search-close" class="btn-secondary btn-red-outline" type="button">关闭</button>
                 </div>
                 <div class="global-search-types" role="tablist" aria-label="搜索范围">
-                    <button id="global-search-tab-sessions" class="global-search-type active" type="button" data-global-search-type="sessions" role="tab" aria-selected="true">会话</button>
-                    <button id="global-search-tab-tasks" class="global-search-type" type="button" data-global-search-type="tasks" role="tab" aria-selected="false">任务</button>
-                    <button id="global-search-tab-workflows" class="global-search-type" type="button" data-global-search-type="workflows" role="tab" aria-selected="false">工作流</button>
+                    <button id="global-search-tab-sessions" class="global-search-type active" type="button" data-global-search-type="sessions" role="tab" aria-controls="session-search-modal-results" aria-selected="true">会话</button>
+                    <button id="global-search-tab-tasks" class="global-search-type" type="button" data-global-search-type="tasks" role="tab" aria-controls="session-search-modal-results" aria-selected="false" tabindex="-1">任务</button>
+                    <button id="global-search-tab-workflows" class="global-search-type" type="button" data-global-search-type="workflows" role="tab" aria-controls="session-search-modal-results" aria-selected="false" tabindex="-1">工作流</button>
                 </div>
                 <div class="session-search-controls">
                     <div class="session-search-input-wrap">
@@ -150,19 +150,22 @@
                             <circle cx="11" cy="11" r="8" />
                             <line x1="21" y1="21" x2="16.65" y2="16.65" />
                         </svg>
-                        <input type="text" id="session-search-modal-input" class="form-input"
+                        <input type="search" id="session-search-modal-input" class="form-input" autocomplete="off" spellcheck="false"
                             placeholder="搜索会话标题、消息内容，或输入 #标签">
+                        <button id="session-search-modal-clear" class="session-search-clear hidden" type="button" aria-label="清空搜索" title="清空搜索">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                        </button>
                     </div>
                     <div id="session-search-scope" class="session-search-scope">
                         <div class="tab-switcher-mini session-search-tabs">
-                            <button id="session-search-modal-active" class="tab-btn-mini active" type="button">当前</button>
-                            <button id="session-search-modal-archive" class="tab-btn-mini" type="button">归档</button>
+                            <button id="session-search-modal-active" class="tab-btn-mini active" type="button" aria-selected="true">当前</button>
+                            <button id="session-search-modal-archive" class="tab-btn-mini" type="button" aria-selected="false">归档</button>
                         </div>
                         <div id="session-batch-slot" class="session-batch-slot"></div>
                     </div>
                 </div>
-                <div id="session-search-modal-results" class="session-search-results"></div>
-                <div id="session-search-modal-status" class="session-search-status"></div>
+                <div id="session-search-modal-results" class="session-search-results" role="list" aria-live="polite" aria-busy="false"></div>
+                <div id="session-search-modal-status" class="session-search-status" role="status" aria-live="polite"></div>
             </div>
         </div>
 

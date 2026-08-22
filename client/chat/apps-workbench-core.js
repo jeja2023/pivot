@@ -113,6 +113,8 @@ const OFFICIAL_WRITING_TYPE_TO_TEMPLATE_KEY = {
 const OFFICIAL_WRITING_STORAGE_KEY = 'pivot_official_writing_state_v1';
 const OFFICIAL_WRITING_LIBRARY_KEY = 'pivot_official_writing_library_v2';
 const APPS_ACTIVE_APP_STORAGE_KEY = 'pivot_apps_active_app';
+let appsWorkbenchFocus = null;
+let appsWorkbenchRetryApp = '';
 const OFFICIAL_WRITING_DEFAULT_FORM_STATE = {
     docType: '通知',
     mode: 'draft',
@@ -335,6 +337,58 @@ function escapeAppsHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function getAppsSessionValue(key) {
+    try { return sessionStorage.getItem(String(key || '')) || ''; } catch (e) { return ''; }
+}
+
+function setAppsSessionValue(key, value) {
+    try {
+        if (value) sessionStorage.setItem(String(key || ''), String(value));
+        else sessionStorage.removeItem(String(key || ''));
+    } catch (e) {
+        // 隐私模式或浏览器禁用存储时，当前应用仍应可用。
+    }
+}
+
+function setAppsWorkbenchState(state = '', message = '', { retryApp = '' } = {}) {
+    const el = document.getElementById('apps-workbench-state');
+    if (!el) return;
+    appsWorkbenchRetryApp = retryApp || '';
+    el.dataset.state = state || '';
+    el.hidden = !message;
+    PivotSafeHtml.setHtml(el, '');
+    if (!message) return;
+    const text = document.createElement('span');
+    text.textContent = message;
+    el.appendChild(text);
+    if (retryApp) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-secondary apps-state-retry';
+        button.textContent = '重试';
+        button.addEventListener('click', () => {
+            const target = appsWorkbenchRetryApp;
+            if (!target) return;
+            setAppsWorkbenchState('loading', '正在重新加载应用…');
+            openRegisteredApp(target);
+        });
+        el.appendChild(button);
+    }
+}
+
+function setAppsWorkbenchVisibility(open) {
+    const panel = document.getElementById('apps-workbench-modal');
+    if (!panel) return;
+    if (open) {
+        if (!appsWorkbenchFocus && document.activeElement && document.activeElement !== document.body) appsWorkbenchFocus = document.activeElement;
+        panel.setAttribute('aria-hidden', 'false');
+        return;
+    }
+    panel.setAttribute('aria-hidden', 'true');
+    if (appsWorkbenchFocus?.isConnected) appsWorkbenchFocus.focus?.();
+    appsWorkbenchFocus = null;
+}
+
 function getAppIconSvg(icon) {
     if (icon === 'file-text') {
         return `
@@ -413,7 +467,7 @@ function renderAppsGrid() {
     const apps = PIVOT_APP_REGISTRY;
     empty.classList.toggle('hidden', apps.length > 0);
     PivotSafeHtml.setHtml(grid, apps.map(app => `
-        <button class="app-card" type="button" data-app-id="${escapeAppsHtml(app.id)}">
+        <button class="app-card" type="button" data-app-id="${escapeAppsHtml(app.id)}" aria-label="打开${escapeAppsHtml(app.name)}">
             <span class="app-card-icon">${getAppIconSvg(app.icon)}</span>
             <span class="app-card-main">
                 <span class="app-card-topline">
@@ -435,23 +489,11 @@ function setAppsTitle(title, desc) {
 }
 
 function getStoredAppsActiveApp() {
-    try {
-        return sessionStorage.getItem(APPS_ACTIVE_APP_STORAGE_KEY) || '';
-    } catch (e) {
-        return '';
-    }
+    return getAppsSessionValue(APPS_ACTIVE_APP_STORAGE_KEY);
 }
 
 function setStoredAppsActiveApp(appId) {
-    try {
-        if (appId) {
-            sessionStorage.setItem(APPS_ACTIVE_APP_STORAGE_KEY, appId);
-        } else {
-            sessionStorage.removeItem(APPS_ACTIVE_APP_STORAGE_KEY);
-        }
-    } catch (e) {
-        // 浏览器禁用 sessionStorage 时仅退回应用中心首页。
-    }
+    setAppsSessionValue(APPS_ACTIVE_APP_STORAGE_KEY, appId);
 }
 
 function showAppsHome() {
@@ -465,6 +507,7 @@ function showAppsHome() {
     document.getElementById('pdf-tools-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
+    setAppsWorkbenchState();
     renderAppsGrid();
 }
 
@@ -534,32 +577,63 @@ async function showPdfToolsAppFromRegistry() {
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
-    if (app.id === 'official-writing') showOfficialWritingApp();
+    setAppsWorkbenchState('loading', '正在打开' + app.name + '…');
+    const handleFailure = () => {
+        showAppsHome();
+        setAppsWorkbenchState('error', app.name + '暂时无法打开，请检查网络或稍后重试。', { retryApp: app.id });
+    };
+    if (app.id === 'official-writing') {
+        showOfficialWritingApp();
+        setAppsWorkbenchState();
+    }
     if (app.id === 'data-analysis') {
         showDataAnalysisAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
             .catch(() => {
+                handleFailure();
                 if (typeof showToast === 'function') showToast('\u6570\u636e\u5206\u6790\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'regulations') {
         showRegulationsAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
             .catch(() => {
+                handleFailure();
                 if (typeof showToast === 'function') showToast('\u6cd5\u89c4\u67e5\u8be2\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'ocr') {
         showOcrAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
             .catch(() => {
+                handleFailure();
                 if (typeof showToast === 'function') showToast('\u6587\u5b57\u8bc6\u522b\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'pdf-tools') {
         showPdfToolsAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
             .catch(() => {
+                handleFailure();
                 if (typeof showToast === 'function') showToast('PDF 工具加载失败', 'error');
             });
     }
 }
+
+window.Pivot?.exposeModule?.('workspaces.apps', {
+    getAppsSessionValue,
+    setAppsSessionValue,
+    setAppsWorkbenchState,
+    setAppsWorkbenchVisibility,
+    getStoredAppsActiveApp,
+    setStoredAppsActiveApp
+}, [
+    { globalName: 'getAppsSessionValue', exportName: 'getAppsSessionValue' },
+    { globalName: 'setAppsSessionValue', exportName: 'setAppsSessionValue' },
+    { globalName: 'setAppsWorkbenchState', exportName: 'setAppsWorkbenchState' },
+    { globalName: 'setAppsWorkbenchVisibility', exportName: 'setAppsWorkbenchVisibility' },
+    { globalName: 'showRegulationsAppFromRegistry', exportName: 'showRegulationsAppFromRegistry' }
+]);
 
 function loadOfficialWritingLibrary() {
     // 优先读取多文档库；不存在时从旧版单文档 key 迁移为库中第一篇。

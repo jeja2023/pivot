@@ -58,8 +58,19 @@ async function getWorkflowForUser(workflowId) {
     return row || null;
 }
 
-function listWorkflowsForUser(userId, limit = 200) {
+function listWorkflowsForUser(userId, limit = 200, search = '') {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 200, 1), 200);
+    const searchText = String(search || '').trim();
+    const params = [userId];
+    const searchPattern = searchText.replace(/[\\%_]/g, character => `\\${character}`);
+    const searchClause = searchText
+        ? `AND (LOWER(w.name) LIKE LOWER(?) ESCAPE '\\'
+            OR LOWER(COALESCE(w.description, '')) LIKE LOWER(?) ESCAPE '\\'
+            OR CAST(COALESCE(v.version, 0) AS TEXT) LIKE ? ESCAPE '\\'
+            OR CAST(COALESCE(pv.version, 0) AS TEXT) LIKE ? ESCAPE '\\')`
+        : '';
+    if (searchText) params.push(`%${searchPattern}%`, `%${searchPattern}%`, `%${searchPattern}%`, `%${searchPattern}%`);
+    params.push(safeLimit);
     return query(`
         SELECT
             w.*,
@@ -77,9 +88,10 @@ function listWorkflowsForUser(userId, limit = 200) {
         LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
         LEFT JOIN agent_workflow_versions pv ON pv.id = w.published_version_id
         WHERE (w.user_id = ? OR w.scope = 'shared') AND w.deleted_at IS NULL
+        ${searchClause}
         ORDER BY w.updated_at DESC, w.id DESC
         LIMIT ?
-    `, [userId, safeLimit]);
+    `, params);
 }
 
 async function getWorkflowVersionContext(workflowId) {

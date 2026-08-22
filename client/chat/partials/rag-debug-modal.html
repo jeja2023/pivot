@@ -1,12 +1,12 @@
     <!-- 召回测试弹窗 (RAG Debug) -->
-    <div id="rag-debug-modal" class="modal-overlay hidden">
-        <div class="modal rag-debug-modal">
+    <div id="rag-debug-modal" class="modal-overlay hidden" data-knowledge-modal aria-hidden="true">
+        <div class="modal rag-debug-modal" role="dialog" aria-modal="true" aria-labelledby="rag-debug-title">
             <div class="rag-debug-modal-head">
                 <div>
-                    <h3>知识库召回测试</h3>
+                    <h3 id="rag-debug-title">知识库召回测试</h3>
                     <p class="model-modal-desc">测试知识库检索准确度，查看匹配详情。</p>
                 </div>
-                <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" type="button">关闭</button>
+                <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" type="button" data-knowledge-modal-close aria-label="关闭知识库召回测试">关闭</button>
             </div>
             
             <div class="modal-form" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
@@ -14,18 +14,18 @@
                 <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;">
                     <!-- 第一行：标签 -->
                     <div style="display: flex; gap: 12px; margin-bottom: 6px;">
-                        <div style="flex: 1;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); padding-left: 2px;">测试问题</label></div>
-                        <div style="width: 120px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">范围</label></div>
-                        <div style="width: 100px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">标签</label></div>
-                        <div style="width: 75px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">阈值</label></div>
-                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">命中</label></div>
-                        <div style="width: 65px; text-align: center;"><label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">候选</label></div>
+                        <div style="flex: 1;"><label for="rag-debug-query" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); padding-left: 2px;">测试问题</label></div>
+                        <div style="width: 120px; text-align: center;"><label for="rag-debug-collection" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">范围</label></div>
+                        <div style="width: 100px; text-align: center;"><label for="rag-debug-tag" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">标签</label></div>
+                        <div style="width: 75px; text-align: center;"><label for="rag-debug-score-threshold" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">阈值</label></div>
+                        <div style="width: 65px; text-align: center;"><label for="rag-debug-top-k" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">命中</label></div>
+                        <div style="width: 65px; text-align: center;"><label for="rag-debug-candidate-limit" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">候选</label></div>
                         <div style="width: 95px;"></div> <!-- 按钮占位空位 -->
                     </div>
                     <!-- 第二行：输入框与按钮 -->
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div style="flex: 1; display: flex;">
-                            <input id="rag-debug-query" class="form-input" placeholder="输入测试问题..." style="height: 34px; border-radius: 6px; font-size: 0.85rem; width: 100%; margin: 0;">
+                            <input id="rag-debug-query" class="form-input" type="text" placeholder="输入测试问题..." aria-label="测试问题" style="height: 34px; border-radius: 6px; font-size: 0.85rem; width: 100%; margin: 0;">
                         </div>
                         <div style="width: 120px; display: flex;">
                             <select id="rag-debug-collection" class="form-input" style="height: 34px; font-size: 0.82rem; padding: 0 6px; margin: 0; width: 100%;">
@@ -38,13 +38,13 @@
                             </select>
                         </div>
                         <div style="width: 75px; display: flex;">
-                            <input id="rag-debug-score-threshold" class="form-input" type="number" min="0" max="1" step="0.05" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                            <input id="rag-debug-score-threshold" class="form-input" type="number" min="0" max="1" step="0.05" aria-label="相似度阈值" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
                         </div>
                         <div style="width: 65px; display: flex;">
-                            <input id="rag-debug-top-k" class="form-input" type="number" min="1" max="10" step="1" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                            <input id="rag-debug-top-k" class="form-input" type="number" min="1" max="10" step="1" aria-label="命中数量" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
                         </div>
                         <div style="width: 65px; display: flex;">
-                            <input id="rag-debug-candidate-limit" class="form-input" type="number" min="20" max="1000" step="10" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
+                            <input id="rag-debug-candidate-limit" class="form-input" type="number" min="20" max="1000" step="10" aria-label="候选数量" style="height: 34px; text-align: center; font-size: 0.85rem; padding: 0; margin: 0; width: 100%;">
                         </div>
                         <button id="rag-debug-btn" class="btn-primary" style="height: 34px; width: 95px; font-size: 0.85rem; font-weight: 600; border-radius: 6px; flex-shrink: 0; transition: transform 0.1s ease; margin: 0;">开始测试</button>
                     </div>
@@ -60,7 +60,7 @@
                 <!-- 结果展示区域 -->
                 <div id="rag-debug-history" class="rag-debug-history"></div>
 
-                <div id="rag-debug-results" class="rag-debug-results" style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: white; padding: 4px;">
+                <div id="rag-debug-results" class="rag-debug-results" style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-primary); padding: 4px;">
                     <div class="rag-debug-empty" style="height: 180px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.85rem;">
                         请输入测试问题并点击“开始测试”
                     </div>
