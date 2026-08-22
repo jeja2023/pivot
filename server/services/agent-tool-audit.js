@@ -19,8 +19,8 @@ async function recordAgentToolCall(data = {}) {
             id, run_id, step_id, tool_name, capability, risk_level, policy_decision,
             policy_version, approval_id, idempotent, input_payload, input_hash,
             output_payload_ref, output_hash, status, error_category, error_message,
-            duration_ms, created_at, attempt, operation_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            duration_ms, created_at, attempt, operation_key, context_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const params = [
         id,
@@ -43,7 +43,8 @@ async function recordAgentToolCall(data = {}) {
         Math.max(Number(data.durationMs) || 0, 0),
         now,
         Math.max(Number(data.attempt) || 1, 1),
-        data.operationKey || null
+        data.operationKey || null,
+        String(data.contextHash || '').slice(0, 64)
     ];
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -75,7 +76,7 @@ async function listAgentToolCalls(runId, options = {}) {
         SELECT id, run_id, step_id, tool_name, capability, risk_level, policy_decision,
                policy_version, approval_id, idempotent, input_payload, input_hash,
                output_payload_ref, output_hash, status, error_category, error_message,
-               duration_ms, created_at
+               duration_ms, created_at, context_hash
         FROM agent_tool_calls WHERE run_id = ? ORDER BY created_at ASC LIMIT ?
     `, [runId, limit]);
     return rows.map(row => {

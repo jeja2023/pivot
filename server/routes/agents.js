@@ -19,9 +19,22 @@ const {
 } = require('../services/agent-workflow-dependencies');
 const { getAgentTraceForUser } = require('../services/agent-traces');
 const { listAgentCheckpointsForUser } = require('../services/agent-checkpoints');
+const { getAgentEventCursorForUser, listAgentEventsForUser, replayAgentEventsForUser } = require('../services/agent-event-log');
+const {
+    listAgentContextWindowsForUser,
+    listAgentWorldStateSnapshotsForUser
+} = require('../services/agent-world-state-store');
+const {
+    acknowledgeAgentControlMessage,
+    listAgentControlMessages,
+    sendAgentControlMessage
+} = require('../services/agent-control');
+const { getAgentRunResources } = require('../services/agent-run-resources');
 const { listAgentToolCalls } = require('../services/agent-tool-audit');
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser, registerAgentSkill } = require('../services/agent-skills');
+const { installSkillPackage, verifySkillPackage } = require('../services/agent-skill-packages');
+const { listRuntimePacks, syncRuntimePack } = require('../services/agent-runtime-packs');
 const {
     createAgentEvalSuite,
     deleteAgentEvalSuite,
@@ -93,7 +106,7 @@ const {
     updateWorkflowTrigger
 } = require('../services/agent-runtime');
 
-function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
+function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
 
@@ -117,6 +130,45 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         });
         logAction(req, '注册 Agent Skill', `Skill: ${skill.name}`);
         res.status(201).json({ success: true, skill });
+    }));
+
+    router.post('/agents/skills/package', authMiddleware, uploadLimiter || ((_req, _res, next) => next()), ...(skillUpload?.single ? skillUpload.single('file') : []), asyncHandler(async (req, res) => {
+        if (!req.file?.path) return res.status(400).json({ error: '请选择 .skill.zip 文件。' });
+        try {
+            const allowedPermissions = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '')
+                .split(',').map(item => item.trim()).filter(Boolean);
+            const verified = await verifySkillPackage(req.file.path, {
+                allowedPermissions,
+                requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false',
+                publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
+            });
+            const installed = await installSkillPackage(req.file.path, {
+                allowedPermissions,
+                requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false',
+                publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || '',
+                installRoot: process.env.AGENT_SKILL_ROOT
+            });
+            const skill = await registerAgentSkill(req.user, verified.manifest.manifest, verified.package.instructions, {
+                allowedPermissions,
+                requireSignature: false,
+                publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
+            });
+            logAction(req, '导入 Agent Skill 包', `Skill: ${skill.name}，包摘要: ${installed.package.digest}`);
+            res.status(201).json({ success: true, skill, package: { digest: installed.package.digest, installDir: installed.installDir, bytes: installed.package.bytes } });
+        } finally {
+            try { require('fs').rmSync(req.file.path, { force: true }); } catch (_) {}
+        }
+    }));
+
+    router.get('/agents/runtime-packs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listRuntimePacks({ root: process.env.PIVOT_RUNTIME_PACK_ROOT }) });
+    }));
+
+    router.post('/agents/runtime-packs/sync', authMiddleware, asyncHandler(async (req, res) => {
+        if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) return res.status(403).json({ error: '只有管理员可以同步运行时资源包。' });
+        const result = await syncRuntimePack(req.body?.manifest || {}, { root: process.env.PIVOT_RUNTIME_PACK_ROOT, networkPolicy: req.body?.networkPolicy || req.body?.network_policy });
+        logAction(req, '同步 Agent 运行时资源包', `资源包: ${result.manifest.id}@${result.manifest.version}`);
+        res.status(201).json({ success: true, pack: { type: result.manifest.type, id: result.manifest.id, version: result.manifest.version, sha256: result.manifest.sha256, target: result.target } });
     }));
 
     router.post('/agents/skills/:name/disable', authMiddleware, asyncHandler(async (req, res) => {
@@ -542,6 +594,9 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
             workflowId: req.body?.workflowId || req.body?.workflow_id,
             workflowVersion: req.body?.workflowVersion || req.body?.workflow_version,
             modelRouter: req.body?.modelRouter || req.body?.model_router
+            ,forkHistory: req.body?.forkHistory || req.body?.fork_history || 'none'
+            ,skillId: req.body?.skillId || req.body?.skill_id
+            ,skillName: req.body?.skillName || req.body?.skill_name
         });
         logAction(req, '创建智能体任务', `任务ID: ${run.id}，目标: ${String(req.body?.goal || '').slice(0, 120)}`);
         res.status(202).json({ success: true, run });
@@ -563,6 +618,84 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
         const checkpoints = await listAgentCheckpointsForUser(req.params.id, req.user, { limit: req.query.limit });
         if (!checkpoints) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json({ data: checkpoints });
+    }));
+
+    router.get('/agents/runs/:id/events', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const replay = String(req.query.replay || '').toLowerCase() === 'true' || String(req.query.replay || '') === '1';
+        const events = await listAgentEventsForUser(req.params.id, req.user, {
+            after: req.query.after || req.query.afterSeq || 0,
+            limit: req.query.limit,
+            types: req.query.type || req.query.types || []
+        });
+        const cursor = await getAgentEventCursorForUser(req.params.id, req.user);
+        const nextAfter = events.length ? Number(events[events.length - 1].event_seq || 0) : Math.max(Number(req.query.after || req.query.afterSeq || 0) || 0, 0);
+        res.json({ data: events, cursor, nextAfter, hasMore: nextAfter < cursor.eventSeq, replay });
+    }));
+
+    router.get('/agents/runs/:id/events/replay', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const replay = await replayAgentEventsForUser(req.params.id, req.user, {
+            after: req.query.after || req.query.afterSeq || 0,
+            limit: req.query.limit,
+            types: req.query.type || req.query.types || []
+        });
+        res.json({ data: replay.events, cursor: replay.cursor, nextAfter: replay.nextAfter, hasMore: replay.hasMore, replay: true });
+    }));
+
+    router.get('/agents/runs/:id/context-windows', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const windows = await listAgentContextWindowsForUser(req.params.id, req.user, { limit: req.query.limit });
+        res.json({ data: windows });
+    }));
+
+    router.get('/agents/runs/:id/world-states', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const snapshots = await listAgentWorldStateSnapshotsForUser(req.params.id, req.user, {
+            after: req.query.after || req.query.afterVersion || 0,
+            limit: req.query.limit,
+            windowId: req.query.windowId || req.query.window_id || ''
+        });
+        res.json({ data: snapshots });
+    }));
+
+    router.get('/agents/runs/:id/resources', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        res.json({ data: await getAgentRunResources(req.params.id, req.user.id) });
+    }));
+
+    router.get('/agents/runs/:id/control-messages', authMiddleware, asyncHandler(async (req, res) => {
+        const messages = await listAgentControlMessages(req.params.id, req.user, {
+            after: req.query.after || 0,
+            limit: req.query.limit,
+            status: req.query.status
+        });
+        if (!messages) return res.status(404).json({ error: '智能体任务不存在。' });
+        res.json({ data: messages });
+    }));
+
+    router.post('/agents/runs/:id/control-messages', authMiddleware, asyncHandler(async (req, res) => {
+        const message = await sendAgentControlMessage({
+            user: req.user,
+            fromRunId: req.body?.fromRunId || req.body?.from_run_id || '',
+            toRunId: req.params.id,
+            type: req.body?.type || req.body?.messageType || req.body?.message_type,
+            payload: req.body?.payload ?? req.body?.message ?? {},
+            expiresAt: req.body?.expiresAt || req.body?.expires_at || null
+        });
+        logAction(req, '发送 AgentControl 消息', `目标任务ID: ${req.params.id}，消息类型: ${message.message_type}`);
+        res.status(202).json({ success: true, data: message });
+    }));
+
+    router.post('/agents/runs/:id/control-messages/:messageId/ack', authMiddleware, asyncHandler(async (req, res) => {
+        const message = await acknowledgeAgentControlMessage(req.params.messageId, req.user, req.params.id);
+        if (!message) return res.status(404).json({ error: '消息不存在、已确认或无权访问。' });
+        res.json({ success: true, data: message });
     }));
 
     router.get('/agents/runs/:id/tool-calls', authMiddleware, asyncHandler(async (req, res) => {
@@ -587,6 +720,15 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter }) {
     router.post('/agents/runs/:id/workflow-draft', authMiddleware, asyncHandler(async (req, res) => {
         const draft = await createWorkflowDraftFromRun(req.params.id, req.user);
         if (!draft) return res.status(404).json({ error: '自由任务不存在或无权访问。' });
+        const traceCalls = await listAgentToolCalls(req.params.id, { limit: 500 });
+        const traceDraft = compileTraceToWorkflow(traceCalls, {
+            title: draft.name,
+            filterExploration: true
+        });
+        draft.traceDraft = traceDraft;
+        draft.dagSpec = draft.dagSpec?.nodes?.length ? draft.dagSpec : traceDraft.dagSpec;
+        draft.traceYaml = traceDraft.yaml;
+        draft.summary = { ...draft.summary, traceNodeCount: traceDraft.nodes.length, traceCompiled: true };
         logAction(req, '从自由任务生成工作流草稿', `任务ID: ${req.params.id}，节点数: ${draft.summary?.nodeCount || 0}`);
         res.json({ success: true, draft });
     }));

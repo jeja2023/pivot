@@ -4,6 +4,7 @@ const {
     assertSafeModelRuntimeUrl,
     createSafeModelHttpAgents
 } = require('./model-adapter');
+const { normalizeProviderRequestData } = require('./agent-provider-envelope');
 
 // 模型补全转发的默认超时（毫秒）。聊天链路对常规补全使用更长超时，按需在调用处覆盖。
 const DEFAULT_FORWARD_TIMEOUT_MS = 180000;
@@ -25,9 +26,10 @@ async function forwardChatCompletion({
     if (!modelCfg) throw new Error('模型转发失败：缺少必需的 modelCfg 配置');
     if (!url) throw new Error('模型转发失败：缺少必需的 url 地址');
     await assertSafeModelRuntimeUrl(modelCfg, url, user);
-    assertJsonOnlyPayload(data);
+    const providerData = normalizeProviderRequestData(data);
+    assertJsonOnlyPayload(providerData);
     const agents = createSafeModelHttpAgents(modelCfg, user);
-    return axios.post(url, data, {
+    return axios.post(url, providerData, {
         headers,
         responseType: stream ? 'stream' : 'json',
         timeout,

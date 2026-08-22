@@ -763,6 +763,7 @@ function baseTablesSql() {
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 
+
         CREATE TABLE IF NOT EXISTS agent_eval_suites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -1343,7 +1344,7 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id, step_index);
         CREATE INDEX IF NOT EXISTS idx_agent_traces_user_created ON agent_traces(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_run_started ON agent_trace_spans(run_id, started_at, id);
-        CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_parent ON agent_trace_spans(parent_span_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_parent ON agent_trace_spans(parent_span_id);
         CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_run_step ON agent_run_checkpoints(run_id, step_index, id);
         CREATE INDEX IF NOT EXISTS idx_agent_eval_suites_user_updated ON agent_eval_suites(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_eval_cases_suite_order ON agent_eval_cases(suite_id, sort_order, id);

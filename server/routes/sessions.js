@@ -10,6 +10,10 @@ const { getAccessibleModelAsync } = require('../services/models');
 const { TimeoutError } = require('../services/concurrency');
 const { encodeAttachmentUrl } = require('../security');
 const sessionsRepository = require('../repositories/sessions');
+const {
+    listChatContextSnapshotsForUser,
+    listChatContextWindowsForUser
+} = require('../services/chat-context-state-store');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -312,6 +316,24 @@ function createSessionsRouter({
         if (!session) return res.status(404).json({ error: '会话不存在' });
         const rawMessages = await sessionsRepository.listMessages(req.params.id, req.user.id);
         res.json({ contextMeta: buildContextMeta(rawMessages) });
+    }));
+
+    router.get('/sessions/:id/context-windows', authMiddleware, asyncHandler(async (req, res) => {
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const windows = await listChatContextWindowsForUser(req.params.id, req.user, { limit: req.query.limit });
+        res.json({ data: windows });
+    }));
+
+    router.get('/sessions/:id/context-snapshots', authMiddleware, asyncHandler(async (req, res) => {
+        const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
+        if (!session) return res.status(404).json({ error: '会话不存在' });
+        const snapshots = await listChatContextSnapshotsForUser(req.params.id, req.user, {
+            after: req.query.after || req.query.afterVersion || 0,
+            limit: req.query.limit,
+            windowId: req.query.windowId || req.query.window_id || ''
+        });
+        res.json({ data: snapshots });
     }));
 
     router.post('/sessions/:id/compact', authMiddleware, asyncHandler(async (req, res) => {

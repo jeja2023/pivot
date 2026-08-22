@@ -47,4 +47,22 @@ function shouldRetryDiagnosis(diagnosis, attempt, maxAttempts = 3) {
     return Boolean(diagnosis?.retryable) && Number(attempt) < Math.max(Number(maxAttempts) || 1, 1);
 }
 
-module.exports = { CATEGORIES, diagnoseError, normalizeError, shouldRetryDiagnosis };
+function buildRecoveryPlan(diagnosis, attempt = 0) {
+    const category = String(diagnosis?.category || 'unknown');
+    const retryable = Boolean(diagnosis?.retryable);
+    const delayMs = retryable ? Math.min(30000, 250 * (2 ** Math.max(Number(attempt) || 0, 0))) : 0;
+    const actions = {
+        syntax: ['修复语法或 SQL 后重试'],
+        schema: ['重新读取字段/表结构', '修正字段映射后重试'],
+        data_quality: ['增加空值与类型防御', '缩小批次后重试'],
+        permission: ['停止越权操作', '请求明确授权'],
+        policy: ['停止被拦截调用', '改用已授权工具或提交审批'],
+        network: ['验证白名单和目标健康状态', '使用指数退避重试'],
+        resource: ['降低并发或数据规模', '改用 DuckDB 分批处理'],
+        timeout: ['拆分当前步骤', '降低单步复杂度后重试'],
+        unknown: ['保留诊断上下文', '执行一次受限重试']
+    }[category] || ['保留诊断上下文'];
+    return { category, retryable, attempt: Number(attempt) || 0, delayMs, actions, maxAttempts: retryable ? 3 : 0 };
+}
+
+module.exports = { CATEGORIES, buildRecoveryPlan, diagnoseError, normalizeError, shouldRetryDiagnosis };

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 807,
+  "total": 816,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -53,7 +53,7 @@
     },
     {
       "file": "tests/agent-runtime-lifecycle.test.js",
-      "count": 16
+      "count": 25
     },
     {
       "file": "tests/agent-trace-contracts.test.js",

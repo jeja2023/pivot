@@ -16,6 +16,7 @@ const {
     parsePlannerJson
 } = require('./chat-route-helpers');
 const { forwardChatCompletion } = require('./model-forwarder');
+const { buildToolExecutionPlan, summarizeToolExecutionPlan } = require('./agent-tool-execution-plan');
 
 const MCP_CHAT_TOOL_TITLES = {
     'db.list_tables': '列出数据表',
@@ -84,6 +85,47 @@ function buildMcpTracePayload(tool) {
 function buildMcpTraceMessage(actionName, serverName, fallback = '工具服务', prefix = '正在使用工具库') {
     const service = cleanCapabilityDisplayName(serverName || fallback) || fallback;
     return `${prefix}：${service} / ${actionName || '工具'}`;
+}
+
+async function executeChatMcpTool(tool, input, user, options = {}) {
+    const plan = await buildToolExecutionPlan({
+        run: {
+            id: `chat:${user?.id || 'anonymous'}`,
+            user_id: user?.id || null,
+            goal: '聊天工具调用',
+            tool_policy: 'all',
+            approval_policy: 'safe_mcp_auto',
+            network_policy: options.networkPolicy || {}
+        },
+        tool,
+        input,
+        user,
+        context: { autonomous: false, sandboxAvailable: options.sandboxAvailable !== false }
+    });
+    if (plan.policy.decision === 'denied') {
+        const error = new Error(plan.policy.reasons.join('；') || '聊天工具调用被策略拒绝。');
+        error.code = 'AGENT_POLICY_DENIED';
+        error.plan = summarizeToolExecutionPlan(plan);
+        throw error;
+    }
+    if (plan.approval.required) {
+        const error = new Error('聊天工具调用需要人工审批。');
+        error.code = 'AGENT_APPROVAL_REQUIRED';
+        error.plan = summarizeToolExecutionPlan(plan);
+        throw error;
+    }
+    if (plan.network.preflight === 'denied') {
+        const error = new Error(plan.network.error?.message || '聊天工具网络预检被拒绝。');
+        error.code = plan.network.error?.code || 'AGENT_NETWORK_POLICY_DENIED';
+        error.plan = summarizeToolExecutionPlan(plan);
+        throw error;
+    }
+    const result = await executeMcpTool(tool.fullName || tool.name, plan.input, user, {
+        ...(options || {}),
+        executionPlan: plan,
+        source: options.source || 'chat'
+    });
+    return { result, plan };
 }
 
 function getMcpToolIntent(userPrompt = '') {
@@ -501,7 +543,8 @@ async function maybeBuildChartAfterDataTool({ selected, result, intentTools, use
         serverName: chartTrace.serverName || '图表生成',
         message: buildMcpTraceMessage(chartTrace.actionName, chartTrace.serverName || '图表生成')
     }));
-    const chartResult = await executeMcpTool(chartTool.fullName, chartInput, user, { source: 'chat_auto_chart' });
+    const chartExecution = await executeChatMcpTool(chartTool, chartInput, user, { source: 'chat_auto_chart' });
+    const chartResult = chartExecution.result;
     return compactText(extractMcpResultText(chartResult, writeSse), 12000);
 }
 
@@ -651,7 +694,8 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
         message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具库工具')
     }));
     try {
-        const result = await executeMcpTool(selectedTool.fullName, fallbackInput, user, { source: 'chat_fallback' });
+        const execution = await executeChatMcpTool(selectedTool, fallbackInput, user, { source: 'chat_fallback' });
+        const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected: selectedTool, result, intentTools, userPrompt, user, writeSse });
         if (chartText) {
@@ -820,7 +864,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             message: buildMcpTraceMessage(trace.actionName, trace.serverName)
         }));
         mcpStage = 'execution';
-        const result = await executeMcpTool(selected.fullName, plan.input || {}, user, { source: 'chat' });
+        const execution = await executeChatMcpTool(selected, plan.input || {}, user, { source: 'chat' });
+        const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
         if (chartText) {

@@ -38,6 +38,7 @@ const PG_VECTOR_COLUMNS = {
 // 使用同一物理类型，避免 node-postgres 的返回值在测试与生产间发生漂移。
 const PG_JSONB_COLUMNS = {
     agent_runs: ['context_config', 'metadata', 'budget_config', 'usage_stats', 'network_policy'],
+    agent_events: ['payload'],
     knowledge_entities: ['aliases'],
     memories: ['source_message_ids'],
     memory_extraction_jobs: ['message_ids', 'result'],

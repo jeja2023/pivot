@@ -4,10 +4,10 @@ const { TaskBudget, BudgetExceededError, normalizeTaskBudget } = require('../ser
 const { ToolRegistry, normalizeToolContract } = require('../server/services/agent-contracts');
 const { enforceToolPolicy, evaluateToolPolicy } = require('../server/services/agent-policy');
 const { diagnoseError } = require('../server/services/agent-diagnosis');
-const { validateNetworkPolicyUrl } = require('../server/services/agent-network-policy');
+const { assertRedirectAllowed, validateNetworkPolicyUrl } = require('../server/services/agent-network-policy');
 const { createWorkspaceJail } = require('../server/services/agent-sandbox');
 const { compileTraceToWorkflow, normalizeTrace } = require('../server/services/agent-trace-compiler');
-const { parseSkillManifest, validateSkillManifest } = require('../server/services/agent-skills');
+const { buildSkillExecutionContext, parseSkillManifest, validateSkillManifest } = require('../server/services/agent-skills');
 const { canTransitionAgentRunStatus } = require('../server/services/agent-runtime/state-machine');
 const { assertWorkerConfiguration } = require('../desktop/agent-runtime');
 const { putAgentBlob } = require('../server/services/agent-blob-store');
@@ -46,6 +46,9 @@ test('PEP denies disallowed MCP and requires approval for risky calls', () => {
     assert.equal(evaluateToolPolicy({ run: { tool_policy: 'builtin_only' }, tool: { name: 'mcp.1.x', source: 'mcp' } }).decision, 'denied');
     assert.equal(evaluateToolPolicy({ run: { approval_policy: 'approve_all_mcp' }, tool: { name: 'mcp.1.x', source: 'mcp', input_schema: { type: 'object' } }, input: {} }).decision, 'require_approval');
     assert.throws(() => enforceToolPolicy({ run: { approval_policy: 'approve_all_mcp' }, tool: { name: 'mcp.1.x', source: 'mcp', input_schema: { type: 'object' } }, input: {} }), /人工审批/);
+    const approvedBudget = new TaskBudget({ max_tool_calls: 1 });
+    assert.equal(evaluateToolPolicy({ run: { approval_policy: 'approve_all_mcp' }, tool: { name: 'mcp.1.x', source: 'mcp', input_schema: { type: 'object' } }, input: {}, budget: approvedBudget, allowApproval: true }).decision, 'allow');
+    assert.equal(approvedBudget.snapshot().counts.tool_calls, 1);
 });
 
 test('content review policy normalizes model references before contract validation', () => {
@@ -90,6 +93,9 @@ test('network policy blocks loopback and validates allowed origins', () => {
     assert.throws(() => validateNetworkPolicyUrl('http://127.0.0.1:8080', { allowed_origins: ['http://127.0.0.1:8080'] }), /loopback/);
     assert.throws(() => validateNetworkPolicyUrl('https://example.com:8443', { allowed_origins: ['https://example.com'], allowed_ports: [443] }), /端口/);
     assert.throws(() => validateNetworkPolicyUrl('https://example.com', {}, { requireAllowlist: true }), /Origin 白名单/);
+    assert.doesNotThrow(() => validateNetworkPolicyUrl('http://10.20.30.40:8080', { allowed_origins: ['http://10.20.30.40:8080'], allowed_ports: [8080] }));
+    assert.doesNotThrow(() => validateNetworkPolicyUrl('https://sso.example.com', { allowed_origins: ['https://oa.example.com'], allowed_redirect_origins: ['https://sso.example.com'], allowed_ports: [443] }, { isRedirect: true }));
+    assert.doesNotThrow(() => assertRedirectAllowed('https://oa.example.com', 'https://sso.example.com', { allow_redirect: true, allowed_redirect_origins: ['https://sso.example.com'] }));
 });
 
 test('workspace jail rejects path escapes', () => {
@@ -108,7 +114,10 @@ test('trace compiler removes failed retries after success and emits a draft DAG'
     const draft = compileTraceToWorkflow(calls, { variables: { output: '/tmp/out' } });
     assert.equal(draft.draft, true);
     assert.equal(draft.nodes.length, 2);
+    assert.equal(draft.dagSpec.nodes.length, 2);
+    assert.match(draft.yaml, /nodes:/);
     assert.equal(draft.nodes[1].dependsOn[0], 'step_1');
+    assert.equal(draft.nodes[1].sideEffect, true);
 });
 
 test('Skill manifest parser and digest validator accept JSON/YAML subset', () => {
@@ -116,6 +125,19 @@ test('Skill manifest parser and digest validator accept JSON/YAML subset', () =>
     assert.equal(manifest.name, 'demo');
     const checked = validateSkillManifest({ id: 'corp.demo', name: 'demo', version: '1.0.0' });
     assert.equal(checked.valid, true);
+    const context = buildSkillExecutionContext({ id: 'corp.demo', name: 'demo', version: '1.0.0', permissions: ['code.execute'], tools: ['agent.code'] });
+    assert.deepEqual(context.skillPermissions, ['code.execute']);
+    const nested = parseSkillManifest('id: corp.nested\nname: nested\nversion: 1.0.0\ninputs:\n  file:\n    type: file\n    required: true\noutputs:\n  report:\n    type: file\n');
+    assert.equal(nested.inputs.file.required, true);
+});
+
+test('Skill minimum permissions are enforced by the PEP', () => {
+    const allowed = evaluateToolPolicy({ run: { skill_permissions: ['network.request'] }, tool: { name: 'agent.http', network: true, capabilities: ['network.request'] }, input: { url: 'https://example.com' } });
+    assert.notEqual(allowed.decision, 'denied');
+    const denied = evaluateToolPolicy({ run: { skill_permissions: ['filesystem.read_workspace'] }, tool: { name: 'agent.http', network: true, capabilities: ['network.request'] }, input: { url: 'https://example.com' } });
+    assert.equal(denied.decision, 'denied');
+    const aliased = evaluateToolPolicy({ run: { skill_permissions: ['code.python_execute'] }, tool: { name: 'agent.code', capabilities: ['code.execute'] }, input: { code: 'return 1' } });
+    assert.notEqual(aliased.decision, 'denied');
 });
 
 test('desktop worker requires explicit approval and network policy allowlist', () => {

@@ -59,6 +59,12 @@ async function beginAgentToolCheckpoint(runId, data = {}) {
     const existing = await queryOne('SELECT * FROM agent_run_checkpoints WHERE operation_key = ?', [operationKey]);
     if (existing) {
         const state = parseCheckpointState(existing.state);
+        if (existing.input_hash && data.inputHash && String(existing.input_hash) !== String(data.inputHash)) {
+            const error = new Error('工具操作键与输入摘要不匹配，已拒绝潜在重放混淆。');
+            error.code = 'AGENT_OPERATION_INPUT_MISMATCH';
+            error.category = 'policy';
+            throw error;
+        }
         if (String(existing.status) === 'completed') return { created: false, replay: true, output: state.output, checkpointId: existing.checkpoint_id };
         if (String(existing.status) === 'pending' && !data.idempotent && data.approvalGranted !== true) {
             const error = new Error('检测到未完成的非幂等工具调用，必须重新审批后才能继续。');
@@ -96,6 +102,25 @@ async function completeAgentToolCheckpoint(operationKey, output, options = {}) {
         SET status = 'completed', state = ?, committed_at = ?, created_at = COALESCE(created_at, ?)
         WHERE operation_key = ? AND status = 'pending'
     `, [serializeCheckpointState(next), options.committedAt || getBeijingTimestamp(), options.createdAt || getBeijingTimestamp(), String(operationKey)]);
+    return changed > 0;
+}
+
+async function failAgentToolCheckpoint(operationKey, error, options = {}) {
+    if (!operationKey) return false;
+    const row = await queryOne('SELECT state FROM agent_run_checkpoints WHERE operation_key = ?', [String(operationKey)]);
+    const current = parseCheckpointState(row?.state);
+    const next = {
+        ...current,
+        errorMessage: String(error?.message || error || '工具执行失败').slice(0, 2000),
+        errorCode: String(error?.code || '').slice(0, 80),
+        committed: false,
+        failedAt: getBeijingTimestamp()
+    };
+    const changed = await execute(`
+        UPDATE agent_run_checkpoints
+        SET status = 'error', state = ?, created_at = COALESCE(created_at, ?)
+        WHERE operation_key = ? AND status = 'pending'
+    `, [serializeCheckpointState(next), options.createdAt || getBeijingTimestamp(), String(operationKey)]);
     return changed > 0;
 }
 
@@ -178,6 +203,7 @@ module.exports = {
     beginAgentToolCheckpoint,
     checkpointInputHash,
     completeAgentToolCheckpoint,
+    failAgentToolCheckpoint,
     getLatestAgentCheckpoint,
     listAgentCheckpoints,
     listAgentCheckpointsForUser,

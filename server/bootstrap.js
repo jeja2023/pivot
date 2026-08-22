@@ -2,6 +2,7 @@ const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documen
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
+const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -59,7 +60,8 @@ function startBackgroundServices({
         recoverStaleKnowledgeDocumentIndexes,
         recoverAgentRuns,
         startAgentRecoveryRunner,
-        startAgentScheduleRunner
+        startAgentScheduleRunner,
+        startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start()
     }
 }) {
     dependencies.startGpuMonitor().catch(err => {
@@ -82,6 +84,11 @@ function startBackgroundServices({
         }
         try { dependencies.startAgentScheduleRunner(); } catch (err) {
             logger.warn({ err: err && err.message ? err.message : err }, '智能体计划调度器启动失败');
+        }
+        if (typeof dependencies.startAgentEventOutboxDispatcher === 'function') {
+            try { dependencies.startAgentEventOutboxDispatcher(); } catch (err) {
+                logger.warn({ err: err && err.message ? err.message : err }, 'Agent 事件 outbox 投递器启动失败');
+            }
         }
     });
 }

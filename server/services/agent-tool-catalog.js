@@ -66,6 +66,8 @@ async function formatToolList(user, options = {}) {
             risk_level: contract.risk_level,
             idempotent: contract.idempotent,
             side_effect: contract.side_effect,
+            concurrency: contract.concurrency,
+            cancellable: contract.cancellable,
             network: contract.network,
             approval_required: contract.approval_required,
             timeout: contract.timeout,

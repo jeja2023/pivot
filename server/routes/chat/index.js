@@ -16,7 +16,7 @@ const {
     recordModelSuccess,
     recordModelFailure
 } = require('../../services/model-runtime');
-const { createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../../streaming');
+const { createProviderEventStateMachine, createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
 const { openChatModelStream } = require('../../services/model-stream-service');
 const {
@@ -384,6 +384,7 @@ function createChatRouter({
                 });
             };
             const visibleReasoningFilter = disableChatThinking ? createVisibleReasoningStreamFilter() : null;
+            const providerState = createProviderEventStateMachine({ maxRecentEvents: 128 });
             const accumulator = createStreamAccumulator({
                 includeThoughtTags: !disableChatThinking,
                 includeThoughtContent: !disableChatThinking,
@@ -398,6 +399,10 @@ function createChatRouter({
             });
             const parser = createSseEventParser({
                 onData(payload) {
+                    try {
+                        const frame = JSON.parse(payload);
+                        providerState.ingest(frame);
+                    } catch (_) {}
                     accumulator.pushPayload(payload);
                 },
                 onDone() {}
@@ -426,9 +431,10 @@ function createChatRouter({
                 try {
                     parser.end();
                     accumulator.finish();
+                    const providerSnapshot = providerState.finalize();
 
                     let assistantContent = accumulator.getContent();
-                    let apiUsage = accumulator.getUsage();
+                    let apiUsage = accumulator.getUsage() || providerSnapshot.usage?.raw || null;
                     if (!assistantContent.trim()) {
                         const fallback = extractModelTextFromRawResponse(rawStreamText);
                         if (fallback.content) {
@@ -480,7 +486,15 @@ function createChatRouter({
                         modelId: modelCfg.id,
                         assistantTokens,
                         costTime,
-                        tps: tokensPerSec
+                        tps: tokensPerSec,
+                        provider: {
+                            status: providerSnapshot.status,
+                            protocol: providerSnapshot.protocol,
+                            responseId: providerSnapshot.responseId,
+                            eventCount: providerSnapshot.eventCount,
+                            finishReason: providerSnapshot.finishReason,
+                            usage: providerSnapshot.usage
+                        }
                     });
                     writeSse(JSON.stringify({
                         type: 'message_saved',

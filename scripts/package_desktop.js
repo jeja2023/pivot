@@ -138,6 +138,8 @@ try {
     ensureElectronInstalled();
     cleanBuildOutputs();
     run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
+    run(process.execPath, [path.join('scripts', 'package_browser_runtime.js')]);
+    run(process.execPath, [path.join('scripts', 'package_python_runtime.js')]);
     run(process.execPath, [electronBuilderInstallDeps]);
     run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(rawBuilderArgs)]);
     copyReleaseArtifactsToDownloads(rawBuilderArgs);

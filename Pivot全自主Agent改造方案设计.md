@@ -516,27 +516,27 @@ Phase 1: Runtime 核心与 PEP ➔ Phase 2: 沙箱隔离与数据双引擎 ➔ P
 ```
 
 ### 阶段一：Agent Runtime 核心、状态机与 PEP 拦截点 (MVP 核心)
-- [ ] 搭建 `desktop/agent-runtime/`，实现标准状态机（10 种状态流转与 Checkpoint 持久化）。
-- [ ] 建立 `Policy Enforcement Point (PEP)` 架构与 `ToolRegistry`，接入强类型 Tool Contract。
-- [ ] 实现 `TaskBudget` 预算与看门狗熔断机制。
-- [ ] 落地持久化数据模型（`agent_runs`, `agent_steps`, `agent_tool_calls`）。
+- [x] 搭建 `desktop/agent-runtime/`，实现标准状态机（10 种状态流转与 Checkpoint 持久化）。
+- [x] 建立 `Policy Enforcement Point (PEP)` 架构与 `ToolRegistry`，接入强类型 Tool Contract。
+- [x] 实现 `TaskBudget` 预算与看门狗熔断机制。
+- [x] 落地持久化数据模型（`agent_runs`, `agent_steps`, `agent_tool_calls`）。
 
 ### 阶段二：OS 级沙箱隔离与数据处理双引擎 (DuckDB + Python)
-- [ ] 实现 Windows Job Object / Linux cgroups 进程硬隔离与 Workspace Jail。
-- [ ] 接入 `@duckdb/node-api` 与 Data Source Adapter（CSV/Parquet/Excel）。
-- [ ] 接入 Base Python 运行环境，打通数据分析处理流水线。
-- [ ] 实现基于标准化分类学（Diagnose Taxonomy）的错误自愈引擎。
+- [x] 实现 Windows Job Object / Linux cgroups 进程硬隔离与 Workspace Jail。
+- [x] 接入 `@duckdb/node-api` 与 Data Source Adapter（CSV/Parquet/Excel）。
+- [x] 接入 Base Python 运行环境，打通数据分析处理流水线。
+- [x] 实现基于标准化分类学（Diagnose Taxonomy）的错误自愈引擎。
 
 ### 阶段三：浏览器自动化、网络白名单与凭证隔离 (Playwright)
-- [ ] 打包离线 Chromium，构建独立的 `AgentBrowserContext`。
-- [ ] 实施严密的 `NetworkPolicy`（防 SSRF、阻断非白名单私有 IP、阻断跨域重定向）。
-- [ ] 实现受控用户登录流与 DOM + 视觉截屏双引擎定位。
+- [x] 打包离线 Chromium，构建独立的 `AgentBrowserContext`。
+- [x] 实施严密的 `NetworkPolicy`（防 SSRF、阻断非白名单私有 IP、阻断跨域重定向）。
+- [x] 实现受控用户登录流与 DOM + 视觉截屏双引擎定位。
 
 ### 阶段四：企业级 Skill 体系与按需运行时分发
-- [ ] 实现 `SKILL.yaml` 解析、SHA256 签名校验与权限最小化审计。
-- [ ] 实现局域网按需资源包（Data Pack / Browser Pack）同步。
+- [x] 实现 `SKILL.yaml` 解析、SHA256 签名校验与权限最小化审计。
+- [x] 实现局域网按需资源包（Data Pack / Browser Pack）同步。
 
 ### 阶段五：Trace 语义提取器与工作流编译器 (Trace ➔ DAG)
-- [ ] 开发 `Trace Normalizer` 清洗过滤器与 `Workflow Compiler`。
-- [ ] 实现客户端自主任务“一键编译为 Web 端 DAG 工作流草稿”。
-- [ ] 完成端云协同联调、Crash Recovery 故障演练与企业内网环境压力/安全渗透测试。
+- [x] 开发 `Trace Normalizer` 清洗过滤器与 `Workflow Compiler`。
+- [x] 实现客户端自主任务“一键编译为 Web 端 DAG 工作流草稿”。
+- [x] 完成端云协同联调、Crash Recovery 故障演练与企业内网环境压力/安全渗透测试。

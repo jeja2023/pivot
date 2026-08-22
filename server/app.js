@@ -55,7 +55,7 @@ const {
 } = require('./security');
 const { getBeijingTimestamp } = require('./time');
 const { normalizeAuditAction } = require('./audit-actions');
-const { createUploadMiddleware, uploadSecurityMiddleware } = require('./upload');
+const { createSafeUpload, createUploadMiddleware, uploadSecurityMiddleware } = require('./upload');
 const { createAuthRouter } = require('./routes/auth');
 const { createAttachmentsRouter } = require('./routes/attachments');
 const { createChatRouter } = require('./routes/chat');
@@ -73,6 +73,9 @@ const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
 const { createMemoriesRouter } = require('./routes/memories');
+const { createAppServerRouter } = require('./routes/app-server');
+const { createAppServerProtocol } = require('./services/app-server-protocol');
+const { createAgentResidencyStore } = require('./services/agent-residency');
 const { ragRouter, retrieveContext } = require('./rag');
 const {
     migrateModelSecrets
@@ -414,6 +417,13 @@ app.use(express.static(path.join(__dirname, '../client'), {
     }
 }));
 const upload = createUploadMiddleware();
+const skillUpload = createSafeUpload({
+    root: path.join(process.env.DATA_DIR || path.join(__dirname, '../data'), 'skill-package-uploads'),
+    extensions: new Set(['.zip']),
+    fileSize: () => Math.min(Number(process.env.AGENT_SKILL_PACKAGE_MAX_BYTES) || 100 * 1024 * 1024, 100 * 1024 * 1024),
+    maxFields: 4,
+    errorMessage: '仅支持 .skill.zip 技能包'
+});
 const secureUpload = {
     single: (field) => [upload.single(field), uploadSecurityMiddleware],
     array: (field, maxCount) => [upload.array(field, maxCount), uploadSecurityMiddleware]
@@ -516,7 +526,11 @@ app.use('/api', createMemoriesRouter({
 app.use('/api', createAgentsRouter({
     authMiddleware,
     logAction,
-    automationLimiter: app.locals.automationLimiter
+    automationLimiter: app.locals.automationLimiter,
+    uploadLimiter,
+    skillUpload: {
+        single(field) { return [skillUpload.single(field), uploadSecurityMiddleware]; }
+    }
 }));
 
 // 入站触发挂在 /hooks 下：令牌即凭证，不参与浏览器会话鉴权和 CSRF 校验
@@ -527,6 +541,14 @@ app.use('/hooks', createTriggersRouter({
 
 app.use('/api', createEventsRouter({
     authMiddleware
+}));
+
+// App Server JSON-RPC 控制面：复用现有 Agent Runtime、事件回放和控制信箱。
+app.use('/api', createAppServerRouter({
+    authMiddleware,
+    protocol: createAppServerProtocol({
+        services: { residency: createAgentResidencyStore() }
+    })
 }));
 
 app.use('/api', createChatRouter({

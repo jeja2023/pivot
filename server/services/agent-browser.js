@@ -23,7 +23,7 @@ function assertSafeBrowserEvaluation(expression) {
 }
 
 function buildBrowserContextOptions(options = {}) {
-    return {
+    const result = {
         userDataDir: createIsolatedProfile(options.profileRoot, options.taskId),
         headless: options.headless !== false,
         viewport: options.viewport || { width: 1440, height: 900 },
@@ -31,6 +31,19 @@ function buildBrowserContextOptions(options = {}) {
         javaScriptEnabled: true,
         serviceWorkers: 'block'
     };
+    if (options.executablePath) result.executablePath = String(options.executablePath);
+    return result;
+}
+
+function resolveChromiumExecutable(chromium, options = {}) {
+    const candidates = [
+        options.executablePath,
+        process.env.PIVOT_CHROMIUM_PATH,
+        process.resourcesPath && path.join(process.resourcesPath, 'agent-runtime', 'browser', 'chromium', process.platform === 'win32' ? 'chrome.exe' : 'chrome'),
+        process.resourcesPath && path.join(process.resourcesPath, 'agent-runtime', 'browser', 'chromium', 'chrome'),
+        typeof chromium?.executablePath === 'function' ? chromium.executablePath() : ''
+    ].filter(Boolean).map(item => path.resolve(String(item)));
+    return candidates.find(item => fs.existsSync(item)) || '';
 }
 
 async function createAgentBrowserContext(options = {}) {
@@ -42,7 +55,8 @@ async function createAgentBrowserContext(options = {}) {
         throw unavailable;
     }
     const policy = normalizeNetworkPolicy(options.networkPolicy || {});
-    const contextOptions = buildBrowserContextOptions(options);
+    const executablePath = resolveChromiumExecutable(chromium, options);
+    const contextOptions = buildBrowserContextOptions({ ...options, executablePath });
     const profile = contextOptions.userDataDir;
     delete contextOptions.userDataDir;
     const context = await chromium.launchPersistentContext(profile, contextOptions);
@@ -51,8 +65,13 @@ async function createAgentBrowserContext(options = {}) {
             const request = route.request();
             let fromUrl = request.url();
             try { fromUrl = request.frame()?.url() || fromUrl; } catch (_) {}
-            await assertNetworkPolicyUrl(request.url(), policy, { requireAllowlist: true });
-            assertRedirectAllowed(fromUrl, request.url(), policy);
+            if (!['about:blank', 'about:srcdoc', 'null'].includes(String(fromUrl || '').toLowerCase())) {
+                assertRedirectAllowed(fromUrl, request.url(), policy);
+            }
+            await assertNetworkPolicyUrl(request.url(), policy, {
+                requireAllowlist: true,
+                isRedirect: !['about:blank', 'about:srcdoc', 'null'].includes(String(fromUrl || '').toLowerCase())
+            });
             await route.continue();
         } catch (error) {
             await route.abort('blockedbyclient');
@@ -74,6 +93,65 @@ async function createAgentBrowserContext(options = {}) {
     return context;
 }
 
+async function createControlledLoginFlow(options = {}) {
+    const policy = normalizeNetworkPolicy(options.networkPolicy || {});
+    const loginUrl = String(options.loginUrl || '').trim();
+    await assertNetworkPolicyUrl(loginUrl, policy, { requireAllowlist: true });
+    const context = await createAgentBrowserContext({ ...options, headless: false, networkPolicy: policy });
+    const page = await context.newPage();
+    await page.goto(loginUrl, { waitUntil: options.waitUntil || 'domcontentloaded' });
+    return {
+        context,
+        page,
+        async waitForUserReady({ readySelector = '', timeoutMs = 10 * 60 * 1000 } = {}) {
+            if (readySelector) await page.locator(String(readySelector)).waitFor({ state: 'visible', timeout: timeoutMs });
+            else await page.waitForTimeout(Math.min(Math.max(Number(timeoutMs) || 1000, 1000), 10 * 60 * 1000));
+            await assertNetworkPolicyUrl(page.url(), policy, { requireAllowlist: true });
+            return { url: page.url(), authenticated: true };
+        },
+        async close() { await closeAgentBrowserContext(context); }
+    };
+}
+
+async function captureAgentScreenshot(page, options = {}) {
+    if (options.loginPhase === true) {
+        const error = new Error('登录阶段禁止截取页面，避免凭证进入 Agent 上下文。');
+        error.code = 'AGENT_BROWSER_LOGIN_SCREENSHOT_DENIED';
+        error.category = 'policy';
+        throw error;
+    }
+    return page.screenshot({ type: 'png', fullPage: options.fullPage === true });
+}
+
+async function locateBrowserTarget(page, target = {}, options = {}) {
+    const spec = typeof target === 'string' ? { selector: target } : (target || {});
+    const candidates = [];
+    if (spec.selector) candidates.push(page.locator(String(spec.selector)).first());
+    if (spec.role && spec.name) candidates.push(page.getByRole(String(spec.role), { name: String(spec.name) }).first());
+    if (spec.text) candidates.push(page.getByText(String(spec.text), { exact: spec.exact === true }).first());
+    for (const locator of candidates) {
+        try {
+            if (await locator.count() && await locator.isVisible()) return { method: 'dom', locator };
+        } catch (_) {}
+    }
+    if (typeof options.visionLocator === 'function') {
+        const screenshot = await captureAgentScreenshot(page, options);
+        const visual = await options.visionLocator({ screenshot, target: spec });
+        if (visual && Number.isFinite(Number(visual.x)) && Number.isFinite(Number(visual.y))) return { method: 'vision', ...visual };
+    }
+    const error = new Error('浏览器页面未找到目标元素。');
+    error.code = 'AGENT_BROWSER_TARGET_NOT_FOUND';
+    error.category = 'schema';
+    throw error;
+}
+
+async function clickBrowserTarget(page, target, options = {}) {
+    const found = await locateBrowserTarget(page, target, options);
+    if (found.method === 'dom') await found.locator.click();
+    else await page.mouse.click(Number(found.x), Number(found.y));
+    return { method: found.method };
+}
+
 async function evaluateSafe(page, expression, arg) {
     assertSafeBrowserEvaluation(expression);
     return page.evaluate(expression, arg);
@@ -86,8 +164,13 @@ async function closeAgentBrowserContext(context) {
 module.exports = {
     assertSafeBrowserEvaluation,
     buildBrowserContextOptions,
+    captureAgentScreenshot,
+    clickBrowserTarget,
     closeAgentBrowserContext,
+    createControlledLoginFlow,
     createAgentBrowserContext,
     createIsolatedProfile,
-    evaluateSafe
+    evaluateSafe,
+    locateBrowserTarget,
+    resolveChromiumExecutable
 };

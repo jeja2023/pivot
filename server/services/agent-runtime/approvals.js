@@ -12,7 +12,8 @@ function createApprovalHelpers({
     updateRun,
     insertStep,
     listSteps,
-    createAgentNotification
+    createAgentNotification,
+    recordAgentEvent = null
 }) {
     function isApprovalGranted(run, toolName, approvalKey = '', input = {}) {
         const metadata = getRunMetadata(run);
@@ -67,6 +68,20 @@ function createApprovalHelpers({
             input,
             output: { status: 'approval_required', tool: tool.name, key: scopedKey }
         });
+        try {
+            await recordAgentEvent?.({
+                runId: run.id,
+                userId: run.user_id,
+                type: 'approval.requested',
+                payload: {
+                    tool: tool.name,
+                    key: scopedKey,
+                    inputHash: approvalInputHash(input),
+                    riskLevel: Number(tool.risk_level || tool.riskLevel || 0) || 0
+                },
+                eventKey: `approval:${scopedKey}:${approvalInputHash(input)}`
+            });
+        } catch (_) {}
         await createAgentNotification(run.user_id, run.id, 'approval', '任务需要审批', tool.title || tool.name);
         return true;
     }

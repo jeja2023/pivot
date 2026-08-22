@@ -1,3 +1,73 @@
+## [v0.1.23] - 2026-08-22
+
+### Codex Harness 对照项闭环：官方 MCP、外部长连接与 Agent Residency
+
+- Provider 转发边界统一清洗 Chat Completions 与 Responses API 的消息、Responses input、tool/function 定义和工具调用字段；Chat、OpenAI 兼容、应用中心、标题、RAG/长期记忆及 Agent 文本/流式入口继续复用同一转发层，内部治理字段不会从消息对象透传到上游。
+- 外部 MCP 标准 HTTP 客户端支持分片 SSE、异步 JSON-RPC 通知、会话头、协议版本、标准 GET SSE 重连、`retry` 延迟和 `Last-Event-ID` 恢复；普通请求收到目标结果后关闭流，需要订阅时可显式保活。
+- 固定接入 `@modelcontextprotocol/conformance@0.2.0-alpha.11`，新增官方 `initialize`、`tools_call` 和 `sse-retry` 客户端场景脚本与 npm 命令，三项官方场景实测通过。
+- 新增 PostgreSQL `agent_residencies` 持久化表与 Agent residency 服务：WorldState 脱敏快照、上下文哈希、运行绑定、访问时间、租约、过期淘汰、每用户 LRU、手工 evict/list 和后台 sweep；App Server 增加常驻实例 touch、租约领取/释放与治理方法。
+- 新增 residency PostgreSQL 集成回归和 MCP 分片长连接回归，版本迁移 `202608220006_agent_residency` 随启动自动应用。
+
+## [v0.1.22] - 2026-08-22
+
+### Codex Harness 对照项继续落地
+
+- Chat 入口新增 PostgreSQL 持久化 context window/snapshot，记录 turn、context/world-state hash、full/reference/diff 注入模式和压缩/权限/模型变化导致的窗口轮换，并提供窗口与快照查询接口。
+- Chat MCP 调用和桌面 Runtime 在 handler 前统一生成 `ToolExecutionPlan`，执行策略、审批、网络预检、sandbox 选择、规范化输入和重试语义；计划摘要写入执行步骤与 Trace 边界。
+- 桌面 Runtime 每个工具步骤创建并持久化 `AgentStepContext` 的 `contextHash/worldStateHash`，checkpoint 可按 hash 与服务端事件、Trace 对齐。
+- Provider 流新增 Responses API 与 Chat Completions 事件分类/状态机，记录工具增量、完成/失败/不完整状态、响应 ID、usage 和 finish reason；Agent model.completed 事件带 provider 摘要，Chat 也回传 provider 状态。
+- 新增 App Server JSON-RPC 控制面基线：`thread/start`、`turn/start`、`turn/steer`、`turn/interrupt`、`turn/events`，复用 Agent Runtime、AgentControl 和事件 replay。
+- 新增本地 MCP JSON-RPC conformance harness，覆盖 initialize、initialized notification、session header、tools/list 和 tools/call 生命周期。
+- 新增协议与恢复契约测试，覆盖 Responses/Chat Completions 状态机、App Server 控制面、本地 MCP conformance，以及非幂等副作用恢复时未审批不执行、审批后单次执行。
+- 迁移 `202608220005_chat_context_windows` 新增 Chat context window/snapshot 表及索引；本版本继续按 PostgreSQL-only 服务端口径维护。
+
+## [v0.1.21] - 2026-08-21
+
+### 阶段五：Trace 编译器、端云固化与全链路验收
+
+- 桌面 Runtime 新增 Trace 账本到 Web DAG 草稿的编译入口，并与现有 Trace/Workflow Draft API 对齐。
+- 完成端云协同联调、Checkpoint Crash Recovery、非幂等副作用重新审批、32 路并发压力和 SSRF/白名单安全探针。
+- 五阶段专项验收累计 `39/39` 通过（阶段一 20/20、阶段二 22/22、阶段三 3/3、阶段四 6/6、阶段五 3/3），新增验收记录见 `docs/reports/Pivot自主Agent五阶段验收记录.md`。
+- 本轮补强：桌面 Runtime 看门狗与预算落库、操作键输入摘要防混淆、Workspace Jail 符号链接防逃逸、完整 YAML Skill 解析与最小权限 PEP、企业内网白名单例外、Skill ZIP 魔数校验、Trace YAML/DAG 输出，以及 Python/Chromium 离线资源打包闭环。
+- 按 PostgreSQL-only 部署口径移除本轮新增的服务端 SQLite Skill/checkpoint 兼容迁移；PostgreSQL 生产迁移保留 owner_key、幂等检查点和工具审计字段。
+
+## [v0.1.19] - 2026-08-21
+
+### 阶段四：Skill 生态与局域网运行时资源分发
+
+- 新增 `.skill.zip` 离线供应链：`SKILL.yaml` 清单校验、SHA256 摘要、detached RSA 签名、权限最小化和安全解包。
+- 新增 Data Pack / Browser Pack 局域网同步、大小限制、Origin 白名单和 SHA256 校验，并接入 Agent 管理 API。
+- 阶段四专项测试 `4/4` 通过，覆盖签名包、路径穿越、重复条目、权限审计与资源包同步拒绝。
+
+## [v0.1.18] - 2026-08-21
+
+### 阶段三：离线 Chromium、受控登录与浏览器双引擎定位
+
+- Agent Browser 支持从离线资源包、环境变量或 Playwright 安装路径解析 Chromium；桌面打包前自动生成并纳入 `agent-runtime/browser`。
+- 浏览器上下文使用独立持久化 Profile、下载禁用、Service Worker 禁止、Origin/端口/重定向/下载大小策略和凭证脚本读取阻断。
+- 新增受控用户登录流程：用户在白名单页面完成登录，Agent 仅接收登录完成信号，不读取 Cookie、Storage 或密码字段。
+- 新增 DOM 优先、视觉截图回退的目标定位与点击 API，并接入 `agent.browser` 工具。
+- 阶段三专项测试 `22/22` 通过，真实 Chromium 集成验证、离线浏览器 dry-run 和 ESLint 均通过。
+
+## [v0.1.17] - 2026-08-21
+
+### 阶段二：OS 隔离、Python Worker 与数据错误自愈
+
+- 增加跨平台 OS 隔离适配：Windows Job Object 内存限制、Linux cgroup 限制与网络命名空间能力探测；严格模式在能力不可用时拒绝启动。
+- Workspace Jail Worker 现在返回实际隔离元数据，并对进程组、内存、PID 数和网络隔离策略进行统一编排。
+- 新增受工作区约束的 Python Worker，支持输入 JSON、超时、脚本大小限制、无用户 site 和临时文件隔离。
+- 增加按错误类别生成的指数退避恢复计划，覆盖语法、结构、数据质量、权限、策略、网络、资源和超时错误。
+- 阶段二专项测试 `20/20` 通过，包含真实 Python 3.12 执行验证；ESLint 无错误。
+
+## [v0.1.16] - 2026-08-21
+
+### 阶段一：桌面 Agent Runtime、状态机与 PEP 执行闭环
+
+- 新增桌面端 SQLite State DB，持久化任务、步骤、工具调用账本与恢复检查点。
+- 新增 `DesktopAgentRuntime`，统一状态流转、TaskBudget、Tool Contract、PEP、审批暂停/恢复、工具执行和诊断记录。
+- 工具调用采用操作键与输入哈希，已完成调用可幂等重放，未完成非幂等调用恢复时强制重新审批。
+- 新增桌面 Runtime 集成测试，覆盖正常执行、风险审批恢复和崩溃恢复，阶段一专项测试 `17/17` 通过，ESLint 通过。
+
 ## [v0.1.15] - 2026-08-21
 
 ### 智能体实时状态更新、工具输入契约修复与长期记忆超时降级优化

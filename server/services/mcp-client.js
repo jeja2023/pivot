@@ -7,7 +7,7 @@ const {
     createSafeHttpAgentsForUser,
     redactSecrets
 } = require('../security');
-const { safeJsonPost } = require('./safe-http-client');
+const { safeJsonGet, safeJsonPost } = require('./safe-http-client');
 const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServerAsync,
@@ -55,6 +55,164 @@ const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.sample_collection',
     'db.aggregate'
 ]);
+
+function headerValue(headers = {}, name) {
+    const target = String(name || '').toLowerCase();
+    const key = Object.keys(headers || {}).find(item => String(item).toLowerCase() === target);
+    return key ? headers[key] : undefined;
+}
+
+function parseMcpJsonRpcPayload(payload) {
+    if (payload && typeof payload === 'object') return payload;
+    const text = String(payload || '').trim();
+    if (!text) return null;
+    try { return JSON.parse(text); } catch (_) {
+        const dataLines = text.split(/\r?\n/)
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trim())
+            .filter(Boolean);
+        const candidate = dataLines.at(-1) || text;
+        try { return JSON.parse(candidate); } catch (error) {
+            error.message = 'MCP 服务返回了无法解析的 JSON-RPC 响应。';
+            throw error;
+        }
+    }
+}
+
+function readMcpStreamResponse(response, requestId, {
+    onNotification,
+    signal,
+    maxBytes = 4 * 1024 * 1024,
+    onReconnect = null,
+    keepAlive = false
+} = {}) {
+    const stream = response?.data;
+    if (!stream || typeof stream.on !== 'function') return Promise.resolve(parseMcpJsonRpcPayload(stream));
+    return new Promise((resolve, reject) => {
+        let buffer = '';
+        let dataLines = [];
+        let bytes = 0;
+        let settled = false;
+        let ended = false;
+        let reconnecting = false;
+        let currentEventId = '';
+        let lastEventId = '';
+        let retryMs = null;
+        const handleMessage = message => {
+            if (!message || typeof message !== 'object') return;
+            if (requestId && String(message.id ?? '') === String(requestId)) {
+                if (!settled) {
+                    settled = true;
+                    resolve(message);
+                }
+                if (!keepAlive) stream.destroy?.();
+                return;
+            }
+            try { onNotification?.(message); } catch (_) {}
+        };
+        const flush = () => {
+            if (!dataLines.length) {
+                if (currentEventId) lastEventId = currentEventId;
+                currentEventId = '';
+                return;
+            }
+            const payload = dataLines.join('\n');
+            dataLines = [];
+            if (currentEventId) lastEventId = currentEventId;
+            currentEventId = '';
+            if (payload === '[DONE]') return;
+            try { handleMessage(parseMcpJsonRpcPayload(payload)); } catch (error) {
+                if (!settled) {
+                    settled = true;
+                    reject(error);
+                }
+            }
+        };
+        const consume = text => {
+            buffer += text;
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.trim()) flush();
+                else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+                else if (line.startsWith('id:')) currentEventId = line.slice(3).trim();
+                else if (line.startsWith('retry:')) {
+                    const value = Number.parseInt(line.slice(6).trim(), 10);
+                    if (Number.isFinite(value) && value >= 0) retryMs = value;
+                }
+                else if (!dataLines.length && line.trim().startsWith('{')) dataLines.push(line.trim());
+            }
+        };
+        const onData = chunk => {
+            bytes += Buffer.byteLength(chunk);
+            if (bytes > maxBytes) {
+                const error = new Error('MCP SSE 响应超过大小限制。');
+                error.code = 'MCP_RESPONSE_TOO_LARGE';
+                if (!settled) {
+                    settled = true;
+                    reject(error);
+                }
+                stream.destroy?.(error);
+                return;
+            }
+            consume(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
+        };
+        const onEnd = async () => {
+            ended = true;
+            if (buffer) consume('\n');
+            flush();
+            if (!settled) {
+                if (typeof onReconnect === 'function' && !reconnecting) {
+                    reconnecting = true;
+                    try {
+                        const message = await onReconnect({ lastEventId, retryMs });
+                        if (!settled) {
+                            settled = true;
+                            resolve(message);
+                        }
+                    } catch (error) {
+                        if (!settled) {
+                            settled = true;
+                            reject(error);
+                        }
+                    }
+                    return;
+                }
+                settled = true;
+                reject(new Error('MCP SSE 响应在返回 JSON-RPC 结果前结束。'));
+            }
+        };
+        const onError = error => {
+            if (!settled) {
+                settled = true;
+                reject(error);
+            } else {
+                try { onNotification?.({ type: 'stream.error', error: { message: String(error?.message || error) } }); } catch (_) {}
+            }
+        };
+        stream.on('data', onData);
+        stream.once('end', () => { void onEnd(); });
+        stream.once('error', onError);
+        if (signal) {
+            const abort = () => stream.destroy?.(signal.reason || new Error('MCP 请求已取消。'));
+            if (signal.aborted) abort();
+            else signal.addEventListener('abort', abort, { once: true });
+            stream.once('close', () => signal.removeEventListener?.('abort', abort));
+        }
+        if (ended) onEnd();
+    });
+}
+
+function drainMcpResponse(response) {
+    const stream = response?.data;
+    if (!stream || typeof stream.on !== 'function') return Promise.resolve();
+    return new Promise(resolve => {
+        stream.once('end', resolve);
+        stream.once('error', resolve);
+        stream.once('close', resolve);
+        stream.resume?.();
+    });
+}
 
 function isUnitSharedMcpServer(server) {
     return Boolean(server && server.user_id !== null && server.user_id !== undefined && String(server.scope || '').toLowerCase() === 'shared');
@@ -361,7 +519,8 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         'Accept': protocolMode === 'standard' ? 'application/json, text/event-stream' : 'application/json',
         'User-Agent': 'Pivot-MCP-Client/1.0'
     };
-    if (protocolMode === 'standard') headers['MCP-Protocol-Version'] = '2024-11-05';
+    const protocolVersion = String(config.protocolVersion || config.protocol_version || options.protocolVersion || '2024-11-05');
+    if (protocolMode === 'standard') headers['MCP-Protocol-Version'] = protocolVersion;
     if (server.api_key && authMode !== 'none') {
         if (authMode === 'bearer') headers.Authorization = `Bearer ${server.api_key}`;
         else if (authMode === 'x-api-key') headers['x-api-key'] = server.api_key;
@@ -371,23 +530,59 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         }
     }
     const sessionKey = String(server.id || url);
-    const send = async (requestMethod, requestParams, requestHeaders, notification = false) => safeJsonPost(url, {
-        jsonrpc: '2.0',
-        ...(notification ? {} : { id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
-        method: requestMethod,
-        params: requestParams
-    }, {
-        user,
-        assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
-        createAgents: (targetUser) => createSafeHttpAgentsForUser(targetUser, {
-            allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
-            allowExplicitLoopbackForAdmin: true
-        }),
-        headers: requestHeaders,
-        timeout: timeoutMs,
-        signal: options.signal || null,
-        maxContentLength: 4 * 1024 * 1024
-    });
+    const send = async (requestMethod, requestParams, requestHeaders, notification = false) => {
+        const requestId = notification ? '' : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const maxReconnects = Math.max(0, Math.min(Number(options.maxReconnects ?? config.maxReconnects ?? 3) || 0, 8));
+        const requestOptions = {
+            user,
+            assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
+            createAgents: (targetUser) => createSafeHttpAgentsForUser(targetUser, {
+                allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
+                allowExplicitLoopbackForAdmin: true
+            }),
+            headers: requestHeaders,
+            timeout: timeoutMs,
+            signal: options.signal || null,
+            responseType: protocolMode === 'standard' ? 'stream' : 'json',
+            maxContentLength: 4 * 1024 * 1024
+        };
+        const response = await safeJsonPost(url, {
+            jsonrpc: '2.0',
+            ...(notification ? {} : { id: requestId }),
+            method: requestMethod,
+            params: requestParams
+        }, requestOptions);
+        if (notification) {
+            if (protocolMode === 'standard') await drainMcpResponse(response);
+            return response;
+        }
+        if (protocolMode !== 'standard') return response;
+        const readStream = async (streamResponse, attempt, streamHeaders) => readMcpStreamResponse(streamResponse, requestId, {
+            signal: options.signal || null,
+            onNotification: options.onNotification,
+            maxBytes: 4 * 1024 * 1024,
+            keepAlive: options.keepAlive === true,
+            onReconnect: attempt < maxReconnects
+                ? async ({ lastEventId, retryMs }) => {
+                    const waitMs = Math.max(0, Math.min(Number(retryMs) || 0, timeoutMs));
+                    if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+                    options.signal?.throwIfAborted?.();
+                    const reconnectHeaders = { ...streamHeaders };
+                    if (lastEventId) reconnectHeaders['Last-Event-ID'] = lastEventId;
+                    const reconnectResponse = await safeJsonGet(url, {
+                        ...requestOptions,
+                        headers: reconnectHeaders,
+                        responseType: 'stream'
+                    });
+                    const reconnectSessionId = headerValue(reconnectResponse.headers, 'mcp-session-id');
+                    if (reconnectSessionId) externalMcpSessions.set(sessionKey, String(reconnectSessionId));
+                    return readStream(reconnectResponse, attempt + 1, reconnectHeaders);
+                }
+                : null
+        });
+        const message = await readStream(response, 0, requestHeaders);
+        return { ...response, data: message };
+    };
     const parseResponse = (response, strict = protocolMode === 'standard') => {
         let data = response.data;
         if (typeof data === 'string') {
@@ -401,13 +596,13 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
     };
     if (protocolMode === 'standard' && method !== 'initialize' && !externalMcpSessions.has(sessionKey)) {
         const initResponse = await send('initialize', {
-            protocolVersion: '2024-11-05',
+            protocolVersion,
             capabilities: { tools: {} },
             clientInfo: { name: 'Pivot-MCP-Client', version: '0.1.13' }
         }, headers);
         parseResponse(initResponse, true);
         const initHeaders = initResponse.headers || {};
-        const sessionId = initHeaders['mcp-session-id'] || initHeaders['Mcp-Session-Id'];
+        const sessionId = headerValue(initHeaders, 'mcp-session-id');
         if (sessionId) externalMcpSessions.set(sessionKey, String(sessionId));
         const sessionHeaders = { ...headers };
         if (sessionId) sessionHeaders['Mcp-Session-Id'] = String(sessionId);
@@ -683,6 +878,8 @@ async function executeMcpTool(fullName, input, user, options = {}) {
 }
 
 module.exports = {
+    callMcpJsonRpc,
+    clearMcpSessions() { externalMcpSessions.clear(); },
     executeMcpTool,
     getAccessibleMcpServer,
     listCachedMcpTools,

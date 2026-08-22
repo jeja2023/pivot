@@ -432,58 +432,6 @@ const migrations = [
     {
         id: '202608210001_autonomous_agent_runtime_contracts',
         description: 'Add autonomous Agent budget, tool governance audit, and Skill registry contracts.',
-        up(db) {
-            const runColumns = db.pragma('table_info(agent_runs)');
-            if (runColumns.length) {
-                const existing = new Set(runColumns.map(column => column.name));
-                if (!existing.has('budget_config')) db.exec("ALTER TABLE agent_runs ADD COLUMN budget_config TEXT DEFAULT '{}'");
-                if (!existing.has('usage_stats')) db.exec("ALTER TABLE agent_runs ADD COLUMN usage_stats TEXT DEFAULT '{}'");
-            }
-            db.exec(`
-                CREATE TABLE IF NOT EXISTS agent_tool_calls (
-                    id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL,
-                    step_id TEXT NOT NULL,
-                    tool_name TEXT NOT NULL,
-                    capability TEXT DEFAULT 'agent.execute',
-                    risk_level INTEGER DEFAULT 0,
-                    policy_decision TEXT NOT NULL,
-                    policy_version TEXT DEFAULT 'v1',
-                    approval_id TEXT,
-                    idempotent INTEGER DEFAULT 0,
-                    input_payload TEXT DEFAULT '{}',
-                    input_hash TEXT,
-                    output_payload_ref TEXT,
-                    output_hash TEXT,
-                    status TEXT NOT NULL,
-                    error_category TEXT,
-                    error_message TEXT,
-                    duration_ms INTEGER DEFAULT 0,
-                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
-                );
-                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(run_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool ON agent_tool_calls(tool_name);
-                CREATE TABLE IF NOT EXISTS agent_skills (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    version TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT DEFAULT '',
-                    publisher TEXT DEFAULT '',
-                    digest TEXT NOT NULL,
-                    manifest_yaml TEXT NOT NULL,
-                    instructions_md TEXT DEFAULT '',
-                    scope TEXT DEFAULT 'user',
-                    user_id INTEGER,
-                    status TEXT DEFAULT 'enabled',
-                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                    updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                );
-                CREATE INDEX IF NOT EXISTS idx_agent_skills_user ON agent_skills(user_id, status, updated_at);
-            `);
-        },
         async upPg(client) {
             await client.query(`
                 ALTER TABLE agent_runs
@@ -514,7 +462,7 @@ const migrations = [
                 CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool ON agent_tool_calls(tool_name);
                 CREATE TABLE IF NOT EXISTS agent_skills (
                     id VARCHAR(64) PRIMARY KEY,
-                    name VARCHAR(128) UNIQUE NOT NULL,
+                    name VARCHAR(128) NOT NULL,
                     version VARCHAR(32) NOT NULL,
                     title VARCHAR(255) NOT NULL,
                     description TEXT DEFAULT '',
@@ -577,6 +525,275 @@ const migrations = [
                 ALTER TABLE agent_tool_calls ADD COLUMN IF NOT EXISTS operation_key VARCHAR(255);
                 CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_operation ON agent_tool_calls(operation_key);
                 CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_input_gin ON agent_tool_calls USING gin(input_payload);
+            `);
+        }
+    },
+    {
+        id: '202608210003_agent_harness_context_events',
+        description: 'Add PostgreSQL AgentStepContext hashes, WorldState event sequencing, and append-only Agent events.',
+        async upPg(client) {
+            await client.query(`
+                ALTER TABLE agent_runs
+                    ADD COLUMN IF NOT EXISTS event_seq BIGINT NOT NULL DEFAULT 0;
+                ALTER TABLE agent_steps
+                    ADD COLUMN IF NOT EXISTS context_hash VARCHAR(64) DEFAULT '';
+                ALTER TABLE agent_trace_spans
+                    ADD COLUMN IF NOT EXISTS context_hash VARCHAR(64) DEFAULT '';
+                ALTER TABLE agent_tool_calls
+                    ADD COLUMN IF NOT EXISTS context_hash VARCHAR(64) DEFAULT '';
+                CREATE TABLE IF NOT EXISTS agent_events (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    run_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    event_seq BIGINT NOT NULL,
+                    event_key VARCHAR(255) DEFAULT '',
+                    event_type VARCHAR(80) NOT NULL,
+                    turn_id VARCHAR(160) DEFAULT '',
+                    step_index INTEGER DEFAULT 0,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    payload_hash VARCHAR(64) NOT NULL,
+                    provider_visible BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    UNIQUE(run_id, event_seq),
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_events_run_seq ON agent_events(run_id, event_seq);
+                CREATE INDEX IF NOT EXISTS idx_agent_events_user_seq ON agent_events(user_id, event_seq);
+                CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_steps_context_hash ON agent_steps(context_hash);
+                CREATE INDEX IF NOT EXISTS idx_agent_trace_spans_context_hash ON agent_trace_spans(context_hash);
+                CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_context_hash ON agent_tool_calls(context_hash);
+            `);
+        }
+    },
+    {
+        id: '202608220001_agent_control_mailbox',
+        description: 'Add PostgreSQL parent-child AgentControl mailbox with scoped delivery and acknowledgements.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS agent_control_messages (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    message_id VARCHAR(128) NOT NULL UNIQUE,
+                    user_id BIGINT NOT NULL,
+                    from_run_id VARCHAR(128),
+                    to_run_id VARCHAR(128) NOT NULL,
+                    message_type VARCHAR(40) NOT NULL DEFAULT 'steer',
+                    status VARCHAR(24) NOT NULL DEFAULT 'pending',
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    payload_hash VARCHAR(64) NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    delivered_at TIMESTAMPTZ,
+                    acknowledged_at TIMESTAMPTZ,
+                    expires_at TIMESTAMPTZ,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (from_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (to_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_control_to_status ON agent_control_messages(to_run_id, status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_control_user_created ON agent_control_messages(user_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_control_from_run ON agent_control_messages(from_run_id, created_at);
+            `);
+        }
+    },
+    {
+        id: '202608220002_agent_world_state_windows',
+        description: 'Persist PostgreSQL WorldState context windows, baselines, and replayable snapshots for Agent runs.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS agent_context_windows (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    window_id VARCHAR(128) NOT NULL UNIQUE,
+                    run_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    window_version INTEGER NOT NULL,
+                    parent_window_id VARCHAR(128),
+                    status VARCHAR(24) NOT NULL DEFAULT 'active',
+                    opened_reason VARCHAR(64) NOT NULL DEFAULT 'initial',
+                    initial_state_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    closed_at TIMESTAMPTZ,
+                    UNIQUE(run_id, window_version),
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS agent_world_state_snapshots (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    snapshot_id VARCHAR(128) NOT NULL UNIQUE,
+                    run_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    window_id VARCHAR(128) NOT NULL,
+                    snapshot_version INTEGER NOT NULL,
+                    turn_id VARCHAR(160) DEFAULT '',
+                    step_index INTEGER DEFAULT 0,
+                    context_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    state_hash VARCHAR(64) NOT NULL,
+                    base_state_hash VARCHAR(64) DEFAULT '',
+                    injection_mode VARCHAR(16) NOT NULL DEFAULT 'full',
+                    full_refresh_reason VARCHAR(64) DEFAULT '',
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    patch JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    UNIQUE(run_id, snapshot_version),
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (window_id) REFERENCES agent_context_windows(window_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_context_windows_run_version
+                    ON agent_context_windows(run_id, window_version DESC);
+                CREATE INDEX IF NOT EXISTS idx_agent_context_windows_user_created
+                    ON agent_context_windows(user_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_agent_world_state_run_version
+                    ON agent_world_state_snapshots(run_id, snapshot_version DESC);
+                CREATE INDEX IF NOT EXISTS idx_agent_world_state_window_version
+                    ON agent_world_state_snapshots(window_id, snapshot_version ASC);
+                CREATE INDEX IF NOT EXISTS idx_agent_world_state_context_hash
+                    ON agent_world_state_snapshots(context_hash);
+            `);
+        }
+    },
+    {
+        id: '202608220003_agent_event_outbox',
+        description: 'Persist PostgreSQL Agent event notifications for retryable cross-process delivery and replay cursors.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS agent_event_outbox (
+                    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    event_id BIGINT NOT NULL UNIQUE,
+                    run_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    event_seq BIGINT NOT NULL,
+                    event_type VARCHAR(80) NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    status VARCHAR(24) NOT NULL DEFAULT 'pending',
+                    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                    available_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    locked_at TIMESTAMPTZ,
+                    locked_by VARCHAR(128) DEFAULT '',
+                    delivered_at TIMESTAMPTZ,
+                    last_error TEXT DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    FOREIGN KEY (event_id) REFERENCES agent_events(id) ON DELETE CASCADE,
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_event_outbox_pending
+                    ON agent_event_outbox(status, available_at, id);
+                CREATE INDEX IF NOT EXISTS idx_agent_event_outbox_run_seq
+                    ON agent_event_outbox(run_id, event_seq);
+                CREATE INDEX IF NOT EXISTS idx_agent_event_outbox_user_status
+                    ON agent_event_outbox(user_id, status, created_at);
+            `);
+        }
+    },
+    {
+        id: '202608220004_agent_run_resources',
+        description: 'Track PostgreSQL Agent child budget reservations, concurrency limits, and fork history policy.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS agent_run_resources (
+                    run_id VARCHAR(128) PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    parent_run_id VARCHAR(128),
+                    token_budget BIGINT NOT NULL DEFAULT 0,
+                    tokens_reserved BIGINT NOT NULL DEFAULT 0,
+                    tokens_consumed BIGINT NOT NULL DEFAULT 0,
+                    max_children INTEGER NOT NULL DEFAULT 4,
+                    active_children INTEGER NOT NULL DEFAULT 0,
+                    fork_history_mode VARCHAR(16) NOT NULL DEFAULT 'none',
+                    fork_history_turns INTEGER NOT NULL DEFAULT 0,
+                    reservation_released BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (parent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_run_resources_parent
+                    ON agent_run_resources(parent_run_id, reservation_released);
+                CREATE INDEX IF NOT EXISTS idx_agent_run_resources_user
+                    ON agent_run_resources(user_id, created_at DESC);
+            `);
+        }
+    },
+    {
+        id: '202608220005_chat_context_windows',
+        description: 'Persist PostgreSQL Chat context windows and compact world-state snapshots for cross-entry replay.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS chat_context_windows (
+                    window_id VARCHAR(128) PRIMARY KEY,
+                    session_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    window_version INTEGER NOT NULL,
+                    parent_window_id VARCHAR(128),
+                    status VARCHAR(24) NOT NULL DEFAULT 'active',
+                    opened_reason VARCHAR(64) NOT NULL DEFAULT 'initial',
+                    initial_state_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    closed_at TIMESTAMPTZ,
+                    UNIQUE(session_id, user_id, window_version),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS chat_context_snapshots (
+                    snapshot_id VARCHAR(128) PRIMARY KEY,
+                    session_id VARCHAR(128) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    window_id VARCHAR(128) NOT NULL,
+                    snapshot_version INTEGER NOT NULL,
+                    turn_id VARCHAR(160) NOT NULL DEFAULT '',
+                    context_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    state_hash VARCHAR(64) NOT NULL,
+                    base_state_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    injection_mode VARCHAR(16) NOT NULL DEFAULT 'full',
+                    full_refresh_reason VARCHAR(64) NOT NULL DEFAULT '',
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    patch JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    UNIQUE(session_id, user_id, snapshot_version),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (window_id) REFERENCES chat_context_windows(window_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_context_windows_session
+                    ON chat_context_windows(session_id, user_id, window_version DESC);
+                CREATE INDEX IF NOT EXISTS idx_chat_context_snapshots_session
+                    ON chat_context_snapshots(session_id, user_id, snapshot_version DESC);
+                CREATE INDEX IF NOT EXISTS idx_chat_context_snapshots_hash
+                    ON chat_context_snapshots(context_hash);
+            `);
+        }
+    },
+    {
+        id: '202608220006_agent_residency',
+        description: 'Persist PostgreSQL resident Agent state with leases, expiry and per-user LRU eviction.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS agent_residencies (
+                    resident_id VARCHAR(128) PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    resident_key VARCHAR(255) NOT NULL,
+                    run_id VARCHAR(128),
+                    status VARCHAR(24) NOT NULL DEFAULT 'idle',
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    context_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    expires_at TIMESTAMPTZ,
+                    lease_owner VARCHAR(128) NOT NULL DEFAULT '',
+                    lease_expires_at TIMESTAMPTZ,
+                    hit_count BIGINT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    UNIQUE(user_id, resident_key),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_residencies_user_access
+                    ON agent_residencies(user_id, status, last_accessed_at ASC);
+                CREATE INDEX IF NOT EXISTS idx_agent_residencies_expiry
+                    ON agent_residencies(status, expires_at, lease_expires_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_residencies_run
+                    ON agent_residencies(run_id, updated_at DESC);
             `);
         }
     },

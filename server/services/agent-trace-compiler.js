@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const yaml = require('js-yaml');
 
 function parseValue(value) {
     if (value && typeof value === 'object') return value;
@@ -6,6 +7,11 @@ function parseValue(value) {
 }
 
 function inputHash(input) { return crypto.createHash('sha256').update(JSON.stringify(input || {})).digest('hex'); }
+
+function inferSideEffect(call) {
+    if (call.side_effect !== undefined || call.sideEffect !== undefined) return Boolean(call.side_effect || call.sideEffect);
+    return !Boolean(call.idempotent) && /(?:write|insert|update|delete|export|upload|send|message|publish|browser|http|mcp\.)/i.test(String(call.tool_name || ''));
+}
 
 function normalizeTrace(toolCalls = [], options = {}) {
     const calls = (Array.isArray(toolCalls) ? toolCalls : []).map((call, index) => ({
@@ -16,6 +22,8 @@ function normalizeTrace(toolCalls = [], options = {}) {
         output_payload: parseValue(call.output_payload ?? call.output ?? {}),
         status: String(call.status || 'success'),
         idempotent: Boolean(call.idempotent),
+        side_effect: inferSideEffect({ ...call, tool_name: String(call.tool_name || call.toolName || call.tool || '') }),
+        risk_level: Number(call.risk_level || call.riskLevel || 0) || 0,
         input_hash: call.input_hash || inputHash(call.input_payload ?? call.input ?? {})
     })).filter(call => call.tool_name);
     const successfulHashes = new Set(calls.filter(call => ['success', 'completed'].includes(call.status)).map(call => `${call.tool_name}:${call.input_hash}`));
@@ -87,6 +95,8 @@ function compileTraceToWorkflow(toolCalls, options = {}) {
         description: '由标准化工具执行轨迹生成，发布前必须人工审核。',
         draft: true,
         nodes: steps,
+        dagSpec: { nodes: steps },
+        yaml: yaml.dump({ version: '1.0', title: options.title || '由 Agent Trace 编译的工作流草稿', nodes: steps }, { noRefs: true, lineWidth: 120 }),
         variables: Object.keys(variables),
         trace: { sourceCount: Array.isArray(toolCalls) ? toolCalls.length : 0, normalizedCount: normalized.length }
     };

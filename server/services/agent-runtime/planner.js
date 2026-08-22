@@ -1,6 +1,7 @@
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
 const { fitMessagesToContextBudget } = require('../context-budget');
+const { buildWorldStatePrompt } = require('../agent-step-context');
 
 function observationMessages(observations = []) {
     return observations.map((observation, index) => ({
@@ -9,7 +10,7 @@ function observationMessages(observations = []) {
     }));
 }
 
-function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null) {
+function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null, worldState = null, worldStateInjection = null) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
     if (context.mode === 'recent') contextLines.push('使用最近的对话上下文。');
@@ -29,6 +30,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
                 '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
                 '以观察结果为依据，不要编造工具返回结果。',
                 contextLines.length ? `上下文指导：${contextLines.join(' ')}` : '无额外上下文指导。',
+                worldState ? buildWorldStatePrompt(worldState, { injection: worldStateInjection }) : '',
                 '可用工具：',
                 JSON.stringify(toolList, null, 2)
             ].join('\n')

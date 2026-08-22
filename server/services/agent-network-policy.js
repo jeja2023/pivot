@@ -37,6 +37,10 @@ function originAllowed(origin, allowed = []) {
     });
 }
 
+function isOriginExplicitlyAllowed(origin, allowed = []) {
+    return allowed.length > 0 && originAllowed(origin, allowed);
+}
+
 function validateNetworkPolicyUrl(rawUrl, policy = {}, options = {}) {
     const normalized = normalizeNetworkPolicy(policy);
     const { parsed, origin } = originOf(rawUrl);
@@ -44,18 +48,24 @@ function validateNetworkPolicyUrl(rawUrl, policy = {}, options = {}) {
     const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
     if (!normalized.allowed_ports.includes(port)) throw new Error(`网络端口不在白名单中：${port}`);
     if (options.requireAllowlist === true && normalized.allowed_origins.length === 0) throw new Error('自主 Agent 网络策略必须显式配置 Origin 白名单。');
-    if (!originAllowed(origin, normalized.allowed_origins) && !options.isRedirect) throw new Error('网络目标 Origin 不在白名单中。');
+    const redirectAllowed = options.isRedirect === true && originAllowed(origin, normalized.allowed_redirect_origins);
+    if (!originAllowed(origin, normalized.allowed_origins) && !redirectAllowed) throw new Error('网络目标 Origin 不在白名单中。');
     const host = normalizeHostForPolicy(parsed.hostname);
     if (normalized.block_loopback && isLoopbackHost(host)) throw new Error('网络策略禁止访问 loopback。');
-    if (normalized.block_private_ranges && isPrivateHost(host)) throw new Error('网络策略禁止访问非白名单私有地址。');
+    if (normalized.block_private_ranges && isPrivateHost(host) && !isOriginExplicitlyAllowed(origin, normalized.allowed_origins)) throw new Error('网络策略禁止访问非白名单私有地址。');
     if (normalized.block_link_local && (host.startsWith('169.254.') || host.startsWith('fe80:'))) throw new Error('网络策略禁止访问 link-local 地址。');
     return parsed;
 }
 
 async function assertNetworkPolicyUrl(rawUrl, policy = {}, options = {}) {
-    const parsed = validateNetworkPolicyUrl(rawUrl, policy, options);
+    const normalized = normalizeNetworkPolicy(policy);
+    const parsed = validateNetworkPolicyUrl(rawUrl, normalized, options);
+    const allowlistedPrivateOrigin = isOriginExplicitlyAllowed(parsed.origin.toLowerCase(), normalized.allowed_origins);
     await assertSafeOutboundHost(parsed.hostname, {
-        blockPrivate: normalizeNetworkPolicy(policy).block_private_ranges,
+        // An explicitly allowlisted private Origin is the supported enterprise
+        // LAN case. Sensitive loopback/link-local/metadata addresses remain
+        // blocked by assertSafeOutboundHost regardless of this exception.
+        blockPrivate: normalized.block_private_ranges && !allowlistedPrivateOrigin,
         allowExplicitLoopback: false
     });
     return parsed;

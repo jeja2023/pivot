@@ -85,6 +85,31 @@ test('runtime recovery leaves stale awaiting approval runs suspended', async () 
     }
 });
 
+test('runtime recovery requeues stale idempotent checkpoints and suspends side effects for approval', async () => {
+    const userId = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()?.id;
+    assert.ok(userId);
+    const suffix = process.pid + '-' + Date.now();
+    const safeId = `stale-idempotent-${suffix}`;
+    const unsafeId = `stale-side-effect-${suffix}`;
+    const staleAt = '2000-01-01 00:00:00';
+    db.prepare("INSERT INTO agent_runs (id,user_id,title,goal,status,metadata,last_heartbeat_at,created_at,updated_at) VALUES (?,?,?,?, 'running','{}',?,?,?)")
+        .run(safeId, userId, 'safe', 'safe', staleAt, staleAt, staleAt);
+    db.prepare("INSERT INTO agent_runs (id,user_id,title,goal,status,metadata,last_heartbeat_at,created_at,updated_at) VALUES (?,?,?,?, 'running','{}',?,?,?)")
+        .run(unsafeId, userId, 'unsafe', 'unsafe', staleAt, staleAt, staleAt);
+    try {
+        db.prepare("INSERT INTO agent_run_checkpoints (checkpoint_id,run_id,step_index,checkpoint_type,status,state,operation_key,tool_name,input_hash,idempotent,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+            .run(`cp-safe-${suffix}`, safeId, 1, 'tool', 'pending', '{}', `op-safe-${suffix}`, 'filesystem.read', 'h', 1, staleAt);
+        db.prepare("INSERT INTO agent_run_checkpoints (checkpoint_id,run_id,step_index,checkpoint_type,status,state,operation_key,tool_name,input_hash,idempotent,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+            .run(`cp-unsafe-${suffix}`, unsafeId, 1, 'tool', 'pending', '{}', `op-unsafe-${suffix}`, 'database.insert', 'h', 0, staleAt);
+        await recoverAgentRuns();
+        assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(safeId).status, 'queued');
+        assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(unsafeId).status, 'approval_required');
+    } finally {
+        db.prepare('DELETE FROM agent_run_checkpoints WHERE run_id IN (?,?)').run(safeId, unsafeId);
+        db.prepare('DELETE FROM agent_runs WHERE id IN (?,?)').run(safeId, unsafeId);
+    }
+});
+
 test('an awaiting approval run releases its queue slot to the next run', async () => {
     const globalQueue = getAgentQueue();
     const previousMax = globalQueue.getStatus().maxConcurrent;

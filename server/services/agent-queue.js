@@ -196,7 +196,7 @@ function createAgentQueue({
         scheduleProcessQueue();
     }
 
-    async function recoverQueued(limit = 100) {
+    async function recoverQueued(limit = 100, options = {}) {
         const queued = await dbRunner.query(`
             SELECT id
             FROM agent_runs
@@ -206,7 +206,8 @@ function createAgentQueue({
             LIMIT ?
         `, [limit]);
         queued.forEach(run => queuedHints.add(run.id));
-        scheduleProcessQueue();
+        if (options.deferSchedule) setTimeout(scheduleProcessQueue, 0);
+        else scheduleProcessQueue();
         return queued.length;
     }
 

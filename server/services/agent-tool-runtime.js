@@ -2,8 +2,8 @@ const { clampText, executeBuiltInTool } = require('./agent-tools');
 const { executeMcpTool } = require('./mcp-client');
 const { estimateTokens } = require('../llm');
 const { getModelContextBudget } = require('./context-budget');
-const { enforceToolPolicy } = require('./agent-policy');
-const { beginAgentToolCheckpoint, checkpointInputHash, completeAgentToolCheckpoint } = require('./agent-checkpoints');
+const { defaultToolOrchestrator } = require('./agent-tool-orchestrator');
+const { buildToolExecutionPlan } = require('./agent-tool-execution-plan');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -114,75 +114,54 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         err.status = 403;
         throw err;
     }
-    // All tool execution paths pass through this guard.  A caller may only
-    // acknowledge an approval after the runtime has created the approval
-    // request; it cannot bypass a deny decision by calling this helper directly.
     const policyRun = {
         ...(context.run || { tool_policy: 'all', approval_policy: 'approve_all_mcp' })
     };
     if (context.modelCfg?.id) policyRun.chosen_model_id = context.modelCfg.id;
-    const policyResult = enforceToolPolicy({
+    const executionPlan = await buildToolExecutionPlan({ run: policyRun, tool, input, user, context });
+    return defaultToolOrchestrator.execute({
         run: policyRun,
         tool,
         input,
         user,
-        budget: context.budget || null,
-        allowApproval: context.allowApproval === true || context.approvalGranted === true
-    });
-    const effectiveInput = policyResult?.input || input;
-    if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName)) {
-        const error = new Error('自主 Agent 禁止在服务端进程内执行动态代码；请使用桌面 Worker 沙箱。');
-        error.code = 'AGENT_SANDBOX_REQUIRED';
-        error.category = 'policy';
-        throw error;
-    }
-    const runId = context.run?.id || context.runId;
-    const operationInputHash = checkpointInputHash(effectiveInput);
-    const operationKey = runId
-        ? String(context.operationKey || `${runId}:${context.stepId || context.node?.id || 'step'}:${safeName}:${operationInputHash}`)
-        : '';
-    if (operationKey) {
-        const checkpoint = await beginAgentToolCheckpoint(runId, {
-            operationKey,
-            stepIndex: context.stepIndex || context.step || 0,
-            toolName: safeName,
-            input: effectiveInput,
-            inputHash: operationInputHash,
-            idempotent: tool.idempotent,
-            approvalGranted: context.approvalGranted === true
-        });
-        if (checkpoint.replay) return checkpoint.output;
-    }
-    let output;
-    if (safeName.startsWith('mcp.')) {
-        output = await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null });
-    } else if (tool.databaseTool && safeName.startsWith('db.')) {
-        const rawConnectionId = effectiveInput?.connectionId ?? effectiveInput?.connection_id ?? effectiveInput?.databaseConnectionId ?? effectiveInput?.database_connection_id ?? effectiveInput?.mcpServerId ?? effectiveInput?.mcp_server_id;
-        const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
-        const selectedConnectionId = String(rawConnectionId ?? '').trim()
-            || (connections.length === 1 ? String(connections[0].connectionId ?? connections[0].serverId ?? '') : '');
-        const connection = connections.find(item => (
-            String(item.connectionId ?? item.serverId ?? '') === selectedConnectionId
-            || String(item.serverId ?? '') === selectedConnectionId
-        ));
-        if (!connection?.fullName) {
-            const err = new Error('请为这个数据库工具选择一个可用的数据连接。');
-            err.status = 400;
-            throw err;
+        context,
+        executionPlan,
+        execute: async ({ input: effectiveInput }) => {
+            if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName)) {
+                const error = new Error('自主 Agent 禁止在服务端进程内执行动态代码；请使用桌面 Worker 沙箱。');
+                error.code = 'AGENT_SANDBOX_REQUIRED';
+                error.category = 'policy';
+                throw error;
+            }
+            if (safeName.startsWith('mcp.')) {
+                return await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null });
+            }
+            if (tool.databaseTool && safeName.startsWith('db.')) {
+                const rawConnectionId = effectiveInput?.connectionId ?? effectiveInput?.connection_id ?? effectiveInput?.databaseConnectionId ?? effectiveInput?.database_connection_id ?? effectiveInput?.mcpServerId ?? effectiveInput?.mcp_server_id;
+                const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
+                const selectedConnectionId = String(rawConnectionId ?? '').trim()
+                    || (connections.length === 1 ? String(connections[0].connectionId ?? connections[0].serverId ?? '') : '');
+                const connection = connections.find(item => (
+                    String(item.connectionId ?? item.serverId ?? '') === selectedConnectionId
+                    || String(item.serverId ?? '') === selectedConnectionId
+                ));
+                if (!connection?.fullName) {
+                    const err = new Error('请为这个数据库工具选择一个可用的数据连接。');
+                    err.status = 400;
+                    throw err;
+                }
+                const toolInput = effectiveInput && typeof effectiveInput === 'object' && !Array.isArray(effectiveInput) ? { ...effectiveInput } : {};
+                delete toolInput.connectionId;
+                delete toolInput.connection_id;
+                delete toolInput.databaseConnectionId;
+                delete toolInput.database_connection_id;
+                delete toolInput.mcpServerId;
+                delete toolInput.mcp_server_id;
+                return await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
+            }
+            return await executeBuiltInTool(safeName, effectiveInput, user, context);
         }
-        const toolInput = effectiveInput && typeof effectiveInput === 'object' && !Array.isArray(effectiveInput) ? { ...effectiveInput } : {};
-        delete toolInput.connectionId;
-        delete toolInput.connection_id;
-        delete toolInput.databaseConnectionId;
-        delete toolInput.database_connection_id;
-        delete toolInput.mcpServerId;
-        delete toolInput.mcp_server_id;
-        output = await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
-    } else {
-        output = await executeBuiltInTool(safeName, effectiveInput, user, context);
-    }
-    if (operationKey) await completeAgentToolCheckpoint(operationKey, output);
-    return output;
+    });
 }
 
 module.exports = {

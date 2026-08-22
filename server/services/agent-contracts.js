@@ -26,6 +26,12 @@ function inferCapabilities(name = '', source = 'builtin') {
     return capabilities.length ? capabilities : ['agent.execute'];
 }
 
+function normalizeToolConcurrency(value, sideEffect = false) {
+    const requested = String(value || '').trim().toLowerCase();
+    if (['read', 'write', 'exclusive'].includes(requested)) return requested;
+    return sideEffect ? 'write' : 'read';
+}
+
 function normalizeToolContract(definition = {}) {
     const source = String(definition.source || (String(definition.name || '').startsWith('mcp.') ? 'mcp' : 'builtin'));
     const riskLevel = normalizeRisk(definition.risk_level ?? definition.riskLevel ?? definition.risk,
@@ -47,6 +53,8 @@ function normalizeToolContract(definition = {}) {
         risk_level: riskLevel,
         idempotent: definition.idempotent === undefined ? inferredIdempotent : Boolean(definition.idempotent),
         side_effect: sideEffect,
+        concurrency: normalizeToolConcurrency(definition.concurrency ?? definition.concurrency_mode, sideEffect),
+        cancellable: definition.cancellable === undefined ? !sideEffect : Boolean(definition.cancellable),
         network: Boolean(definition.network || /(?:http|web|browser|network)/i.test(String(definition.name || '')) || source === 'mcp' && definition.network !== false),
         approval_required: Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.alwaysRequiresApproval) || riskLevel >= 5),
         timeout: {
@@ -94,6 +102,7 @@ module.exports = {
     RISK_NAMES,
     ToolRegistry,
     inferCapabilities,
+    normalizeToolConcurrency,
     normalizeRisk,
     normalizeToolContract,
     validateToolInput

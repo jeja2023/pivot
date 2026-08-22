@@ -269,6 +269,27 @@ async function upsertDagNode(runId, node, patch = {}) {
 async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex = 0, executionContext = {} }, deps) {
     const startedAt = Date.now();
     const startedAtText = getBeijingTimestamp();
+    const stepContext = executionContext.stepContext || await deps.captureStepContext?.({
+        run,
+        user,
+        turnId: `dag:${node.id}`,
+        stepIndex,
+        modelCfg,
+        toolList,
+        contextConfig: { mode: 'dag', nodeId: node.id, toolName: node.tool },
+        policy,
+        approval: {
+            granted: Boolean(executionContext.approvalGranted),
+            allowApproval: executionContext.allowApproval !== false
+        },
+        deadline,
+        signal: executionContext.signal || deps.signal || null
+    });
+    if (stepContext) {
+        executionContext.stepContext = stepContext;
+        executionContext.contextHash = stepContext.contextHash;
+    }
+    const contextHash = stepContext?.contextHash || executionContext.contextHash || '';
     let lastError = null;
     let attempted = 0;
     const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
@@ -300,7 +321,8 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                     policyDecision: 'allow',
                     status: 'success',
                     durationMs: Date.now() - startedAt,
-                    attempt
+                    attempt,
+                    contextHash
                 });
             } catch (auditError) {
                 throw auditError;
@@ -325,7 +347,8 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 output: { error: e.message, attempt, attempts, retrying: attempt < attempts },
                 errorMessage: e.message,
                 status: attempt < attempts ? 'success' : 'error',
-                durationMs: Date.now() - startedAt
+                durationMs: Date.now() - startedAt,
+                contextHash
             });
             if (attempt >= attempts) break;
         }
@@ -342,7 +365,8 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             errorCategory: diagnoseError(lastError || new Error('DAG 节点执行失败')).category,
             errorMessage: lastError?.message || '执行失败',
             durationMs: Date.now() - startedAt,
-            attempt: attempted || 1
+            attempt: attempted || 1,
+            contextHash
         });
     } catch (auditError) {
         auditError.cause = lastError;
@@ -649,6 +673,20 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             const outputDefinitionIssues = validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, []);
             const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs);
             const startedAtText = getBeijingTimestamp();
+            const stepContext = await deps.captureStepContext?.({
+                run,
+                user,
+                turnId: `dag:${node.id}`,
+                stepIndex: nodeStepIndex,
+                modelCfg,
+                toolList,
+                contextConfig: { mode: 'dag', nodeId: node.id, toolName: node.tool, inputs: dagInputs },
+                resumeContext: { nodeId: node.id, attempt: 0 },
+                policy,
+                approval: { granted: true, allowApproval: true },
+                deadline,
+                signal: batchSignal
+            });
             states.set(node.id, { status: 'running', input: resolvedInput });
             await upsertDagNode(run.id, node, {
                 status: 'running',
@@ -665,6 +703,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 type: delegatedAgent ? 'agent' : (handoffNode ? 'handoff' : 'dag_node'),
                 name: node.title || node.id,
                 input: resolvedInput,
+                contextHash: stepContext?.contextHash || '',
                 details: {
                     nodeId: node.id,
                     toolName: node.tool,
@@ -714,6 +753,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     // a prior grant or determined that this tool is safe to run.
                     approvalGranted: true,
                     allowApproval: true,
+                    stepContext,
+                    contextHash: stepContext?.contextHash || '',
                     workflowApprovalResult,
                     workflowDelayResult,
                     executeSubworkflow: childInput => executeSubworkflowDag({
@@ -761,7 +802,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     toolName: node.tool,
                     input: resolvedInput,
                     output: compactOutput,
-                    durationMs: result.durationMs
+                    durationMs: result.durationMs,
+                    contextHash: stepContext?.contextHash || ''
                 });
                 deps.finishAgentTraceSpan?.(nodeSpanId, {
                     output: { nodeId: node.id, result: compactOutput },
@@ -821,7 +863,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     output: failureOutput,
                     errorMessage: e.message,
                     status: 'error',
-                    durationMs
+                    durationMs,
+                    contextHash: stepContext?.contextHash || ''
                 });
                 deps.finishAgentTraceSpan?.(nodeSpanId, {
                     status: 'error',

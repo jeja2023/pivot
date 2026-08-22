@@ -10,9 +10,12 @@ const { parsePositiveInt } = require('../number');
 const { cleanupSoftDeletedStorage } = require('./storage-gc');
 const { cleanupAnalysisWorkspace, processSemanticAnalysisJobs } = require('./data-analysis');
 const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing/cleanup');
+const { createAgentResidencyStore } = require('./agent-residency');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEMANTIC_WORKER_INTERVAL_MS = Math.max(5000, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_WORKER_INTERVAL_MS || '10000', 10) || 10000);
+const AGENT_RESIDENCY_SWEEP_INTERVAL_MS = Math.max(60000, Number.parseInt(process.env.AGENT_RESIDENCY_SWEEP_INTERVAL_MS || String(5 * 60 * 1000), 10) || (5 * 60 * 1000));
+const agentResidencyStore = createAgentResidencyStore();
 
 const maintenanceState = {
     startedAt: null,
@@ -466,6 +469,17 @@ async function runDocumentProcessingCleanup() {
     }
 }
 
+async function sweepAgentResidency() {
+    try {
+        const changes = await agentResidencyStore.sweepResidents();
+        if (changes > 0) logger.info({ changes }, '过期 Agent 常驻状态已淘汰');
+        return changes;
+    } catch (err) {
+        logger.warn({ err: err.message }, 'Agent 常驻状态清理失败');
+        return 0;
+    }
+}
+
 function startMaintenanceTasks() {
     const retentionDays = getAuditLogRetentionDays();
     const apiCallLogRetentionDays = getApiCallLogRetentionDays();
@@ -490,10 +504,15 @@ function startMaintenanceTasks() {
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
     processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务恢复失败'));
+    sweepAgentResidency().catch(() => {});
 
     setInterval(() => {
         processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务轮询失败'));
     }, SEMANTIC_WORKER_INTERVAL_MS).unref();
+
+    setInterval(() => {
+        sweepAgentResidency().catch(() => {});
+    }, AGENT_RESIDENCY_SWEEP_INTERVAL_MS).unref();
 
     setInterval(() => {
         cleanupOldLogs(retentionDays).catch(() => {});
@@ -535,5 +554,6 @@ module.exports = {
     getPgDumpTimeoutMs,
     buildPgDumpEnvironment,
     runPgDump,
+    sweepAgentResidency,
     getMaintenanceStatus
 };

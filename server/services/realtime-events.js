@@ -11,7 +11,9 @@ function normalizeUserId(userOrId) {
 }
 
 function encodeSse(type, payload = {}) {
+    const eventId = payload.eventId || (payload.runId && payload.eventSeq ? `${payload.runId}:${payload.eventSeq}` : '');
     return [
+        ...(eventId ? [`id: ${String(eventId).replace(/[\r\n]/g, '')}`] : []),
         `event: ${type}`,
         `data: ${JSON.stringify({
             type,
@@ -60,6 +62,18 @@ function subscribeUserEvents(user, res, options = {}) {
     client.write = write;
 
     write('connected', { userId });
+    const initialEvents = Array.isArray(options.initialEvents) ? options.initialEvents : [];
+    for (const event of initialEvents) {
+        write('agent.event', {
+            runId: event.run_id || event.runId || '',
+            eventId: event.id || event.event_id || '',
+            eventSeq: event.event_seq || event.eventSeq || 0,
+            eventType: event.event_type || event.eventType || '',
+            payload: event.payload || {},
+            replayable: true,
+            replay: true
+        });
+    }
 
     const unsubscribe = () => {
         writer.cleanup();

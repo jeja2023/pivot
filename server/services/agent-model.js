@@ -13,9 +13,11 @@ const {
     recordModelFailure,
     recordModelSuccess
 } = require('./model-runtime');
-const { createSseEventParser } = require('../streaming');
+const { createProviderEventStateMachine, createSseEventParser } = require('../streaming');
 const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./streaming-tools');
 const { forwardChatCompletion } = require('./model-forwarder');
+const { assertProviderSafe, toProviderInput } = require('./agent-provider-envelope');
+const { recordAgentRunResourceUsage } = require('./agent-run-resources');
 
 // Agent 调用的输出上限：优先调用方显式值，其次模型配置的 max_tokens，最后回退 1200。
 // 与 chat/openai/apps 一致地尊重模型配置，避免推理型模型（如 Qwen3）被 1200 写死后思考耗尽、正文为空。
@@ -48,12 +50,14 @@ async function withAgentModelConcurrency(modelCfg, operation) {
 
 async function callModelJson(modelCfg, messages, options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
+        const providerMessages = toProviderInput(messages);
+        assertProviderSafe(providerMessages);
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
         const maxTokens = resolveAgentMaxTokens(modelCfg, options);
         const data = {
             model: modelCfg.model_name || modelCfg.name,
-            messages,
+            messages: providerMessages,
             stream: false,
             temperature,
             max_tokens: maxTokens
@@ -70,6 +74,10 @@ async function callModelJson(modelCfg, messages, options = {}) {
             timeout: 180000,
             signal: options.signal || null
         });
+        const usage = response.data?.usage || response.data?.response?.usage || null;
+        if (usage && typeof options.onUsage === 'function') {
+            try { options.onUsage(usage); } catch (_) {}
+        }
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     });
 }
@@ -91,10 +99,13 @@ async function callModelText(modelCfg, messages, options = {}) {
  */
 async function callModelStreamingWithTools(modelCfg, messages, tools = [], options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
+        const providerMessages = toProviderInput(messages);
+        assertProviderSafe(providerMessages);
         const accumulator = createToolCallAccumulator();
+        const providerState = createProviderEventStateMachine({ onEvent: options.onProviderEvent });
         const payload = {
             model: modelCfg.model_name || modelCfg.name,
-            messages,
+            messages: providerMessages,
             stream: true,
             temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
             max_tokens: resolveAgentMaxTokens(modelCfg, options)
@@ -114,6 +125,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
                     return; // 非 JSON 帧忽略，避免被注释/心跳行污染
                 }
                 if (frame && typeof frame === 'object') accumulator.ingest(frame);
+                if (frame && typeof frame === 'object') providerState.ingest(frame);
                 if (typeof options.onDelta === 'function') {
                     try {
                         options.onDelta(accumulator.snapshot());
@@ -148,13 +160,21 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             });
             response.data.on('error', reject);
         });
-        return accumulator.finalize();
+        const result = accumulator.finalize();
+        const provider = providerState.finalize();
+        if (provider.usage && typeof options.onUsage === 'function') {
+            try { options.onUsage(provider.usage.raw || provider.usage); } catch (_) {}
+        }
+        return { ...result, provider };
     });
 }
 
 async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '', options = {}) {
-    const inputTokens = estimateTokens(JSON.stringify(messages || []));
-    const outputTokens = estimateTokens(output || '');
+    const usage = options.usage || null;
+    const usageInput = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens ?? 0) || 0;
+    const usageOutput = Number(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens ?? 0) || 0;
+    const inputTokens = usageInput > 0 ? usageInput : estimateTokens(JSON.stringify(toProviderInput(messages)));
+    const outputTokens = usageOutput > 0 ? usageOutput : estimateTokens(output || '');
     recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
     if (runId) {
         await execute(`
@@ -166,6 +186,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 updated_at = ?
             WHERE id = ?
         `, [inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId]);
+        await recordAgentRunResourceUsage(runId, inputTokens + outputTokens);
         const run = await queryOne('SELECT max_token_budget, total_tokens, budget_config FROM agent_runs WHERE id = ?', [runId]);
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
             const err = new Error(`智能体任务已超过模型用量上限 ${run.max_token_budget}`);

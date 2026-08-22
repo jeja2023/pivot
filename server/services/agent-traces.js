@@ -80,8 +80,8 @@ async function startAgentTraceSpan(runId, data = {}) {
         await execute(`
             INSERT INTO agent_trace_spans (
                 span_id, run_id, parent_span_id, span_type, name, status,
-                input_summary, details, started_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
+                input_summary, context_hash, details, started_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
         `, [
             spanId,
             runId,
@@ -89,6 +89,7 @@ async function startAgentTraceSpan(runId, data = {}) {
             String(data.type || 'operation').slice(0, 40),
             String(data.name || '运行步骤').slice(0, 160),
             serializeTraceValue(data.input),
+            String(data.contextHash || '').slice(0, 64),
             serializeTraceValue(data.details),
             now,
             now
@@ -171,7 +172,7 @@ async function getAgentTraceForUser(runId, user) {
         FROM agent_traces WHERE run_id = ? AND user_id = ?
     `, [runId, user.id]);
     const rawSpans = await query(`
-        SELECT span_id, parent_span_id, span_type, name, status, input_summary, output_summary,
+        SELECT span_id, parent_span_id, span_type, name, status, input_summary, output_summary, context_hash,
                details, error_message, input_tokens, output_tokens, started_at, completed_at,
                duration_ms, created_at
         FROM agent_trace_spans

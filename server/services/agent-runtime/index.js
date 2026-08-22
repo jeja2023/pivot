@@ -123,9 +123,21 @@ const {
     syncAgentTraceFromRun
 } = require('../agent-traces');
 const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
+const { getAgentSkillExecutionContext } = require('../agent-skills');
 const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
 const { diagnoseError } = require('../agent-diagnosis');
 const { recordAgentToolCall } = require('../agent-tool-audit');
+const { createPersistedAgentStepContext } = require('../agent-world-state-store');
+const { recordAgentEvent } = require('../agent-event-log');
+const { claimAgentControlMessages } = require('../agent-control');
+const {
+    buildForkHistory,
+    cancelChildRunReservation,
+    initializeAgentRunResources,
+    normalizeForkHistory,
+    releaseChildRunReservation,
+    reserveChildRunResources
+} = require('../agent-run-resources');
 const {
     configureAgentApprovalRequests,
     runApprovalTimeouts,
@@ -155,7 +167,8 @@ const { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePause
     updateRun,
     insertStep,
     listSteps,
-    createAgentNotification
+    createAgentNotification,
+    recordAgentEvent
 });
 
 
@@ -198,6 +211,29 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                 'last_heartbeat_at'
             ].includes(key))) {
                 await publishAgentRunEvent(runId, 'updated');
+            }
+            if (statusEntry) {
+                try {
+                    await recordAgentEvent({
+                        runId,
+                        type: ['approval_required', 'waiting_approval', 'awaiting_approval'].includes(targetStatus)
+                            ? 'run.paused'
+                            : ['resuming'].includes(targetStatus)
+                                ? 'run.resumed'
+                                : ['completed', 'completed_with_errors', 'error', 'failed', 'cancelled'].includes(targetStatus)
+                                    ? 'run.completed'
+                                    : 'run.status_changed',
+                        payload: { from: currentStatus, to: targetStatus },
+                        eventKey: `status:${currentStatus}->${targetStatus}`
+                    });
+                } catch (eventError) {
+                    logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
+                }
+                if (TERMINAL_STATUSES.has(targetStatus)) {
+                    try { await releaseChildRunReservation(runId); } catch (resourceError) {
+                        logger.warn({ runId, err: resourceError.message }, 'Agent 子运行资源预留释放失败');
+                    }
+                }
             }
             return changes;
         }
@@ -371,6 +407,19 @@ async function cancelAgentRun(runId, user) {
         completed_at: now,
         updated_at: now
     });
+    // Parent cancellation propagates through the persisted Agent tree so a
+    // child cannot continue consuming tools after its supervisor has stopped.
+    const childRuns = await query(`
+        SELECT id
+        FROM agent_runs
+        WHERE parent_run_id = ?
+          AND user_id = ?
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required', 'awaiting_approval', 'waiting_approval')
+          AND deleted_at IS NULL
+    `, [runId, user.id]);
+    for (const child of childRuns) {
+        await cancelAgentRun(child.id, user);
+    }
     const abortError = new Error('智能体运行已被用户主动取消。');
     abortError.code = 'AGENT_RUN_CANCELLED';
     activeRunControllers.get(runId)?.abort(abortError);
@@ -409,6 +458,7 @@ async function createChildRunFromExisting(run, user) {
         contextConfig: parseJsonObject(run.context_config) || {},
         parentRunId: run.id,
         metadata,
+        forkHistory: metadata.forkHistory || metadata.fork_history || 'none',
         dagSpec: metadata.dagSpec
     });
 }
@@ -518,6 +568,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
             rerunFromNodeId: nodeId || '',
             workflowVersionMode: metadata.workflowVersionMode || ''
         },
+        forkHistory: metadata.forkHistory || metadata.fork_history || 'none',
         dagSpec: resume.dagSpec
     });
 }
@@ -573,7 +624,8 @@ async function resumeAgentRun(runId, user) {
                 previousAnswer: clampText(run.final_answer || '', 1200),
                 previousError: run.error_message || ''
             }
-        }
+        },
+        forkHistory: previousMetadata.forkHistory || previousMetadata.fork_history || 'none'
     });
 }
 
@@ -614,9 +666,9 @@ async function insertStep(runId, stepIndex, data = {}) {
     const changes = await execute(`
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
-            status, duration_ms, started_at, completed_at, created_at
+            status, duration_ms, started_at, completed_at, created_at, context_hash
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
         runId,
         safeStepIndex,
@@ -630,7 +682,8 @@ async function insertStep(runId, stepIndex, data = {}) {
         Number(data.durationMs) || 0,
         data.startedAt || now,
         data.completedAt || now,
-        now
+        now,
+        String(data.contextHash || '').slice(0, 64)
     ]);
     if (changes > 0) {
         await recordAgentCheckpoint(runId, {
@@ -654,6 +707,7 @@ async function insertStep(runId, stepIndex, data = {}) {
             input: data.input,
             output: data.output,
             details: { stepIndex: safeStepIndex, toolName: data.toolName || '' },
+            contextHash: data.contextHash || '',
             status: data.status === 'error' ? 'error' : (data.status || 'completed'),
             errorMessage: data.errorMessage || '',
             durationMs: Number(data.durationMs) || 0,
@@ -668,6 +722,23 @@ async function insertStep(runId, stepIndex, data = {}) {
                 title: data.title || ''
             }
         });
+        try {
+            await recordAgentEvent({
+                runId,
+                type: 'step.recorded',
+                stepIndex: safeStepIndex,
+                payload: {
+                    type: data.type || 'note',
+                    status: data.status || 'success',
+                    title: data.title || '',
+                    toolName: data.toolName || '',
+                    contextHash: data.contextHash || ''
+                },
+                eventKey: `step:${safeStepIndex}:${data.type || 'note'}`
+            });
+        } catch (eventError) {
+            logger.warn({ runId, err: eventError.message }, 'Agent 步骤事件写入失败');
+        }
     }
 }
 
@@ -696,7 +767,10 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         updateRun,
         withTimeout,
         signal,
-        taskBudget: effectiveTaskBudget
+        taskBudget: effectiveTaskBudget,
+        captureStepContext: options => createPersistedAgentStepContext(options),
+        recordAgentEvent,
+        pollAgentControlMessages: (runId, user, options) => claimAgentControlMessages(runId, user, options)
     };
 }
 
@@ -837,32 +911,122 @@ async function runAgent(runId, user) {
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
+        let previousWorldState = null;
         for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
             taskBudget.consumeStep();
             await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg);
+            const controlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
+            if (controlMessages.length) {
+                observations.push(...controlMessages.map(message => ({
+                    type: 'agent_control',
+                    messageId: message.message_id,
+                    messageType: message.message_type,
+                    fromRunId: message.from_run_id || '',
+                    payload: message.payload
+                })));
+            }
+            const stepContext = await createPersistedAgentStepContext({
+                run,
+                user,
+                turnId: `${runId}:turn:${step}`,
+                stepIndex: step,
+                modelCfg,
+                toolList,
+                previousWorldState,
+                // JSON planner 每轮重新构造独立消息，必须携带完整 WorldState，不能依赖上一次 Provider 请求的上下文。
+                forceWorldStateFull: true,
+                fullRefreshReason: 'provider_independent',
+                contextConfig: parseJsonObject(run.context_config) || {},
+                resumeContext,
+                policy: {
+                    toolPolicy: run.tool_policy,
+                    toolAllowlist: run.tool_allowlist,
+                    approvalPolicy: run.approval_policy,
+                    networkPolicy: run.network_policy
+                },
+                approval: { grantedTools: getRunMetadata(run).approvedTools || [] },
+                deadline,
+                signal: runController.signal
+            });
+            previousWorldState = stepContext.worldState;
+            try {
+                await recordAgentEvent({
+                    runId,
+                    userId: user.id,
+                    turnId: stepContext.turnId,
+                    stepIndex: step,
+                    type: 'step.context_captured',
+                    payload: {
+                        contextHash: stepContext.contextHash,
+                        worldStateHash: stepContext.worldStateHash,
+                        worldStateMode: stepContext.worldStateInjection.mode,
+                        previousWorldStateHash: stepContext.previousWorldStateHash,
+                        contextWindow: stepContext.worldStateWindow || {}
+                    },
+                    eventKey: stepContext.contextHash
+                });
+            } catch (eventError) {
+                logger.warn({ runId, err: eventError.message }, 'Agent StepContext 事件写入失败');
+            }
+            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',
                 name: `规划模型调用 #${step}`,
                 input: { messageCount: plannerMessages.length, model: modelCfg.name || modelCfg.model_name || modelCfg.id },
-                details: { purpose: 'agent_planner', step }
+                details: { purpose: 'agent_planner', step },
+                contextHash: stepContext.contextHash
             });
             let plannedText;
             try {
+                try {
+                    await recordAgentEvent({
+                        runId,
+                        userId: user.id,
+                        turnId: stepContext.turnId,
+                        stepIndex: step,
+                        type: 'model.requested',
+                        payload: { purpose: 'agent_planner', messageCount: plannerMessages.length, contextHash: stepContext.contextHash },
+                        eventKey: `model:${stepContext.contextHash}:requested`
+                    });
+                } catch (_) {}
                 plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
+                try {
+                    await recordAgentEvent({
+                        runId,
+                        userId: user.id,
+                        turnId: stepContext.turnId,
+                        stepIndex: step,
+                        type: 'model.completed',
+                        payload: { purpose: 'agent_planner', responseLength: String(plannedText || '').length, contextHash: stepContext.contextHash },
+                        eventKey: `model:${stepContext.contextHash}:completed`
+                    });
+                } catch (_) {}
                 await finishAgentTraceSpan(plannerSpanId, {
                     output: { responseLength: String(plannedText || '').length },
-                    durationMs: Date.now() - plannerStartedAt
+                    durationMs: Date.now() - plannerStartedAt,
+                    contextHash: stepContext.contextHash
                 });
             } catch (plannerError) {
+                try {
+                    await recordAgentEvent({
+                        runId,
+                        userId: user.id,
+                        turnId: stepContext.turnId,
+                        stepIndex: step,
+                        type: 'model.failed',
+                        payload: { purpose: 'agent_planner', errorCode: plannerError.code || '', errorMessage: plannerError.message, contextHash: stepContext.contextHash },
+                        eventKey: `model:${stepContext.contextHash}:failed`
+                    });
+                } catch (_) {}
                 await finishAgentTraceSpan(plannerSpanId, {
                     status: 'error',
                     errorMessage: plannerError.message,
-                    durationMs: Date.now() - plannerStartedAt
+                    durationMs: Date.now() - plannerStartedAt,
+                    contextHash: stepContext.contextHash
                 });
                 throw plannerError;
             }
@@ -875,7 +1039,8 @@ async function runAgent(runId, user) {
                 title: plan.thought || 'Agent plan',
                 input: { goal: run.goal },
                 output: plan,
-                durationMs: Date.now() - plannerStartedAt
+                durationMs: Date.now() - plannerStartedAt,
+                contextHash: stepContext.contextHash
             });
 
             if (plan.action === 'final' || !plan.tool) {
@@ -912,6 +1077,8 @@ async function runAgent(runId, user) {
                     autonomous: true,
                     stepId: `${runId}:${step}`,
                     stepIndex: step,
+                    stepContext,
+                    contextHash: stepContext.contextHash,
                     budget: taskBudget,
                     approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
                     allowApproval: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
@@ -921,7 +1088,7 @@ async function runAgent(runId, user) {
                         : ''
                 };
                 const output = await withTimeout(
-                    signal => executeToolByName(plan.tool, effectivePlanInput, user, toolList, { ...toolContext, signal }),
+                        signal => executeToolByName(plan.tool, effectivePlanInput, user, toolList, { ...toolContext, signal }),
                     Math.min(normalizePositiveInt(run.tool_timeout_ms, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000), Math.max(deadline - Date.now(), 1000)),
                     `执行工具：${plan.tool}`,
                     { signal: runController.signal }
@@ -942,7 +1109,8 @@ async function runAgent(runId, user) {
                     toolName: plan.tool,
                     input: effectivePlanInput,
                     output: compactOutput,
-                    durationMs: Date.now() - startedAt
+                    durationMs: Date.now() - startedAt,
+                    contextHash: stepContext.contextHash
                 });
                 try {
                     await recordAgentToolCall({
@@ -953,7 +1121,8 @@ async function runAgent(runId, user) {
                         output: compactOutput,
                         policyDecision: 'allow',
                         status: 'success',
-                        durationMs: Date.now() - startedAt
+                        durationMs: Date.now() - startedAt,
+                        contextHash: stepContext.contextHash
                     });
                 } catch (auditError) {
                     throw auditError;
@@ -995,7 +1164,8 @@ async function runAgent(runId, user) {
                     output: { error: toolErr.message, diagnosis },
                     errorMessage: toolErr.message,
                     status: 'error',
-                    durationMs: Date.now() - startedAt
+                    durationMs: Date.now() - startedAt,
+                    contextHash: stepContext.contextHash
                 });
                 try {
                     await recordAgentToolCall({
@@ -1008,7 +1178,8 @@ async function runAgent(runId, user) {
                         status: 'error',
                         errorCategory: diagnosis.category,
                         errorMessage: toolErr.message,
-                        durationMs: Date.now() - startedAt
+                        durationMs: Date.now() - startedAt,
+                        contextHash: stepContext.contextHash
                     });
                 } catch (auditError) {
                     auditError.cause = toolErr;
@@ -1174,27 +1345,42 @@ async function recoverAgentRuns() {
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
     `, [cutoff]);
     for (const run of staleRunning) {
-        const changed = await updateRunCas(run.id, ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming'], {
-            status: 'error',
-            error_message: '服务已重启或心跳超时，任务已标记为失败。',
-            completed_at: now,
+        const pending = await queryOne(`
+            SELECT tool_name, input_hash, idempotent, operation_key, state
+            FROM agent_run_checkpoints
+            WHERE run_id = ? AND status = 'pending'
+            ORDER BY step_index DESC, id DESC LIMIT 1
+        `, [run.id]);
+        const runMetadataRow = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [run.id]);
+        const safeResume = pending && Boolean(pending.idempotent);
+        const targetStatus = pending && !safeResume ? 'approval_required' : safeResume ? 'queued' : 'error';
+        const recoveryFields = {
+            status: targetStatus,
+            error_message: targetStatus === 'error' ? '服务已重启或心跳超时，任务已标记为失败。' : targetStatus === 'approval_required' ? '检测到未完成的非幂等工具调用，需要重新审批。' : null,
             updated_at: now,
             last_heartbeat_at: now,
             locked_by: null,
             lock_expires_at: null
-        });
+        };
+        if (targetStatus === 'error') recoveryFields.completed_at = now;
+        if (targetStatus === 'approval_required') {
+            let metadata = {};
+            try { metadata = JSON.parse(runMetadataRow?.metadata || '{}'); } catch (_) {}
+            recoveryFields.metadata = JSON.stringify({ ...metadata, pendingApproval: { tool: pending.tool_name, operationKey: pending.operation_key, recovery: true } });
+        }
+        const changed = await updateRunCas(run.id, ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming'], recoveryFields);
         if (!changed) continue;
         const abortError = new Error('停滞任务已恢复并标记终止。');
         abortError.code = 'AGENT_RUN_CANCELLED';
         activeRunControllers.get(run.id)?.abort(abortError);
-        await insertStep(run.id, (await listSteps(run.id)).length + 1, {
+        if (targetStatus !== 'queued') await insertStep(run.id, (await listSteps(run.id)).length + 1, {
             type: 'control',
-            title: '运行时恢复并标记停滞任务',
-            output: { status: 'error', reason: 'stale_running' }
+            title: targetStatus === 'approval_required' ? '运行时恢复并等待副作用审批' : '运行时恢复并标记停滞任务',
+            output: { status: targetStatus, reason: targetStatus === 'error' ? 'stale_running' : 'pending_tool_recovery' }
         });
     }
 
-    const recoveredQueued = await getAgentQueue().recoverQueued(100);
+    const recoveredQueued = await getAgentQueue().recoverQueued(100, { deferSchedule: true });
     if (recoveredQueued > 0 || staleRunning.length > 0) {
         logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时异常任务恢复完成');
     } else {
@@ -1245,6 +1431,15 @@ async function approveAgentTool(runId, user, approve = true) {
             toolName: pending.tool || '',
             output: { status: 'rejected' }
         });
+        try {
+            await recordAgentEvent({
+                runId,
+                userId: user.id,
+                type: 'approval.rejected',
+                payload: { tool: pending.tool || '', key: pending.key || '' },
+                eventKey: `approval:${pending.key || pending.tool || 'unknown'}:rejected`
+            });
+        } catch (_) {}
         await createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
         return await getRunForUser(runId, user);
     }
@@ -1276,6 +1471,15 @@ async function approveAgentTool(runId, user, approve = true) {
         toolName: pending.tool || '',
         output: { status: 'approved', tool: pending.tool || '' }
     });
+    try {
+        await recordAgentEvent({
+            runId,
+            userId: user.id,
+            type: 'approval.granted',
+            payload: { tool: pending.tool || '', key: pending.key || '', inputHash: approvalGrant.inputHash },
+            eventKey: `approval:${pending.key || pending.tool || 'unknown'}:granted:${approvalGrant.inputHash}`
+        });
+    } catch (_) {}
     enqueueAgentRun(runId, user);
     return await getRunForUser(runId, user);
 }
@@ -1369,7 +1573,10 @@ async function createAgentRun({
     workflowId = null,
     workflowVersion = null,
     modelRouter = 'fixed',
-    dedupeKey = null
+    dedupeKey = null,
+    skillId = null,
+    skillName = null,
+    forkHistory = 'none'
 }) {
     await assertRunUserActive(user);
     const normalizedScheduleId = scheduleId === null || scheduleId === '' ? null : Number(scheduleId);
@@ -1406,6 +1613,20 @@ async function createAgentRun({
     const normalizedRunMode = normalizeRunMode(runMode);
     const normalizedRouter = normalizeRouterStrategy(modelRouter);
     const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+    const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
+    let resourceReservation = null;
+    let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
+    const skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
+    delete runMetadata.skillPermissions;
+    delete runMetadata.skillTools;
+    if (skillReference) {
+        const skillContext = await getAgentSkillExecutionContext(user, skillReference);
+        runMetadata.skillId = skillContext.skillId;
+        runMetadata.skillName = skillContext.skillName;
+        runMetadata.skillVersion = skillContext.skillVersion;
+        runMetadata.skillPermissions = skillContext.skillPermissions;
+        runMetadata.skillTools = skillContext.skillTools;
+    }
     const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
         ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
         : goal);
@@ -1447,6 +1668,29 @@ async function createAgentRun({
     }
     const modelCfg = await getRunnableModelForUserAsync(effectiveModelId, user);
     if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');
+    if (parentRunId) {
+        const inherited = await reserveChildRunResources({
+            parentRunId,
+            userId: user.id,
+            requestedTokenBudget: effectiveChildTokenBudget,
+            forkHistory: normalizedForkHistory
+        });
+        effectiveChildTokenBudget = inherited.tokenBudget;
+        resourceReservation = inherited.reservation;
+        runMetadata.resourceInheritance = {
+            parentRunId: String(parentRunId),
+            tokenBudget: effectiveChildTokenBudget,
+            forkHistory: inherited.forkHistory
+        };
+        if (inherited.forkHistory.mode !== 'none') {
+            try {
+                runMetadata.parentHistory = await buildForkHistory(parentRunId, user.id, inherited.forkHistory);
+            } catch (error) {
+                try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
+                throw error;
+            }
+        }
+    }
     try {
         await execute(`
             INSERT INTO agent_runs (
@@ -1478,7 +1722,7 @@ async function createAgentRun({
             normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
             normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
             normalizePositiveInt(retryLimit, 1, 0, 5),
-            normalizePositiveInt(maxTokenBudget, 0, 0, 10000000),
+            effectiveChildTokenBudget,
             normalizedTemplateId,
             normalizedScheduleId,
             normalizedDedupeKey,
@@ -1493,12 +1737,22 @@ async function createAgentRun({
             now
         ]);
     } catch (err) {
+        if (resourceReservation) {
+            try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
+        }
         if (normalizedDedupeKey && (String(err.code || '').includes('CONSTRAINT') || String(err.code || '').includes('23505'))) {
             const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
             if (existing) return existing;
         }
         throw err;
     }
+    await initializeAgentRunResources({
+        runId,
+        userId: user.id,
+        parentRunId,
+        tokenBudget: effectiveChildTokenBudget,
+        forkHistory: normalizedForkHistory
+    });
     if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
         const { upsertDagNode } = require('../agent-dag-runtime');
         for (const node of runMetadata.dagSpec.nodes) {

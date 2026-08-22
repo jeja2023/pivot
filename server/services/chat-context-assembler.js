@@ -13,6 +13,8 @@ const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
 const { maybeBuildMcpChatContext } = require('./chat-mcp-context');
+const { buildWorldStatePrompt } = require('./agent-step-context');
+const { createPersistedChatStepContext } = require('./chat-context-state-store');
 const {
     buildLongTermMemoryContextMessage,
     injectLongTermMemoryBeforeLatestUser,
@@ -162,9 +164,11 @@ async function assembleChatContext({
         }
     }
 
+    let chatMcpTools = [];
     if (mcpEnabled) {
         const accessibleMcpTools = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
         const mcpTools = filterChatMcpToolsByAllowlist(accessibleMcpTools, mcpToolAllowlist);
+        chatMcpTools = mcpTools;
         const mcpContext = await maybeBuildMcpChatContext({
             modelCfg,
             history: visionHistory,
@@ -178,6 +182,43 @@ async function assembleChatContext({
         if (mcpContext) {
             visionHistory = appendMcpContextForFinalAnswer(visionHistory, mcpContext);
         }
+    }
+
+    let chatStepContext = null;
+    try {
+        chatStepContext = await createPersistedChatStepContext({
+            sessionId,
+            user: req.user,
+            modelCfg,
+            toolList: chatMcpTools,
+            turnId: `${sessionId}:chat:${Date.now()}`,
+            stepIndex: Number(history.length || 0),
+            contextConfig: {
+                goal: String(modelContent || '').slice(0, 4000),
+                ragEnabled: Boolean(ragEnabled),
+                mcpEnabled: Boolean(mcpEnabled),
+                mcpToolAllowlist: Array.isArray(mcpToolAllowlist) ? mcpToolAllowlist : [],
+                historyMessageCount: history.length,
+                networkPolicy: { enabled: true }
+            },
+            environment: { entrypoint: 'chat', userAgent: req.get?.('user-agent') || '' },
+            memory: { enabled: true, hasSummary: history.some(message => message?.is_summary === 1 || message?.context_archived === 1) },
+            contextCompacted: history.some(message => message?.is_summary === 1 || message?.context_archived === 1)
+        });
+        visionHistory = [
+            { role: 'system', content: buildWorldStatePrompt(chatStepContext.worldState, { injection: chatStepContext.worldStateInjection }) },
+            ...visionHistory
+        ];
+        writeSse(JSON.stringify({
+            type: 'context',
+            status: 'captured',
+            contextHash: chatStepContext.contextHash,
+            worldStateHash: chatStepContext.worldStateHash,
+            contextWindow: chatStepContext.worldStateWindow,
+            injectionMode: chatStepContext.worldStateInjection?.mode || 'full'
+        }));
+    } catch (error) {
+        req.log.warn({ sessionId, userId, err: error.message }, '聊天上下文窗口持久化失败，继续使用内存上下文');
     }
 
     visionHistory = applyChatNoThinkSoftSwitch(visionHistory, modelCfg);
@@ -236,7 +277,8 @@ async function assembleChatContext({
     return {
         visionHistory,
         effectiveUserPrompt,
-        disableChatThinking
+        disableChatThinking,
+        chatStepContext
     };
 }
 

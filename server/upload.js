@@ -137,6 +137,7 @@ function verifyUploadedMagic(file) {
     if (ext === '.pdf') return actualData.length >= 5 && actualData.subarray(0, 5).toString('ascii') === '%PDF-';
     if (ext === '.docx' || ext === '.xlsx') return actualData.length >= 4 && actualData[0] === 0x50 && actualData[1] === 0x4b && actualData[2] === 0x03 && actualData[3] === 0x04;
     if (ext === '.doc' || ext === '.xls') return actualData.length >= 4 && actualData[0] === 0xd0 && actualData[1] === 0xcf && actualData[2] === 0x11 && actualData[3] === 0xe0;
+    if (ext === '.zip') return actualData.length >= 4 && actualData.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 
     const checkLen = Math.min(bytesRead, 512);
     return checkLen === 0 || !actualData.subarray(0, checkLen).includes(0);

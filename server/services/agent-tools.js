@@ -14,6 +14,12 @@ const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
 const { assertNetworkPolicyUrl, normalizeNetworkPolicy } = require('./agent-network-policy');
 const {
+    clickBrowserTarget,
+    closeAgentBrowserContext,
+    createAgentBrowserContext,
+    locateBrowserTarget
+} = require('./agent-browser');
+const {
     normalizeJsonSchema,
     schemaHasRules,
     validateJsonSchemaDefinition,
@@ -148,6 +154,20 @@ function getBuiltInToolDefinitions(user) {
                 credentialPrefix: { type: 'string', default: 'Bearer ', description: '凭据值前缀。' },
                 body: { type: 'object', description: 'POST/PUT/PATCH 的 JSON 请求体。' },
                 timeoutMs: { type: 'integer', minimum: 1000, maximum: 30000, default: 10000 }
+            }, ['url'])
+        },
+        {
+            name: 'agent.browser',
+            title: '浏览器自动化',
+            description: '在独立浏览器 Profile 中访问白名单页面并执行受控 DOM/视觉定位操作，禁止读取凭证。',
+            alwaysRequiresApproval: true,
+            network: true,
+            input_schema: asJsonSchema({
+                url: { type: 'string', description: '必须位于任务网络白名单中的 HTTP/HTTPS 地址。' },
+                action: { type: 'string', enum: ['inspect', 'click'], default: 'inspect' },
+                target: { type: 'object', description: 'DOM/视觉目标，支持 selector、role/name 或 text。' },
+                taskId: { type: 'string', maxLength: 80 },
+                screenshot: { type: 'boolean', default: false }
             }, ['url'])
         },
         {
@@ -755,6 +775,36 @@ async function executeAgentHttp(input = {}, user, context = {}) {
     };
 }
 
+async function executeAgentBrowser(input = {}, context = {}) {
+    const url = String(input.url || '').trim();
+    if (!url) throw new Error('浏览器节点需要填写 URL。');
+    const networkPolicy = normalizeNetworkPolicy(context.run?.network_policy || context.run?.networkPolicy || input.networkPolicy || input.network_policy || {});
+    const browserContext = await createAgentBrowserContext({
+        taskId: input.taskId || context.run?.id || 'agent-browser',
+        profileRoot: context.browserProfileRoot,
+        networkPolicy,
+        executablePath: context.browserExecutablePath
+    });
+    try {
+        const page = await browserContext.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(Number(input.timeoutMs) || 30000, 120000) });
+        let action = 'inspect';
+        let targetResult = null;
+        if (String(input.action || 'inspect') === 'click') {
+            targetResult = await clickBrowserTarget(page, input.target || {}, { visionLocator: context.visionLocator });
+            action = 'click';
+        } else if (input.target) {
+            targetResult = await locateBrowserTarget(page, input.target, { visionLocator: context.visionLocator });
+            targetResult = { method: targetResult.method };
+        }
+        const output = { action, url: page.url(), title: await page.title(), text: String(await page.locator('body').innerText()).slice(0, 12000), target: targetResult };
+        if (input.screenshot === true) output.screenshot = (await page.screenshot({ type: 'png', fullPage: false })).toString('base64');
+        return output;
+    } finally {
+        await closeAgentBrowserContext(browserContext);
+    }
+}
+
 // ——————————————————————————————————————————
 // agent.merge：将多个上游节点的输出合并为单一对象，支持重命名字段，方便后续节点统一引用。
 // ——————————————————————————————————————————
@@ -1077,6 +1127,10 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         return executeAgentHttp(input, user, context);
     }
 
+    if (name === 'agent.browser') {
+        return executeAgentBrowser(input, context);
+    }
+
     if (name === 'agent.merge') {
         return executeAgentMerge(input);
     }
@@ -1098,6 +1152,7 @@ module.exports = {
     clampText,
     executeAgentDelegate,
     executeAgentHandoff,
+    executeAgentBrowser,
     executeBuiltInTool,
     getBuiltInToolDefinitions
 };
