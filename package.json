@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -23,6 +23,7 @@
     "version:sync": "node scripts/sync_version.js",
     "check": "npm run check:text && npm run check:large-files && npm run check:architecture && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
+    "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js",
     "test:mcp:official": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario initialize --spec-version 2025-11-25",
     "test:mcp:official:tools": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario tools_call --spec-version 2025-11-25",
     "test:mcp:official:sse": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario sse-retry --spec-version 2025-11-25",

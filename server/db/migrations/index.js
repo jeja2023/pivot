@@ -797,6 +797,39 @@ const migrations = [
             `);
         }
     },
+    {
+        id: '202608220007_provider_usage_calibration',
+        description: 'Persist real Provider usage samples and aggregate estimate error metrics per model and protocol.',
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS model_usage_calibrations (
+                    model_id BIGINT NOT NULL,
+                    protocol VARCHAR(32) NOT NULL DEFAULT 'unknown',
+                    sample_count BIGINT NOT NULL DEFAULT 0,
+                    input_sample_count BIGINT NOT NULL DEFAULT 0,
+                    output_sample_count BIGINT NOT NULL DEFAULT 0,
+                    estimated_input_tokens BIGINT NOT NULL DEFAULT 0,
+                    actual_input_tokens BIGINT NOT NULL DEFAULT 0,
+                    input_abs_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    input_signed_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    max_input_abs_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    estimated_output_tokens BIGINT NOT NULL DEFAULT 0,
+                    actual_output_tokens BIGINT NOT NULL DEFAULT 0,
+                    output_abs_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    output_signed_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    max_output_abs_error_tokens BIGINT NOT NULL DEFAULT 0,
+                    last_actual_total_tokens BIGINT NOT NULL DEFAULT 0,
+                    last_source VARCHAR(80) NOT NULL DEFAULT '',
+                    last_sample_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    PRIMARY KEY (model_id, protocol)
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_usage_calibrations_updated
+                    ON model_usage_calibrations(updated_at DESC);
+            `);
+        }
+    },
     ...regulationsMigrations
 ];
 

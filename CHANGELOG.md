@@ -1,3 +1,13 @@
+## [v0.1.24] - 2026-08-22
+
+### 质量闭环：Provider 用量校准、非幂等故障矩阵与多进程 Residency 压测
+
+- 新增 `model_usage_calibrations` PostgreSQL 聚合表和 `provider-usage-calibration.js`：记录真实 Provider input/output/total usage 与字符估算的有符号误差、绝对误差、偏差比和最大误差；普通 JSON、Agent planner、工作流节点、委派、内容校对和流式入口均接入校准记录。
+- 新增 Provider usage 校准契约测试，覆盖 Chat Completions/Responses 字段归一化、缺失字段降级和 PostgreSQL 聚合指标写入。
+- 扩展非幂等副作用故障矩阵，覆盖超时、Worker 崩溃/错误、上游不可用、重复投递和外部提交状态未知；已完成操作键只读重放，状态未知的调用必须重新审批，不允许自动重试。
+- 新增多进程 residency 测试 worker，验证 8 个并发进程争抢同一租约时只有一个获胜，并验证 12 路并发 touch 最终收敛到 per-user LRU 上限。
+- 新增 `npm run test:agent:quality`，可单独执行三项质量扩展回归；迁移 `202608220007_provider_usage_calibration` 随启动自动应用。
+
 ## [v0.1.23] - 2026-08-22
 
 ### Codex Harness 对照项闭环：官方 MCP、外部长连接与 Agent Residency

@@ -821,4 +821,11 @@ Codex 的 Harness 本质上是一个：
 - MCP 外部客户端已支持分片 SSE、通知、标准 HTTP session、协议版本、GET SSE 重连、`retry` 延迟、`Last-Event-ID` 恢复以及目标响应后的流关闭。固定依赖 `@modelcontextprotocol/conformance@0.2.0-alpha.11`，官方 `initialize` 1/1、`tools_call` 2/2、`sse-retry` 3/3 均通过。
 - Agent residency/LRU 已从评估项变为 PostgreSQL 持久化能力：迁移 `202608220006_agent_residency`、WorldState 脱敏快照与 hash、租约/TTL、按用户 LRU、evict/list/acquire/release/sweep 和后台清理均已实现。App Server 以显式 `residentKey` 绑定常驻实例，避免普通一次性 Run 形成无界驻留。
 
-本版本仍保留两类后续质量工作：Provider usage 与真实 tokenizer 的精确校准，以及更完整的外部副作用崩溃/重复投递故障矩阵；它们不再阻塞本轮协议、持久化和治理闭环。
+当时仍保留的两类后续质量工作已在 v0.1.24 完成，详见下一节。
+
+## 22. v0.1.24 质量扩展闭环（2026-08-22）
+
+- Provider usage 校准已落地：`model_usage_calibrations` 按模型/协议聚合真实 input/output/total usage 与字符估算的 signed error、absolute error、bias ratio 和 max error；普通 JSON、Agent planner、工作流节点、委派、内容校对和流式调用均接入记录层。
+- 非幂等故障矩阵已扩展：超时、Worker 错误、上游不可用、重复投递和外部提交状态未知均有恢复契约；完成 operation key 只读重放，pending 非幂等调用必须重新审批。
+- Residency 多进程压力已验证：8 个独立进程争抢同一 PostgreSQL lease 只有一个获胜，12 路并发 touch 收敛到 per-user LRU 上限。
+- v0.1.24 质量扩展命令 `npm run test:agent:quality` 为 `6/6`；全量 PostgreSQL 回归为 `573/573`，`npm run check` 和 `npm run lint` 均通过。

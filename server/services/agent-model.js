@@ -1,5 +1,4 @@
 const { queryOne, execute } = require('../db/client');
-const { estimateTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage } = require('./models');
 const { normalizeTaskBudget } = require('./agent-budget');
@@ -18,6 +17,7 @@ const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./stream
 const { forwardChatCompletion } = require('./model-forwarder');
 const { assertProviderSafe, toProviderInput } = require('./agent-provider-envelope');
 const { recordAgentRunResourceUsage } = require('./agent-run-resources');
+const { estimateProviderUsage, recordProviderUsageCalibration } = require('./provider-usage-calibration');
 
 // Agent 调用的输出上限：优先调用方显式值，其次模型配置的 max_tokens，最后回退 1200。
 // 与 chat/openai/apps 一致地尊重模型配置，避免推理型模型（如 Qwen3）被 1200 写死后思考耗尽、正文为空。
@@ -75,6 +75,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
             signal: options.signal || null
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
+        if (options.usageRef && typeof options.usageRef === 'object') options.usageRef.usage = usage;
         if (usage && typeof options.onUsage === 'function') {
             try { options.onUsage(usage); } catch (_) {}
         }
@@ -170,12 +171,29 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
 }
 
 async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '', options = {}) {
-    const usage = options.usage || null;
+    const usage = options.usage || options.usageRef?.usage || null;
     const usageInput = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens ?? 0) || 0;
     const usageOutput = Number(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens ?? 0) || 0;
-    const inputTokens = usageInput > 0 ? usageInput : estimateTokens(JSON.stringify(toProviderInput(messages)));
-    const outputTokens = usageOutput > 0 ? usageOutput : estimateTokens(output || '');
+    const estimated = estimateProviderUsage(messages, output);
+    const inputTokens = usageInput > 0 ? usageInput : estimated.inputTokens;
+    const outputTokens = usageOutput > 0 ? usageOutput : estimated.outputTokens;
     recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
+    let calibration = null;
+    if (usage) {
+        try {
+            calibration = await recordProviderUsageCalibration({
+                modelId: modelCfg.id,
+                protocol: usage.protocol || 'unknown',
+                source,
+                messages,
+                output,
+                estimated,
+                usage
+            });
+        } catch (_) {
+            // Calibration is an audit metric and must not fail an otherwise valid model response.
+        }
+    }
     if (runId) {
         await execute(`
             UPDATE agent_runs
@@ -204,7 +222,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
         }
         if (options.budget?.recordTokens) options.budget.recordTokens(inputTokens + outputTokens);
     }
-    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, calibration };
 }
 
 module.exports = {

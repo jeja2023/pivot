@@ -26,7 +26,7 @@ Pivot 已经实现了一个面向业务自动化的 Agent 控制面与执行面�
 5. Pivot 已落地 PostgreSQL-only `AgentControl` mailbox、`agent_run_resources` 资源账本和 `agent_residencies` 常驻实例表，支持父子消息、预算预留/消耗回收、子并发上限、fork history（none/all/turns）、父取消传播、租约保护和 per-user LRU。
 6. Pivot 已补齐 Provider envelope、WorldState/编排/控制器契约测试，并新增本地 mock SSE 的真实工具回传闭环、App Server JSON-RPC 最小控制面、官方 MCP conformance 客户端场景和 Provider 事件状态机；真实长连接与 conformance 已在本版本完成验证。
 
-综合判定：**Pivot 已具备生产级 Agent 治理底座；本轮已把“统一采样上下文 + 持久化 WorldState 窗口 + 跨 Chat/desktop 的 ToolExecutionPlan + PostgreSQL 事件日志/outbox + AgentControl 资源账本 + Provider envelope + App Server/MCP 官方协议验证 + 常驻 Agent residency/LRU”推进为可运行骨架。下一阶段重点转向真实 Provider usage 校准、非幂等副作用故障矩阵和多进程 residency 压力评测，而不是复制 Codex 的 Prompt 文本或 Rust 文件结构。**
+综合判定：**Pivot 已具备生产级 Agent 治理底座；v0.1.24 已把“统一采样上下文 + 持久化 WorldState 窗口 + 跨 Chat/desktop 的 ToolExecutionPlan + PostgreSQL 事件日志/outbox + AgentControl 资源账本 + Provider envelope + App Server/MCP 官方协议验证 + 常驻 Agent residency/LRU + usage 校准 + 非幂等故障矩阵 + 多进程压力验证”推进为可运行骨架。后续仅需持续积累生产样本和扩展评测规模，而不是复制 Codex 的 Prompt 文本或 Rust 文件结构。**
 
 ## 二、判定等级
 
@@ -244,7 +244,7 @@ Pivot 已经实现了一个面向业务自动化的 Agent 控制面与执行面�
 
 ### 3.12 多 Agent Harness
 
-**结论：AgentControl、父子资源治理和常驻 Agent residency/LRU 已实现；后续只需继续做多进程压力与迁移评测。**
+**结论：AgentControl、父子资源治理、常驻 Agent residency/LRU 及多进程竞争回归均已实现。**
 
 已有实现：
 
@@ -291,7 +291,7 @@ Pivot 已经实现了一个面向业务自动化的 Agent 控制面与执行面�
 - `tests/agent-provider-sse-harness.test.js` 已形成可控本地 mock SSE：预制增量工具参数 -> 实际工具执行 -> 精确检查第二次 Provider 请求中的 assistant tool_call/tool 消息 -> 检查 model/工具结果事件和最终回答，并覆盖断流、取消、审批暂停和可恢复工具失败。
 - `tests/agent-tool-scheduler.test.js` 覆盖只读并行、写入屏障、结果顺序和取消契约。
 - `tests/protocol-conformance.test.js` 已覆盖 App Server 请求/通知/错误、MCP 生命周期、Provider 事件状态机；官方 suite 的 initialize/tools_call/sse-retry 场景和真实网络长连接顺序均已由独立命令验证。
-- 测试统一由 PostgreSQL bootstrap 驱动；版本收口后的 `npm run test:all` 为 **567/567**，通过后置静态检查未发现新增 raw SQL。
+- 测试统一由 PostgreSQL bootstrap 驱动；v0.1.24 的 `npm run test:all` 为 **573/573**，通过后置静态检查未发现新增 raw SQL。
 
 ### 3.15 报告设计优点、风险与可复用原则的对照
 
@@ -310,7 +310,7 @@ Pivot 已经实现了一个面向业务自动化的 Agent 控制面与执行面�
 | 压缩近似误差 | `estimateTokens()` 和摘要压缩均是近似方案 | 风险已存在，应增加校准指标 |
 | 权限升级严格测试 | 有审批恢复、网络/沙箱/SSRF 测试；缺 sandbox denial → escalation 的完整矩阵 | 部分实现 |
 
-报告第 18 节的 15 条可复用原则中，Pivot 已直接覆盖生命周期、统一工具入口、审批/沙箱、事件 outbox/replay、父子图/资源限制、StepContext、Provider 边界、WorldState 窗口化、App Server 最小协议、官方 MCP conformance、真实长连接和 residency/LRU 等核心原则；后续重点是 usage 校准、故障矩阵与跨进程压力评测。
+报告第 18 节的 15 条可复用原则中，Pivot 已直接覆盖生命周期、统一工具入口、审批/沙箱、事件 outbox/replay、父子图/资源限制、StepContext、Provider 边界、WorldState 窗口化、App Server 最小协议、官方 MCP conformance、真实长连接、residency/LRU、usage 校准和副作用恢复矩阵等核心原则；后续重点是生产样本积累与评测规模扩展。
 
 ## 四、能力清单：已经实现什么
 
@@ -405,7 +405,7 @@ PostgreSQL mailbox 已支持父子/同树消息、用户隔离、领取、确认
 | 1 | 采样上下文统一 | `AgentStepContext`、context hash、provider payload 脱敏/剥离 | Agent streaming、JSON、DAG 三入口 hash 一致（已完成） |
 | 2 | 工具治理收敛 | `ToolOrchestrator`，接入 approval/network/sandbox/checkpoint/audit | Agent、Chat MCP、desktop handler 前均生成计划（已完成；统一审计字段待收敛） |
 | 3 | WorldState | 结构化状态、full/reference/diff injection、窗口版本链、保留/压缩 | Streaming 可差分，跨进程从 PostgreSQL snapshot 恢复，Chat 已有独立窗口（已完成；desktop 窗口统一待补） |
-| 4 | 事件可恢复 | append-only event log、seq、delta、provider state、outbox、回放 | 事实事件、outbox、重试、replay API、SSE Last-Event-ID 和 Provider 状态机已完成；usage 校准待补 |
+| 4 | 事件可恢复 | append-only event log、seq、delta、provider state、outbox、回放 | 事实事件、outbox、重试、replay API、SSE Last-Event-ID、Provider 状态机和 usage 校准指标已完成 |
 | 5 | 多 Agent 控制 | AgentControl、mailbox、预算/取消/并发继承、fork 策略、residency lease/LRU | 父子 Agent 可控通信且资源继承、常驻实例状态可审计（已完成） |
 | 6 | 协议生态 | mock SSE、App Server JSON-RPC、MCP conformance、外部长连接 | 官方 initialize/tools_call/sse-retry 与真实 SSE reconnect 已通过；继续扩展客户端矩阵 |
 
@@ -419,7 +419,7 @@ node --test tests/agent-acceptance.test.js tests/autonomous-agent-contracts.test
   tests/agent-trace-contracts.test.js tests/agent-sandbox-python.test.js
 ```
 
-结果：新增 WorldState 保留、Provider mock SSE 断流/取消/审批暂停/工具失败恢复、ToolExecutionPlan、事件 outbox/replay、资源预算/并发/fork、App Server/MCP/Provider 状态机和非幂等恢复矩阵契约测试与既有自主 Agent、桌面、安全、Trace 回归均通过；本轮定向契约测试为 **12/12**，版本收口后的全量 PostgreSQL `npm run test:all` 为 **567/567**。`check:architecture`、`check:text`、`check:no-new-raw-sql`、`git diff --check` 均通过；`check:async_db_calls` 保持项目既有提示量，未新增本轮测试的同步 `db.prepare` 使用。
+结果：新增 WorldState 保留、Provider mock SSE 断流/取消/审批暂停/工具失败恢复、ToolExecutionPlan、事件 outbox/replay、资源预算/并发/fork、App Server/MCP/Provider 状态机和非幂等恢复矩阵契约测试与既有自主 Agent、桌面、安全、Trace 回归均通过；v0.1.24 质量扩展回归为 **6/6**，全量 PostgreSQL `npm run test:all` 为 **573/573**。`check:architecture`、`check:text`、`check:no-new-raw-sql`、`git diff --check` 均通过；`check:async_db_calls` 报告 75 条非阻断提示（包含独立 residency worker 入口），未发现会阻断构建的新问题。
 
 剩余工程风险：
 
@@ -441,7 +441,7 @@ Pivot 已经实现报告中最重要的安全和运行时基础：**模型提出
 4. `AgentEventLog`：先持久化事实，再发布通知，并支持回放。
 5. `AgentControl`：父子 Agent 的通信、预算、取消和并发控制器。
 
-其中 StepContext、WorldState 窗口链/保留、跨入口 ToolExecutionPlan/scheduler、EventLog + outbox/replay、Provider envelope、Provider mock SSE、App Server/MCP 官方 conformance、真实长连接和 AgentControl residency/LRU 已落地；继续通过 usage 校准、故障矩阵和压力评测，Pivot 将进一步演进为“上下文一致、可重放、跨入口统一的 Agent Harness”。
+其中 StepContext、WorldState 窗口链/保留、跨入口 ToolExecutionPlan/scheduler、EventLog + outbox/replay、Provider envelope、Provider mock SSE、App Server/MCP 官方 conformance、真实长连接、AgentControl residency/LRU、usage 校准、非幂等故障矩阵和多进程压力验证均已落地；后续通过生产样本和更大规模评测，Pivot 将继续演进为“上下文一致、可重放、跨入口统一的 Agent Harness”。
 
 ## 十、本轮落地校正（2026-08-22）
 
@@ -451,12 +451,12 @@ Pivot 已经实现报告中最重要的安全和运行时基础：**模型提出
 | --- | --- | --- |
 | `AgentStepContext` | `server/services/agent-step-context.js` 提供稳定排序、不可变快照、`contextHash/worldStateHash`；JSON planner、streaming planner、DAG 节点均创建并传递；Chat 持久化等价 snapshot，desktop 每 step 创建并落盘 hash | Chat/desktop 尚未完全复用同一对象序列化 |
 | `WorldState` | 将 Run 策略、模型、工具契约、上下文、恢复信息、环境/记忆和安全扩展编译为结构化快照；Streaming 使用 `full/reference/diff` 注入，JSON planner 因每轮独立请求强制 full；Agent 与 Chat 均有 PG window/snapshot 链 | desktop 尚未完全接入同一窗口语义 |
-| Provider 输入边界 | `agent-provider-envelope.js` + `model-forwarder.js` 在中央出站边界统一清洗 Chat/Responses 消息、工具和工具调用；Chat、OpenAI、应用中心、标题、RAG/长期记忆和 Agent 文本/流式共用 | Provider usage 精确 tokenizer 校准仍可继续加强 |
+| Provider 输入边界 | `agent-provider-envelope.js` + `model-forwarder.js` 在中央出站边界统一清洗 Chat/Responses 消息、工具和工具调用；Chat、OpenAI、应用中心、标题、RAG/长期记忆和 Agent 文本/流式共用 | usage 真实值与估算误差已按模型/协议持久化；继续累积生产样本以优化 tokenizer 偏差 |
 | `ToolOrchestrator` | `server/services/agent-tool-execution-plan.js` + `agent-tool-orchestrator.js` 统一策略、审批、网络预检、sandbox 选择、operation key、checkpoint、失败/拒绝事件和实际 handler；Chat/desktop 也在 handler 前生成计划 | 统一审计字段和 StepContext 关联仍需收敛；沙箱升级重试明确为禁止自动放宽 |
-| Append-only 事件 | PostgreSQL `agent_events` + `agent_event_outbox`、Run `event_seq`、payload hash、provider event、replay API、后台 claim/retry、SSE Last-Event-ID | 外部 MCP 客户端事件顺序已验证；真实 provider usage 仍需校准 |
-| `AgentControl` mailbox | `agent-control.js` + `agent_run_resources` 支持父子/同树消息、预算预留/消耗回收、子并发上限、fork history、领取、确认、过期、用户隔离和取消传播；`agent_residencies` 补充持久化常驻实例租约与 LRU | 仍需扩展跨进程常驻实例恢复压测 |
+| Append-only 事件 | PostgreSQL `agent_events` + `agent_event_outbox`、Run `event_seq`、payload hash、provider event、replay API、后台 claim/retry、SSE Last-Event-ID | 外部 MCP 客户端事件顺序和 Provider usage 校准指标均已验证 |
+| `AgentControl` mailbox | `agent-control.js` + `agent_run_resources` 支持父子/同树消息、预算预留/消耗回收、子并发上限、fork history、领取、确认、过期、用户隔离和取消传播；`agent_residencies` 补充持久化常驻实例租约与 LRU | 多进程租约竞争和 LRU 压力回归已完成 |
 | 上下文可追踪 | `agent_steps`、`agent_trace_spans`、`agent_tool_calls` 均保存 `context_hash`；DAG 重试复用节点快照；Chat snapshot 记录 turn/context/world-state hash | 旧数据的 context hash 为空是兼容历史记录的预期结果；desktop 完整 snapshot 仍待补 |
-| 契约测试 | 既有 Agent Harness、WorldState、Provider SSE、scheduler、event/resource、control 测试，加上 `protocol-conformance.test.js`、chunked SSE 回归和官方 MCP conformance 客户端场景 | 真实 Provider usage 与更大规模副作用故障矩阵仍需长期评测 |
+| 契约测试 | 既有 Agent Harness、WorldState、Provider SSE、scheduler、event/resource、control 测试，加上 `protocol-conformance.test.js`、chunked SSE 回归和官方 MCP conformance 客户端场景；v0.1.24 增加 usage 校准、非幂等故障矩阵和多进程 residency 压力测试 | 基线已完成；真实流量样本与更大规模评测持续累积 |
 
 ### 当前应视为“已实现”的结论
 
@@ -465,11 +465,11 @@ Pivot 已经实现报告中最重要的安全和运行时基础：**模型提出
 - 工具调用已经有单一 Agent 入口：`executeToolByName()` -> `ToolOrchestrator` -> 实际 MCP/数据库/内置 handler。策略拒绝发生在 checkpoint 和 handler 之前并记录 `tool.denied`，幂等操作可重放，失败会收敛为失败 checkpoint 和 `tool.failed` 事件。
 - 事实事件使用 PostgreSQL 事务内的单调 `event_seq` 写入；客户端可按用户隔离的 run + seq 增量查询，model delta 已进入日志，outbox 负责可重试通知，replay API 和 SSE Last-Event-ID 支持断线续传。
 
-### 仍需持续借鉴的质量扩展
+### 已落地并持续演进的质量扩展
 
-1. Provider usage 目前记录了 Responses/Chat Completions 的结构化 usage；后续可用真实 tokenizer 对估算值做长期校准，并把误差纳入评测。
-2. 继续扩大非幂等副作用矩阵到超时、进程崩溃、重复投递和外部服务已提交等边界；当前最小恢复矩阵已覆盖未审批不执行、审批后单次执行。
-3. residency/LRU 已实现数据库持久化和租约保护，后续可在多进程高并发下补充恢复压测、租约争抢和跨版本状态迁移评测。
+1. Provider usage 已记录 Responses/Chat Completions 的结构化真实 usage，并按模型/协议累计估算误差；生产流量达到统计量后继续优化 tokenizer 偏差。
+2. 非幂等副作用矩阵已覆盖超时、Worker 错误、上游不可用、重复投递和外部提交状态未知；继续扩展异常注入规模与跨版本恢复评测。
+3. residency/LRU 已实现数据库持久化、租约保护和多进程压力回归；继续累积更高并发、跨版本迁移和故障恢复样本。
 
 ### 数据库与测试约束
 
@@ -481,7 +481,7 @@ Pivot 已经实现报告中最重要的安全和运行时基础：**模型提出
 node scripts/run_node_tests.js agent-harness-context.test.js autonomous-agent-contracts.test.js
 ```
 
-结果：`agent-world-state-store.test.js`、`agent-provider-sse-harness.test.js`、`agent-tool-scheduler.test.js`、`agent-event-resource-plan.test.js`、`agent-control.test.js`、`agent-residency.test.js`、`mcp-client-long-connection.test.js`、`protocol-conformance.test.js` 与既有 Agent Harness 契约均通过；本轮定向协议/恢复测试为 **12/12**，迁移 `202608210003` 至 `202608220006` 已应用，全量 PostgreSQL 回归为 **567/567**。核心文件语法和 ESLint、架构边界、文本完整性、raw SQL 增量检查和差异检查均通过；DAG、JSON planner、streaming planner、工具 scheduler、Provider envelope、AgentControl、App Server 路由均可加载。
+结果：`agent-world-state-store.test.js`、`agent-provider-sse-harness.test.js`、`agent-tool-scheduler.test.js`、`agent-event-resource-plan.test.js`、`agent-control.test.js`、`agent-residency.test.js`、`agent-residency-multiprocess.test.js`、`mcp-client-long-connection.test.js`、`protocol-conformance.test.js`、`provider-usage-calibration.test.js` 与既有 Agent Harness 契约均通过；v0.1.24 质量回归为 **6/6**，迁移 `202608210003` 至 `202608220007` 已应用，全量 PostgreSQL 回归为 **573/573**。核心文件语法和 ESLint、架构边界、文本完整性、raw SQL 增量检查和差异检查均通过；DAG、JSON planner、streaming planner、工具 scheduler、Provider envelope、AgentControl、App Server 路由均可加载。
 
 ## 十一、v0.1.23 剩余项闭环（2026-08-22）
 
@@ -494,4 +494,16 @@ node scripts/run_node_tests.js agent-harness-context.test.js autonomous-agent-co
 | 官方 MCP conformance | 固定 `@modelcontextprotocol/conformance@0.2.0-alpha.11`，新增 `scripts/mcp-conformance-client.js` 及 `test:mcp:official`、`test:mcp:official:tools`、`test:mcp:official:sse` | `initialize` 1/1、`tools_call` 2/2、`sse-retry` 3/3 全部通过 |
 | Agent residency/LRU | 新增迁移 `202608220006_agent_residency` 和 `agent-residency.js`，持久化脱敏状态/哈希、run 绑定、lease、TTL、per-user LRU、evict/list/acquire/release/sweep；App Server 显式 `residentKey` 触碰，后台每 5 分钟 sweep | PostgreSQL `agent-residency.test.js` 通过；租约实例不会被 LRU 淘汰 |
 
-因此本报告原“尚未完成但值得继续借鉴”的第 1、3、5 项已经落地为可运行代码；第 2、4 项（真实 Provider usage 校准、全量非幂等故障矩阵）仍属于后续质量扩展，不影响本版本核心闭环。
+因此本报告原“尚未完成但值得继续借鉴”的五项内容均已落地为可运行代码和回归证据；v0.1.24 仅保留生产样本累积与更大规模评测作为持续质量工作。
+
+## 十二、v0.1.24 质量扩展闭环（2026-08-22）
+
+v0.1.24 将上一节列出的三项非阻塞质量扩展落实为可执行代码和 PostgreSQL 回归证据：
+
+| 质量目标 | 实现 | 验证 |
+| --- | --- | --- |
+| 真实 Provider usage 校准 | `model_usage_calibrations` 聚合表；`provider-usage-calibration.js` 归一化 Chat/Responses usage，记录估算值、真实值、有符号误差、绝对误差、偏差比和最大误差；模型记录层接入普通 JSON、Agent planner、工作流节点、委派、内容校对和流式入口 | `provider-usage-calibration.test.js`：字段归一化、缺失字段和 PostgreSQL 聚合写入通过 |
+| 非幂等故障矩阵 | 桌面执行账本覆盖超时、Worker 错误、上游不可用、重复投递和外部提交状态未知；已完成操作键只读重放，pending 非幂等调用恢复时强制重新审批 | `agent-non-idempotent-fault-matrix.test.js`：6 个场景全部通过，副作用执行次数符合契约 |
+| 多进程 residency 压力 | `agent-residency-worker.js` 作为独立进程争抢同一 PostgreSQL lease；并发 touch 验证 per-user LRU 上限在压力下收敛 | `agent-residency-multiprocess.test.js`：8 进程单租约获胜、12 路 touch LRU 上限均通过 |
+
+本轮独立质量回归命令为 `npm run test:agent:quality`；在 PostgreSQL 测试 schema 中三项测试共 **6/6** 通过。真实 usage 样本会持续累积，后续只需在目标 Provider 流量达到统计量后按模型/协议读取聚合误差指标。

@@ -60,8 +60,9 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         }
     ];
     const fitted = fitMessagesToContextBudget(messages, modelCfg);
-    const content = await callModelText(modelCfg, fitted.messages, { user, signal: options.signal || null });
-    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, { budget: options.budget });
+    const usageRef = {};
+    const content = await callModelText(modelCfg, fitted.messages, { user, signal: options.signal || null, usageRef });
+    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, { budget: options.budget, usageRef });
     return content || '未能生成最终答案。';
 }
 

@@ -452,7 +452,7 @@ function validateStructuredOutput(content, schema = {}) {
     return { value: parsed, issues };
 }
 
-async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName, signal }) {
+async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName, signal, usageRef }) {
     const responseFormat = schemaHasRules(schema)
         ? {
             type: 'json_schema',
@@ -468,6 +468,7 @@ async function requestStructuredOutput({ modelCfg, messages, user, temperature, 
         temperature,
         maxTokens,
         signal,
+        usageRef,
         ...(responseFormat ? { responseFormat } : {})
     });
     return { content, native: Boolean(responseFormat) };
@@ -500,6 +501,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
     let content = '';
     let nativeStructured = false;
     if (responseFormat === 'json') {
+        const usageRef = {};
         try {
             const result = await requestStructuredOutput({
                 modelCfg,
@@ -509,15 +511,16 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                 maxTokens,
                 schema: outputSchema,
                 schemaName: context.node?.id || 'workflow_output',
-                signal: context.signal || null
+                signal: context.signal || null,
+                usageRef
             });
             content = result.content;
             nativeStructured = result.native;
         } catch (error) {
             if (!isNativeStructuredOutputUnsupported(error)) throw error;
-            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
+            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
         }
-        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '', { usageRef });
         let validation = validateStructuredOutput(content, outputSchema);
         if (validation.issues.length) {
             const repairMessages = [
@@ -530,8 +533,9 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                     content: `原始结果：\n${String(content || '').slice(0, 16000)}\n\n校验问题：\n${validation.issues.join('\n')}`
                 }
             ];
-            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null });
-            await recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '');
+            const repairUsageRef = {};
+            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null, usageRef: repairUsageRef });
+            await recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '', { usageRef: repairUsageRef });
             content = repaired;
             validation = validateStructuredOutput(content, outputSchema);
             if (validation.issues.length) {
@@ -542,8 +546,9 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
             }
         }
     } else {
-        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null });
-        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '');
+        const usageRef = {};
+        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
+        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '', { usageRef });
     }
     return {
         content,
@@ -610,8 +615,9 @@ async function executeAgentDelegate(input = {}, user, context = {}) {
     const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
     const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
     const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
-    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null });
-    await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '');
+    const usageRef = {};
+    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
+    await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '', { usageRef });
     return {
         content,
         text: content,

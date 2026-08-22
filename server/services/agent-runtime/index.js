@@ -981,6 +981,7 @@ async function runAgent(runId, user) {
                 contextHash: stepContext.contextHash
             });
             let plannedText;
+            let plannedTextUsageRef = null;
             try {
                 try {
                     await recordAgentEvent({
@@ -993,7 +994,9 @@ async function runAgent(runId, user) {
                         eventKey: `model:${stepContext.contextHash}:requested`
                     });
                 } catch (_) {}
-                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
+                const usageRef = {};
+                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal, usageRef }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
+                plannedTextUsageRef = usageRef;
                 try {
                     await recordAgentEvent({
                         runId,
@@ -1030,7 +1033,7 @@ async function runAgent(runId, user) {
                 });
                 throw plannerError;
             }
-            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, { budget: taskBudget });
+            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, { budget: taskBudget, usageRef: plannedTextUsageRef });
             assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};

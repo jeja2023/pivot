@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.23-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.24-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,7 +11,7 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.23
+## 最新版本：0.1.24
 
 （详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)）
 
@@ -325,6 +325,8 @@ AGENT_RESIDENCY_IDLE_TTL_MS=1800000
 AGENT_RESIDENCY_LEASE_MS=60000
 AGENT_RESIDENCY_SWEEP_INTERVAL_MS=300000
 
+# Provider usage 校准指标会按模型/协议写入 model_usage_calibrations，供估算误差评测
+
 # 后台记忆压缩（v0.0.43）
 # 自动压缩触发阈值与保留策略（v0.0.56）
 # 仅作为初始化默认值；后续可由管理员在系统设置中调整，保存后即时生效。
@@ -390,10 +392,16 @@ npm run check
 npm run lint
 ```
 
-全量自动化测试（567 项测试）：
+全量自动化测试（573 项测试）：
 
 ```bash
 npm run test:all
+```
+
+Agent 质量扩展回归（Provider usage 校准、非幂等故障矩阵、多进程 residency）：
+
+```bash
+npm run test:agent:quality
 ```
 
 官方 MCP 客户端一致性场景（固定 `@modelcontextprotocol/conformance@0.2.0-alpha.11`）：
@@ -484,4 +492,4 @@ npm run check:external -- --live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.23
+**当前版本**：v0.1.24
