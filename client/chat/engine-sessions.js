@@ -1,4 +1,6 @@
 // --- 对话会话引擎模块 ---
+let sessionSelectionSequence = 0;
+
 async function createSession(title) {
     try {
         const res = await apiFetch(API_BASE + '/sessions', {
@@ -25,8 +27,14 @@ async function createSession(title) {
 }
 
 async function selectSession(id, title, options = {}) {
+    const selectionSequence = ++sessionSelectionSequence;
+    const requestedSessionId = String(id || '');
+    const isCurrentSelection = () => (
+        selectionSequence === sessionSelectionSequence
+        && String(currentSessionId || '') === requestedSessionId
+    );
     window.showMainWorkspace?.('chat');
-    if (String(currentSessionId || '') !== String(id || '')) {
+    if (String(currentSessionId || '') !== requestedSessionId) {
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
     }
     currentSessionId = id;
@@ -37,6 +45,8 @@ async function selectSession(id, title, options = {}) {
     let data = null;
     try {
         const res = await apiFetch(API_BASE + `/sessions/${id}?messageLimit=60`);
+        // 会话切换是异步的；旧请求晚返回时不能覆盖用户刚选中的会话。
+        if (!isCurrentSelection()) return;
         if (!res.ok) {
             if (options.restore || res.status === 404) {
                 currentSessionId = null;
@@ -54,6 +64,7 @@ async function selectSession(id, title, options = {}) {
         data = await res.json();
     } catch (e) {
         console.error('加载会话失败', e);
+        if (!isCurrentSelection()) return;
         if (options.restore) {
             currentSessionId = null;
             window.persistActiveChatSession?.('');
@@ -64,6 +75,8 @@ async function selectSession(id, title, options = {}) {
         showToast('加载会话失败，请稍后重试', 'error');
         return;
     }
+
+    if (!isCurrentSelection()) return;
 
     const session = data.session;
     const messages = data.messages;
