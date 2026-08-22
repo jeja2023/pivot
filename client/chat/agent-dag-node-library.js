@@ -21,6 +21,7 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
     if (container._pivotNodeLibDestroy) container._pivotNodeLibDestroy();
 
     let searchQuery = '';
+    let showAdvanced = false;
 
     function filteredGroups() {
         const q = searchQuery.trim().toLowerCase();
@@ -88,6 +89,7 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
     function renderGroups(groupsContainer) {
         groupsContainer.replaceChildren();
         const groups = filteredGroups();
+        const includeAdvanced = showAdvanced || Boolean(searchQuery.trim());
         if (!groups.length) {
             const empty = document.createElement('div');
             empty.className = 'pivot-node-library-empty';
@@ -96,6 +98,8 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
             return;
         }
         groups.forEach(group => {
+            const visibleItems = group.items.filter(item => includeAdvanced || !item.advanced);
+            if (!visibleItems.length) return;
             const groupEl = document.createElement('div');
             groupEl.className = 'pivot-node-library-group';
 
@@ -107,7 +111,7 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
             const itemsEl = document.createElement('div');
             itemsEl.className = 'pivot-node-library-items';
 
-            group.items.forEach(item => {
+            visibleItems.forEach(item => {
                 const availability = window.Pivot.moduleApi('agent.dagNodePresets').availability?.(item, typeof getTools === 'function' ? getTools() : [])
                     || { available: true, reason: '' };
                 const card = document.createElement('button');
@@ -147,6 +151,19 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
             groupEl.appendChild(itemsEl);
             groupsContainer.appendChild(groupEl);
         });
+        const advancedCount = NODE_PRESETS.reduce((count, group) => count + group.items.filter(item => item.advanced).length, 0);
+        if (advancedCount) {
+            const advancedToggle = document.createElement('button');
+            advancedToggle.type = 'button';
+            advancedToggle.className = 'pivot-node-library-advanced-toggle';
+            advancedToggle.setAttribute('aria-expanded', showAdvanced ? 'true' : 'false');
+            advancedToggle.textContent = showAdvanced ? '收起高级节点' : `显示高级节点（${advancedCount}）`;
+            advancedToggle.addEventListener('click', () => {
+                showAdvanced = !showAdvanced;
+                renderGroups(groupsContainer);
+            });
+            groupsContainer.appendChild(advancedToggle);
+        }
     }
 
     render();

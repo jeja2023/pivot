@@ -1,4 +1,5 @@
 /* Agent DAG 参数与预设工作流向导（拆自 agents-dag-editor.js） */
+/* global partitionWizardFields, isWizardFieldRelevant */
 
 
 
@@ -14,7 +15,9 @@ function createDagWizardController(ctx) {
             const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
             const required = new Set(Array.isArray(schema.required) ? schema.required : []);
             const isVisualSqlQuery = isVisualSqlQueryTool(tool);
-            const fields = Object.entries(properties).filter(([name]) => !isVisualSqlQuery || !['sql', 'limit'].includes(name));
+            const fieldEntries = Object.entries(properties).filter(([name]) => !isVisualSqlQuery || !['sql', 'limit'].includes(name));
+            const fieldGroups = partitionWizardFields(fieldEntries, required, tool);
+            const fields = fieldGroups.all;
             const dependencyNodes = buildWizardDependencyNodes(node, ctx.spec.nodes);
             let modal = document.getElementById('pivot-dag-input-wizard');
             if (!modal) {
@@ -30,9 +33,16 @@ function createDagWizardController(ctx) {
                 if (legacyConnectionId) currentInput.connectionId = legacyConnectionId;
             }
             const initialInput = { ...templateInput, ...currentInput };
-            const fieldMarkup = fields.length
-                ? fields.map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools)).join('')
+            let wizardBaseInput = cloneDagInput(currentInput);
+            const renderFieldEntries = (entries) => entries
+                .filter(([name]) => isWizardFieldRelevant(name, initialInput, tool))
+                .map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools)).join('');
+            const primaryFieldMarkup = fieldGroups.primary.length
+                ? renderFieldEntries(fieldGroups.primary)
                 : '<div class="pivot-dag-wizard-empty">当前工具不需要配置参数，直接应用即可。</div>';
+            const advancedFieldMarkup = fieldGroups.advanced.length
+                ? `<details class="pivot-dag-wizard-more-settings"><summary>更多设置 <span>一般无需修改</span></summary><div class="pivot-dag-wizard-more-grid">${renderFieldEntries(fieldGroups.advanced)}</div></details>`
+                : '';
             PivotSafeHtml.setHtml(modal, `
                 <div class="modal rag-detail-modal pivot-dag-input-wizard">
                     <div class="rag-detail-header pivot-dag-input-head">
@@ -53,11 +63,12 @@ function createDagWizardController(ctx) {
                                     ${renderInputSummary(initialInput, tool, wizardTools)}
                                 </div>
                             </section>
-                            ${isVisualSqlQuery ? fieldMarkup : ''}
+                            ${isVisualSqlQuery ? primaryFieldMarkup : ''}
                             ${isVisualSqlQuery
                                 ? renderVisualSqlBuilder(initialInput)
                                 : renderDatabaseAssistPanel(node, tool, initialInput, wizardTools)}
-                            ${isVisualSqlQuery ? '' : fieldMarkup}
+                            ${isVisualSqlQuery ? '' : primaryFieldMarkup}
+                            ${advancedFieldMarkup}
                         </div>
                         <aside class="pivot-dag-wizard-sources">
                             <div class="pivot-dag-wizard-sources-title">变量引用</div>
@@ -142,7 +153,10 @@ function createDagWizardController(ctx) {
                 }
                 if (type === 'integer') {
                     const value = Number.parseInt(raw, 10);
-                    return Number.isFinite(value) ? value : undefined;
+                    if (!Number.isFinite(value)) return undefined;
+                    return toolValue(tool) === 'workflow.delay' && normalizeFieldKey(fieldName) === 'duration_ms'
+                        ? value * 1000
+                        : value;
                 }
                 if (type === 'number') {
                     const value = Number(raw);
@@ -282,7 +296,7 @@ function createDagWizardController(ctx) {
             };
 
             const collectWizardInput = () => {
-                const nextInput = cloneDagInput(node.input);
+                const nextInput = cloneDagInput(wizardBaseInput);
                 const missing = [];
                 fields.forEach(([name, fieldSchema]) => {
                     const control = fieldsByName.get(name);
@@ -322,7 +336,7 @@ function createDagWizardController(ctx) {
                     return null;
                 }
                 // 保留高级 JSON 里已有但向导没覆盖的字段。
-                Object.keys(node.input || {}).forEach(key => {
+                Object.keys(wizardBaseInput || {}).forEach(key => {
                     if (
                         tool?.databaseTool
                         && ['connection_id', 'databaseConnectionId', 'database_connection_id', 'mcpServerId', 'mcp_server_id'].includes(key)
@@ -330,7 +344,7 @@ function createDagWizardController(ctx) {
                         return;
                     }
                     if (!Object.prototype.hasOwnProperty.call(properties, key) && nextInput[key] === undefined) {
-                        nextInput[key] = node.input[key];
+                        nextInput[key] = wizardBaseInput[key];
                     }
                 });
                 return nextInput;
@@ -382,6 +396,7 @@ function createDagWizardController(ctx) {
 
 
             const resetWizard = (draftInput = {}) => {
+                wizardBaseInput = cloneDagInput(draftInput);
                 syncFormWithDraft(draftInput);
                 queryBuilder?.hydrate(draftInput);
             };

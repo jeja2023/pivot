@@ -143,10 +143,10 @@ const NODE_PRESET_GROUPS = [
                 }
             },
             {
-                base: 'delegate', title: '委派智能体', svgIcon: 'users', theme: 'delegate',
+                base: 'delegate', title: '委派智能体', svgIcon: 'users', theme: 'delegate', advanced: true,
                 desc: '调用独立专家并返回结果与结构化交接', toolName: 'agent.delegate',
                 getInput: ({ selectedNode }) => ({
-                    agentName: '领域专家', role: '分析专家', model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
+                    agentName: '领域专家', role: 'analyst', model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
                     task: '{{goal}}',
                     context: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}',
                     responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200
@@ -182,6 +182,7 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'code', title: '代码执行', svgIcon: 'code', theme: 'code',
+                advanced: true,
                 desc: '在沙箱中执行 JS，对数据做转换或计算', toolName: 'agent.code',
                 getInput: ({ selectedNode }) => ({
                     code: '// vars 保存下方配置的变量\nreturn vars.input;',
@@ -191,6 +192,7 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
+                advanced: true,
                 desc: '逐项执行安全 JS 转换，并汇总结果', toolName: 'workflow.foreach',
                 getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
                 outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
@@ -204,7 +206,7 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'delay', title: '延时', svgIcon: 'clock', theme: 'delay',
                 desc: '等待指定时长后继续执行下游节点', toolName: 'workflow.delay',
-                input: { durationMs: 1000, reason: '' },
+                input: { durationMs: 60000, reason: '' },
                 outputSchema: { type: 'object', required: ['durationMs'], properties: { durationMs: { type: 'integer' }, completedAt: { type: 'string' } } }
             }
         ]
@@ -214,12 +216,19 @@ const NODE_PRESET_GROUPS = [
         items: [
             {
                 base: 'http', title: '网络请求', svgIcon: 'globe', theme: 'http',
+                advanced: true,
                 desc: '调用外部服务接口，支持安全凭据引用和节点测试', toolName: 'agent.http',
                 input: { url: '', method: 'GET', headers: {}, credentialSecret: '', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', body: null, timeoutMs: 10000 },
                 outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
             },
             {
+                base: 'browser', title: '浏览器自动化', svgIcon: 'globe', theme: 'http', advanced: true,
+                desc: '在允许的网站上执行受控查看或点击操作', toolName: 'agent.browser',
+                input: { url: '', action: 'inspect', target: {}, screenshot: false }
+            },
+            {
                 base: 'merge', title: '变量聚合', iconText: '+', theme: 'merge',
+                advanced: true,
                 desc: '把多个上游输出映射为统一对象', toolName: 'agent.merge',
                 getInput: ({ selectedNode }) => ({ fields: selectedNode ? { [selectedNode.id]: `{{nodes.${selectedNode.id}.output}}` } : {} }),
                 outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' }, count: { type: 'integer' } } }
@@ -230,14 +239,69 @@ const NODE_PRESET_GROUPS = [
                 input: { query: '{{goal}}', topK: 5, candidateLimit: 80 }
             },
             {
+                base: 'knowledge_graph', title: '知识关系查询', svgIcon: 'search', theme: 'rag', advanced: true,
+                desc: '查询知识库中的实体关系、归属和影响路径', toolName: 'knowledge.graph.query',
+                input: { query: '{{goal}}', entityLimit: 6, relationLimit: 12 }
+            },
+            {
+                base: 'session_search', title: '历史会话检索', svgIcon: 'search', theme: 'rag', advanced: true,
+                desc: '按关键词查找当前用户的历史会话内容', toolName: 'sessions.search',
+                input: { query: '{{goal}}', limit: 8 }
+            },
+            {
                 base: 'data', title: '数据查询', svgIcon: 'database', theme: 'db',
-                desc: '选择数据库连接、字段和只读筛选条件', patterns: ['db.run_readonly_query', 'db.list_tables'],
+                desc: '选择数据库连接、数据表、字段和筛选条件', patterns: ['db.run_readonly_query'],
                 unavailableReason: '请先在工具库配置可用数据库连接', input: {}
             },
             {
-                base: 'file', title: '文件 / 文档解析', svgIcon: 'file-text', theme: 'file',
-                desc: '读取报表摘要或提取文档结构', patterns: ['reports.read_file_summary', 'doc.extract_outline', 'doc.extract_key_values'],
-                unavailableReason: '请先启用报表或文档处理工具', input: {}
+                base: 'report_file', title: '读取报表文件', svgIcon: 'file-text', theme: 'file',
+                desc: '读取电子表格或 CSV 的工作表、字段和样本行', toolName: 'reports.read_file_summary',
+                unavailableReason: '当前没有可用的报表文件读取工具', input: { path: '', sheet: '', sampleRows: 20 }
+            },
+            {
+                base: 'report_query', title: '查询报表数据', svgIcon: 'table', theme: 'file',
+                desc: '从电子表格或 CSV 中选择字段、筛选并返回数据行', toolName: 'reports.query_table',
+                unavailableReason: '当前没有可用的报表数据查询工具', input: { path: '', columns: [], filters: {}, limit: 100 }
+            },
+            {
+                base: 'document_outline', title: '提取文档大纲', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '从长文本中提取标题和层级结构', toolName: 'doc.extract_outline',
+                input: { text: '{{goal}}', maxHeadings: 30 }
+            },
+            {
+                base: 'document_values', title: '提取文档信息', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '从文档中提取名称、编号等键值信息', toolName: 'doc.extract_key_values',
+                input: { text: '{{goal}}', maxItems: 50 }
+            },
+            {
+                base: 'filter_rows', title: '筛选数据行', svgIcon: 'table', theme: 'db', advanced: true,
+                desc: '按字段和值筛选上游表格数据', toolName: 'data.filter_rows',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], filters: {}, matchMode: 'exact', limit: 200 })
+            },
+            {
+                base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db', advanced: true,
+                desc: '按字段分组并计算数量、求和或平均值', toolName: 'data.group_summary',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: '', valueField: '', aggregation: 'count', limit: 100 })
+            },
+            {
+                base: 'profile_rows', title: '分析表格字段', svgIcon: 'table', theme: 'db', advanced: true,
+                desc: '查看字段类型、填写率和样本值，帮助决定后续处理方式', toolName: 'data.profile_rows',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], limit: 500 })
+            },
+            {
+                base: 'normalize_fields', title: '规范表格字段', svgIcon: 'table', theme: 'db', advanced: true,
+                desc: '批量重命名字段并清理文本首尾空格', toolName: 'data.normalize_fields',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], renameMap: {}, trimStrings: true, limit: 1000 })
+            },
+            {
+                base: 'compare_reports', title: '对比报表文件', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '对比两份报表的工作表、字段和样本数据', toolName: 'reports.compare_files',
+                input: { leftPath: '', rightPath: '', sheet: '', sampleRows: 20 }
+            },
+            {
+                base: 'chunk_text', title: '拆分长文本', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '按段落拆分长文本，便于后续逐段处理', toolName: 'doc.chunk_text',
+                getInput: ({ selectedNode }) => ({ text: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}', maxChars: 3000 })
             }
         ]
     },
@@ -268,9 +332,15 @@ function toolValue(tool) {
     return String(tool?.fullName || tool?.name || '').trim();
 }
 
+function toolShortValue(tool) {
+    return toolValue(tool).replace(/^mcp\.\d+\./, '');
+}
+
 function resolvePresetTool(preset, tools = []) {
     const list = Array.isArray(tools) ? tools : [];
-    if (preset?.toolName) return list.find(tool => toolValue(tool) === preset.toolName) || null;
+    if (preset?.toolName) {
+        return list.find(tool => toolValue(tool) === preset.toolName || toolShortValue(tool) === preset.toolName) || null;
+    }
     const patterns = Array.isArray(preset?.patterns) ? preset.patterns.map(item => String(item).toLowerCase()) : [];
     if (!patterns.length) return null;
     return list.find(tool => {

@@ -708,17 +708,20 @@ function createDagInspectorController(ctx) {
             ${renderWhenPanel(node)}
             ${renderSelectedToolMeta(selectedTool)}
             ${renderOutputPanel(node)}
-            <div class="pivot-dag-inspector-row pivot-dag-inspector-row-runtime">
-                <label><span>失败策略</span>
-                    <select data-pivot-dag-field="onError">
-                        <option value="skip_dependents" ${node.onError === 'skip_dependents' ? 'selected' : ''}>失败后跳过下游</option>
-                        <option value="continue" ${node.onError === 'continue' ? 'selected' : ''}>失败后继续下游</option>
-                        <option value="stop" ${node.onError === 'stop' ? 'selected' : ''}>失败后停止工作流</option>
-                    </select>
-                </label>
-                <label><span>重试次数</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
-                <label><span>调用超时（毫秒）</span><input type="number" min="0" max="600000" step="1000" data-pivot-dag-field="timeoutMs" value="${Number(node.timeoutMs || 0)}" placeholder="默认" title="节点工具调用超时毫秒数，0 表示使用智能体全局超时设置"></label>
-            </div>
+            <details class="pivot-dag-runtime-settings">
+                <summary><strong>失败与重试</strong><span>一般无需修改</span></summary>
+                <div class="pivot-dag-inspector-row pivot-dag-inspector-row-runtime">
+                    <label><span>失败后</span>
+                        <select data-pivot-dag-field="onError">
+                            <option value="skip_dependents" ${node.onError === 'skip_dependents' ? 'selected' : ''}>跳过后续步骤</option>
+                            <option value="continue" ${node.onError === 'continue' ? 'selected' : ''}>继续执行其他步骤</option>
+                            <option value="stop" ${node.onError === 'stop' ? 'selected' : ''}>停止整个工作流</option>
+                        </select>
+                    </label>
+                    <label><span>自动重试</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
+                    <label><span>单步最长等待（秒）</span><input type="number" min="0" max="600" step="1" data-pivot-dag-field="timeoutSeconds" value="${node.timeoutMs ? Math.round(Number(node.timeoutMs) / 1000) : 0}" placeholder="自动"></label>
+                </div>
+            </details>
             <details class="pivot-dag-contract-panel">
                 <summary class="pivot-dag-contract-panel-head">
                     <strong>高级：数据契约</strong>
@@ -900,6 +903,9 @@ function createDagInspectorController(ctx) {
         } else if (field === 'timeoutMs') {
             ctx.recordHistory?.();
             node.timeoutMs = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 600000));
+        } else if (field === 'timeoutSeconds') {
+            ctx.recordHistory?.();
+            node.timeoutMs = Math.max(0, Math.min((Number.parseInt(input.value, 10) || 0) * 1000, 600000));
         } else if (field === 'input') {
             try {
                 const parsed = JSON.parse(input.value || '{}');

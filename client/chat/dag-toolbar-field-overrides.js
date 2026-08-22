@@ -7,9 +7,14 @@
 
 const FIELD_LABEL_OVERRIDES = {
         aggregation: '聚合方式',
+        action: '操作方式',
+        agentName: '专家名称',
+        agent_name: '专家名称',
         apiKey: '访问密钥',
         api_key: '访问密钥',
         body: '请求内容',
+        compareTo: '比较值',
+        compare_to: '比较值',
         candidateLimit: '候选数量上限',
         candidate_limit: '候选数量上限',
         chartType: '图表类型',
@@ -17,9 +22,12 @@ const FIELD_LABEL_OVERRIDES = {
         collection: '集合',
         columns: '字段列表',
         content: '内容',
+        context: '参考上下文',
         countAlias: '数量列别名',
         count_alias: '数量列别名',
         data: '数据',
+        durationMs: '等待时长（秒）',
+        duration_ms: '等待时长（秒）',
         file: '文件',
         filename: '文件名',
         filters: '筛选条件',
@@ -50,6 +58,7 @@ const FIELD_LABEL_OVERRIDES = {
         message: '消息内容',
         method: '请求方法',
         mode: '处理模式',
+        role: '专家角色',
         model: '模型',
         path: '文件路径',
         pipeline: '聚合管道',
@@ -67,6 +76,7 @@ const FIELD_LABEL_OVERRIDES = {
         sample_rows: '样本行数',
         schema: '数据库命名空间',
         sections: '报告段落',
+        screenshot: '保存页面截图',
         sheet: '工作表',
         sortBy: '排序依据',
         sort_by: '排序依据',
@@ -77,6 +87,7 @@ const FIELD_LABEL_OVERRIDES = {
         subtitle: '副标题',
         systemPrompt: '系统提示词',
         system_prompt: '系统提示词',
+        summary: '内容摘要',
         table: '数据表',
         target: '接收对象',
         targetType: '接收对象类型',
@@ -84,6 +95,7 @@ const FIELD_LABEL_OVERRIDES = {
         temperature: '随机性',
         text: '文本内容',
         title: '标题',
+        task: '委派任务',
         tools: '工具列表',
         topK: '返回片段数',
         top_k: '返回片段数',
@@ -96,7 +108,14 @@ const FIELD_LABEL_OVERRIDES = {
         xAxis: '横轴字段',
         x_axis: '横轴字段',
         yAxis: '纵轴字段',
-        y_axis: '纵轴字段'
+        y_axis: '纵轴字段',
+        workflowId: '目标工作流',
+        workflow_id: '目标工作流',
+        stopOnError: '遇到错误时停止',
+        includeToc: '生成目录',
+        credentialSecret: '安全凭据',
+        credential_secret: '安全凭据',
+        reportTitle: '报告标题'
     };
 
 const TOOL_FIELD_LABEL_OVERRIDES = {
@@ -302,6 +321,60 @@ const FIELD_DESCRIPTION_OVERRIDES = {
     };
 
 const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
+        'agent.delegate': {
+            task: '写清楚专家需要完成的任务和交付内容。',
+            context: '引用上游结论、数据或证据；不填则只使用任务描述。',
+            agentName: '给这位专家一个容易识别的名称。',
+            role: '选择专家的主要工作类型，系统会据此调整执行口径。',
+            instructions: '可选。补充判断标准、限制条件或禁止事项。',
+            model: '选择当前账号可用的模型；不确定时使用默认模型。'
+        },
+        'agent.browser': {
+            url: '填写已经加入网络白名单的网站地址。',
+            action: '查看页面只读取信息；点击目标会产生外部操作，运行前需要审批。',
+            target: '点击操作时填写按钮、链接或文字目标；查看页面可留空。',
+            screenshot: '开启后保留页面截图，便于后续核对结果。'
+        },
+        'workflow.delay': {
+            durationMs: '填写等待秒数；工作流会在等待期间暂停，不占用执行位置。',
+            reason: '可选。说明为什么要等待。'
+        },
+        'workflow.condition': {
+            value: '通常引用上游节点结果，再选择判断方式。',
+            operator: '选择要使用的判断方式。',
+            compareTo: '仅在等于、包含或大小比较时填写。'
+        },
+        'reports.read_file_summary': {
+            path: '选择或填写允许访问目录中的报表文件。',
+            sheet: 'Excel 可选工作表名称；CSV 留空即可。',
+            sampleRows: '预览多少行样本，默认值通常足够。'
+        },
+        'reports.query_table': {
+            path: '选择或填写要查询的报表文件。',
+            columns: '留空返回全部字段，也可以只选择需要的字段。',
+            filters: '可选。按字段和值筛选，例如 {"状态":"已完成"}。',
+            limit: '限制最多返回多少行。'
+        },
+        'reports.compare_files': {
+            leftPath: '要比较的第一份报表文件。',
+            rightPath: '要比较的第二份报表文件。',
+            sheet: '两份文件使用同名工作表时可填写；CSV 留空。'
+        },
+        'doc.chunk_text': {
+            text: '需要拆分的长文本，通常引用上游文档内容。',
+            maxChars: '每段的大致最大字符数；越小越适合逐段分析。'
+        },
+        'data.filter_rows': {
+            rows: '通常引用上游查询节点的数据行。',
+            filters: '填写要筛选的字段和值。',
+            matchMode: '精确匹配适合状态/编号，包含匹配适合名称/描述。'
+        },
+        'data.group_summary': {
+            rows: '通常引用上游查询节点的数据行。',
+            groupBy: '选择要分组的字段。',
+            valueField: '求和或平均值时选择数值字段；计数时可留空。',
+            aggregation: '选择计数、求和、平均值、最小值或最大值。'
+        },
         'rag.search': {
             query: '输入要从知识库里检索的问题或关键词。',
             topK: '最终返回给下游节点的知识片段数量。',
@@ -340,9 +413,6 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
         },
         'sessions.search': {
             query: '输入要查找的历史会话关键词或问题。'
-        },
-        'reports.query_table': {
-            filters: '用字段名和值组成筛选条件，例如按状态、日期或部门过滤。'
         },
         'db.group_count': {
             table: '要做分布统计的数据表。',
@@ -415,6 +485,42 @@ const FIELD_PLACEHOLDER_OVERRIDES = {
     };
 
 const TOOL_FIELD_PLACEHOLDER_OVERRIDES = {
+        'agent.delegate': {
+            task: '例如：分析这批数据并给出三个关键结论',
+            context: '可插入上游节点的完整结果',
+            agentName: '例如：数据分析专家',
+            instructions: '例如：只根据输入事实，不要猜测',
+            model: '选择当前账号可用模型'
+        },
+        'agent.browser': {
+            url: '例如：https://example.com',
+            target: '例如：名称为“提交”的按钮'
+        },
+        'workflow.delay': {
+            durationMs: '例如 60'
+        },
+        'workflow.condition': {
+            value: '插入上游结果或运行输入',
+            compareTo: '例如：已完成、100 或 true'
+        },
+        'reports.read_file_summary': {
+            path: '选择或输入报表文件路径',
+            sheet: '例如：Sheet1',
+            sampleRows: '例如 20'
+        },
+        'reports.query_table': {
+            path: '选择或输入报表文件路径',
+            columns: '留空返回全部字段',
+            filters: '例如 {"状态":"已完成"}'
+        },
+        'reports.compare_files': {
+            leftPath: '第一份报表文件路径',
+            rightPath: '第二份报表文件路径'
+        },
+        'doc.chunk_text': {
+            text: '插入上游文档内容或任务目标',
+            maxChars: '例如 3000'
+        },
         'rag.search': {
             query: '例如：最近 30 天哪个产品线投诉最多？',
             topK: '例如 5',

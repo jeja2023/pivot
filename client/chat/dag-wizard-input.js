@@ -12,7 +12,7 @@ const cloneDagInput = (value) => {
             }
         };
 
-        const isTextualSchemaField = (name, schema = {}) => {
+const isTextualSchemaField = (name, schema = {}) => {
             const type = normalizeSchemaType(schema);
             return type === 'string'
                 || type === 'array'
@@ -34,6 +34,20 @@ const cloneDagInput = (value) => {
             if (type === 'boolean') return Boolean(value);
             if (type === 'integer' || type === 'number') return String(value);
             return String(value);
+        };
+
+const isWizardFieldRelevant = (name, input = {}, tool = null) => {
+            const key = normalizeFieldKey(name);
+            const shortName = toolShortName(tool);
+            if (shortName === 'workflow.output') {
+                const presentation = String(input.presentation || 'default');
+                if (key === 'table_title' || key === 'table_columns') return presentation === 'table';
+                if (key === 'file_ref') return presentation === 'file';
+            }
+            if (shortName === 'workflow.condition' && key === 'compare_to') {
+                return !['is_empty', 'not_empty', 'is_true', 'is_false'].includes(String(input.operator || 'not_empty'));
+            }
+            return true;
         };
 
         const fieldUsageHint = (name, schema = {}, tool = null) => {

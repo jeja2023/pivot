@@ -454,6 +454,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const duplicateSelection = () => { copySelection(); if (clipboardNodes.length) pasteSelection(); };
 
         const addNode = () => {
+            const wasEmpty = spec.nodes.length === 0;
             recordHistory();
             const baseId = uniqueId(spec.nodes.map(n => n.id));
             const tools = currentTools();
@@ -481,6 +482,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             placeNewNode(spec.nodes, node, anchorId);
             setSelection([node.id], node.id);
             render();
+            if (wasEmpty) fitToContent();
             flushOut();
             window.showToast?.(anchorNode ? `已在「${anchorNode.title || anchorNode.id}」后添加新节点` : '已添加新的起始节点', 'success');
         };
@@ -495,6 +497,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 window.showToast?.(reason, 'warning');
                 return null;
             }
+            const wasEmpty = spec.nodes.length === 0;
             recordHistory();
             const baseId = uniqueId(spec.nodes.map(n => n.id), preset.base || 'node');
             const selectedNode = spec.nodes.find(n => n.id === selectedId);
@@ -519,6 +522,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             placeNewNode(spec.nodes, node, selectedId);
             setSelection([node.id], node.id);
             render();
+            if (wasEmpty) fitToContent();
             flushOut();
             window.showToast?.(
                 selectedNode
@@ -529,6 +533,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const addAgentTeamTemplate = () => {
+            const wasEmpty = spec.nodes.length === 0;
             recordHistory();
             const existingIds = spec.nodes.map(node => node.id);
             const anchorId = selectedId || '';
@@ -592,6 +597,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             autoLayout(spec.nodes);
             setSelection([supervisorId], supervisorId);
             render();
+            if (wasEmpty) fitToContent();
             flushOut();
             window.showToast?.('已添加并行专家与主管智能体，可继续调整角色、模型和交接契约', 'success');
         };

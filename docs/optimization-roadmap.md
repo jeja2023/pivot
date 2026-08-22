@@ -2,6 +2,13 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-22 工作流编排易用性闭环
+
+- 工作流节点预设按普通用户的使用频率分层：输入/输出、模型、条件、审批、检索、报表、图表和报告等常用能力直接展示；委派、代码、循环、网络、浏览器、知识关系、历史会话、文档和数据处理能力保留在高级节点入口，避免删除运行时能力或破坏历史工作流。
+- 节点工具匹配从模糊模式收敛到精确名称，并补齐报表文件、文档处理和表格数据处理预设，降低工具库变化后出现错误节点或不可用节点的风险。
+- 参数配置向导采用“主要字段 + 更多设置”分层，按条件/输出模式动态隐藏无关字段；普通用户看到中文说明、枚举和示例，技术参数仍保留 JSON 高级入口。模板、清空、延时秒数、重试与内部标识的语义同步收口。
+- 新建工作流首次添加节点时自动适配内容、居中并放大，后续节点和已有手动布局不自动重排。相关实现集中在 `client/chat/agents-dag-editor.js`、`dag-node-presets.js`、`dag-toolbar-fields.js` 和 `dag-wizard*.js`，专项回归 `12/12`，全量 Node 回归 `573/573`。
+
 ## 2026-08-09 Architecture Baseline
 
 - Rich-text review nodes now use the same selectable-model policy as ordinary LLM and delegate nodes: current-user visibility is enforced, embedding models are excluded, duplicate caches are merged, and empty or stale selections remain explicit in the wizard.

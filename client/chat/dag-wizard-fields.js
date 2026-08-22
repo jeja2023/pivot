@@ -14,6 +14,7 @@
             const isDatabaseConnection = isDatabaseConnectionField(name, tool);
             const isSubworkflowSelector = toolValue(tool) === 'workflow.subworkflow' && normalizeFieldKey(name) === 'workflowid';
             const isContentReviewRecords = toolValue(tool) === 'agent.content_review' && normalizeFieldKey(name) === 'records';
+            const isDelayDuration = toolValue(tool) === 'workflow.delay' && normalizeFieldKey(name) === 'duration_ms';
             const codeTextArea = type === 'array'
                 || type === 'object'
                 || isContentReviewRecords
@@ -21,7 +22,9 @@
             const wideRichTextArea = /content|instructions|markdown|message|prompt/i.test(fieldName);
             const proseTextArea = /query|summary|text/i.test(fieldName);
             const useTextArea = codeTextArea || wideRichTextArea || proseTextArea;
-            const fieldValue = formatWizardFieldValue(schema, value);
+            const fieldValue = isDelayDuration
+                ? String(Math.max(0, Number(value ?? schema.default ?? 0)) / 1000)
+                : formatWizardFieldValue(schema, value);
             const suggestions = isDatabaseConnection ? [] : buildWizardFieldSuggestions(name, schema, dependencyNodes);
             const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].includes(toolValue(tool)) && normalizeFieldKey(name) === 'model';
             const modelOptions = isLlmModelField ? workflowModelOptions() : [];
@@ -100,6 +103,8 @@
                         ${schema.enum.map(option => `<option value="${dagEscapeAttr(option)}" ${String(value ?? '') === String(option) ? 'selected' : ''}>${dagEscapeHtml(friendlyEnumOptionLabel(name, option))}</option>`).join('')}
                     </select>
                 `;
+            } else if (isDelayDuration) {
+                controlHtml = `<input class="form-input" type="number" step="1" min="0" max="2592000" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-ms-multiplier="1000" value="${dagEscapeAttr(fieldValue)}" placeholder="例如 60">`;
             } else if (type === 'integer' || type === 'number') {
                 const step = type === 'integer' ? '1' : 'any';
                 const minimum = Number.isFinite(Number(schema.minimum)) ? ` min="${dagEscapeAttr(schema.minimum)}"` : '';

@@ -47,6 +47,81 @@ function normalizeSchemaType(schema = {}) {
         return String(type || '').trim() || 'string';
     }
 
+const TOOL_PRIMARY_FIELD_NAMES = {
+        'agent.llm': ['prompt', 'model', 'systemPrompt'],
+        'agent.content_review': ['records', 'model', 'idField', 'titleField', 'contentField', 'instructions', 'reportTitle'],
+        'agent.delegate': ['task', 'context', 'agentName', 'role', 'instructions', 'model'],
+        'agent.handoff': ['fromAgent', 'toAgent', 'summary'],
+        'agent.code': ['code', 'vars'],
+        'agent.http': ['url', 'method', 'body', 'credentialSecret'],
+        'agent.browser': ['url', 'action', 'target', 'screenshot'],
+        'agent.merge': ['fields'],
+        'workflow.input': ['label', 'name', 'type', 'required', 'defaultValue', 'description'],
+        'workflow.output': ['name', 'value', 'tableTitle', 'tableColumns', 'fileRef'],
+        'workflow.condition': ['value', 'operator', 'compareTo'],
+        'workflow.approval': ['title', 'summary', 'instructions', 'approvers', 'approverUnits', 'mode', 'timeoutHours', 'timeoutAction'],
+        'workflow.foreach': ['items', 'code', 'vars', 'stopOnError'],
+        'workflow.subworkflow': ['workflowId', 'goal', 'inputs'],
+        'workflow.delay': ['durationMs', 'reason'],
+        'report.compose': ['title', 'summary', 'sections', 'includeToc'],
+        'rag.search': ['query', 'topK'],
+        'sessions.search': ['query'],
+        'knowledge.graph.query': ['query'],
+        'viz.build_chart': ['rows', 'chartType', 'title', 'xAxis', 'yAxis', 'groupBy', 'aggregation'],
+        'viz.build_table': ['rows', 'columns', 'title'],
+        'reports.read_file_summary': ['path', 'sheet', 'sampleRows'],
+        'reports.query_table': ['path', 'sheet', 'columns', 'filters', 'limit'],
+        'reports.compare_files': ['leftPath', 'rightPath', 'sheet', 'sampleRows'],
+        'doc.extract_outline': ['text', 'maxHeadings'],
+        'doc.extract_key_values': ['text', 'maxItems'],
+        'doc.chunk_text': ['text', 'maxChars'],
+        'data.filter_rows': ['rows', 'filters', 'matchMode', 'limit'],
+        'data.group_summary': ['rows', 'groupBy', 'valueField', 'aggregation', 'limit'],
+        'data.profile_rows': ['rows', 'limit'],
+        'data.normalize_fields': ['rows', 'renameMap', 'trimStrings', 'limit']
+    };
+
+const TOOL_HIDDEN_FIELD_NAMES = {
+        'agent.llm': ['responseFormat'],
+        'agent.content_review': ['rows', 'data'],
+        'workflow.output': ['format', 'presentation'],
+        'workflow.approval': ['timeoutMs'],
+        'workflow.subworkflow': ['version']
+    };
+
+const GENERIC_ADVANCED_FIELD_NAMES = new Set([
+        'candidate_limit', 'chunk_tokens', 'overlap_tokens', 'max_tokens', 'max_steps',
+        'max_summary_chars', 'concurrency', 'temperature', 'timeout_ms', 'task_id',
+        'credential_header', 'credential_prefix', 'callback_base_url', 'callback_credential',
+        'im_server_id', 'im_target_type', 'im_target', 'approver_user_ids', 'approval_levels',
+        'entity_limit', 'relation_limit', 'sort_by', 'sort_order'
+    ]);
+
+function isWizardFieldHidden(name, tool = null) {
+        const hidden = TOOL_HIDDEN_FIELD_NAMES[toolShortName(tool)] || [];
+        const key = normalizeFieldKey(name);
+        return hidden.some(item => normalizeFieldKey(item) === key);
+    }
+
+function partitionWizardFields(entries = [], required = new Set(), tool = null) {
+        const visible = entries.filter(([name]) => !isWizardFieldHidden(name, tool));
+        const preferredNames = TOOL_PRIMARY_FIELD_NAMES[toolShortName(tool)] || [];
+        const preferred = new Set(preferredNames.map(normalizeFieldKey));
+        const primary = [];
+        const advanced = [];
+        visible.forEach((entry, index) => {
+            const [name, schema] = entry;
+            const key = normalizeFieldKey(name);
+            const explicitlyPrimary = preferred.has(key);
+            const requiredField = required.has(name);
+            const genericPrimary = !preferred.size
+                && !GENERIC_ADVANCED_FIELD_NAMES.has(key)
+                && (requiredField || !Object.prototype.hasOwnProperty.call(schema || {}, 'default') || index < 4);
+            (explicitlyPrimary || requiredField || genericPrimary ? primary : advanced).push(entry);
+        });
+        return { primary, advanced, all: [...primary, ...advanced] };
+    }
+
 function friendlySchemaTypeLabel(schema = {}) {
         const rawType = Array.isArray(schema?.type) ? schema.type : [schema?.type || 'value'];
         const map = {
@@ -138,6 +213,13 @@ function friendlyEnumOptionLabel(name, option) {
             'format:json': '结构化数据',
             'format:markdown': '格式化文本',
             'format:text': '纯文本',
+            'action:inspect': '查看页面',
+            'action:click': '点击目标',
+            'role:researcher': '研究员',
+            'role:analyst': '分析师',
+            'role:reviewer': '审阅员',
+            'role:writer': '写作者',
+            'role:custom': '自定义角色',
             'presentation:default': '默认结果',
             'presentation:table': '表格',
             'presentation:file': '文件产物',

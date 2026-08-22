@@ -156,10 +156,13 @@ function renderSelectedToolMeta(tool) {
                 </div>
                 <div class="pivot-dag-tool-meta-body">
                     <p>${dagEscapeHtml(friendlyToolDescription(tool))}</p>
-                    <div class="pivot-dag-tool-meta-id">
-                        <span>工具标识</span>
-                        <code>${dagEscapeHtml(toolValue(tool))}</code>
-                    </div>
+                    <details class="pivot-dag-tool-meta-technical">
+                        <summary>技术信息</summary>
+                        <div class="pivot-dag-tool-meta-id">
+                            <span>内部标识</span>
+                            <code>${dagEscapeHtml(toolValue(tool))}</code>
+                        </div>
+                    </details>
                 </div>
             </div>
         `;

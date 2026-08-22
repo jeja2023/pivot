@@ -202,6 +202,30 @@
     text-align: center;
 }
 
+.pivot-node-library-advanced-toggle {
+    width: 100%;
+    min-height: 30px;
+    margin-top: 2px;
+    padding: 5px 8px;
+    border: 1px dashed rgba(100, 116, 139, 0.45);
+    border-radius: 7px;
+    background: rgba(248, 250, 252, 0.9);
+    color: #475569;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.pivot-node-library-advanced-toggle:hover,
+.pivot-node-library-advanced-toggle:focus-visible {
+    border-color: #3b82f6;
+    background: rgba(239, 246, 255, 0.9);
+    color: #1d4ed8;
+    outline: none;
+}
+
 /* 节点类型主题色（与画布节点保持一致） */
 .pivot-node-library-card-icon.is-llm      { background: rgba(13, 148, 136, 0.12); color: #0f766e; }
 .pivot-node-library-card-icon.is-delegate { background: rgba(124, 58, 237, 0.12); color: #6d28d9; }
@@ -267,6 +291,13 @@ body.dark-mode .pivot-node-library-card-desc,
 body.dark-mode .pivot-node-library-group-label,
 .dark-mode .pivot-node-library-group-label {
     color: #94a3b8;
+}
+
+body.dark-mode .pivot-node-library-advanced-toggle,
+.dark-mode .pivot-node-library-advanced-toggle {
+    border-color: rgba(148, 163, 184, 0.35);
+    background: rgba(30, 41, 59, 0.92);
+    color: #cbd5e1;
 }
 
 /* ── 画布容器：为左侧面板腾出空间 ─────────── */

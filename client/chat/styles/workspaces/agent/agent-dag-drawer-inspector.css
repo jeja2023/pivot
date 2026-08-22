@@ -88,6 +88,39 @@
 .pivot-dag-editor-inspector > .pivot-dag-tool-meta { order: 7; }
 .pivot-dag-editor-inspector > .pivot-dag-contract-panel { order: 8; }
 
+.pivot-dag-runtime-settings {
+    order: 6;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.pivot-dag-runtime-settings > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 34px;
+    padding: 0 10px;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.72rem;
+    list-style: none;
+}
+
+.pivot-dag-runtime-settings > summary::-webkit-details-marker {
+    display: none;
+}
+
+.pivot-dag-runtime-settings > summary span {
+    color: var(--text-muted);
+    font-size: 0.64rem;
+    font-weight: 600;
+}
+
+.pivot-dag-runtime-settings > .pivot-dag-inspector-row {
+    padding: 0 10px 10px;
+}
+
 .pivot-dag-inspector-empty {
     color: var(--text-muted);
     font-size: 0.78rem;
@@ -290,6 +323,38 @@
     color: #1e293b;
     font-size: 0.66rem;
     line-height: 1.45;
+}
+
+.pivot-dag-tool-meta-technical {
+    min-width: 0;
+}
+
+.pivot-dag-tool-meta-technical > summary {
+    color: #64748b;
+    cursor: pointer;
+    font-size: 0.64rem;
+    font-weight: 700;
+    list-style: none;
+    text-align: right;
+}
+
+.pivot-dag-tool-meta-technical > summary::-webkit-details-marker {
+    display: none;
+}
+
+.pivot-dag-tool-meta-technical > summary::before {
+    content: '›';
+    display: inline-block;
+    margin-right: 3px;
+    transition: transform 0.12s ease;
+}
+
+.pivot-dag-tool-meta-technical[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.pivot-dag-tool-meta-technical .pivot-dag-tool-meta-id {
+    margin-top: 5px;
 }
 
 @media (max-width: 520px) {

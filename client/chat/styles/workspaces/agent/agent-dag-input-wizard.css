@@ -141,6 +141,60 @@
     grid-column: span 1;
 }
 
+.pivot-dag-wizard-more-settings {
+    grid-column: 1 / -1;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.pivot-dag-wizard-more-settings > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 12px;
+    color: #334155;
+    cursor: pointer;
+    font-size: 0.76rem;
+    font-weight: 800;
+    list-style: none;
+}
+
+.pivot-dag-wizard-more-settings > summary::-webkit-details-marker {
+    display: none;
+}
+
+.pivot-dag-wizard-more-settings > summary::after {
+    content: '+';
+    color: #64748b;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.pivot-dag-wizard-more-settings[open] > summary::after {
+    content: '−';
+}
+
+.pivot-dag-wizard-more-settings > summary span {
+    margin-left: auto;
+    color: #94a3b8;
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+
+.pivot-dag-wizard-more-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 0 10px 10px;
+}
+
+.pivot-dag-wizard-more-grid .pivot-dag-wizard-field {
+    min-height: 0;
+}
+
 .pivot-dag-wizard-field.is-wide,
 .pivot-dag-wizard-field.is-code,
 .pivot-dag-wizard-field.is-rich {
@@ -520,6 +574,10 @@
     .pivot-dag-wizard-field.is-prose {
         grid-column: 1 / -1;
         min-height: 0;
+    }
+
+    .pivot-dag-wizard-more-grid {
+        grid-template-columns: 1fr;
     }
 
     .pivot-dag-wizard-field-head,

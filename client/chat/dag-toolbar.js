@@ -98,12 +98,20 @@ function renderDagToolbar(ctx) {
             }
             const tools = typeof ctx.currentTools === 'function' ? ctx.currentTools() : [];
             const registry = window.Pivot.moduleApi('agent.dagNodePresets');
-            const presetButtons = (registry?.groups || []).flatMap(group => group.items.map(preset => {
+            const presetButtons = (registry?.groups || []).flatMap(group => group.items.filter(preset => !preset.advanced).map(preset => {
                 const availability = registry.availability(preset, tools);
-                const label = preset.advanced ? `${preset.title}（高级）` : preset.title;
                 return makeButton(
-                    label,
+                    preset.title,
                     availability.available ? preset.desc : availability.reason,
+                    () => ctx.addPresetNode(preset),
+                    { icon: '+', tone: preset.theme || '', disabled: !availability.available }
+                );
+            }));
+            const advancedPresetButtons = (registry?.groups || []).flatMap(group => group.items.filter(preset => preset.advanced).map(preset => {
+                const availability = registry.availability(preset, tools);
+                return makeButton(
+                    preset.title,
+                    availability.available ? `${preset.desc}（高级节点）` : availability.reason,
                     () => ctx.addPresetNode(preset),
                     { icon: '+', tone: preset.theme || '', disabled: !availability.available }
                 );
@@ -114,6 +122,9 @@ function renderDagToolbar(ctx) {
                     ...presetButtons
                 ])
             ], 'is-node-group'));
+            if (advancedPresetButtons.length) {
+                ctx.toolbar.appendChild(makeToolbarDropdown('高级节点', advancedPresetButtons, 'is-advanced-node-group'));
+            }
             ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
                 makeButton('多智能体审阅', '添加并行研究员、审阅员与主管智能体裁决节点', ctx.addAgentTeamTemplate),
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
