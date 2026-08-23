@@ -175,6 +175,26 @@ function createAgentResidencyStore(options = {}) {
         return rows.map(normalizeResidencyRow);
     }
 
+    async function listAllResidents({ status = '', limit = 200 } = {}) {
+        const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 1000);
+        const params = [];
+        const clauses = [];
+        if (RESIDENT_STATUSES.has(String(status || ''))) {
+            clauses.push('r.status = ?');
+            params.push(String(status));
+        }
+        params.push(safeLimit);
+        const rows = await query(`
+            SELECT r.*, u.username, u.nickname, u.unit
+            FROM agent_residencies r
+            LEFT JOIN users u ON u.id = r.user_id
+            ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+            ORDER BY r.last_accessed_at DESC, r.resident_id ASC
+            LIMIT ?
+        `, params);
+        return rows.map(normalizeResidencyRow);
+    }
+
     async function evictResident({ user, userId = user?.id, residentKey, residentId = '' } = {}) {
         const normalizedUserId = Number(userId || 0);
         const key = normalizeResidentKey(residentKey);
@@ -185,6 +205,18 @@ function createAgentResidencyStore(options = {}) {
             WHERE user_id = ? AND ${residentId ? 'resident_id = ?' : 'resident_key = ?'}
             RETURNING *
         `, [now(), normalizedUserId, residentId || key]);
+        return normalizeResidencyRow(row);
+    }
+
+    async function evictResidentForAdmin({ residentId = '' } = {}) {
+        const id = String(residentId || '').trim();
+        if (!id) return null;
+        const row = await queryOne(`
+            UPDATE agent_residencies
+            SET status = 'evicted', lease_owner = '', lease_expires_at = NULL, updated_at = ?
+            WHERE resident_id = ?
+            RETURNING *
+        `, [now(), id]);
         return normalizeResidencyRow(row);
     }
 
@@ -260,7 +292,9 @@ function createAgentResidencyStore(options = {}) {
     return {
         acquireResidentLease,
         evictResident,
+        evictResidentForAdmin,
         getResident,
+        listAllResidents,
         listResidents,
         releaseResidentLease,
         sweepResidents,

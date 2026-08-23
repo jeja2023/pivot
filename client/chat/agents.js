@@ -98,6 +98,7 @@ window.loadAgentWorkbench = async function() {
             loadAgentSchedules(),
             loadAgentNotifications(),
             loadAgentArtifacts(),
+            window.loadAgentHarnessSkills?.(),
             agentEvaluationsApi().loadSuites?.()
         ]);
     } catch (e) {
@@ -263,6 +264,7 @@ window.bindAgentEnterpriseControls = function() {
 const agentConfigSectionTitles = {
     templates: '任务模板',
     results: '能力与结果',
+    harness: '运行支撑管理',
     evaluations: '质量评测'
 };
 
@@ -300,6 +302,9 @@ function openAgentConfigSection(sectionKey) {
         const evaluations = agentEvaluationsApi();
         evaluations.bind?.();
         evaluations.loadSuites?.().catch(error => showToast(error.message || '评测中心加载失败', 'error'));
+    }
+    if (sectionKey === 'harness') {
+        window.loadAgentHarnessManagement?.();
     }
     if (sectionKey === 'advanced') {
         mountAgentDagEditor();

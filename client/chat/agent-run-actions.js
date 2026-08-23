@@ -71,6 +71,7 @@ function getAgentRunPayload(goalOverride = '') {
         retryLimit: document.getElementById('agent-retry-limit')?.value || 1,
         toolAllowlist: getSelectedAgentToolAllowlist(),
         contextConfig: getAgentContextConfig(),
+        skillId: window.getAgentHarnessSkillId?.() || '',
         sessionId: window.currentSessionId || null
     };
     return payload;

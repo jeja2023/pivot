@@ -326,12 +326,49 @@ window.closeAgentRunDetailModal = closeAgentRunDetailModal;
 let agentRunDetailRequestId = 0;
 let agentRunDetailRefreshInFlight = false;
 
+const agentRunDisclosureStates = new Map();
+const agentRunDisclosureSelectors = Object.freeze({
+    technical: '.agent-run-technical-summary',
+    harness: '.agent-run-harness-diagnostics',
+    process: '.agent-run-process'
+});
+
+function captureAgentRunDisclosureState(detail, runId) {
+    if (!detail || String(detail.dataset.agentDisclosureRunId || '') !== String(runId)) return null;
+    const state = {};
+    Object.entries(agentRunDisclosureSelectors).forEach(([key, selector]) => {
+        const element = detail.querySelector(selector);
+        if (element) state[key] = element.open === true;
+    });
+    if (Object.keys(state).length) {
+        const key = String(runId);
+        agentRunDisclosureStates.set(key, state);
+        if (agentRunDisclosureStates.size > 50) {
+            const oldestKey = agentRunDisclosureStates.keys().next().value;
+            if (oldestKey) agentRunDisclosureStates.delete(oldestKey);
+        }
+    }
+    return state;
+}
+
+function restoreAgentRunDisclosureState(detail, runId) {
+    if (!detail) return;
+    const state = agentRunDisclosureStates.get(String(runId)) || {};
+    Object.entries(agentRunDisclosureSelectors).forEach(([key, selector]) => {
+        const element = detail.querySelector(selector);
+        if (!element || !Object.hasOwn(state, key)) return;
+        element.open = state[key] === true;
+    });
+    detail.dataset.agentDisclosureRunId = String(runId);
+}
+
 window.openAgentRun = async function(runId, options = {}) {
     const requestId = ++agentRunDetailRequestId;
     activeAgentRunId = runId;
     const modal = ensureAgentRunDetailModalVisible();
     const detail = document.getElementById('agent-run-detail');
     if (!detail) return null;
+    captureAgentRunDisclosureState(detail, runId);
     document.querySelectorAll('[data-agent-run-id]').forEach(row => {
         const active = row.dataset.agentRunId === runId;
         row.classList.toggle('active', active);
@@ -391,6 +428,10 @@ window.openAgentRun = async function(runId, options = {}) {
         checkpoints,
         isActive: isAgentRunActive(run.status)
     });
+    // The detail body is rebuilt after every polling/SSE refresh. Capture the
+    // latest state immediately before replacement so a click during a slow
+    // request is not overwritten by an older snapshot.
+    captureAgentRunDisclosureState(detail, runId);
     const processExpanded = ' open';
     const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流节点配置' : '');
     const technicalSummary = [
@@ -444,6 +485,7 @@ window.openAgentRun = async function(runId, options = {}) {
             <summary><span>运行信息</span><em>${agentEscape(progressLabel)} · ${agentEscape(agentRunModeLabel(run.run_mode))}</em></summary>
             <dl>${technicalSummary}</dl>
         </details>
+        ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
         ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
         ${visualOutputs}
@@ -465,6 +507,7 @@ window.openAgentRun = async function(runId, options = {}) {
             </div>
         </details>
     `);
+    restoreAgentRunDisclosureState(detail, run.id);
     detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
         if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
         return window.cancelAgentRun(run.id);
@@ -482,6 +525,7 @@ window.openAgentRun = async function(runId, options = {}) {
         window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
     });
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
+    window.bindAgentRunHarnessDiagnostics?.(detail, run.id);
     if (isAgentRunActive(run.status)) {
         startAgentWorkflowPreviewPolling(run.id, isPreview);
     } else {

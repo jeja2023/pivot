@@ -1,0 +1,839 @@
+/* Harness 管理与运行诊断 */
+.agent-collapse-harness .agent-collapse-body {
+    display: grid;
+    gap: 14px;
+}
+
+/* 顶部模块切换 Tab（技能包 / 资源包 / 常驻实例） */
+.agent-harness-nav-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    background: #e2e8f0;
+    border: 1px solid rgba(203, 213, 225, 0.8);
+    border-radius: 8px;
+    margin-bottom: 2px;
+}
+
+.agent-harness-nav-tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 6px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.16s ease;
+}
+
+.agent-harness-nav-tab:hover {
+    color: var(--text-primary, #0f172a);
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.agent-harness-nav-tab.active {
+    background: #fff;
+    color: var(--primary-color, #2563eb);
+    font-weight: 700;
+    border-color: rgba(203, 213, 225, 0.9);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.agent-harness-notice {
+    min-height: 0;
+    color: var(--text-muted, #64748b);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.agent-harness-notice:not(:empty) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.95);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.agent-harness-notice.is-success {
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.35);
+    background: rgba(236, 253, 245, 0.95);
+}
+
+.agent-harness-notice.is-error {
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.35);
+    background: rgba(254, 242, 242, 0.95);
+}
+
+.agent-harness-panel {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+    border: 1px solid rgba(203, 213, 225, 0.75);
+    border-radius: 10px;
+    background: var(--bg-secondary, #fff);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.agent-harness-panel.hidden {
+    display: none !important;
+}
+
+.agent-harness-panel-head,
+.agent-harness-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+}
+
+.agent-harness-panel-head > div:first-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+.agent-harness-panel-head strong,
+.agent-harness-subhead strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-align: left;
+}
+
+.agent-harness-panel-head span,
+.agent-harness-subhead span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.76rem;
+    line-height: 1.4;
+    text-align: left;
+}
+
+/* 头部操作区：下拉框与按钮严格水平对齐（32px） */
+.agent-harness-inline-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: nowrap;
+    margin: 0;
+    padding: 0;
+}
+
+.agent-harness-inline-actions .form-input,
+.agent-harness-inline-actions select,
+.agent-harness-inline-actions button,
+.agent-harness-inline-actions .btn-secondary,
+.agent-harness-inline-actions .btn-primary,
+.agent-harness-panel-head > button,
+.agent-harness-panel-head > .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    line-height: 30px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0 12px !important;
+    font-size: 0.76rem !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+    vertical-align: middle !important;
+    white-space: nowrap !important;
+}
+
+.agent-harness-inline-actions select.form-input {
+    min-width: 100px;
+    width: auto;
+    padding-right: 24px !important;
+}
+
+/* 技能与资源包两栏布局 */
+.agent-harness-skill-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: stretch;
+}
+
+.agent-harness-skill-list-wrap,
+.agent-harness-skill-form-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.5);
+}
+
+.agent-harness-list {
+    display: grid;
+    gap: 8px;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.agent-harness-list.full-width {
+    max-height: 480px;
+}
+
+.agent-harness-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    background: var(--bg-secondary, #fff);
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.agent-harness-item:hover {
+    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+.agent-harness-item.is-disabled {
+    opacity: 0.62;
+    background: rgba(241, 245, 249, 0.5);
+}
+
+.agent-harness-item-main {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agent-harness-item-main strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.84rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.agent-harness-item-main span {
+    color: var(--text-secondary, #475569);
+    font-size: 0.74rem;
+    font-weight: 500;
+}
+
+.agent-harness-item-main small {
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.agent-harness-item-meta {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-harness-badge {
+    padding: 2px 8px;
+    border: 1px solid rgba(59, 130, 246, 0.22);
+    border-radius: 999px;
+    color: #1d4ed8;
+    background: rgba(239, 246, 255, 0.95);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.agent-harness-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.agent-harness-form-grid--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.agent-harness-form-field,
+.agent-harness-form-grid > label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    text-align: left;
+}
+
+.agent-harness-form-field > span,
+.agent-harness-form-grid > label > span {
+    color: var(--text-secondary, #475569);
+    font-size: 0.74rem;
+    font-weight: 600;
+    text-align: left;
+}
+
+.agent-harness-form-field-wide {
+    grid-column: 1 / -1;
+}
+
+.agent-harness-form-grid .form-input {
+    min-width: 0;
+    font-size: 0.76rem;
+}
+
+#agent-harness-skill-manifest,
+#agent-harness-skill-instructions {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    padding: 10px 12px;
+    border-radius: 7px;
+    background: var(--bg-secondary, #fff);
+}
+
+.agent-harness-form-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.agent-harness-file-button {
+    cursor: pointer;
+}
+
+.agent-harness-pack-sync {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.5);
+}
+
+/* ==========================================================================
+   运行支撑诊断区域（任务详情模态框中）
+   ========================================================================== */
+.agent-run-harness-diagnostics {
+    margin-top: 14px;
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    border-radius: 10px;
+    background: var(--bg-secondary, #fff);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    overflow: hidden;
+}
+
+.agent-run-harness-diagnostics > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    padding: 11px 16px;
+    color: var(--text-primary, #1e293b);
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+    background: rgba(248, 250, 252, 0.8);
+    transition: background 0.15s ease;
+}
+
+.agent-run-harness-diagnostics > summary:hover {
+    background: rgba(241, 245, 249, 0.95);
+}
+
+.agent-run-harness-diagnostics > summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-run-harness-diagnostics > summary::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    margin-right: 2px;
+    border-right: 1.5px solid #64748b;
+    border-bottom: 1.5px solid #64748b;
+    transform: rotate(-45deg);
+    transition: transform .18s ease;
+}
+
+.agent-run-harness-diagnostics[open] > summary::before {
+    transform: rotate(45deg);
+}
+
+.agent-run-harness-diagnostics > summary span {
+    margin-right: auto;
+}
+
+.agent-run-harness-diagnostics > summary em {
+    color: var(--text-muted, #94a3b8);
+    font-size: 0.72rem;
+    font-style: normal;
+    font-weight: 500;
+}
+
+.agent-harness-diagnostics-body {
+    padding: 12px 16px 16px;
+    border-top: 1px solid rgba(226, 232, 240, 0.85);
+    background: rgba(248, 250, 252, 0.5);
+}
+
+/* 常驻子导航按钮组（分段控制器外观） */
+.agent-harness-diagnostic-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    background: rgba(241, 245, 249, 0.95);
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    backdrop-filter: blur(8px);
+    margin-bottom: 10px;
+}
+
+.agent-harness-diagnostic-tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 5px 12px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.agent-harness-diagnostic-tab:hover {
+    color: var(--text-primary, #0f172a);
+    background: rgba(255, 255, 255, 0.65);
+}
+
+.agent-harness-diagnostic-tab.active {
+    background: #fff;
+    color: var(--primary-color, #2563eb);
+    font-weight: 700;
+    border-color: rgba(203, 213, 225, 0.85);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.agent-harness-diagnostic-panels {
+    display: block;
+    min-height: 60px;
+}
+
+.agent-harness-diagnostic-panel {
+    display: grid;
+    gap: 8px;
+}
+
+.agent-harness-diagnostic-panel.hidden {
+    display: none !important;
+}
+
+.agent-harness-diagnostic-card {
+    display: grid;
+    gap: 5px;
+    padding: 11px 14px;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    background: var(--bg-secondary, #fff);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+    transition: border-color 0.15s ease;
+}
+
+.agent-harness-diagnostic-card:hover {
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.agent-harness-diagnostic-card > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.agent-harness-diagnostic-card > summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-harness-diagnostic-card strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.agent-harness-diagnostic-card span,
+.agent-harness-diagnostic-card small,
+.agent-harness-diagnostic-meta {
+    color: var(--text-muted, #64748b);
+    font-size: 0.7rem;
+}
+
+.agent-harness-diagnostic-card code {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #334155;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.68rem;
+    overflow-wrap: anywhere;
+}
+
+.agent-harness-json {
+    max-height: 260px;
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 7px;
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+    font: 0.72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow: auto;
+}
+
+.agent-harness-resource-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.agent-harness-resource-grid > div {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    background: var(--bg-secondary, #fff);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.agent-harness-resource-grid span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.agent-harness-resource-grid strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+/* 控制消息表单：严格水平对齐（36px） */
+.agent-harness-control-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary, #fff);
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.agent-harness-control-form select,
+.agent-harness-control-form textarea,
+.agent-harness-control-form button,
+.agent-harness-control-form .btn-primary,
+.agent-harness-control-form .form-input {
+    height: 36px !important;
+    min-height: 36px !important;
+    max-height: 36px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+
+.agent-harness-control-form select.form-input {
+    width: 120px;
+    flex: 0 0 120px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    line-height: 34px;
+}
+
+.agent-harness-control-form textarea.form-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 20px;
+    padding: 7px 10px;
+    resize: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+    overflow: hidden;
+}
+
+.agent-harness-control-form button.btn-primary {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    font-weight: 600;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    border-radius: 6px;
+}
+
+/* 空状态设计 */
+.agent-harness-panel .empty-state,
+.agent-harness-diagnostic-panel .empty-state {
+    padding: 24px 16px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    border: 1px dashed rgba(203, 213, 225, 0.8);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.5);
+    margin: 4px 0;
+}
+
+/* ==========================================================================
+   深色模式 Dark Mode 适配
+   ========================================================================== */
+body.dark-mode .agent-harness-nav-tabs,
+.dark-mode .agent-harness-nav-tabs {
+    background: rgba(15, 23, 42, 0.85);
+    border-color: rgba(51, 65, 85, 0.7);
+}
+
+body.dark-mode .agent-harness-nav-tab.active,
+.dark-mode .agent-harness-nav-tab.active {
+    background: #1e293b;
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+body.dark-mode .agent-harness-panel,
+.dark-mode .agent-harness-panel,
+body.dark-mode .agent-harness-diagnostic-card,
+.dark-mode .agent-harness-diagnostic-card,
+body.dark-mode .agent-harness-resource-grid > div,
+.dark-mode .agent-harness-resource-grid > div,
+body.dark-mode .agent-harness-control-form,
+.dark-mode .agent-harness-control-form {
+    background: rgba(30, 41, 59, 0.7);
+    border-color: rgba(51, 65, 85, 0.7);
+}
+
+body.dark-mode .agent-harness-skill-list-wrap,
+.dark-mode .agent-harness-skill-list-wrap,
+body.dark-mode .agent-harness-skill-form-wrap,
+.dark-mode .agent-harness-skill-form-wrap,
+body.dark-mode .agent-harness-pack-sync,
+.dark-mode .agent-harness-pack-sync {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
+}
+
+body.dark-mode .agent-harness-item,
+.dark-mode .agent-harness-item {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(51, 65, 85, 0.6);
+}
+
+body.dark-mode .agent-harness-item:hover,
+.dark-mode .agent-harness-item:hover {
+    background: rgba(30, 41, 59, 0.85);
+    border-color: rgba(59, 130, 246, 0.45);
+}
+
+body.dark-mode .agent-run-harness-diagnostics,
+.dark-mode .agent-run-harness-diagnostics {
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.8);
+}
+
+body.dark-mode .agent-run-harness-diagnostics > summary,
+.dark-mode .agent-run-harness-diagnostics > summary {
+    background: rgba(30, 41, 59, 0.85);
+    color: #f1f5f9;
+}
+
+body.dark-mode .agent-harness-diagnostics-body,
+.dark-mode .agent-harness-diagnostics-body {
+    background: rgba(15, 23, 42, 0.75);
+    border-color: rgba(51, 65, 85, 0.6);
+}
+
+body.dark-mode .agent-harness-diagnostic-tabs,
+.dark-mode .agent-harness-diagnostic-tabs {
+    background: rgba(15, 23, 42, 0.85);
+    border-color: rgba(51, 65, 85, 0.7);
+}
+
+body.dark-mode .agent-harness-diagnostic-tab.active,
+.dark-mode .agent-harness-diagnostic-tab.active {
+    background: #1e293b;
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+body.dark-mode .agent-harness-diagnostic-card code,
+.dark-mode .agent-harness-diagnostic-card code {
+    background: rgba(2, 6, 23, 0.6);
+    color: #94a3b8;
+}
+
+body.dark-mode .agent-harness-json,
+.dark-mode .agent-harness-json {
+    background: rgba(2, 6, 23, 0.8);
+    border-color: rgba(51, 65, 85, 0.6);
+    color: #cbd5e1;
+}
+
+body.dark-mode .agent-harness-panel .empty-state,
+.dark-mode .agent-harness-panel .empty-state,
+body.dark-mode .agent-harness-diagnostic-panel .empty-state,
+.dark-mode .agent-harness-diagnostic-panel .empty-state {
+    background: rgba(15, 23, 42, 0.4);
+    border-color: rgba(51, 65, 85, 0.6);
+    color: #64748b;
+}
+
+/* ==========================================================================
+   运行支撑管理弹窗在模态框中的布局规则
+   ========================================================================== */
+#agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
+    display: flex;
+    flex-direction: column;
+    width: min(1140px, calc(100vw - 32px));
+    height: min(840px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+    border-radius: 12px;
+    box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    padding: 16px;
+    overflow-y: auto;
+    background: #f4f7fb;
+}
+
+/* 弹窗模式下隐藏内部多余的折叠 summary */
+#agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness > summary {
+    display: none;
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness {
+    min-height: 100%;
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness .agent-collapse-body {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+body.dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body,
+.dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
+    background: #111827;
+}
+
+/* ==========================================================================
+   响应式断点
+   ========================================================================== */
+@media (max-width: 900px) {
+    #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
+        width: min(760px, calc(100vw - 18px));
+        height: calc(100vh - 18px);
+        max-height: calc(100vh - 18px);
+    }
+
+    .agent-harness-skill-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .agent-harness-item {
+        flex-direction: column;
+    }
+    .agent-harness-item-meta {
+        justify-content: flex-start;
+    }
+    .agent-harness-form-grid,
+    .agent-harness-form-grid--compact {
+        grid-template-columns: 1fr;
+    }
+    .agent-harness-form-field-wide {
+        grid-column: auto;
+    }
+    .agent-harness-resource-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .agent-harness-control-form {
+        grid-template-columns: 1fr;
+    }
+    .agent-harness-control-form button {
+        justify-self: end;
+    }
+    .agent-run-harness-diagnostics > summary em {
+        display: none;
+    }
+    .agent-harness-diagnostic-tabs {
+        overflow-x: auto;
+    }
+}
+
+@media (max-width: 560px) {
+    #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
+        padding: 10px;
+    }
+
+    .agent-harness-panel {
+        padding: 12px;
+    }
+
+    .agent-harness-panel-head {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .agent-harness-panel-head > button,
+    .agent-harness-inline-actions {
+        align-self: stretch;
+        justify-content: flex-start;
+    }
+}

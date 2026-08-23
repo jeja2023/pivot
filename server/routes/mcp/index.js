@@ -48,6 +48,7 @@ const {
     normalizeBuiltinPayload
 } = require('../../services/builtin-mcp');
 const { isSuperAdmin } = require('../../permissions');
+const { MCP_CHAT_TOOL_TITLES } = require('../../services/chat-mcp-context');
 const {
     SYSTEM_MCP_SERVICES,
     getDatabaseTestErrorStatus,
@@ -279,10 +280,12 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                     continue;
                 }
                 const gov = await getCapabilityToolGovernance(item.type, item.source_ref, tool.name, req.user);
+                const shortName = String(tool.name || '').replace(/^mcp\.\d+\./, '');
+                const title = tool.title && tool.title !== tool.name ? tool.title : (MCP_CHAT_TOOL_TITLES[shortName] || tool.title || tool.name);
                 tools.push({
                     name: tool.name,
                     fullName: tool.fullName,
-                    title: tool.name,
+                    title,
                     description: tool.description || '',
                     governance: gov
                 });
@@ -292,10 +295,12 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         for (const name of Object.keys(storedTools)) {
             if (known.has(name)) continue;
             const gov = await getCapabilityToolGovernance(item.type, item.source_ref, name, req.user);
+            const shortName = String(name || '').replace(/^mcp\.\d+\./, '');
+            const title = MCP_CHAT_TOOL_TITLES[shortName] || name;
             tools.push({
                 name,
                 fullName: name,
-                title: name,
+                title,
                 description: '已保存策略，当前工具缓存中未找到该工具。',
                 stale: true,
                 governance: gov

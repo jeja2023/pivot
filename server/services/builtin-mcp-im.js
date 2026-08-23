@@ -81,11 +81,13 @@ function listImTools() {
     return [
         {
             name: 'im.list_allowed_targets',
+            title: '查看通知目标',
             description: '列出当前允许通知的 LAN IM 目标。',
             inputSchema: { type: 'object', properties: {} }
         },
         {
             name: 'im.send_user_message',
+            title: '发送用户消息',
             description: '向一个允许的 LAN IM 用户发送纯文本消息。',
             inputSchema: {
                 type: 'object',
@@ -99,6 +101,7 @@ function listImTools() {
         },
         {
             name: 'im.send_group_message',
+            title: '发送群组消息',
             description: '向一个允许的 LAN IM 群组发送纯文本消息。',
             inputSchema: {
                 type: 'object',
@@ -112,6 +115,7 @@ function listImTools() {
         },
         {
             name: 'im.send_markdown',
+            title: '发送 Markdown 消息',
             description: '向一个允许的 LAN IM 目标发送 Markdown 消息。',
             inputSchema: {
                 type: 'object',

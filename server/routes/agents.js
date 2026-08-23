@@ -1,6 +1,7 @@
 const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { queryOne } = require('../db/client');
+const { isSuperAdmin } = require('../permissions');
 const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
 const {
@@ -36,6 +37,7 @@ const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser, registerAgentSkill } = require('../services/agent-skills');
 const { installSkillPackage, verifySkillPackage } = require('../services/agent-skill-packages');
 const { listRuntimePacks, syncRuntimePack } = require('../services/agent-runtime-packs');
+const { createAgentResidencyStore } = require('../services/agent-residency');
 const {
     createAgentEvalSuite,
     deleteAgentEvalSuite,
@@ -110,6 +112,7 @@ const {
 function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
+    const residency = createAgentResidencyStore();
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
@@ -203,6 +206,35 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
 
     router.get('/agents/runtime', authMiddleware, asyncHandler(async (req, res) => {
         res.json(await getAgentRuntimeStatus(req.user));
+    }));
+
+    router.get('/agents/residencies', authMiddleware, asyncHandler(async (req, res) => {
+        const allUsers = String(req.query.scope || '').toLowerCase() === 'all' && isSuperAdmin(req.user);
+        const data = allUsers
+            ? await residency.listAllResidents({ status: req.query.status, limit: req.query.limit })
+            : await residency.listResidents({ user: req.user, status: req.query.status, limit: req.query.limit });
+        res.json({
+            data,
+            scope: allUsers ? 'all' : 'self',
+            config: residency.config
+        });
+    }));
+
+    router.post('/agents/residencies/sweep', authMiddleware, asyncHandler(async (req, res) => {
+        const allUsers = String(req.body?.scope || '').toLowerCase() === 'all' && isSuperAdmin(req.user);
+        const evicted = await residency.sweepResidents({ userId: allUsers ? null : req.user.id });
+        logAction(req, '清理 Agent Residency', `范围: ${allUsers ? '全部用户' : '当前用户'}，清理数量: ${evicted}`);
+        res.json({ success: true, evicted, scope: allUsers ? 'all' : 'self' });
+    }));
+
+    router.post('/agents/residencies/:residentId/evict', authMiddleware, asyncHandler(async (req, res) => {
+        const allUsers = String(req.body?.scope || '').toLowerCase() === 'all' && isSuperAdmin(req.user);
+        const resident = allUsers
+            ? await residency.evictResidentForAdmin({ residentId: req.params.residentId })
+            : await residency.evictResident({ user: req.user, residentId: req.params.residentId });
+        if (!resident) return res.status(404).json({ error: '常驻 Agent 不存在或无权操作。' });
+        logAction(req, '驱逐 Agent Residency', `常驻实例: ${resident.resident_id}`);
+        res.json({ success: true, data: resident });
     }));
 
     router.get('/agents/metrics', authMiddleware, asyncHandler(async (req, res) => {

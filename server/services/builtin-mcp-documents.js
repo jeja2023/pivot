@@ -9,7 +9,8 @@ function listDocumentTools() {
     return [
         {
             name: 'doc.extract_outline',
-            description: 'Extract a lightweight outline from plain text or Markdown content.',
+            title: '提取文档大纲',
+            description: '从纯文本或 Markdown 内容中轻量提取标题层级与大纲结构。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -21,7 +22,8 @@ function listDocumentTools() {
         },
         {
             name: 'doc.extract_key_values',
-            description: 'Extract key/value style lines from document text.',
+            title: '提取关键信息',
+            description: '从文档文本中提取键值对风格的关键信息条目。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -33,7 +35,8 @@ function listDocumentTools() {
         },
         {
             name: 'doc.chunk_text',
-            description: 'Split long text into paragraph-aware chunks for downstream analysis.',
+            title: '切分文档文本',
+            description: '按段落感知将长文本智能切分为适合下游分析的文本分块。',
             inputSchema: {
                 type: 'object',
                 properties: {

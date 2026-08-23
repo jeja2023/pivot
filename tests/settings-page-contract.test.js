@@ -37,3 +37,12 @@ test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {
     assert.match(route, /settings: getPublicSettings\(\)/);
     assert.match(route, /redacted: true/);
 });
+
+test('工具策略卡片具备工具名称与简介全量中文化映射', () => {
+    const toolPolicy = read('client/chat/tool-policy.js');
+    assert.match(toolPolicy, /'data\.group_summary':\s*'分组汇总数据'/);
+    assert.match(toolPolicy, /'format\.extract_json':\s*'提取 JSON'/);
+    assert.match(toolPolicy, /'data\.filter_rows':\s*'筛选表格行'/);
+    assert.match(toolPolicy, /function toolPolicyToolTitle/);
+    assert.match(toolPolicy, /function toolPolicyToolDescription/);
+});

@@ -161,7 +161,7 @@ function renderAgentWorkflowSchedules() {
     const list = document.getElementById('agent-workflow-schedule-list');
     if (!list) return;
     if (!agentWorkflowSchedulesCache.length) {
-        PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state">暂无计划任务</div>');
+        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-schedule-empty"><strong>暂无计划任务</strong><span>当前工作流尚未配置定时运行计划。</span></div>');
         return;
     }
     PivotSafeHtml.setHtml(list, agentWorkflowSchedulesCache.map(schedule => {
@@ -199,12 +199,12 @@ async function loadAgentWorkflowSchedules() {
     const list = document.getElementById('agent-workflow-schedule-list');
     if (!workflow || !list) return;
     const requestId = ++agentWorkflowSchedulesLoadSequence;
-    PivotSafeHtml.setHtml(list, '<div class="empty-state agent-empty-state">正在加载计划...</div>');
+    PivotSafeHtml.setHtml(list, '<div class="agent-workflow-schedule-empty"><strong>正在加载计划...</strong><span>正在查询工作流关联的计划任务</span></div>');
     const res = await apiFetch(`${API_BASE}/agents/schedules`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (requestId !== agentWorkflowSchedulesLoadSequence) return false;
     if (!res.ok) {
-        PivotSafeHtml.setHtml(list, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '计划加载失败')}</div>`);
+        PivotSafeHtml.setHtml(list, `<div class="agent-workflow-schedule-empty"><strong>计划加载失败</strong><span>${agentEscape(data.error || '无法获取计划任务列表')}</span></div>`);
         return;
     }
     agentWorkflowSchedulesCache = (data.data || []).filter(schedule => agentWorkflowScheduleMatches(schedule, workflow.id));

@@ -898,6 +898,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
 }
 
 module.exports = {
+    MCP_CHAT_TOOL_TITLES,
     buildFallbackDataQueryInput,
     detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,

@@ -911,11 +911,13 @@ body.dark-mode .agent-workflow-dependency-summary span,
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+    text-align: left !important;
 }
 
 .agent-workflow-schedule-list-head strong {
     color: var(--text-main);
     font-size: 0.82rem;
+    text-align: left !important;
 }
 
 .agent-workflow-schedule-list-head .btn-secondary {
@@ -932,6 +934,8 @@ body.dark-mode .agent-workflow-dependency-summary span,
     flex-direction: column;
     gap: 7px;
     overflow: auto;
+    text-align: left !important;
+    align-items: stretch !important;
 }
 
 .agent-workflow-schedule-item {
@@ -943,6 +947,7 @@ body.dark-mode .agent-workflow-dependency-summary span,
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
+    text-align: left !important;
 }
 
 .agent-workflow-schedule-item.is-paused {
@@ -955,6 +960,7 @@ body.dark-mode .agent-workflow-dependency-summary span,
 .agent-workflow-schedule-item-main small {
     display: block;
     min-width: 0;
+    text-align: left !important;
 }
 
 .agent-workflow-schedule-item-main strong,
@@ -968,6 +974,7 @@ body.dark-mode .agent-workflow-dependency-summary span,
 .agent-workflow-schedule-item-main strong {
     color: var(--text-main);
     font-size: 0.8rem;
+    text-align: left !important;
 }
 
 .agent-workflow-schedule-item-main span,
@@ -975,6 +982,42 @@ body.dark-mode .agent-workflow-dependency-summary span,
     margin-top: 3px;
     color: var(--text-muted);
     font-size: 0.68rem;
+    text-align: left !important;
+}
+
+.agent-workflow-schedule-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start !important;
+    justify-content: center;
+    gap: 4px;
+    padding: 16px 14px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    text-align: left !important;
+    background: var(--bg-secondary, rgba(248, 250, 252, 0.6));
+}
+
+.agent-workflow-schedule-empty strong {
+    color: var(--text-main);
+    font-size: 0.8rem;
+    text-align: left !important;
+}
+
+.agent-workflow-schedule-empty span {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: left !important;
+}
+
+.agent-workflow-schedule-list .empty-state,
+.agent-workflow-schedule-list .agent-empty-state {
+    text-align: left !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    padding: 14px 12px !important;
 }
 
 .agent-workflow-schedule-item-actions {
@@ -1139,18 +1182,41 @@ body.dark-mode .agent-workflow-dependency-summary span,
 }
 
 .agent-automation-resources-modal-overlay {
+    position: fixed;
+    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    box-sizing: border-box;
+    display: flex;
     align-items: center;
     justify-content: center;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(8px);
+    z-index: 5600;
+    padding: clamp(16px, 3vh, 32px);
+}
+
+.agent-automation-resources-modal-overlay.hidden,
+#agent-automation-resources-modal.hidden {
+    display: none !important;
 }
 
 .agent-automation-resources-modal {
-    width: min(820px, calc(100vw - 32px));
-    max-height: min(760px, calc(100vh - 40px));
+    width: min(840px, calc(100vw - 32px));
+    max-height: min(780px, calc(100vh - 40px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
     padding: 0;
     text-align: left;
+    background: var(--bg-secondary, #fff);
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    margin: auto;
 }
 
 .agent-automation-resources-body {
@@ -1433,6 +1499,43 @@ body.dark-mode .agent-workflow-dependency-summary span,
     padding-top: 2px;
 }
 
+/* 自动启动编辑器使用独立的大尺寸工作区，保持居中并自适应高度 */
+.agent-automation-resources-modal.agent-automation-resources-modal--trigger,
+.agent-automation-resources-modal-overlay .agent-automation-resources-modal.agent-automation-resources-modal--trigger {
+    width: min(920px, calc(100vw - 32px));
+    max-height: min(820px, calc(100vh - 40px));
+    height: auto;
+    margin: auto;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-body {
+    gap: 10px;
+    padding: 14px 18px 14px;
+    overflow-y: auto;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-editor {
+    gap: 10px;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-editor label,
+.agent-automation-resources-modal--trigger .agent-automation-resources-config > label {
+    gap: 4px;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-form-grid {
+    gap: 9px;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-config {
+    gap: 9px;
+    padding: 10px 12px;
+}
+
+.agent-automation-resources-modal--trigger .agent-automation-resources-editor-footer {
+    padding-top: 0;
+}
+
 body.dark-mode .agent-automation-resource-row,
 .dark-mode .agent-automation-resource-row,
 body.dark-mode .agent-automation-resources-tab.active,
@@ -1465,6 +1568,12 @@ body.dark-mode .agent-automation-resources-editor-error,
     .agent-automation-resources-modal {
         width: calc(100vw - 20px);
         max-height: calc(100vh - 20px);
+    }
+
+    .agent-automation-resources-modal--trigger {
+        width: calc(100vw - 16px);
+        height: calc(100vh - 16px);
+        max-height: calc(100vh - 16px);
     }
 
     .agent-automation-resources-body {

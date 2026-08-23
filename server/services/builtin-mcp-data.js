@@ -14,7 +14,8 @@ function listDataProcessingTools() {
     return [
         {
             name: 'data.profile_rows',
-            description: 'Profile tabular rows, including field names, types, fill rates, and sample values.',
+            title: '数据画像分析',
+            description: '分析表格数据行结构，生成字段名、类型分布、填充率及样本值画像。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -26,7 +27,8 @@ function listDataProcessingTools() {
         },
         {
             name: 'data.filter_rows',
-            description: 'Filter rows using exact or contains matching.',
+            title: '筛选表格行',
+            description: '使用精确匹配或包含匹配规则筛选表格数据行。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -40,7 +42,8 @@ function listDataProcessingTools() {
         },
         {
             name: 'data.group_summary',
-            description: 'Group rows and calculate count, sum, average, min, or max.',
+            title: '分组汇总数据',
+            description: '按指定字段对表格行分组，并计算计数、求和、均值、最小值或最大值。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -56,7 +59,8 @@ function listDataProcessingTools() {
         },
         {
             name: 'data.normalize_fields',
-            description: 'Rename fields and trim string values in tabular rows.',
+            title: '标准化字段',
+            description: '重命名表格字段名称并去除字符串首尾空白字符。',
             inputSchema: {
                 type: 'object',
                 properties: {

@@ -9,10 +9,11 @@
                 <div class="agent-dag-header-actions">
                     <button id="automation-new-workflow-btn" class="btn-primary" type="button">新建工作流</button>
                     <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
-                    <button id="automation-resources-btn" class="btn-secondary" type="button">触发器与凭据</button>
+                    <button id="automation-resources-btn" class="btn-secondary" type="button">凭据库</button>
                     <button id="automation-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-dag-save-btn" class="btn-primary hidden" type="button">保存</button>
                     <button id="agent-workflow-dependency-btn" class="btn-secondary hidden" type="button">配置依赖</button>
+                    <button id="agent-workflow-triggers-btn" class="btn-secondary hidden" type="button">自动启动</button>
                     <button id="agent-workflow-readonly-run-btn" class="btn-primary hidden" type="button">运行发布版</button>
                     <button id="agent-dag-back-btn" class="btn-secondary hidden" type="button">返回资产中心</button>
                     <button id="automation-close-btn" class="btn-secondary agent-modal-close" type="button">关闭</button>
@@ -180,7 +181,6 @@
                             <h3 id="agent-workflow-share-title">分享工作流</h3>
                             <p id="agent-workflow-share-subtitle">设置谁可以查看和运行已发布版本。</p>
                         </div>
-                        <button id="agent-workflow-share-close-btn" class="btn-danger-outline" type="button" aria-label="关闭分享设置" title="关闭分享设置">关闭</button>
                     </div>
                     <div class="agent-workflow-share-body">
                         <div class="agent-workflow-share-summary" id="agent-workflow-share-summary"></div>
@@ -244,10 +244,10 @@
                 <div class="modal agent-automation-resources-modal" role="document">
                     <div class="agent-workflow-share-head">
                         <div>
-                            <h3 id="agent-automation-resources-title">触发器与凭据</h3>
-                            <p id="agent-automation-resources-subtitle">管理工作流的自动启动方式和运行时受控凭据。</p>
+                            <h3 id="agent-automation-resources-title">凭据库</h3>
+                            <p id="agent-automation-resources-subtitle">集中管理工作流运行时需要使用的受控凭据。</p>
                         </div>
-                        <button id="agent-automation-resources-close-btn" class="btn-danger-outline" type="button" aria-label="关闭触发器与凭据" title="关闭触发器与凭据">关闭</button>
+                        <button id="agent-automation-resources-close-btn" class="btn-danger-outline" type="button" aria-label="关闭凭据库" title="关闭凭据库">关闭</button>
                     </div>
                     <div class="agent-automation-resources-body">
                         <div id="agent-automation-resources-tabs" class="agent-automation-resources-tabs" role="tablist" aria-label="自动化资源">
@@ -260,9 +260,6 @@
                         </div>
                         <div id="agent-automation-resources-list" class="agent-automation-resources-list" role="tabpanel" aria-labelledby="agent-automation-triggers-tab"></div>
                         <form id="agent-automation-resources-editor" class="agent-automation-resources-editor hidden" novalidate></form>
-                    </div>
-                    <div class="agent-workflow-share-footer">
-                        <button id="agent-automation-resources-cancel-btn" class="btn-secondary" type="button">关闭</button>
                     </div>
                 </div>
             </div>

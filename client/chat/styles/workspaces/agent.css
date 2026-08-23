@@ -4,6 +4,7 @@
 @import url("./agent/agent-model-tools.css");
 @import url("./agent/agent-runs-list-table.css");
 @import url("./agent/agent-run-detail.css");
+@import url("./agent/agent-harness.css");
 @import url("./agent/agent-run-steps.css");
 @import url("./agent/agent-run-capabilities.css");
 @import url("./agent/agent-evaluations.css");

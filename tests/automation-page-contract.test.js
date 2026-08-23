@@ -61,6 +61,11 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     const migrations = read('server/db/migrations/index.js');
 
     assert.match(dag, /id="automation-resources-btn"/);
+    assert.match(dag, />凭据库</);
+    assert.match(dag, /id="agent-workflow-triggers-btn"[^>]*>自动启动</);
+    const workflowsSource = read('client/chat/agent-workflows.js');
+    assert.match(workflowsSource, /automation-resources-btn.*classList\.add\('hidden'\)/s);
+    assert.match(workflowsSource, /automation-resources-btn.*classList\.remove\('hidden'\)/s);
     assert.match(dag, /id="agent-automation-resources-modal"[^>]*role="dialog"[^>]*aria-hidden="true"/);
     assert.match(dag, /id="agent-automation-triggers-tab"[^>]*role="tab"/);
     assert.match(resources, /apiFetch\(`\$\{API_BASE\}\/agents\/triggers`\)/);
@@ -68,6 +73,14 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     assert.match(resources, /const agentAutomationResourceActionLocks = new Set/);
     assert.match(resources, /访问令牌只显示这一次/);
     assert.match(resources, /clearAgentAutomationResourceNotice\(\)/);
+    assert.match(resources, /agentAutomationResourceWorkflowId/);
+    assert.match(resources, /data-agent-automation-resource-tab/);
+    assert.match(resources, /modal\.parentElement !== document\.body/);
+    assert.match(resources, /modal\.style\.zIndex = '5600'/);
+    assert.match(resources, /agent-automation-resources-modal--trigger/);
+    assert.match(resources, /footer\?\.classList\.toggle\('hidden', isOpen\)/);
+    const modalStyles = read('client/chat/styles/workspaces/agent/agent-workflow-modals.css');
+    assert.match(modalStyles, /\.agent-automation-resources-modal--trigger/);
     assert.match(credentials, /allowed_user_ids: parseAllowedUserIds\(row\.allowed_user_ids\)/);
     assert.match(credentials, /allowed_units = \?, allowed_user_ids = \?, updated_at/);
     assert.match(migrations, /202608220008_workflow_credential_user_visibility/);

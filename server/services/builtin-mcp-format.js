@@ -9,7 +9,8 @@ function listFormatConversionTools() {
     return [
         {
             name: 'format.to_markdown_table',
-            description: 'Convert rows into a Markdown table block.',
+            title: '转换 Markdown 表格',
+            description: '将数据行数组转换为标准 Markdown 表格块。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -23,7 +24,8 @@ function listFormatConversionTools() {
         },
         {
             name: 'format.to_json',
-            description: 'Serialize a value as compact or pretty JSON.',
+            title: '转换 JSON',
+            description: '将输入值序列化为紧凑或美化格式的 JSON 字符串。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -35,7 +37,8 @@ function listFormatConversionTools() {
         },
         {
             name: 'format.extract_json',
-            description: 'Extract and parse the first JSON object or array from text.',
+            title: '提取 JSON',
+            description: '从非结构化文本中查找并解析第一个有效 JSON 对象或数组。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -46,7 +49,8 @@ function listFormatConversionTools() {
         },
         {
             name: 'format.normalize_text',
-            description: 'Normalize whitespace and optionally convert text case.',
+            title: '规范化文本',
+            description: '规范化文本中的空白字符，并可选转换为指定的大小写模式。',
             inputSchema: {
                 type: 'object',
                 properties: {

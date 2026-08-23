@@ -108,6 +108,12 @@
                                     <option value="none">不扩展</option>
                                 </select>
                             </label>
+                            <label>
+                                <span>执行技能</span>
+                                <select id="agent-skill-select" class="form-input">
+                                    <option value="">不指定技能</option>
+                                </select>
+                            </label>
                             <label class="agent-token-budget-field">
                                 <span>单次任务 Token 上限</span>
                                 <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="留空表示不限" aria-describedby="agent-token-budget-help" title="累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。">
@@ -151,11 +157,11 @@
                         <div class="agent-collapse-body">
                             <div id="agent-runtime-status" class="agent-runtime-status"></div>
                             <div class="agent-results-panel agent-results-tools-panel">
-                                <div class="agent-tool-section-head compact agent-available-tools-head">
-                                    <strong>可用工具</strong>
-                                    <span>已启用的系统与个人工具</span>
-                                </div>
-                                <div id="agent-tool-list" class="agent-tool-list"></div>
+                            <div class="agent-tool-section-head compact agent-available-tools-head">
+                                <strong>可用工具</strong>
+                                <span>已启用的系统与个人工具</span>
+                            </div>
+                            <div id="agent-tool-list" class="agent-tool-list"></div>
                             </div>
                             <div class="agent-results-panel agent-results-artifacts-panel">
                                 <div class="agent-tool-section-head compact">
@@ -164,6 +170,109 @@
                                 </div>
                                 <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
                             </div>
+                        </div>
+                    </details>
+                    <details class="agent-collapse-section agent-collapse-harness" data-agent-config-section="harness">
+                        <summary>
+                            <span>底座管理</span>
+                            <small>技能、运行资源与常驻实例</small>
+                        </summary>
+                        <div class="agent-collapse-body">
+                            <div class="agent-harness-nav-tabs" role="tablist" aria-label="底座管理模块">
+                                <button class="agent-harness-nav-tab active" type="button" data-agent-harness-nav="skills" role="tab" aria-selected="true">技能包管理</button>
+                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="packs" role="tab" aria-selected="false">运行资源包</button>
+                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="residency" role="tab" aria-selected="false">常驻实例</button>
+                            </div>
+                            <div id="agent-harness-notice" class="agent-harness-notice" role="status" aria-live="polite"></div>
+
+                            <!-- 1. 技能包管理 -->
+                            <section class="agent-harness-panel" data-agent-harness-section="skills" aria-labelledby="agent-harness-skills-title">
+                                <div class="agent-harness-panel-head">
+                                    <div>
+                                        <strong id="agent-harness-skills-title">技能包</strong>
+                                        <span>安装后可在自主任务中复用受控指令、工具和权限。</span>
+                                    </div>
+                                    <div class="agent-harness-inline-actions">
+                                        <button id="agent-harness-skills-refresh" class="btn-secondary" type="button" title="刷新技能列表">刷新</button>
+                                    </div>
+                                </div>
+                                <div class="agent-harness-skill-layout">
+                                    <div class="agent-harness-skill-list-wrap">
+                                        <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>
+                                        <div id="agent-harness-skill-list" class="agent-harness-list"></div>
+                                    </div>
+                                    <div class="agent-harness-skill-form-wrap">
+                                        <div class="agent-harness-subhead"><strong>注册 / 导入技能</strong><span>通过 YAML 清单注册或导入 .skill.zip 压缩包</span></div>
+                                        <div class="agent-harness-form-grid">
+                                            <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                                <span>技能清单（YAML / JSON）</span>
+                                                <textarea id="agent-harness-skill-manifest" class="form-input" rows="6" placeholder="id: project-review
+name: project-review
+version: 1.0.0
+title: 项目审查
+description: 检查项目资料并输出风险摘要。
+tools: []
+permissions: []"></textarea>
+                                            </label>
+                                            <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                                <span>技能补充说明（可选）</span>
+                                                <textarea id="agent-harness-skill-instructions" class="form-input" rows="3" placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
+                                            </label>
+                                        </div>
+                                        <div class="agent-harness-form-actions">
+                                            <button id="agent-harness-skill-register" class="btn-primary" type="button">注册技能</button>
+                                            <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
+                                                <span>导入技能包</span>
+                                                <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- 2. 运行资源包 -->
+                            <section class="agent-harness-panel hidden" data-agent-harness-section="packs" aria-labelledby="agent-harness-packs-title">
+                                <div class="agent-harness-panel-head">
+                                    <div>
+                                        <strong id="agent-harness-packs-title">运行资源包</strong>
+                                        <span>浏览器和数据处理资源由系统下载、校验完整性后安装。</span>
+                                    </div>
+                                    <div class="agent-harness-inline-actions">
+                                        <button id="agent-harness-packs-refresh" class="btn-secondary" type="button" title="刷新运行资源包">刷新</button>
+                                    </div>
+                                </div>
+                                <div class="agent-harness-skill-layout">
+                                    <div class="agent-harness-skill-list-wrap">
+                                        <div class="agent-harness-subhead"><strong>已安装资源包</strong><span>系统已缓存并校验的运行时包</span></div>
+                                        <div id="agent-harness-pack-list" class="agent-harness-list"></div>
+                                    </div>
+                                    <div class="agent-harness-pack-sync admin-only hidden">
+                                        <div class="agent-harness-subhead"><strong>同步运行资源包</strong><span>必须提供资源地址和访问来源白名单。</span></div>
+                                        <div class="agent-harness-form-grid agent-harness-form-grid--compact">
+                                            <label><span>资源类型</span><select id="agent-harness-pack-type" class="form-input"><option value="data">数据资源</option><option value="browser">浏览器资源</option></select></label>
+                                            <label><span>ID</span><input id="agent-harness-pack-id" class="form-input" placeholder="python-runtime"></label>
+                                            <label><span>版本</span><input id="agent-harness-pack-version" class="form-input" placeholder="1.0.0"></label>
+                                            <label><span>大小（字节，可选）</span><input id="agent-harness-pack-size" class="form-input" type="number" min="0" placeholder="0"></label>
+                                            <label class="agent-harness-form-field-wide"><span>资源地址</span><input id="agent-harness-pack-url" class="form-input" type="url" placeholder="http://10.0.0.20/packs/python.bundle"></label>
+                                            <label class="agent-harness-form-field-wide"><span>校验摘要（SHA256）</span><input id="agent-harness-pack-sha256" class="form-input" spellcheck="false" placeholder="填写 64 位十六进制摘要"></label>
+                                            <label class="agent-harness-form-field-wide"><span>访问来源白名单（每行一个）</span><textarea id="agent-harness-pack-origins" class="form-input" rows="2" placeholder="http://10.0.0.20"></textarea></label>
+                                        </div>
+                                        <div class="agent-harness-form-actions"><button id="agent-harness-pack-sync" class="btn-primary" type="button">同步并校验</button></div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- 3. 常驻实例 -->
+                            <section class="agent-harness-panel hidden" data-agent-harness-section="residency" aria-labelledby="agent-harness-residency-title">
+                                <div class="agent-harness-panel-head">
+                                    <div>
+                                        <strong id="agent-harness-residency-title">常驻实例</strong>
+                                        <span>查看当前账号的上下文复用实例、租约和过期时间。</span>
+                                    </div>
+                                    <div class="agent-harness-inline-actions"><select id="agent-harness-residency-scope" class="form-input admin-only hidden" aria-label="常驻实例查看范围"><option value="self">当前账号</option><option value="all">全部用户</option></select><button id="agent-harness-residency-sweep" class="btn-secondary" type="button">清理过期实例</button><button id="agent-harness-residency-refresh" class="btn-secondary" type="button">刷新</button></div>
+                                </div>
+                                <div id="agent-harness-residency-list" class="agent-harness-list full-width"></div>
+                            </section>
                         </div>
                     </details>
                     <details class="agent-collapse-section agent-collapse-evaluations" data-agent-config-section="evaluations">
@@ -211,6 +320,7 @@
                             <div class="agent-history-tools" aria-label="任务工具">
                                 <button class="btn-secondary" type="button" data-agent-config-open="templates">任务模板</button>
                                 <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
+                                <button class="btn-secondary" type="button" data-agent-config-open="harness">运行支撑管理</button>
                                 <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
                             </div>
                             <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>

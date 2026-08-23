@@ -6,6 +6,7 @@ let agentWorkflowCredentialsCache = [];
 let agentAutomationResourceLoadSequence = 0;
 let agentAutomationResourceEditorState = null;
 let agentAutomationResourceModalOpener = null;
+let agentAutomationResourceWorkflowId = '';
 let agentAutomationShareOptions = null;
 const agentAutomationResourceActionLocks = new Set();
 
@@ -16,7 +17,9 @@ function agentAutomationResourceModal() {
 function setAgentAutomationResourcesModalVisible(isOpen, focusTarget = null) {
     const modal = agentAutomationResourceModal();
     if (!modal) return;
+    const dialog = modal.querySelector('.agent-automation-resources-modal');
     if (isOpen) {
+        if (modal.parentElement !== document.body) document.body.appendChild(modal);
         agentAutomationResourceModalOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
@@ -25,8 +28,11 @@ function setAgentAutomationResourcesModalVisible(isOpen, focusTarget = null) {
     }
     modal.classList.add('hidden');
     modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('agent-automation-resources-modal--trigger');
+    dialog?.classList.remove('agent-automation-resources-modal--trigger');
     clearAgentAutomationResourceNotice();
     resetAgentAutomationResourceEditor();
+    agentAutomationResourceWorkflowId = '';
     const opener = agentAutomationResourceModalOpener;
     agentAutomationResourceModalOpener = null;
     if (opener?.isConnected) requestAnimationFrame(() => opener.focus());
@@ -99,6 +105,19 @@ function renderAgentAutomationResourceTabs() {
     const tablist = document.getElementById('agent-automation-resources-tabs');
     const list = document.getElementById('agent-automation-resources-list');
     if (!tablist || !list) return;
+    const contextualTriggers = Boolean(agentAutomationResourceWorkflowId);
+    const triggerTab = document.getElementById('agent-automation-triggers-tab');
+    const credentialsTab = document.getElementById('agent-automation-credentials-tab');
+
+    // 针对特定工作流的自动启动配置，隐藏多余的单项 Tab 栏；全局打开凭据库时展示切换
+    tablist.classList.toggle('hidden', contextualTriggers);
+    triggerTab?.classList.toggle('hidden', !contextualTriggers);
+    credentialsTab?.classList.toggle('hidden', contextualTriggers);
+    if (contextualTriggers) {
+        agentAutomationResourceTab = 'triggers';
+    } else if (!agentAutomationResourceTab) {
+        agentAutomationResourceTab = 'credentials';
+    }
     tablist.querySelectorAll('[data-agent-automation-resource-tab]').forEach(button => {
         const active = button.dataset.agentAutomationResourceTab === agentAutomationResourceTab;
         button.classList.toggle('active', active);
@@ -117,11 +136,18 @@ function renderAgentAutomationResourceList() {
     if (!list || agentAutomationResourceEditorState) return;
     renderAgentAutomationResourceTabs();
     if (agentAutomationResourceTab === 'triggers') {
-        if (!agentWorkflowTriggersCache.length) {
-            PivotSafeHtml.setHtml(list, '<div class="agent-automation-resources-empty"><strong>暂无触发器</strong><span>新建 Webhook、文件落地或数据变更触发器，让已发布工作流在事件到达时自动运行。</span></div>');
+        const visibleTriggers = agentAutomationResourceWorkflowId
+            ? agentWorkflowTriggersCache.filter(trigger => String(trigger.workflowId) === String(agentAutomationResourceWorkflowId))
+            : agentWorkflowTriggersCache;
+        if (!visibleTriggers.length) {
+            PivotSafeHtml.setHtml(list, `<div class="agent-automation-resources-empty">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <strong>暂无自动启动触发器</strong>
+                <span>${agentAutomationResourceWorkflowId ? '当前工作流尚未配置自动启动规则。您可以新建 Webhook 回调、文件落地监听或数据库变更触发器。' : '当前暂无已配置的触发器。您可以新建 Webhook 回调、文件落地监听或数据库变更触发器。'}</span>
+            </div>`);
             return;
         }
-        PivotSafeHtml.setHtml(list, `<div class="agent-automation-resource-rows">${agentWorkflowTriggersCache.map(trigger => {
+        PivotSafeHtml.setHtml(list, `<div class="agent-automation-resource-rows">${visibleTriggers.map(trigger => {
             const hasError = Boolean(trigger.lastError);
             const paused = trigger.status === 'paused';
             return `<article class="agent-automation-resource-row">
@@ -146,7 +172,11 @@ function renderAgentAutomationResourceList() {
         return;
     }
     if (!agentWorkflowCredentialsCache.length) {
-        PivotSafeHtml.setHtml(list, '<div class="agent-automation-resources-empty"><strong>暂无凭据</strong><span>创建后可在工作流节点中以引用名使用；凭据内容只会加密保存，不会再次显示在页面上。</span></div>');
+        PivotSafeHtml.setHtml(list, `<div class="agent-automation-resources-empty">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <strong>暂无受控凭据</strong>
+            <span>创建后可在工作流节点中以引用名使用；凭据内容由系统加密保存，不向浏览器回显明文。</span>
+        </div>`);
         return;
     }
     PivotSafeHtml.setHtml(list, `<div class="agent-automation-resource-rows">${agentWorkflowCredentialsCache.map(credential => {
@@ -305,10 +335,15 @@ function setAgentAutomationResourceEditorVisible(isOpen) {
     const actions = document.getElementById('agent-automation-resources-actions');
     const list = document.getElementById('agent-automation-resources-list');
     const editor = document.getElementById('agent-automation-resources-editor');
+    const closeBtn = document.getElementById('agent-automation-resources-close-btn');
+    const footer = agentAutomationResourceModal()?.querySelector('.agent-workflow-share-footer');
     tabs?.classList.toggle('hidden', isOpen);
     actions?.classList.toggle('hidden', isOpen);
     list?.classList.toggle('hidden', isOpen);
     editor?.classList.toggle('hidden', !isOpen);
+    // 编辑表单中已有底部的“取消”及顶部的“返回列表”操作，隐藏右上角全局关闭按钮以避免功能与视觉重复
+    closeBtn?.classList.toggle('hidden', isOpen);
+    footer?.classList.toggle('hidden', isOpen);
 }
 
 function resetAgentAutomationResourceEditor() {
@@ -350,13 +385,16 @@ function renderAgentAutomationResourceEditor(kind, item = null, draft = {}) {
     }
     if (isTrigger) {
         const config = agentAutomationTriggerConfig(triggerType, draft.config || item?.config || {});
-        const workflows = agentAutomationPublishedWorkflows(draft.workflowId || item?.workflowId || activeAgentWorkflowId);
-        const workflowId = String(draft.workflowId || item?.workflowId || activeAgentWorkflowId || '');
+        const contextualWorkflowId = String(agentAutomationResourceWorkflowId || '');
+        const workflows = contextualWorkflowId
+            ? agentAutomationPublishedWorkflows(contextualWorkflowId).filter(workflow => String(workflow.id) === contextualWorkflowId)
+            : agentAutomationPublishedWorkflows(draft.workflowId || item?.workflowId || activeAgentWorkflowId);
+        const workflowId = contextualWorkflowId || String(draft.workflowId || item?.workflowId || activeAgentWorkflowId || '');
         PivotSafeHtml.setHtml(editor, `
             <div class="agent-automation-resources-editor-head"><strong>${item ? '编辑触发器' : '新建触发器'}</strong><button type="button" class="btn-secondary" data-agent-automation-resource-back>返回列表</button></div>
             <div class="agent-automation-resources-form-grid">
                 <label><span>触发器名称</span><input class="form-input" name="name" type="text" required minlength="2" maxlength="80" value="${agentEscapeAttr(draft.name ?? item?.name ?? '')}" placeholder="例如：ERP 订单变更"></label>
-                <label><span>已发布工作流</span><select class="form-input" name="workflowId" required><option value="">请选择已发布工作流</option>${workflows.map(workflow => `<option value="${agentEscapeAttr(workflow.id)}" ${String(workflow.id) === workflowId ? 'selected' : ''}>${agentEscape(workflow.name)} · 已发布版本 ${Number(workflow.published_version || 0)}</option>`).join('')}</select></label>
+                <label><span>已发布工作流</span><select class="form-input" name="workflowId" required ${contextualWorkflowId ? 'disabled aria-disabled="true"' : ''}><option value="">请选择已发布工作流</option>${workflows.map(workflow => `<option value="${agentEscapeAttr(workflow.id)}" ${String(workflow.id) === workflowId ? 'selected' : ''}>${agentEscape(workflow.name)} · 已发布版本 ${Number(workflow.published_version || 0)}</option>`).join('')}</select></label>
                 <label><span>触发方式</span><select class="form-input" name="triggerType" ${item ? 'disabled' : ''}><option value="webhook" ${triggerType === 'webhook' ? 'selected' : ''}>入站 Webhook</option><option value="file" ${triggerType === 'file' ? 'selected' : ''}>文件落地</option><option value="database" ${triggerType === 'database' ? 'selected' : ''}>数据变更</option></select></label>
                 <label><span>状态</span><select class="form-input" name="status"><option value="active" ${(draft.status ?? item?.status ?? 'active') === 'active' ? 'selected' : ''}>创建后立即启用</option><option value="paused" ${(draft.status ?? item?.status) === 'paused' ? 'selected' : ''}>创建后保持暂停</option></select></label>
             </div>
@@ -648,21 +686,30 @@ function bindAgentAutomationResources() {
     const modal = agentAutomationResourceModal();
     if (!modal || modal.dataset.boundAgentAutomationResources === '1') return;
     modal.dataset.boundAgentAutomationResources = '1';
-    const close = () => setAgentAutomationResourcesModalVisible(false);
+    const close = (event) => {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        setAgentAutomationResourcesModalVisible(false);
+    };
     document.getElementById('agent-automation-resources-close-btn')?.addEventListener('click', close);
-    document.getElementById('agent-automation-resources-cancel-btn')?.addEventListener('click', close);
     modal.addEventListener('click', event => {
-        if (event.target === modal) close();
+        if (event.target === modal || event.target.closest('#agent-automation-resources-close-btn') || event.target.closest('[data-agent-automation-resources-close]')) {
+            close(event);
+        }
     });
-    modal.addEventListener('keydown', event => {
+    window.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
+        const currentModal = agentAutomationResourceModal();
+        if (!currentModal || currentModal.classList.contains('hidden')) return;
         event.preventDefault();
-        close();
+        close(event);
     });
     document.getElementById('agent-automation-resources-tabs')?.addEventListener('click', event => {
         const tab = event.target.closest('[data-agent-automation-resource-tab]');
         if (!tab || agentAutomationResourceEditorState) return;
-        agentAutomationResourceTab = tab.dataset.agentAutomationResourceTab === 'credentials' ? 'credentials' : 'triggers';
+        agentAutomationResourceTab = tab.dataset.agentAutomationResourceTab === 'triggers' ? 'triggers' : 'credentials';
         clearAgentAutomationResourceNotice();
         renderAgentAutomationResourceList();
         tab.focus();
@@ -670,12 +717,14 @@ function bindAgentAutomationResources() {
     document.getElementById('agent-automation-resources-tabs')?.addEventListener('keydown', event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
-        const tabs = [...event.currentTarget.querySelectorAll('[data-agent-automation-resource-tab]')];
+        const tabs = [...event.currentTarget.querySelectorAll('[data-agent-automation-resource-tab]:not(.hidden)')];
+        if (!tabs.length) return;
         const current = tabs.findIndex(tab => tab.dataset.agentAutomationResourceTab === agentAutomationResourceTab);
         const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
         tabs[index]?.click();
     });
-    document.getElementById('agent-automation-resources-new-btn')?.addEventListener('click', async () => {
+    document.getElementById('agent-automation-resources-new-btn')?.addEventListener('click', async (event) => {
+        event?.preventDefault();
         if (agentAutomationResourceTab === 'triggers') return renderAgentAutomationResourceEditor('trigger');
         try {
             await loadAgentAutomationShareOptions();
@@ -721,19 +770,48 @@ function bindAgentAutomationResources() {
 
 async function openAgentAutomationResources(options = {}) {
     bindAgentAutomationResources();
-    agentAutomationResourceTab = options.tab === 'credentials' ? 'credentials' : 'triggers';
+    const modal = agentAutomationResourceModal();
+    if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
+    if (modal) modal.style.zIndex = '5600';
+    agentAutomationResourceWorkflowId = String(options.workflowId || '');
+    const dialog = modal?.querySelector('.agent-automation-resources-modal');
+    dialog?.classList.toggle('agent-automation-resources-modal--trigger', Boolean(agentAutomationResourceWorkflowId));
+    modal?.classList.toggle('agent-automation-resources-modal-overlay--trigger', Boolean(agentAutomationResourceWorkflowId));
+    agentAutomationResourceTab = agentAutomationResourceWorkflowId
+        ? 'triggers'
+        : (options.tab === 'triggers' ? 'triggers' : 'credentials');
     resetAgentAutomationResourceEditor();
+    const title = document.getElementById('agent-automation-resources-title');
+    const subtitle = document.getElementById('agent-automation-resources-subtitle');
+    const workflow = (typeof agentWorkflowsCache !== 'undefined' && Array.isArray(agentWorkflowsCache))
+        ? agentWorkflowsCache.find(item => String(item.id) === agentAutomationResourceWorkflowId)
+        : null;
+    if (title) title.textContent = agentAutomationResourceWorkflowId ? '自动启动' : '凭据库';
+    if (subtitle) subtitle.textContent = agentAutomationResourceWorkflowId
+        ? `为“${workflow?.name || `工作流 #${agentAutomationResourceWorkflowId}`}”配置事件触发方式。`
+        : '集中管理工作流运行时需要使用的受控凭据。';
     renderAgentAutomationResourceTabs();
     setAgentAutomationResourcesModalVisible(true);
     try {
-        await Promise.all([
-            agentWorkflowsCache.length ? Promise.resolve() : loadAgentWorkflows(),
-            loadAgentAutomationResources({ showLoading: true })
-        ]);
+        const tasks = [loadAgentAutomationResources({ showLoading: true })];
+        if (typeof loadAgentWorkflows === 'function' && (!Array.isArray(agentWorkflowsCache) || !agentWorkflowsCache.length)) {
+            tasks.push(loadAgentWorkflows());
+        }
+        await Promise.all(tasks);
+        if (agentAutomationResourceWorkflowId && subtitle && typeof agentWorkflowsCache !== 'undefined' && Array.isArray(agentWorkflowsCache)) {
+            const loadedWorkflow = agentWorkflowsCache.find(item => String(item.id) === agentAutomationResourceWorkflowId);
+            if (loadedWorkflow) subtitle.textContent = `为“${loadedWorkflow.name}”配置事件触发方式。`;
+        }
         renderAgentAutomationResourceList();
     } catch (error) {
         showToast(error.message || '自动化资源加载失败', 'error');
     }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindAgentAutomationResources);
+} else {
+    bindAgentAutomationResources();
 }
 
 window.Pivot.exposeModule('agent.automationResources', {

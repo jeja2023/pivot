@@ -21,6 +21,7 @@ function listReportTools() {
     return [
         {
             name: 'reports.list_files',
+            title: '查找报表文件',
             description: '列出配置目录下可访问的报表/数据文件。',
             inputSchema: {
                 type: 'object',
@@ -32,6 +33,7 @@ function listReportTools() {
         },
         {
             name: 'reports.read_file_summary',
+            title: '读取报表摘要',
             description: '读取单个报表/数据文件的元数据、工作表和样本行。',
             inputSchema: {
                 type: 'object',
@@ -45,6 +47,7 @@ function listReportTools() {
         },
         {
             name: 'reports.query_table',
+            title: '查询表格数据',
             description: '按列筛选并限制行数，查询 CSV/XLS/XLSX 表格。',
             inputSchema: {
                 type: 'object',
@@ -60,6 +63,7 @@ function listReportTools() {
         },
         {
             name: 'reports.compare_files',
+            title: '对比数据文件',
             description: '对比两个报表/数据文件的工作表、表头和样本行。',
             inputSchema: {
                 type: 'object',
