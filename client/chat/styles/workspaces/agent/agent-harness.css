@@ -424,14 +424,38 @@
     outline: none;
 }
 
-#agent-harness-skill-manifest,
+#agent-harness-skill-manifest {
+    min-height: 240px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    padding: 10px 12px;
+    border-radius: 7px;
+    background: var(--bg-main, #fff);
+}
+
 #agent-harness-skill-instructions {
+    min-height: 60px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     font-size: 0.74rem;
     line-height: 1.5;
     padding: 8px 12px;
     border-radius: 7px;
     background: var(--bg-main, #fff);
+}
+
+.agent-harness-skill-list-wrap,
+.agent-harness-skill-form-wrap {
+    min-height: 440px;
+}
+
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-list {
+    max-height: 480px;
+    min-height: 360px;
+}
+
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-empty-card {
+    min-height: 360px;
 }
 
 .agent-harness-form-actions {
@@ -850,8 +874,9 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
     display: flex;
     flex-direction: column;
-    width: min(1080px, calc(100vw - 32px));
-    max-height: min(780px, calc(100vh - 40px));
+    width: min(1120px, calc(100vw - 32px));
+    min-height: min(680px, calc(100vh - 40px));
+    max-height: min(860px, calc(100vh - 40px));
     height: auto;
     border-radius: 12px;
     box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
