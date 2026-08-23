@@ -345,26 +345,34 @@
 .agent-harness-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.agent-harness-form-grid--compact {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
 }
 
 .agent-harness-form-field,
 .agent-harness-form-grid > label {
-    display: grid;
-    gap: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     min-width: 0;
+    color: var(--text-main);
+    font-size: 0.75rem;
+    font-weight: 700;
     text-align: left;
+    margin: 0;
 }
 
 .agent-harness-form-field > span,
 .agent-harness-form-grid > label > span {
-    color: var(--text-secondary, #475569);
-    font-size: 0.74rem;
-    font-weight: 600;
+    display: block;
+    height: 18px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-main);
+    font-size: 0.75rem;
+    font-weight: 700;
     text-align: left;
 }
 
@@ -372,22 +380,63 @@
     grid-column: 1 / -1;
 }
 
-.agent-harness-form-grid .form-input {
-    min-width: 0;
-    font-size: 0.76rem;
+.agent-harness-form-grid .form-input,
+.agent-harness-skill-form-wrap .form-input,
+.agent-harness-pack-sync .form-input {
+    width: 100%;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main, #fff);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-harness-form-grid input.form-input,
+.agent-harness-form-grid select.form-input,
+.agent-harness-pack-sync input.form-input,
+.agent-harness-pack-sync select.form-input {
+    height: 36px !important;
+    min-height: 36px !important;
+    max-height: 36px !important;
+    line-height: 34px !important;
+    padding: 0 12px !important;
+    font-size: 0.78rem !important;
+    vertical-align: middle !important;
+}
+
+.agent-harness-form-grid textarea.form-input,
+.agent-harness-skill-form-wrap textarea.form-input,
+.agent-harness-pack-sync textarea.form-input {
+    padding: 8px 12px !important;
+    line-height: 1.5 !important;
+    font-size: 0.78rem !important;
+    resize: vertical;
+}
+
+.agent-harness-form-grid .form-input:focus,
+.agent-harness-skill-form-wrap .form-input:focus,
+.agent-harness-pack-sync .form-input:focus {
+    border-color: var(--primary, #3b82f6);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    outline: none;
 }
 
 #agent-harness-skill-manifest,
 #agent-harness-skill-instructions {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     line-height: 1.5;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-radius: 7px;
-    background: var(--bg-secondary, #fff);
+    background: var(--bg-main, #fff);
 }
 
 .agent-harness-form-actions {
+    display: flex;
+    align-items: center;
     justify-content: flex-start;
     flex-wrap: wrap;
     gap: 10px;
@@ -396,16 +445,6 @@
 
 .agent-harness-file-button {
     cursor: pointer;
-}
-
-.agent-harness-pack-sync {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid rgba(226, 232, 240, 0.85);
-    border-radius: 8px;
-    background: rgba(248, 250, 252, 0.5);
 }
 
 /* ==========================================================================
