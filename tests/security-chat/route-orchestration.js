@@ -1,10 +1,13 @@
 // 聊天路由编排回归测试
 // 覆盖优化路线图「Chat orchestration tests」列出的路由级场景：额度拦截、知识库命中、
 // 长期记忆命中、流式中断和上下文裁剪，确保对话路由继续只做 SSE 传输层。
+const fs = require('node:fs');
+const path = require('node:path');
 const {
     assert,
     db,
     longTermMemory,
+    saveUserMessage,
     test
 } = require('../security-helpers');
 const {
@@ -14,6 +17,15 @@ const {
     startChatRouteServer,
     startFakeUpstream
 } = require('./chat-route-harness');
+const { execute, queryOne } = require('../../server/db/client');
+const {
+    buildChatAgentMetadata,
+    listChatAgentRunsForSession,
+    persistAgentRunChatResult,
+    recoverChatAgentResults
+} = require('../../server/services/chat-agent-bridge');
+const { buildVisionHistory } = require('../../server/services/chat-vision');
+const { resolveUploadUrlPath, toProjectRelativePath } = require('../../server/security');
 
 // 上下文窗口取 4000 时输入预算为 4000 - 2048（保留输出）- 256（安全边界）= 1696 tokens。
 const NARROW_CONTEXT_WINDOW_TOKENS = 4000;
@@ -66,6 +78,166 @@ test('聊天路由拒绝不属于当前用户的会话', async () => {
         assert.equal(readSessionMessages(fixture).length, 0);
     } finally {
         await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天重新生成也会复用原用户消息并进入持久化 Agent', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_regenerate_agent' });
+    const userMessage = await saveUserMessage({
+        sessionId: fixture.sessionId,
+        userId: fixture.userId,
+        content: '请继续分析这个任务',
+        modelId: fixture.modelId
+    });
+    let capturedRun = null;
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async options => {
+            capturedRun = options;
+            return { id: 'regenerate-agent-run', status: 'queued' };
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '',
+            modelId: fixture.modelId,
+            regenerate: true
+        });
+
+        const handoff = result.findByType('agent_handoff');
+        assert.equal(handoff?.runId, 'regenerate-agent-run');
+        assert.ok(capturedRun, '重新生成必须创建 Agent Run');
+        assert.equal(capturedRun.goal, '请继续分析这个任务');
+        assert.equal(capturedRun.metadata.chatBridge.userMessageId, Number(userMessage.lastInsertRowid));
+        assert.equal(capturedRun.metadata.chatBridge.currentMessage.content, '请继续分析这个任务');
+        assert.equal(capturedRun.metadata.chatHistory.length, 0, '当前用户消息不应在历史中重复注入');
+
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1, '重新生成不应重复写入用户消息');
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 0, '结果应由 Agent 完成后再持久化');
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('重新生成的 Agent 接管失败也会持久化可见错误结果', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_regenerate_agent_error' });
+    await saveUserMessage({
+        sessionId: fixture.sessionId,
+        userId: fixture.userId,
+        content: '请重新执行失败场景',
+        modelId: fixture.modelId
+    });
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async () => {
+            throw new Error('测试用 Agent 启动失败');
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '',
+            modelId: fixture.modelId,
+            regenerate: true
+        });
+        assert.equal(result.errorEvent?.code, 'AGENT_HANDOFF_FAILED');
+        const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant');
+        assert.ok(assistant);
+        assert.match(assistant.content, /测试用 Agent 启动失败/);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天 Agent 终态回写幂等，并能恢复未回写的终态结果', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_agent_recovery' });
+    const runIds = ['chat-bridge-idempotent', 'chat-bridge-recovery'];
+    const createRun = async (id, answer, status = 'completed') => {
+        await execute(`
+            INSERT INTO agent_runs (
+                id, user_id, session_id, goal, status, final_answer, metadata, created_at, updated_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [
+            id,
+            fixture.userId,
+            fixture.sessionId,
+            '持久化聊天任务',
+            status,
+            answer,
+            JSON.stringify(buildChatAgentMetadata({
+                sessionId: fixture.sessionId,
+                visibleContent: '持久化聊天任务',
+                currentContent: '持久化聊天任务',
+                userMessageId: null
+            }))
+        ]);
+    };
+    await createRun(runIds[0], '第一次最终答案');
+    await createRun(runIds[1], '恢复后的最终答案');
+
+    try {
+        const [firstMessageId, concurrentMessageId] = await Promise.all([
+            persistAgentRunChatResult(runIds[0]),
+            persistAgentRunChatResult(runIds[0])
+        ]);
+        const secondMessageId = await persistAgentRunChatResult(runIds[0]);
+        assert.ok(firstMessageId > 0);
+        assert.equal(concurrentMessageId, firstMessageId, '并发终态通知必须收敛到同一条助手消息');
+        assert.equal(secondMessageId, firstMessageId, '重复终态通知不得重复写助手消息');
+        assert.equal((await queryOne('SELECT COUNT(*) AS count FROM messages WHERE agent_run_id = ?', [runIds[0]])).count, 1);
+
+        const activeBefore = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runIds[1]]);
+        const activeMetadata = typeof activeBefore.metadata === 'string'
+            ? JSON.parse(activeBefore.metadata)
+            : activeBefore.metadata;
+        assert.equal(activeMetadata.chatBridge.messageId || null, null);
+        const recovered = await recoverChatAgentResults({ limit: 20 });
+        assert.ok(recovered.recovered >= 1, '恢复扫描应补齐未回写的聊天结果');
+        const secondRow = await queryOne('SELECT id, content FROM messages WHERE agent_run_id = ?', [runIds[1]]);
+        assert.ok(secondRow);
+        assert.equal(secondRow.content, '恢复后的最终答案');
+
+        const pending = await listChatAgentRunsForSession(fixture.sessionId, fixture.userId);
+        assert.equal(pending.length, 0, '已回写的终态 Agent 不应再次显示为待恢复');
+    } finally {
+        await execute('DELETE FROM agent_runs WHERE id IN (?, ?)', runIds);
+        fixture.cleanup();
+    }
+});
+
+test('聊天 Agent 会把当前会话内的图片附件转换为受控视觉输入', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_agent_vision' });
+    const uploadUrl = '/uploads/chat-agent-vision.png';
+    const targetPath = resolveUploadUrlPath(uploadUrl);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+    assert.ok(targetPath);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, png);
+    await execute(`
+        INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, created_at)
+        VALUES (?, ?, 'chat-agent-vision.png', ?, 'image/png', ?, CURRENT_TIMESTAMP)
+    `, [fixture.userId, fixture.sessionId, toProjectRelativePath(targetPath), png.length]);
+
+    try {
+        const history = await buildVisionHistory([
+            { role: 'user', content: `请分析 ![截图](${uploadUrl})` }
+        ], 'http://pivot-agent.local', fixture.userId, fixture.sessionId);
+        assert.equal(history[0].content[0].type, 'text');
+        assert.match(history[0].content[0].text, /截图/);
+        assert.equal(history[0].content[1].type, 'image_url');
+        assert.match(history[0].content[1].image_url.url, /^data:image\/png;base64,/);
+    } finally {
+        await execute('DELETE FROM attachments WHERE user_id = ? AND session_id = ?', [fixture.userId, fixture.sessionId]);
+        try { fs.unlinkSync(targetPath); } catch (_) {}
         fixture.cleanup();
     }
 });

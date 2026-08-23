@@ -5,6 +5,7 @@ let activeSendTask = null;
 let latestSendEpoch = 0;
 let chatLocalMcpBridgeDebug = null;
 let chatLocalMcpHeartbeatStarted = false;
+const chatAgentStreamingTargets = new Map();
 
 function getChatLocalMcpDeviceId() {
     const key = 'pivot_local_execution_device_id';
@@ -170,6 +171,123 @@ function hasSendableChatPayload() {
     return Boolean(text) || pendingAttachments.length > 0;
 }
 
+async function postChatAgentControl(runId, path, body = {}) {
+    const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '连续 Agent 操作失败');
+    return data;
+}
+
+async function cancelChatAgentRun(runId) {
+    if (!runId) return null;
+    const result = await postChatAgentControl(runId, '/cancel');
+    showToast('已请求停止连续 Agent', 'info');
+    return result;
+}
+
+function attachChatAgentControls(messageContent, runId, status = '') {
+    if (!messageContent || !runId) return;
+    const actions = messageContent.querySelector('.message-actions');
+    if (!actions) return;
+    let controls = messageContent.querySelector('.chat-agent-controls');
+    if (!controls) {
+        controls = document.createElement('div');
+        controls.className = 'chat-agent-controls';
+        actions.insertAdjacentElement('beforebegin', controls);
+    }
+    const normalizedStatus = String(status || '').toLowerCase();
+    const isTerminal = ['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted'].includes(normalizedStatus);
+    const canResume = ['error', 'failed', 'cancelled'].includes(normalizedStatus);
+    if (isTerminal && !canResume) {
+        controls.remove();
+        return;
+    }
+    while (controls.firstChild) controls.removeChild(controls.firstChild);
+    const addButton = (label, className, title, handler) => {
+        const key = `${label}:${runId}`;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className;
+        button.textContent = label;
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.dataset.chatAgentControl = key;
+        button.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            button.disabled = true;
+            try { await handler(); } catch (error) { showToast(error.message || '连续 Agent 操作失败', 'error'); }
+            finally { button.disabled = false; }
+        });
+        controls.appendChild(button);
+    };
+    addButton('详情', 'btn-secondary', '查看连续 Agent 任务详情', () => window.openAgentRun?.(runId));
+    if (!isTerminal) addButton('停止', 'btn-danger-outline', '停止连续 Agent 任务', () => cancelChatAgentRun(runId));
+    if (['approval_required', 'waiting_approval', 'awaiting_approval'].includes(normalizedStatus)) {
+        addButton('批准', 'btn-primary', '批准工具调用并继续任务', () => postChatAgentControl(runId, '/approval', { approve: true }));
+        addButton('拒绝', 'btn-danger-outline', '拒绝工具调用并停止任务', () => postChatAgentControl(runId, '/approval', { approve: false }));
+    }
+    if (canResume) {
+        addButton('继续', 'btn-primary', '从上次执行位置继续任务', async () => {
+            await postChatAgentControl(runId, '/resume');
+            showToast('已创建续跑任务', 'info');
+            window.attachChatAgentRunsForSession?.(currentSessionId);
+        });
+    }
+}
+
+function registerChatAgentStreamingTarget(runId, messageContent, sessionId = currentSessionId) {
+    const safeRunId = String(runId || '').trim();
+    if (!safeRunId || !messageContent) return;
+    chatAgentStreamingTargets.set(safeRunId, {
+        element: messageContent,
+        sessionId: String(sessionId || '')
+    });
+}
+
+function unregisterChatAgentStreamingTarget(runId) {
+    chatAgentStreamingTargets.delete(String(runId || '').trim());
+}
+
+function handleChatAgentStreamingEvent(payload = {}) {
+    const runId = String(payload.runId || '').trim();
+    const target = chatAgentStreamingTargets.get(runId);
+    if (!target || String(currentSessionId || '') !== target.sessionId) return;
+    const step = Number(payload.step || 0);
+    const hasTools = Array.isArray(payload.partialToolCalls) && payload.partialToolCalls.length > 0;
+    const status = payload.completed
+        ? (hasTools ? `连续 Agent 第 ${step || 1} 步工具调用已完成` : `连续 Agent 第 ${step || 1} 步规划已完成`)
+        : (hasTools ? `连续 Agent 正在处理第 ${step || 1} 步工具调用` : `连续 Agent 正在生成第 ${step || 1} 步计划`);
+    const textBody = target.element?.querySelector?.('.text-body');
+    if (textBody) PivotSafeHtml.setHtml(textBody, `<div class="queue-detail">${escapeChatStatusHtml(status)}</div>`);
+}
+
+async function cancelCurrentChatAgent() {
+    const runId = currentAbortController?.pivotAgentRunId;
+    if (runId) {
+        try { await cancelChatAgentRun(runId); } catch (error) { showToast(error.message || '停止连续 Agent 失败', 'error'); }
+    }
+    currentAbortController?.abort();
+}
+
+window.Pivot.exposeModule('chat.agentBridge', {
+    attachChatAgentControls,
+    cancelCurrentChatAgent,
+    registerChatAgentStreamingTarget,
+    unregisterChatAgentStreamingTarget,
+    handleChatAgentStreamingEvent
+}, [
+    'attachChatAgentControls',
+    'cancelCurrentChatAgent',
+    'registerChatAgentStreamingTarget',
+    'unregisterChatAgentStreamingTarget',
+    'handleChatAgentStreamingEvent'
+]);
+
 // 发新消息时先中断上一次生成再串行接管，而不是拦下用户输入
 window.sendMessage = async function(isRegenerate = false) {
     const shouldRegenerate = isRegenerate === true;
@@ -300,6 +418,8 @@ async function runSendMessage(shouldRegenerate) {
     let pendingStreamChunks = [];
     let reader = null;
     let hasServerFinalStats = false;
+    let agentRunId = '';
+    let agentTrackingPromise = null;
 
     const getElapsedSeconds = () => Math.max((Date.now() - startTime) / 1000, 0.001);
     const getAverageTps = (count = tokenCount) => {
@@ -453,6 +573,57 @@ async function runSendMessage(shouldRegenerate) {
                 window.renderPivotCharts?.(textBody);
             }
         };
+        const trackChatAgentRun = async (runId) => {
+            const terminalStatuses = new Set(['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted']);
+            for (let attempt = 0; attempt < 43200; attempt += 1) {
+                try {
+                    const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+                    if (!response.ok) throw new Error(`Agent 任务查询失败（${response.status}）`);
+                    const detail = await response.json();
+                    const run = detail?.run || detail?.data?.run || detail?.data || detail;
+                    const status = String(run?.status || '').toLowerCase();
+                    if (terminalStatuses.has(status)) {
+                        const metadata = typeof run?.metadata === 'string'
+                            ? (() => { try { return JSON.parse(run.metadata); } catch (_) { return {}; } })()
+                            : (run?.metadata || {});
+                        const bridge = metadata?.chatBridge || {};
+                        const answer = String(run?.final_answer
+                            || (run?.error_message ? `任务执行失败：${run.error_message}` : '任务未生成可用结果。')).trim();
+                        if (answer) renderPersistedAssistantContent(answer);
+                        if (bridge.messageId) window.setMessageActionId?.(aiMsgEl, bridge.messageId);
+                        unregisterChatAgentStreamingTarget(runId);
+                        attachChatAgentControls(aiMsgEl, runId, status);
+                        if (isViewingRequestSession()) {
+                            const elapsed = Math.max((Date.now() - startTime) / 1000, 0.001);
+                            renderFinalAssistantStats(statsEl, {
+                                modelName: run?.model_name || assistantModelName,
+                                costTime: elapsed,
+                                tokenCount: estimateStreamingTokenCount(answer),
+                                tps: answer ? estimateStreamingTokenCount(answer) / elapsed : 0
+                            });
+                            window.refreshCurrentContextUsage?.(requestSessionId);
+                            window.scrollMessagesToBottom?.();
+                        } else {
+                            showToast('原会话的 Agent 任务已完成，可切回查看。', 'info');
+                        }
+                        if (window.loadSessions) window.loadSessions();
+                        return;
+                    }
+                    if (isViewingRequestSession()) {
+                        const statusText = status === 'approval_required' || status === 'waiting_approval'
+                            ? '连续 Agent 等待审批'
+                            : status === 'executing' || status === 'observing' || status === 'replanning'
+                                ? '连续 Agent 正在执行任务'
+                                : '连续 Agent 正在规划任务';
+                        updateAssistantStatus(statusText);
+                        attachChatAgentControls(aiMsgEl, runId, status);
+                    }
+                } catch (error) {
+                    if (isViewingRequestSession()) updateAssistantStatus('连续 Agent 仍在后台运行，暂时无法读取最新状态');
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        };
         const sseParser = createBrowserSseParser({
             onData(payload) {
                 let data = null;
@@ -460,6 +631,19 @@ async function runSendMessage(shouldRegenerate) {
                     data = JSON.parse(payload);
                 } catch (e) {
                     console.warn('忽略格式异常的 SSE 事件', e);
+                    return;
+                }
+                if (data.type === 'agent_handoff') {
+                    agentRunId = String(data.runId || '').trim();
+                    myController.pivotAgentRunId = agentRunId;
+                    registerChatAgentStreamingTarget(agentRunId, aiMsgEl, requestSessionId);
+                    updateAssistantStatus(data.message || '已切换为连续 Agent，任务会在后台继续执行。');
+                    attachChatAgentControls(aiMsgEl, agentRunId, data.status || 'queued');
+                    if (agentRunId && !agentTrackingPromise) {
+                        agentTrackingPromise = trackChatAgentRun(agentRunId).catch(error => {
+                            if (isViewingRequestSession()) updateAssistantStatus(error.message || '连续 Agent 状态跟踪失败', 'error');
+                        });
+                    }
                     return;
                 }
                 if (data.type === 'queue') {
@@ -565,6 +749,10 @@ async function runSendMessage(shouldRegenerate) {
             }
         }
         await waitForLocalReplay();
+        if (agentRunId) {
+            if (isViewingRequestSession()) updateAssistantStatus('连续 Agent 已接管，任务会在后台继续执行');
+            return;
+        }
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
         if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
 

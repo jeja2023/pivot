@@ -108,7 +108,9 @@ async function startChatRouteServer({
     fixture,
     retrieveContext,
     isRagEnabled,
-    publicUrl = ''
+    publicUrl = '',
+    autoAgent = false,
+    agentRunFactory
 } = {}) {
     const express = require('express');
     const auditRecords = [];
@@ -124,7 +126,9 @@ async function startChatRouteServer({
         logAction: (_req, action, detail) => auditRecords.push({ action, detail }),
         retrieveContext,
         isRagEnabled,
-        publicUrl
+        publicUrl,
+        autoAgent,
+        agentRunFactory
     }));
     const server = http.createServer(app);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

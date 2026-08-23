@@ -10,6 +10,41 @@ function observationMessages(observations = []) {
     }));
 }
 
+function chatHistoryMessages(contextConfig = {}) {
+    const history = Array.isArray(contextConfig?.chatHistory)
+        ? contextConfig.chatHistory
+        : Array.isArray(contextConfig?.history) ? contextConfig.history : [];
+    return history
+        .filter(message => ['user', 'assistant'].includes(String(message?.role || '').trim().toLowerCase()))
+        .map(message => ({
+            role: String(message.role).trim().toLowerCase(),
+            content: Array.isArray(message.content)
+                ? message.content.filter(part => part && typeof part === 'object' && (part.type === 'text' || part.type === 'image_url'))
+                : String(message.content || '').trim()
+        }))
+        .filter(message => Array.isArray(message.content) ? message.content.length > 0 : message.content);
+}
+
+function chatAgentContextMessages(contextConfig = {}) {
+    const chatAgent = contextConfig?.chatAgent;
+    if (!chatAgent || typeof chatAgent !== 'object') return [];
+    return [
+        chatAgent.memoryContext ? { role: 'user', content: String(chatAgent.memoryContext) } : null,
+        chatAgent.ragContext ? { role: 'user', content: String(chatAgent.ragContext) } : null
+    ].filter(Boolean);
+}
+
+function buildCurrentGoalContent(goal, observations, contextConfig = {}) {
+    const prefix = [
+        `目标：${goal}`,
+        observations.length ? `已有 ${observations.length} 条执行观察，请基于上述观察决定下一步。` : '当前还没有执行观察。'
+    ].join('\n\n');
+    const currentMessage = contextConfig?.chatAgent?.currentMessage;
+    if (!Array.isArray(currentMessage?.content)) return prefix;
+    const parts = currentMessage.content.filter(part => part && typeof part === 'object');
+    return [{ type: 'text', text: prefix }, ...parts];
+}
+
 function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null, worldState = null, worldStateInjection = null) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
@@ -17,6 +52,18 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     if (context.mode === 'knowledge') contextLines.push('使用知识库上下文。');
     if (context.mode === 'none') contextLines.push('不包含额外的会话上下文。');
     if (context.notes) contextLines.push(`附加说明：${context.notes}`);
+    if (contextConfig?.chatAgent && typeof contextConfig.chatAgent === 'object') {
+        const chatAgent = contextConfig.chatAgent;
+        if (String(chatAgent.systemPrompt || '').trim()) {
+            contextLines.push(`当前会话系统提示词：${String(chatAgent.systemPrompt).trim()}`);
+        }
+        contextLines.push(chatAgent.mcpEnabled === true
+            ? '当前普通聊天已获得用户确认的 MCP 工具权限，只能在工具策略和白名单允许时调用。'
+            : '当前普通聊天未确认外部 MCP，禁止调用外部 MCP 工具。');
+        contextLines.push(chatAgent.ragEnabled === true
+            ? '用户已开启知识库检索，需要相关资料时可以调用 rag.search。'
+            : '用户未开启知识库检索，不要调用知识库工具。');
+    }
     const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
     const messages = [
         {
@@ -35,28 +82,37 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
                 JSON.stringify(toolList, null, 2)
             ].join('\n')
         },
+        ...chatHistoryMessages(contextConfig),
+        ...chatAgentContextMessages(contextConfig),
         ...observationMessages(observations),
         {
             role: 'user',
-            content: [
-                `目标：${goal}`,
-                observations.length ? `已有 ${observations.length} 条执行观察，请基于上述观察决定下一步。` : '当前还没有执行观察。'
-            ].join('\n\n')
+            content: buildCurrentGoalContent(goal, observations, contextConfig)
         }
     ];
     return modelCfg ? fitMessagesToContextBudget(messages, modelCfg).messages : messages;
 }
 
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
+    const finalContext = {
+        chatHistory: options.chatHistory,
+        chatAgent: options.chatAgent
+    };
     const messages = [
         {
             role: 'system',
             content: '你是 Pivot Agent。请将 Agent 的观察记录总结为清晰的最终答案。如适用，请说明局限性和有用的后续步骤。输出请使用中文。'
         },
+        ...chatHistoryMessages(finalContext),
+        ...chatAgentContextMessages(finalContext),
         ...observationMessages(observations),
         {
             role: 'user',
-            content: `任务目标：${goal}\n\n请基于上述 ${observations.length} 条执行观察生成最终答案。`
+            content: buildCurrentGoalContent(
+                `任务目标：${goal}\n\n请基于上述 ${observations.length} 条执行观察生成最终答案。`,
+                observations,
+                finalContext
+            )
         }
     ];
     const fitted = fitMessagesToContextBudget(messages, modelCfg);
@@ -75,6 +131,7 @@ function isMissingFinalAnswer(value) {
 
 module.exports = {
     buildPlannerMessages,
+    chatHistoryMessages,
     observationMessages,
     synthesizeFinalAnswer,
     isMissingFinalAnswer

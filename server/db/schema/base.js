@@ -93,6 +93,7 @@ function baseTablesSql() {
             context_archived INTEGER DEFAULT 0,
             compressed_at DATETIME,
             model_id INTEGER,
+            agent_run_id TEXT,
             cost_time REAL,
             tokens_per_sec REAL,
             deleted_at DATETIME,

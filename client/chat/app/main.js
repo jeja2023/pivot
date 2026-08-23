@@ -146,7 +146,7 @@ bind('new-chat-btn', async () => {
     if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
 bind('send-btn', () => sendMessage());
-bind('stop-btn', () => { currentAbortController?.abort(); });
+bind('stop-btn', () => window.cancelCurrentChatAgent?.() || currentAbortController?.abort());
 bind('upload-btn', () => {
     const modelId = document.getElementById('model-selector').value;
     const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));

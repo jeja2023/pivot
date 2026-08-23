@@ -364,6 +364,17 @@ body.is-main-workspace-full .chat-container {
 .message.assistant .message-actions { left: 100%; margin-left: 12px; }
 .message.user .message-actions { right: 100%; margin-right: 12px; }
 .message-content:hover .message-actions { opacity: 1; transform: translateY(-2px); }
+.chat-agent-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.chat-agent-controls button {
+    min-height: 28px;
+    padding: 3px 8px;
+    font-size: 0.74rem;
+}
 
 .message-content img {
     max-width: 200px;

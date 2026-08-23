@@ -2,6 +2,19 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-23 持久化连续 Agent 桥接发布（v0.1.33）
+
+- Web 和 Electron 普通聊天统一由 `server/app.js` 以 `autoAgent: true` 接入 Agent Runtime；前端聊天设置和入口保持不变，后台复杂任务不再依赖页面连接存活。
+- `server/services/chat-agent-bridge.js` 将会话历史、系统提示、当前消息、视觉附件、长期记忆、RAG 和 MCP 策略写入受控 Agent metadata；终态答案或错误通过 `messages.agent_run_id` 回写原会话。
+- 新增终态恢复、并发回写幂等和 `/agents/runs/chat-active` 会话恢复协议；客户端刷新、切换设备、SSE 断线后可重连，且支持停止、批准、拒绝、继续控制。
+- 重新生成复用原用户消息并进入同一持久化 Agent 路径；避免重复用户消息，接管失败保留可见错误结果；图片附件完成服务端归属和路径安全校验后再转换为视觉输入。
+- 版本化迁移 `202608220009_chat_agent_run_message_link` 已纳入启动迁移；完整 `npm test` 为 `592/592`，语法检查 `525` 文件通过，raw SQL 基线 `816/816` 通过。
+
+### 本版本仍需在部署环境确认的项目
+
+- 生产环境需使用实际模型凭据验证普通聊天首轮接管、长任务后台完成、审批恢复和跨设备重连。
+- Electron 发布包需在目标 Windows 机器验证本地服务初始化、远程模式 SSE 重连和升级后数据库迁移；这些不属于代码测试夹具能替代的部署冒烟。
+
 ## 2026-08-22 工作流编排易用性闭环
 
 - 工作流节点预设按普通用户的使用频率分层：输入/输出、模型、条件、审批、检索、报表、图表和报告等常用能力直接展示；委派、代码、循环、网络、浏览器、知识关系、历史会话、文档和数据处理能力保留在高级节点入口，避免删除运行时能力或破坏历史工作流。
@@ -36,6 +49,7 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.1.33 (2026-08-23) 完成 Web/Electron 普通聊天自动升级为持久化连续 Agent：普通发送与重新生成统一进入 Agent Runtime，保留历史、系统提示、图片视觉输入、长期记忆、RAG 和 MCP 策略；终态答案通过 `agent_run_id` 幂等写回聊天，启动恢复扫描补齐断线或重启期间未落库结果；会话切换/刷新/跨设备恢复仍显示 Agent 状态并支持停止、批准、拒绝、继续；新增 HTTP/SSE、PostgreSQL 并发幂等、视觉附件和客户端会话恢复回归，`npm test` `592/592`、语法 `525/525`、raw SQL 基线 `816/816` 通过。
 - v0.1.15 (2026-08-21) 完成智能体工作台全功能实时状态同步：SSE 与轮询兜底覆盖任务、运行详情、执行步骤、工作流、计划任务、通知、结果和评测，增加 no-store、并发刷新保护和关闭清理；修复 `agent.content_review` 模型文本契约，统一模型对象/别名输入规范化并贯穿自主规划、DAG、嵌套工作流和流式执行；长期记忆模型抽取增加 800 Token 输出上限、超时降级分类、按模型熔断冷却和 `modelFallbackReason`；定向回归 22/22、ESLint 与语法检查通过，PostgreSQL 集成测试需在配置 `DATABASE_URL` 的环境补跑。
 - v0.1.14 (2026-08-21) 完成工作流与任务执行面板全量中文化、富文本步骤详情中文化与长文本语义批次加固：全面补齐 `agent.content_review` 产物及指标字典（`stats`、`records`、`artifact`、`reviewComplete`、`sourceRowCount`、`processedRecords`、`incompleteRecords`、`titleIssues`、`contentIssues` 等指标 100% 中文展示）；覆盖 48+ 种工作流与内置工具中文标题描述；DAG 节点执行条件与 24 种状态机状态全面中文化；引入动态子词与复合后缀智能拆分翻译机制；全量语义分析批次根据输出预算动态切分并支持截断自动二分恢复重试。新增前端中文化专项测试，全量 Node 回归 510/510，`npm run check` 与 ESLint 零警告通过。
 - v0.1.13 (2026-08-21) 完成 Pivot 全自主 Agent 执行治理：状态机、队列租约、心跳恢复、预算熔断、网络策略、工具 PEP、审批恢复、幂等账本和持久化检查点形成统一运行闭环；浏览器、数据适配器和 Skill 增加隔离、白名单、签名和工作区 jail；桌面端新增显式审批的 JSONL Worker 与 IPC 执行面；Trace 支持依赖编译，审计大结果使用 Blob 引用；周期计划手动运行推进下一次执行时间；执行账本迁移收口为 PostgreSQL-only。全量 Node 回归 505/505，迁移专项 6/6，Agent/PG 契约 18/18，`npm run check` 与 ESLint 通过。

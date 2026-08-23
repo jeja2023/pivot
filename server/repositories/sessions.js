@@ -99,12 +99,12 @@ function updateSessionTitle(sessionId, userId, title) {
     );
 }
 
-async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, createdAt }) {
+async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, agentRunId = null, createdAt }) {
     const row = await queryOne(`
-        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, agent_run_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
-    `, [sessionId, userId, role, content, tokenCount, modelId || null, createdAt]);
+    `, [sessionId, userId, role, content, tokenCount, modelId || null, agentRunId || null, createdAt]);
     return { changes: 1, lastInsertRowid: row ? row.id : null };
 }
 

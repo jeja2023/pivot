@@ -124,6 +124,7 @@ function handleAgentStreamingEvent(event) {
     let payload;
     try { payload = JSON.parse(event.data || '{}'); } catch (e) { return; }
     if (!payload || !payload.runId) return;
+    window.handleChatAgentStreamingEvent?.(payload);
     // 只为当前打开的任务渲染，避免后台任务覆盖前台 UI
     if (activeAgentRunId !== payload.runId) return;
     renderAgentStreamingPanel(payload);

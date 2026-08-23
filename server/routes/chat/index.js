@@ -53,6 +53,13 @@ const { buildChatRequestState, validateChatPreflight } = require('../../services
 const { assembleChatContext } = require('../../services/chat-context-assembler');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { registerLocalBridgeDevice } = require('../../services/local-device-bridge');
+const { createAgentRun } = require('../../services/agent-runtime');
+const {
+    buildChatAgentMetadata,
+    normalizeChatHistory,
+    prepareChatAgentContext
+} = require('../../services/chat-agent-bridge');
+const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
@@ -110,7 +117,9 @@ function createChatRouter({
     logAction,
     retrieveContext,
     isRagEnabled,
-    publicUrl = ''
+    publicUrl = '',
+    autoAgent = false,
+    agentRunFactory = createAgentRun
 }) {
     const router = express.Router();
 
@@ -122,7 +131,7 @@ function createChatRouter({
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
         const chatState = buildChatRequestState(req);
-        const {
+        let {
             regenerate,
             mcpEnabled,
             ragEnabled,
@@ -130,8 +139,12 @@ function createChatRouter({
             modelId,
             userId,
             modelContent,
-            visibleContent
+            visibleContent,
+            mcpToolAllowlist,
+            ragScope
         } = chatState;
+        let regenerationMessages = null;
+        let regenerationUserMessageId = null;
         let userMessagePersisted = false;
         const chatTrace = createObservabilityTrace({
             type: 'chat',
@@ -169,6 +182,30 @@ function createChatRouter({
             chartSseCapture.writeSse(payload);
         };
 
+        // 重新生成请求不会再次提交 user content。先从当前用户自己的会话
+        // 中解析最近一条用户消息，使它与普通发送拥有相同的 Agent 上下文。
+        if (regenerate && sessionId) {
+            try {
+                regenerationMessages = await sessionsRepository.listMessages(sessionId, userId);
+                const sourceMessage = [...regenerationMessages].reverse().find(message => message?.role === 'user');
+                if (sourceMessage) {
+                    regenerationUserMessageId = Number(sourceMessage.id || 0) || null;
+                    modelContent = typeof sourceMessage.content === 'string'
+                        ? sourceMessage.content.trim()
+                        : String(sourceMessage.content || '').trim();
+                    visibleContent = modelContent;
+                    chatState.content = modelContent;
+                    chatState.displayContent = visibleContent;
+                    chatState.modelContent = modelContent;
+                    chatState.visibleContent = visibleContent;
+                }
+            } catch (error) {
+                req.log.error({ sessionId, userId, err: error.message }, '重新生成读取原用户消息失败');
+                writeSse(JSON.stringify({ error: '无法读取待重新生成的用户消息', code: 'REGENERATE_SOURCE_UNAVAILABLE' }));
+                return res.end();
+            }
+        }
+
         const writeQueueNotice = (scope, info = {}) => {
             const queueAhead = Math.max(0, Number(info.queueAhead || 0));
             const label = scope === 'endpoint' ? '模型端点' : '模型服务';
@@ -201,6 +238,10 @@ function createChatRouter({
             writeSse(JSON.stringify(preflight.error));
             return res.end();
         }
+        if (regenerate && !regenerationUserMessageId) {
+            writeSse(JSON.stringify({ error: '没有可重新生成的用户消息', code: 'REGENERATE_SOURCE_NOT_FOUND' }));
+            return res.end();
+        }
         const { modelCfg } = preflight;
         if (mcpEnabled) {
             const localBridgeDevice = registerChatRequestLocalBridge(req);
@@ -209,7 +250,7 @@ function createChatRouter({
             }
         }
 
-        let userMessageId = null;
+        let userMessageId = regenerationUserMessageId;
         if (!regenerate) {
             try {
                 const userMessageResult = await saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
@@ -279,6 +320,110 @@ function createChatRouter({
             }));
             writeSse('[DONE]');
             return res.end();
+        }
+
+        // 普通聊天和重新生成统一进入持久化 Agent 入口。简单问题会在 Agent
+        // 的首轮直接返回答案，复杂问题则由同一套运行时继续规划、调用工具并后台恢复。
+        if (autoAgent) {
+            try {
+                const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
+                const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
+                    !userMessageId || Number(message?.id || 0) !== userMessageId
+                )));
+                const agentContext = await prepareChatAgentContext({
+                    userId,
+                    user: req.user,
+                    modelCfg,
+                    modelContent,
+                    ragEnabled,
+                    ragScope,
+                    retrieveContext,
+                    isRagEnabled
+                });
+                if (agentContext.memoryCount > 0) {
+                    writeSse(JSON.stringify({
+                        type: 'memory',
+                        status: 'hit',
+                        message: `已检索到 ${agentContext.memoryCount} 条相关长期记忆`,
+                        memoryCount: agentContext.memoryCount
+                    }));
+                }
+                if (ragEnabled) {
+                    const sourceCount = Number(agentContext.ragSummary?.sourceCount || 0);
+                    const citationCount = Number(agentContext.ragSummary?.citationCount || 0);
+                    writeSse(JSON.stringify({
+                        type: 'rag',
+                        status: agentContext.ragContext ? 'hit' : 'empty',
+                        message: agentContext.ragContext
+                            ? `知识库已找到 ${sourceCount || citationCount || 1} 条相关资料，正在基于来源执行任务`
+                            : '知识库未检索到足够相关内容，将按普通上下文继续',
+                        sourceCount,
+                        citationCount,
+                        sources: agentContext.ragSummary?.sources || []
+                    }));
+                }
+                const run = await agentRunFactory({
+                    user: req.user,
+                    goal: modelContent,
+                    modelId: modelCfg.id,
+                    sessionId,
+                    title: visibleContent || modelContent,
+                    maxSteps: 30,
+                    runMode: 'standard',
+                    toolPolicy: mcpEnabled ? 'all' : 'builtin_only',
+                    // 普通聊天的 MCP 白名单只约束 MCP 工具，内置能力仍由 Agent 策略提供。
+                    toolAllowlist: [],
+                    approvalPolicy: 'safe_mcp_auto',
+                    timeoutMs: 24 * 60 * 60 * 1000,
+                    toolTimeoutMs: 10 * 60 * 1000,
+                    retryLimit: 1,
+                    contextConfig: {
+                        mode: 'recent',
+                        notes: mcpEnabled
+                            ? '这是普通聊天自动升级的连续 Agent。遵守当前会话的 MCP 授权和工具白名单。'
+                            : '这是普通聊天自动升级的连续 Agent。当前会话未授权外部 MCP，只能使用内置安全能力。'
+                    },
+                    networkPolicy: { enabled: true },
+                    metadata: buildChatAgentMetadata({
+                        sessionId,
+                        userMessageId,
+                        visibleContent,
+                        history: chatHistory,
+                        systemPrompt: preflight.session?.system_prompt || '',
+                        mcpEnabled,
+                        mcpToolAllowlist,
+                        ragEnabled,
+                        ragScope,
+                        currentContent: modelContent,
+                        memoryContext: agentContext.memoryContext,
+                        ragContext: agentContext.ragContext
+                    })
+                });
+                finishChatTrace('completed', { mode: 'agent_handoff', runId: run.id, modelId: modelCfg.id });
+                writeSse(JSON.stringify({
+                    type: 'agent_handoff',
+                    runId: run.id,
+                    status: run.status,
+                    message: '已切换为连续 Agent，任务会在后台继续执行。'
+                }));
+                writeSse('[DONE]');
+                return res.end();
+            } catch (error) {
+                req.log.error({ sessionId, userId, err: error.message }, '普通聊天 Agent 接管失败');
+                await writeChatErrorSse({
+                    writeSse,
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    error: '连续 Agent 启动失败',
+                    detail: error.message,
+                    code: error.code || 'AGENT_HANDOFF_FAILED',
+                    persist: userMessagePersisted || regenerate,
+                    log: req.log
+                });
+                finishChatTrace('error', { mode: 'agent_handoff', error: error.message });
+                return res.end();
+            }
         }
 
 

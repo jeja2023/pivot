@@ -72,12 +72,14 @@ function runMigrations() {
     ensureColumn('users', 'last_login_at', 'DATETIME');
     ensureColumn('audit_logs', 'ip_address', 'TEXT');
     ensureColumn('messages', 'model_id', 'INTEGER');
+    ensureColumn('messages', 'agent_run_id', 'TEXT');
     ensureColumn('messages', 'cost_time', 'REAL');
     ensureColumn('messages', 'tokens_per_sec', 'REAL');
     ensureColumn('messages', 'context_archived', 'INTEGER DEFAULT 0');
     ensureColumn('messages', 'compressed_at', 'DATETIME');
     ensureColumn('messages', 'deleted_at', 'DATETIME');
     ensureColumn('messages', 'deleted_by_user', 'INTEGER DEFAULT 0');
+    try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_agent_run ON messages(agent_run_id)'); } catch (_) {}
     db.prepare('UPDATE messages SET context_archived = 0 WHERE context_archived IS NULL').run();
     db.exec(`
         CREATE TABLE IF NOT EXISTS memories (

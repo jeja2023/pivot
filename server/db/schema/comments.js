@@ -154,6 +154,7 @@ const COLUMN_COMMENTS = {
         "context_archived": "是否已在上下文中归档裁剪（1:是, 0:否）",
         "compressed_at": "上下文压缩时间",
         "model_id": "关联的模型 ID（关联 models.id）",
+        "agent_run_id": "创建该助手消息的持久化 Agent 运行 ID",
         "cost_time": "执行耗时（毫秒）",
         "tokens_per_sec": "messages 表的 tokens_per_sec 字段",
         "deleted_at": "软删除时间（为空表示正常有效）",

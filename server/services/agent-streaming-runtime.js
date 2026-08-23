@@ -18,7 +18,7 @@ function isStreamingToolsEnabled() {
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations }, deps) {
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, chatContext = {} }, deps) {
     let roundsUsed = 0;
     try {
         const callStreamingModel = deps.callModelStreamingWithTools || callModelStreamingWithTools;
@@ -33,9 +33,27 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
 
 【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。`;
 
+        const history = Array.isArray(chatContext.chatHistory)
+            ? chatContext.chatHistory
+                .filter(message => ['user', 'assistant'].includes(String(message?.role || '').toLowerCase()))
+                .map(message => ({ role: String(message.role).toLowerCase(), content: message.content }))
+            : [];
+        const chatAgent = chatContext.chatAgent && typeof chatContext.chatAgent === 'object' ? chatContext.chatAgent : null;
+        const effectiveSystemPrompt = chatAgent?.systemPrompt
+            ? `${systemPrompt}\n\n当前会话系统提示词：${String(chatAgent.systemPrompt).slice(0, 12000)}`
+            : systemPrompt;
+        const contextMessages = [
+            chatAgent?.memoryContext ? { role: 'user', content: chatAgent.memoryContext } : null,
+            chatAgent?.ragContext ? { role: 'user', content: chatAgent.ragContext } : null
+        ].filter(Boolean);
+        const currentContent = Array.isArray(chatAgent?.currentMessage?.content)
+            ? [{ type: 'text', text: run.goal || '' }, ...chatAgent.currentMessage.content]
+            : run.goal || '';
         const conversation = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: run.goal || '' }
+            { role: 'system', content: effectiveSystemPrompt },
+            ...history,
+            ...contextMessages,
+            { role: 'user', content: currentContent }
         ];
         let lastStep = (await deps.listSteps(runId)).length;
         let previousWorldState = null;
@@ -86,7 +104,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             });
             conversation[0] = {
                 role: 'system',
-                content: `${systemPrompt}\n\n${buildWorldStatePrompt(stepContext?.worldState || {}, { injection: stepContext?.worldStateInjection })}`
+                content: `${effectiveSystemPrompt}\n\n${buildWorldStatePrompt(stepContext?.worldState || {}, { injection: stepContext?.worldStateInjection })}`
             };
             await deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();

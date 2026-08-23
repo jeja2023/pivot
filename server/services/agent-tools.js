@@ -1047,9 +1047,14 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'rag.search') {
         const query = String(input.query || '').trim();
         if (!query) throw new Error('请填写检索问题。');
+        let chatBridge = context?.run?.metadata?.chatBridge;
+        if (typeof chatBridge === 'string') {
+            try { chatBridge = JSON.parse(chatBridge); } catch (_) { chatBridge = null; }
+        }
         const result = await debugRetrieveContext(user.id, query, {
             topK: parsePositiveInt(input.topK, 5, 10),
             candidateLimit: parsePositiveInt(input.candidateLimit, 80, 200),
+            scope: chatBridge?.ragScope && typeof chatBridge.ragScope === 'object' ? chatBridge.ragScope : {},
             user
         });
         return {

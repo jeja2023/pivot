@@ -149,6 +149,11 @@ const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = re
 const { inferDagRunGoal } = require('./dag-run-config');
 const { createAgentNotificationFactory } = require('./notifications');
 const { createApprovalHelpers } = require('./approvals');
+const { buildVisionHistory, limitVisionImages } = require('../chat-vision');
+const {
+    persistAgentRunChatResult,
+    recoverChatAgentResults
+} = require('../chat-agent-bridge');
 
 
 let agentQueue = null;
@@ -232,6 +237,11 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                 if (TERMINAL_STATUSES.has(targetStatus)) {
                     try { await releaseChildRunReservation(runId); } catch (resourceError) {
                         logger.warn({ runId, err: resourceError.message }, 'Agent 子运行资源预留释放失败');
+                    }
+                    try {
+                        await persistAgentRunChatResult(runId);
+                    } catch (chatBridgeError) {
+                        logger.error({ runId, err: chatBridgeError.message }, 'Agent 聊天结果回写失败');
                     }
                 }
             }
@@ -858,6 +868,26 @@ async function runAgent(runId, user) {
         }
 
         const runtimeMetadata = getRunMetadata(run);
+        let plannerChatHistory = Array.isArray(runtimeMetadata.chatHistory) ? runtimeMetadata.chatHistory : [];
+        let plannerCurrentMessage = runtimeMetadata.chatBridge?.currentMessage || null;
+        if (runtimeMetadata.chatBridge && run.session_id && user?.id) {
+            try {
+                const sourceMessages = [
+                    ...plannerChatHistory,
+                    ...(plannerCurrentMessage ? [plannerCurrentMessage] : [])
+                ];
+                const visionMessages = limitVisionImages(await buildVisionHistory(
+                    sourceMessages,
+                    'http://pivot-agent.local',
+                    user.id,
+                    run.session_id
+                ));
+                if (plannerCurrentMessage) plannerCurrentMessage = visionMessages.pop() || plannerCurrentMessage;
+                plannerChatHistory = visionMessages;
+            } catch (error) {
+                logger.warn({ runId, err: error.message }, '普通聊天 Agent 图片上下文转换失败，已使用文本上下文');
+            }
+        }
         const resumeContext = runtimeMetadata.resumeContext && typeof runtimeMetadata.resumeContext === 'object'
             ? runtimeMetadata.resumeContext
             : {};
@@ -876,10 +906,34 @@ async function runAgent(runId, user) {
                 }
             });
         }
-        const toolList = await formatToolList(user, {
+        let toolList = await formatToolList(user, {
             toolPolicy: run.tool_policy,
             toolAllowlist: run.tool_allowlist
         });
+        const chatBridge = runtimeMetadata.chatBridge;
+        const plannerChatContext = chatBridge
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage } }
+            : {};
+        if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
+            const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
+            toolList = toolList.map(tool => {
+                if (tool?.source !== 'mcp') return tool;
+                if (allowedMcpTools.has(String(tool?.name || '').trim())) return tool;
+                if (!tool?.databaseTool || !Array.isArray(tool.databaseConnections)) return null;
+                const allowedConnections = tool.databaseConnections.filter(connection => allowedMcpTools.has(String(connection?.fullName || '').trim()));
+                return allowedConnections.length ? { ...tool, databaseConnections: allowedConnections } : null;
+            }).filter(Boolean);
+        }
+        if (chatBridge && chatBridge.ragEnabled !== true) {
+            toolList = toolList.filter(tool => !['rag.search', 'knowledge.list', 'knowledge.graph.query'].includes(String(tool?.name || '')));
+        }
+        if (runtimeMetadata.chatBridge && runtimeMetadata.chatBridge.mcpEnabled !== true) {
+            toolList = toolList.filter(tool => !tool?.network
+                && !tool?.side_effect
+                && !tool?.approval_required
+                && !tool?.requiresApproval
+                && !tool?.alwaysRequiresApproval);
+        }
         if (toolList.length === 0) {
             throw new Error('没有可用工具符合当前任务配置。');
         }
@@ -903,9 +957,27 @@ async function runAgent(runId, user) {
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         let roundsUsed = 0;
         if (isStreamingToolsEnabled()) {
+            const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
+            if (chatBridge) {
+                streamingDeps.synthesizeFinalAnswer = (streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, options = {}) => (
+                    synthesizeFinalAnswer(streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, {
+                        ...options,
+                        ...plannerChatContext
+                    })
+                );
+            }
             const streamingResult = await tryRunAgentStreaming({
-                run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations
-            }, getAgentRuntimeDeps(runController.signal, taskBudget));
+                run,
+                user,
+                modelCfg,
+                toolList,
+                runId,
+                deadline,
+                assertRunWithinBudget,
+                assertRunNotCancelled,
+                observations,
+                chatContext: plannerChatContext
+            }, streamingDeps);
             if (streamingResult?.completed) return;
             roundsUsed = Math.min(Math.max(Number(streamingResult?.roundsUsed || 0), 0), maxSteps);
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
@@ -971,7 +1043,14 @@ async function runAgent(runId, user) {
             } catch (eventError) {
                 logger.warn({ runId, err: eventError.message }, 'Agent StepContext 事件写入失败');
             }
-            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, parseJsonObject(run.context_config) || {}, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
+            const plannerContextConfig = {
+                ...(parseJsonObject(run.context_config) || {}),
+                chatHistory: plannerChatHistory,
+                chatAgent: runtimeMetadata.chatBridge
+                    ? { ...runtimeMetadata.chatBridge, currentMessage: plannerCurrentMessage }
+                    : null
+            };
+            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',
@@ -1047,7 +1126,11 @@ async function runAgent(runId, user) {
             });
 
             if (plan.action === 'final' || !plan.tool) {
-                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal: runController.signal, budget: taskBudget });
+                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                    signal: runController.signal,
+                    budget: taskBudget,
+                    ...plannerChatContext
+                });
                 await updateRun(runId, {
                     status: 'completed',
                     final_answer: answer,
@@ -1211,7 +1294,11 @@ async function runAgent(runId, user) {
         });
         let answer;
         try {
-            answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal, budget: taskBudget }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
+            answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                signal,
+                budget: taskBudget,
+                ...plannerChatContext
+            }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
             await finishAgentTraceSpan(summarySpanId, {
                 output: { responseLength: String(answer || '').length },
                 durationMs: Date.now() - summaryStartedAt
@@ -1245,7 +1332,11 @@ async function runAgent(runId, user) {
                         await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
                             modelCfg.id, getBeijingTimestamp(), runId
                         ]);
-                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, { signal, budget: taskBudget }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
+                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                            signal,
+                            budget: taskBudget,
+                            ...plannerChatContext
+                        }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
                     }
                 } catch (escErr) {
                     logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
@@ -1384,10 +1475,16 @@ async function recoverAgentRuns() {
     }
 
     const recoveredQueued = await getAgentQueue().recoverQueued(100, { deferSchedule: true });
+    let recoveredChatResults = null;
+    try {
+        recoveredChatResults = await recoverChatAgentResults({ limit: 200 });
+    } catch (error) {
+        logger.error({ err: error.message }, '普通聊天 Agent 结果恢复扫描失败');
+    }
     if (recoveredQueued > 0 || staleRunning.length > 0) {
-        logger.info({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时异常任务恢复完成');
+        logger.info({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults }, '智能体运行时异常任务恢复完成');
     } else {
-        logger.debug({ recoveredQueued, staleRunning: staleRunning.length }, '智能体运行时周期巡检完成');
+        logger.debug({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults }, '智能体运行时周期巡检完成');
     }
 }
 

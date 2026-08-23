@@ -31,6 +31,7 @@ const {
 } = require('../services/agent-control');
 const { getAgentRunResources } = require('../services/agent-run-resources');
 const { listAgentToolCalls } = require('../services/agent-tool-audit');
+const { listChatAgentRunsForSession } = require('../services/chat-agent-bridge');
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser, registerAgentSkill } = require('../services/agent-skills');
 const { installSkillPackage, verifySkillPackage } = require('../services/agent-skill-packages');
@@ -560,6 +561,15 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
             includePreview: req.query.includePreview || req.query.include_preview
         });
         res.json(result);
+    }));
+
+    // 普通聊天页面在刷新、切换设备或短暂断线后，用会话 ID 找回仍在执行的 Agent。
+    // 该路由必须放在 /agents/runs/:id 之前，避免被当成运行 ID。
+    router.get('/agents/runs/chat-active', authMiddleware, asyncHandler(async (req, res) => {
+        const sessionId = String(req.query.sessionId || '').trim();
+        if (!sessionId) return res.json({ runs: [] });
+        const runs = await listChatAgentRunsForSession(sessionId, req.user.id, { limit: req.query.limit });
+        res.json({ runs });
     }));
 
     router.get('/agents/runs/deleted/audit', authMiddleware, asyncHandler(async (req, res) => {
