@@ -869,7 +869,7 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 }
 
 /* ==========================================================================
-   底座管理弹窗在模态框中的布局规则
+   运行环境弹窗在模态框中的布局规则
    ========================================================================== */
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
     display: flex;

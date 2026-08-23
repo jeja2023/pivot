@@ -36,7 +36,7 @@ test('任务详情刷新会按运行 ID 保留折叠面板状态', () => {
     assert.match(detail, /agentDisclosureRunId/);
 });
 
-test('底座诊断刷新会保留当前子页面', () => {
+test('运行诊断刷新会保留当前子页面', () => {
     const harness = read('client/chat/agent-harness.js');
     const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
     assert.match(harness, /state\.diagnostics\.get\(String\(runId\)\)/);

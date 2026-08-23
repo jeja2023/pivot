@@ -395,9 +395,9 @@
             return `<div class="agent-harness-diagnostic-panel${isHidden ? ' hidden' : ''}" data-agent-harness-panel="${key}" role="tabpanel" aria-label="${key}">${content}</div>`;
         };
         return `<details class="agent-run-harness-diagnostics" data-agent-harness-diagnostics="${escapeAttr(runId)}" data-agent-harness-active-tab="${escapeAttr(activeTab)}">
-            <summary><span>底座诊断</span><em>上下文、状态快照、资源与控制消息</em></summary>
+            <summary><span>运行诊断</span><em>上下文、状态快照、资源与控制消息</em></summary>
             <div class="agent-harness-diagnostics-body">
-                <div class="agent-harness-diagnostic-tabs" role="tablist" aria-label="底座诊断">
+                <div class="agent-harness-diagnostic-tabs" role="tablist" aria-label="运行诊断">
                     ${tab('context', '上下文窗口')}
                     ${tab('world', '状态快照')}
                     ${tab('resources', '资源用量')}

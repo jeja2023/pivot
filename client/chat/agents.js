@@ -264,7 +264,7 @@ window.bindAgentEnterpriseControls = function() {
 const agentConfigSectionTitles = {
     templates: '任务模板',
     results: '能力与结果',
-    harness: '底座管理',
+    harness: '运行环境',
     evaluations: '质量评测'
 };
 
