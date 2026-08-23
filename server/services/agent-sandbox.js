@@ -1,22 +1,34 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const { isolationMetadata, prepareProcessIsolation } = require('./agent-os-isolation');
+
+let cachedCanUnshare = null;
+function canUseUnshare(unsharePath) {
+    if (cachedCanUnshare !== null) return cachedCanUnshare;
+    try {
+        const res = spawnSync(unsharePath, ['--net', 'true'], { stdio: 'ignore', timeout: 1000 });
+        cachedCanUnshare = res.status === 0;
+    } catch (_) {
+        cachedCanUnshare = false;
+    }
+    return cachedCanUnshare;
+}
 
 function prepareCommand(command, args, isolation) {
     if (process.platform !== 'linux' || isolation?.spec?.networkDisabled !== true) return { command, args };
     const unshare = ['/usr/bin/unshare', '/bin/unshare'].find(candidate => fs.existsSync(candidate));
-    if (!unshare) {
-        if (isolation.spec.strict) {
-            const error = new Error('Linux network namespace 工具不可用，严格网络隔离无法启动。');
+    if (!unshare || !canUseUnshare(unshare)) {
+        if (isolation?.spec?.strict) {
+            const error = new Error('Linux network namespace 工具不可用或权限不足，严格网络隔离无法启动。');
             error.code = 'AGENT_NETWORK_NAMESPACE_UNAVAILABLE';
             error.category = 'network';
             throw error;
         }
         return { command, args };
     }
-    return { command: unshare, args: ['--mount', '--mount-proc', '--net', '--', command, ...args] };
+    return { command: unshare, args: ['--net', '--', command, ...args] };
 }
 
 function sanitizeTaskId(value) {

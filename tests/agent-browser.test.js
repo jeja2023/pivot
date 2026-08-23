@@ -25,7 +25,9 @@ function startFixture() {
     return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${server.address().port}` })));
 }
 
-test('browser context enforces isolated profile and DOM/visual interaction', async () => {
+const hasChromium = Boolean(resolveChromiumExecutable(chromium));
+
+test('browser context enforces isolated profile and DOM/visual interaction', { skip: !hasChromium && '未检测到可用的 Chromium 可执行文件，跳过浏览器交互测试' }, async () => {
     const fixture = await startFixture();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-browser-test-'));
     const previous = process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
@@ -63,7 +65,7 @@ test('browser context options always use a separate profile and block downloads'
     assert.equal(options.serviceWorkers, 'block');
 });
 
-test('controlled login flow waits for user readiness without exposing credentials', async () => {
+test('controlled login flow waits for user readiness without exposing credentials', { skip: !hasChromium && '未检测到可用的 Chromium 可执行文件，跳过受控登录测试' }, async () => {
     const fixture = await startFixture();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-login-test-'));
     const previous = process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;

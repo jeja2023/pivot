@@ -56,6 +56,11 @@ async function createAgentBrowserContext(options = {}) {
     }
     const policy = normalizeNetworkPolicy(options.networkPolicy || {});
     const executablePath = resolveChromiumExecutable(chromium, options);
+    if (!executablePath) {
+        const unavailable = new Error('未找到可用的 Chromium 浏览器可执行文件，无法创建 Agent Browser Worker。');
+        unavailable.code = 'AGENT_BROWSER_UNAVAILABLE';
+        throw unavailable;
+    }
     const contextOptions = buildBrowserContextOptions({ ...options, executablePath });
     const profile = contextOptions.userDataDir;
     delete contextOptions.userDataDir;

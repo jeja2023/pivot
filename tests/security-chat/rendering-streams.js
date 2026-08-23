@@ -543,7 +543,7 @@ test('long-term memory table and modals use shared controls', () => {
     assert.doesNotMatch(adminSettings, /escapeHtml\(memory\.status \|\| 'active'\)/);
     assert.match(adminSettings, /const memory = getCurrentMemory\(memoryId\);/);
     assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) PivotSafeHtml\.setHtml\(body, `<p class="muted">\$\{escapeHtml\(e\.message/s);
-    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: none;\s*white-space: nowrap;/s);
+    assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: 500px;\s*white-space: nowrap;\s*overflow: hidden;\s*text-overflow: ellipsis;/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-modal \{\s*width: min\(680px,/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-content textarea\.form-input \{\s*height: 180px;/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-modal-header \{\s*display: flex;\s*align-items: center;\s*justify-content: space-between;/s);

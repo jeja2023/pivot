@@ -88,7 +88,7 @@ function createAgentResidencyStore(options = {}) {
               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
             ORDER BY last_accessed_at ASC, resident_id ASC
             LIMIT ?
-            FOR UPDATE SKIP LOCKED
+            FOR UPDATE
         `, [userId, currentResidentId, timestamp, overflow]);
         let changed = 0;
         for (const victim of victims) {
@@ -113,6 +113,7 @@ function createAgentResidencyStore(options = {}) {
         const expiresAt = futureTimestamp(requestedTtlMs ?? idleTtlMs);
         const residentId = residentIdFor(normalizedUserId, key);
         const row = await transaction(async trx => {
+            await trx.query('SELECT pg_advisory_xact_lock(hashtext(?))', [`agent_residency_${normalizedUserId}`]);
             const updated = await trx.queryOne(`
                 INSERT INTO agent_residencies (
                     resident_id, user_id, resident_key, run_id, status, state, context_hash,
