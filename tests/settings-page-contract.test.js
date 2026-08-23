@@ -26,6 +26,8 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(styles, /\.admin-content\s*\{[^}]*position:\s*relative/);
     assert.match(styles, /\.settings-state\s*\{[^}]*position:\s*absolute/);
     assert.match(styles, /\.settings-state\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
+    assert.match(styles, /\.settings-workspace-view\s+\.memories-tab\s+\.settings-page-head\s*\{[^}]*margin-bottom:\s*8px/);
+    assert.match(styles, /\.settings-workspace-view\s+\.memories-table\s+td\s*\{[^}]*height:\s*28px/);
 });
 
 test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {
