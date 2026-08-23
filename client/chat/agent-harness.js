@@ -65,7 +65,15 @@
         const list = document.getElementById('agent-harness-skill-list');
         if (!list) return;
         if (!state.skills.length) {
-            setMarkup(list, '<div class="empty-state">暂无可用技能包。可以注册技能清单或导入技能包。</div>');
+            setMarkup(list, `<div class="agent-harness-empty-card">
+                <svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <strong>暂无已安装技能包</strong>
+                <span>可通过右侧表单填入清单或导入 .skill.zip 离线包</span>
+            </div>`);
             return;
         }
         const userId = String(getCurrentUser()?.id || '');
@@ -74,8 +82,19 @@
             const status = String(skill.status || '').toLowerCase();
             const scopeLabel = ({ user: '个人', shared: '共享', global: '全局' })[skill.scope] || skill.scope || '个人';
             return `<article class="agent-harness-item ${status === 'disabled' ? 'is-disabled' : ''}">
-                <div class="agent-harness-item-main"><strong>${escape(skill.title || skill.name)}</strong><span>${escape(skill.name || '')} · v${escape(skill.version || '')}</span><small>${escape(shortText(skill.description || '未填写说明', 180))}</small></div>
-                <div class="agent-harness-item-meta"><span class="agent-harness-badge">${escape(scopeLabel)}</span><span>${escape(status === 'enabled' ? '已启用' : '已停用')}</span><span>${escape(formatDate(skill.updated_at))}</span>${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}</div>
+                <div class="agent-harness-item-main">
+                    <div class="agent-harness-item-title-row">
+                        <strong>${escape(skill.title || skill.name)}</strong>
+                        <span class="agent-harness-badge">${escape(scopeLabel)}</span>
+                        <span class="agent-harness-status-pill ${status === 'enabled' ? 'is-active' : 'is-inactive'}">${escape(status === 'enabled' ? '已启用' : '已停用')}</span>
+                    </div>
+                    <span class="agent-harness-item-id">${escape(skill.name || '')} · v${escape(skill.version || '')}</span>
+                    <small>${escape(shortText(skill.description || '未填写说明', 180))}</small>
+                </div>
+                <div class="agent-harness-item-meta">
+                    <span>${escape(formatDate(skill.updated_at))}</span>
+                    ${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}
+                </div>
             </article>`;
         }).join(''));
     }
@@ -156,12 +175,29 @@
         const list = document.getElementById('agent-harness-pack-list');
         if (!list) return;
         if (!state.packs.length) {
-            setMarkup(list, '<div class="empty-state">暂无已安装运行资源包。</div>');
+            setMarkup(list, `<div class="agent-harness-empty-card">
+                <svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <path d="M3 9h18"></path>
+                    <path d="M9 21V9"></path>
+                </svg>
+                <strong>暂无已安装运行资源包</strong>
+                <span>由系统自动下载、校验完整性后安装</span>
+            </div>`);
             return;
         }
         setMarkup(list, state.packs.map(pack => `<article class="agent-harness-item">
-            <div class="agent-harness-item-main"><strong>${escape(pack.id || '运行资源')}</strong><span>${escape(pack.type === 'browser' ? '浏览器资源' : '数据资源')} · v${escape(pack.version || '')}</span><small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 24))} · ${escape(String(pack.size || 0))} 字节</small></div>
-            <div class="agent-harness-item-meta"><span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器资源' : '数据资源')}</span><span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span></div>
+            <div class="agent-harness-item-main">
+                <div class="agent-harness-item-title-row">
+                    <strong>${escape(pack.id || '运行资源')}</strong>
+                    <span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</span>
+                </div>
+                <span class="agent-harness-item-id">版本 v${escape(pack.version || '1.0.0')} · ${escape(String(pack.size || 0))} 字节</span>
+                <small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 28))}</small>
+            </div>
+            <div class="agent-harness-item-meta">
+                <span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span>
+            </div>
         </article>`).join(''));
     }
 
@@ -214,13 +250,37 @@
         const list = document.getElementById('agent-harness-residency-list');
         if (!list) return;
         if (!state.residents.length) {
-            setMarkup(list, '<div class="empty-state">暂无常驻实例。</div>');
+            setMarkup(list, `<div class="agent-harness-empty-card agent-harness-empty-card--wide">
+                <svg class="agent-harness-empty-svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                    <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                    <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                </svg>
+                <strong>当前暂无活跃的常驻实例</strong>
+                <span>自主任务或复杂会话启用环境复用后，常驻实例将在此处展示运行租约、命中次数与生命周期状态。</span>
+            </div>`);
             return;
         }
-        setMarkup(list, state.residents.map(item => `<article class="agent-harness-item">
-            <div class="agent-harness-item-main"><strong>${escape(item.resident_key || item.resident_id)}</strong><span>${escape(({ active: '活跃', idle: '空闲', evicted: '已驱逐', stopped: '已停止' })[item.status] || item.status || '空闲')} · 命中 ${escape(item.hit_count || 0)} 次</span><small>关联运行 ${escape(item.run_id || '-')} · 上下文摘要 ${escape(shortText(item.context_hash || '-', 18))}</small></div>
-            <div class="agent-harness-item-meta"><span>${escape(formatDate(item.last_accessed_at))}</span><span>过期 ${escape(formatDate(item.expires_at))}</span><button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button></div>
-        </article>`).join(''));
+        setMarkup(list, state.residents.map(item => {
+            const status = String(item.status || '').toLowerCase();
+            const statusLabel = ({ active: '活跃中', idle: '空闲中', evicted: '已驱逐', stopped: '已停止' })[status] || status || '空闲中';
+            return `<article class="agent-harness-item agent-harness-item--resident">
+                <div class="agent-harness-item-main">
+                    <div class="agent-harness-item-title-row">
+                        <strong>${escape(item.resident_key || item.resident_id)}</strong>
+                        <span class="agent-harness-status-pill ${status === 'active' ? 'is-active' : 'is-idle'}">${escape(statusLabel)}</span>
+                        <span class="agent-harness-badge">命中 ${escape(item.hit_count || 0)} 次</span>
+                    </div>
+                    <span class="agent-harness-item-id">关联运行 ${escape(item.run_id || '-')} · 上下文摘要 ${escape(shortText(item.context_hash || '-', 18))}</span>
+                </div>
+                <div class="agent-harness-item-meta">
+                    <span>最近访问 ${escape(formatDate(item.last_accessed_at))}</span>
+                    <span>过期时间 ${escape(formatDate(item.expires_at))}</span>
+                    <button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button>
+                </div>
+            </article>`;
+        }).join(''));
     }
 
     async function loadResidents() {

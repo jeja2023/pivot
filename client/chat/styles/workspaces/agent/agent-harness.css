@@ -6,13 +6,16 @@
 
 /* 顶部模块切换 Tab（技能包 / 资源包 / 常驻实例） */
 .agent-harness-nav-tabs {
-    display: flex;
-    gap: 6px;
+    display: inline-flex;
+    gap: 4px;
     padding: 4px;
-    background: #e2e8f0;
-    border: 1px solid rgba(203, 213, 225, 0.8);
-    border-radius: 8px;
-    margin-bottom: 2px;
+    background: var(--bg-secondary, #f1f5f9);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    margin-bottom: 4px;
+    align-self: flex-start;
+    width: 100%;
+    max-width: 460px;
 }
 
 .agent-harness-nav-tab {
@@ -20,13 +23,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 34px;
-    padding: 6px 14px;
-    border: 1px solid transparent;
+    min-height: 32px;
+    padding: 5px 14px;
+    border: 0;
     border-radius: 6px;
     background: transparent;
     color: var(--text-muted, #64748b);
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -39,10 +42,9 @@
 }
 
 .agent-harness-nav-tab.active {
-    background: #fff;
-    color: var(--primary-color, #2563eb);
+    background: var(--bg-main, #fff);
+    color: var(--primary, #3b82f6);
     font-weight: 700;
-    border-color: rgba(203, 213, 225, 0.9);
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
@@ -77,12 +79,13 @@
 }
 
 .agent-harness-panel {
-    display: grid;
-    gap: 14px;
-    padding: 18px;
-    border: 1px solid rgba(203, 213, 225, 0.75);
-    border-radius: 10px;
-    background: var(--bg-secondary, #fff);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface, #fff);
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
@@ -176,14 +179,15 @@
 }
 
 .agent-harness-skill-list-wrap,
-.agent-harness-skill-form-wrap {
+.agent-harness-skill-form-wrap,
+.agent-harness-pack-sync {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid rgba(226, 232, 240, 0.85);
-    border-radius: 8px;
-    background: rgba(248, 250, 252, 0.5);
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
 }
 
 .agent-harness-list {
@@ -196,6 +200,46 @@
 
 .agent-harness-list.full-width {
     max-height: 480px;
+    min-height: 200px;
+}
+
+.agent-harness-empty-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 36px 16px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    background: var(--bg-main, #fff);
+    color: var(--text-muted);
+    text-align: center;
+    min-height: 190px;
+}
+
+.agent-harness-empty-card--wide {
+    min-height: 240px;
+    padding: 48px 24px;
+}
+
+.agent-harness-empty-svg {
+    color: var(--text-muted);
+    opacity: 0.55;
+    margin-bottom: 2px;
+}
+
+.agent-harness-empty-card strong {
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.agent-harness-empty-card span {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.45;
+    max-width: 420px;
 }
 
 .agent-harness-item {
@@ -204,9 +248,9 @@
     justify-content: space-between;
     gap: 12px;
     padding: 12px 14px;
-    border: 1px solid rgba(226, 232, 240, 0.85);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--bg-secondary, #fff);
+    background: var(--bg-main, #fff);
     transition: all 0.15s ease;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
 }
@@ -225,19 +269,49 @@
     display: grid;
     gap: 4px;
     min-width: 0;
+    text-align: left;
 }
 
-.agent-harness-item-main strong {
-    color: var(--text-primary, #0f172a);
-    font-size: 0.84rem;
-    font-weight: 700;
-    overflow-wrap: anywhere;
+.agent-harness-item-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
-.agent-harness-item-main span {
+.agent-harness-item-title-row strong {
+    color: var(--text-main, #0f172a);
+    font-size: 0.86rem;
+    font-weight: 750;
+}
+
+.agent-harness-item-id {
     color: var(--text-secondary, #475569);
-    font-size: 0.74rem;
+    font-size: 0.73rem;
+    font-family: var(--font-mono, monospace);
     font-weight: 500;
+}
+
+.agent-harness-status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 650;
+}
+
+.agent-harness-status-pill.is-active {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.agent-harness-status-pill.is-inactive,
+.agent-harness-status-pill.is-idle {
+    background: rgba(100, 116, 139, 0.1);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
 }
 
 .agent-harness-item-main small {
@@ -248,8 +322,11 @@
 }
 
 .agent-harness-item-meta {
+    display: flex;
+    align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
+    gap: 8px;
     flex: 0 0 auto;
     font-size: 0.72rem;
     color: var(--text-muted, #64748b);
@@ -729,25 +806,26 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 }
 
 /* ==========================================================================
-   运行支撑管理弹窗在模态框中的布局规则
+   底座管理弹窗在模态框中的布局规则
    ========================================================================== */
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
     display: flex;
     flex-direction: column;
-    width: min(1140px, calc(100vw - 32px));
-    height: min(840px, calc(100vh - 32px));
-    max-height: calc(100vh - 32px);
+    width: min(1080px, calc(100vw - 32px));
+    max-height: min(780px, calc(100vh - 40px));
+    height: auto;
     border-radius: 12px;
     box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
+    margin: auto;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: none;
-    padding: 16px;
+    max-height: calc(100vh - 120px);
+    padding: 18px 20px;
     overflow-y: auto;
-    background: #f4f7fb;
+    background: #f8fafc;
 }
 
 /* 弹窗模式下隐藏内部多余的折叠 summary */
@@ -756,11 +834,10 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness {
-    min-height: 100%;
+    min-height: 0;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness .agent-collapse-body {
-    min-height: 100%;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -769,6 +846,22 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 body.dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body,
 .dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
     background: #111827;
+}
+
+body.dark-mode .agent-harness-empty-card,
+.dark-mode .agent-harness-empty-card {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+body.dark-mode .agent-harness-skill-list-wrap,
+body.dark-mode .agent-harness-skill-form-wrap,
+body.dark-mode .agent-harness-pack-sync,
+.dark-mode .agent-harness-skill-list-wrap,
+.dark-mode .agent-harness-skill-form-wrap,
+.dark-mode .agent-harness-pack-sync {
+    background: rgba(15, 23, 42, 0.45);
+    border-color: rgba(255, 255, 255, 0.08);
 }
 
 /* ==========================================================================
