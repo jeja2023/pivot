@@ -361,7 +361,7 @@ window.loadMemoryMergeSuggestions = async function() {
 
 function memoryQueryParams(page = pageState.memories || 1) {
     const params = new URLSearchParams();
-    const limit = Number(pageState.limit || 10);
+    const limit = Number(pageState.limit || 15);
     const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
     params.set('status', document.getElementById('memory-status-filter')?.value || 'active');
     params.set('limit', String(limit));
@@ -519,7 +519,7 @@ window.loadMemories = async function(page = pageState.memories || 1) {
         if (!res.ok) throw new Error(data.error || '长期记忆加载失败');
         if (toggle) toggle.checked = data.enabled !== false;
         const total = Number(data.total || 0);
-        const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 10)));
+        const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 15)));
         if (total > 0 && requestedPage > totalPages) {
             await window.loadMemories(totalPages);
             return;
