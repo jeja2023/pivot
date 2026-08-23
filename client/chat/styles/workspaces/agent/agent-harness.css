@@ -875,9 +875,8 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
     display: flex;
     flex-direction: column;
     width: min(1120px, calc(100vw - 32px));
-    min-height: min(680px, calc(100vh - 40px));
+    height: min(720px, calc(100vh - 40px));
     max-height: min(860px, calc(100vh - 40px));
-    height: auto;
     border-radius: 12px;
     box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
     margin: auto;
@@ -886,10 +885,12 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 120px);
+    max-height: none;
     padding: 18px 20px;
     overflow-y: auto;
     background: #f8fafc;
+    display: flex;
+    flex-direction: column;
 }
 
 /* 弹窗模式下隐藏内部多余的折叠 summary */
@@ -899,12 +900,31 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness {
     min-height: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-collapse-harness .agent-collapse-body {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel {
+    flex: 1 1 auto;
+    min-height: 480px;
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel[data-agent-harness-section="residency"] .agent-harness-list.full-width {
+    flex: 1 1 auto;
+    min-height: 400px;
+}
+
+#agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel[data-agent-harness-section="residency"] .agent-harness-empty-card {
+    flex: 1 1 auto;
+    min-height: 400px;
 }
 
 body.dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body,
