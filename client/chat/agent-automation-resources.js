@@ -269,27 +269,27 @@ function agentAutomationTriggerConfig(type, config = {}) {
 function agentAutomationTriggerConfigFields(type, config) {
     if (type === 'webhook') return `
         <div class="agent-automation-resources-form-grid">
-            <label><span>输入映射（JSON）</span><textarea class="form-input" name="inputMappingJson" rows="5" spellcheck="false" placeholder='{"订单号":"data.order.id"}'>${agentEscape(JSON.stringify(config.inputMapping || {}, null, 2))}</textarea><small>键为工作流输入名，值为 Webhook JSON 中的字段路径；留空会把完整请求体传入 <code>payload</code>。</small></label>
-            <label><span>固定输入（JSON）</span><textarea class="form-input" name="staticInputsJson" rows="5" spellcheck="false" placeholder='{"来源":"ERP"}'>${agentEscape(JSON.stringify(config.staticInputs || {}, null, 2))}</textarea><small>每次触发都会附加的工作流输入。</small></label>
+            <label><span>输入映射（JSON）</span><textarea class="form-input" name="inputMappingJson" rows="3" spellcheck="false" placeholder='{"订单号":"data.order.id"}'>${agentEscape(JSON.stringify(config.inputMapping || {}, null, 2))}</textarea><small>键为工作流输入名，值为 Webhook JSON 中的字段路径；留空会把完整请求体传入 <code>payload</code>。</small></label>
+            <label><span>固定输入（JSON）</span><textarea class="form-input" name="staticInputsJson" rows="3" spellcheck="false" placeholder='{"来源":"ERP"}'>${agentEscape(JSON.stringify(config.staticInputs || {}, null, 2))}</textarea><small>每次触发都会附加的工作流输入。</small></label>
         </div>
         <label><span>去重字段路径</span><input class="form-input" name="dedupePath" type="text" maxlength="120" value="${agentEscapeAttr(config.dedupePath)}" placeholder="例如 data.eventId"></label>
-        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="3" maxlength="2000" placeholder="例如：处理来自 ERP 的订单变更">${agentEscape(config.goalTemplate)}</textarea></label>`;
+        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="2" maxlength="2000" placeholder="例如：处理来自 ERP 的订单变更">${agentEscape(config.goalTemplate)}</textarea></label>`;
     if (type === 'file') return `
         <label><span>监听目录</span><input class="form-input" name="directory" type="text" required maxlength="400" value="${agentEscapeAttr(config.directory)}" placeholder="选择已授权的报告目录"></label>
         <div class="agent-automation-resources-form-grid">
             <label><span>文件扩展名</span><input class="form-input" name="extensions" type="text" maxlength="260" value="${agentEscapeAttr(config.extensions)}" placeholder="csv, xlsx, pdf；留空表示全部"></label>
             <label><span>工作流输入名</span><input class="form-input" name="inputName" type="text" maxlength="80" value="${agentEscapeAttr(config.inputName)}" placeholder="filePath"></label>
         </div>
-        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="3" maxlength="2000" placeholder="例如：处理新落地的报告文件">${agentEscape(config.goalTemplate)}</textarea></label>`;
+        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="2" maxlength="2000" placeholder="例如：处理新落地的报告文件">${agentEscape(config.goalTemplate)}</textarea></label>`;
     return `
         <label><span>数据库连接 ID</span><input class="form-input" name="connectionId" type="text" required maxlength="80" value="${agentEscapeAttr(config.connectionId)}" placeholder="填写工具库中已授权的数据库连接 ID"></label>
-        <label><span>增量查询 SQL</span><textarea class="form-input" name="query" rows="6" required maxlength="4000" spellcheck="false" placeholder="SELECT * FROM orders WHERE updated_at > '{{watermark}}'">${agentEscape(config.query)}</textarea><small>必须是只读查询，并包含 <code>{{watermark}}</code> 占位符。</small></label>
+        <label><span>增量查询 SQL</span><textarea class="form-input" name="query" rows="4" required maxlength="4000" spellcheck="false" placeholder="SELECT * FROM orders WHERE updated_at > '{{watermark}}'">${agentEscape(config.query)}</textarea><small>必须是只读查询，并包含 <code>{{watermark}}</code> 占位符。</small></label>
         <div class="agent-automation-resources-form-grid">
             <label><span>水位线字段</span><input class="form-input" name="watermarkField" type="text" maxlength="80" value="${agentEscapeAttr(config.watermarkField)}" placeholder="updated_at"></label>
             <label><span>初始水位线</span><input class="form-input" name="initialWatermark" type="text" maxlength="120" value="${agentEscapeAttr(config.initialWatermark)}" placeholder="首次轮询起点"></label>
             <label><span>工作流输入名</span><input class="form-input" name="inputName" type="text" maxlength="80" value="${agentEscapeAttr(config.inputName)}" placeholder="rows"></label>
         </div>
-        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="3" maxlength="2000" placeholder="例如：处理订单状态变化">${agentEscape(config.goalTemplate)}</textarea></label>`;
+        <label><span>运行目标说明</span><textarea class="form-input" name="goalTemplate" rows="2" maxlength="2000" placeholder="例如：处理订单状态变化">${agentEscape(config.goalTemplate)}</textarea></label>`;
 }
 
 function agentAutomationCredentialShareFields(credential, options = {}) {
@@ -377,7 +377,7 @@ function renderAgentAutomationResourceEditor(kind, item = null, draft = {}) {
     if (isRotation) {
         PivotSafeHtml.setHtml(editor, `
             <div class="agent-automation-resources-editor-head"><strong>轮换凭据：${agentEscape(item?.name || '')}</strong><button type="button" class="btn-secondary" data-agent-automation-resource-back>返回列表</button></div>
-            <label><span>新的凭据内容</span><textarea class="form-input" name="secretValue" rows="5" required maxlength="8192" autocomplete="new-password" placeholder="粘贴新的密钥、Token 或密码"></textarea><small>保存后仅用于运行时注入，系统不会再次显示该内容。</small></label>
+            <label><span>新的凭据内容</span><textarea class="form-input" name="secretValue" rows="3" required maxlength="8192" autocomplete="new-password" placeholder="粘贴新的密钥、Token 或密码"></textarea><small>保存后仅用于运行时注入，系统不会再次显示该内容。</small></label>
             <div class="agent-automation-resources-editor-error" role="alert" hidden></div>
             <div class="agent-automation-resources-editor-footer"><button type="button" class="btn-secondary" data-agent-automation-resource-back>取消</button><button type="submit" class="btn-primary">确认轮换</button></div>`);
         requestAnimationFrame(() => editor.elements.secretValue?.focus());
@@ -411,8 +411,8 @@ function renderAgentAutomationResourceEditor(kind, item = null, draft = {}) {
             <label><span>凭据名称</span><input class="form-input" name="name" type="text" required maxlength="80" value="${agentEscapeAttr(draft.name ?? item?.name ?? '')}" placeholder="例如：ERP 生产环境 API"></label>
             <label><span>引用名</span><input class="form-input" name="slug" type="text" required minlength="2" maxlength="64" pattern="[A-Za-z0-9_ -]+" value="${agentEscapeAttr(draft.slug ?? item?.slug ?? '')}" placeholder="例如：ERP_API_KEY" autocapitalize="characters"></label>
         </div>
-        <label><span>用途说明</span><textarea class="form-input" name="description" rows="3" maxlength="500" placeholder="说明凭据对应的系统和用途">${agentEscape(draft.description ?? item?.description ?? '')}</textarea></label>
-        ${!item ? '<label><span>凭据内容</span><textarea class="form-input" name="secretValue" rows="5" required maxlength="8192" autocomplete="new-password" placeholder="粘贴密钥、Token 或密码"></textarea><small>保存后内容会加密存储，页面不会再次显示。</small></label>' : ''}
+        <label><span>用途说明</span><textarea class="form-input" name="description" rows="2" maxlength="500" placeholder="说明凭据对应的系统和用途">${agentEscape(draft.description ?? item?.description ?? '')}</textarea></label>
+        ${!item ? '<label><span>凭据内容</span><textarea class="form-input" name="secretValue" rows="3" required maxlength="8192" autocomplete="new-password" placeholder="粘贴密钥、Token 或密码"></textarea><small>保存后内容会加密存储，页面不会再次显示。</small></label>' : ''}
         ${agentAutomationCredentialShareFields(item, scopeOptions)}
         <div class="agent-automation-resources-editor-error" role="alert" hidden></div>
         <div class="agent-automation-resources-editor-footer"><button type="button" class="btn-secondary" data-agent-automation-resource-back>取消</button><button type="submit" class="btn-primary">${item ? '保存凭据' : '创建凭据'}</button></div>`);
