@@ -157,6 +157,7 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+    position: relative;
 }
 .settings-scale-canvas {
     --settings-canvas-width: 1540px;
@@ -187,25 +188,74 @@
     overscroll-behavior-inline: contain;
 }
 .settings-state {
-    display: flex;
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    min-height: 30px;
-    padding: 5px 14px;
-    color: var(--text-muted);
-    background: rgba(248, 250, 252, 0.96);
-    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-    font-size: 0.78rem;
+    gap: 8px;
+    min-height: 32px;
+    max-width: min(90%, 540px);
+    padding: 5px 16px;
+    border-radius: 9999px;
+    color: var(--text-main, #334155);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+    font-size: 0.8rem;
+    font-weight: 500;
+    pointer-events: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+}
+.settings-state[hidden] {
+    display: none !important;
+}
+.settings-state[data-state="loading"]::before {
+    content: '';
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border: 2px solid rgba(16, 185, 129, 0.25);
+    border-top-color: var(--primary, #10b981);
+    border-radius: 50%;
+    animation: settingsStateSpin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+@keyframes settingsStateSpin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 .settings-state[data-state="error"] {
-    color: var(--danger);
+    color: var(--danger, #ef4444);
     background: rgba(254, 242, 242, 0.96);
+    border-color: rgba(239, 68, 68, 0.32);
+    box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.15), 0 8px 10px -6px rgba(239, 68, 68, 0.08);
 }
 .settings-state-retry {
-    min-height: 26px;
+    min-height: 24px;
     padding: 0 10px;
+    border-radius: 9999px;
     font-size: 0.74rem;
+    font-weight: 600;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    background: #fff;
+    color: var(--danger, #ef4444);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: 2px;
+}
+.settings-state-retry:hover {
+    background: rgba(254, 226, 226, 0.8);
+    border-color: var(--danger, #ef4444);
 }
 .admin-content h3 {
     margin: 0 0 14px;
@@ -1092,10 +1142,26 @@ body.dark-mode .global-params-tab .form-item label,
 }
 body.dark-mode .settings-state,
 .dark-mode .settings-state {
-    background: #172033;
-    border-color: rgba(148, 163, 184, 0.2);
+    background: rgba(23, 32, 51, 0.94);
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #e2e8f0;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
 }
 body.dark-mode .settings-state[data-state="error"],
 .dark-mode .settings-state[data-state="error"] {
-    background: rgba(127, 29, 29, 0.35);
+    background: rgba(69, 10, 10, 0.92);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+body.dark-mode .settings-state-retry,
+.dark-mode .settings-state-retry {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+}
+body.dark-mode .settings-state-retry:hover,
+.dark-mode .settings-state-retry:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.6);
 }

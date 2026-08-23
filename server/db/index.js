@@ -20,19 +20,28 @@ if (db?.prepare && process.env.PIVOT_TEST_DB_SYNC === 'postgres') {
     stmts.getMessagesForContext = stmts.getMessages;
 }
 
+async function initializePostgresStructure({
+    initSchemaPg = require('./schema').initSchemaPg,
+    runMigrationsPg = require('./migrate').runMigrationsPg,
+    applyPgSchemaComments = require('./schema').applyPgSchemaComments
+} = {}) {
+    await initSchemaPg();
+    await runMigrationsPg();
+    // CREATE TABLE IF NOT EXISTS 不会为历史表补列。注释必须在版本迁移后执行，
+    // 否则升级旧库时会对尚未创建的新字段发出误导性告警。
+    await applyPgSchemaComments();
+}
+
 /**
  * PostgreSQL 模式异步初始化
  * 在应用启动时调用：await initPostgresDatabase()
  */
 async function initPostgresDatabase() {
-    const { initSchemaPg } = require('./schema');
-    const { runMigrationsPg } = require('./migrate');
     const { runSeedsPg } = require('./seed');
     const { ensureAppSettingAsync } = require('../services/app-settings');
     const { RUNTIME_SETTING_DEFINITIONS, getRuntimeDefaultValue } = require('../services/runtime-settings-defs');
 
-    await initSchemaPg();
-    await runMigrationsPg();
+    await initializePostgresStructure();
     await runSeedsPg();
     await refreshUserSettingsCache();
 
@@ -54,4 +63,4 @@ async function initPostgresDatabase() {
     }
 }
 
-module.exports = { db, dataDir, dbPath, stmts, initPostgresDatabase };
+module.exports = { db, dataDir, dbPath, stmts, initializePostgresStructure, initPostgresDatabase };

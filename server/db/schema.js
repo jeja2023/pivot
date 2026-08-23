@@ -14,6 +14,10 @@ function buildPgSchemaStatements() {
     return require('./schema/pg').buildPgSchemaStatements();
 }
 
+function applyPgSchemaComments() {
+    return require('./schema/pg').applyPgSchemaComments();
+}
+
 module.exports = {
     // Legacy SQLite schema source/helpers
     initSchema,
@@ -22,5 +26,6 @@ module.exports = {
     sqliteFtsSql,
     // PostgreSQL
     initSchemaPg,
+    applyPgSchemaComments,
     buildPgSchemaStatements,
 };

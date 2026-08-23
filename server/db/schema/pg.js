@@ -328,6 +328,27 @@ async function normalizeLegacyResidualColumnTypes(client) {
     }
 }
 
+async function applyPgSchemaComments() {
+    const statements = buildPgCommentStatements();
+    const client = await getPgPool().connect();
+    let applied = 0;
+
+    try {
+        for (const sql of statements) {
+            try {
+                await client.query(sql);
+                applied += 1;
+            } catch (err) {
+                logger.warn({ sql, err: err.message }, '[PG] 添加表或字段注释失败');
+            }
+        }
+    } finally {
+        client.release();
+    }
+
+    logger.info({ applied, total: statements.length }, '[PG] 数据字典注释已应用');
+}
+
 async function initSchemaPg() {
     const plan = buildPgSchemaStatements();
     const client = await getPgPool().connect();
@@ -407,14 +428,6 @@ async function initSchemaPg() {
             }
         }
 
-        for (const sql of plan.comments || []) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                logger.warn({ sql, err: err.message }, '[PG] 添加表或字段注释失败');
-            }
-        }
-
         // 全文索引依赖 pg_trgm，扩展缺失或非属主时降级跳过而非中断启动
         for (const sql of plan.fulltextIndexes) {
             try {
@@ -439,6 +452,7 @@ async function initSchemaPg() {
 
 module.exports = {
     initSchemaPg,
+    applyPgSchemaComments,
     buildPgSchemaStatements,
     normalizeLegacyResidualColumnTypes,
     convertColumnTypes,

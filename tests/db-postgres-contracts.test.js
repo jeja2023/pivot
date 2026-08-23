@@ -138,6 +138,19 @@ test('dynamic PostgreSQL schema generator produces complete 81-table DDL matchin
     assert.ok(plan.comments.some(c => c.includes('COMMENT ON COLUMN "messages"."content"')), 'Must generate messages.content column comment');
 });
 
+test('PostgreSQL startup applies schema comments after versioned migrations', async () => {
+    const { initializePostgresStructure } = require('../server/db');
+    const calls = [];
+
+    await initializePostgresStructure({
+        initSchemaPg: async () => calls.push('schema'),
+        runMigrationsPg: async () => calls.push('migrations'),
+        applyPgSchemaComments: async () => calls.push('comments')
+    });
+
+    assert.deepEqual(calls, ['schema', 'migrations', 'comments']);
+});
+
 test('db-write-queue exports PostgreSQL write queue methods', async () => {
     const {
         enqueueAuditLog,
