@@ -1473,14 +1473,36 @@ body.dark-mode .agent-workflow-dependency-summary span,
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
+    align-items: start;
+}
+
+.agent-automation-resources-form-grid--3col {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .agent-automation-resources-editor > label,
 .agent-automation-resources-form-grid > label,
 .agent-automation-resources-config > label {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 6px;
     min-width: 0;
+    color: var(--text-main);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: left;
+    margin: 0;
+}
+
+.agent-automation-resources-editor > label > span,
+.agent-automation-resources-form-grid > label > span,
+.agent-automation-resources-config > label > span {
+    display: block;
+    height: 18px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--text-main);
     font-size: 0.75rem;
     font-weight: 700;
@@ -1490,10 +1512,12 @@ body.dark-mode .agent-workflow-dependency-summary span,
 .agent-automation-resources-editor > label > small,
 .agent-automation-resources-form-grid > label > small,
 .agent-automation-resources-config label > small {
+    display: block;
     color: var(--text-muted);
-    font-size: 0.66rem;
+    font-size: 0.68rem;
     font-weight: 500;
     line-height: 1.4;
+    margin-top: 2px;
 }
 
 .agent-automation-resources-editor .form-input,
@@ -1505,7 +1529,29 @@ body.dark-mode .agent-workflow-dependency-summary span,
     background: var(--bg-main, #fff);
     color: var(--text-main);
     font-size: 0.78rem;
+    box-sizing: border-box;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-automation-resources-editor input.form-input,
+.agent-automation-resources-editor select.form-input,
+.agent-automation-resources-config input.form-input,
+.agent-automation-resources-config select.form-input {
+    height: 36px !important;
+    min-height: 36px !important;
+    max-height: 36px !important;
+    line-height: 34px !important;
+    padding: 0 12px !important;
+    font-size: 0.78rem !important;
+    vertical-align: middle !important;
+}
+
+.agent-automation-resources-editor textarea.form-input,
+.agent-automation-resources-config textarea.form-input {
+    padding: 8px 12px !important;
+    line-height: 1.5 !important;
+    font-size: 0.78rem !important;
+    resize: vertical;
 }
 
 .agent-automation-resources-editor .form-input:focus,
