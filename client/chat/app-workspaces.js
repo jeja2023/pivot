@@ -4,7 +4,62 @@
 const userInput = document.getElementById('user-input');
 const CHAT_MCP_TOOL_ALLOWLIST_KEY = 'pivot_chat_mcp_tool_allowlist';
 const CHAT_MCP_TOOL_MODE_KEY = 'pivot_chat_mcp_tool_mode';
+const CHAT_MODE_KEY = 'pivot_chat_mode';
 let chatMcpToolsCache = [];
+let chatAgentExecutionEnabled = true;
+
+function getChatMode() {
+    try {
+        return localStorage.getItem(CHAT_MODE_KEY) === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
+    } catch (_error) { return 'normal'; }
+}
+
+function applyChatModeState(mode = getChatMode()) {
+    const normalized = mode === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
+    document.querySelectorAll('[data-chat-mode-option]').forEach(option => {
+        const selected = option.dataset.chatModeOption === normalized;
+        option.setAttribute('aria-selected', selected ? 'true' : 'false');
+        option.disabled = option.dataset.chatModeOption === 'agent' && !chatAgentExecutionEnabled;
+        option.classList.toggle('is-active', selected);
+    });
+    const label = document.getElementById('chat-mode-label');
+    if (label) label.textContent = normalized === 'agent' ? 'Agent' : '普通';
+    const option = document.getElementById('chat-agent-mode-option');
+    const hint = document.getElementById('chat-agent-mode-hint');
+    option?.classList.toggle('is-disabled', !chatAgentExecutionEnabled);
+    if (hint) hint.textContent = chatAgentExecutionEnabled ? '连续规划、工具调用和后台恢复' : '管理员已暂时关闭此模式';
+    return normalized;
+}
+
+function setChatMode(mode) {
+    const normalized = mode === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
+    try { localStorage.setItem(CHAT_MODE_KEY, normalized); } catch (_error) {}
+    applyChatModeState(normalized);
+    setChatModePanelOpen(false);
+    return normalized;
+}
+
+function setChatModePanelOpen(open) {
+    const trigger = document.getElementById('chat-mode-trigger');
+    const panel = document.getElementById('chat-mode-panel');
+    if (!trigger || !panel) return;
+    panel.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.getElementById('chat-mode-selector')?.classList.toggle('is-open', open);
+}
+
+async function loadChatModeCapabilities() {
+    try {
+        const response = await apiFetch(`${API_BASE}/chat/capabilities`, { cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || '聊天模式状态读取失败');
+        chatAgentExecutionEnabled = data.agentExecutionEnabled !== false;
+    } catch (_error) {
+        chatAgentExecutionEnabled = true;
+    }
+    applyChatModeState();
+    return chatAgentExecutionEnabled;
+}
 
 function setChatToolsMenuOpen(open) {
     const trigger = document.getElementById('chat-tools-menu-btn');
@@ -225,11 +280,24 @@ function initChatToolsMenu() {
         event.stopPropagation();
         setChatToolsMenuOpen(document.getElementById('chat-tools-menu-panel')?.hidden !== false);
     });
+    const modeTrigger = document.getElementById('chat-mode-trigger');
+    modeTrigger?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const open = document.getElementById('chat-mode-panel')?.hidden !== false;
+        setChatToolsMenuOpen(false);
+        setChatModePanelOpen(open);
+        if (open) loadChatModeCapabilities().catch(() => {});
+    });
     document.addEventListener('click', event => {
         if (!event.target.closest('#chat-tools-menu')) setChatToolsMenuOpen(false);
+        if (!event.target.closest('#chat-mode-selector')) setChatModePanelOpen(false);
     });
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') setChatToolsMenuOpen(false);
+        if (event.key === 'Escape') {
+            setChatToolsMenuOpen(false);
+            setChatModePanelOpen(false);
+        }
     });
     window.addEventListener('resize', () => {
         document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel:not([hidden])')
@@ -246,6 +314,15 @@ function initChatToolsMenu() {
     document.querySelectorAll('input[name="chat-mcp-mode"]').forEach(option => {
         option.addEventListener('change', event => {
             if (event.target.checked) setChatMcpToolMode(event.target.value);
+        });
+    });
+    document.querySelectorAll('[data-chat-mode-option]').forEach(option => {
+        option.addEventListener('change', event => {
+            if (event.target.dataset.chatModeOption) setChatMode(event.target.dataset.chatModeOption);
+        });
+        option.addEventListener('click', event => {
+            event.preventDefault();
+            setChatMode(option.dataset.chatModeOption);
         });
     });
     document.getElementById('chat-mcp-all-tools')?.addEventListener('change', event => {
@@ -288,11 +365,15 @@ function initChatToolsMenu() {
     });
     syncChatToolsMenuLabels();
     updateChatMcpToolSummary();
+    applyChatModeState();
 }
 initChatToolsMenu();
 document.addEventListener('DOMContentLoaded', initChatToolsMenu);
 window.Pivot.exposeModule('chat.inputMenu', {
     getMcpToolAllowlist: getChatMcpToolAllowlist,
+    getChatMode,
+    setChatMode,
+    isAgentExecutionEnabled: () => chatAgentExecutionEnabled,
     setOpen: setChatToolsMenuOpen
 });
 window.resizeUserInput = () => {
@@ -348,24 +429,15 @@ function findChatToolToggle(target) {
 function getChatToolName(button) {
     if (!button) return '';
     if (button.dataset?.chatToolToggle) return button.dataset.chatToolToggle;
-    if (button.id === 'chat-rag-enabled') return 'rag';
-    if (button.id === 'chat-mcp-enabled') return 'mcp';
-    if (button.querySelector?.('#chat-rag-enabled')) return 'rag';
-    if (button.querySelector?.('#chat-mcp-enabled')) return 'mcp';
+    if (button.id === 'chat-rag-enabled' || button.querySelector?.('#chat-rag-enabled')) return 'rag';
+    if (button.id === 'chat-mcp-enabled' || button.querySelector?.('#chat-mcp-enabled')) return 'mcp';
     return '';
 }
 
 function syncChatRagScopeControls() {
     const ragButton = document.getElementById('chat-rag-enabled') || document.querySelector('[data-chat-tool-toggle="rag"]');
     const pressed = ragButton?.getAttribute('aria-pressed');
-    const enabled = Boolean(ragButton) && (
-        pressed === 'true'
-        || (pressed !== 'false' && (
-            ragButton.dataset.enabled === 'true'
-            || ragButton.classList.contains('is-active')
-            || ragButton.checked === true
-        ))
-    );
+    const enabled = Boolean(ragButton) && (pressed === 'true' || (pressed !== 'false' && (ragButton.dataset.enabled === 'true' || ragButton.classList.contains('is-active') || ragButton.checked === true)));
     document.body?.classList.toggle('chat-rag-scope-open', enabled);
     document.querySelectorAll('#chat-rag-collection-scope, #chat-rag-tag-scope').forEach(select => {
         select.classList.remove('hidden');
@@ -447,18 +519,14 @@ function renderChatToolStatus(items = []) {
 
 function getSelectedOptionCleanLabel(select) {
     if (!select || !select.value) return '';
-    const option = select.selectedOptions?.[0];
-    return String(option?.textContent || '')
-        .replace(/\s*\(\d+\)\s*$/, '')
-        .trim();
+    return String(select.selectedOptions?.[0]?.textContent || '').replace(/\s*\(\d+\)\s*$/, '').trim();
 }
 
 function getChatRagScopeLabel() {
-    const labels = [
+    return [
         getSelectedOptionCleanLabel(document.getElementById('chat-rag-collection-scope')),
         getSelectedOptionCleanLabel(document.getElementById('chat-rag-tag-scope'))
-    ].filter(Boolean);
-    return labels.join(' / ');
+    ].filter(Boolean).join(' / ');
 }
 
 function buildChatRagSummaryUrl() {
@@ -712,11 +780,7 @@ function setStoredSessionValue(key, value) {
 }
 
 function removeStoredSessionValue(key) {
-    try {
-        sessionStorage.removeItem(key);
-    } catch (e) {
-        // 浏览器禁用 sessionStorage 时仅退回默认入口。
-    }
+    try { sessionStorage.removeItem(key); } catch (e) {}
 }
 
 window.getStoredMainWorkspace = function() {
@@ -725,8 +789,7 @@ window.getStoredMainWorkspace = function() {
 };
 
 window.persistSettingsTab = function(tab) {
-    if (!tab) return;
-    setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
+    if (tab) setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
 };
 
 window.getStoredSettingsTab = function() {
@@ -884,15 +947,9 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     openAppsWorkbench: openAppsWorkbenchEntrypoint
 });
 
-window.closeAgentWorkbench = () => {
-    if (document.body?.dataset.activeWorkspace === 'agent') window.showMainWorkspace?.('chat');
-};
-window.closeKnowledgeWorkbench = () => {
-    if (document.body?.dataset.activeWorkspace === 'knowledge') window.showMainWorkspace?.('chat');
-};
-window.closeMcpWorkbench = () => {
-    if (document.body?.dataset.activeWorkspace === 'mcp') window.showMainWorkspace?.('chat');
-};
+window.closeAgentWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'agent') window.showMainWorkspace?.('chat'); };
+window.closeKnowledgeWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'knowledge') window.showMainWorkspace?.('chat'); };
+window.closeMcpWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'mcp') window.showMainWorkspace?.('chat'); };
 
 window.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.getStoredMainWorkspace?.() || 'chat';

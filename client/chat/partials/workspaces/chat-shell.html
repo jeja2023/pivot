@@ -275,6 +275,19 @@
                         <div id="chat-tool-status" class="chat-tool-status hidden" aria-live="polite"></div>
                         </div>
                         </div>
+                        <div id="chat-mode-selector" class="chat-mode-selector">
+                            <button type="button" id="chat-mode-trigger" class="chat-mode-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="chat-mode-panel" title="切换回答模式">
+                                <span id="chat-mode-label">普通</span>
+                            </button>
+                            <div id="chat-mode-panel" class="chat-mode-panel" role="listbox" aria-label="回答模式" hidden>
+                                <button type="button" class="chat-mode-option" data-chat-mode-option="normal" role="option" aria-selected="true">
+                                    <strong>普通</strong><small>快速回答</small>
+                                </button>
+                                <button type="button" id="chat-agent-mode-option" class="chat-mode-option" data-chat-mode-option="agent" role="option" aria-selected="false">
+                                    <strong>Agent</strong><small id="chat-agent-mode-hint">连续规划和工具执行</small>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div class="input-actions right">
                         <button type="button" id="context-usage-pill" class="context-usage-btn has-tooltip" data-tooltip="上下文用量: -" aria-label="当前会话上下文用量，点击手动压缩">

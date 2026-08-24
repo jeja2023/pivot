@@ -139,8 +139,9 @@ function renderTrendChart(canvasId, data) {
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, width, height);
 
-    const values = data.map(d => Number(d.tokens) || 0);
-    const labels = data.map(d => String(d.day || '').slice(5));
+    const chartData = Array.isArray(data) ? data : [];
+    const values = chartData.map(d => Number(d?.tokens) || 0);
+    const labels = chartData.map(d => String(d?.day || '').slice(5));
     const max = Math.max(...values, 1);
     const padLeft = 30;
     const padRight = 18;
@@ -438,8 +439,9 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, width, height);
 
-    const values = data.map(d => Number(d.tokens) || 0);
-    const labels = data.map(d => String(d[labelField] || d[fallbackField] || '未知'));
+    const chartData = Array.isArray(data) ? data : [];
+    const values = chartData.map(d => Number(d?.tokens) || 0);
+    const labels = chartData.map(d => String(d?.[labelField] || d?.[fallbackField] || '未知'));
     const max = Math.max(...values, 1);
     ctx.font = '12px sans-serif';
     const longestLabelWidth = labels.reduce((longest, label) => Math.max(longest, ctx.measureText(label).width), 0);

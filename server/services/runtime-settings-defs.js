@@ -7,6 +7,9 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     modelEndpointQueueTimeoutMs: 'model_endpoint_queue_timeout_ms',
     agentMaxConcurrentRuns: 'agent_max_concurrent_runs',
     agentDagNodeConcurrency: 'agent_dag_node_concurrency',
+    // Keep the persisted key stable for existing deployments; the semantic
+    // meaning is now a global execution permission, not automatic routing.
+    chatAgentExecutionEnabled: 'chat_auto_agent_enabled',
     chatAutoAgentEnabled: 'chat_auto_agent_enabled',
     ragIndexMaxConcurrent: 'rag_index_max_concurrent',
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
@@ -116,12 +119,12 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     },
     {
         key: RUNTIME_SETTING_KEYS.chatAutoAgentEnabled,
-        prop: 'chatAutoAgentEnabled',
-        label: '普通会话自动连续 Agent',
-        env: 'CHAT_AUTO_AGENT_ENABLED',
-        // Continuous Agent is opt-in: ordinary chat should not create a
-        // persistent run and pay planner/tool overhead unless enabled.
-        defaultValue: 0,
+        prop: 'chatAgentExecutionEnabled',
+        label: '允许聊天使用 Agent 执行模式',
+        env: ['CHAT_AGENT_EXECUTION_ENABLED', 'CHAT_AUTO_AGENT_ENABLED'],
+        // The chat mode itself defaults to ordinary answer. This flag only
+        // controls whether the explicit Agent mode is available at all.
+        defaultValue: 1,
         min: 0,
         max: 1,
         group: 'agent',

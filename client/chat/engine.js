@@ -425,6 +425,7 @@ async function runSendMessage(shouldRegenerate) {
     const sentAttachments = pendingAttachments.map(item => ({ ...item }));
 
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
+    const chatMode = window.Pivot.modules['chat.inputMenu']?.getChatMode?.() || 'normal';
     let mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
     let localMcpBridge = null;
@@ -493,6 +494,7 @@ async function runSendMessage(shouldRegenerate) {
                 content,
                 displayContent: stripInternalReferenceText(displayContent || content),
                 modelId,
+                chatMode,
                 regenerate: shouldRegenerate,
                 ragEnabled,
                 ragScope: window.getRagScopeSelection?.('chat') || {},

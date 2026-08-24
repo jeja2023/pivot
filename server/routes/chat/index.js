@@ -66,14 +66,6 @@ const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
-const AGENT_INTENT_HINT_RE = /(查询|搜索|检索|分析|整理|总结|生成|创建|修改|执行|检查|对比|计算|导出|读取|写入|调用|规划|研究|多个|并且|然后|文件|数据库|知识库)/;
-
-function isLikelyComplexAgentGoal(content) {
-    const text = String(content || '').trim();
-    if (text.length >= 24) return true;
-    return text.length >= 8 && AGENT_INTENT_HINT_RE.test(text);
-}
-
 function hasAuthorizedLocalBridgeGrant(payload) {
     const grants = payload && typeof payload.grants === 'object' && payload.grants ? payload.grants : {};
     return Object.values(grants).some(grant => grant && grant.authorized === true);
@@ -128,10 +120,22 @@ function createChatRouter({
     retrieveContext,
     isRagEnabled,
     publicUrl = '',
-    autoAgent = false,
+    agentExecutionEnabled = undefined,
+    autoAgent = undefined,
     agentRunFactory = createAgentRun
 }) {
     const router = express.Router();
+
+    const readAgentExecutionEnabled = () => {
+        if (typeof agentExecutionEnabled === 'function') return agentExecutionEnabled() === true;
+        if (agentExecutionEnabled !== undefined && agentExecutionEnabled !== null) return agentExecutionEnabled === true;
+        return typeof autoAgent === 'function' ? autoAgent() === true : autoAgent === true;
+    };
+
+    router.get('/chat/capabilities', authMiddleware, (_req, res) => {
+        const enabled = readAgentExecutionEnabled();
+        res.json({ success: true, defaultMode: 'normal', modes: enabled ? ['normal', 'agent'] : ['normal'], agentExecutionEnabled: enabled });
+    });
 
     router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
         const { sessionId, costTime, tps } = req.body;
@@ -140,9 +144,6 @@ function createChatRouter({
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
-        const autoAgentEnabled = typeof autoAgent === 'function'
-            ? autoAgent() === true
-            : autoAgent === true;
         const chatState = buildChatRequestState(req);
         let {
             regenerate,
@@ -154,8 +155,10 @@ function createChatRouter({
             modelContent,
             visibleContent,
             mcpToolAllowlist,
-            ragScope
+            ragScope,
+            chatMode
         } = chatState;
+        const agentExecutionAllowed = readAgentExecutionEnabled();
         let regenerationMessages = null;
         let regenerationUserMessageId = null;
         let userMessagePersisted = false;
@@ -164,7 +167,7 @@ function createChatRouter({
             source: 'api.chat',
             thresholdMs: SLOW_CHAT_TRACE_MS,
             message: 'Chat generation trace',
-            details: { sessionId, userId, modelId, regenerate, mcpEnabled, ragEnabled }
+            details: { sessionId, userId, modelId, regenerate, mcpEnabled, ragEnabled, chatMode }
         });
         let chatTraceStatus = 'open';
         const finishChatTrace = (status = 'closed', details = {}) => {
@@ -240,6 +243,16 @@ function createChatRouter({
 
         sse.writeComment('stream-ready');
 
+        if (chatMode === 'agent' && !agentExecutionAllowed) {
+            writeSse(JSON.stringify({
+                error: '管理员已暂时关闭聊天 Agent 执行模式，请切换为普通回答。',
+                code: 'AGENT_EXECUTION_DISABLED',
+                chatMode: 'normal'
+            }));
+            finishChatTrace('completed', { mode: 'agent_disabled' });
+            return res.end();
+        }
+
         // --- 业务逻辑检查 ---
         const preflight = await validateChatPreflight({
             state: chatState,
@@ -256,6 +269,17 @@ function createChatRouter({
             return res.end();
         }
         const { modelCfg } = preflight;
+        if (chatMode === 'agent' && (modelContent.length < 4 || modelContent.length > MAX_CHAT_AGENT_GOAL_LENGTH)) {
+            writeSse(JSON.stringify({
+                error: modelContent.length > MAX_CHAT_AGENT_GOAL_LENGTH
+                    ? `Agent 执行消息不能超过 ${MAX_CHAT_AGENT_GOAL_LENGTH} 个字符，请拆分任务后重试。`
+                    : 'Agent 执行需要至少 4 个字符的明确目标。',
+                code: modelContent.length > MAX_CHAT_AGENT_GOAL_LENGTH ? 'AGENT_GOAL_TOO_LONG' : 'AGENT_GOAL_TOO_SHORT',
+                chatMode: 'agent'
+            }));
+            finishChatTrace('completed', { mode: 'agent_validation' });
+            return res.end();
+        }
         if (mcpEnabled) {
             const localBridgeDevice = registerChatRequestLocalBridge(req);
             if (localBridgeDevice) {
@@ -335,18 +359,9 @@ function createChatRouter({
             return res.end();
         }
 
-        // 普通聊天和重新生成统一进入持久化 Agent 入口。简单问题会在 Agent
-        // 的首轮直接返回答案，复杂问题则由同一套运行时继续规划、调用工具并后台恢复。
-        // 普通聊天允许“你好”“好的”这类短消息；Agent Runtime 的 goal 校验
-        // 需要更明确的目标，因此短消息继续走原有模型流式路径，不升级为 Agent。
-        // Agent Runtime 的目标契约独立于普通聊天的模型上下文预算：手工 Agent
-        // 目标最多 2000 字符，普通聊天 Agent 使用会话桥接上限，保留较长的当前消息。
-        // 再长的消息走普通模型流，避免把桥接输入上限异常显示给用户；
-        // 短且没有任务意图的闲聊也留在普通模型流，避免无谓创建持久化 Agent。
-        if (autoAgentEnabled
-            && modelContent.length >= 4
-            && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH
-            && isLikelyComplexAgentGoal(modelContent)) {
+        // The user explicitly chooses Agent mode. Ordinary chat never creates
+        // a persistent run, regardless of message length or wording.
+        if (chatMode === 'agent' && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
@@ -403,8 +418,8 @@ function createChatRouter({
                     contextConfig: {
                         mode: 'recent',
                         notes: mcpEnabled
-                            ? '这是普通聊天自动升级的连续 Agent。遵守当前会话的 MCP 授权和工具白名单。'
-                            : '这是普通聊天自动升级的连续 Agent。当前会话未授权外部 MCP，只能使用内置安全能力。'
+                            ? '这是用户主动选择的聊天 Agent 执行模式。遵守当前会话的 MCP 授权和工具白名单。'
+                            : '这是用户主动选择的聊天 Agent 执行模式。当前会话未授权外部 MCP，只能使用内置安全能力。'
                     },
                     networkPolicy: { enabled: true },
                     metadata: buildChatAgentMetadata({

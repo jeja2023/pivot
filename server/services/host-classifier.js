@@ -1,7 +1,31 @@
-﻿const dns = require('dns').promises;
+const dns = require('dns').promises;
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
+
+const DEFAULT_DNS_LOOKUP_TIMEOUT_MS = 2000;
+
+function getDnsLookupTimeoutMs() {
+    const configured = Number.parseInt(process.env.PIVOT_DNS_LOOKUP_TIMEOUT_MS || '', 10);
+    if (!Number.isFinite(configured)) return DEFAULT_DNS_LOOKUP_TIMEOUT_MS;
+    return Math.min(Math.max(configured, 250), 10000);
+}
+
+async function lookupWithTimeout(host, options = {}) {
+    const timeoutMs = getDnsLookupTimeoutMs();
+    let timer = null;
+    const lookup = dns.lookup(host, options);
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            const error = new Error(`DNS lookup timeout for ${host}`);
+            error.code = 'DNS_LOOKUP_TIMEOUT';
+            reject(error);
+        }, timeoutMs);
+    });
+    return Promise.race([lookup, timeout]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
 
 function normalizeHostAlias(value) {
     let host = String(value || '').trim();
@@ -63,6 +87,39 @@ function isLikelyContainerRuntime() {
     }
 }
 
+const KNOWN_PUBLIC_TLDS = new Set([
+    'com', 'net', 'org', 'cn', 'io', 'ai', 'co', 'app', 'dev', 'xyz', 'cc', 'top',
+    'me', 'info', 'biz', 'us', 'uk', 'jp', 'hk', 'tw', 'de', 'fr', 'ru', 'in', 'vip',
+    'cloud', 'site', 'tech', 'online', 'store', 'space', 'fun', 'pro', 'live', 'icu',
+    'link', 'work', 'world', 'agency', 'digital', 'network', 'ltd', 'zone', 'today'
+]);
+
+const KNOWN_PUBLIC_MODEL_DOMAINS = new Set([
+    'openai.com', 'anthropic.com', 'deepseek.com', 'aliyuncs.com', 'aliyun.com',
+    'baidu.com', 'volces.com', 'volcengine.com', 'tencent.com', 'zhipuai.cn',
+    'bigmodel.cn', 'moonshot.cn', 'siliconflow.cn', 'groq.com', 'together.xyz',
+    'openrouter.ai', 'mistral.ai', 'cohere.com', 'azure.com', 'cloudflare.com',
+    'google.com', 'googleapis.com', 'github.com', 'huggingface.co', 'ollama.com'
+]);
+
+function isPublicRemoteHostname(host) {
+    const normalized = normalizeHostAlias(host);
+    if (!normalized || net.isIP(normalized)) return false;
+    for (const domain of KNOWN_PUBLIC_MODEL_DOMAINS) {
+        if (normalized === domain || normalized.endsWith(`.${domain}`)) return true;
+    }
+    const parts = normalized.split('.');
+    if (parts.length >= 2) {
+        const tld = parts[parts.length - 1];
+        const sld = parts[parts.length - 2];
+        if (KNOWN_PUBLIC_TLDS.has(tld)) {
+            if (['com', 'edu', 'gov', 'net', 'org'].includes(sld) && parts.length >= 3) return true;
+            return true;
+        }
+    }
+    return false;
+}
+
 function isDockerInternalServiceHost(host) {
     const normalized = normalizeHostAlias(host);
     if (!normalized || normalized.includes('.') || net.isIP(normalized)) return false;
@@ -79,12 +136,15 @@ function shouldResolveHostAlias(host) {
     const normalized = normalizeHostAlias(host);
     if (!normalized || net.isIP(normalized)) return false;
     if (['localhost', 'loopback', 'host.docker.internal'].includes(normalized)) return false;
+    if (isPublicRemoteHostname(normalized)) return false;
+    const disableDns = String(process.env.PIVOT_DISABLE_DNS_LOOKUP || '').trim().toLowerCase();
+    if (disableDns === 'true' || disableDns === '1') return false;
     return normalized.includes('.');
 }
 
 async function addResolvedHostAliases(names) {
     const hosts = Array.from(names).filter(shouldResolveHostAlias);
-    const results = await Promise.allSettled(hosts.map(host => dns.lookup(host, { all: true, verbatim: true })));
+    const results = await Promise.allSettled(hosts.map(host => lookupWithTimeout(host, { all: true, verbatim: true })));
     results.forEach(result => {
         if (result.status !== 'fulfilled') return;
         (result.value || []).forEach(record => {
@@ -94,14 +154,25 @@ async function addResolvedHostAliases(names) {
     return names;
 }
 
+const HOST_RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000;
+const hostResolutionCache = new Map();
+
 async function isLocalModelHostAsync(host, localNames) {
     if (isLocalModelHost(host, localNames)) return true;
     const normalized = normalizeHostAlias(host);
     if (!shouldResolveHostAlias(normalized)) return false;
+    const now = Date.now();
+    const cached = hostResolutionCache.get(normalized);
+    if (cached && cached.expires > now) {
+        return cached.value;
+    }
     try {
-        const records = await dns.lookup(normalized, { all: true, verbatim: true });
-        return records.some(record => localNames.has(String(record.address || '').toLowerCase()));
+        const records = await lookupWithTimeout(normalized, { all: true, verbatim: true });
+        const result = records.some(record => localNames.has(String(record.address || '').toLowerCase()));
+        hostResolutionCache.set(normalized, { value: result, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
+        return result;
     } catch (_err) {
+        hostResolutionCache.set(normalized, { value: false, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
         return false;
     }
 }
@@ -164,6 +235,7 @@ module.exports = {
     isLikelyContainerRuntime,
     isLocalModelHost,
     isLocalModelHostAsync,
+    isPublicRemoteHostname,
     normalizeHostAlias,
     shouldResolveHostAlias
 };

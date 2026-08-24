@@ -146,6 +146,7 @@
 
     const scriptLoadPromises = existingPivot._scriptLoadPromises || new Map();
     const modules = existingPivot.modules || Object.create(null);
+    const SCRIPT_LOAD_TIMEOUT_MS = 15000;
 
     function registerModule(name, api = {}) {
         const key = String(name || '').trim();
@@ -211,14 +212,22 @@
             const script = existing || document.createElement('script');
             script.async = false;
             script.dataset.loaded = 'false';
+            let timer = null;
             script.onload = () => {
+                if (timer) clearTimeout(timer);
                 script.dataset.loaded = 'true';
                 resolve();
             };
             script.onerror = () => {
+                if (timer) clearTimeout(timer);
                 scriptLoadPromises.delete(key);
                 reject(new Error(`加载脚本失败: ${rawSrc}`));
             };
+            timer = setTimeout(() => {
+                scriptLoadPromises.delete(key);
+                if (script.dataset.loaded === 'false') script.remove();
+                reject(new Error(`加载脚本超时（已等待 ${SCRIPT_LOAD_TIMEOUT_MS} 毫秒）: ${rawSrc}`));
+            }, SCRIPT_LOAD_TIMEOUT_MS);
             if (!existing) {
                 script.src = nextSrc;
                 document.head.appendChild(script);

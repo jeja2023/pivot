@@ -215,6 +215,23 @@ const adminFeatureScripts = [
 let adminFeatureLoadPromise = null;
 let settingsTabLoadSequence = 0;
 let settingsPanelOpenSequence = 0;
+const SETTINGS_OPERATION_TIMEOUT_MS = 35000;
+
+function withSettingsTimeout(task, timeoutMs = SETTINGS_OPERATION_TIMEOUT_MS) {
+    const operation = typeof task === 'function' ? Promise.resolve().then(task) : Promise.resolve(task);
+    const timeout = Math.max(1000, Number(timeoutMs) || SETTINGS_OPERATION_TIMEOUT_MS);
+    let timer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            const error = new Error(`设置数据加载超时（已等待 ${timeout} 毫秒）`);
+            error.code = 'SETTINGS_LOAD_TIMEOUT';
+            reject(error);
+        }, timeout);
+    });
+    return Promise.race([operation, timeoutPromise]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
 
 const loadScriptOnce = (src) => {
     if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
@@ -245,8 +262,9 @@ window.ensureAdminFeatureScripts = async () => {
 window.openAdminPanel = async (options = {}) => {
     const openSequence = ++settingsPanelOpenSequence;
     try {
-        await window.ensureAdminFeatureScripts();
+        await withSettingsTimeout(() => window.ensureAdminFeatureScripts());
     } catch (error) {
+        adminFeatureLoadPromise = null;
         window.setSettingsLoadState?.('error', error.message || '设置模块加载失败', { retry: true });
         showToast(error.message || '设置模块加载失败', 'error');
         return;
@@ -284,7 +302,14 @@ window.closeModal = () => {
 };
 
 window.switchTab = async (tab, options = {}) => {
-    await window.ensureAdminFeatureScripts();
+    try {
+        await withSettingsTimeout(() => window.ensureAdminFeatureScripts());
+    } catch (error) {
+        adminFeatureLoadPromise = null;
+        window.setSettingsTabState?.('error', error.message || '设置模块加载超时', { retry: true, tab, page: options.page || 1 });
+        showToast(error.message || '设置模块加载超时', 'error');
+        return false;
+    }
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
     const currentTab = document.querySelector('.admin-tab.active')?.id?.replace(/^tab-/, '');
@@ -326,6 +351,18 @@ window.switchTab = async (tab, options = {}) => {
 };
 
 async function loadTabData(tab, page = 1) {
+    try {
+        return await withSettingsTimeout(() => loadTabDataInternal(tab, page));
+    } catch (error) {
+        settingsTabLoadSequence += 1;
+        const message = error.message || '设置数据加载超时';
+        window.setSettingsTabState?.('error', message, { retry: true, tab, page });
+        showToast(message, 'error');
+        return false;
+    }
+}
+
+async function loadTabDataInternal(tab, page = 1) {
     const loadSequence = ++settingsTabLoadSequence;
     window.setSettingsTabState?.('loading', '正在加载设置数据…');
     try {
@@ -347,7 +384,7 @@ async function loadTabData(tab, page = 1) {
                 setTimeout(() => window.ensureUserRecordButtons?.(), 0);
             }
             if (tab === 'logs' && window.loadLogs) await loadLogs(page);
-            if (tab === 'monitor' && window.loadMonitorSummary) await loadMonitorSummary();
+            if (tab === 'monitor' && window.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.loadStats) await loadStats(pageState.stats || page);
@@ -358,10 +395,11 @@ async function loadTabData(tab, page = 1) {
             if (tab === 'attachments' && window.loadAttachments) await loadAttachments(page);
             if (tab === 'announcements' && window.loadAnnouncementsAdmin) await window.loadAnnouncementsAdmin(page);
             if (tab === 'tool-policy' && window.loadToolPolicy) await window.loadToolPolicy();
-            if (tab === 'ops' && window.loadOpsSummary) await loadOpsSummary();
+            if (tab === 'ops' && window.loadOpsSummary) await loadOpsSummary({ propagateErrors: true });
             if (tab === 'details' && window.loadDetails) await loadDetails(page);
             if (tab === 'apiCallLogs' && window.loadApiCallLogs) await loadApiCallLogs(page);
             if (tab === 'userRecords' && window.loadUserRecordMessages) await loadUserRecordMessages(page);
+            if (tab === 'global-params' && window.loadSettings) await window.loadSettings();
             if (tab === 'keys' && window.loadApiKeys) {
                 await loadApiKeys();
                 const displayEl = document.getElementById('api-base-url-display');

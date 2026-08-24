@@ -147,6 +147,38 @@
     background: var(--surface, rgba(255,255,255,.98)); box-shadow: 0 16px 34px var(--shadow-md, rgba(15,23,42,.16));
 }
 .chat-tools-menu-panel[hidden] { display: none; }
+.chat-mode-selector { position: relative; display: inline-flex; align-items: center; }
+.chat-mode-trigger {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 64px; height: 30px;
+    padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
+    background: transparent; color: var(--text-muted, #64748b); cursor: pointer;
+    font: inherit; font-size: .73rem; font-weight: 650; transition: .18s ease;
+}
+.chat-mode-trigger:hover, .chat-mode-selector.is-open .chat-mode-trigger {
+    border-color: var(--primary-border, rgba(16,185,129,.24));
+    background: var(--primary-light, rgba(16,185,129,.10)); color: var(--primary-hover, #047857);
+}
+.chat-mode-panel {
+    position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 42;
+    display: grid; gap: 3px; width: 178px; padding: 5px;
+    border: 1px solid var(--border-subtle, rgba(148,163,184,.30)); border-radius: 9px;
+    background: var(--surface, rgba(255,255,255,.99)); box-shadow: 0 14px 30px var(--shadow-md, rgba(15,23,42,.16));
+}
+.chat-mode-panel[hidden] { display: none; }
+.chat-mode-option {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+    padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+    background: transparent; color: var(--text-main, #334155); text-align: left; font: inherit;
+}
+.chat-mode-option:hover { background: var(--bg-side, #f8fafc); }
+.chat-mode-option.is-active, .chat-mode-option[aria-selected="true"] {
+    border-color: var(--primary-border, rgba(16,185,129,.28));
+    background: var(--primary-bg, rgba(236,253,245,.72));
+}
+.chat-mode-option strong { color: var(--text-main, #1e293b); font-size: .75rem; font-weight: 650; }
+.chat-mode-option small { color: var(--text-muted, #64748b); font-size: .66rem; line-height: 1.35; }
+.chat-mode-option.is-disabled { opacity: .55; cursor: not-allowed; }
+.chat-mode-option:disabled { opacity: .55; cursor: not-allowed; }
 .chat-tool-entry { position: relative; width: 100%; }
 .chat-tool-menu-item {
     position: relative; display: flex; width: 100%; height: auto; min-height: 42px;

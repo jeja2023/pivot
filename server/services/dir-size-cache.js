@@ -4,31 +4,44 @@ const { LruCache } = require('../cache');
 const { logger } = require('../logger');
 
 const DEFAULT_MAX_DEPTH = 32;
+const DEFAULT_SCAN_TIMEOUT_MS = 2500;
+const DEFAULT_MAX_SCAN_ITEMS = 5000;
+const DEFAULT_DIR_SIZE_CACHE_TTL_MS = 60_000;
 
-let cache = new LruCache({ max: 64, ttlMs: 0 });
+let cache = new LruCache({ max: 64, ttlMs: DEFAULT_DIR_SIZE_CACHE_TTL_MS });
 let maxDepth = DEFAULT_MAX_DEPTH;
+const inFlightScans = new Map();
 
-function configureDirSizeCache({ ttlMs = 0, max = 64, depth = DEFAULT_MAX_DEPTH } = {}) {
+function configureDirSizeCache({ ttlMs = DEFAULT_DIR_SIZE_CACHE_TTL_MS, max = 64, depth = DEFAULT_MAX_DEPTH } = {}) {
     const safeMax = Math.max(1, Number.parseInt(max, 10) || 64);
     const safeTtl = Math.max(0, Number.parseInt(ttlMs, 10) || 0);
     maxDepth = Math.max(1, Number.parseInt(depth, 10) || DEFAULT_MAX_DEPTH);
     cache = new LruCache({ max: safeMax, ttlMs: safeTtl });
 }
 
-async function getDirSizeAsync(dir, depth = 0) {
+async function getDirSizeAsync(dir, depth = 0, ctx = null) {
     if (!fs.existsSync(dir)) return 0;
     if (depth >= maxDepth) {
         logger.warn({ dir, depth, maxDepth }, '目录大小扫描已达到递归深度上限');
         return 0;
     }
+    const scanCtx = ctx || { startTime: Date.now(), itemCount: 0 };
+    if (Date.now() - scanCtx.startTime > DEFAULT_SCAN_TIMEOUT_MS || scanCtx.itemCount >= DEFAULT_MAX_SCAN_ITEMS) {
+        return 0;
+    }
+
     let total = 0;
     try {
         const entries = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
+            scanCtx.itemCount += 1;
+            if (Date.now() - scanCtx.startTime > DEFAULT_SCAN_TIMEOUT_MS || scanCtx.itemCount >= DEFAULT_MAX_SCAN_ITEMS) {
+                break;
+            }
             const fullPath = path.join(dir, entry.name);
             if (entry.isSymbolicLink()) continue;
             if (entry.isDirectory()) {
-                total += await getDirSizeAsync(fullPath, depth + 1);
+                total += await getDirSizeAsync(fullPath, depth + 1, scanCtx);
             } else if (entry.isFile()) {
                 const stats = await fs.promises.stat(fullPath);
                 total += stats.size;
@@ -46,13 +59,25 @@ async function getCachedDirSize(dir) {
         const cached = cache.get(key);
         if (cached !== undefined) return cached;
     }
-    const value = await getDirSizeAsync(key);
-    if (cache.ttlMs > 0) cache.set(key, value);
-    return value;
+    if (inFlightScans.has(key)) {
+        return inFlightScans.get(key);
+    }
+    const scanPromise = (async () => {
+        try {
+            const value = await getDirSizeAsync(key);
+            if (cache.ttlMs > 0) cache.set(key, value);
+            return value;
+        } finally {
+            inFlightScans.delete(key);
+        }
+    })();
+    inFlightScans.set(key, scanPromise);
+    return scanPromise;
 }
 
 function clearDirSizeCache() {
     cache.clear();
+    inFlightScans.clear();
 }
 
 function invalidateDirSizeCacheForPath(_targetPath) {

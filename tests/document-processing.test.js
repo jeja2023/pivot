@@ -350,6 +350,7 @@ test('HTTP OCR adapter calls external service and normalizes result blocks', asy
     try {
         process.env.OCR_SERVICE_URL = `http://127.0.0.1:${address.port}`;
         await setAppSettingAsync(key, process.env.OCR_SERVICE_URL);
+        await refreshAppSettingsCache();
         process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS = '1000';
         const status = await httpOcr.checkAvailability();
         assert.equal(status.available, true);

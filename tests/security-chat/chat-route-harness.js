@@ -110,6 +110,7 @@ async function startChatRouteServer({
     isRagEnabled,
     publicUrl = '',
     autoAgent = false,
+    agentExecutionEnabled,
     agentRunFactory
 } = {}) {
     const express = require('express');
@@ -128,6 +129,7 @@ async function startChatRouteServer({
         isRagEnabled,
         publicUrl,
         autoAgent,
+        agentExecutionEnabled,
         agentRunFactory
     }));
     const server = http.createServer(app);

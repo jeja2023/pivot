@@ -595,7 +595,7 @@ function getRuntimeItemHint(item) {
         rag_index_max_concurrent: '同时执行多少个知识库索引任务。',
         agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。',
         agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
-        chat_auto_agent_enabled: '关闭后普通会话继续使用原有模型流，不会自动创建连续 Agent；手工 Agent 和工作流不受影响。',
+        chat_auto_agent_enabled: '关闭后用户不能选择聊天 Agent 执行模式；普通回答、手工 Agent 和工作流仍可使用。',
         memory_compression_max_concurrent: '后台同时压缩多少个记忆任务。'
     };
     return hintMap[item?.key] || '';

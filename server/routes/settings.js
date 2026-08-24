@@ -311,7 +311,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             globalAiConcurrency = syncGlobalAiConcurrencySettings();
             syncConfiguredRuntimes();
             modelEndpointRuntime = getModelEndpointRuntimeStatus();
-            agentQueue = syncAgentRuntimeConcurrency();
+            agentQueue = await syncAgentRuntimeConcurrency();
             knowledgeIndexQueue = syncKnowledgeDocumentIndexConcurrency();
             memoryCompressionConcurrency = syncMemoryCompressionConcurrency();
         } catch (e) {

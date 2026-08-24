@@ -82,7 +82,7 @@ test('聊天路由拒绝不属于当前用户的会话', async () => {
     }
 });
 
-test('聊天重新生成也会复用原用户消息并进入持久化 Agent', async () => {
+test('聊天重新生成沿用显式 Agent 模式并复用原用户消息', async () => {
     const fixture = createChatFixture({ prefix: 'chat_regenerate_agent' });
     const userMessage = await saveUserMessage({
         sessionId: fixture.sessionId,
@@ -105,6 +105,7 @@ test('聊天重新生成也会复用原用户消息并进入持久化 Agent', as
             sessionId: fixture.sessionId,
             content: '',
             modelId: fixture.modelId,
+            chatMode: 'agent',
             regenerate: true
         });
 
@@ -125,7 +126,7 @@ test('聊天重新生成也会复用原用户消息并进入持久化 Agent', as
     }
 });
 
-test('普通聊天短消息不会因 Agent 目标最小长度校验而接管失败', async () => {
+test('普通回答模式不会因消息内容创建持久化 Agent', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['你好，普通聊天回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_short_message', upstreamUrl: upstream.url });
     let agentCalled = false;
@@ -156,7 +157,7 @@ test('普通聊天短消息不会因 Agent 目标最小长度校验而接管失�
     }
 });
 
-test('普通聊天 Agent 开关关闭时继续使用原有模型流', async () => {
+test('管理员关闭聊天 Agent 执行许可时拒绝显式 Agent 模式', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['普通模型流回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_auto_agent_disabled', upstreamUrl: upstream.url });
     let agentCalled = false;
@@ -173,11 +174,12 @@ test('普通聊天 Agent 开关关闭时继续使用原有模型流', async () =
         const result = await postChat(routeServer.port, {
             sessionId: fixture.sessionId,
             content: '请使用普通模型流回答这个问题',
-            modelId: fixture.modelId
+            modelId: fixture.modelId,
+            chatMode: 'agent'
         });
         assert.equal(agentCalled, false);
-        assert.match(result.streamedContent, /普通模型流回答正常/);
-        assert.equal(readSessionMessages(fixture).filter(row => row.role === 'assistant').length, 1);
+        assert.equal(result.errorEvent?.code, 'AGENT_EXECUTION_DISABLED');
+        assert.equal(readSessionMessages(fixture).filter(row => row.role === 'assistant').length, 0);
     } finally {
         await routeServer.close();
         await upstream.close();
@@ -185,7 +187,35 @@ test('普通聊天 Agent 开关关闭时继续使用原有模型流', async () =
     }
 });
 
-test('普通聊天超过手工 Agent 上限仍能进入连续 Agent', async () => {
+test('普通回答模式即使内容复杂也不会创建持久化 Agent', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['普通回答模式正常。'] });
+    const fixture = createChatFixture({ prefix: 'chat_explicit_normal_mode', upstreamUrl: upstream.url });
+    let agentCalled = false;
+    const routeServer = await startChatRouteServer({
+        fixture,
+        agentExecutionEnabled: true,
+        agentRunFactory: async () => {
+            agentCalled = true;
+            throw new Error('普通回答模式不应创建 Agent');
+        }
+    });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '请分析这份数据并生成一份完整的管理报告',
+            modelId: fixture.modelId,
+            chatMode: 'normal'
+        });
+        assert.equal(agentCalled, false);
+        assert.match(result.streamedContent, /普通回答模式正常/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('显式 Agent 模式允许普通聊天使用较长任务目标', async () => {
     const fixture = createChatFixture({ prefix: 'chat_long_agent_message' });
     let capturedRun = null;
     const longContent = '长消息内容'.repeat(401);
@@ -202,7 +232,8 @@ test('普通聊天超过手工 Agent 上限仍能进入连续 Agent', async () =
         const result = await postChat(routeServer.port, {
             sessionId: fixture.sessionId,
             content: longContent,
-            modelId: fixture.modelId
+            modelId: fixture.modelId,
+            chatMode: 'agent'
         });
         assert.equal(longContent.length > 2000, true);
         assert.equal(capturedRun?.chatAgent, true);
@@ -265,7 +296,8 @@ test('普通聊天兼容旧版 Agent 目标校验并回退模型流', async () =
         const result = await postChat(routeServer.port, {
             sessionId: fixture.sessionId,
             content: '兼容旧版目标校验'.repeat(300),
-            modelId: fixture.modelId
+            modelId: fixture.modelId,
+            chatMode: 'agent'
         });
         assert.match(result.streamedContent, /旧版校验回退回答正常/);
         assert.equal(result.errorEvent, undefined);
@@ -299,6 +331,7 @@ test('重新生成的 Agent 接管失败也会持久化可见错误结果', asyn
             sessionId: fixture.sessionId,
             content: '',
             modelId: fixture.modelId,
+            chatMode: 'agent',
             regenerate: true
         });
         assert.equal(result.errorEvent?.code, 'AGENT_HANDOFF_FAILED');

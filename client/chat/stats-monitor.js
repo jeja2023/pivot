@@ -1,4 +1,4 @@
-window.loadOpsSummary = async function() {
+window.loadOpsSummary = async function(options = {}) {
     try {
         const includeMonitor = isAdminUser();
         const [summaryRes, trendRes, monitorRes] = await Promise.all([
@@ -6,10 +6,13 @@ window.loadOpsSummary = async function() {
             apiFetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
             includeMonitor ? apiFetch(`${API_BASE}/stats/monitor-summary`) : Promise.resolve(null)
         ]);
-        const summary = await summaryRes.json();
-        const trend = await trendRes.json();
+        if (!summaryRes?.ok) {
+            throw new Error(`加载数据概览失败（HTTP ${summaryRes?.status || 500}）`);
+        }
+        const summary = await summaryRes.json().catch(() => ({}));
+        const trend = trendRes?.ok ? (await trendRes.json().catch(() => [])) : [];
         if (monitorRes?.ok) {
-            const monitorSummary = await monitorRes.json();
+            const monitorSummary = await monitorRes.json().catch(() => ({}));
             renderMonitorEndpointLists(monitorSummary.modelEndpoints || {});
         }
         const formatSize = (bytes) => {
@@ -19,15 +22,20 @@ window.loadOpsSummary = async function() {
             return `${(v / 1024).toFixed(1)} KB`;
         };
         const cards = summary.isPersonal
-            ? [['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)]]
-            : [['用户', `${summary.activeUsers}/${summary.users}`], ['会话', summary.sessions], ['消息', summary.messages], ['附件', summary.attachments], ['模型', summary.models], ['Token', formatTokenCount(summary.tokens)], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday]];
+            ? [['会话', summary.sessions ?? 0], ['消息', summary.messages ?? 0], ['附件', summary.attachments ?? 0], ['模型', summary.models ?? 0], ['Token', formatTokenCount(summary.tokens ?? 0)]]
+            : [['用户', `${summary.activeUsers ?? 0}/${summary.users ?? 0}`], ['会话', summary.sessions ?? 0], ['消息', summary.messages ?? 0], ['附件', summary.attachments ?? 0], ['模型', summary.models ?? 0], ['Token', formatTokenCount(summary.tokens ?? 0)], ['占用', formatSize(summary.uploadsSize)], ['审计', summary.auditToday ?? 0]];
         const gridEl = document.getElementById('ops-summary-grid');
-        gridEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(132px, 1fr))';
-        PivotSafeHtml.setHtml(gridEl, cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join(''));
-        renderTrendChart('usage-trend-chart', trend);
+        if (gridEl) {
+            gridEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(132px, 1fr))';
+            PivotSafeHtml.setHtml(gridEl, cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join(''));
+        }
+        renderTrendChart('usage-trend-chart', Array.isArray(trend) ? trend : []);
         window.scheduleSettingsWorkspaceScale?.();
-    } catch (e) { showToast('加载概览失败', 'error'); }
-}
+    } catch (e) {
+        showToast(e.message || '加载概览失败', 'error');
+        if (options.propagateErrors) throw e;
+    }
+};
 
 let monitorTimer = null;
 
@@ -37,12 +45,18 @@ window.loadMonitorSummary = async function(options = {}) {
         const forceRefresh = options?.force === true || options?.refresh === true;
         const suffix = forceRefresh ? '?refresh=1' : '';
         const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`);
-        if (!res.ok) throw new Error('系统监控加载失败');
+        if (!res.ok) throw new Error(`系统监控加载失败（HTTP ${res.status}）`);
         const data = await res.json();
-        const memoryUsedRate = data.system.memory.total > 0 ? data.system.memory.used / data.system.memory.total : 0;
-        const disk = data.system.disk || {};
+        const system = data.system || {};
+        const processInfo = data.process || {};
+        const tokens = data.tokens || {};
+        const httpInfo = data.http || {};
+        const memoryUsed = system.memory?.used || 0;
+        const memoryTotal = system.memory?.total || 1;
+        const memoryUsedRate = memoryTotal > 0 ? memoryUsed / memoryTotal : 0;
+        const disk = system.disk || {};
         const diskUsedRate = Number(disk.usedRatio ?? (disk.total > 0 ? disk.used / disk.total : 0)) || 0;
-        const errorRate = (data.http.errorRate || 0) * 100;
+        const errorRate = (httpInfo.errorRate || 0) * 100;
         const concurrency = data.concurrency || {};
         const gpu = data.gpu || {};
         const endpoints = data.modelEndpoints || {};
@@ -57,14 +71,15 @@ window.loadMonitorSummary = async function(options = {}) {
             concurrencyHintParts.push('GPU 临时保护');
         }
         const gpuProtectionStatus = gpu.overloaded ? '保护中' : (gpu.throttled ? '降档中' : '正常');
+        const loadAvgStr = Array.isArray(system.loadAverage) ? system.loadAverage.map(v => Number(v || 0).toFixed(2)).join(' / ') : '0.00 / 0.00 / 0.00';
         const cards = [
-            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrencyEffectiveMax)}`, concurrencyHintParts.join(' \u00b7 ')],
-            ['今日 Token', formatTokenCount(data.tokens.today), '累计 ' + formatTokenCount(data.tokens.total)],
-            ['今日消息', formatMetricNumber(data.tokens.todayMessages), `15min 活跃用户: ${data.activeUsers}`],
-            ['请求总数', formatMetricNumber(data.http.requests), `错误率 ${errorRate.toFixed(2)}%`],
-            ['平均延迟', `${formatMetricNumber(data.http.avgLatencyMs, 1)} ms`, `P95 ${formatMetricNumber(data.http.p95LatencyMs, 1)} ms`],
-            ['进程内存', formatBytes(data.process.memory.rss), `堆 ${formatBytes(data.process.memory.heapUsed)}`],
-            ['系统负载', data.system.loadAverage.map(v => Number(v).toFixed(2)).join(' / '), `${data.system.cpuCount} 核 CPU`],
+            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrencyEffectiveMax)}`, concurrencyHintParts.join(' · ')],
+            ['今日 Token', formatTokenCount(tokens.today), '累计 ' + formatTokenCount(tokens.total)],
+            ['今日消息', formatMetricNumber(tokens.todayMessages), `15min 活跃用户: ${data.activeUsers || 0}`],
+            ['请求总数', formatMetricNumber(httpInfo.requests), `错误率 ${errorRate.toFixed(2)}%`],
+            ['平均延迟', `${formatMetricNumber(httpInfo.avgLatencyMs, 1)} ms`, `P95 ${formatMetricNumber(httpInfo.p95LatencyMs, 1)} ms`],
+            ['进程内存', formatBytes(processInfo.memory?.rss), `堆 ${formatBytes(processInfo.memory?.heapUsed)}`],
+            ['系统负载', loadAvgStr, `${system.cpuCount || 1} 核 CPU`],
             ['维护任务', maintenance.running ? '运行中' : '未启动', `审计保留 ${maintenance.retentionDays || '-'} 天`]
         ];
         const cardIcons = {
@@ -96,27 +111,27 @@ window.loadMonitorSummary = async function(options = {}) {
 
         // 恢复详细资源展示 (9行)
         PivotSafeHtml.setHtml(document.getElementById('monitor-resource-list'), [
-            ['运行主机', `<strong>${escapeHtml(data.system.hostname)}</strong>`],
-            ['操作系统', `<strong>${escapeHtml(`${data.system.type} ${data.system.release}`)}</strong>`],
-            ['Node 版本', `<strong>${escapeHtml(`${data.process.version} (${data.process.arch})`)}</strong>`],
-            ['CPU 型号', `<strong>${escapeHtml(data.system.cpuModel)}</strong>`],
-            ['系统时长', `<strong>${formatDuration(data.system.uptime)}</strong>`],
-            ['进程时长', `<strong>${formatDuration(data.process.uptimeSeconds)}</strong>`],
+            ['运行主机', `<strong>${escapeHtml(system.hostname || '-')}</strong>`],
+            ['操作系统', `<strong>${escapeHtml(`${system.type || ''} ${system.release || ''}`.trim() || '-')}</strong>`],
+            ['Node 版本', `<strong>${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}</strong>`],
+            ['CPU 型号', `<strong>${escapeHtml(system.cpuModel || '-')}</strong>`],
+            ['系统时长', `<strong>${formatDuration(system.uptime || 0)}</strong>`],
+            ['进程时长', `<strong>${formatDuration(processInfo.uptimeSeconds || 0)}</strong>`],
             ['系统内存', `<div class="monitor-meter-cell">
-                <strong>${formatBytes(data.system.memory.used)} / ${formatBytes(data.system.memory.total)} (${memBarWidth}%)</strong>
+                <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
                 <div class="monitor-meter-track">
                     <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
                 </div>
             </div>`],
             ['硬盘空间', `<div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')}">
-                <strong>${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)</strong>
+                <strong>${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)</strong>
                 <div class="monitor-meter-track">
                     <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
                 </div>
             </div>`],
-            ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free)}</strong>`],
-            ['进程 CPU', `<strong>${data.process.cpuSeconds.user.toFixed(1)}s U / ${data.process.cpuSeconds.system.toFixed(1)}s S</strong>`],
-            ['运行平台', `<strong>${escapeHtml(data.system.platform)}</strong>`]
+            ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>`],
+            ['进程 CPU', `<strong>${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s U / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s S</strong>`],
+            ['运行平台', `<strong>${escapeHtml(system.platform || '-')}</strong>`]
         ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
 
         const healthEl = document.getElementById('monitor-health-maintenance-list');
@@ -170,7 +185,7 @@ window.loadMonitorSummary = async function(options = {}) {
                     </strong>
                 </div>`;
             }).join('')
-            : `<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>`;
+            : '<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>';
 
         const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>本机指标：</strong>仅显示 Pivot 部署服务器上的 NVIDIA GPU 与全局并发保护；模型端点本地/远端状态请查看“模型端点状态”。</div>';
 
@@ -193,7 +208,7 @@ window.loadMonitorSummary = async function(options = {}) {
             gpuRows
         ].join(''));
 
-        const models = data.tokens.byModel || [];
+        const models = tokens.byModel || [];
         PivotSafeHtml.setHtml(document.getElementById('monitor-model-list'), models.length
             ? models.map(item => {
                 const modelName = item.model_name || '未知模型';
@@ -207,14 +222,17 @@ window.loadMonitorSummary = async function(options = {}) {
         // 4. 数据与知识库渲染
         const ragStorageEl = document.getElementById('monitor-rag-storage-list');
         if (ragStorageEl) {
+            const ragData = data.rag || {};
+            const storageData = data.storage || {};
+            const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
             PivotSafeHtml.setHtml(ragStorageEl, [
-                ['检索总数', `<strong>${formatMetricNumber(data.rag.retrievals)} 次</strong>`],
-                ['命中率', `<strong>${(Number(data.rag.hitRate || 0) * 100).toFixed(1)}%</strong>`],
-                ['缓存命中率', `<strong>${(Number(data.rag.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
-                ['平均耗时', `<strong>${data.rag.avgRetrievalMs.toFixed(1)} ms</strong>`],
-                ['索引分片', `<strong>${formatMetricNumber(data.rag.chunksIndexed)}</strong>`],
-                ['数据库大小', `<strong>${formatBytes(data.storage.db)}</strong>`],
-                ['附件总存储', `<strong>${formatBytes(data.storage.uploads)}</strong>`]
+                ['检索总数', `<strong>${formatMetricNumber(ragData.retrievals)} 次</strong>`],
+                ['命中率', `<strong>${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%</strong>`],
+                ['缓存命中率', `<strong>${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
+                ['平均耗时', `<strong>${avgRetrieval} ms</strong>`],
+                ['索引分片', `<strong>${formatMetricNumber(ragData.chunksIndexed)}</strong>`],
+                ['数据库大小', `<strong>${formatBytes(storageData.db)}</strong>`],
+                ['附件总存储', `<strong>${formatBytes(storageData.uploads)}</strong>`]
             ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
         }
 
@@ -284,6 +302,7 @@ window.loadMonitorSummary = async function(options = {}) {
         window.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
         showToast(e.message || '系统监控加载失败', 'error');
+        if (options.propagateErrors) throw e;
     }
 };
 

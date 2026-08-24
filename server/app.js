@@ -570,7 +570,7 @@ app.use('/api', createChatRouter({
     retrieveContext,
     isRagEnabled: () => true,
     publicUrl: appConfig.publicUrl,
-    autoAgent: () => getChatAgentRuntimeConfig().autoAgentEnabled
+    agentExecutionEnabled: () => getChatAgentRuntimeConfig().agentExecutionEnabled
 }));
 
 app.use('/v1', createOpenAIRouter({

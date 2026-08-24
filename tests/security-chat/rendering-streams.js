@@ -154,6 +154,10 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(ragCore, /data-rag-debug-chat/);
     assert.match(ragCore, /pivot_chat_rag_enabled/);
     assert.match(chatShellPartial, /chat-tool-status/);
+    assert.match(chatShellPartial, /id="chat-mode-trigger"/);
+    assert.match(chatShellPartial, /data-chat-mode-option="normal"/);
+    assert.match(chatShellPartial, /data-chat-mode-option="agent"/);
+    assert.match(appWorkspaces, /CHAT_MODE_KEY/);
     assert.match(appWorkspaces, /CHAT_TOOL_STATUS_COPY/);
     assert.match(appWorkspaces, /updateChatToolReadiness/);
     assert.match(appWorkspaces, /fetchChatToolReadiness/);

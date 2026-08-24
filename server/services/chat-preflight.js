@@ -22,6 +22,7 @@ function buildChatRequestState(req) {
         content,
         displayContent,
         regenerate: normalizeRegenerateFlag(body.regenerate),
+        chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
         mcpEnabled: Boolean(body.mcpEnabled) && Boolean(body.mcpConfirmed),
         mcpToolAllowlist,
         ragEnabled: body.ragEnabled !== false,

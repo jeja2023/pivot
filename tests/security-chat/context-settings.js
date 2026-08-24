@@ -142,17 +142,19 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
     }
 });
 
-test('普通聊天连续 Agent 开关可从运行时配置即时读写', async () => {
+test('聊天 Agent 执行许可可从运行时配置即时读写', async () => {
     const key = RUNTIME_SETTING_KEYS.chatAutoAgentEnabled;
     const previous = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key);
     try {
         const disabled = await saveRuntimeConfigAsync({ [key]: 0 }, null);
         assert.equal(disabled.error, undefined);
         assert.equal(getChatAgentRuntimeConfig().autoAgentEnabled, false);
+        assert.equal(getChatAgentRuntimeConfig().agentExecutionEnabled, false);
 
         const enabled = await saveRuntimeConfigAsync({ [key]: 1 }, null);
         assert.equal(enabled.error, undefined);
         assert.equal(getChatAgentRuntimeConfig().autoAgentEnabled, true);
+        assert.equal(getChatAgentRuntimeConfig().agentExecutionEnabled, true);
     } finally {
         if (previous) {
             db.prepare(`

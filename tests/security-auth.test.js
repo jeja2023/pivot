@@ -176,6 +176,9 @@ function createConfigSandbox(fetchImpl) {
     const sandbox = {
         console,
         URL,
+        AbortController,
+        setTimeout,
+        clearTimeout,
         document: { documentElement: { dataset: {} } },
         localStorage: createMemoryStorage({ pivot_token: 'legacy-token' }),
         sessionStorage: createMemoryStorage(),
@@ -243,6 +246,24 @@ test('apiFetch returns to login when refresh token is no longer valid', async ()
     assert.equal(showAuthCount, 1);
     assert.equal(closedRealtimeCount, 1);
     assert.equal(sandbox.sessionStorage.getItem('pivot_csrf_token'), null);
+});
+
+test('apiFetch aborts a stalled request and exposes a retryable timeout', async () => {
+    let requestSignal = null;
+    const sandbox = createConfigSandbox((_url, options = {}) => new Promise((_resolve, reject) => {
+        requestSignal = options.signal;
+        options.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+        }, { once: true });
+    }));
+
+    await assert.rejects(
+        () => sandbox.apiFetch('/api/settings', { timeoutMs: 20 }),
+        error => error.code === 'CLIENT_REQUEST_TIMEOUT' && /请求超时/.test(error.message)
+    );
+    assert.equal(requestSignal?.aborted, true);
 });
 
 test('outbound URL guard blocks sensitive SSRF targets', async () => {

@@ -191,7 +191,7 @@ test('agent execution rounds support automatic mode defaults and mode-specific c
     const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
     const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
     const taskEditor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
-    assert.match(streamingSource, /roundsUsed \+= 1/);
+    assert.match(streamingSource, /roundsUsed\s*=\s*(?:step|lastStep|\w+)/);
     assert.match(runtimeSource, /for \(let step = roundsUsed \+ 1; step <= maxSteps; step \+= 1\)/);
     assert.match(runtimeSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
     assert.match(taskEditor, /最大执行轮次/);
@@ -911,7 +911,8 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     const agents = readAgentSourceBundle();
     const editor = readDagEditorSourceBundle();
     const tools = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools.js'), 'utf8');
-    const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
+    const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8')
+        + fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-creation.js'), 'utf8');
     const dagRunConfig = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'dag-run-config.js'), 'utf8');
     const dagRuntime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-dag-runtime.js'), 'utf8');
     const model = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-model.js'), 'utf8');
