@@ -6,11 +6,12 @@ const { logger } = require('../logger');
 const DEFAULT_MAX_DEPTH = 32;
 const DEFAULT_SCAN_TIMEOUT_MS = 2500;
 const DEFAULT_MAX_SCAN_ITEMS = 5000;
-const DEFAULT_DIR_SIZE_CACHE_TTL_MS = 60_000;
+const DEFAULT_DIR_SIZE_CACHE_TTL_MS = 300_000;
 
 let cache = new LruCache({ max: 64, ttlMs: DEFAULT_DIR_SIZE_CACHE_TTL_MS });
 let maxDepth = DEFAULT_MAX_DEPTH;
 const inFlightScans = new Map();
+const lastKnownSizes = new Map();
 
 function configureDirSizeCache({ ttlMs = DEFAULT_DIR_SIZE_CACHE_TTL_MS, max = 64, depth = DEFAULT_MAX_DEPTH } = {}) {
     const safeMax = Math.max(1, Number.parseInt(max, 10) || 64);
@@ -53,19 +54,13 @@ async function getDirSizeAsync(dir, depth = 0, ctx = null) {
     return total;
 }
 
-async function getCachedDirSize(dir) {
-    const key = path.resolve(dir);
-    if (cache.ttlMs > 0) {
-        const cached = cache.get(key);
-        if (cached !== undefined) return cached;
-    }
-    if (inFlightScans.has(key)) {
-        return inFlightScans.get(key);
-    }
+function triggerBackgroundScan(key) {
+    if (inFlightScans.has(key)) return inFlightScans.get(key);
     const scanPromise = (async () => {
         try {
             const value = await getDirSizeAsync(key);
             if (cache.ttlMs > 0) cache.set(key, value);
+            lastKnownSizes.set(key, value);
             return value;
         } finally {
             inFlightScans.delete(key);
@@ -75,9 +70,24 @@ async function getCachedDirSize(dir) {
     return scanPromise;
 }
 
+async function getCachedDirSize(dir) {
+    const key = path.resolve(dir);
+    if (cache.ttlMs > 0) {
+        const cached = cache.get(key);
+        if (cached !== undefined) return cached;
+    }
+    // SWR (Stale-While-Revalidate): 如果有历史缓存值，立即返回历史值并在后台异步刷新，绝不阻塞当前响应
+    if (lastKnownSizes.has(key)) {
+        triggerBackgroundScan(key);
+        return lastKnownSizes.get(key);
+    }
+    return triggerBackgroundScan(key);
+}
+
 function clearDirSizeCache() {
     cache.clear();
     inFlightScans.clear();
+    lastKnownSizes.clear();
 }
 
 function invalidateDirSizeCacheForPath(_targetPath) {

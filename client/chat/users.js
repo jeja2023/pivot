@@ -57,7 +57,7 @@ window.loadUsers = async function(page = 1) {
                     ${canViewUserRecords ? renderUserActionButton('records', '记录', u) : ''}
                     ${renderUserActionButton('edit', '编辑', u)}
                     ${u.username !== 'admin' ? renderUserActionButton('reset-password', '重置密码', u.id) : ''}
-                    ${u.id !== currentUser.id && u.username !== 'admin' ? renderUserActionButton('delete', '删除', u.id, 'btn-danger') : ''}
+                    ${u.id !== currentUser?.id && u.username !== 'admin' ? renderUserActionButton('delete', '删除', u.id, 'btn-danger') : ''}
                 </div>
             </td>
         </tr>
@@ -65,7 +65,7 @@ window.loadUsers = async function(page = 1) {
     }).join(''));
     renderPagination('users', totalCount, requestedPage);
     window.scheduleSettingsWorkspaceScale?.();
-}
+};
 
 document.getElementById('user-list-body')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-user-action][data-user-id]');

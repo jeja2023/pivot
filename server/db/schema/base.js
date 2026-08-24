@@ -1,4 +1,4 @@
-﻿const { db } = require('../connection');
+const { db } = require('../connection');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
 const { enterpriseTablesSql, enterpriseIndexesSql } = require('./enterprise');
 
@@ -1412,7 +1412,11 @@ function baseIndexesSql() {
         -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_doc ON rag_feedback(user_id, doc_name);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp_user ON audit_logs(timestamp, user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_user_timestamp ON audit_logs(user_id, timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_user_deleted ON messages(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_model_usage_created ON model_usage_events(created_at);
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_created_at ON api_call_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_created ON knowledge_docs(created_at);

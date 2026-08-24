@@ -305,16 +305,35 @@ window.loadMonitorSummary = async function(options = {}) {
         if (options.propagateErrors) throw e;
     }
 };
+function clearMonitorRefreshTimer() {
+    if (monitorTimer) {
+        clearTimeout(monitorTimer);
+        monitorTimer = null;
+    }
+}
+
+window.Pivot?.exposeModule?.('settings.monitor', {
+    clearMonitorRefreshTimer
+}, ['clearMonitorRefreshTimer']);
 
 window.refreshMonitorSummary = function(options = {}) {
     return window.loadMonitorSummary({ ...options, force: true });
 };
+
 function scheduleMonitorRefresh() {
-    clearTimeout(monitorTimer);
-    const visible = !document.getElementById('tab-content-monitor')?.classList.contains('hidden');
+    clearMonitorRefreshTimer();
+    const isSettingsActive = document.body?.dataset?.activeWorkspace === 'settings';
+    const monitorTab = document.getElementById('tab-content-monitor');
+    const visible = isSettingsActive && monitorTab && !monitorTab.classList.contains('hidden');
     const enabled = document.getElementById('monitor-auto-refresh')?.checked;
     if (visible && enabled) {
-        monitorTimer = setTimeout(() => window.loadMonitorSummary(), 10000);
+        monitorTimer = setTimeout(() => {
+            const stillActive = document.body?.dataset?.activeWorkspace === 'settings';
+            const stillVisible = stillActive && !document.getElementById('tab-content-monitor')?.classList.contains('hidden');
+            if (stillVisible) {
+                window.loadMonitorSummary();
+            }
+        }, 10000);
     }
 }
 

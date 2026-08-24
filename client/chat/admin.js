@@ -297,6 +297,7 @@ window.openAdminPanel = async (options = {}) => {
 };
 
 window.closeModal = () => {
+    window.clearMonitorRefreshTimer?.();
     document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
     return window.showMainWorkspace?.('chat');
 };
@@ -312,6 +313,9 @@ window.switchTab = async (tab, options = {}) => {
     }
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
+    if (tab !== 'monitor') {
+        window.clearMonitorRefreshTimer?.();
+    }
     const currentTab = document.querySelector('.admin-tab.active')?.id?.replace(/^tab-/, '');
     if (!options.skipDirtyCheck && currentTab && currentTab !== tab && window.settingsHasUnsavedChanges?.()) {
         const confirmed = await (window.showConfirm?.(

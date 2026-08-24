@@ -861,8 +861,8 @@ window.showMainWorkspace = function(view = 'chat') {
     return target;
 };
 
-let settingsWorkspaceScaleObserver = null;
-let settingsWorkspaceScaleRaf = 0;
+let settingsWorkspaceScaleObserver = null, settingsWorkspaceScaleRaf = 0;
+let lastObservedSettingsWidth = 0, lastObservedSettingsHeight = 0;
 
 window.scheduleSettingsWorkspaceScale = function() {
     if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
@@ -878,12 +878,19 @@ window.updateSettingsWorkspaceScale = function() {
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (!stage || !canvas || !content) return;
     if (window.ResizeObserver && !settingsWorkspaceScaleObserver) {
-        settingsWorkspaceScaleObserver = new window.ResizeObserver(() => {
+        settingsWorkspaceScaleObserver = new window.ResizeObserver((entries) => {
             if (document.body?.dataset.activeWorkspace === 'settings') {
-                window.scheduleSettingsWorkspaceScale?.();
+                const entry = entries?.[0];
+                const width = entry?.contentRect?.width || content.clientWidth;
+                const height = entry?.contentRect?.height || content.clientHeight;
+                if (Math.abs(width - lastObservedSettingsWidth) > 1 || Math.abs(height - lastObservedSettingsHeight) > 1) {
+                    lastObservedSettingsWidth = width;
+                    lastObservedSettingsHeight = height;
+                    window.scheduleSettingsWorkspaceScale?.();
+                }
             }
         });
-        settingsWorkspaceScaleObserver.observe(canvas);
+        settingsWorkspaceScaleObserver.observe(content);
     }
     const baseWidth = 1540;
     const contentStyle = window.getComputedStyle(content);
@@ -891,9 +898,6 @@ window.updateSettingsWorkspaceScale = function() {
     const verticalPadding = (parseFloat(contentStyle.paddingTop) || 0) + (parseFloat(contentStyle.paddingBottom) || 0);
     const availableWidth = Math.max(1, content.clientWidth - horizontalPadding - 2);
     const availableHeight = Math.max(1, content.clientHeight - verticalPadding - 2);
-    // Narrow settings panes use their real width so controls remain readable.
-    // Wide tables keep their own horizontal scroll instead of shrinking the
-    // entire page to an unusable thumbnail.
     const useResponsiveCanvas = availableWidth < 1100;
     const layoutWidth = useResponsiveCanvas ? availableWidth : Math.max(baseWidth, availableWidth);
     const scale = useResponsiveCanvas ? 1 : Math.min(1, availableWidth / baseWidth);
@@ -910,17 +914,13 @@ window.updateSettingsWorkspaceScale = function() {
         return;
     }
     canvas.style.removeProperty('--settings-canvas-height');
-    window.requestAnimationFrame(() => {
-        const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
-        const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
-        stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
-    });
+    const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
+    const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
+    stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
 };
 
 window.addEventListener('resize', () => {
-    if (document.body?.dataset.activeWorkspace === 'settings') {
-        window.scheduleSettingsWorkspaceScale?.();
-    }
+    if (document.body?.dataset.activeWorkspace === 'settings') window.scheduleSettingsWorkspaceScale?.();
 });
 
 function createLazyWorkspaceEntrypoint(group, functionName) {

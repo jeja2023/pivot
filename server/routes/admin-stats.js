@@ -57,7 +57,14 @@ function formatUsageRoleLabel(role) {
     return '其它调用';
 }
 
+let modelEndpointsCache = { data: null, expires: 0, key: '' };
+
 async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {}) {
+    const cacheKey = `${publicUrl}|${Array.isArray(requestHosts) ? requestHosts.slice().sort().join(',') : ''}`;
+    const now = Date.now();
+    if (modelEndpointsCache.data && modelEndpointsCache.expires > now && modelEndpointsCache.key === cacheKey) {
+        return modelEndpointsCache.data;
+    }
     const rows = await query(`
         SELECT id, name, url, monitor_url, max_concurrent
         FROM models
@@ -113,6 +120,7 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
     summary.gpuScope = summary.hasRemoteModels
         ? (summary.hasLocalModels ? 'mixed' : 'local_only_not_model_host')
         : 'local';
+    modelEndpointsCache = { data: summary, expires: now + 30000, key: cacheKey };
     return summary;
 }
 
@@ -120,48 +128,32 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
 // 日期工具（北京时间，SQLite 格式字符串比较 or PG AT TIME ZONE）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 计算"北京当日"的半开区间边界 [start, nextStart)
 function getBeijingDayBounds(date = new Date()) {
-    const day = getBeijingTimestamp(date).slice(0, 10); // YYYY-MM-DD（北京当日）
-    const start = `${day} 00:00:00`;
+    const day = getBeijingTimestamp(date).slice(0, 10);
     const next = new Date(`${day}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
-    const nextStart = `${next.toISOString().slice(0, 10)} 00:00:00`;
-    return { start, nextStart };
+    return { start: `${day} 00:00:00`, nextStart: `${next.toISOString().slice(0, 10)} 00:00:00` };
 }
 
-// 将一个 'YYYY-MM-DD' 日期字符串按 UTC 算术偏移 deltaDays 天
 function shiftDayString(day, deltaDays) {
     const d = new Date(`${day}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() + deltaDays);
     return d.toISOString().slice(0, 10);
 }
 
-// "最近 N 天"的起始边界（含今天）
 function getBeijingDaysAgoStart(days, date = new Date()) {
     const today = getBeijingTimestamp(date).slice(0, 10);
     return `${shiftDayString(today, -Math.abs(days))} 00:00:00`;
 }
 
-// 某个北京日期（'YYYY-MM-DD'）的次日 00:00:00
 function getBeijingDateExclusiveEnd(day) {
     return `${shiftDayString(day, 1)} 00:00:00`;
 }
 
-// "当前北京时刻向前 N 分钟"的时间戳
 function getBeijingMinutesAgoTimestamp(minutes, date = new Date()) {
     return getBeijingTimestamp(new Date(date.getTime() - minutes * 60 * 1000));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SQL 构建工具
-// created_at 列在 SQLite 存为北京时间字符串，在 PG 中存为 timestamptz（UTC）。
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 生成 token 使用聚合的 UNION 子查询（messages + model_usage_events）。
- * innerWhere 中的条件使用位置参数占位符 ?，由调用方管理参数数组。
- */
 function tokenUsageSubquery(innerWhere = '') {
     const whereClause = innerWhere ? `WHERE ${innerWhere}` : '';
     return `
@@ -169,46 +161,26 @@ function tokenUsageSubquery(innerWhere = '') {
                CASE WHEN role = 'user' THEN token_count ELSE 0 END AS input_tokens,
                CASE WHEN role != 'user' THEN token_count ELSE 0 END AS output_tokens,
                created_at, 'message' AS usage_source
-        FROM messages
-        ${whereClause}
+        FROM messages ${whereClause}
         UNION ALL
         SELECT id, user_id, model_id, COALESCE(source, 'api') AS role, token_count,
-               COALESCE(input_tokens, 0) AS input_tokens,
-               COALESCE(output_tokens, 0) AS output_tokens,
+               COALESCE(input_tokens, 0) AS input_tokens, COALESCE(output_tokens, 0) AS output_tokens,
                created_at, 'api' AS usage_source
-        FROM model_usage_events
-        ${whereClause}
+        FROM model_usage_events ${whereClause}
     `;
 }
 
-function balancedInputSql(alias) {
-    return `COALESCE(${alias}.input_tokens, 0)`;
-}
-
-function balancedOutputSql(alias) {
-    return `GREATEST(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
-}
-
+const balancedInputSql = alias => `COALESCE(${alias}.input_tokens, 0)`;
+const balancedOutputSql = alias => `GREATEST(COALESCE(${alias}.output_tokens, 0), COALESCE(${alias}.token_count, 0) - COALESCE(${alias}.input_tokens, 0))`;
 function usageCostSql(usageAlias = 'usage', modelAlias = 'm') {
     const expr = `((${balancedInputSql(usageAlias)}) * COALESCE(${modelAlias}.input_price_per_million, 0) + (${balancedOutputSql(usageAlias)}) * COALESCE(${modelAlias}.output_price_per_million, 0)) / 1000000.0`;
     return `ROUND((${expr})::numeric, 6)`;
 }
 
-/**
- * 生成 created_at 时间范围条件（PostgreSQL timestamptz）。
- * 返回 { conditions: string[], params: any[] }
- */
 function buildDateRangeConditions(startTs, endTs) {
-    const conditions = [];
-    const params = [];
-    if (startTs) {
-        conditions.push("created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai')");
-        params.push(startTs);
-    }
-    if (endTs) {
-        conditions.push("created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')");
-        params.push(endTs);
-    }
+    const conditions = [], params = [];
+    if (startTs) { conditions.push("created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai')"); params.push(startTs); }
+    if (endTs) { conditions.push("created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')"); params.push(endTs); }
     return { conditions, params };
 }
 
@@ -233,11 +205,18 @@ async function getMonitorKnowledgeChunkCount() {
     return Number(row?.count || 0);
 }
 
-const MONITOR_SUMMARY_CACHE_TTL_MS = 5000;
+const MONITOR_SUMMARY_CACHE_TTL_MS = 8000;
 let monitorSummaryCache = { data: null, expires: 0 };
+const OPS_SUMMARY_CACHE_TTL_MS = 8000;
+const opsSummaryCache = new Map();
+const TREND_CACHE_TTL_MS = 15000;
+const trendCache = new Map();
 
 function invalidateMonitorSummaryCache() {
     monitorSummaryCache = { data: null, expires: 0 };
+    opsSummaryCache.clear();
+    trendCache.clear();
+    modelEndpointsCache = { data: null, expires: 0, key: '' };
 }
 
 function createAdminStatsRouter({
@@ -298,20 +277,16 @@ function createAdminStatsRouter({
             uploadsSize = await getCachedDirSize(uploadsDir);
         } catch(e) {}
 
-        // 北京当日 token 统计
+        // 北京当日 token 统计（使用快速双表聚合，避免大子查询物化）
         const dayBounds = getBeijingDayBounds();
-        const { conditions: dayConditions, params: dayParams } = buildDateRangeConditions(dayBounds.start, dayBounds.nextStart);
-        const dayWhere = dayConditions.join(' AND ');
-
-        // 总 token 统计（无日期过滤）
         const todayTokensRow = await queryOne(
-            `SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery(dayWhere)}) usage`,
-            dayParams.length ? [...dayParams, ...dayParams] : []
+            "SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai') AND created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events WHERE created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai') AND created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai'))) AS total",
+            [dayBounds.start, dayBounds.nextStart, dayBounds.start, dayBounds.nextStart]
         );
         const todayTokens = Number(todayTokensRow?.total || 0);
 
         const totalTokensRow = await queryOne(
-            `SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery()}) usage`
+            'SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events)) AS total'
         );
         const totalTokens = Number(totalTokensRow?.total || 0);
 
@@ -321,6 +296,8 @@ function createAdminStatsRouter({
         );
         const todayMessages = Number(todayMessagesRow?.count || 0);
 
+        const { conditions: dayConditions, params: dayParams } = buildDateRangeConditions(dayBounds.start, dayBounds.nextStart);
+        const dayWhere = dayConditions.join(' AND ');
         const tokenByModel = await query(
             `SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
              FROM (${tokenUsageSubquery(dayWhere)}) usage
@@ -523,9 +500,16 @@ function createAdminStatsRouter({
 
     router.get('/trend', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
+        const cacheKey = canViewAll ? 'all' : `user:${req.user.id}`;
+        const cacheNow = Date.now();
+        const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1';
+        if (!forceRefresh) {
+            const cached = trendCache.get(cacheKey);
+            if (cached && cached.expires > cacheNow) return res.json(cached.data);
+        }
+
         const innerConditions = [];
         const innerParams = [];
-
         const { conditions: dateConditions, params: dateParams } = buildDateRangeConditions(getBeijingDaysAgoStart(30), null);
         innerConditions.push(...dateConditions);
         innerParams.push(...dateParams);
@@ -537,7 +521,6 @@ function createAdminStatsRouter({
 
         const innerWhere = innerConditions.join(' AND ');
         const dayExpr = dateGroupExpr('usage.created_at');
-        // UNION ALL: 参数需传两份（messages + model_usage_events 各一份）
         const trend = await query(
             `SELECT ${dayExpr} as day, SUM(token_count) as tokens
              FROM (${tokenUsageSubquery(innerWhere)}) usage
@@ -545,6 +528,7 @@ function createAdminStatsRouter({
              ORDER BY day`,
             [...innerParams, ...innerParams]
         );
+        trendCache.set(cacheKey, { data: trend, expires: Date.now() + TREND_CACHE_TTL_MS });
         res.json(trend);
     }));
 
@@ -722,6 +706,14 @@ function createAdminStatsRouter({
 
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
+        const cacheKey = canViewAll ? 'all' : `user:${req.user.id}`;
+        const cacheNow = Date.now();
+        const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1';
+        if (!forceRefresh) {
+            const cached = opsSummaryCache.get(cacheKey);
+            if (cached && cached.expires > cacheNow) return res.json(cached.data);
+        }
+
         if (canViewAll) {
             const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
                 ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -743,7 +735,7 @@ function createAdminStatsRouter({
                         queryOne('SELECT COUNT(*) AS count FROM messages'),
                         queryOne('SELECT COUNT(*) AS count FROM attachments'),
                         queryOne('SELECT COUNT(*) AS count FROM models'),
-                        queryOne(`SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery()}) usage`)
+                        queryOne('SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events)) AS total')
                     ]);
                     return {
                         users: Number(users?.count || 0),
@@ -760,7 +752,7 @@ function createAdminStatsRouter({
                 getCachedDirSize(dataDir)
             ]);
 
-            res.json({
+            const payload = {
                 users: counts.users,
                 activeUsers: counts.activeUsers,
                 sessions: counts.sessions,
@@ -772,7 +764,9 @@ function createAdminStatsRouter({
                 dataSize,
                 auditToday: counts.auditToday,
                 isPersonal: false
-            });
+            };
+            opsSummaryCache.set(cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
+            res.json(payload);
         } else {
             const uid = req.user.id;
             const [sessions, messages, attachments, models, tokens] = await Promise.all([
@@ -780,16 +774,18 @@ function createAdminStatsRouter({
                 queryOne('SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND deleted_at IS NULL', [uid]),
                 queryOne('SELECT COUNT(*) AS count FROM attachments WHERE user_id = ? AND deleted_at IS NULL', [uid]),
                 queryOne('SELECT COUNT(*) AS count FROM models WHERE user_id IS NULL OR user_id = ?', [uid]),
-                queryOne(`SELECT COALESCE(SUM(token_count), 0) AS total FROM (${tokenUsageSubquery('user_id = ?')}) usage`, [uid, uid])
+                queryOne('SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE user_id = ? AND deleted_at IS NULL) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events WHERE user_id = ?)) AS total', [uid, uid])
             ]);
-            res.json({
+            const payload = {
                 sessions: Number(sessions?.count || 0),
                 messages: Number(messages?.count || 0),
                 attachments: Number(attachments?.count || 0),
                 models: Number(models?.count || 0),
                 tokens: Number(tokens?.total || 0),
                 isPersonal: true
-            });
+            };
+            opsSummaryCache.set(cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
+            res.json(payload);
         }
     }));
 

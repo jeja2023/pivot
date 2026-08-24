@@ -84,7 +84,7 @@ window.loadModels = async function(page = 1) {
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
         const isSuperAdmin = isSuperAdminUser();
-        const isMyModel = String(m.user_id) === String(currentUser.id);
+        const isMyModel = String(m.user_id) === String(currentUser?.id);
         
         let defaultBtn = '';
         if (isSuperAdmin) {
@@ -105,7 +105,7 @@ window.loadModels = async function(page = 1) {
             }
         }
 
-        const isOwnModel = String(m.user_id) === String(currentUser.id);
+        const isOwnModel = String(m.user_id) === String(currentUser?.id);
         const canEdit = isOwnModel || (isSuperAdmin && isGlobalModel);
         const canDelete = canEdit;
         
