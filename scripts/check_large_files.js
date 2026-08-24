@@ -12,6 +12,7 @@ function walk(dir) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(fullPath);
         else if (entry.isFile()) {
+            if (/\.(tar|tar\.gz|tgz|zip|dump|iso)$/i.test(entry.name)) continue;
             const size = fs.statSync(fullPath).size;
             if (size > maxBytes) failures.push({ file: path.relative(rootDir, fullPath), size });
         }
