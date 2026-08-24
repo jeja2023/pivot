@@ -38,7 +38,10 @@ async function trackReattachedChatAgent(runId, sessionId, entry) {
                 }
                 return;
             }
-            if (String(currentSessionId || '') === String(sessionId)) updateReattachedAgentMessage(entry, status);
+            if (String(currentSessionId || '') === String(sessionId)) {
+                const progressText = window.chatAgentProgressText?.(detail, status) || chatAgentStatusText(status);
+                updateReattachedAgentMessage(entry, status, progressText);
+            }
         } catch (_error) {
             if (String(currentSessionId || '') === String(sessionId)) updateReattachedAgentMessage(entry, 'running', '连续 Agent 仍在后台运行，暂时无法读取最新状态');
         }

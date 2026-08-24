@@ -367,13 +367,17 @@ body.is-main-workspace-full .chat-container {
 .chat-agent-controls {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 4px;
+    margin-top: 6px;
 }
 .chat-agent-controls button {
-    min-height: 28px;
-    padding: 3px 8px;
-    font-size: 0.74rem;
+    width: auto;
+    height: 26px;
+    min-height: 26px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    line-height: 1;
 }
 
 .message-content img {

@@ -189,6 +189,53 @@ async function cancelChatAgentRun(runId) {
     return result;
 }
 
+async function openChatAgentRunDetail(runId) {
+    if (!runId) return null;
+    if (typeof window.openAgentRun !== 'function') {
+        if (typeof window.ensureWorkspaceScripts !== 'function') {
+            throw new Error('任务详情模块尚未初始化，请刷新页面后重试');
+        }
+        await window.ensureWorkspaceScripts('agent');
+    }
+    if (typeof window.openAgentRun !== 'function') {
+        throw new Error('任务详情模块加载失败，请刷新页面后重试');
+    }
+    return window.openAgentRun(runId);
+}
+
+function parseChatAgentStepPayload(value) {
+    if (value && typeof value === 'object') return value;
+    try {
+        const parsed = JSON.parse(String(value || ''));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_error) {
+        return {};
+    }
+}
+
+function chatAgentProgressText(detail = {}, status = '') {
+    const normalizedStatus = String(status || detail?.run?.status || '').toLowerCase();
+    const base = normalizedStatus === 'queued'
+        ? '连续 Agent 正在排队'
+        : ['approval_required', 'waiting_approval', 'awaiting_approval'].includes(normalizedStatus)
+            ? '连续 Agent 等待审批'
+            : ['executing', 'observing', 'replanning', 'running'].includes(normalizedStatus)
+                ? '连续 Agent 正在执行任务'
+                : '连续 Agent 正在规划任务';
+    const steps = Array.isArray(detail?.steps) ? detail.steps : [];
+    const latest = [...steps].reverse().find(step => ['plan', 'tool'].includes(String(step?.type || '').toLowerCase()));
+    if (!latest) return base;
+    if (String(latest.type || '').toLowerCase() === 'plan') {
+        const payload = parseChatAgentStepPayload(latest.output);
+        const thought = String(payload.thought || latest.title || '').trim();
+        if (thought && thought !== 'Agent plan') {
+            return `${base} · 当前判断：${thought.slice(0, 120)}${thought.length > 120 ? '…' : ''}`;
+        }
+    }
+    const action = String(latest.title || latest.tool_name || '').trim();
+    return action ? `${base} · ${action.slice(0, 120)}${action.length > 120 ? '…' : ''}` : base;
+}
+
 function attachChatAgentControls(messageContent, runId, status = '') {
     if (!messageContent || !runId) return;
     const actions = messageContent.querySelector('.message-actions');
@@ -225,7 +272,7 @@ function attachChatAgentControls(messageContent, runId, status = '') {
         });
         controls.appendChild(button);
     };
-    addButton('详情', 'btn-secondary', '查看连续 Agent 任务详情', () => window.openAgentRun?.(runId));
+    addButton('详情', 'btn-secondary', '查看连续 Agent 任务详情', () => openChatAgentRunDetail(runId));
     if (!isTerminal) addButton('停止', 'btn-danger-outline', '停止连续 Agent 任务', () => cancelChatAgentRun(runId));
     if (['approval_required', 'waiting_approval', 'awaiting_approval'].includes(normalizedStatus)) {
         addButton('批准', 'btn-primary', '批准工具调用并继续任务', () => postChatAgentControl(runId, '/approval', { approve: true }));
@@ -277,12 +324,16 @@ async function cancelCurrentChatAgent() {
 window.Pivot.exposeModule('chat.agentBridge', {
     attachChatAgentControls,
     cancelCurrentChatAgent,
+    openChatAgentRunDetail,
+    chatAgentProgressText,
     registerChatAgentStreamingTarget,
     unregisterChatAgentStreamingTarget,
     handleChatAgentStreamingEvent
 }, [
     'attachChatAgentControls',
     'cancelCurrentChatAgent',
+    'openChatAgentRunDetail',
+    'chatAgentProgressText',
     'registerChatAgentStreamingTarget',
     'unregisterChatAgentStreamingTarget',
     'handleChatAgentStreamingEvent'
@@ -610,11 +661,7 @@ async function runSendMessage(shouldRegenerate) {
                         return;
                     }
                     if (isViewingRequestSession()) {
-                        const statusText = status === 'approval_required' || status === 'waiting_approval'
-                            ? '连续 Agent 等待审批'
-                            : status === 'executing' || status === 'observing' || status === 'replanning'
-                                ? '连续 Agent 正在执行任务'
-                                : '连续 Agent 正在规划任务';
+                        const statusText = chatAgentProgressText(detail, status);
                         updateAssistantStatus(statusText);
                         attachChatAgentControls(aiMsgEl, runId, status);
                     }

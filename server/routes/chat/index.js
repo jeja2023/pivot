@@ -36,6 +36,7 @@ const {
 } = require('../../services/chat-messages');
 const {
     buildPersistedChatErrorContent,
+    normalizeChatError,
     readStreamErrorDetail,
     writeChatErrorSse
 } = require('../../services/chat-errors');
@@ -324,7 +325,9 @@ function createChatRouter({
 
         // 普通聊天和重新生成统一进入持久化 Agent 入口。简单问题会在 Agent
         // 的首轮直接返回答案，复杂问题则由同一套运行时继续规划、调用工具并后台恢复。
-        if (autoAgent) {
+        // 普通聊天允许“你好”“好的”这类短消息；Agent Runtime 的 goal 校验
+        // 需要更明确的目标，因此短消息继续走原有模型流式路径，不升级为 Agent。
+        if (autoAgent && modelContent.length >= 4) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
@@ -761,6 +764,7 @@ module.exports = {
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,
     injectRagContextBeforeLatestUser,
+    normalizeChatError,
     normalizeRegenerateFlag,
     resolveRagQueryContent,
     summarizeRagContextSources

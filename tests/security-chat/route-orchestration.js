@@ -125,6 +125,37 @@ test('聊天重新生成也会复用原用户消息并进入持久化 Agent', as
     }
 });
 
+test('普通聊天短消息不会因 Agent 目标最小长度校验而接管失败', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['你好，普通聊天回答正常。'] });
+    const fixture = createChatFixture({ prefix: 'chat_short_message', upstreamUrl: upstream.url });
+    let agentCalled = false;
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async () => {
+            agentCalled = true;
+            throw new Error('短消息不应进入 Agent');
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '你好',
+            modelId: fixture.modelId
+        });
+        assert.equal(agentCalled, false);
+        assert.match(result.streamedContent, /普通聊天回答正常/);
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
 test('重新生成的 Agent 接管失败也会持久化可见错误结果', async () => {
     const fixture = createChatFixture({ prefix: 'chat_regenerate_agent_error' });
     await saveUserMessage({

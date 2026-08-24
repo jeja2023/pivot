@@ -1,3 +1,15 @@
+## [v0.1.38] - 2026-08-24
+
+### 模型上下文友好报错、多架构容器运行时与 Agent 体验升级
+
+- **模型上下文超限智能解析**：自动识别上游模型服务（vLLM、llama.cpp、Ollama、OpenAI 等）返回的 `exceed_context_size_error` 与 `context_length_exceeded` 等英文错误，精确提取请求 Token 数与模型窗口上限（如 `132,085 Tokens` vs `131,072 Tokens`），转化为结构化友好中文说明并提供开新会话、精简输入和调大 Context Size 的操作建议。
+- **上游模型错误全量中文化**：统一规范化 401（API Key 无效/未授权）、402/429（余额不足/额度耗尽）、429（模型限流）、404（模型名称错误）、502/ECONNREFUSED（服务不可达/超时）等常见报错，消除直接将未翻译 JSON 甩给用户的生硬体验。
+- **Docker 多架构原生绑定加固**：`Dockerfile` 支持 `ARG TARGETARCH` 动态适配，在 `amd64` 与 `arm64` 架构下自动精准补装对应的 DuckDB 原生二进制依赖（`linux-x64` / `linux-arm64`），避免跨架构构建失败；移除非必须的外部 syntax 指令，增强国内离线构建稳定性。
+- **Docker 运行阶段自检契约**：在最终 runtime 镜像层增加原生依赖（`@duckdb/node-api`, `sharp`, `unzipper`, `better-sqlite3`）与系统工具（`python3`, `pg_dump`）的启动前加载自检，确保生产环境 100% 具备运行能力。
+- **聊天 Agent 状态与操作体验**：聊天界面连续 Agent 任务增加「详情」按钮与判断摘要，支持懒加载任务模块与实时进度文本展示；优化短提问判定逻辑，防止普通日常短提问被误拦截。
+- **测试与质量回归**：新增 `tests/chat-errors.test.js`（6 类模型错误全场景覆盖）与 `tests/dockerfile-runtime-contract.test.js`（多架构与自检契约验证）；`npm run check` 与 ESLint 扫描全部通过。
+- **详细发布记录**：见 [v0.1.38 发布记录](docs/releases/v0.1.38-模型上下文友好报错与多架构容器加固.md)。
+
 ## [v0.1.37] - 2026-08-24
 
 ### 安全边界、批量性能与发布治理全面优化

@@ -121,6 +121,55 @@ test.describe('Pivot browser smoke', () => {
         expect(toolBounds.bottom).toBeLessThanOrEqual(toolBounds.viewportHeight - 11.5);
     });
 
+    test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
+        await page.route('**/api/agents/runs/run-lazy-detail', route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+                run: {
+                    id: 'run-lazy-detail',
+                    title: '连续 Agent 测试任务',
+                    goal: '检查详情按钮和执行判断摘要',
+                    status: 'running',
+                    run_mode: 'standard',
+                    tool_policy: 'builtin_only',
+                    metadata: {},
+                    created_at: '2026-08-24 14:00:00'
+                },
+                steps: [{
+                    step_index: 1,
+                    type: 'plan',
+                    title: '先检查当前任务上下文',
+                    output: { thought: '先检查当前任务上下文', action: 'final', answer: '测试' },
+                    status: 'success',
+                    duration_ms: 12
+                }],
+                dagNodes: [],
+                progress: { stepCount: 1, roundCount: 1, maxSteps: 30, percent: 20, totalDurationMs: 12 },
+                trace: {},
+                checkpoints: { total: 0 }
+            })
+        }));
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction('() => Boolean(window.attachChatAgentControls && window.ensureWorkspaceScripts)');
+        await page.evaluate(() => {
+            const card = document.createElement('div');
+            card.id = 'chat-agent-detail-smoke';
+            card.style.position = 'fixed';
+            card.style.inset = '20px auto auto 20px';
+            card.style.zIndex = '99999';
+            card.style.background = 'white';
+            const actions = document.createElement('div');
+            actions.className = 'message-actions';
+            card.appendChild(actions);
+            document.body.appendChild(card);
+            window.attachChatAgentControls(card, 'run-lazy-detail', 'running');
+        });
+
+        await page.locator('#chat-agent-detail-smoke .chat-agent-controls button', { hasText: '详情' }).click();
+        await expect(page.locator('#agent-run-detail-modal')).toBeVisible();
+        await expect(page.locator('#agent-run-detail')).toContainText('先检查当前任务上下文');
+    });
+
     test('usage audit workspace switches between statistics, details and report', async ({ page }) => {
         const login = await page.request.post('/api/auth/login', {
             data: {
