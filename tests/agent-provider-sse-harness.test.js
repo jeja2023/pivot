@@ -6,6 +6,7 @@ const { callModelStreamingWithTools } = require('../server/services/agent-model'
 const { createModelItemEnvelope } = require('../server/services/agent-provider-envelope');
 const { tryRunAgentStreaming } = require('../server/services/agent-streaming-runtime');
 const { createAgentStepContext } = require('../server/services/agent-step-context');
+const { TaskBudget } = require('../server/services/agent-budget');
 
 function startMockProvider(received) {
     const server = http.createServer((req, res) => {
@@ -130,6 +131,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             idempotent: true,
             input_schema: { type: 'object', properties: { value: { type: 'string' } } }
         }];
+        const taskBudget = new TaskBudget({ max_steps: 2, max_tool_calls: 1 });
         const result = await tryRunAgentStreaming({
             run,
             user: { id: 7, role: 'admin' },
@@ -162,12 +164,16 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             publishUserEvent: () => {},
             maybePauseForApproval: async () => false,
             getRunMetadata: () => ({}),
+            taskBudget,
             synthesizeFinalAnswer: async () => 'unexpected fallback',
             createAgentNotification: async () => {},
             getAgentRunTitle: () => 'mock run'
         });
 
         assert.deepEqual(result, { completed: true, roundsUsed: 2 });
+        assert.equal(taskBudget.snapshot().counts.steps, 2);
+        assert.equal(taskBudget.snapshot().counts.tool_calls, 1);
+        assert.equal(taskBudget.snapshot().counts.consecutive_errors, 0);
         assert.deepEqual(executed, [{ name: 'test.echo', input: { value: 'from tool' } }]);
         assert.equal(received.length, 3);
         const secondTurnMessages = received[2].body.messages;

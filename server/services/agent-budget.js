@@ -6,11 +6,19 @@
  * deterministic guard.
  */
 
+const DEFAULT_RUNTIME_SECONDS = Math.max(
+    60,
+    Math.floor((Number.parseInt(process.env.AGENT_RUN_TIMEOUT_MS || '600000', 10) || 600000) / 1000)
+);
+
 const DEFAULT_BUDGET = Object.freeze({
-    max_steps: 40,
+    // Matches the highest deep/audit run-mode limit.
+    max_steps: 60,
     max_tool_calls: 80,
     max_consecutive_errors: 3,
-    max_runtime_seconds: 1800,
+    // Keep the budget deadline aligned with the runtime deadline. A caller can
+    // still opt into a shorter per-run budget through budget_config.
+    max_runtime_seconds: DEFAULT_RUNTIME_SECONDS,
     max_python_timeout_seconds: 30,
     max_tokens_total: Math.max(128000, Number.parseInt(process.env.AGENT_TASK_MAX_TOKENS_TOTAL || '500000', 10) || 500000),
     risk_budget: 20,

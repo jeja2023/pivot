@@ -119,7 +119,9 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         prop: 'chatAutoAgentEnabled',
         label: '普通会话自动连续 Agent',
         env: 'CHAT_AUTO_AGENT_ENABLED',
-        defaultValue: 1,
+        // Continuous Agent is opt-in: ordinary chat should not create a
+        // persistent run and pay planner/tool overhead unless enabled.
+        defaultValue: 0,
         min: 0,
         max: 1,
         group: 'agent',

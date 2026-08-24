@@ -55,6 +55,7 @@ const { assembleChatContext } = require('../../services/chat-context-assembler')
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { registerLocalBridgeDevice } = require('../../services/local-device-bridge');
 const { createAgentRun } = require('../../services/agent-runtime');
+const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
 const {
     buildChatAgentMetadata,
     normalizeChatHistory,
@@ -65,6 +66,13 @@ const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
+const AGENT_INTENT_HINT_RE = /(查询|搜索|检索|分析|整理|总结|生成|创建|修改|执行|检查|对比|计算|导出|读取|写入|调用|规划|研究|多个|并且|然后|文件|数据库|知识库)/;
+
+function isLikelyComplexAgentGoal(content) {
+    const text = String(content || '').trim();
+    if (text.length >= 24) return true;
+    return text.length >= 8 && AGENT_INTENT_HINT_RE.test(text);
+}
 
 function hasAuthorizedLocalBridgeGrant(payload) {
     const grants = payload && typeof payload.grants === 'object' && payload.grants ? payload.grants : {};
@@ -333,8 +341,12 @@ function createChatRouter({
         // 需要更明确的目标，因此短消息继续走原有模型流式路径，不升级为 Agent。
         // Agent Runtime 的目标契约独立于普通聊天的模型上下文预算：手工 Agent
         // 目标最多 2000 字符，普通聊天 Agent 使用会话桥接上限，保留较长的当前消息。
-        // 再长的消息走普通模型流，避免把桥接输入上限异常显示给用户。
-        if (autoAgentEnabled && modelContent.length >= 4 && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
+        // 再长的消息走普通模型流，避免把桥接输入上限异常显示给用户；
+        // 短且没有任务意图的闲聊也留在普通模型流，避免无谓创建持久化 Agent。
+        if (autoAgentEnabled
+            && modelContent.length >= 4
+            && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH
+            && isLikelyComplexAgentGoal(modelContent)) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
@@ -385,8 +397,8 @@ function createChatRouter({
                     // 普通聊天的 MCP 白名单只约束 MCP 工具，内置能力仍由 Agent 策略提供。
                     toolAllowlist: [],
                     approvalPolicy: 'safe_mcp_auto',
-                    timeoutMs: 24 * 60 * 60 * 1000,
-                    toolTimeoutMs: 10 * 60 * 1000,
+                    timeoutMs: AGENT_DEFAULT_TIMEOUT_MS,
+                    toolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
                     retryLimit: 1,
                     contextConfig: {
                         mode: 'recent',

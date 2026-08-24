@@ -70,7 +70,7 @@ function createToolOrchestrator(overrides = {}) {
                 tool,
                 input,
                 user,
-                budget: context.budget || null,
+                budget: context.budgetAlreadyConsumed === true ? null : (context.budget || null),
                 allowApproval: context.allowApproval === true || context.approvalGranted === true
             });
         } catch (error) {

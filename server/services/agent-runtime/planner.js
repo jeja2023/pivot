@@ -1,6 +1,20 @@
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
 const { fitMessagesToContextBudget } = require('../context-budget');
+
+const AGENT_CONTEXT_FALLBACK_TOKENS = Math.max(
+    Number.parseInt(process.env.AGENT_CONTEXT_WINDOW_TOKENS || '32768', 10) || 32768,
+    8192
+);
+
+function fitAgentMessages(messages, modelCfg, options = {}) {
+    const fitted = fitMessagesToContextBudget(messages, modelCfg, options);
+    if (!fitted.metadata?.unbounded) return fitted.messages;
+    return fitMessagesToContextBudget(messages, modelCfg, {
+        ...options,
+        contextWindowTokens: AGENT_CONTEXT_FALLBACK_TOKENS
+    }).messages;
+}
 const { buildWorldStatePrompt } = require('../agent-step-context');
 
 function observationMessages(observations = []) {
@@ -93,7 +107,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             content: buildCurrentGoalContent(goal, observations, contextConfig)
         }
     ];
-    return modelCfg ? fitMessagesToContextBudget(messages, modelCfg).messages : messages;
+    return modelCfg ? fitAgentMessages(messages, modelCfg) : messages;
 }
 
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
@@ -118,10 +132,14 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             )
         }
     ];
-    const fitted = fitMessagesToContextBudget(messages, modelCfg);
+    const fitted = { messages: fitAgentMessages(messages, modelCfg) };
     const usageRef = {};
     const content = await callModelText(modelCfg, fitted.messages, { user, signal: options.signal || null, usageRef });
-    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, { budget: options.budget, usageRef });
+    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, {
+        budget: options.budget,
+        usageRef,
+        allowBudgetExceeded: options.allowBudgetExceeded === true
+    });
     return content || '未能生成最终答案。';
 }
 

@@ -26,7 +26,7 @@ const TRANSITIONS = {
     executing: new Set(['queued', 'observing', 'diagnosing', 'planning', 'approval_required', 'waiting_approval', 'running', 'completed', 'completed_with_errors', 'cancelled', 'error', 'failed', 'deleted']),
     observing: new Set(['queued', 'diagnosing', 'replanning', 'planning', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'running', 'cancelled', 'error', 'failed', 'deleted']),
     diagnosing: new Set(['queued', 'replanning', 'planning', 'waiting_approval', 'approval_required', 'completed_with_errors', 'completed', 'error', 'failed', 'cancelled', 'deleted']),
-    replanning: new Set(['queued', 'planning', 'executing', 'running', 'waiting_approval', 'approval_required', 'cancelled', 'error', 'failed', 'deleted']),
+    replanning: new Set(['queued', 'planning', 'executing', 'running', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'cancelled', 'error', 'failed', 'deleted']),
     running: new Set(['planning', 'executing', 'observing', 'diagnosing', 'replanning', 'approval_required', 'awaiting_approval', 'waiting_approval', 'completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'queued', 'deleted']),
     approval_required: new Set(['queued', 'resuming', 'cancelled', 'error', 'deleted']),
     awaiting_approval: new Set(['queued', 'resuming', 'running', 'cancelled', 'error', 'deleted']),

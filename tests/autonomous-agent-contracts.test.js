@@ -40,6 +40,7 @@ test('read-only tools are inferred idempotent while mutating tools are not', () 
 test('state machine permits terminal completion directly from planning', () => {
     assert.equal(canTransitionAgentRunStatus('planning', 'completed'), true);
     assert.equal(canTransitionAgentRunStatus('planning', 'completed_with_errors'), true);
+    assert.equal(canTransitionAgentRunStatus('replanning', 'completed_with_errors'), true);
 });
 
 test('PEP denies disallowed MCP and requires approval for risky calls', () => {

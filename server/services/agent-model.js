@@ -206,21 +206,32 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
         `, [inputTokens, outputTokens, inputTokens + outputTokens, getBeijingTimestamp(), getBeijingTimestamp(), runId]);
         await recordAgentRunResourceUsage(runId, inputTokens + outputTokens);
         const run = await queryOne('SELECT max_token_budget, total_tokens, budget_config FROM agent_runs WHERE id = ?', [runId]);
+        let budgetExceeded = false;
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
+            budgetExceeded = true;
             const err = new Error(`智能体任务已超过模型用量上限 ${run.max_token_budget}`);
             err.code = 'AGENT_BUDGET_EXCEEDED';
-            throw err;
+            if (!options.allowBudgetExceeded) throw err;
         }
         let budgetConfig = {};
         try { budgetConfig = typeof run?.budget_config === 'string' ? JSON.parse(run.budget_config || '{}') : (run?.budget_config || {}); } catch (_) {}
         const budget = normalizeTaskBudget(budgetConfig);
         if (Number.isFinite(budget.max_tokens_total) && Number(budget.max_tokens_total) >= 0 && Number(run?.total_tokens || 0) > budget.max_tokens_total) {
+            budgetExceeded = true;
             const err = new Error(`智能体任务已超过总 Token 预算 ${budget.max_tokens_total}`);
             err.code = 'AGENT_BUDGET_EXCEEDED';
             err.category = 'resource';
-            throw err;
+            if (!options.allowBudgetExceeded) throw err;
         }
-        if (options.budget?.recordTokens) options.budget.recordTokens(inputTokens + outputTokens);
+        if (options.budget?.recordTokens) {
+            try {
+                options.budget.recordTokens(inputTokens + outputTokens);
+            } catch (error) {
+                if (!options.allowBudgetExceeded || error?.code !== 'AGENT_BUDGET_EXCEEDED') throw error;
+                budgetExceeded = true;
+            }
+        }
+        if (budgetExceeded) return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, calibration, budgetExceeded: true };
     }
     return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, calibration };
 }

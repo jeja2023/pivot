@@ -36,22 +36,18 @@ const {
     createAgentTemplate,
     deleteAgentTemplate,
     listAgentTemplates,
-    updateAgentTemplate,
-    assertTemplateAccess
+    updateAgentTemplate
 } = require('../agent-templates');
 const {
     createAgentWorkflow,
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,
     getAgentWorkflowForUser,
-    assertWorkflowLlmNodesConfigured,
     listAgentWorkflowVersions,
     listAgentWorkflows,
     listAgentWorkflowShareOptions,
-    normalizeDagInputsPayload,
     publishAgentWorkflowVersion,
     restoreAgentWorkflow,
-    resolveAgentWorkflowVersion,
     restoreAgentWorkflowVersion,
     updateAgentWorkflow,
     updateAgentWorkflowMetadata,
@@ -78,30 +74,20 @@ const {
 } = require('../agent-artifacts');
 const { formatToolList } = require('../agent-tool-catalog');
 const {
-    assertAgentWorkflowDependencies,
-    resolveAgentWorkflowDependencyBindings
-} = require('../agent-workflow-dependencies');
-const {
     getAgentMetrics,
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('../agent-monitoring');
 const {
     ACTIVE_STATUSES,
-    MAX_CHAT_AGENT_GOAL_LENGTH,
     parseJsonObject,
     normalizeMaxSteps,
-    resolveMaxSteps,
-    normalizePriority,
     normalizeRunMode,
     normalizeToolPolicy,
     normalizeApprovalPolicy,
     normalizePositiveInt,
-    serializeContextConfig,
     normalizeDagSpec,
     normalizeToolAllowlist,
-    serializeToolAllowlist,
-    normalizeAgentGoal,
-    normalizeAgentTitle
+    normalizeAgentGoal
 } = require('../agent-validators');
 const {
     AGENT_DEFAULT_TIMEOUT_MS,
@@ -111,7 +97,6 @@ const {
     AGENT_INSTANCE_ID,
     getAgentMaxConcurrentRuns,
     getAgentDagNodeConcurrency,
-    createRunId,
     withTimeout
 } = require('./runtime-env');
 const { getAgentRunTitle, getRunMetadata } = require('./metadata');
@@ -124,7 +109,6 @@ const {
     syncAgentTraceFromRun
 } = require('../agent-traces');
 const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-checkpoints');
-const { getAgentSkillExecutionContext } = require('../agent-skills');
 const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
 const { diagnoseError } = require('../agent-diagnosis');
 const { recordAgentToolCall } = require('../agent-tool-audit');
@@ -132,12 +116,7 @@ const { createPersistedAgentStepContext } = require('../agent-world-state-store'
 const { recordAgentEvent } = require('../agent-event-log');
 const { claimAgentControlMessages } = require('../agent-control');
 const {
-    buildForkHistory,
-    cancelChildRunReservation,
-    initializeAgentRunResources,
-    normalizeForkHistory,
-    releaseChildRunReservation,
-    reserveChildRunResources
+    releaseChildRunReservation
 } = require('../agent-run-resources');
 const {
     configureAgentApprovalRequests,
@@ -147,7 +126,6 @@ const {
 } = require('../agent-approval-requests');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
-const { inferDagRunGoal } = require('./dag-run-config');
 const { createAgentNotificationFactory } = require('./notifications');
 const { createApprovalHelpers } = require('./approvals');
 const { buildVisionHistory, limitVisionImages } = require('../chat-vision');
@@ -793,9 +771,13 @@ async function runAgent(runId, user) {
     activeRunControllers.set(runId, runController);
     let deadlineTimer = null;
     let taskBudget = null;
+    let runForSummary = null;
+    let modelCfgForSummary = null;
+    let observations = [];
     try {
         await assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
+        runForSummary = run;
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
         await ensureAgentTrace(run, {
@@ -804,9 +786,21 @@ async function runAgent(runId, user) {
             approvalPolicy: run.approval_policy
         });
         assertRunNotCancelled(runId);
-        const deadline = Date.now() + normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
+        const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         const budgetConfig = parseJsonObject(run.budget_config) || {};
-        taskBudget = new TaskBudget(normalizeTaskBudget(budgetConfig), {
+        const effectiveBudgetConfig = { ...budgetConfig };
+        if (effectiveBudgetConfig.max_steps === undefined && effectiveBudgetConfig.maxSteps === undefined) {
+            // Run-mode limits (deep/audit) may be higher than the historical
+            // generic default. Keep the default budget aligned with this run.
+            effectiveBudgetConfig.max_steps = maxSteps;
+        }
+        const normalizedBudget = normalizeTaskBudget(effectiveBudgetConfig);
+        const normalizedRunTimeout = normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
+        const configuredRuntimeMs = Number.isFinite(normalizedBudget.max_runtime_seconds)
+            ? Number(normalizedBudget.max_runtime_seconds) * 1000
+            : Infinity;
+        const deadline = Date.now() + Math.min(normalizedRunTimeout, configuredRuntimeMs);
+        taskBudget = new TaskBudget(normalizedBudget, {
             startedAt: Date.now(),
             enabled: true
         });
@@ -830,6 +824,7 @@ async function runAgent(runId, user) {
         if (!initialModelCfg && !dagRun) throw new Error('当前智能体运行无可用的模型端点。');
         // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
         let modelCfg = initialModelCfg;
+        modelCfgForSummary = modelCfg;
         const routerStrategy = normalizeRouterStrategy(run.model_router);
         if (initialModelCfg && routerStrategy !== 'fixed') {
             try {
@@ -842,6 +837,7 @@ async function runAgent(runId, user) {
                 });
                 if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
                     modelCfg = routed.model;
+                    modelCfgForSummary = modelCfg;
                     await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
                         modelCfg.id, getBeijingTimestamp(), runId
                     ]);
@@ -895,7 +891,7 @@ async function runAgent(runId, user) {
         const resumeContext = runtimeMetadata.resumeContext && typeof runtimeMetadata.resumeContext === 'object'
             ? runtimeMetadata.resumeContext
             : {};
-        const observations = [
+        observations = [
             ...(Array.isArray(resumeContext.observations) ? resumeContext.observations : []),
             ...(Array.isArray(resumeContext.recentFailures) ? resumeContext.recentFailures : [])
         ].slice(-25);
@@ -958,8 +954,11 @@ async function runAgent(runId, user) {
 
         // 启用时优先使用流式函数调用，让模型可直接发出 tool_calls。
         // 如果流式调用未完成，下方 JSON 规划器会基于已收集的观察继续执行。
-        const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
-        let roundsUsed = 0;
+        let roundsUsed = Math.max(
+            Number(run.resume_from_step || 0) || 0,
+            Number(resumeContext.latestStepIndex || 0) || 0,
+            0
+        );
         if (isStreamingToolsEnabled()) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
             if (chatBridge) {
@@ -988,6 +987,9 @@ async function runAgent(runId, user) {
         }
 
         let previousWorldState = null;
+        let lastOperationSignature = '';
+        let stagnantRounds = 0;
+        let stopReason = '';
         for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
             taskBudget.consumeStep();
             await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
@@ -1065,6 +1067,7 @@ async function runAgent(runId, user) {
             });
             let plannedText;
             let plannedTextUsageRef = null;
+            let plannedUsageResult = null;
             try {
                 try {
                     await recordAgentEvent({
@@ -1116,8 +1119,12 @@ async function runAgent(runId, user) {
                 });
                 throw plannerError;
             }
-            await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, { budget: taskBudget, usageRef: plannedTextUsageRef });
-            assertRunWithinBudget();
+            plannedUsageResult = await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, {
+                budget: taskBudget,
+                usageRef: plannedTextUsageRef,
+                allowBudgetExceeded: true
+            });
+            if (!plannedUsageResult?.budgetExceeded) assertRunWithinBudget();
             assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
             await insertStep(runId, step, {
@@ -1128,6 +1135,26 @@ async function runAgent(runId, user) {
                 durationMs: Date.now() - plannerStartedAt,
                 contextHash: stepContext.contextHash
             });
+
+            if (plannedUsageResult?.budgetExceeded) {
+                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                    signal: runController.signal,
+                    budget: taskBudget,
+                    allowBudgetExceeded: true,
+                    ...plannerChatContext
+                });
+                const warning = '已达到总 Token 预算，任务已停止继续调用工具。';
+                await updateRun(runId, {
+                    status: 'completed_with_errors',
+                    final_answer: `注意：${warning}\n\n${answer}`,
+                    error_message: warning,
+                    completed_at: getBeijingTimestamp(),
+                    last_heartbeat_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                });
+                await createAgentNotification(user.id, runId, 'warning', '任务已生成部分结果', warning);
+                return;
+            }
 
             if (plan.action === 'final' || !plan.tool) {
                 const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
@@ -1152,6 +1179,23 @@ async function runAgent(runId, user) {
                 model_id: run.model_id ?? modelCfg?.id,
                 chosen_model_id: run.chosen_model_id ?? modelCfg?.id
             });
+            const operationSignature = `${plan.tool}:${approvalInputHash(effectivePlanInput)}`;
+            stagnantRounds = operationSignature === lastOperationSignature ? stagnantRounds + 1 : 1;
+            lastOperationSignature = operationSignature;
+            if (stagnantRounds >= 3) {
+                stopReason = `检测到工具 ${plan.tool} 连续重复调用且没有进展，已提前停止。`;
+                observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: stopReason });
+                await insertStep(runId, step, {
+                    type: 'control',
+                    title: '检测到重复工具调用',
+                    input: effectivePlanInput,
+                    output: { tool: plan.tool, message: stopReason },
+                    errorMessage: stopReason,
+                    status: 'error',
+                    contextHash: stepContext.contextHash
+                });
+                break;
+            }
             try {
                 await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
                 await assertRunUserActive(user);
@@ -1281,7 +1325,7 @@ async function runAgent(runId, user) {
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
-        const limitMessage = `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
+        const limitMessage = stopReason || `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
         await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'control',
             title: '已达到最大执行轮次',
@@ -1301,6 +1345,7 @@ async function runAgent(runId, user) {
             answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                 signal,
                 budget: taskBudget,
+                allowBudgetExceeded: true,
                 ...plannerChatContext
             }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
             await finishAgentTraceSpan(summarySpanId, {
@@ -1339,6 +1384,7 @@ async function runAgent(runId, user) {
                         answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                             signal,
                             budget: taskBudget,
+                            allowBudgetExceeded: true,
                             ...plannerChatContext
                         }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
                     }
@@ -1378,6 +1424,45 @@ async function runAgent(runId, user) {
                     completed_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
+            }
+            return;
+        }
+        if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
+            const reason = e.code === 'AGENT_TIMEOUT'
+                ? '任务已达到运行时间上限，以下为已完成的部分结果。'
+                : '任务已达到预算上限，以下为已完成的部分结果。';
+            let answer = '';
+            if (modelCfgForSummary && runForSummary) {
+                try {
+                    answer = await withTimeout(
+                        () => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {
+                            budget: taskBudget,
+                            allowBudgetExceeded: true,
+                            chatAgent: runForSummary ? getRunMetadata(runForSummary).chatBridge : null
+                        }),
+                        30000,
+                        'partial final summary'
+                    );
+                } catch (summaryError) {
+                    logger.warn({ runId, err: summaryError.message }, '资源受限后的部分结果总结失败');
+                }
+            }
+            if (!String(answer || '').trim()) {
+                answer = observations.length
+                    ? `已完成 ${observations.length} 项执行观察，但未能生成完整总结。`
+                    : '任务在产生可用总结前被中止。';
+            }
+            const currentStatus = await getRunStatus(runId);
+            if (!TERMINAL_STATUSES.has(currentStatus)) {
+                await updateRun(runId, {
+                    status: 'completed_with_errors',
+                    final_answer: `${reason}\n\n${answer}`,
+                    error_message: e.message || reason,
+                    completed_at: getBeijingTimestamp(),
+                    last_heartbeat_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                });
+                await createAgentNotification(user.id, runId, 'warning', '任务已生成部分结果', reason);
             }
             return;
         }
@@ -1512,7 +1597,6 @@ function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
     agentRecoveryTimer = timer;
     return agentRecoveryTimer;
 }
-
 async function approveAgentTool(runId, user, approve = true) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
@@ -1562,13 +1646,25 @@ async function approveAgentTool(runId, user, approve = true) {
         ? metadata.approvalGrants.filter(item => item && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()))
         : [];
     approvalGrants.push(approvalGrant);
+    const resumeContext = await buildAgentResumeContext(runId);
     await setRunMetadata(runId, {
         pendingApproval: null,
         approvalGrants,
         approvedTools: [...approvedTools],
-        approvedApprovalKeys: [...approvedApprovalKeys]
+        approvedApprovalKeys: [...approvedApprovalKeys],
+        resumeContext: {
+            ...resumeContext,
+            previousStatus: run.status,
+            approvedTool: pending.tool || '',
+            approvedInputHash: approvalGrant.inputHash
+        }
     });
-    await updateRun(runId, { status: 'queued', error_message: '', updated_at: now });
+    await updateRun(runId, {
+        status: 'queued',
+        error_message: '',
+        resume_from_step: Number(resumeContext.latestStepIndex || run.resume_from_step || 0) || 0,
+        updated_at: now
+    });
     await insertStep(runId, (await listSteps(runId)).length + 1, {
         type: 'approval',
         title: 'User approved tool call',
@@ -1607,6 +1703,13 @@ async function syncAgentRuntimeConcurrency() {
     }
     return await queue.getStatus();
 }
+
+const { createAgentRunFactory } = require('./run-creation');
+const createAgentRun = createAgentRunFactory({
+    assertRunUserActive,
+    enqueueAgentRun,
+    publishAgentRunEvent
+});
 
 configureAgentSchedules({
     createAgentRun,
@@ -1647,229 +1750,6 @@ configureAgentArtifacts({
     getAgentRunTitle,
     getRunDetailForUser: getRunDetailForUserHelper
 });
-
-async function createAgentRun({
-    user,
-    goal,
-    modelId,
-    sessionId = null,
-    title = '',
-    maxSteps = 0,
-    parentRunId = null,
-    priority = 0,
-    runMode = 'standard',
-    toolPolicy = 'all',
-    toolAllowlist = [],
-    approvalPolicy = 'safe_mcp_auto',
-    timeoutMs = AGENT_DEFAULT_TIMEOUT_MS,
-    toolTimeoutMs = AGENT_TOOL_TIMEOUT_MS,
-    retryLimit = 1,
-    maxTokenBudget = 0,
-    budgetConfig = {},
-    networkPolicy = {},
-    templateId = null,
-    scheduleId = null,
-    contextConfig = {},
-    resumeFromStep = 0,
-    metadata = {},
-    dagSpec = null,
-    dagInputs = null,
-    workflowId = null,
-    workflowVersion = null,
-    modelRouter = 'fixed',
-    dedupeKey = null,
-    skillId = null,
-    skillName = null,
-    forkHistory = 'none',
-    chatAgent = false
-}) {
-    await assertRunUserActive(user);
-    const normalizedScheduleId = scheduleId === null || scheduleId === '' ? null : Number(scheduleId);
-    if (normalizedScheduleId !== null && (!Number.isInteger(normalizedScheduleId) || normalizedScheduleId <= 0)) {
-        const err = new Error('计划标识无效。');
-        err.status = 400;
-        throw err;
-    }
-    if (normalizedScheduleId !== null && !(await queryOne('SELECT id FROM agent_schedules WHERE id = ? AND user_id = ?', [normalizedScheduleId, user.id]))) {
-        const err = new Error('计划不存在或无权使用。');
-        err.status = 403;
-        throw err;
-    }
-    const normalizedTemplateId = templateId === null || templateId === '' ? null : Number(templateId);
-    if (normalizedTemplateId !== null && (!Number.isInteger(normalizedTemplateId) || normalizedTemplateId <= 0)) {
-        const err = new Error('任务模板标识无效。');
-        err.status = 400;
-        throw err;
-    }
-    if (normalizedTemplateId !== null) {
-        const template = await queryOne('SELECT * FROM agent_templates WHERE id = ?', [normalizedTemplateId]);
-        if (!assertTemplateAccess(template, user, false)) {
-            const err = new Error('任务模板不存在或无权使用。');
-            err.status = 403;
-            throw err;
-        }
-    }
-    const normalizedDedupeKey = dedupeKey ? String(dedupeKey).trim().slice(0, 240) : null;
-    if (normalizedDedupeKey) {
-        const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
-        if (existing) return existing;
-    }
-    const normalizedToolPolicy = normalizeToolPolicy(toolPolicy);
-    const normalizedRunMode = normalizeRunMode(runMode);
-    const normalizedRouter = normalizeRouterStrategy(modelRouter);
-    const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
-    const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
-    let resourceReservation = null;
-    let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
-    const skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
-    delete runMetadata.skillPermissions;
-    delete runMetadata.skillTools;
-    if (skillReference) {
-        const skillContext = await getAgentSkillExecutionContext(user, skillReference);
-        runMetadata.skillId = skillContext.skillId;
-        runMetadata.skillName = skillContext.skillName;
-        runMetadata.skillVersion = skillContext.skillVersion;
-        runMetadata.skillPermissions = skillContext.skillPermissions;
-        runMetadata.skillTools = skillContext.skillTools;
-    }
-    const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
-    const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
-        ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
-        : goal, goalMaxLength ? { maxLength: goalMaxLength } : undefined);
-    const runId = createRunId();
-    const now = getBeijingTimestamp();
-    const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});
-    if (Object.keys(normalizedDagInputs).length) {
-        runMetadata.dagInputs = normalizedDagInputs;
-    }
-    let effectiveModelId = modelId;
-    const effectiveMaxSteps = resolveMaxSteps(maxSteps, normalizedRunMode);
-    if (normalizedRunMode === 'dag') {
-        const requestedWorkflowId = workflowId || runMetadata.workflowId || runMetadata.workflow_id || null;
-        const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
-        if (requestedWorkflowId && requestedWorkflowVersion) {
-            const sourceWorkflow = await resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
-            if (!sourceWorkflow) {
-                const err = new Error('工作流版本不可用。');
-                err.status = 404;
-                throw err;
-            }
-            const resolvedWorkflow = await resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
-            runMetadata.dagSpec = resolvedWorkflow.dagSpec;
-            runMetadata.workflowId = resolvedWorkflow.workflow.id;
-            runMetadata.workflowName = resolvedWorkflow.workflow.name;
-            runMetadata.workflowVersion = resolvedWorkflow.version;
-            runMetadata.workflowVersionMode = resolvedWorkflow.mode;
-            runMetadata.workflowVersionId = resolvedWorkflow.version_id;
-            runMetadata.workflowDependencyBinding = {
-                required: Boolean(resolvedWorkflow.dependency_binding?.required),
-                versionId: resolvedWorkflow.dependency_binding?.bound_version_id || null,
-                updatedAt: resolvedWorkflow.dependency_binding?.updated_at || ''
-            };
-        } else {
-            runMetadata.dagSpec = normalizeDagSpec(dagSpec || runMetadata.dagSpec || {});
-        }
-        assertWorkflowLlmNodesConfigured(runMetadata.dagSpec);
-        await assertAgentWorkflowDependencies(runMetadata.dagSpec, user);
-    }
-    const modelCfg = await getRunnableModelForUserAsync(effectiveModelId, user);
-    if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');
-    if (parentRunId) {
-        const inherited = await reserveChildRunResources({
-            parentRunId,
-            userId: user.id,
-            requestedTokenBudget: effectiveChildTokenBudget,
-            forkHistory: normalizedForkHistory
-        });
-        effectiveChildTokenBudget = inherited.tokenBudget;
-        resourceReservation = inherited.reservation;
-        runMetadata.resourceInheritance = {
-            parentRunId: String(parentRunId),
-            tokenBudget: effectiveChildTokenBudget,
-            forkHistory: inherited.forkHistory
-        };
-        if (inherited.forkHistory.mode !== 'none') {
-            try {
-                runMetadata.parentHistory = await buildForkHistory(parentRunId, user.id, inherited.forkHistory);
-            } catch (error) {
-                try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
-                throw error;
-            }
-        }
-    }
-    try {
-        await execute(`
-            INSERT INTO agent_runs (
-                id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
-                priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
-                retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
-                metadata, model_router, budget_config, usage_stats, network_policy, created_at, updated_at
-            )
-            VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-        `, [
-            runId,
-            user.id,
-            sessionId || null,
-            modelCfg?.id || null,
-            normalizeAgentTitle(title, cleanGoal),
-            cleanGoal,
-            'queued',
-            normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
-            parentRunId || null,
-            normalizePriority(priority),
-            normalizedRunMode,
-            normalizedToolPolicy,
-            serializeToolAllowlist(toolAllowlist),
-            normalizeApprovalPolicy(approvalPolicy),
-            normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
-            normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
-            normalizePositiveInt(retryLimit, 1, 0, 5),
-            effectiveChildTokenBudget,
-            normalizedTemplateId,
-            normalizedScheduleId,
-            normalizedDedupeKey,
-            serializeContextConfig(contextConfig),
-            normalizePositiveInt(resumeFromStep, 0, 0, 999),
-            JSON.stringify(runMetadata),
-            normalizedRouter,
-            JSON.stringify(normalizeTaskBudget(budgetConfig)),
-            JSON.stringify({}),
-            JSON.stringify(networkPolicy || {}),
-            now,
-            now
-        ]);
-    } catch (err) {
-        if (resourceReservation) {
-            try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
-        }
-        if (normalizedDedupeKey && (String(err.code || '').includes('CONSTRAINT') || String(err.code || '').includes('23505'))) {
-            const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
-            if (existing) return existing;
-        }
-        throw err;
-    }
-    await initializeAgentRunResources({
-        runId,
-        userId: user.id,
-        parentRunId,
-        tokenBudget: effectiveChildTokenBudget,
-        forkHistory: normalizedForkHistory
-    });
-    if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
-        const { upsertDagNode } = require('../agent-dag-runtime');
-        for (const node of runMetadata.dagSpec.nodes) {
-            await upsertDagNode(runId, node, { status: 'pending' });
-        }
-    }
-    enqueueAgentRun(runId, user);
-    const run = await getRunForUser(runId, user);
-    await publishAgentRunEvent(runId, 'created');
-    return run;
-}
 
 module.exports = {
     createAgentRun,

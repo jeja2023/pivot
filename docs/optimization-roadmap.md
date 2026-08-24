@@ -2,6 +2,19 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-24 Agent 连续执行控制回路、预算降级与断点恢复加固（v0.1.40）
+
+- ✅ 流式 Agent 接入步骤、工具、连续错误和 Token 预算记账，使用绝对恢复轮次，流式与 JSON 回退共享执行上限。
+- ✅ Token/运行时间/连续错误熔断改为优先交付 `completed_with_errors` 部分结果；最终总结记账不会丢弃已生成答案。
+- ✅ 流式、JSON 规划和最终总结统一上下文拟合；未配置模型窗口时使用 Agent 回退窗口，并增加重复工具调用停滞检测。
+- ✅ 审批通过保存 `resumeContext` 和检查点进度；默认步骤、运行超时、工具超时与深度/审计模式上限统一。
+- ✅ 普通聊天自动 Agent 默认关闭，并增加任务意图门槛；新增流式预算计数和状态转换回归测试。
+
+### 本版本部署注意
+
+- 显式设置 `CHAT_AUTO_AGENT_ENABLED=1` 的环境不会被覆盖；需要新默认行为时请改为 `0` 或删除后重启。
+- PostgreSQL 集成测试应在配置 `TEST_DATABASE_URL` 或 `DATABASE_URL` 的环境补跑。
+
 ## 2026-08-24 安全边界、批量性能与发布治理升级（v0.1.37）
 
 - ✅ Electron Worker 改为主进程一次性审批令牌，绑定完整请求指纹；远程非 HTTPS 页面不能调用本机通用 Worker。
@@ -58,6 +71,7 @@ This document records optimization work that is intentionally staged instead of 
 
 > 维护约定：本文件与 CHANGELOG、版本号同级维护。发布时若本轮涉及"有意分阶段推进/暂缓"的决策，必须在此登记，否则决策会随版本推进丢失。
 
+- v0.1.40 (2026-08-24) 加固连续 Agent 的流式预算记账、绝对轮次、上下文拟合、超限部分结果、审批断点恢复和重复调用停滞检测；普通聊天自动 Agent 默认改为关闭并增加任务意图门槛。Agent SSE、聊天桥接、预算契约、语法和 ESLint 通过；PostgreSQL 集成测试需在配置测试库的环境补跑。
 - v0.1.33 (2026-08-23) 完成 Web/Electron 普通聊天自动升级为持久化连续 Agent：普通发送与重新生成统一进入 Agent Runtime，保留历史、系统提示、图片视觉输入、长期记忆、RAG 和 MCP 策略；终态答案通过 `agent_run_id` 幂等写回聊天，启动恢复扫描补齐断线或重启期间未落库结果；会话切换/刷新/跨设备恢复仍显示 Agent 状态并支持停止、批准、拒绝、继续；PostgreSQL 注释调整至版本迁移后应用；新增 HTTP/SSE、PostgreSQL 并发幂等、视觉附件、客户端会话恢复和启动顺序回归，`npm test` `593/593`、语法 `525/525`、raw SQL 基线 `816/816` 通过。
 - v0.1.15 (2026-08-21) 完成智能体工作台全功能实时状态同步：SSE 与轮询兜底覆盖任务、运行详情、执行步骤、工作流、计划任务、通知、结果和评测，增加 no-store、并发刷新保护和关闭清理；修复 `agent.content_review` 模型文本契约，统一模型对象/别名输入规范化并贯穿自主规划、DAG、嵌套工作流和流式执行；长期记忆模型抽取增加 800 Token 输出上限、超时降级分类、按模型熔断冷却和 `modelFallbackReason`；定向回归 22/22、ESLint 与语法检查通过，PostgreSQL 集成测试需在配置 `DATABASE_URL` 的环境补跑。
 - v0.1.14 (2026-08-21) 完成工作流与任务执行面板全量中文化、富文本步骤详情中文化与长文本语义批次加固：全面补齐 `agent.content_review` 产物及指标字典（`stats`、`records`、`artifact`、`reviewComplete`、`sourceRowCount`、`processedRecords`、`incompleteRecords`、`titleIssues`、`contentIssues` 等指标 100% 中文展示）；覆盖 48+ 种工作流与内置工具中文标题描述；DAG 节点执行条件与 24 种状态机状态全面中文化；引入动态子词与复合后缀智能拆分翻译机制；全量语义分析批次根据输出预算动态切分并支持截断自动二分恢复重试。新增前端中文化专项测试，全量 Node 回归 510/510，`npm run check` 与 ESLint 零警告通过。
