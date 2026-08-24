@@ -63,5 +63,6 @@ test('普通聊天 Agent 桥接保留图片消息、当前消息和记忆/RAG上
     });
     assert.equal(messages[1].content[0].text, '看图');
     assert.match(messages.at(-1).content[0].text, /分析图片/);
+    assert.equal(messages.at(-1).content.length, 2, '当前消息文本已由 Agent 目标承载，不应重复注入');
     assert.match(messages.map(message => JSON.stringify(message.content)).join('\n'), /PIVOT_RAG_CONTEXT_BEGIN/);
 });

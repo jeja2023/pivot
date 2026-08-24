@@ -32,6 +32,8 @@ const SCHEDULE_FREQUENCIES = new Set(['manual', 'interval', 'daily', 'weekly', '
 const TOOL_POLICIES = new Set(['all', 'builtin_only']);
 const RUN_MODES = new Set(['standard', 'deep', 'audit', 'dag']);
 const APPROVAL_POLICIES = new Set(['safe_mcp_auto', 'approve_all_mcp']);
+// 普通聊天会额外保留会话桥接上下文，允许比手工 Agent 目标更长的当前消息。
+const MAX_CHAT_AGENT_GOAL_LENGTH = 12000;
 const { normalizeJsonSchema } = require('./agent-dag-contracts');
 
 // 解码 U+FFFD 替换字符；不能直接出现在源文件中，否则会被 check:text 误报为乱码
@@ -325,16 +327,21 @@ function serializeToolAllowlist(value) {
     return list.length ? JSON.stringify(list) : '';
 }
 
-function normalizeAgentGoal(goal) {
+function normalizeAgentGoal(goal, options = {}) {
     const cleanGoal = String(goal || '').trim();
+    const requestedMaxLength = typeof options === 'number' ? options : options?.maxLength;
+    const maxLength = Number.isFinite(Number(requestedMaxLength))
+        ? Math.max(MAX_GOAL_LENGTH, Math.min(Number(requestedMaxLength), MAX_CHAT_AGENT_GOAL_LENGTH))
+        : MAX_GOAL_LENGTH;
     if (cleanGoal.length < 4) {
         const err = new Error('请填写更明确的智能体目标。');
         err.status = 400;
         throw err;
     }
-    if (cleanGoal.length > MAX_GOAL_LENGTH) {
-        const err = new Error(`智能体目标不能超过 ${MAX_GOAL_LENGTH} 个字符。`);
+    if (cleanGoal.length > maxLength) {
+        const err = new Error(`智能体目标不能超过 ${maxLength} 个字符。`);
         err.status = 400;
+        err.code = 'AGENT_GOAL_TOO_LONG';
         throw err;
     }
     return cleanGoal;
@@ -368,6 +375,7 @@ module.exports = {
     TOOL_POLICIES,
     RUN_MODES,
     APPROVAL_POLICIES,
+    MAX_CHAT_AGENT_GOAL_LENGTH,
     parseJsonObject,
     normalizeMaxSteps,
     normalizeOptionalMaxSteps,

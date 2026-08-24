@@ -87,6 +87,7 @@ const {
 } = require('../agent-monitoring');
 const {
     ACTIVE_STATUSES,
+    MAX_CHAT_AGENT_GOAL_LENGTH,
     parseJsonObject,
     normalizeMaxSteps,
     resolveMaxSteps,
@@ -151,6 +152,7 @@ const { createAgentNotificationFactory } = require('./notifications');
 const { createApprovalHelpers } = require('./approvals');
 const { buildVisionHistory, limitVisionImages } = require('../chat-vision');
 const {
+    isChatAgentRun,
     persistAgentRunChatResult,
     recoverChatAgentResults
 } = require('../chat-agent-bridge');
@@ -468,6 +470,7 @@ async function createChildRunFromExisting(run, user) {
         contextConfig: parseJsonObject(run.context_config) || {},
         parentRunId: run.id,
         metadata,
+        chatAgent: isChatAgentRun(run),
         forkHistory: metadata.forkHistory || metadata.fork_history || 'none',
         dagSpec: metadata.dagSpec
     });
@@ -635,6 +638,7 @@ async function resumeAgentRun(runId, user) {
                 previousError: run.error_message || ''
             }
         },
+        chatAgent: isChatAgentRun(run),
         forkHistory: previousMetadata.forkHistory || previousMetadata.fork_history || 'none'
     });
 }
@@ -1676,7 +1680,8 @@ async function createAgentRun({
     dedupeKey = null,
     skillId = null,
     skillName = null,
-    forkHistory = 'none'
+    forkHistory = 'none',
+    chatAgent = false
 }) {
     await assertRunUserActive(user);
     const normalizedScheduleId = scheduleId === null || scheduleId === '' ? null : Number(scheduleId);
@@ -1727,9 +1732,10 @@ async function createAgentRun({
         runMetadata.skillPermissions = skillContext.skillPermissions;
         runMetadata.skillTools = skillContext.skillTools;
     }
+    const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
     const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
         ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
-        : goal);
+        : goal, goalMaxLength ? { maxLength: goalMaxLength } : undefined);
     const runId = createRunId();
     const now = getBeijingTimestamp();
     const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});

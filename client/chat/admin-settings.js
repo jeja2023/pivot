@@ -2,19 +2,23 @@ let settingsLoadSequence = 0;
 
 function setSettingsInitialValues(selector = '') {
     document.querySelectorAll(selector).forEach(input => {
-        input.dataset.settingsInitial = String(input.value ?? '');
+        input.dataset.settingsInitial = input.type === 'checkbox'
+            ? String(input.checked === true)
+            : String(input.value ?? '');
     });
 }
 
 function settingsHasUnsavedChanges() {
     return [...document.querySelectorAll('[data-settings-initial]')].some(input => (
-        String(input.value ?? '') !== input.dataset.settingsInitial
+        (input.type === 'checkbox' ? String(input.checked === true) : String(input.value ?? '')) !== input.dataset.settingsInitial
     ));
 }
 
 function clearSettingsDirty() {
     document.querySelectorAll('[data-settings-initial]').forEach(input => {
-        input.dataset.settingsInitial = String(input.value ?? '');
+        input.dataset.settingsInitial = input.type === 'checkbox'
+            ? String(input.checked === true)
+            : String(input.value ?? '');
     });
 }
 
@@ -250,6 +254,7 @@ async function mergeMemoryPair(targetId, sourceId) {
 }
 
 window.openMemoryEditModal = function(memory) {
+    window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-edit-modal');
     const idInput = document.getElementById('memory-edit-id');
     const typeInput = document.getElementById('memory-edit-type');
@@ -257,13 +262,9 @@ window.openMemoryEditModal = function(memory) {
     const salienceInput = document.getElementById('memory-edit-salience');
     const confidenceInput = document.getElementById('memory-edit-confidence');
     if (!modal || !idInput || !typeInput || !contentInput || !salienceInput || !confidenceInput) {
-        showToast('记忆编辑窗口加载异常，请刷新后重试', 'error');
-        return;
+        return showToast('记忆编辑窗口加载异常，请刷新后重试', 'error');
     }
-    if (!memory) {
-        showToast('记忆数据已刷新，请重新加载后再编辑', 'error');
-        return;
-    }
+    if (!memory) return showToast('记忆数据已刷新，请重新加载后再编辑', 'error');
     idInput.value = memory.id;
     typeInput.value = memory.type || 'episode';
     contentInput.value = memory.content || '';
@@ -305,6 +306,7 @@ function renderMemorySource(data = {}) {
 }
 
 window.openMemorySourceModal = async function(memoryId) {
+    window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-source-modal');
     if (!modal) return;
     const body = document.getElementById('memory-source-body');
@@ -430,7 +432,7 @@ function renderProductMemoryRows(memories = []) {
         <tr>
             <td><input type="checkbox" data-memory-select value="${memory.id}"></td>
             <td><span class="memory-type-badge">${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[memory.type] || memory.type || '记忆')}</span></td>
-            <td class="memory-content-cell">${escapeHtml(memory.content || '')}</td>
+            <td class="memory-content-cell" data-full-content="${escapeHtml(memory.content || '')}">${escapeHtml(memory.content || '')}</td>
             <td>${Number(memory.salience || 0).toFixed(2)}</td>
             <td>${Number(memory.confidence || 0).toFixed(2)}</td>
             <td>${escapeHtml(formatMemoryStatusLabel(memory.status))}</td>
@@ -449,6 +451,7 @@ function renderProductMemoryRows(memories = []) {
             </td>
         </tr>
     `).join(''));
+    window.Pivot?.getModule?.('settings.memoryUi')?.initMemoryContentTooltips?.();
 }
 
 async function fetchMemoryQuality() {
@@ -592,6 +595,7 @@ function getRuntimeItemHint(item) {
         rag_index_max_concurrent: '同时执行多少个知识库索引任务。',
         agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。',
         agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
+        chat_auto_agent_enabled: '关闭后普通会话继续使用原有模型流，不会自动创建连续 Agent；手工 Agent 和工作流不受影响。',
         memory_compression_max_concurrent: '后台同时压缩多少个记忆任务。'
     };
     return hintMap[item?.key] || '';
@@ -646,6 +650,10 @@ function collectRuntimeSettingsPayload(source = null) {
     Array.from(root.querySelectorAll('[data-runtime-key]')).forEach(input => {
         const key = input.dataset.runtimeKey;
         if (!key || Object.prototype.hasOwnProperty.call(payload, key)) return;
+        if (input.type === 'checkbox') {
+            payload[key] = input.checked === true ? 1 : 0;
+            return;
+        }
         const rawValue = String(input.value || '').trim();
         payload[key] = isRuntimeHumanIntKey(key) ? parseTokenAmount(rawValue) : Number(rawValue);
     });
@@ -676,8 +684,13 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
         if (!item) return;
         input.min = item.min ?? input.min;
         input.max = item.max ?? input.max;
-        input.value = isRuntimeHumanIntKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
-        input.dataset.settingsInitial = String(input.value ?? '');
+        if (input.type === 'checkbox') {
+            input.checked = Number(item.value) === 1;
+            input.dataset.settingsInitial = String(input.checked === true);
+        } else {
+            input.value = isRuntimeHumanIntKey(key) ? formatTokenInputValue(item.value) : String(item.value ?? '');
+            input.dataset.settingsInitial = String(input.value ?? '');
+        }
         const hint = getRuntimeItemHint(item);
         input.title = hint ? `${item.label}。${hint} 范围 ${item.min} - ${item.max}` : `${item.label}，范围 ${item.min} - ${item.max}`;
     });

@@ -11,7 +11,7 @@ const {
 } = require('./long-term-memory');
 const { summarizeRagContextSources } = require('./chat-rag-context');
 const { getModelContextBudget } = require('./context-budget');
-const { parseJsonObject } = require('./agent-validators');
+const { MAX_CHAT_AGENT_GOAL_LENGTH, parseJsonObject } = require('./agent-validators');
 const { logger } = require('../logger');
 
 const CHAT_AGENT_BRIDGE_VERSION = 1;
@@ -102,7 +102,7 @@ function buildChatAgentMetadata({
             ragScope: ragScope && typeof ragScope === 'object' ? ragScope : {},
             currentMessage: {
                 role: 'user',
-                content: normalizeChatContent(currentContent)
+                content: normalizeChatContent(currentContent, MAX_CHAT_AGENT_GOAL_LENGTH)
             },
             memoryContext: clampText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
             ragContext: clampText(ragContext, CHAT_AGENT_CONTEXT_CHARS),

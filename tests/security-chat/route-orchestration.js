@@ -156,6 +156,128 @@ test('普通聊天短消息不会因 Agent 目标最小长度校验而接管失�
     }
 });
 
+test('普通聊天 Agent 开关关闭时继续使用原有模型流', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['普通模型流回答正常。'] });
+    const fixture = createChatFixture({ prefix: 'chat_auto_agent_disabled', upstreamUrl: upstream.url });
+    let agentCalled = false;
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: () => false,
+        agentRunFactory: async () => {
+            agentCalled = true;
+            throw new Error('开关关闭时不应创建 Agent');
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '请使用普通模型流回答这个问题',
+            modelId: fixture.modelId
+        });
+        assert.equal(agentCalled, false);
+        assert.match(result.streamedContent, /普通模型流回答正常/);
+        assert.equal(readSessionMessages(fixture).filter(row => row.role === 'assistant').length, 1);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('普通聊天超过手工 Agent 上限仍能进入连续 Agent', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_long_agent_message' });
+    let capturedRun = null;
+    const longContent = '长消息内容'.repeat(401);
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async options => {
+            capturedRun = options;
+            return { id: 'long-agent-run', status: 'queued' };
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: longContent,
+            modelId: fixture.modelId
+        });
+        assert.equal(longContent.length > 2000, true);
+        assert.equal(capturedRun?.chatAgent, true);
+        assert.equal(capturedRun?.goal, longContent);
+        assert.equal(result.findByType('agent_handoff')?.runId, 'long-agent-run');
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 0);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('普通聊天超出会话 Agent 桥接上限时回退模型流', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['超长消息普通聊天回答正常。'] });
+    const fixture = createChatFixture({ prefix: 'chat_oversize_message', upstreamUrl: upstream.url });
+    let agentCalled = false;
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async () => {
+            agentCalled = true;
+            throw new Error('超出聊天 Agent 上限的消息不应进入 Agent');
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '超长消息内容'.repeat(2001),
+            modelId: fixture.modelId
+        });
+        assert.equal(agentCalled, false);
+        assert.match(result.streamedContent, /超长消息普通聊天回答正常/);
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
+test('普通聊天兼容旧版 Agent 目标校验并回退模型流', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['旧版校验回退回答正常。'] });
+    const fixture = createChatFixture({ prefix: 'chat_legacy_goal_limit', upstreamUrl: upstream.url });
+    const routeServer = await startChatRouteServer({
+        fixture,
+        autoAgent: true,
+        agentRunFactory: async () => {
+            const error = new Error('智能体目标不能超过 2000 个字符。');
+            error.code = 'AGENT_GOAL_TOO_LONG';
+            throw error;
+        }
+    });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '兼容旧版目标校验'.repeat(300),
+            modelId: fixture.modelId
+        });
+        assert.match(result.streamedContent, /旧版校验回退回答正常/);
+        assert.equal(result.errorEvent, undefined);
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
 test('重新生成的 Agent 接管失败也会持久化可见错误结果', async () => {
     const fixture = createChatFixture({ prefix: 'chat_regenerate_agent_error' });
     await saveUserMessage({

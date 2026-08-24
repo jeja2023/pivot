@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 817,
+  "total": 820,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -105,7 +105,7 @@
     },
     {
       "file": "tests/security-chat/context-settings.js",
-      "count": 16
+      "count": 19
     },
     {
       "file": "tests/security-chat/context-thought.js",

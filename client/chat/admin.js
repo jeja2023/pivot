@@ -206,6 +206,7 @@ const adminFeatureScripts = [
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
     '/chat/admin-settings.js',
+    '/chat/admin-memory-ui.js',
     '/chat/announcements-admin.js',
     '/chat/tool-policy.js',
     '/chat/extra.js'

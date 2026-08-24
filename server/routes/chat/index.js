@@ -60,6 +60,7 @@ const {
     normalizeChatHistory,
     prepareChatAgentContext
 } = require('../../services/chat-agent-bridge');
+const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
 const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
@@ -131,6 +132,9 @@ function createChatRouter({
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
+        const autoAgentEnabled = typeof autoAgent === 'function'
+            ? autoAgent() === true
+            : autoAgent === true;
         const chatState = buildChatRequestState(req);
         let {
             regenerate,
@@ -327,7 +331,10 @@ function createChatRouter({
         // 的首轮直接返回答案，复杂问题则由同一套运行时继续规划、调用工具并后台恢复。
         // 普通聊天允许“你好”“好的”这类短消息；Agent Runtime 的 goal 校验
         // 需要更明确的目标，因此短消息继续走原有模型流式路径，不升级为 Agent。
-        if (autoAgent && modelContent.length >= 4) {
+        // Agent Runtime 的目标契约独立于普通聊天的模型上下文预算：手工 Agent
+        // 目标最多 2000 字符，普通聊天 Agent 使用会话桥接上限，保留较长的当前消息。
+        // 再长的消息走普通模型流，避免把桥接输入上限异常显示给用户。
+        if (autoAgentEnabled && modelContent.length >= 4 && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
@@ -367,6 +374,7 @@ function createChatRouter({
                 }
                 const run = await agentRunFactory({
                     user: req.user,
+                    chatAgent: true,
                     goal: modelContent,
                     modelId: modelCfg.id,
                     sessionId,
@@ -412,20 +420,24 @@ function createChatRouter({
                 writeSse('[DONE]');
                 return res.end();
             } catch (error) {
-                req.log.error({ sessionId, userId, err: error.message }, '普通聊天 Agent 接管失败');
-                await writeChatErrorSse({
-                    writeSse,
-                    sessionId,
-                    userId,
-                    modelId: modelCfg.id,
-                    error: '连续 Agent 启动失败',
-                    detail: error.message,
-                    code: error.code || 'AGENT_HANDOFF_FAILED',
-                    persist: userMessagePersisted || regenerate,
-                    log: req.log
-                });
-                finishChatTrace('error', { mode: 'agent_handoff', error: error.message });
-                return res.end();
+                if (error?.code === 'AGENT_GOAL_TOO_LONG') {
+                    req.log.warn({ sessionId, userId, contentLength: modelContent.length }, '普通聊天 Agent 目标超长，回退普通模型流');
+                } else {
+                    req.log.error({ sessionId, userId, err: error.message }, '普通聊天 Agent 接管失败');
+                    await writeChatErrorSse({
+                        writeSse,
+                        sessionId,
+                        userId,
+                        modelId: modelCfg.id,
+                        error: '连续 Agent 启动失败',
+                        detail: error.message,
+                        code: error.code || 'AGENT_HANDOFF_FAILED',
+                        persist: userMessagePersisted || regenerate,
+                        log: req.log
+                    });
+                    finishChatTrace('error', { mode: 'agent_handoff', error: error.message });
+                    return res.end();
+                }
             }
         }
 

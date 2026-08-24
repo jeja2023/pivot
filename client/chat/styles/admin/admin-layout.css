@@ -410,6 +410,56 @@
     line-height: 1.05;
     text-align: left;
 }
+.global-params-tab .runtime-agent-toggle-item {
+    justify-content: flex-start;
+}
+.global-params-tab .runtime-agent-toggle {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 7px;
+    color: #334155;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.global-params-tab .runtime-agent-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.global-params-tab .runtime-agent-toggle-track {
+    position: relative;
+    width: 34px;
+    height: 19px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transition: background 140ms ease;
+}
+.global-params-tab .runtime-agent-toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+    transition: transform 140ms ease;
+}
+.global-params-tab .runtime-agent-toggle input:checked ~ .runtime-agent-toggle-track {
+    background: #0f766e;
+}
+.global-params-tab .runtime-agent-toggle input:checked ~ .runtime-agent-toggle-track::after {
+    transform: translateX(15px);
+}
+.global-params-tab .runtime-agent-toggle input:focus-visible ~ .runtime-agent-toggle-track {
+    outline: 2px solid rgba(14, 116, 144, 0.45);
+    outline-offset: 2px;
+}
 .global-params-tab .runtime-key-note {
     display: block;
     min-width: 0;
@@ -1041,13 +1091,16 @@
     justify-content: space-between;
     gap: 12px;
 }
+.memory-source-close,
 .settings-workspace-view .memory-source-close {
     margin-left: auto;
 }
+.memory-edit-grid,
 .settings-workspace-view .memory-edit-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.memory-edit-content textarea.form-input,
 .settings-workspace-view .memory-edit-content textarea.form-input {
     height: 180px;
     min-height: 140px;
@@ -1055,9 +1108,11 @@
     line-height: 1.5;
     resize: vertical;
 }
+.memory-modal-actions,
 .settings-workspace-view .memory-modal-actions {
     margin-top: 4px;
 }
+.memory-source-meta,
 .settings-workspace-view .memory-source-meta {
     display: flex;
     align-items: center;
@@ -1067,22 +1122,26 @@
     color: #64748b;
     font-size: 0.78rem;
 }
+.memory-source-meta strong,
 .settings-workspace-view .memory-source-meta strong {
     color: #0f172a;
     font-size: 0.9rem;
 }
+.memory-source-list,
 .settings-workspace-view .memory-source-list {
     display: grid;
     gap: 10px;
     max-height: 560px;
     overflow: auto;
 }
+.memory-source-message,
 .settings-workspace-view .memory-source-message {
     padding: 10px 12px;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     background: #f8fafc;
 }
+.memory-source-message div,
 .settings-workspace-view .memory-source-message div {
     display: flex;
     justify-content: space-between;
@@ -1091,6 +1150,7 @@
     font-size: 0.75rem;
     margin-bottom: 6px;
 }
+.memory-source-message pre,
 .settings-workspace-view .memory-source-message pre {
     margin: 0;
     white-space: pre-wrap;
@@ -1099,6 +1159,39 @@
     font-family: inherit;
     font-size: 0.82rem;
     line-height: 1.5;
+}
+.memory-custom-tooltip {
+    position: fixed;
+    z-index: 9999;
+    max-width: min(580px, 85vw);
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: 0 16px 36px -4px rgba(15, 23, 42, 0.45), 0 6px 14px -2px rgba(15, 23, 42, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: auto;
+    transition: opacity 120ms ease, transform 120ms ease;
+    opacity: 1;
+    transform: translateY(0);
+}
+.memory-custom-tooltip.hidden {
+    display: none;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+}
+.memory-custom-tooltip.tooltip-top {
+    transform: translateY(-100%);
 }
 .settings-workspace-view .pagination {
     margin-top: 10px;

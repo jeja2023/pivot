@@ -46,8 +46,15 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             chatAgent?.memoryContext ? { role: 'user', content: chatAgent.memoryContext } : null,
             chatAgent?.ragContext ? { role: 'user', content: chatAgent.ragContext } : null
         ].filter(Boolean);
-        const currentContent = Array.isArray(chatAgent?.currentMessage?.content)
-            ? [{ type: 'text', text: run.goal || '' }, ...chatAgent.currentMessage.content]
+        const currentMessageParts = Array.isArray(chatAgent?.currentMessage?.content)
+            ? chatAgent.currentMessage.content.filter(part => part && typeof part === 'object')
+            : [];
+        const currentMediaParts = currentMessageParts.filter(part => part.type === 'image_url' || part.type === 'input_image');
+        const currentContent = currentMessageParts.length
+            ? [
+                { type: 'text', text: run.goal || '' },
+                ...(currentMediaParts.length ? currentMediaParts : currentMessageParts)
+            ]
             : run.goal || '';
         const conversation = [
             { role: 'system', content: effectiveSystemPrompt },

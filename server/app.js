@@ -82,6 +82,7 @@ const {
 } = require('./services/models');
 const { getPublicRegistrationSetting } = require('./services/registration-settings');
 const { getSystemHealthSnapshot } = require('./services/system-health');
+const { getChatAgentRuntimeConfig } = require('./services/runtime-settings');
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
 
@@ -569,7 +570,7 @@ app.use('/api', createChatRouter({
     retrieveContext,
     isRagEnabled: () => true,
     publicUrl: appConfig.publicUrl,
-    autoAgent: true
+    autoAgent: () => getChatAgentRuntimeConfig().autoAgentEnabled
 }));
 
 app.use('/v1', createOpenAIRouter({

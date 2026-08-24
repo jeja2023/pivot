@@ -136,6 +136,12 @@ function getAgentConcurrencyConfig() {
     };
 }
 
+function getChatAgentRuntimeConfig() {
+    return {
+        autoAgentEnabled: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.chatAutoAgentEnabled) === 1
+    };
+}
+
 function getBackgroundRuntimeConfig() {
     return {
         ragIndexMaxConcurrent: getRuntimeSettingValue(RUNTIME_SETTING_KEYS.ragIndexMaxConcurrent),
@@ -200,6 +206,7 @@ module.exports = {
     clearRuntimeConfigCache,
     getAttachmentRuntimeConfig,
     getAgentConcurrencyConfig,
+    getChatAgentRuntimeConfig,
     getBackgroundRuntimeConfig,
     getGlobalAiConcurrencyConfig,
     getGlobalContextRuntimeConfig,

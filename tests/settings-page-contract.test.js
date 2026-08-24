@@ -19,6 +19,9 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(settings, /globalName: 'loadSettings'/);
     assert.match(settings, /const requestId = \+\+settingsLoadSequence/);
     assert.match(settings, /settings-state-retry/);
+    assert.match(settings, /chat_auto_agent_enabled/);
+    assert.match(settings, /input.type === 'checkbox'/);
+    assert.match(shell, /tab-content-global-params/);
     assert.match(shell, /role="tablist"/);
     assert.match(shell, /role="tab" aria-controls="tab-content-models"/);
     assert.match(shell, /id="settings-load-state"[^>]*role="status"/);

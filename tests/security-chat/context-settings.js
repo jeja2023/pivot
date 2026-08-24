@@ -8,6 +8,7 @@ const { resolveAgentMaxTokens } = require('../../server/services/agent-model');
 const { validateModelTokenSettings, normalizeModelTokenLimit } = require('../../server/services/models');
 const {
     RUNTIME_SETTING_KEYS,
+    getChatAgentRuntimeConfig,
     getGlobalContextRuntimeConfig,
     getGlobalSamplingRuntimeConfig,
     getUploadRuntimeConfig,
@@ -138,6 +139,34 @@ test('运行时上下文默认值可从设置页保存并影响上下文预算',
         await refreshAppSettingsCache();
         syncGlobalAiConcurrencySettings();
         syncAgentRuntimeConcurrency();
+    }
+});
+
+test('普通聊天连续 Agent 开关可从运行时配置即时读写', async () => {
+    const key = RUNTIME_SETTING_KEYS.chatAutoAgentEnabled;
+    const previous = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key);
+    try {
+        const disabled = await saveRuntimeConfigAsync({ [key]: 0 }, null);
+        assert.equal(disabled.error, undefined);
+        assert.equal(getChatAgentRuntimeConfig().autoAgentEnabled, false);
+
+        const enabled = await saveRuntimeConfigAsync({ [key]: 1 }, null);
+        assert.equal(enabled.error, undefined);
+        assert.equal(getChatAgentRuntimeConfig().autoAgentEnabled, true);
+    } finally {
+        if (previous) {
+            db.prepare(`
+                INSERT INTO app_settings (key, value, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
+            `).run(previous.key, previous.value, previous.updated_at, previous.updated_by);
+        } else {
+            db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+        }
+        await refreshAppSettingsCache();
     }
 });
 

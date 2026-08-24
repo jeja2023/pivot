@@ -42,7 +42,10 @@ function buildCurrentGoalContent(goal, observations, contextConfig = {}) {
     const currentMessage = contextConfig?.chatAgent?.currentMessage;
     if (!Array.isArray(currentMessage?.content)) return prefix;
     const parts = currentMessage.content.filter(part => part && typeof part === 'object');
-    return [{ type: 'text', text: prefix }, ...parts];
+    // 图片消息的文本已经包含在 Agent 目标中；只追加媒体部分，避免同一段
+    // 用户输入在每轮规划中重复占用上下文窗口。
+    const mediaParts = parts.filter(part => part.type === 'image_url' || part.type === 'input_image');
+    return [{ type: 'text', text: prefix }, ...(mediaParts.length ? mediaParts : parts)];
 }
 
 function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null, worldState = null, worldStateInjection = null) {

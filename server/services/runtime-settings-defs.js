@@ -7,6 +7,7 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     modelEndpointQueueTimeoutMs: 'model_endpoint_queue_timeout_ms',
     agentMaxConcurrentRuns: 'agent_max_concurrent_runs',
     agentDagNodeConcurrency: 'agent_dag_node_concurrency',
+    chatAutoAgentEnabled: 'chat_auto_agent_enabled',
     ragIndexMaxConcurrent: 'rag_index_max_concurrent',
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
     modelContextWindowTokens: 'model_context_window_tokens',
@@ -112,6 +113,17 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
         min: 1,
         max: 256,
         group: 'agent'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.chatAutoAgentEnabled,
+        prop: 'chatAutoAgentEnabled',
+        label: '普通会话自动连续 Agent',
+        env: 'CHAT_AUTO_AGENT_ENABLED',
+        defaultValue: 1,
+        min: 0,
+        max: 1,
+        group: 'agent',
+        valueType: 'boolean'
     },
     {
         key: RUNTIME_SETTING_KEYS.ragIndexMaxConcurrent,
@@ -364,6 +376,14 @@ function parseHumanInt(value) {
 }
 
 function parseRuntimeSettingRawValue(definition, value) {
+    if (definition?.valueType === 'boolean') {
+        if (value === true || value === 1) return 1;
+        if (value === false || value === 0) return 0;
+        const normalized = String(value ?? '').trim().toLowerCase();
+        if (['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)) return 1;
+        if (['0', 'false', 'no', 'off', 'disabled'].includes(normalized)) return 0;
+        return NaN;
+    }
     if (definition?.valueType === 'float') {
         const parsed = Number.parseFloat(String(value ?? '').trim());
         return Number.isFinite(parsed) ? parsed : NaN;

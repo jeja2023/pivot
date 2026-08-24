@@ -1434,6 +1434,11 @@ test('agent runs can be cancelled and rerun from an existing run', async () => {
     }
 
     assert.throws(() => normalizeAgentGoal('短'), /更明确/);
+    assert.throws(
+        () => normalizeAgentGoal('超长目标'.repeat(501)),
+        error => error.code === 'AGENT_GOAL_TOO_LONG' && /2000/.test(error.message)
+    );
+    assert.doesNotThrow(() => normalizeAgentGoal('超长目标'.repeat(501), { maxLength: 12000 }));
 });
 
 test('agent model visibility excludes other users private models', async () => {
@@ -2017,6 +2022,5 @@ test('listRuns enriches model_name for standard, DAG node models, and pure tool 
     assert.ok(run3);
     assert.equal(run3.model_name, '无需模型 (纯工具)');
 });
-
 
 
