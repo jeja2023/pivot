@@ -487,6 +487,7 @@ window.openAgentRun = async function(runId, options = {}) {
         </details>
         ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
         ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
+        ${!isPreview && !isAgentRunActive(run.status) ? `<section class="agent-run-feedback" data-agent-run-feedback="${agentEscapeAttr(run.id)}"><div class="agent-tool-section-head compact"><strong>结果反馈</strong><span>反馈会用于改进提示词、工具选择和工作流建议，不会自动修改系统。</span></div><div class="agent-run-feedback-actions"><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="success">有帮助</button><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="partial">部分有帮助</button><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="failure">需要修正</button><select class="form-input" data-agent-feedback-rating aria-label="结果评分"><option value="">评分</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></div><textarea class="form-input" rows="2" data-agent-feedback-correction placeholder="可选：指出缺失、错误或你修改后的答案"></textarea><button type="button" class="btn-primary btn-xs" data-agent-feedback-submit>提交反馈</button><span class="agent-run-feedback-status" data-agent-feedback-status role="status"></span></section>` : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
         ${visualOutputs}
         <details class="agent-run-process"${processExpanded}>
@@ -523,6 +524,27 @@ window.openAgentRun = async function(runId, options = {}) {
     detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.Pivot.moduleApi('agent.artifacts').saveFromRun?.(run.id));
     detail.querySelector('[data-agent-add-evaluation]')?.addEventListener('click', () => {
         window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
+    });
+    detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(button => {
+        button.addEventListener('click', () => {
+            detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(item => item.classList.toggle('active', item === button));
+            detail.querySelector('[data-agent-feedback-submit]')?.setAttribute('data-outcome', button.dataset.agentFeedbackOutcome || 'unknown');
+        });
+    });
+    detail.querySelector('[data-agent-feedback-submit]')?.addEventListener('click', async event => {
+        const section = detail.querySelector('[data-agent-run-feedback]');
+        const status = section?.querySelector('[data-agent-feedback-status]');
+        const outcome = event.currentTarget.dataset.outcome || 'unknown';
+        try {
+            const correction = section?.querySelector('[data-agent-feedback-correction]')?.value || '';
+            const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, rating: section?.querySelector('[data-agent-feedback-rating]')?.value || null, correction, modifiedAnswer: correction }) });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '反馈提交失败');
+            if (status) { status.textContent = '已记录，谢谢反馈。'; status.className = 'agent-run-feedback-status is-success'; }
+            event.currentTarget.disabled = true;
+        } catch (error) {
+            if (status) { status.textContent = error.message || '反馈提交失败'; status.className = 'agent-run-feedback-status is-error'; }
+        }
     });
     detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
     window.bindAgentRunHarnessDiagnostics?.(detail, run.id);

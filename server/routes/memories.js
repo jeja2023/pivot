@@ -20,6 +20,7 @@ const {
     updateMemoryStatus,
     updateMemoryStatuses
 } = require('../services/long-term-memory');
+const { getMemoryPolicy, updateMemoryPolicy } = require('../services/memory-governance');
 
 function normalizeMemoryId(raw) {
     const id = Number.parseInt(raw, 10);
@@ -140,6 +141,16 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             enabled: finalEnabled,
             summary
         });
+    }));
+
+    router.get('/memories/policy', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, policy: await getMemoryPolicy(req.user.id) });
+    }));
+
+    router.put('/memories/policy', authMiddleware, asyncHandler(async (req, res) => {
+        const policy = await updateMemoryPolicy(req.user.id, req.body || {});
+        if (typeof logAction === 'function') logAction(req, '更新记忆治理策略', `禁止类别: ${(policy.blockedCategories || []).join(',') || '无'}`);
+        res.json({ success: true, policy });
     }));
 
     router.put('/memories/status/bulk', authMiddleware, asyncHandler(async (req, res) => {

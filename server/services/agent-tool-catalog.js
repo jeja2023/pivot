@@ -46,7 +46,7 @@ async function formatToolList(user, options = {}) {
         .filter(tool => tool.serverType !== 'database')
         .map(tool => ({
             name: tool.fullName,
-            title: tool.name,
+            title: tool.title || tool.name,
             description: `[${tool.serverName}] ${tool.description || tool.name}`,
             input_schema: tool.input_schema,
             source: 'mcp',

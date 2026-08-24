@@ -44,6 +44,14 @@ const DEFAULT_BATCH_CONCURRENCY = 2;
 const MAX_BATCH_CONCURRENCY = 4;
 const JOB_WORKER_LIMIT = 1;
 let workerRunning = false;
+const activeJobControllers = new Map();
+
+function isAbortError(err, signal) {
+    if (signal?.aborted) return true;
+    if (!err) return false;
+    if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.code === 'ECONNABORTED') return true;
+    return typeof err.message === 'string' && /abort|canceled|cancelled|cancel/i.test(err.message);
+}
 
 function clampText(value, max = 4000) {
     const text = String(value ?? '');
@@ -677,7 +685,8 @@ async function analyzeSemanticBatchSegments({ job, batch, segments, options, use
         source: 'data_analysis_semantic_batch',
         maxTokens: maxOutputTokens,
         maxOutputTokensCap: maxOutputTokens,
-        temperature: 0.1
+        temperature: 0.1,
+        signal: options.signal || null
     });
     try {
         const normalized = normalizeBatchResult(response.content, segments);
@@ -727,7 +736,7 @@ async function ensureSemanticQuota(user, model, messages, maxOutputTokens) {
     }
 }
 
-async function synthesizeSemanticReport(job, batchRows, user, model) {
+async function synthesizeSemanticReport(job, batchRows, user, model, { signal = null } = {}) {
     const options = jsonParse(job.options_json, {});
     const summaries = batchRows.map(batch => `批次 ${Number(batch.batch_index) + 1}（${Number(batch.row_count) || 0} 条记录，${Number(batch.char_count) || 0} 字符）：${clampText(jsonParse(batch.result_json, {}).summary || batch.result_text, 1400)}`).join('\n');
     const messages = [
@@ -753,15 +762,16 @@ async function synthesizeSemanticReport(job, batchRows, user, model) {
         source: 'data_analysis_semantic_summary',
         maxTokens: options.maxOutputTokens || 1200,
         maxOutputTokensCap: options.maxOutputTokens || 1200,
-        temperature: 0.15
+        temperature: 0.15,
+        signal
     });
     return output.content;
 }
 
 async function processSemanticBatch({ job, user, model, batches, options, stopSignal }) {
-    if (stopSignal.stopped) return { claimed: false };
+    if (stopSignal.stopped || options.signal?.aborted) return { claimed: false };
     const currentJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
-    if (!currentJob || currentJob.status !== SEMANTIC_JOB_STATUS.running) {
+    if (!currentJob || currentJob.status !== SEMANTIC_JOB_STATUS.running || options.signal?.aborted) {
         stopSignal.stopped = true;
         return { claimed: false };
     }
@@ -802,6 +812,11 @@ async function processSemanticBatch({ job, user, model, batches, options, stopSi
         await touchSemanticJob(job.id);
         return { claimed: true, ok: true };
     } catch (err) {
+        if (isAbortError(err, options.signal)) {
+            await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.cancelled, { error: '任务已被用户取消。' });
+            stopSignal.stopped = true;
+            return { claimed: true, ok: false, aborted: true };
+        }
         const exhausted = Number(batch.attempts || 1) >= Number(batch.max_attempts || DEFAULT_BATCH_MAX_ATTEMPTS);
         const quotaOrContextError = ['INSUFFICIENT_QUOTA', 'SEMANTIC_CONTEXT_TOO_SMALL'].includes(err.code);
         await finishSemanticBatch(batch, exhausted ? SEMANTIC_BATCH_STATUS.failed : SEMANTIC_BATCH_STATUS.queued, { error: err.message || String(err) });
@@ -834,59 +849,68 @@ async function processSemanticAnalysisJob(job) {
     await ensureSemanticBatches(job, batches);
     await execute(`UPDATE analysis_semantic_jobs SET analyzed_rows = ?, total_batches = ?, updated_at = ? WHERE id = ?`, [rows.length, batches.length, getBeijingTimestamp(), job.id]);
 
-    const stopSignal = { stopped: false, failure: null };
-    const batchConcurrency = resolveSemanticBatchConcurrency(
-        model,
-        options.batchConcurrency || process.env.DATA_ANALYSIS_SEMANTIC_BATCH_CONCURRENCY
-    );
-    const runBatchWorker = async () => {
-        while (!stopSignal.stopped) {
-            const result = await processSemanticBatch({ job, user, model, batches, options, stopSignal });
-            if (!result.claimed) break;
-        }
-    };
-    await Promise.all(Array.from({ length: batchConcurrency }, () => runBatchWorker()));
+    const jobController = new AbortController();
+    activeJobControllers.set(job.id, jobController);
+    try {
+        const stopSignal = { stopped: false, failure: null };
+        const batchConcurrency = resolveSemanticBatchConcurrency(
+            model,
+            options.batchConcurrency || process.env.DATA_ANALYSIS_SEMANTIC_BATCH_CONCURRENCY
+        );
+        const jobOptions = { ...options, signal: jobController.signal };
+        const runBatchWorker = async () => {
+            while (!stopSignal.stopped && !jobController.signal.aborted) {
+                const result = await processSemanticBatch({ job, user, model, batches, options: jobOptions, stopSignal });
+                if (!result.claimed) break;
+            }
+        };
+        await Promise.all(Array.from({ length: batchConcurrency }, () => runBatchWorker()));
 
-    if (stopSignal.failure) {
-        await markJobFailure(job.id, stopSignal.failure.error.message || String(stopSignal.failure.error), stopSignal.failure.retry);
-        return;
-    }
-    const latestJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
-    if (!latestJob || latestJob.status === SEMANTIC_JOB_STATUS.cancelled) return;
-
-    const failed = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status = ?', [job.id, SEMANTIC_BATCH_STATUS.failed]);
-    const pending = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status != ?', [job.id, SEMANTIC_BATCH_STATUS.succeeded]);
-    if (Number(failed?.count || 0) > 0 || Number(pending?.count || 0) > 0) {
-        await markJobFailure(job.id, Number(failed?.count || 0) > 0 ? '存在无法完成的语义分析批次。' : '语义分析批次尚未全部完成。', Number(failed?.count || 0) === 0);
-        return;
-    }
-    const completedBatches = await query(`SELECT * FROM analysis_semantic_batches WHERE job_id = ? ORDER BY batch_index ASC`, [job.id]);
-    const report = await synthesizeSemanticReport(job, completedBatches, user, model);
-    const result = {
-        report,
-        coverage: {
-            totalRows: Number(job.total_rows) || rows.length,
-            analyzedRows: rows.length,
-            totalChars: Number(job.total_chars) || rows.reduce((sum, row) => sum + row.text.length, 0),
-            totalBatches: batches.length,
-            completedBatches: completedBatches.length
+        if (jobController.signal.aborted) return;
+        if (stopSignal.failure) {
+            await markJobFailure(job.id, stopSignal.failure.error.message || String(stopSignal.failure.error), stopSignal.failure.retry);
+            return;
         }
-    };
-    await execute(`
-        UPDATE analysis_semantic_jobs
-        SET status = ?, locked_at = NULL, last_error = '', report_text = ?, result_json = ?,
-            completed_batches = ?, succeeded_batches = ?, failed_batches = 0,
-            completed_at = ?, updated_at = ?
-        WHERE id = ?
-    `, [SEMANTIC_JOB_STATUS.succeeded, report, JSON.stringify(result).slice(0, 100000), completedBatches.length, completedBatches.length, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
-    await recordArtifact({
-        userId: job.user_id,
-        datasetId: job.dataset_id,
-        type: 'ai_full_text_analysis',
-        title: `全量语义分析：${options.textFieldName || job.text_field}`,
-        content: JSON.stringify({ jobId: job.id, instruction: job.instruction, ...result }),
-        metadata: { jobId: job.id, totalBatches: batches.length, analyzedRows: rows.length }
-    });
+        const latestJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
+        if (!latestJob || latestJob.status === SEMANTIC_JOB_STATUS.cancelled) return;
+
+        const failed = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status = ?', [job.id, SEMANTIC_BATCH_STATUS.failed]);
+        const pending = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status != ?', [job.id, SEMANTIC_BATCH_STATUS.succeeded]);
+        if (Number(failed?.count || 0) > 0 || Number(pending?.count || 0) > 0) {
+            await markJobFailure(job.id, Number(failed?.count || 0) > 0 ? '存在无法完成的语义分析批次。' : '语义分析批次尚未全部完成。', Number(failed?.count || 0) === 0);
+            return;
+        }
+        const completedBatches = await query(`SELECT * FROM analysis_semantic_batches WHERE job_id = ? ORDER BY batch_index ASC`, [job.id]);
+        const report = await synthesizeSemanticReport(job, completedBatches, user, model, { signal: jobController.signal });
+        if (jobController.signal.aborted) return;
+        const result = {
+            report,
+            coverage: {
+                totalRows: Number(job.total_rows) || rows.length,
+                analyzedRows: rows.length,
+                totalChars: Number(job.total_chars) || rows.reduce((sum, row) => sum + row.text.length, 0),
+                totalBatches: batches.length,
+                completedBatches: completedBatches.length
+            }
+        };
+        await execute(`
+            UPDATE analysis_semantic_jobs
+            SET status = ?, locked_at = NULL, last_error = '', report_text = ?, result_json = ?,
+                completed_batches = ?, succeeded_batches = ?, failed_batches = 0,
+                completed_at = ?, updated_at = ?
+            WHERE id = ?
+        `, [SEMANTIC_JOB_STATUS.succeeded, report, JSON.stringify(result).slice(0, 100000), completedBatches.length, completedBatches.length, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
+        await recordArtifact({
+            userId: job.user_id,
+            datasetId: job.dataset_id,
+            type: 'ai_full_text_analysis',
+            title: `全量语义分析：${options.textFieldName || job.text_field}`,
+            content: JSON.stringify({ jobId: job.id, instruction: job.instruction, ...result }),
+            metadata: { jobId: job.id, totalBatches: batches.length, analyzedRows: rows.length }
+        });
+    } finally {
+        activeJobControllers.delete(job.id);
+    }
 }
 
 async function processSemanticAnalysisJobs(options = {}) {
@@ -928,25 +952,19 @@ async function retrySemanticAnalysisJob(userId, jobId) {
         throw err;
     }
     const now = getBeijingTimestamp();
-    await execute(`
-        UPDATE analysis_semantic_jobs
-        SET status = ?, attempts = 0, last_error = '', locked_at = NULL, next_run_at = ?, completed_at = NULL, updated_at = ?
-        WHERE id = ? AND user_id = ?
-    `, [SEMANTIC_JOB_STATUS.queued, now, now, job.id, userId]);
-    await execute(`
-        UPDATE analysis_semantic_batches
-        SET status = CASE WHEN status = ? THEN ? ELSE status END,
-            attempts = CASE WHEN status IN (?, ?, ?) THEN 0 ELSE attempts END,
-            last_error = CASE WHEN status IN (?, ?, ?) THEN '' ELSE last_error END,
-            locked_at = NULL, completed_at = NULL, updated_at = ?
-        WHERE job_id = ?
-    `, [SEMANTIC_BATCH_STATUS.succeeded, SEMANTIC_BATCH_STATUS.succeeded, SEMANTIC_BATCH_STATUS.failed, SEMANTIC_BATCH_STATUS.cancelled, SEMANTIC_BATCH_STATUS.running, SEMANTIC_BATCH_STATUS.failed, SEMANTIC_BATCH_STATUS.cancelled, SEMANTIC_BATCH_STATUS.running, now, job.id]);
+    await execute(`UPDATE analysis_semantic_jobs SET status = ?, attempts = 0, last_error = '', locked_at = NULL, next_run_at = ?, completed_at = NULL, updated_at = ? WHERE id = ? AND user_id = ?`, [SEMANTIC_JOB_STATUS.queued, now, now, job.id, userId]);
+    await execute(`UPDATE analysis_semantic_batches SET status = CASE WHEN status = ? THEN ? ELSE status END, attempts = CASE WHEN status IN (?, ?, ?) THEN 0 ELSE attempts END, last_error = CASE WHEN status IN (?, ?, ?) THEN '' ELSE last_error END, locked_at = NULL, completed_at = NULL, updated_at = ? WHERE job_id = ?`, [SEMANTIC_BATCH_STATUS.succeeded, SEMANTIC_BATCH_STATUS.succeeded, SEMANTIC_BATCH_STATUS.failed, SEMANTIC_BATCH_STATUS.cancelled, SEMANTIC_BATCH_STATUS.running, SEMANTIC_BATCH_STATUS.failed, SEMANTIC_BATCH_STATUS.cancelled, SEMANTIC_BATCH_STATUS.running, now, job.id]);
     triggerSemanticAnalysisWorker();
     return await getSemanticJobDetail(userId, job.id);
 }
 
 async function cancelSemanticAnalysisJob(userId, jobId) {
     const job = await getSemanticJobForUser(userId, jobId);
+    const controller = activeJobControllers.get(job.id);
+    if (controller) {
+        try { controller.abort(); } catch (_e) {}
+        activeJobControllers.delete(job.id);
+    }
     if ([SEMANTIC_JOB_STATUS.succeeded, SEMANTIC_JOB_STATUS.failed, SEMANTIC_JOB_STATUS.cancelled].includes(job.status)) return await getSemanticJobDetail(userId, job.id);
     const now = getBeijingTimestamp();
     await execute(`UPDATE analysis_semantic_jobs SET status = ?, locked_at = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`, [SEMANTIC_JOB_STATUS.cancelled, now, now, job.id, userId]);
@@ -969,5 +987,6 @@ module.exports = {
     normalizeSemanticBatchConcurrency,
     resolveSemanticBatchConcurrency,
     normalizeBatchResult,
-    semanticBatchOutputLimit
+    semanticBatchOutputLimit,
+    getActiveJobControllers: () => activeJobControllers
 };

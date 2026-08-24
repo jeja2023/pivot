@@ -4,6 +4,11 @@
         skills: [],
         packs: [],
         residents: [],
+        profile: null,
+        memoryPolicy: null,
+        feedback: [],
+        feedbackSummary: null,
+        proposals: [],
         residentScope: 'self',
         diagnostics: new Map()
     };
@@ -321,11 +326,202 @@
         }
     }
 
+    const splitLines = value => String(value || '').split(/[\n,]/).map(item => item.trim()).filter(Boolean);
+
+    function fillProfile(profile = {}) {
+        const setValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value || ''; };
+        setValue('agent-profile-display-name', profile.displayName);
+        setValue('agent-profile-role', profile.role);
+        setValue('agent-profile-preferences', jsonText(profile.preferences || {}));
+        setValue('agent-profile-work-habits', (profile.workHabits || []).join('\n'));
+        setValue('agent-profile-tools', (profile.frequentTools || []).join('\n'));
+        setValue('agent-profile-tasks', (profile.commonTasks || []).join('\n'));
+        setValue('agent-profile-tone', profile.communicationStyle?.tone || 'professional');
+        setValue('agent-profile-verbosity', profile.communicationStyle?.verbosity || 'balanced');
+    }
+
+    async function loadProfile() {
+        const data = await apiJson(`${API_BASE}/agents/profile`, { cache: 'no-store' });
+        state.profile = data.profile || {};
+        fillProfile(state.profile);
+        return state.profile;
+    }
+
+    async function saveProfile() {
+        let preferences = {};
+        try { preferences = JSON.parse(document.getElementById('agent-profile-preferences')?.value || '{}'); } catch (_) { return setNotice('偏好必须是合法 JSON。', 'error'); }
+        const payload = {
+            displayName: document.getElementById('agent-profile-display-name')?.value || '',
+            role: document.getElementById('agent-profile-role')?.value || '',
+            preferences,
+            workHabits: splitLines(document.getElementById('agent-profile-work-habits')?.value),
+            frequentTools: splitLines(document.getElementById('agent-profile-tools')?.value),
+            commonTasks: splitLines(document.getElementById('agent-profile-tasks')?.value),
+            communicationStyle: {
+                ...(state.profile?.communicationStyle || {}),
+                tone: document.getElementById('agent-profile-tone')?.value || 'professional',
+                verbosity: document.getElementById('agent-profile-verbosity')?.value || 'balanced'
+            }
+        };
+        try {
+            const data = await apiJson(`${API_BASE}/agents/profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            state.profile = data.profile || payload;
+            setNotice('个人 Agent 档案已保存。', 'success');
+        } catch (error) { setNotice(error.message || '个人档案保存失败。', 'error'); }
+    }
+
+    async function loadMemoryPolicy() {
+        const data = await apiJson(`${API_BASE}/memories/policy`, { cache: 'no-store' });
+        state.memoryPolicy = data.policy || {};
+        const autoCapture = document.getElementById('agent-memory-auto-capture');
+        if (autoCapture) autoCapture.checked = state.memoryPolicy.autoCapture !== false;
+        const blocked = new Set(state.memoryPolicy.blockedCategories || []);
+        document.querySelectorAll('[data-agent-memory-blocked]').forEach(input => { input.checked = blocked.has(input.value); });
+        return state.memoryPolicy;
+    }
+
+    async function saveMemoryPolicy() {
+        const blockedCategories = [...document.querySelectorAll('[data-agent-memory-blocked]:checked')].map(input => input.value);
+        try {
+            const data = await apiJson(`${API_BASE}/memories/policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoCapture: document.getElementById('agent-memory-auto-capture')?.checked !== false, blockedCategories }) });
+            state.memoryPolicy = data.policy;
+            const notice = document.getElementById('agent-memory-policy-notice');
+            if (notice) { notice.textContent = '记忆治理策略已保存。敏感信息始终不会持久化。'; notice.className = 'agent-harness-notice is-success'; }
+        } catch (error) {
+            const notice = document.getElementById('agent-memory-policy-notice');
+            if (notice) { notice.textContent = error.message || '记忆治理策略保存失败。'; notice.className = 'agent-harness-notice is-error'; }
+        }
+    }
+
+    function renderFeedback() {
+        const summary = document.getElementById('agent-feedback-summary');
+        const list = document.getElementById('agent-feedback-list');
+        if (summary) {
+            if (state.feedbackSummary) {
+                const s = state.feedbackSummary;
+                const total = Number(s.total || 0);
+                const rate = Math.round(Number(s.successRate || 0) * 100);
+                const avg = s.averageRating == null ? '—' : Number(s.averageRating).toFixed(1);
+                const failTools = (s.frequentToolFailures || []).slice(0, 3).map(item => `${item.tool} (${item.count})`).join('、') || '无';
+                setMarkup(summary, `
+                    <div class="agent-feedback-metrics">
+                        <div class="agent-feedback-metric-card">
+                            <span class="metric-label">近 ${escape(s.days || 30)} 天总反馈</span>
+                            <strong class="metric-value">${total} <small>次</small></strong>
+                        </div>
+                        <div class="agent-feedback-metric-card">
+                            <span class="metric-label">任务执行成功率</span>
+                            <strong class="metric-value ${rate >= 80 ? 'is-good' : rate >= 50 ? 'is-warn' : 'is-bad'}">${rate}%</strong>
+                        </div>
+                        <div class="agent-feedback-metric-card">
+                            <span class="metric-label">综合平均评分</span>
+                            <strong class="metric-value">${avg} <small>${s.averageRating != null ? '分' : ''}</small></strong>
+                        </div>
+                        <div class="agent-feedback-metric-card">
+                            <span class="metric-label">高频失败工具</span>
+                            <strong class="metric-value metric-tools" title="${escape(failTools)}">${escape(failTools)}</strong>
+                        </div>
+                    </div>
+                `);
+            } else {
+                setMarkup(summary, '<div class="agent-feedback-empty">暂无统计指标。</div>');
+            }
+        }
+        if (!list) return;
+        setMarkup(list, state.feedback.length ? state.feedback.map(item => `
+            <article class="agent-harness-item">
+                <div class="agent-harness-item-main">
+                    <div class="agent-harness-item-title-row">
+                        <strong>任务 #${escape(item.runId)}</strong>
+                        <span class="agent-harness-badge ${item.outcome === 'success' ? 'badge-success' : item.outcome === 'failure' ? 'badge-error' : 'badge-neutral'}">${escape(item.outcome === 'success' ? '成功' : item.outcome === 'failure' ? '失败' : item.outcome || '反馈')}</span>
+                        ${item.rating ? `<span class="agent-harness-status-pill is-active">评分: ${escape(`${item.rating}/5`)}</span>` : ''}
+                    </div>
+                    <small>${escape(shortText(item.correction || item.modifiedAnswer || '未填写修正意见', 180))}</small>
+                </div>
+                <div class="agent-harness-item-meta">
+                    <span>${escape(formatDate(item.updatedAt))}</span>
+                </div>
+            </article>
+        `).join('') : '<div class="agent-harness-empty-card"><strong>暂无结果反馈</strong><span>任务完成后可在任务详情提交成功、失败或修正意见。</span></div>');
+    }
+
+    async function loadFeedback() {
+        const [summary, list] = await Promise.all([
+            apiJson(`${API_BASE}/agents/feedback/summary?days=30`, { cache: 'no-store' }),
+            apiJson(`${API_BASE}/agents/feedback?limit=30`, { cache: 'no-store' })
+        ]);
+        state.feedbackSummary = summary.summary || null;
+        state.feedback = Array.isArray(list.data) ? list.data : [];
+        renderFeedback();
+    }
+
+    function renderProposals() {
+        const list = document.getElementById('agent-evolution-list');
+        if (!list) return;
+        const kindLabels = {
+            preference: '偏好调整',
+            skill: '创建 Skill',
+            workflow: '保存工作流'
+        };
+        const statusLabels = {
+            approved: '已批准',
+            rejected: '已拒绝',
+            pending: '待确认',
+            applied: '已应用'
+        };
+        setMarkup(list, state.proposals.length ? state.proposals.map(item => `
+            <article class="agent-harness-item agent-evolution-item">
+                <div class="agent-harness-item-main">
+                    <div class="agent-harness-item-title-row">
+                        <strong>${escape(item.title || '未命名提议')}</strong>
+                        <span class="agent-harness-badge">${escape(kindLabels[item.kind] || item.kind || '提议')}</span>
+                        <span class="agent-harness-status-pill ${item.status === 'approved' ? 'is-active' : item.status === 'pending' ? 'is-idle' : 'is-inactive'}">${escape(statusLabels[item.status] || item.status)}</span>
+                    </div>
+                    <small>${escape(shortText(item.description || '无详细说明', 180))}</small>
+                    <code class="agent-evolution-code-preview">${escape(shortText(jsonText(item.proposedChange), 220))}</code>
+                </div>
+                <div class="agent-harness-item-meta">
+                    ${item.status === 'pending' ? `
+                        <button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button>
+                        <button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>
+                    ` : ''}
+                    ${item.status === 'approved' && item.kind === 'preference' ? `
+                        <button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用此偏好</button>
+                    ` : ''}
+                </div>
+            </article>
+        `).join('') : '<div class="agent-harness-empty-card"><strong>暂无进化提议</strong><span>Agent 的 Skill、工作流和偏好调整建议都会先进入这里等待确认。</span></div>');
+    }
+
+    async function loadProposals() {
+        const data = await apiJson(`${API_BASE}/agents/evolution/proposals?limit=50`, { cache: 'no-store' });
+        state.proposals = Array.isArray(data.data) ? data.data : [];
+        renderProposals();
+    }
+
+    async function createProposal() {
+        let proposedChange = {};
+        try { proposedChange = JSON.parse(document.getElementById('agent-evolution-change')?.value || '{}'); } catch (_) { return setNotice('结构化变更必须是合法 JSON。', 'error'); }
+        try {
+            await apiJson(`${API_BASE}/agents/evolution/proposals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: document.getElementById('agent-evolution-kind')?.value, title: document.getElementById('agent-evolution-title-input')?.value, description: document.getElementById('agent-evolution-description')?.value, proposedChange }) });
+            setNotice('进化提议已提交，等待用户确认。', 'success');
+            await loadProposals();
+        } catch (error) { setNotice(error.message || '进化提议提交失败。', 'error'); }
+    }
+
+    async function decideProposal(id, decision) {
+        try { await apiJson(`${API_BASE}/agents/evolution/proposals/${encodeURIComponent(id)}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision }) }); await loadProposals(); } catch (error) { setNotice(error.message || '进化提议审批失败。', 'error'); }
+    }
+
+    async function applyProposal(id) {
+        try { await apiJson(`${API_BASE}/agents/evolution/proposals/${encodeURIComponent(id)}/apply`, { method: 'POST' }); setNotice('偏好提议已应用并生成新档案版本。', 'success'); await Promise.all([loadProposals(), loadProfile()]); } catch (error) { setNotice(error.message || '进化提议应用失败。', 'error'); }
+    }
+
     async function loadHarnessManagement() {
         document.querySelectorAll('.agent-harness-pack-sync').forEach(el => el.classList.toggle('hidden', !isAdminUser()));
         document.querySelectorAll('#agent-harness-residency-scope').forEach(el => el.classList.toggle('hidden', !isSuperAdminUser()));
         try {
-            await Promise.all([loadSkills(), loadPacks(), loadResidents()]);
+            await Promise.all([loadSkills(), loadPacks(), loadResidents(), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadProposals()]);
         } catch (error) {
             setNotice(error.message || '底座数据加载失败。', 'error');
         }
@@ -558,6 +754,20 @@
         document.getElementById('agent-harness-residency-list')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-harness-evict-resident]');
             if (button) evictResident(button.dataset.agentHarnessEvictResident);
+        });
+        document.getElementById('agent-profile-refresh')?.addEventListener('click', () => loadProfile().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-profile-save')?.addEventListener('click', saveProfile);
+        document.getElementById('agent-memory-policy-refresh')?.addEventListener('click', () => loadMemoryPolicy().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-memory-policy-save')?.addEventListener('click', saveMemoryPolicy);
+        document.querySelector('[data-memory-open]')?.addEventListener('click', event => { event.preventDefault(); window.showMainWorkspace?.('settings'); window.switchTab?.('memories'); });
+        document.getElementById('agent-feedback-refresh')?.addEventListener('click', () => loadFeedback().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-evolution-refresh')?.addEventListener('click', () => loadProposals().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-evolution-create')?.addEventListener('click', createProposal);
+        document.getElementById('agent-evolution-list')?.addEventListener('click', event => {
+            const decision = event.target.closest('[data-agent-evolution-decision]');
+            if (decision) return decideProposal(decision.dataset.agentEvolutionId, decision.dataset.agentEvolutionDecision);
+            const apply = event.target.closest('[data-agent-evolution-apply]');
+            if (apply) applyProposal(apply.dataset.agentEvolutionApply);
         });
     }
 

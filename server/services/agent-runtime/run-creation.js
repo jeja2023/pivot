@@ -44,6 +44,8 @@ const {
     reserveChildRunResources
 } = require('../agent-run-resources');
 const { inferDagRunGoal } = require('./dag-run-config');
+const { buildAgentProfileContext, getAgentProfile } = require('../agent-profile');
+const { getAgentFeedbackSignals } = require('../agent-feedback');
 
 function createAgentRunFactory(deps = {}) {
     const {
@@ -124,6 +126,15 @@ function createAgentRunFactory(deps = {}) {
         const normalizedRunMode = normalizeRunMode(runMode);
         const normalizedRouter = normalizeRouterStrategy(modelRouter);
         const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+        // 档案与反馈只作为可审计的运行上下文快照保存；它们不会修改工具权限或审批策略。
+        try {
+            const profile = await getAgentProfile(user.id);
+            runMetadata.agentProfileContext = buildAgentProfileContext(profile);
+            runMetadata.agentProfileVersion = profile.version;
+            runMetadata.feedbackSignals = await getAgentFeedbackSignals(user.id, { days: 30 });
+        } catch (_) {
+            // 新库迁移尚未完成时仍允许创建任务，运行时按旧上下文继续。
+        }
         const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
         let resourceReservation = null;
         let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);

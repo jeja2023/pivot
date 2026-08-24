@@ -4,48 +4,415 @@
     gap: 14px;
 }
 
-/* 顶部模块切换 Tab（技能包 / 资源包 / 常驻实例） */
+/* 顶部模块切换 Tab（技能包 / 资源包 / 常驻实例 / 个人档案 / 记忆治理 / 结果反馈 / 进化提议） */
 .agent-harness-nav-tabs {
-    display: inline-flex;
-    gap: 4px;
-    padding: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    padding: 5px;
     background: var(--bg-secondary, #f1f5f9);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    margin-bottom: 4px;
-    align-self: flex-start;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    margin-bottom: 6px;
     width: 100%;
-    max-width: 460px;
+    max-width: 100%;
 }
 
 .agent-harness-nav-tab {
-    flex: 1;
+    flex: 1 1 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 32px;
-    padding: 5px 14px;
+    min-height: 34px;
+    padding: 6px 14px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 7px;
     background: transparent;
     color: var(--text-muted, #64748b);
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.16s ease;
+    transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .agent-harness-nav-tab:hover {
     color: var(--text-primary, #0f172a);
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.7);
 }
 
 .agent-harness-nav-tab.active {
     background: var(--bg-main, #fff);
     color: var(--primary, #3b82f6);
     font-weight: 700;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* 个人档案卡片化布局 */
+.agent-profile-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+}
+
+.agent-profile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 18px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
+}
+
+#agent-profile-work-habits,
+#agent-profile-tools,
+#agent-profile-tasks {
+    height: 130px !important;
+    min-height: 110px !important;
+    max-height: 220px !important;
+    padding: 8px 12px !important;
+    font-size: 0.78rem !important;
+    line-height: 1.5 !important;
+}
+
+#agent-profile-preferences {
+    height: 85px !important;
+    min-height: 75px !important;
+    max-height: 160px !important;
+    padding: 8px 12px !important;
+    font-size: 0.78rem !important;
+}
+
+.form-input-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+    font-size: 0.78rem !important;
+    line-height: 1.5 !important;
+}
+
+/* 记忆治理卡片化布局 */
+.agent-governance-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+}
+
+.agent-governance-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px 18px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
+}
+
+.agent-governance-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.agent-governance-card-title {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+}
+
+.agent-governance-card-title strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.agent-governance-card-title span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+/* 现代化开关 Switch Slider */
+.agent-harness-switch-label {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.agent-harness-switch-label input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.agent-harness-switch-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    border-radius: 24px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+
+.agent-harness-switch-slider::before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.agent-harness-switch-label input:checked + .agent-harness-switch-slider {
+    background-color: var(--primary, #3b82f6);
+}
+
+.agent-harness-switch-label input:checked + .agent-harness-switch-slider::before {
+    transform: translateX(20px);
+}
+
+/* 记忆类别选择芯片网格 */
+.agent-memory-chips-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.agent-memory-chip {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    background: var(--bg-main, #fff);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.agent-memory-chip:hover {
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+.agent-memory-chip input[type="checkbox"] {
+    margin-top: 3px;
+    cursor: pointer;
+    accent-color: var(--primary, #3b82f6);
+}
+
+.agent-memory-chip .chip-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.agent-memory-chip .chip-content strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.agent-memory-chip .chip-content span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.agent-memory-chip.is-locked {
+    background: rgba(241, 245, 249, 0.7);
+    cursor: not-allowed;
+    opacity: 0.85;
+}
+
+/* 治理合规与安全保障网格 */
+.agent-governance-security-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.security-feature-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    background: var(--bg-main, #fff);
+}
+
+.security-feature-item .feature-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.08);
+    color: var(--primary, #3b82f6);
+    flex-shrink: 0;
+}
+
+.security-feature-item .feature-icon svg {
+    width: 17px;
+    height: 17px;
+}
+
+.security-feature-item .feature-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.security-feature-item .feature-text strong {
+    color: var(--text-primary, #0f172a);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.security-feature-item .feature-text span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+/* 结果反馈统计卡片 */
+.agent-feedback-summary-container {
+    margin-bottom: 6px;
+}
+
+.agent-feedback-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.agent-feedback-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.agent-feedback-metric-card .metric-label {
+    color: var(--text-muted, #64748b);
+    font-size: 0.74rem;
+    font-weight: 600;
+}
+
+.agent-feedback-metric-card .metric-value {
+    color: var(--text-primary, #0f172a);
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.agent-feedback-metric-card .metric-value small {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-feedback-metric-card .metric-value.is-good {
+    color: #059669;
+}
+
+.agent-feedback-metric-card .metric-value.is-warn {
+    color: #d97706;
+}
+
+.agent-feedback-metric-card .metric-value.is-bad {
+    color: #dc2626;
+}
+
+.agent-feedback-metric-card .metric-value.metric-tools {
+    font-size: 0.88rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-feedback-empty {
+    padding: 12px;
+    color: var(--text-muted, #64748b);
+    font-size: 0.78rem;
+}
+
+/* 进化提议两栏布局 */
+.agent-evolution-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.2fr);
+    gap: 16px;
+    align-items: stretch;
+}
+
+.agent-evolution-form-card,
+.agent-evolution-list-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
+}
+
+.agent-evolution-code-preview {
+    display: inline-block;
+    max-height: 64px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.05);
+    color: #334155;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.badge-success {
+    background: rgba(16, 185, 129, 0.12) !important;
+    color: #059669 !important;
+    border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+.badge-error {
+    background: rgba(239, 68, 68, 0.12) !important;
+    color: #dc2626 !important;
+    border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+.badge-neutral {
+    background: rgba(100, 116, 139, 0.1) !important;
+    color: #64748b !important;
+    border-color: rgba(100, 116, 139, 0.25) !important;
 }
 
 .agent-harness-notice {
@@ -349,6 +716,16 @@
     align-items: start;
 }
 
+.agent-harness-form-grid.agent-harness-form-grid-4col,
+.agent-harness-form-grid-4col {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.agent-harness-form-grid.agent-harness-form-grid-3col,
+.agent-harness-form-grid-3col {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
 .agent-harness-form-field,
 .agent-harness-form-grid > label {
     display: flex;
@@ -465,6 +842,26 @@
     flex-wrap: wrap;
     gap: 10px;
     margin-top: 4px;
+}
+
+.agent-harness-form-actions a,
+.agent-harness-form-actions a:hover,
+.agent-harness-form-actions a:focus,
+.agent-harness-form-actions a:active,
+.agent-harness-form-actions a:visited,
+.agent-harness-panel a.btn-secondary,
+.agent-harness-panel a.btn-secondary:hover,
+.agent-harness-panel a.btn-secondary:focus,
+.agent-harness-panel a.btn-secondary:visited,
+.agent-harness-panel a.btn-primary,
+.agent-harness-panel a.btn-primary:hover,
+a.btn-secondary,
+a.btn-secondary:hover {
+    text-decoration: none !important;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .agent-harness-file-button {
@@ -868,25 +1265,78 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
     color: #64748b;
 }
 
+body.dark-mode .agent-profile-card,
+.dark-mode .agent-profile-card,
+body.dark-mode .agent-governance-card,
+.dark-mode .agent-governance-card,
+body.dark-mode .agent-feedback-metric-card,
+.dark-mode .agent-feedback-metric-card,
+body.dark-mode .agent-evolution-form-card,
+.dark-mode .agent-evolution-form-card,
+body.dark-mode .agent-evolution-list-card,
+.dark-mode .agent-evolution-list-card {
+    background: rgba(15, 23, 42, 0.55);
+    border-color: rgba(51, 65, 85, 0.6);
+}
+
+body.dark-mode .agent-memory-chip,
+.dark-mode .agent-memory-chip,
+body.dark-mode .security-feature-item,
+.dark-mode .security-feature-item {
+    background: rgba(30, 41, 59, 0.7);
+    border-color: rgba(51, 65, 85, 0.6);
+}
+
+body.dark-mode .security-feature-item .feature-icon,
+.dark-mode .security-feature-item .feature-icon {
+    background: rgba(59, 130, 246, 0.16);
+    color: #60a5fa;
+}
+
+body.dark-mode .agent-memory-chip.is-locked,
+.dark-mode .agent-memory-chip.is-locked {
+    background: rgba(15, 23, 42, 0.4);
+    opacity: 0.75;
+}
+
+body.dark-mode .agent-harness-switch-slider,
+.dark-mode .agent-harness-switch-slider {
+    background-color: #475569;
+}
+
+body.dark-mode .agent-evolution-code-preview,
+.dark-mode .agent-evolution-code-preview {
+    background: rgba(2, 6, 23, 0.6);
+    color: #94a3b8;
+}
+
 /* ==========================================================================
    运行环境弹窗在模态框中的布局规则
    ========================================================================== */
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
     display: flex;
     flex-direction: column;
-    width: min(1120px, calc(100vw - 32px));
-    height: min(720px, calc(100vh - 40px));
-    max-height: min(860px, calc(100vh - 40px));
+    width: min(1480px, calc(100vw - 20px));
+    height: min(880px, calc(100vh - 24px));
+    max-height: min(900px, calc(100vh - 24px));
     border-radius: 12px;
     box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
     margin: auto;
+}
+
+body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal {
+    width: min(1480px, calc(100vw - 20px));
+    height: calc(100vh - 50px);
+    height: calc(100dvh - 50px);
+    max-height: calc(100vh - 50px);
+    max-height: calc(100dvh - 50px);
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
-    padding: 18px 20px;
+    padding: 16px 22px 36px 22px;
     overflow-y: auto;
     background: #f8fafc;
     display: flex;
@@ -909,22 +1359,23 @@ body.dark-mode .agent-harness-diagnostic-panel .empty-state,
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel {
     flex: 1 1 auto;
-    min-height: 480px;
+    min-height: auto;
+    padding: 18px 20px 24px 20px;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel[data-agent-harness-section="residency"] .agent-harness-list.full-width {
     flex: 1 1 auto;
-    min-height: 400px;
+    min-height: 460px;
 }
 
 #agent-config-modal[data-agent-config-section="harness"] .agent-harness-panel[data-agent-harness-section="residency"] .agent-harness-empty-card {
     flex: 1 1 auto;
-    min-height: 400px;
+    min-height: 460px;
 }
 
 body.dark-mode #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body,
@@ -958,8 +1409,13 @@ body.dark-mode .agent-harness-pack-sync,
         max-height: calc(100vh - 18px);
     }
 
-    .agent-harness-skill-layout {
+    .agent-harness-skill-layout,
+    .agent-evolution-layout {
         grid-template-columns: 1fr;
+    }
+
+    .agent-feedback-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -971,7 +1427,12 @@ body.dark-mode .agent-harness-pack-sync,
         justify-content: flex-start;
     }
     .agent-harness-form-grid,
-    .agent-harness-form-grid--compact {
+    .agent-harness-form-grid--compact,
+    .agent-harness-form-grid-3col,
+    .agent-memory-chips-grid {
+        grid-template-columns: 1fr;
+    }
+    .agent-feedback-metrics {
         grid-template-columns: 1fr;
     }
     .agent-harness-form-field-wide {

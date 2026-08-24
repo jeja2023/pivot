@@ -73,10 +73,11 @@ async function assembleChatContext({
     writeSse,
     releaseSemaphore,
     writeChatErrorSse,
-    persistOnError = false
+    persistOnError = false,
+    signal = null
 }) {
     const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
-    let history = await getContext(sessionId, userId, modelCfg);
+    let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
     const memoryQuery = effectiveUserPrompt || modelContent;
@@ -177,7 +178,8 @@ async function assembleChatContext({
             user: req.user,
             writeSse,
             log: req.log,
-            localMcpBridgeDebug: req.localMcpBridgeDebug || req.body?.localMcpBridgeDebug || null
+            localMcpBridgeDebug: req.localMcpBridgeDebug || req.body?.localMcpBridgeDebug || null,
+            signal
         });
         if (mcpContext) {
             visionHistory = appendMcpContextForFinalAnswer(visionHistory, mcpContext);

@@ -179,10 +179,18 @@ function createChatRouter({
                 details
             });
         };
-        res.once('close', () => finishChatTrace(
-            chatTraceStatus === 'open' ? 'closed' : chatTraceStatus,
-            { writableEnded: res.writableEnded }
-        ));
+        const abortController = new AbortController();
+        const onClientDisconnect = () => {
+            try { abortController.abort(); } catch (_) {}
+        };
+        req.once('aborted', onClientDisconnect);
+        res.once('close', () => {
+            onClientDisconnect();
+            finishChatTrace(
+                chatTraceStatus === 'open' ? 'closed' : chatTraceStatus,
+                { writableEnded: res.writableEnded }
+            );
+        });
 
         req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
 
@@ -550,7 +558,8 @@ function createChatRouter({
             writeSse,
             releaseSemaphore,
             writeChatErrorSse,
-            persistOnError: userMessagePersisted || regenerate
+            persistOnError: userMessagePersisted || regenerate,
+            signal: abortController.signal
         }), { ragEnabled, mcpEnabled });
         if (contextResult.errorEnded) return res.end();
         let { visionHistory, disableChatThinking } = contextResult;
@@ -562,7 +571,8 @@ function createChatRouter({
                 visionHistory,
                 log: req.log,
                 sessionId,
-                userId
+                userId,
+                signal: abortController.signal
             }), { modelId: modelCfg.id, messageCount: visionHistory.length });
 
             const writeContentSse = (content) => {
@@ -733,10 +743,18 @@ function createChatRouter({
             });
 
             req.on('close', () => {
+                onClientDisconnect();
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
                 releaseSemaphore(); // 客户端主动断开释放
             });
         } catch (e) {
+            if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+                req.log.warn({ sessionId }, '客户端主动断开连接，已中止上游模型生成');
+                finishChatTrace('closed', { aborted: true });
+                releaseSemaphore();
+                if (!res.writableEnded) res.end();
+                return;
+            }
             const errorData = e.response?.data;
             const statusCode = e.response?.status;
             recordModelFailure(modelCfg, e);

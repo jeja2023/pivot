@@ -118,6 +118,7 @@ async function recognizePage(imagePath, options = {}) {
                 Accept: 'application/json',
                 'Content-Type': 'application/json'
             },
+            signal: options.signal || null,
             validateStatus: status => status >= 200 && status < 300
         });
         return buildRecognitionResult({

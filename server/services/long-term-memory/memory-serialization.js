@@ -9,12 +9,19 @@ const {
 } = require('./memory-utils');
 
 function serializeMemory(row) {
+    const type = normalizeMemoryType(row.type);
+    const governanceClass = row.governance_class
+        || (type === 'preference' ? 'preference' : type === 'episode' ? 'temporary' : 'fact');
     return {
         id: row.id,
         userId: row.user_id,
         scope: row.scope || 'user',
-        type: normalizeMemoryType(row.type),
-        typeLabel: MEMORY_TYPE_LABELS[normalizeMemoryType(row.type)],
+        type,
+        typeLabel: MEMORY_TYPE_LABELS[type],
+        governanceClass,
+        category: governanceClass,
+        retentionMode: row.retention_mode || 'persistent',
+        sensitive: row.sensitive === true || row.sensitive === 1 || row.sensitive === '1',
         content: row.content || '',
         salience: Number(row.salience || 0),
         confidence: Number(row.confidence || 0),

@@ -49,6 +49,18 @@ const {
 } = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
+const { getAgentProfile, updateAgentProfile } = require('../services/agent-profile');
+const {
+    applyEvolutionProposal,
+    createEvolutionProposal,
+    decideEvolutionProposal,
+    listEvolutionProposals
+} = require('../services/agent-evolution');
+const {
+    getAgentFeedbackSummary,
+    listAgentFeedback,
+    recordAgentFeedback
+} = require('../services/agent-feedback');
 const {
     createWorkflowCredential,
     deleteWorkflowCredential,
@@ -116,6 +128,54 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
+    }));
+
+    router.get('/agents/profile', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, profile: await getAgentProfile(req.user.id) });
+    }));
+
+    router.put('/agents/profile', authMiddleware, asyncHandler(async (req, res) => {
+        const profile = await updateAgentProfile(req.user.id, req.body || {});
+        logAction(req, '更新个人 Agent 档案', `档案版本: ${profile.version}`);
+        res.json({ success: true, profile });
+    }));
+
+    router.get('/agents/feedback', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, data: await listAgentFeedback(req.user, { limit: req.query.limit }) });
+    }));
+
+    router.get('/agents/feedback/summary', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, summary: await getAgentFeedbackSummary(req.user, { days: req.query.days }) });
+    }));
+
+    router.post('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await createEvolutionProposal(req.user, req.body || {});
+        logAction(req, '创建 Agent 进化提议', `提议ID: ${proposal.id}，类型: ${proposal.kind}`);
+        res.status(201).json({ success: true, proposal });
+    }));
+
+    router.post('/agents/runs/:id/evolution-proposals', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await createEvolutionProposal(req.user, { ...(req.body || {}), sourceRunId: req.params.id });
+        logAction(req, '从 Agent 任务创建进化提议', `任务ID: ${req.params.id}，提议ID: ${proposal.id}`);
+        res.status(201).json({ success: true, proposal });
+    }));
+
+    router.get('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, data: await listEvolutionProposals(req.user, { status: req.query.status, limit: req.query.limit }) });
+    }));
+
+    router.post('/agents/evolution/proposals/:id/decision', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await decideEvolutionProposal(req.user, req.params.id, req.body?.decision, req.body?.note || req.body?.reviewNote);
+        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
+        logAction(req, proposal.status === 'approved' ? '批准 Agent 进化提议' : '拒绝 Agent 进化提议', `提议ID: ${proposal.id}`);
+        res.json({ success: true, proposal });
+    }));
+
+    router.post('/agents/evolution/proposals/:id/apply', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await applyEvolutionProposal(req.user, req.params.id);
+        if (!result) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
+        if (result.applied) logAction(req, '应用 Agent 进化提议', `提议ID: ${req.params.id}`);
+        res.json({ success: true, ...result });
     }));
 
     router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
@@ -593,6 +653,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
             includePreview: req.query.includePreview || req.query.include_preview
         });
         res.json(result);
+    }));
+
+    router.post('/agents/runs/:id/feedback', authMiddleware, asyncHandler(async (req, res) => {
+        const feedback = await recordAgentFeedback(req.user, req.params.id, req.body || {});
+        if (!feedback) return res.status(404).json({ error: '任务不存在或无权反馈。' });
+        logAction(req, '提交 Agent 结果反馈', `任务ID: ${req.params.id}，结果: ${feedback.outcome}`);
+        res.status(201).json({ success: true, feedback });
     }));
 
     // 普通聊天页面在刷新、切换设备或短暂断线后，用会话 ID 找回仍在执行的 Agent。

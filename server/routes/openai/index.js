@@ -628,6 +628,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 semaphoreReleased = true;
             }
         };
+        const abortController = new AbortController();
+        const onClientDisconnect = () => {
+            try { abortController.abort(); } catch (_) {}
+            releaseSemaphore();
+        };
+        req.once('aborted', onClientDisconnect);
+        res.once('close', onClientDisconnect);
 
         // 3. 构建下游请求
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
@@ -676,7 +683,8 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 url: targetUrl,
                 data: payload,
                 headers,
-                stream: !!stream
+                stream: !!stream,
+                signal: abortController.signal
             });
 
             if (stream) {
@@ -757,7 +765,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 });
                 req.on('close', () => {
                     if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                    releaseSemaphore();
+                    onClientDisconnect();
                 });
             } else {
                 if (directCompletionTracker) directCompletionTracker.observeResponse(response.data);
@@ -780,6 +788,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 releaseSemaphore();
             }
         } catch (e) {
+            releaseSemaphore();
+            if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+                if (!res.headersSent && !res.writableEnded) {
+                    return res.status(499).json({ error: { message: 'Client closed request.', type: 'client_closed_request' } });
+                }
+                return undefined;
+            }
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
             recordModelFailure(modelCfg, e);
@@ -788,8 +803,11 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 errorMessage: errorMsg,
                 stream: !!stream
             });
-            res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
-            releaseSemaphore();
+            if (!res.headersSent) {
+                res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+            }
+            if (!res.writableEnded) res.end();
+            return undefined;
         }
     }));
 

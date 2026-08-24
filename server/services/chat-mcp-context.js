@@ -585,7 +585,7 @@ function buildChatMcpPlannerMessages(history, userPrompt, tools) {
     ];
 }
 
-async function callChatMcpPlanner(modelCfg, messages, user = null) {
+async function callChatMcpPlanner(modelCfg, messages, user = null, options = {}) {
     const modelName = modelCfg.model_name || modelCfg.name || 'default';
     const headers = buildModelHeaders(modelCfg, { acceptJson: true });
     if (shouldUseResponsesApi(modelName)) {
@@ -603,7 +603,8 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
                     temperature: 0,
                     max_output_tokens: 600
                 },
-                timeout: 120000
+                timeout: 120000,
+                signal: options.signal || null
             });
             return extractModelText(response.data);
         } catch (e) {
@@ -623,7 +624,8 @@ async function callChatMcpPlanner(modelCfg, messages, user = null) {
             temperature: 0,
             max_tokens: 600
         },
-        timeout: 120000
+        timeout: 120000,
+        signal: options.signal || null
     });
     return extractModelText(response.data);
 }
@@ -738,7 +740,7 @@ function buildMcpFailureHint(error, stage = 'planning') {
     ].join('\n');
 }
 
-async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null }) {
+async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null, signal = null }) {
     const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
         const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
@@ -812,7 +814,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             if (context) return context;
             mcpStage = 'planning';
         }
-        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user);
+        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user, { signal });
         const plan = parsePlannerJson(plannerText);
         const plannedTool = plan?.action === 'tool' ? resolvePlannerTool(plan.tool, plannerTools, userPrompt) : null;
         if (!plan || plan.action !== 'tool' || !plannedTool) {

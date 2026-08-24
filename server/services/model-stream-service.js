@@ -30,7 +30,7 @@ function buildChatRequestData(modelCfg, modelName) {
     return requestData;
 }
 
-async function openChatModelStream({ modelCfg, user, visionHistory, log, sessionId, userId }) {
+async function openChatModelStream({ modelCfg, user, visionHistory, log, sessionId, userId, signal = null }) {
     const baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
     const modelName = modelCfg.model_name || 'default';
     const isResponsesApi = shouldUseResponsesApi(modelName);
@@ -66,7 +66,8 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             requestData.input = responsesHistory;
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
-                data: requestData, stream: true, timeout: 180000
+                data: requestData, stream: true, timeout: 180000,
+                signal
             });
             log.info('连接成功 (Responses API)');
             return { response, modelName, targetUrl, mode: 'responses', requestData };
@@ -79,7 +80,8 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             requestData.messages = visionHistory;
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
-                data: requestData, stream: true, timeout: 300000
+                data: requestData, stream: true, timeout: 300000,
+                signal
             });
             log.info('降级连接成功 (Chat Completions)');
             return { response, modelName, targetUrl, mode: 'chat_completions_fallback', requestData };
@@ -90,7 +92,8 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
     requestData.messages = visionHistory;
     const response = await forwardChatCompletion({
         modelCfg, user, url: targetUrl, headers,
-        data: requestData, stream: true, timeout: 300000
+        data: requestData, stream: true, timeout: 300000,
+        signal
     });
     log.info('连接成功');
     return { response, modelName, targetUrl, mode: 'chat_completions', requestData };

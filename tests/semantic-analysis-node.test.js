@@ -102,3 +102,20 @@ test('全量语义分析单分块单对象格式及顶层数组格式健壮解�
     assert.equal(normalizedArray.itemCount, 2);
     assert.equal(normalizedArray.parsed.items[1].result, '第二条');
 });
+
+test('全量语义分析支持 AbortController 任务级断流注册与中止', () => {
+    const { getActiveJobControllers } = require('../server/services/data-analysis/semantic-analysis');
+    const controllers = getActiveJobControllers();
+    const testJobId = 'test-job-abort-1';
+    const controller = new AbortController();
+    controllers.set(testJobId, controller);
+
+    assert.equal(controller.signal.aborted, false);
+    assert.ok(controllers.has(testJobId));
+
+    // 模拟中断
+    controller.abort();
+    assert.equal(controller.signal.aborted, true);
+    controllers.delete(testJobId);
+    assert.equal(controllers.has(testJobId), false);
+});

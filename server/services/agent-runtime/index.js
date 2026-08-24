@@ -112,6 +112,7 @@ const { buildAgentResumeContext, recordAgentCheckpoint } = require('../agent-che
 const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
 const { diagnoseError } = require('../agent-diagnosis');
 const { recordAgentToolCall } = require('../agent-tool-audit');
+const { recordAgentRunOutcome } = require('../agent-feedback');
 const { createPersistedAgentStepContext } = require('../agent-world-state-store');
 const { recordAgentEvent } = require('../agent-event-log');
 const { claimAgentControlMessages } = require('../agent-control');
@@ -222,6 +223,11 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                         await persistAgentRunChatResult(runId);
                     } catch (chatBridgeError) {
                         logger.error({ runId, err: chatBridgeError.message }, 'Agent 聊天结果回写失败');
+                    }
+                    if (targetStatus !== 'deleted') {
+                        try { await recordAgentRunOutcome(runId, targetStatus); } catch (feedbackError) {
+                            logger.warn({ runId, err: feedbackError.message }, 'Agent 结果反馈基线写入失败');
+                        }
                     }
                 }
             }
@@ -912,8 +918,8 @@ async function runAgent(runId, user) {
         });
         const chatBridge = runtimeMetadata.chatBridge;
         const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage } }
-            : {};
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null }
+            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null };
         if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
             const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
             toolList = toolList.map(tool => {
@@ -1051,6 +1057,8 @@ async function runAgent(runId, user) {
             }
             const plannerContextConfig = {
                 ...(parseJsonObject(run.context_config) || {}),
+                agentProfileContext: getRunMetadata(run).agentProfileContext || '',
+                feedbackSignals: getRunMetadata(run).feedbackSignals || null,
                 chatHistory: plannerChatHistory,
                 chatAgent: runtimeMetadata.chatBridge
                     ? { ...runtimeMetadata.chatBridge, currentMessage: plannerCurrentMessage }

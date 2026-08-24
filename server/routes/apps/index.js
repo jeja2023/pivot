@@ -85,6 +85,7 @@ function buildModelSecretErrorPayload(modelCfg) {
         }
     };
 }
+
 async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null, onComplete = null }) {
     const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
@@ -138,12 +139,19 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
     }
     let endpointRelease = null;
     let released = false;
+    const abortController = new AbortController();
     const releaseSlots = () => {
         if (released) return;
         released = true;
         if (endpointRelease) endpointRelease();
         aiSemaphore.release();
     };
+    const onClientDisconnect = () => {
+        try { abortController.abort(); } catch (_e) {}
+        releaseSlots();
+    };
+    req.once('aborted', onClientDisconnect);
+    res.once('close', onClientDisconnect);
     const requestStartedAt = Date.now();
     const upstreamPayloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
     try {
@@ -160,7 +168,8 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                 max_tokens: outputTokens
             },
             headers: buildModelHeaders(modelCfg),
-            stream
+            stream,
+            signal: abortController.signal
         });
 
         if (stream) {
@@ -197,7 +206,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             });
             req.on('close', () => {
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                releaseSlots();
+                onClientDisconnect();
             });
             return undefined;
         }
@@ -219,10 +228,16 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         // extraPayload 用于让具体应用附带额外字段（如法规问答的引用来源），不影响其它调用方
         return res.json({ content, model: modelCfg.model_name, ...(extraPayload && typeof extraPayload === 'object' ? extraPayload : {}) });
     } catch (e) {
+        releaseSlots();
+        if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+            if (!res.headersSent && !res.writableEnded) {
+                return res.status(499).json({ error: { message: '客户端请求已取消。', type: 'client_closed_request' } });
+            }
+            return undefined;
+        }
         const errorMsg = e.response?.data?.error?.message || e.message;
         logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
         recordModelFailure(modelCfg, e);
-        releaseSlots();
         if (!res.headersSent) {
             return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
         }
@@ -782,6 +797,13 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 semaphoreReleased = true;
             }
         };
+        const abortController = new AbortController();
+        const onClientDisconnect = () => {
+            try { abortController.abort(); } catch (_) {}
+            releaseSemaphore();
+        };
+        req.once('aborted', onClientDisconnect);
+        res.once('close', onClientDisconnect);
 
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
         const payload = {
@@ -805,7 +827,8 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 url: targetUrl,
                 data: payload,
                 headers,
-                stream: wantStream
+                stream: wantStream,
+                signal: abortController.signal
             });
 
             if (wantStream) {
@@ -840,7 +863,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 });
                 req.on('close', () => {
                     if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                    releaseSemaphore();
+                    onClientDisconnect();
                 });
             } else {
                 const choice = response.data?.choices?.[0];
@@ -875,6 +898,13 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 res.json(result);
             }
         } catch (e) {
+            releaseSemaphore();
+            if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+                if (!res.headersSent && !res.writableEnded) {
+                    return res.status(499).json({ error: { message: '客户端请求已取消。', type: 'client_closed_request' } });
+                }
+                return undefined;
+            }
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, '公文写作 AI 转发失败');
             recordModelFailure(modelCfg, e);
@@ -883,7 +913,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             } else if (!res.writableEnded) {
                 res.end();
             }
-            releaseSemaphore();
+            return undefined;
         }
     }));
 

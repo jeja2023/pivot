@@ -71,7 +71,7 @@ function shouldReplaceAutoTitle(currentTitle, userMsg) {
     return buildInitialAutoTitles(userMsg).has(normalized);
 }
 
-async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user = null) {
+async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user = null, options = {}) {
     const fallbackTitle = buildFallbackTitle(userMsg, aiMsg);
     let newTitle = fallbackTitle;
 
@@ -100,7 +100,8 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
                 max_tokens: 32,
                 temperature: 0.2
             },
-            timeout: 60000
+            timeout: 60000,
+            signal: options.signal || null
         });
         newTitle = sanitizeGeneratedTitle(response?.data?.choices?.[0]?.message?.content, fallbackTitle);
     } catch (e) {

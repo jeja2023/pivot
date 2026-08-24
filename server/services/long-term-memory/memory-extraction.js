@@ -15,6 +15,7 @@ const {
     fingerprintMemory,
     contentText
 } = require('./memory-utils');
+const { classifyMemory } = require('../memory-governance');
 
 const MODEL_EXTRACTION_FAILURE_COOLDOWN_MS = Math.max(
     10000,
@@ -53,8 +54,10 @@ function normalizeExtractorCandidates(rawCandidates = [], context = {}) {
         if (!raw || typeof raw !== 'object') return;
         const content = normalizeMemoryContent(raw.content || raw.memory || raw.text || raw.value || '');
         if (content.length < MIN_MEMORY_CONTENT_CHARS || hasSensitiveContent(content)) return;
+        const requestedType = normalizeMemoryType(raw.type || raw.category);
         const candidate = buildCandidate({
-            type: normalizeMemoryType(raw.type || raw.category),
+            type: requestedType,
+            governanceClass: classifyMemory({ type: requestedType, category: raw.category, content }),
             content,
             salience: clamp(raw.salience ?? raw.importance, 0, 1, 0.55),
             confidence: clamp(raw.confidence, 0, 1, 0.62),
@@ -119,7 +122,7 @@ function buildExtractorMessages(messages = []) {
             role: 'system',
             content: [
                 'Extract durable long-term memory candidates from the conversation.',
-                'Return only JSON with this shape: {"memories":[{"type":"preference|fact|decision|episode","content":"...","salience":0.0,"confidence":0.0}]}',
+                'Return only JSON with this shape: {"memories":[{"type":"preference|fact|decision|episode","category":"preference|fact|temporary","content":"...","salience":0.0,"confidence":0.0}]}',
                 'Keep only stable user preferences, project/task facts, long-term decisions, or useful historical episodes.',
                 'Do not include secrets, tokens, passwords, private keys, payment card numbers, phone numbers, government IDs, or transient chit-chat.',
                 'Use concise standalone content. Return at most 8 memories.'
@@ -142,6 +145,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
         url,
         headers: buildModelHeaders(modelCfg, { acceptJson: true }),
         timeout: MODEL_EXTRACTION_TIMEOUT_MS,
+        signal: context.signal || null,
         data: {
             model: modelCfg.model_name || modelCfg.name || modelCfg.model || 'memory-extractor',
             messages: buildExtractorMessages(messages),
@@ -158,9 +162,11 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
     });
 }
 
-function buildCandidate({ type, content, salience, confidence, sourceSessionId, sourceMessageIds }) {
+function buildCandidate({ type, governanceClass = '', retentionMode = '', content, salience, confidence, sourceSessionId, sourceMessageIds }) {
     return {
         type,
+        governanceClass,
+        retentionMode,
         scope: 'user',
         content: normalizeMemoryContent(content),
         salience,

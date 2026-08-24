@@ -81,6 +81,14 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             ? '用户已开启知识库检索，需要相关资料时可以调用 rag.search。'
             : '用户未开启知识库检索，不要调用知识库工具。');
     }
+    if (String(contextConfig?.agentProfileContext || '').trim()) {
+        contextLines.push(String(contextConfig.agentProfileContext).trim());
+    }
+    if (contextConfig?.feedbackSignals && typeof contextConfig.feedbackSignals === 'object') {
+        const signals = contextConfig.feedbackSignals;
+        const unreliableTools = Array.isArray(signals.unreliableTools) ? signals.unreliableTools.filter(Boolean).slice(0, 8) : [];
+        if (unreliableTools.length) contextLines.push(`结果反馈提示：工具 ${unreliableTools.join('、')} 近期失败较多，调用前应验证输入、必要时说明限制并准备替代方案。`);
+    }
     const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
     const messages = [
         {

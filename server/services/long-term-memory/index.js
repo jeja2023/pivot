@@ -51,7 +51,7 @@ const {
     recencyScore,
     buildLongTermMemoryContextMessage,
     injectLongTermMemoryBeforeLatestUser
-} = require('./memory-retrieval');
+} = require('./memory-retrieval'); const { filterMemoriesForRetrieval, resolveMemoryGovernance } = require('../memory-governance');
 
 const extractionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, Number.parseInt(process.env.LONG_TERM_MEMORY_EXTRACTION_MAX_CONCURRENT, 10) || 2)
@@ -528,6 +528,7 @@ async function upsertMemory(userId, candidate, options = {}) {
         return { skipped: true, reason: 'invalid_or_sensitive' };
     }
     const type = normalizeMemoryType(candidate.type);
+    const governance = await resolveMemoryGovernance(userId, { type, category: candidate.governanceClass || candidate.category, content, retentionMode: candidate.retentionMode }, options); if (!governance.allowed) return { skipped: true, reason: governance.reason || 'memory_policy_blocked' };
     const scope = normalizeMemoryScope(candidate.scope);
     const salience = clamp(candidate.salience, 0, 1, 0.5);
     const confidence = clamp(candidate.confidence, 0, 1, 0.6);
@@ -568,15 +569,14 @@ async function upsertMemory(userId, candidate, options = {}) {
     const embedding = options.skipEmbedding ? null : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
     const row = await queryOne(`
         INSERT INTO memories (
-            user_id, scope, type, content, embedding, salience, confidence,
-            source_session_id, source_message_ids, status, expires_at, created_at, updated_at
+            user_id, scope, type, governance_class, retention_mode, sensitive, content, embedding, salience, confidence, source_session_id, source_message_ids, status, expires_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
     `, [
         userId,
         scope,
-        type,
+        type, governance.category, governance.retentionMode,
         content,
         embedding,
         salience,
@@ -940,7 +940,7 @@ async function retrieveLongTermMemories(userId, queryText, options = {}) {
     if (!normalizedQuery) return [];
     const now = getBeijingTimestamp();
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || DEFAULT_MAX_INJECTED_MEMORIES, 20));
-    const rows = await query(`
+    const rows = await filterMemoriesForRetrieval(userId, await query(`
         SELECT *
         FROM memories
         WHERE user_id = ?
@@ -948,7 +948,7 @@ async function retrieveLongTermMemories(userId, queryText, options = {}) {
           AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY salience DESC, confidence DESC, updated_at DESC
         LIMIT 200
-    `, [userId, MEMORY_STATUS.active, now]);
+    `, [userId, MEMORY_STATUS.active, now]));
     if (rows.length === 0) return [];
 
     let queryVector = null;

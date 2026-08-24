@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
+const personalAgentMigrations = require('./personal-agent');
 
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -872,6 +873,7 @@ const migrations = [
             `);
         }
     },
+    ...personalAgentMigrations,
     ...regulationsMigrations
 ];
 

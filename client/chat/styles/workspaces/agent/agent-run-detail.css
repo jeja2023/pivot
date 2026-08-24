@@ -1043,3 +1043,14 @@
     .agent-dag-node-title strong { font-size: 0.76rem; }
     .agent-dag-node-title span { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+.agent-run-feedback {
+    margin: 16px 0;
+    padding: 14px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+}
+.agent-run-feedback-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.agent-run-feedback [data-agent-feedback-correction] { width: 100%; margin: 8px 0; }
+.agent-run-feedback-status { margin-left: 8px; color: var(--text-secondary, #667085); }
+.agent-run-feedback-status.is-success { color: #16834b; }
+.agent-run-feedback-status.is-error { color: #c0392b; }
