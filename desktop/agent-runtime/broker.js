@@ -2,14 +2,14 @@ const path = require('path');
 const { createWorkspaceJail, runSandboxedProcess } = require('../../server/services/agent-sandbox');
 
 function assertWorkerConfiguration(request = {}) {
-    if (request.approved !== true) {
-        const error = new Error('桌面 Worker 执行必须先完成审批。');
+    if (request.approvedByMainProcess !== true) {
+        const error = new Error('桌面 Worker 执行必须持有主进程审批。');
         error.code = 'AGENT_DESKTOP_APPROVAL_REQUIRED';
         throw error;
     }
-    if (request.networkEnabled === true && request.networkPolicy?.allowed_origins?.length === 0) {
-        const error = new Error('桌面 Worker 网络执行必须绑定非空 allowlist。');
-        error.code = 'AGENT_NETWORK_POLICY_REQUIRED';
+    if (request.networkEnabled === true) {
+        const error = new Error('通用桌面 Worker 禁止联网。');
+        error.code = 'AGENT_WORKER_NETWORK_DENIED';
         throw error;
     }
 }
@@ -24,7 +24,9 @@ async function runDesktopWorker(request = {}) {
         jail,
         timeoutMs: Math.min(Math.max(Number(request.timeoutMs) || 30000, 100), 10 * 60 * 1000),
         input: JSON.stringify({ ...request, workspaceRoot, taskId: request.taskId || 'agent-worker' }),
-        env: { PIVOT_AGENT_WORKER: '1' }
+        env: { PIVOT_AGENT_WORKER: '1' },
+        inheritEnv: false,
+        networkDisabled: true
     });
     let message = null;
     try { message = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).pop() || '{}'); } catch (_) {}

@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const { query, queryOne } = require('../db/client');
-const { asyncHandler } = require('../http');
+const { asyncHandler, normalizeLimit, normalizePage } = require('../http');
 const { getHttpMetricsSnapshot, getRagMetricsSnapshot } = require('../metrics');
 const { aiSemaphore } = require('../services/concurrency');
 const { getGpuMonitorStatus } = require('../services/gpu-monitor');
@@ -795,8 +795,8 @@ function createAdminStatsRouter({
 
     router.get('/details', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const page = parseInt(req.query.page, 10) || 1;
-        const limit = parseInt(req.query.limit, 10) || 20;
+        const page = normalizePage(req.query.page);
+        const limit = normalizeLimit(req.query.limit, 20, 100);
         const offset = (page - 1) * limit;
 
         const innerParams = [];
@@ -975,8 +975,8 @@ function createAdminStatsRouter({
 
     router.get('/api-call-logs', authMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '仅 admin 权限层级可查看第三方 API 调用内容' });
-        const page = parseInt(req.query.page, 10) || 1;
-        const limit = Math.min(parseInt(req.query.limit, 10) || 15, 100);
+        const page = normalizePage(req.query.page);
+        const limit = normalizeLimit(req.query.limit, 15, 100);
         const offset = (page - 1) * limit;
         const keyword = String(req.query.keyword || '').trim();
         const conditions = [];

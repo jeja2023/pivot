@@ -21,7 +21,15 @@ function main() {
         return;
     }
     if (!executable) {
-        fs.writeFileSync(path.join(outputRoot, 'manifest.json'), JSON.stringify({ bundled: false, source: 'host-python' }, null, 2) + '\n');
+        if (String(process.env.PIVOT_REQUIRE_BUNDLED_PYTHON || '').toLowerCase() === 'true' || process.platform === 'linux') {
+            throw new Error('当前构建要求内置 Python，但未配置 PIVOT_AGENT_PYTHON。');
+        }
+        fs.writeFileSync(path.join(outputRoot, 'manifest.json'), JSON.stringify({
+            bundled: false,
+            source: 'host-python',
+            platform: process.platform,
+            arch: process.arch
+        }, null, 2) + '\n');
         console.log('未配置 PIVOT_AGENT_PYTHON，桌面包保留宿主机 Python 回退。');
         return;
     }
@@ -33,6 +41,8 @@ function main() {
     fs.writeFileSync(path.join(outputRoot, 'manifest.json'), JSON.stringify({
         bundled: true,
         source: executable,
+        platform: process.platform,
+        arch: process.arch,
         executable: path.relative(outputRoot, path.join(outputRoot, path.basename(executable)))
     }, null, 2) + '\n');
     console.log(`已打包 Python Runtime：${path.relative(root, outputRoot)}`);

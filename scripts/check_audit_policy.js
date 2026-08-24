@@ -59,9 +59,22 @@ function runAudit({ omitDev = false } = {}) {
 }
 
 function selectAuditPackages(auditResult, packageNames) {
+    const allVulnerabilities = auditResult?.vulnerabilities || {};
     const names = new Set(packageNames || []);
+    const pending = [...names];
+    // npm audit 用字符串 via 表示漏洞来自另一个包。桌面运行时从 Electron
+    // 开始审计时必须保留这条传递闭包，否则会只留下没有 advisory 对象的父节点。
+    while (pending.length > 0) {
+        const name = pending.shift();
+        const via = allVulnerabilities[name]?.via;
+        for (const item of Array.isArray(via) ? via : []) {
+            if (typeof item !== 'string' || names.has(item) || !allVulnerabilities[item]) continue;
+            names.add(item);
+            pending.push(item);
+        }
+    }
     const vulnerabilities = Object.fromEntries(
-        Object.entries(auditResult?.vulnerabilities || {}).filter(([name]) => names.has(name))
+        Object.entries(allVulnerabilities).filter(([name]) => names.has(name))
     );
     return { ...auditResult, vulnerabilities };
 }
@@ -104,13 +117,18 @@ function classifyAuditFindings(auditResult, exceptions = allowed) {
     for (const [name, vuln] of Object.entries(vulnerabilities)) {
         if (!['high', 'critical'].includes(String(vuln.severity || '').toLowerCase())) continue;
         const advisories = Array.isArray(vuln.via) && vuln.via.length > 0 ? vuln.via : [vuln];
+        const hasFix = Boolean(vuln.fixAvailable);
         for (const advisory of advisories) {
-            if (typeof advisory === 'string') continue;
+            if (typeof advisory === 'string') {
+                // 若调用方没有把传递依赖一并选入，也不能静默放行。
+                if (!vulnerabilities[advisory]) failures.push(`${name}: 传递高危依赖 ${advisory}`);
+                continue;
+            }
             const title = advisory.title || advisory.url || advisory.source || '未命名告警';
             const exception = evaluateException(name, advisory, exceptions);
 
             // 上游已经提供修复版本时不接受任何豁免，必须直接升级。
-            if (exception.matched && exception.valid && vuln.fixAvailable !== true) {
+            if (exception.matched && exception.valid && !hasFix) {
                 accepted.push(`${name}: ${title} —— ${exception.note}`);
                 continue;
             }
@@ -118,7 +136,7 @@ function classifyAuditFindings(auditResult, exceptions = allowed) {
                 failures.push(`${name}: ${title} —— ${exception.note}`);
                 continue;
             }
-            if (exception.matched && vuln.fixAvailable === true) {
+            if (exception.matched && hasFix) {
                 failures.push(`${name}: ${title} —— 上游已有修复版本，不接受豁免，请直接升级`);
                 continue;
             }

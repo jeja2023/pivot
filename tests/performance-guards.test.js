@@ -2,6 +2,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { normalizeLimit, normalizePage } = require('../server/http');
+
+test('分页输入统一限制正数页码与最大响应条数', () => {
+    assert.equal(normalizePage('-2'), 1);
+    assert.equal(normalizePage('999'), 999);
+    assert.equal(normalizeLimit('-5', 20, 100), 1);
+    assert.equal(normalizeLimit('999999', 20, 100), 100);
+    assert.equal(normalizeLimit('bad', 20, 100), 20);
+});
 const { EventEmitter } = require('node:events');
 
 const { sql } = require('../server/db/statements');

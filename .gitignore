@@ -29,6 +29,7 @@ downloads/*.AppImage
 downloads/*.zip
 downloads/*.tar.gz
 downloads/SHA256SUMS.txt
+downloads/SHA256SUMS-*.txt
 
 .venv-paddleocr/
 .paddlex/

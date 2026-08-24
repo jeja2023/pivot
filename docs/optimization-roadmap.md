@@ -2,6 +2,15 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-08-24 安全边界、批量性能与发布治理升级（v0.1.37）
+
+- ✅ Electron Worker 改为主进程一次性审批令牌，绑定完整请求指纹；远程非 HTTPS 页面不能调用本机通用 Worker。
+- ✅ npm audit 门禁递归追踪传递依赖并识别对象型 `fixAvailable`，Electron 升级至 43.4.1。
+- ✅ 管理员用户 CSV 导入使用有限 Worker Thread 哈希和分批事务写入，失败明细有界。
+- ✅ 管理用户、审计、统计、API 调用日志和数据分析产物分页统一限制为 1-100。
+- ✅ Docker 改为多阶段、非 root、只读根文件系统运行模式。
+- ✅ CI 正式执行 Playwright；`check:governance` / `report:governance` 管理大文件、legacy 全局和 E2E 指标。
+
 ## 2026-08-23 持久化连续 Agent 桥接发布（v0.1.33）
 
 - Web 和 Electron 普通聊天统一由 `server/app.js` 以 `autoAgent: true` 接入 Agent Runtime；前端聊天设置和入口保持不变，后台复杂任务不再依赖页面连接存活。
@@ -119,7 +128,7 @@ This document records optimization work that is intentionally staged instead of 
 - Permission capability payloads now expose policy object types, data classification levels, and organization/team placeholders.
 - Deployment profile payloads describe SQLite WAL single-node defaults, provider contract status, and the Postgres/object-storage/distributed-queue/distributed-lock prerequisites for multi-node mode.
 - CI 使用 `npm run audit:policy` 拦截新增 high/critical 依赖告警；豁免必须登记理由与复查日期，到期自动失效，上游已有修复版本时一律不接受豁免（`tests/audit-policy.test.js` 覆盖该机制）。生产依赖当前无豁免项。
-- CI 与本地 `npm test` 口径一致：`npm run check`（文本完整性、开发规范、语法、聊天资源、安全 HTML、window 全局、E2E 脚手架）+ `npm run lint` + `npm run test:all`（顺序运行全部测试套件，505 项测试 100% 全部通过）。
+- CI 与本地 `npm test` 口径一致：`npm run check`、`npm run lint`、`npm run test:all`；CI 另外真实执行 Playwright。实时测试与大文件指标通过 `npm run report:governance` 查询，避免文档固化数字失真。
 - E2E smoke coverage has a runnable Playwright path through `npm run test:e2e`；`npm run check:e2e-smoke` 保持脚手架检查。支持 `PIVOT_E2E_ISOLATED=true` 启用独立 PostgreSQL Schema、临时目录与随机端口隔离运行。
 - 内置工具库（Built-in MCP）的分发层、格式转换、数据处理与报表目录授权边界已有回归覆盖（`tests/security-builtin-mcp.test.js`），含路径穿越、非白名单扩展名与 CSV 编码断言。
 - 数据库持久化全面支持 PostgreSQL 生产级连接池、79 表元数据字典、参数占位符安全词法转换与原生 `pg_dump`（自定义格式、超时控制、环境变量凭据脱敏、版本/保留天数轮转）热备份体系。
@@ -151,9 +160,9 @@ This document records optimization work that is intentionally staged instead of 
    - ⬜ 超级管理员的破窗访问保持可审计，且对租户自有密钥默认关闭。
 
 5. Frontend hardening — 🔄 进行中（存量未下降）
-   - ⚠️ `window.*` 迁移自 v0.0.188 起长期停在 315/320：门禁只冻结了增量，存量未减少。建议改为「每个版本迁 1 个工作区」的配额制，否则不会自然开始。
+   - ⚠️ `window.*` 存量由基线门禁冻结，只减不增；当前预算和大文件清单由 `npm run report:governance` 实时输出。后续按「每个版本迁 1 个工作区」推进。
    - ⬜ 按工作区逐个迁入 `Pivot.registerModule()`，调用方改用 `Pivot.modules.*` 后再移除旧别名。
-   - ⬜ Playwright 覆盖仍只有 smoke 路径（2 个用例），需扩展到登录、聊天流式、上传、设置、知识库索引与核心工作台。
+   - 🔄 Playwright 已纳入 CI 并覆盖页面 smoke 与工作流版本依赖；仍需扩展登录、聊天流式、上传、设置、知识库索引与核心工作台。
    - 说明：前端无构建链、4.3MB 静态资源 27 个 `<script>` 顺序加载，在内网部署且启用 compression 的前提下优先级低，不建议为此引入打包工具而牺牲「改完即生效」的运维简单性。
 
 6. Desktop distribution — 🔄 进行中
@@ -176,8 +185,8 @@ This document records optimization work that is intentionally staged instead of 
 
 ## 已知技术债与判断
 
-- **桌面构建链审计**：生产依赖与直接 Electron 运行时审计均为 0；完整 `npm audit` 的 16 项 high、0 项 critical 位于 electron-builder 间接构建链。尝试 `npm audit` 建议的降级版本会扩大到 28 项并引入 critical，因此保留 26.15.3 并等待上游修复，不以降级换取表面清零。
-- **大文件治理**：`apps-workbench-editor.js` 1418 行、`rag-documents.js` 1251 行、`admin-settings.js` 1131 行超出《开发规范》3.1 的可维护边界。建议在下次改到这些文件时顺手按功能边界拆分，不做专项重构。
+- **桌面构建链审计**：生产依赖、Electron 运行时与完整依赖树均由 `npm run audit:policy` 检查；门禁会递归追踪字符串 `via` 传递依赖，并正确识别对象型 `fixAvailable`，避免父包假阴性。漏洞数量以实时审计结果为准。
+- **大文件治理**：`npm run check:governance` 已建立全部存量大文件的逐文件行数上限；存量只允许缩小，任何新增大文件或行数反弹都会让 CI 失败。修改这些文件时继续按功能边界拆分。
 - **依赖跨主版本落后**：除 Electron 外，`express` 4→5、`better-sqlite3` 11→13、`mongodb` 6→7、`uuid` 11→14、`bcryptjs` 2→3 均为跨主版本升级，需按「一次一个、带回归」的节奏推进，不做批量升级。
 - **同步文件 IO**：`server/routes` 与 `server/services` 中约 19 处 `readFileSync` / `writeFileSync`，需逐个确认是否落在请求热路径上；启动期与低频管理操作可保留。
 - **内置工具库覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支尚未覆盖，其中 IM 涉及内网出站通知，建议下一轮优先补齐。

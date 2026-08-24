@@ -89,6 +89,18 @@ test('上游已有修复版本时不接受豁免', () => {
     assert.match(failures[0], /已有修复版本/);
 });
 
+test('npm audit 的对象型 fixAvailable 同样表示已有修复', () => {
+    const exceptions = buildExceptions({
+        patterns: [/GHSA-demo/i],
+        reason: '临时豁免',
+        expiresOn: shiftDate(30)
+    });
+    const fixAvailable = { name: 'demo-pkg', version: '2.0.0', isSemVerMajor: true };
+    const { failures, accepted } = classifyAuditFindings(buildAuditResult({ fixAvailable }), exceptions);
+    assert.equal(accepted.length, 0);
+    assert.match(failures[0], /已有修复版本/);
+});
+
 test('中低危漏洞不进入门禁拦截范围', () => {
     const { failures, accepted } = classifyAuditFindings(buildAuditResult({ severity: 'moderate' }), new Map());
     assert.equal(failures.length, 0);
@@ -97,12 +109,27 @@ test('中低危漏洞不进入门禁拦截范围', () => {
 test('packaged desktop runtime audit includes Electron without build-only tooling', () => {
     const audit = {
         vulnerabilities: {
-            electron: { name: 'electron', severity: 'high', via: [] },
+            electron: { name: 'electron', severity: 'high', via: ['extract-zip'] },
+            'extract-zip': {
+                name: 'extract-zip',
+                severity: 'high',
+                via: [{ source: 1, name: 'extract-zip', title: '路径穿越', severity: 'high' }]
+            },
             'electron-builder': { name: 'electron-builder', severity: 'high', via: [] }
         }
     };
     const selected = selectAuditPackages(audit, ['electron']);
-    assert.deepEqual(Object.keys(selected.vulnerabilities), ['electron']);
+    assert.deepEqual(Object.keys(selected.vulnerabilities), ['electron', 'extract-zip']);
+    assert.equal(classifyAuditFindings(selected).failures.length, 1);
+});
+
+test('缺失传递依赖详情时字符串 via 不能静默放行', () => {
+    const audit = {
+        vulnerabilities: {
+            electron: { name: 'electron', severity: 'high', via: ['missing-transitive'] }
+        }
+    };
+    assert.match(classifyAuditFindings(audit).failures[0], /missing-transitive/);
 });
 
 test('npm audit uses a platform-safe invocation', () => {

@@ -1,6 +1,8 @@
 // One-request execution worker. It speaks JSONL over stdin/stdout so the
 // Electron main process can keep the execution plane outside its renderer.
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
 const { createWorkspaceJail, runSandboxedProcess } = require('../../server/services/agent-sandbox');
 
 const MAX_REQUEST_BYTES = 128 * 1024;
@@ -12,8 +14,8 @@ function writeResult(value) {
 
 async function handle(request) {
     if (!request || typeof request !== 'object') throw new Error('Worker 请求格式无效。');
-    if (request.approved !== true) {
-        const error = new Error('桌面 Worker 执行必须携带显式批准。');
+    if (request.approvedByMainProcess !== true) {
+        const error = new Error('桌面 Worker 执行必须携带主进程批准。');
         error.code = 'AGENT_DESKTOP_APPROVAL_REQUIRED';
         throw error;
     }
@@ -33,11 +35,24 @@ async function handle(request) {
     if (!workspaceRoot) throw new Error('Worker 必须绑定工作区根目录。');
     const jail = createWorkspaceJail(workspaceRoot, request.taskId || 'agent-worker');
     const args = Array.isArray(request.args) ? request.args.slice(0, 32).map(String) : [];
+    if (!args[0] || args[0].startsWith('-') || path.isAbsolute(args[0])) {
+        const error = new Error('Worker 不允许解释器内联执行或绝对脚本路径。');
+        error.code = 'AGENT_WORKER_INLINE_CODE_DENIED';
+        throw error;
+    }
+    const scriptPath = jail.resolve(args[0]);
+    if (!fs.existsSync(scriptPath) || !fs.statSync(scriptPath).isFile()) {
+        const error = new Error('Worker 脚本不存在或不是普通文件。');
+        error.code = 'AGENT_WORKER_SCRIPT_UNAVAILABLE';
+        throw error;
+    }
     const result = await runSandboxedProcess(command, args, {
         jail,
         timeoutMs: Math.min(Math.max(Number(request.timeoutMs) || 30000, 100), 10 * 60 * 1000),
         input: request.input === undefined ? '' : String(request.input),
-        env: { PIVOT_AGENT_WORKER: '1' }
+        env: { PIVOT_AGENT_WORKER: '1', PIVOT_AGENT_WORKSPACE: jail.workspace },
+        inheritEnv: false,
+        networkDisabled: true
     });
     return {
         ...result,

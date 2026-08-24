@@ -114,6 +114,7 @@ services:
 ```bash
 # 创建必要的目录
 mkdir -p data uploads downloads logs
+sudo chown -R "${PIVOT_UID:-1000}:${PIVOT_GID:-1000}" data uploads downloads logs
 
 # 复制客户端（如果需要）
 cp Pivot-Setup.exe downloads/
@@ -163,7 +164,7 @@ docker exec pivot ls -lh /app/downloads/
 # 检查挂载是否正确
 docker inspect pivot | grep -A 10 Mounts
 
-# 检查文件权限
+# 检查文件权限（Pivot 容器默认以 UID/GID 1000 的非 root 用户运行）
 ls -lh downloads/
 ```
 

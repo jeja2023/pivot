@@ -6,7 +6,7 @@ const { createRegulationsRouter } = require('./regulations');
 const { createDocumentProcessingRouter } = require('./document-processing');
 const { createOcrRouter } = require('./ocr');
 const { createPdfToolsRouter } = require('./pdf-tools');
-const { asyncHandler } = require('../../http');
+const { asyncHandler, normalizeLimit } = require('../../http');
 const { logger } = require('../../logger');
 const { estimateTokens } = require('../../llm');
 const {
@@ -563,7 +563,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
-        const limit = Number.parseInt(req.query.limit, 10) || 30;
+        const limit = normalizeLimit(req.query.limit, 30, 100);
         res.json({ artifacts: await listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
     }));
 

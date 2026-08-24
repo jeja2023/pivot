@@ -1,7 +1,13 @@
 {
   "name": "pivot",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
+  "author": {
+    "name": "jeja2023",
+    "email": "jeja2023@github.com"
+  },
+  "homepage": "https://github.com/jeja2023/pivot",
+  "license": "UNLICENSED",
   "main": "desktop/main.js",
   "engines": {
     "node": ">=20.9.0"
@@ -13,6 +19,8 @@
     "check:text": "node scripts/check_text_integrity.js",
     "check:large-files": "node scripts/check_large_files.js",
     "check:architecture": "node scripts/check_architecture_boundaries.js",
+    "check:governance": "node scripts/check_governance_metrics.js",
+    "report:governance": "node scripts/check_governance_metrics.js --report",
     "check:standards": "node scripts/check_development_standards.js && node scripts/check_no_new_raw_sql.js",
     "check:external": "node scripts/check_external_links.js",
     "check:no-new-raw-sql": "node scripts/check_no_new_raw_sql.js",
@@ -21,7 +29,7 @@
     "check:async_db_calls": "node scripts/check_async_db_calls.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
-    "check": "npm run check:text && npm run check:large-files && npm run check:architecture && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:governance && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js",
     "test:mcp:official": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario initialize --spec-version 2025-11-25",
@@ -33,9 +41,14 @@
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
     "dist:win": "node scripts/package_desktop.js nsis",
-    "dist:linux": "node scripts/package_desktop.js deb",
-    "dist:arm64": "node scripts/package_desktop.js deb --arm64",
-    "dist:loong64": "node scripts/package_desktop.js deb --loong64",
+    "check:desktop:linux": "node scripts/check_desktop_build.js",
+    "dist:linux": "node scripts/package_desktop.js deb --x64",
+    "dist:linux:x64": "node scripts/package_desktop.js deb --x64",
+    "dist:linux:arm64": "node scripts/package_desktop.js deb --arm64",
+    "dist:linux:appimage:x64": "node scripts/package_desktop.js AppImage --x64",
+    "dist:linux:appimage:arm64": "node scripts/package_desktop.js AppImage --arm64",
+    "dist:arm64": "npm run dist:linux:arm64",
+    "dist:loong64": "node scripts/reject_unsupported_desktop_target.js loong64",
     "desktop:icon": "node scripts/build_desktop_icon.js",
     "check:window-globals": "node scripts/check_window_globals_usage.js",
     "check:e2e-smoke": "node scripts/check_e2e_smoke.js",
@@ -75,7 +88,7 @@
   "devDependencies": {
     "@modelcontextprotocol/conformance": "0.2.0-alpha.11",
     "@playwright/test": "^1.61.1",
-    "electron": "^39.8.10",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "eslint": "^10.3.0",
     "nodemon": "^3.1.0"
@@ -121,8 +134,10 @@
         "deb",
         "AppImage"
       ],
-      "icon": "desktop/icon.ico",
-      "category": "Utility"
+      "icon": "client/android-chrome-512x512.png",
+      "category": "Utility",
+      "synopsis": "智枢 Pivot 企业智能协同客户端",
+      "description": "连接组织内部 Pivot 服务的桌面客户端，提供智能协同、数据分析、知识库和自动化工作台。"
     },
     "deb": {
       "priority": "optional",

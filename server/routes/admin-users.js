@@ -5,7 +5,7 @@ const express = require('express');
 const fs = require('fs');
 const { StringDecoder } = require('string_decoder');
 const { query, queryOne, execute, transaction } = require('../db/client');
-const { asyncHandler } = require('../http');
+const { asyncHandler, normalizeLimit, normalizePage } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
     encodeAttachmentUrl,
@@ -16,6 +16,7 @@ const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-ac
 const { flushAllWrites } = require('../services/db-write-queue');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
 const { archiveDeletedUsernameAsync } = require('../services/user-identity');
+const { hashPasswordsOffThread } = require('../services/password-hasher');
 const {
     getPublicRegistrationSetting,
     setPublicRegistrationSetting
@@ -30,6 +31,7 @@ const {
 } = require('../permissions');
 
 const MAX_USER_IMPORT_ROWS = Math.max(100, Math.min(100000, Number.parseInt(process.env.ADMIN_USER_IMPORT_MAX_ROWS || '10000', 10) || 10000));
+const MAX_USER_IMPORT_ERROR_DETAILS = 1000;
 
 async function* iterateUserImportCsv(filePath, maxRows = MAX_USER_IMPORT_ROWS) {
     const stream = fs.createReadStream(filePath);
@@ -125,8 +127,8 @@ function createAdminUsersRouter({
     };
 
     router.get('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const page = parseInt(req.query.page, 10) || 1;
-        const limit = parseInt(req.query.limit, 10) || 10;
+        const page = normalizePage(req.query.page);
+        const limit = normalizeLimit(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
         const where = includeDeleted ? '' : 'WHERE deleted_at IS NULL';
@@ -400,8 +402,15 @@ function createAdminUsersRouter({
         let count = 0;
         let skipped = 0;
         const skippedRows = [];
+        let omittedSkippedRows = 0;
         const usernamePattern = /^[a-zA-Z0-9_.-]{3,32}$/;
         let rowIndex = 0;
+        const candidates = [];
+        const recordSkippedRow = item => {
+            skipped += 1;
+            if (skippedRows.length < MAX_USER_IMPORT_ERROR_DETAILS) skippedRows.push(item);
+            else omittedSkippedRows += 1;
+        };
         try {
             for await (const parts of iterateUserImportCsv(req.file.path)) {
                 const lineNumber = rowIndex + 1;
@@ -430,39 +439,67 @@ function createAdminUsersRouter({
 
             const cleanUsername = String(username).trim();
             if (!usernamePattern.test(cleanUsername)) {
-                skipped++;
-                skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
+                recordSkippedRow({ line: lineNumber, username: cleanUsername, reason: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
                 continue;
             }
 
-            let userHash;
+            let passwordValue;
             if (password) {
                 try {
                     validatePassword(String(password));
                 } catch (e) {
-                    skipped++;
-                    skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '密码强度不足：至少 8 位且同时包含字母和数字' });
+                    recordSkippedRow({ line: lineNumber, username: cleanUsername, reason: '密码强度不足：至少 8 位且同时包含字母和数字' });
                     continue;
                 }
-                userHash = bcrypt.hashSync(String(password), 10);
+                passwordValue = String(password);
             } else {
-                const randomPassword = `Pv${crypto.randomBytes(12).toString('hex')}9`;
-                userHash = bcrypt.hashSync(randomPassword, 10);
+                passwordValue = `Pv${crypto.randomBytes(12).toString('hex')}9`;
+            }
+            candidates.push({
+                lineNumber,
+                username: cleanUsername,
+                password: passwordValue,
+                nickname: nickname || cleanUsername,
+                unit: unit || '',
+                role: (role === 'admin' && isSuperAdmin(req.user)) ? 'admin' : 'user',
+                status: status === 'disabled' ? 'disabled' : 'active'
+            });
             }
 
-            try {
-                await execute(
-                    'INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [cleanUsername, nickname || cleanUsername, unit || '', (role === 'admin' && isSuperAdmin(req.user)) ? 'admin' : 'user', status === 'disabled' ? 'disabled' : 'active', userHash, getBeijingTimestamp()]
-                );
-                count++;
-            } catch (e) {
-                skipped++;
-                skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '插入失败（可能用户名已存在）' });
-            }
-            }
+            const hashes = await hashPasswordsOffThread(candidates.map(item => item.password));
+            const now = getBeijingTimestamp();
+            await transaction(async trx => {
+                const batchSize = 500;
+                for (let start = 0; start < candidates.length; start += batchSize) {
+                    const batch = candidates.slice(start, start + batchSize);
+                    const batchHashes = hashes.slice(start, start + batchSize);
+                    const insertedRows = await trx.query(`
+                        INSERT INTO users (username, nickname, unit, role, status, password_hash, created_at)
+                        SELECT username, nickname, unit, role, status, password_hash, created_at
+                        FROM UNNEST(
+                            ?::text[], ?::text[], ?::text[], ?::text[],
+                            ?::text[], ?::text[], ?::timestamp[]
+                        ) AS imported(username, nickname, unit, role, status, password_hash, created_at)
+                        ON CONFLICT (username) DO NOTHING
+                        RETURNING username
+                    `, [
+                        batch.map(item => item.username),
+                        batch.map(item => item.nickname),
+                        batch.map(item => item.unit),
+                        batch.map(item => item.role),
+                        batch.map(item => item.status),
+                        batchHashes,
+                        batch.map(() => now)
+                    ]);
+                    const insertedUsernames = new Set(insertedRows.map(item => item.username));
+                    for (const item of batch) {
+                        if (insertedUsernames.delete(item.username)) count += 1;
+                        else recordSkippedRow({ line: item.lineNumber, username: item.username, reason: '用户名已存在或在文件中重复' });
+                    }
+                }
+            });
             logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
-            res.json({ success: true, count, skipped, skippedRows, truncated: rowIndex >= MAX_USER_IMPORT_ROWS });
+            res.json({ success: true, count, skipped, skippedRows, omittedSkippedRows, truncated: rowIndex >= MAX_USER_IMPORT_ROWS });
         } finally {
             if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         }
@@ -470,8 +507,8 @@ function createAdminUsersRouter({
 
     router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         await flushAllWrites().catch(() => {});
-        const page = parseInt(req.query.page, 10) || 1;
-        const limit = parseInt(req.query.limit, 10) || 10;
+        const page = normalizePage(req.query.page);
+        const limit = normalizeLimit(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;
 
         const { username, action, details, ip, start, end } = req.query;

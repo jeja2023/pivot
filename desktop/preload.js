@@ -40,8 +40,11 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
         }
         return response && response.success === true ? response.result : response;
     },
-    runAgentWorker(task = {}) {
-        return ipcRenderer.invoke('pivot-agent:run-worker', task || {});
+    requestAgentWorkerApproval(task = {}) {
+        return ipcRenderer.invoke('pivot-agent:request-approval', task || {});
+    },
+    runAgentWorker(task = {}, approvalToken = '') {
+        return ipcRenderer.invoke('pivot-agent:run-worker', task || {}, String(approvalToken || ''));
     },
     checkForUpdates() {
         return ipcRenderer.invoke('pivot-updater:check');

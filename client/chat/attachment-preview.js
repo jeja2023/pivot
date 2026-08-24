@@ -66,7 +66,7 @@ async function renderAttachmentPreview(content, url, kind) {
     `);
 }
 
-window.openAttachmentPreview = async function(url, title = '', mimeType = '') {
+const openAttachmentPreview = async function(url, title = '', mimeType = '') {
     const modal = document.getElementById('attachment-preview-modal');
     const content = document.getElementById('attachment-preview-content');
     if (!modal || !content || !url) return;
@@ -86,7 +86,7 @@ window.openAttachmentPreview = async function(url, title = '', mimeType = '') {
     }
 };
 
-window.closeAttachmentPreview = function() {
+const closeAttachmentPreview = function() {
     const modal = document.getElementById('attachment-preview-modal');
     const content = document.getElementById('attachment-preview-content');
     if (modal) modal.classList.add('hidden');
@@ -99,7 +99,7 @@ document.addEventListener('click', (event) => {
     const url = trigger.dataset.attachmentUrl || trigger.getAttribute('href') || '';
     if (!url) return;
     event.preventDefault();
-    window.openAttachmentPreview?.(
+    openAttachmentPreview(
         url,
         trigger.dataset.attachmentName || trigger.textContent || '',
         trigger.dataset.attachmentType || ''
@@ -107,8 +107,13 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('attachment-preview-close')?.addEventListener('click', window.closeAttachmentPreview);
+    document.getElementById('attachment-preview-close')?.addEventListener('click', closeAttachmentPreview);
     document.getElementById('attachment-preview-modal')?.addEventListener('click', (event) => {
-        if (event.target.id === 'attachment-preview-modal') window.closeAttachmentPreview();
+        if (event.target.id === 'attachment-preview-modal') closeAttachmentPreview();
     });
 });
+
+Pivot.exposeModule('attachmentPreview', {
+    openAttachmentPreview,
+    closeAttachmentPreview
+}, ['openAttachmentPreview', 'closeAttachmentPreview']);

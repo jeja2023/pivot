@@ -8,6 +8,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: pivot
+    # 镜像内固定使用非 root 的 node 用户（UID/GID 1000）。
+    user: "${PIVOT_UID:-1000}:${PIVOT_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
 
     # 端口映射：宿主机端口 -> 容器端口
     ports:
@@ -31,6 +35,7 @@ services:
       # 将 Pivot-Setup.exe 放在宿主机 ./downloads 目录中即可通过 Web 页面下载
       # 优点：更新客户端无需重新构建镜像，保持镜像精简
       - ./downloads:/app/downloads
+      - ./logs:/app/logs
 
     # 网络：加入外部共享网络 ai-bridge
     networks:
@@ -38,6 +43,12 @@ services:
 
     # 重启策略：容器异常退出后自动拉起
     restart: always
+
+    # 防止容器内写入镜像层；业务写目录均通过下方挂载显式提供。
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/node/.cache:size=128m,mode=0700,uid=1000,gid=1000
 
     # 日志管理：限制单文件大小和保留数量，避免占满磁盘
     logging:

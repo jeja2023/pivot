@@ -28,6 +28,9 @@ function copyDir(source, target) {
 
 function main() {
     const executable = resolveExecutable();
+    if (process.platform === 'linux' && !['x64', 'arm64'].includes(process.arch)) {
+        throw new Error(`Playwright Chromium 暂不支持当前 Linux 架构：${process.arch}`);
+    }
     const browserRoot = path.dirname(executable);
     if (process.argv.includes('--dry-run')) {
         console.log(JSON.stringify({ executable, browserRoot, outputRoot }, null, 2));
@@ -37,6 +40,8 @@ function main() {
     copyDir(browserRoot, outputChromium);
     fs.writeFileSync(path.join(outputRoot, 'manifest.json'), JSON.stringify({
         name: 'chromium',
+        platform: process.platform,
+        arch: process.arch,
         executable: path.relative(outputRoot, path.join(outputChromium, path.basename(executable))),
         source: 'playwright',
         packagedAt: new Date().toISOString()

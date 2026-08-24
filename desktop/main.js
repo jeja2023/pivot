@@ -23,6 +23,11 @@ const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 const { runDesktopWorker } = require('./agent-runtime');
+const {
+    createWorkerApprovalStore,
+    isSecureWorkerRendererUrl,
+    normalizeWorkerRequest
+} = require('./worker-security');
 
 let mainWindow = null;
 let pivotServer = null;
@@ -31,6 +36,7 @@ let currentTargetUrl = '';
 let lastLoadError = null;
 let updaterController = null;
 let aboutWindow = null;
+const workerApprovals = createWorkerApprovalStore();
 
 function randomSecret() {
     return crypto.randomBytes(48).toString('hex');
@@ -341,6 +347,20 @@ function assertTrustedIpcSender(event) {
     return true;
 }
 
+function assertSecureWorkerIpcSender(event) {
+    assertTrustedIpcSender(event);
+    const senderUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || '';
+    if (!isSecureWorkerRendererUrl(senderUrl)) {
+        const error = new Error('本机 Worker 只允许 HTTPS 页面或本地回环页面调用。');
+        error.code = 'PIVOT_WORKER_INSECURE_RENDERER';
+        throw error;
+    }
+}
+
+function desktopWorkerRoot() {
+    return path.join(app.getPath('userData'), 'agent-workspaces');
+}
+
 function handleRendererNavigation(event, targetUrl, openExternal) {
     if (isTrustedMainRendererUrl(targetUrl)) return;
     event.preventDefault();
@@ -634,13 +654,33 @@ ipcMain.handle('pivot-local-auth:execute-tool', async (event, payload) => {
         return { success: false, error: normalizeLocalMcpExecutionError(error) };
     }
 });
-ipcMain.handle('pivot-agent:run-worker', async (event, payload = {}) => {
-    assertTrustedIpcSender(event);
+ipcMain.handle('pivot-agent:request-approval', async (event, payload = {}) => {
+    assertSecureWorkerIpcSender(event);
     configureLocalAuthorizationEnvironment();
+    const request = normalizeWorkerRequest(payload, { workspaceRoot: desktopWorkerRoot() });
+    const result = await dialog.showMessageBox(mainWindow || undefined, {
+        type: 'warning',
+        title: '批准本机脚本执行',
+        message: `是否允许 Pivot 执行 ${path.basename(request.args[0])}？`,
+        detail: `解释器：${request.command}\n任务：${request.taskId}\n网络：禁止\n\n仅在确认该任务由你发起时批准。`,
+        buttons: ['批准一次', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true
+    });
+    if (result.response !== 0) return { approved: false, canceled: true };
+    const approval = workerApprovals.issue(request);
+    return { approved: true, approvalToken: approval.token, expiresAt: new Date(approval.expiresAt).toISOString() };
+});
+
+ipcMain.handle('pivot-agent:run-worker', async (event, payload = {}, approvalToken = '') => {
+    assertSecureWorkerIpcSender(event);
+    configureLocalAuthorizationEnvironment();
+    const request = normalizeWorkerRequest(payload, { workspaceRoot: desktopWorkerRoot() });
+    workerApprovals.consume(approvalToken, request);
     return runDesktopWorker({
-        ...payload,
-        approved: payload.approved === true,
-        workspaceRoot: payload.workspaceRoot || path.join(app.getPath('userData'), 'agent-workspaces')
+        ...request,
+        approvedByMainProcess: true
     });
 });
 ipcMain.handle('pivot-desktop:retry', async (event) => {

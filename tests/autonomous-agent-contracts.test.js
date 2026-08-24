@@ -140,9 +140,9 @@ test('Skill minimum permissions are enforced by the PEP', () => {
     assert.notEqual(aliased.decision, 'denied');
 });
 
-test('desktop worker requires explicit approval and network policy allowlist', () => {
-    assert.throws(() => assertWorkerConfiguration({ approved: false }), /审批/);
-    assert.throws(() => assertWorkerConfiguration({ approved: true, networkEnabled: true, networkPolicy: { allowed_origins: [] } }), /allowlist/);
+test('desktop worker requires main-process approval and denies direct networking', () => {
+    assert.throws(() => assertWorkerConfiguration({ approvedByMainProcess: false }), /审批/);
+    assert.throws(() => assertWorkerConfiguration({ approvedByMainProcess: true, networkEnabled: true }), /禁止联网/);
 });
 
 test('large audit payloads are stored as content-addressed blobs', async () => {

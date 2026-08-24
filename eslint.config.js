@@ -66,6 +66,7 @@ const browserGlobals = {
     APP_NAME: 'readonly',
     APP_VERSION: 'readonly',
     PivotSafeHtml: 'readonly',
+    Pivot: 'readonly',
     appendMessage: 'readonly',
     apiFetch: 'readonly',
     authFetch: 'readonly',

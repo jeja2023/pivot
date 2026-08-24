@@ -109,7 +109,13 @@ function runSandboxedProcess(command, args = [], options = {}) {
         networkDisabled: options.networkDisabled === true,
         memoryLimitBytes: options.memoryLimitBytes
     });
-    const env = { ...process.env, ...(options.env || {}) };
+    const inheritedEnv = options.inheritEnv === false
+        ? Object.fromEntries([
+            'PATH', 'Path', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT',
+            'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ'
+        ].filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]]))
+        : process.env;
+    const env = { ...inheritedEnv, ...(options.env || {}) };
     delete env.NODE_OPTIONS;
     return new Promise((resolve, reject) => {
         let processCommand;

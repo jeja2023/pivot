@@ -57,3 +57,12 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
           DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
         run: npm run test:all
+
+      - name: Install Playwright Chromium
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Browser end-to-end tests
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+          DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+        run: npm run test:e2e
