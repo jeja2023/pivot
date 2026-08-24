@@ -117,10 +117,14 @@ app.use((req, res, next) => {
 app.use(httpLogger); // 注入请求日志和请求 ID
 app.use(metricsMiddleware);
 const rateLimit = require('express-rate-limit');
+const { createRateLimitStore } = require('./services/rate-limit-store');
+
+const limiterStore = name => createRateLimitStore(`http:${name}`);
 
 migrateModelSecrets();
 
 const loginLimiter = rateLimit({
+    store: limiterStore('login'),
     windowMs: 15 * 60 * 1000,
     max: 10,
     keyGenerator: (req) => getClientIp(req), // 统一使用 getClientIp
@@ -128,6 +132,7 @@ const loginLimiter = rateLimit({
 });
 
 const registerLimiter = rateLimit({
+    store: limiterStore('register'),
     windowMs: 15 * 60 * 1000,
     max: 5,
     keyGenerator: (req) => getClientIp(req),
@@ -135,6 +140,7 @@ const registerLimiter = rateLimit({
 });
 
 const healthLimiter = rateLimit({
+    store: limiterStore('health'),
     windowMs: 60 * 1000,
     max: 60,
     keyGenerator: (req) => getClientIp(req),
@@ -162,6 +168,7 @@ app.use(helmet({
 }));
 
 const chatLimiter = rateLimit({
+    store: limiterStore('chat'),
     windowMs: 60 * 1000,
     max: 30,
     keyGenerator: (req) => {
@@ -172,6 +179,7 @@ const chatLimiter = rateLimit({
 });
 
 const automationLimiter = rateLimit({
+    store: limiterStore('automation'),
     windowMs: 60 * 1000,
     max: 30,
     keyGenerator: (req) => req.user ? `user_${req.user.id}` : getClientIp(req),
@@ -179,6 +187,7 @@ const automationLimiter = rateLimit({
 });
 
 const probeLimiter = rateLimit({
+    store: limiterStore('probe'),
     windowMs: 60 * 1000,
     max: 20,
     keyGenerator: (req) => {
@@ -189,6 +198,7 @@ const probeLimiter = rateLimit({
 });
 
 const embeddingLimiter = rateLimit({
+    store: limiterStore('embedding'),
     windowMs: 60 * 1000,
     max: 60,
     keyGenerator: (req) => {
@@ -200,6 +210,7 @@ const embeddingLimiter = rateLimit({
 
 // 入站触发按来源 IP 限流：未登录场景下只能依据来源地址识别调用方
 const triggerLimiter = rateLimit({
+    store: limiterStore('trigger'),
     windowMs: 60 * 1000,
     max: 60,
     keyGenerator: (req) => getClientIp(req),

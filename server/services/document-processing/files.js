@@ -53,10 +53,10 @@ function detectDocumentKind({ ext, mimeType = '' }) {
     return 'document';
 }
 
-function sha256File(filePath) {
+async function sha256File(filePath) {
     const hash = crypto.createHash('sha256');
-    const data = fs.readFileSync(filePath);
-    hash.update(data);
+    const stream = fs.createReadStream(filePath);
+    for await (const chunk of stream) hash.update(chunk);
     return hash.digest('hex');
 }
 
@@ -160,7 +160,7 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
     try {
         moveUploadedFile(file.path, targetPath);
         const stat = fs.statSync(targetPath);
-        const digest = sha256File(targetPath);
+        const digest = await sha256File(targetPath);
         const imageMetadata = kind === 'image' ? await readImageMetadata(targetPath) : {};
         const nextMetadata = { ...metadata, mimeType: file.mimetype || '', ...imageMetadata };
         await execute(`

@@ -4,6 +4,12 @@ const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const { isolationMetadata, prepareProcessIsolation } = require('./agent-os-isolation');
 
+const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = Math.max(
+    1024,
+    Number.parseInt(process.env.PIVOT_AGENT_SANDBOX_MAX_OUTPUT_BYTES || String(DEFAULT_MAX_OUTPUT_BYTES), 10) || DEFAULT_MAX_OUTPUT_BYTES
+);
+
 let cachedCanUnshare = null;
 function canUseUnshare(unsharePath) {
     if (cachedCanUnshare !== null) return cachedCanUnshare;
@@ -94,6 +100,10 @@ function runSandboxedProcess(command, args = [], options = {}) {
     const jail = options.jail;
     const cwd = jail ? jail.resolve('.') : path.resolve(options.cwd || process.cwd());
     const timeoutMs = Math.max(Number(options.timeoutMs) || 30000, 100);
+    const maxBufferBytes = Math.max(
+        1024,
+        Number.parseInt(options.maxBufferBytes ?? MAX_OUTPUT_BYTES, 10) || MAX_OUTPUT_BYTES
+    );
     const isolation = options.isolation || prepareProcessIsolation({
         strictIsolation: options.strictIsolation === true,
         networkDisabled: options.networkDisabled === true,
@@ -114,14 +124,49 @@ function runSandboxedProcess(command, args = [], options = {}) {
         });
         const stdout = [];
         const stderr = [];
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
         let settled = false;
         let timer;
+        let outputLimitTriggered = false;
+        let pendingTerminationError = null;
+        const appendOutput = (target, chunk, totalBytes) => {
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+            const remaining = Math.max(0, maxBufferBytes - totalBytes);
+            if (remaining > 0) target.push(buffer.subarray(0, remaining));
+            return buffer.length;
+        };
+        const terminateChild = () => {
+            if (process.platform !== 'win32') {
+                try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { try { child.kill('SIGKILL'); } catch (_) {} }
+            } else {
+                try { child.kill('SIGKILL'); } catch (_) {}
+            }
+        };
+        const triggerOutputLimit = (streamName, totalBytes) => {
+            if (outputLimitTriggered || settled) return;
+            outputLimitTriggered = true;
+            terminateChild();
+            const error = new Error(`沙箱进程${streamName === 'stderr' ? '错误' : '标准'}输出超过 ${maxBufferBytes} 字节限制。`);
+            error.code = 'AGENT_SANDBOX_OUTPUT_LIMIT_EXCEEDED';
+            error.category = 'resource';
+            error.stream = streamName;
+            error.outputBytes = totalBytes;
+            error.maxBufferBytes = maxBufferBytes;
+            error.stdout = Buffer.concat(stdout).toString('utf8');
+            error.stderr = Buffer.concat(stderr).toString('utf8');
+            pendingTerminationError = error;
+        };
         const finish = (error, result) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
             try { isolationHelper?.kill(); } catch (_) {}
             isolation.cleanup();
+            if (error && outputLimitTriggered) {
+                error.stdout = error.stdout ?? Buffer.concat(stdout).toString('utf8');
+                error.stderr = error.stderr ?? Buffer.concat(stderr).toString('utf8');
+            }
             error ? reject(error) : resolve(result);
         };
         let isolationHelper = null;
@@ -133,18 +178,33 @@ function runSandboxedProcess(command, args = [], options = {}) {
             finish(error);
             return;
         }
-        child.stdout.on('data', chunk => stdout.push(chunk));
-        child.stderr.on('data', chunk => stderr.push(chunk));
+        child.stdout.on('data', chunk => {
+            const bytes = appendOutput(stdout, chunk, stdoutBytes + stderrBytes);
+            stdoutBytes += bytes;
+            if (stdoutBytes + stderrBytes > maxBufferBytes) triggerOutputLimit('stdout', stdoutBytes + stderrBytes);
+        });
+        child.stderr.on('data', chunk => {
+            const bytes = appendOutput(stderr, chunk, stdoutBytes + stderrBytes);
+            stderrBytes += bytes;
+            if (stdoutBytes + stderrBytes > maxBufferBytes) triggerOutputLimit('stderr', stdoutBytes + stderrBytes);
+        });
         timer = setTimeout(() => {
-            if (process.platform !== 'win32') { try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {} }
-            else { try { child.kill('SIGKILL'); } catch (_) {} }
+            if (outputLimitTriggered && pendingTerminationError) {
+                terminateChild();
+                finish(pendingTerminationError);
+                return;
+            }
+            terminateChild();
             const error = new Error(`沙箱进程超过 ${timeoutMs}ms 限时。`);
             error.code = 'AGENT_SANDBOX_TIMEOUT';
             error.category = 'timeout';
             finish(error);
         }, timeoutMs);
-        child.on('error', error => finish(error));
-        child.on('close', (code, signal) => finish(null, {
+        child.on('error', error => {
+            if (pendingTerminationError) return;
+            finish(error);
+        });
+        child.on('close', (code, signal) => finish(pendingTerminationError, {
             code,
             signal,
             stdout: Buffer.concat(stdout).toString('utf8'),

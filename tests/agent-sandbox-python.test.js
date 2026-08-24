@@ -58,3 +58,25 @@ test('workspace jail rejects symlink escapes', () => {
         fs.rmSync(outside, { recursive: true, force: true });
     }
 });
+
+test('sandbox terminates noisy processes at the bounded output limit', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-agent-output-limit-'));
+    try {
+        const jail = createWorkspaceJail(root, 'output-limit');
+        await assert.rejects(
+            runSandboxedProcess(process.execPath, ['-e', 'process.stdout.write("x".repeat(3000)); process.stderr.write("y".repeat(3000));'], {
+                jail,
+                timeoutMs: 5000,
+                maxBufferBytes: 4096
+            }),
+            error => {
+                assert.equal(error.code, 'AGENT_SANDBOX_OUTPUT_LIMIT_EXCEEDED');
+            assert.equal(error.category, 'resource');
+            assert.equal(error.maxBufferBytes, 4096);
+            assert.ok(error.outputBytes > 4096);
+                assert.ok(Buffer.byteLength(error.stdout, 'utf8') <= 4096);
+                return true;
+            }
+        );
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

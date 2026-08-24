@@ -181,7 +181,7 @@ function createAttachmentsRouter({
             } else {
                 try {
                     extractedText = truncateExtractedText(
-                        await extractDocumentText(req.file.path, mimeType, originalName, { password }),
+                        await extractDocumentText(req.file.path, mimeType, originalName, { password, maxChars: getAttachmentContextLimit() }),
                         getAttachmentContextLimit()
                     );
                 } catch (readErr) {

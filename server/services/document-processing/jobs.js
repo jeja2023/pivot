@@ -41,6 +41,13 @@ const { buildManagedPath, resolveStoredDocumentPath, safeUnlinkManaged, tempRoot
 const queue = [];
 const runningJobs = new Set();
 let runningCount = 0;
+const JOB_LEASE_MS = Math.max(60_000, Number.parseInt(process.env.DOCUMENT_PROCESSING_JOB_LEASE_MS || String(15 * 60 * 1000), 10) || 15 * 60 * 1000);
+const JOB_RECOVERY_BATCH = Math.max(1, Math.min(500, Number.parseInt(process.env.DOCUMENT_PROCESSING_RECOVERY_BATCH || '100', 10) || 100));
+const MAX_OUTPUT_ARCHIVE_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_ARCHIVE_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
+
+function jobLeaseCutoff() {
+    return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS));
+}
 
 function settingInt(key, fallback, min, max) {
     const value = Number.parseInt(getAppSettingValue(key), 10);
@@ -222,11 +229,13 @@ async function setJobStatus(jobId, status, patch = {}) {
         ? (patch.completedAt || now)
         : current.completed_at;
     const cancelledAt = status === JOB_STATUSES.CANCELLED ? (patch.cancelledAt || now) : current.cancelled_at;
+    const terminal = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status);
+    const refreshLease = status === JOB_STATUSES.PROCESSING;
     await execute(`
         UPDATE document_jobs
-        SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?
-        WHERE id = ?
-    `, [status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt, jobId]);
+        SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?, locked_at = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE locked_at END
+        WHERE id = ? AND (status <> ? OR ? = ?)
+    `, [status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt, refreshLease, now, terminal, jobId, JOB_STATUSES.CANCELLED, status, JOB_STATUSES.CANCELLED]);
     return await getJobRow(jobId);
 }
 
@@ -385,6 +394,35 @@ function drainQueue() {
     }
 }
 
+async function recoverDocumentProcessingJobs({ limit = JOB_RECOVERY_BATCH } = {}) {
+    const now = getBeijingTimestamp();
+    const cutoff = jobLeaseCutoff();
+    const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || JOB_RECOVERY_BATCH, 500));
+    const requeued = await execute(`
+        UPDATE document_jobs
+        SET status = ?, locked_at = NULL, updated_at = ?, error_message = ''
+        WHERE status = ? AND locked_at IS NOT NULL AND locked_at < ? AND attempts < max_attempts
+    `, [JOB_STATUSES.QUEUED, now, JOB_STATUSES.PROCESSING, cutoff]);
+    const failed = await execute(`
+        UPDATE document_jobs
+        SET status = ?, locked_at = NULL, completed_at = ?, updated_at = ?,
+            error_message = CASE WHEN error_message = '' THEN ? ELSE error_message END
+        WHERE status = ? AND locked_at IS NOT NULL AND locked_at < ? AND attempts >= max_attempts
+    `, [JOB_STATUSES.FAILED, now, now, '任务处理租约已过期且达到最大重试次数。', JOB_STATUSES.PROCESSING, cutoff]);
+    const pending = await query(`
+        SELECT id
+        FROM document_jobs
+        WHERE status = ? AND (locked_at IS NULL OR locked_at < ?)
+        ORDER BY created_at ASC, id ASC
+        LIMIT ?
+    `, [JOB_STATUSES.QUEUED, cutoff, safeLimit]);
+    pending.forEach(row => enqueueJob(row.id));
+    if (requeued || failed || pending.length) {
+        logger.info({ requeued, failed, enqueued: pending.length }, '文档处理任务恢复扫描完成');
+    }
+    return { requeued, failed, enqueued: pending.length };
+}
+
 async function createJobRecord({ userId, fileId, jobType, sourceModule, config }) {
     const now = getBeijingTimestamp();
     const row = await queryOne(`
@@ -398,7 +436,13 @@ async function createJobRecord({ userId, fileId, jobType, sourceModule, config }
 
 async function createJobFromUpload({ user, file, jobType = JOB_TYPES.AUTO, sourceModule = 'document_processing', sourceRef = '', config = {} }) {
     const registeredFile = await registerUploadedFile({ user, file, sourceModule, sourceRef, metadata: { createdBy: sourceModule } });
-    const job = await createJobRecord({ userId: user.id, fileId: registeredFile.id, jobType, sourceModule, config });
+    let job;
+    try {
+        job = await createJobRecord({ userId: user.id, fileId: registeredFile.id, jobType, sourceModule, config });
+    } catch (error) {
+        await cleanupJobSourceFiles({ file_id: registeredFile.id, config_json: '{}' }, user.id).catch(() => {});
+        throw error;
+    }
     enqueueJob(job.id);
     return await getJobDetail({ userId: user.id, jobId: job.id });
 }
@@ -421,17 +465,26 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
         }));
     }
     const firstFile = registeredFiles[0];
-    const job = await createJobRecord({
-        userId: user.id,
-        fileId: firstFile.id,
-        jobType: JOB_TYPES.PDF_TOOL,
-        sourceModule: 'pdf_tools',
-        config: {
-            ...config,
-            operation,
-            sourceFileIds: registeredFiles.map(item => item.id)
-        }
-    });
+    let job;
+    try {
+        job = await createJobRecord({
+            userId: user.id,
+            fileId: firstFile.id,
+            jobType: JOB_TYPES.PDF_TOOL,
+            sourceModule: 'pdf_tools',
+            config: {
+                ...config,
+                operation,
+                sourceFileIds: registeredFiles.map(item => item.id)
+            }
+        });
+    } catch (error) {
+        await cleanupJobSourceFiles({
+            file_id: firstFile.id,
+            config_json: JSON.stringify({ sourceFileIds: registeredFiles.map(item => item.id) })
+        }, user.id).catch(() => {});
+        throw error;
+    }
     enqueueJob(job.id);
     return await getJobDetail({ userId: user.id, jobId: job.id });
 }
@@ -589,7 +642,7 @@ async function recognizePages({ job, file, pages, config }) {
 }
 
 async function processTextExtraction({ job, file, filePath, config }) {
-    const text = truncateExtractedText(await extractDocumentText(filePath, '', file.original_name, { password: config.password }), getKnowledgeLimits().extractMaxChars);
+    const text = truncateExtractedText(await extractDocumentText(filePath, '', file.original_name, { password: config.password, maxChars: getKnowledgeLimits().extractMaxChars }), getKnowledgeLimits().extractMaxChars);
     const normalizedText = String(text || '').trim();
     if (normalizedText) {
         const page = await insertPage({
@@ -711,19 +764,22 @@ async function processPdfToolJob({ job, file, config }) {
 }
 
 async function processJob(jobId) {
-    const job = await getJobRow(jobId);
-    if (!job || job.status !== JOB_STATUSES.QUEUED) return null;
-    const file = await getDocumentFileForUser(job.file_id, job.user_id);
+    const initialJob = await getJobRow(jobId);
+    if (!initialJob || initialJob.status !== JOB_STATUSES.QUEUED) return null;
+    const file = await getDocumentFileForUser(initialJob.file_id, initialJob.user_id);
     const filePath = getDocumentFilePath(file);
     if (!file || !filePath) {
         return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
     }
-    const config = normalizeConfig(parseJson(job.config_json, {}));
-    await execute(`
+    const now = getBeijingTimestamp();
+    const claimed = await execute(`
         UPDATE document_jobs
         SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, updated_at = ?
-        WHERE id = ?
-    `, [JOB_STATUSES.PROCESSING, 5, getBeijingTimestamp(), getBeijingTimestamp(), jobId]);
+        WHERE id = ? AND status = ? AND cancelled_at IS NULL
+    `, [JOB_STATUSES.PROCESSING, 5, now, now, jobId, JOB_STATUSES.QUEUED]);
+    if (claimed !== 1) return await getJobRow(jobId);
+    const job = await getJobRow(jobId);
+    const config = normalizeConfig(parseJson(job.config_json, {}));
 
     try {
         if (await isCancelled(jobId)) return await getJobRow(jobId);
@@ -836,9 +892,18 @@ async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
     const outputs = await getOutputs(job.id);
     if (!outputs.length) return null;
     const seen = new Set();
+    let totalBytes = 0;
     const entries = outputs.map(output => {
         const filePath = resolveStoredDocumentPath(output.file_path);
         if (!filePath || !fs.existsSync(filePath)) return null;
+        const size = fs.statSync(filePath).size;
+        totalBytes += size;
+        if (totalBytes > MAX_OUTPUT_ARCHIVE_BYTES) {
+            const error = new Error(`输出归档超过 ${Math.round(MAX_OUTPUT_ARCHIVE_BYTES / 1024 / 1024)}MB 限制，请分批下载。`);
+            error.status = 413;
+            error.code = 'DOCUMENT_OUTPUT_ARCHIVE_TOO_LARGE';
+            throw error;
+        }
         return {
             name: uniqueArchiveFileName(output.file_name || `output-${output.id}`, seen, `output-${output.id}`),
             data: fs.readFileSync(filePath)
@@ -1093,6 +1158,7 @@ module.exports = {
     getQueueStatus,
     listJobs,
     processJob,
+    recoverDocumentProcessingJobs,
     retryJob,
     updateDocumentProcessingSettings,
     savePageReview,

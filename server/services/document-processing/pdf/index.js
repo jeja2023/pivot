@@ -11,6 +11,19 @@ const { createTextOutputs, registerOutput, serializeOutput } = require('../expor
 const { renderPdfPagesToFiles } = require('../renderers');
 const { buildManagedPath, outputsRoot, resolveStoredDocumentPath } = require('../paths');
 
+const MAX_PDF_BUFFER_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_MAX_BUFFER_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
+
+function readBoundedBinary(filePath) {
+    const size = fs.statSync(filePath).size;
+    if (size > MAX_PDF_BUFFER_BYTES) {
+        const error = new Error(`PDF/图片大小超过解析缓冲区上限 ${Math.round(MAX_PDF_BUFFER_BYTES / 1024 / 1024)}MB。`);
+        error.status = 413;
+        error.code = 'DOCUMENT_BUFFER_LIMIT_EXCEEDED';
+        throw error;
+    }
+    return fs.readFileSync(filePath);
+}
+
 const PDF_TOOL_OPERATIONS = Object.freeze({
     SPLIT: 'split',
     MERGE: 'merge',
@@ -112,7 +125,7 @@ function clampToolPageCount(count, limit = 100) {
 
 async function loadPdf(file, config = {}) {
     const filePath = requirePdfFile(file);
-    const bytes = fs.readFileSync(filePath);
+    const bytes = readBoundedBinary(filePath);
     return PDFDocument.load(bytes, {
         ignoreEncryption: false,
         password: config.password || undefined
@@ -325,7 +338,7 @@ async function pdfToImages({ job, file, config, onProgress }) {
 async function readImageForPdf(file) {
     const filePath = requireImageFile(file);
     const ext = String(file.file_ext || '').toLowerCase();
-    const raw = fs.readFileSync(filePath);
+    const raw = readBoundedBinary(filePath);
     if (ext === '.jpg' || ext === '.jpeg' || ext === '.png') return { bytes: raw, ext };
     const converted = await sharp(raw).png().toBuffer();
     return { bytes: converted, ext: '.png' };

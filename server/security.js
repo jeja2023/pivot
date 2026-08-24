@@ -142,6 +142,9 @@ function assertSafeResolvedAddress(hostname, address, options = {}) {
 }
 
 function createSafeLookup(options = {}) {
+    // 每个 Agent 使用独立的 pin 缓存：首次连接解析并校验通过后，后续 socket
+    // 复用同一组地址，不再重新查询 DNS，从而消除校验与 TCP 连接之间的 rebinding 窗口。
+    const pinnedAddresses = new Map();
     return (hostname, lookupOptions, callback) => {
         let cb = callback;
         let opts = lookupOptions;
@@ -150,15 +153,39 @@ function createSafeLookup(options = {}) {
             opts = {};
         }
 
-        dns.lookup(hostname, opts || {}, (err, address, family) => {
+        const safeOptions = opts || {};
+        const cacheKey = normalizeHostForPolicy(hostname);
+        const family = Number(safeOptions.family) || 0;
+        const fromCache = pinnedAddresses.get(cacheKey);
+        const returnPinned = addresses => {
+            const compatible = family
+                ? addresses.filter(item => Number(item.family) === family)
+                : addresses;
+            if (!compatible.length) {
+                const error = new Error(`无法为 ${hostname} 找到匹配 IPv${family} 的已固定地址。`);
+                error.code = 'ENOTFOUND';
+                return cb(error);
+            }
+            if (safeOptions.all) return cb(null, compatible.map(item => ({ ...item })));
+            const selected = compatible[0];
+            return cb(null, selected.address, selected.family);
+        };
+        if (fromCache?.length) return returnPinned(fromCache);
+
+        dns.lookup(hostname, { ...safeOptions, all: true, verbatim: true }, (err, records) => {
             if (err) return cb(err);
             try {
-                if (Array.isArray(address)) {
-                    address.forEach(item => assertSafeResolvedAddress(hostname, item.address, options));
-                    return cb(null, address);
+                const addresses = (Array.isArray(records) ? records : [{ address: records, family: family || net.isIP(records) }])
+                    .filter(item => item && item.address)
+                    .map(item => ({ address: item.address, family: Number(item.family) || net.isIP(item.address) }));
+                addresses.forEach(item => assertSafeResolvedAddress(hostname, item.address, options));
+                if (!addresses.length) {
+                    const error = new Error(`主机 ${hostname} 没有可用解析地址。`);
+                    error.code = 'ENOTFOUND';
+                    return cb(error);
                 }
-                assertSafeResolvedAddress(hostname, address, options);
-                return cb(null, address, family);
+                pinnedAddresses.set(cacheKey, addresses);
+                return returnPinned(addresses);
             } catch (safeErr) {
                 return cb(safeErr);
             }

@@ -5,6 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { StringDecoder } = require('string_decoder');
 let XLSX = null;
 function getXlsx() {
     if (!XLSX) XLSX = require('@e965/xlsx');
@@ -197,20 +198,123 @@ async function listReportFiles(config, query = '', limit = 50) {
     }
     return { files: results, scanned };
 }
-async function readWorkbookRows(file, sheetName, maxRows) {
-    const xlsx = getXlsx();
-    let workbook;
-    if (file.ext === 'csv') {
-        // CSV 是纯文本格式，必须先按 UTF-8 解码再解析。
-        // 直接把 Buffer 交给 xlsx 会被当作单字节编码处理，导致不带 BOM 的 UTF-8 中文表头
-        // 和内容全部乱码，并把乱码带入模型上下文。
-        const raw = await fs.promises.readFile(file.target, 'utf8');
-        const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
-        workbook = xlsx.read(text, { type: 'string', cellDates: true, sheetRows: maxRows + 1 });
-    } else {
-        const buffer = await fs.promises.readFile(file.target);
-        workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
+function normalizeReportHeaders(row = []) {
+    const usedHeaders = new Map();
+    return row.map((cell, index) => {
+        const base = String(cell ?? `column_${index + 1}`).trim() || `column_${index + 1}`;
+        const count = (usedHeaders.get(base) || 0) + 1;
+        usedHeaders.set(base, count);
+        return count === 1 ? base : `${base}_${count}`;
+    });
+}
+
+function reportRowsToObjects(rows) {
+    const headers = normalizeReportHeaders(rows[0] || []);
+    const objects = rows.slice(1).map(row => {
+        const item = {};
+        headers.forEach((header, index) => { item[header] = row[index] ?? ''; });
+        return item;
+    });
+    return { headers, objects };
+}
+
+// 增量 CSV 解析器：支持逗号、双引号转义和跨行字段；只保留 header + maxRows 行。
+async function readCsvRowsStream(filePath, maxRows) {
+    const stream = fs.createReadStream(filePath);
+    const decoder = new StringDecoder('utf8');
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    let pendingQuote = false;
+    let firstCharacter = true;
+    let pendingCarriageReturn = false;
+    let stopped = false;
+
+    const pushRow = () => {
+        // 与 xlsx 的 sheet_to_json(header: 1) 保持一致：忽略文件末尾的空行。
+        if (row.length > 1 || row[0] !== '' || field !== '') rows.push([...row, field]);
+        row = [];
+        field = '';
+        return rows.length >= Math.max(1, Number(maxRows) || 1) + 1;
+    };
+    const consume = text => {
+        for (let index = 0; index < text.length; index += 1) {
+            let char = text[index];
+            if (firstCharacter) {
+                firstCharacter = false;
+                if (char === '\uFEFF') continue;
+            }
+            if (pendingQuote) {
+                pendingQuote = false;
+                if (char === '"') { field += '"'; continue; }
+                inQuotes = false;
+            }
+            if (inQuotes) {
+                if (char === '"') {
+                    if (text[index + 1] === '"') { field += '"'; index += 1; }
+                    else if (index === text.length - 1) pendingQuote = true;
+                    else inQuotes = false;
+                } else field += char;
+                continue;
+            }
+            if (pendingCarriageReturn) {
+                pendingCarriageReturn = false;
+                if (char === '\n') continue;
+            }
+            if (char === '"' && field === '') { inQuotes = true; continue; }
+            if (char === ',') { row.push(field); field = ''; continue; }
+            if (char === '\n' || char === '\r') {
+                if (char === '\r') {
+                    if (text[index + 1] === '\n') index += 1;
+                    else pendingCarriageReturn = true;
+                }
+                if (pushRow()) return true;
+                continue;
+            }
+            field += char;
+        }
+        return false;
+    };
+
+    try {
+        for await (const chunk of stream) {
+            if (consume(decoder.write(chunk))) {
+                stopped = true;
+                stream.destroy();
+                break;
+            }
+        }
+        if (!stopped) {
+            const tail = decoder.end();
+            if (tail && consume(tail)) stopped = true;
+            if (!stopped && (field !== '' || row.length)) pushRow();
+        }
+    } catch (error) {
+        if (!stopped) throw error;
     }
+    return rows;
+}
+
+async function readWorkbookRows(file, sheetName, maxRows) {
+    if (file.ext === 'csv') {
+        const rows = await readCsvRowsStream(file.target, maxRows);
+        const parsed = reportRowsToObjects(rows);
+        const selectedSheet = 'Sheet1';
+        const requestedSheet = String(sheetName || '').trim();
+        return {
+            workbook: { SheetNames: [selectedSheet], Sheets: { [selectedSheet]: {} } },
+            selectedSheet,
+            headers: parsed.headers,
+            rows: parsed.objects,
+            warnings: requestedSheet && requestedSheet !== selectedSheet
+                ? [`CSV 文件没有工作表 ${requestedSheet}，已使用默认工作表 ${selectedSheet}。`]
+                : []
+        };
+    }
+    const xlsx = getXlsx();
+    const buffer = await fs.promises.readFile(file.target);
+    const workbook = xlsx.read(buffer, { type: 'buffer', cellDates: true, sheetRows: maxRows + 1 });
     const requestedSheet = String(sheetName || '').trim();
     const selectedSheet = requestedSheet && workbook.Sheets[requestedSheet] ? requestedSheet : workbook.SheetNames[0];
     const warnings = requestedSheet && selectedSheet !== requestedSheet
@@ -221,27 +325,35 @@ async function readWorkbookRows(file, sheetName, maxRows) {
         return { workbook, selectedSheet: '', headers: [], rows: [], warnings: [...warnings, '工作簿没有可读取的工作表。'] };
     }
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-    const usedHeaders = new Map();
-    const headers = (rows[0] || []).map((cell, index) => {
-        const base = String(cell || `column_${index + 1}`).trim() || `column_${index + 1}`;
-        const count = (usedHeaders.get(base) || 0) + 1;
-        usedHeaders.set(base, count);
-        return count === 1 ? base : `${base}_${count}`;
-    });
-    const objects = rows.slice(1).map(row => {
-        const item = {};
-        headers.forEach((header, index) => { item[header] = row[index] ?? ''; });
-        return item;
-    });
-    return { workbook, selectedSheet, headers, rows: objects, warnings };
+    const parsed = reportRowsToObjects(rows);
+    return { workbook, selectedSheet, headers: parsed.headers, rows: parsed.objects, warnings };
 }
 
 async function readTextPreview(file, maxRows) {
-    const text = await fs.promises.readFile(file.target, 'utf8');
-    const lines = text.split(/\r?\n/);
+    const stream = fs.createReadStream(file.target);
+    const decoder = new StringDecoder('utf8');
+    const sampleLines = [];
+    let lineCount = 0;
+    let pending = '';
+    let endedWithNewline = false;
+    const collect = text => {
+        if (text) endedWithNewline = /[\r\n]$/.test(text);
+        const lines = `${pending}${text}`.split(/\r?\n/);
+        pending = lines.pop() || '';
+        lines.forEach(line => {
+            lineCount += 1;
+            if (sampleLines.length < maxRows) sampleLines.push(line);
+        });
+    };
+    for await (const chunk of stream) collect(decoder.write(chunk));
+    collect(decoder.end());
+    if (pending || lineCount === 0 || endedWithNewline) {
+        lineCount += 1;
+        if (sampleLines.length < maxRows) sampleLines.push(pending);
+    }
     return {
-        lineCount: lines.length,
-        sample: lines.slice(0, maxRows).join('\n').slice(0, 12000)
+        lineCount,
+        sample: sampleLines.join('\n').slice(0, 12000)
     };
 }
 

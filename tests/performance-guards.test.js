@@ -226,6 +226,7 @@ test('chat assets include variable-height virtualization and deferred chart moun
     const chartRenderer = fs.readFileSync(path.join(root, 'client/chat/render-charts.js'), 'utf8');
     const engine = fs.readFileSync(path.join(root, 'client/chat/engine.js'), 'utf8');
     const sessionEngine = fs.readFileSync(path.join(root, 'client/chat/engine-sessions.js'), 'utf8');
+    const dagRenderer = fs.readFileSync(path.join(root, 'client/chat/dag-render.js'), 'utf8');
     const scripts = fs.readFileSync(path.join(root, 'client/chat/partials/scripts.html'), 'utf8');
 
     assert.match(virtualizer, /ResizeObserver/);
@@ -236,5 +237,9 @@ test('chat assets include variable-height virtualization and deferred chart moun
     assert.match(engine, /modules\?\.\['chat\.messageVirtualizer'\]/);
     assert.match(sessionEngine, /modules\?\.\['chat\.messageVirtualizer'\]/);
     assert.match(chartRenderer, /isConnected/);
+    assert.match(chartRenderer, /getInstanceByDom/);
+    assert.match(virtualizer, /teardownPivotCharts/);
+    assert.match(dagRenderer, /DAG_CULL_THRESHOLD/);
+    assert.match(dagRenderer, /dagViewport/);
     assert.ok(scripts.indexOf('/chat/message-virtualizer.js') > scripts.indexOf('/chat/render-messages.js'));
 });

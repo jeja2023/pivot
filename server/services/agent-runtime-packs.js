@@ -3,7 +3,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const axios = require('axios');
 const { assertNetworkPolicyUrl, normalizeNetworkPolicy } = require('./agent-network-policy');
+const { assertSafeOutboundHost, createSafeHttpAgents, isLoopbackHost } = require('../security');
 
 const PACK_TYPES = new Set(['data', 'browser']);
 const MAX_PACK_BYTES = 2 * 1024 * 1024 * 1024;
@@ -69,14 +71,26 @@ async function syncRuntimePack(manifest, options = {}) {
     if (!normalized.url) throw new Error('运行时资源包同步需要提供 LAN URL。');
     const policy = normalizeNetworkPolicy(options.networkPolicy || {});
     const parsed = await assertNetworkPolicyUrl(normalized.url, policy, { requireAllowlist: true });
-    const response = await globalThis.fetch(parsed, { redirect: 'error', signal: options.signal });
-    if (!response.ok) throw new Error(`运行时资源包下载失败：HTTP ${response.status}`);
+    await assertSafeOutboundHost(parsed.hostname, { blockPrivate: false });
+    const response = await axios.get(parsed.toString(), {
+        responseType: 'stream',
+        timeout: Math.max(1000, Number.parseInt(options.timeoutMs || '120000', 10) || 120000),
+        maxContentLength: MAX_PACK_BYTES,
+        maxBodyLength: MAX_PACK_BYTES,
+        validateStatus: status => status >= 200 && status < 300,
+        signal: options.signal,
+        proxy: false,
+        ...createSafeHttpAgents({
+            blockPrivate: false,
+            allowExplicitLoopback: policy.block_loopback === false && isLoopbackHost(parsed.hostname)
+        })
+    });
     const temp = path.join(options.tempRoot || os.tmpdir(), `pivot-pack-${crypto.randomUUID()}.bundle`);
     await fsp.mkdir(path.dirname(temp), { recursive: true });
     const file = await fsp.open(temp, 'w');
     let size = 0;
     try {
-        for await (const chunk of response.body) {
+        for await (const chunk of response.data) {
             size += chunk.length;
             if (size > MAX_PACK_BYTES) throw new Error('运行时资源包超过下载大小限制。');
             await file.write(chunk);

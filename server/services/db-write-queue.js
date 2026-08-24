@@ -51,6 +51,8 @@ const QUEUE_SPECS = {
 const DEFAULT_FLUSH_INTERVAL_MS = 250;
 const DEFAULT_MAX_BATCH_SIZE = 100;
 const DEFAULT_MAX_QUEUE_SIZE = 5000;
+const QUEUE_HIGH_WATERMARK = 0.8;
+const HIGH_WATERMARK_FLUSH_INTERVAL_MS = 50;
 const QUEUE_DISABLED = /^(1|true|yes)$/i.test(String(process.env.PIVOT_DB_WRITE_QUEUE_DISABLED || ''));
 
 const QUEUE_LIMITS = {
@@ -62,10 +64,22 @@ const QUEUE_LIMITS = {
 
 const FLUSH_INTERVAL_MS = Number.parseInt(process.env.PIVOT_DB_WRITE_FLUSH_MS, 10) || DEFAULT_FLUSH_INTERVAL_MS;
 const MAX_BATCH_SIZE = Number.parseInt(process.env.PIVOT_DB_WRITE_BATCH_SIZE, 10) || DEFAULT_MAX_BATCH_SIZE;
+const MAX_BURST_BATCH_SIZE = Math.max(
+    MAX_BATCH_SIZE,
+    Math.min(60000, Number.parseInt(process.env.PIVOT_DB_WRITE_MAX_BATCH_SIZE, 10) || 1000)
+);
 
 // PG 单条语句绑定参数上限 65535，按列数换算每批安全行数
-function safeBatchRows(columnCount) {
-    return Math.max(1, Math.min(MAX_BATCH_SIZE, Math.floor(60000 / Math.max(1, columnCount))));
+function safeBatchRows(columnCount, queueName) {
+    const postgresSafeRows = Math.max(1, Math.floor(60000 / Math.max(1, columnCount)));
+    const queue = queueName ? pgQueues[queueName] : null;
+    const limit = QUEUE_LIMITS[queueName] || DEFAULT_MAX_QUEUE_SIZE;
+    const pressure = queue ? Math.max(0, Math.min(1, queue.length / Math.max(1, limit))) : 0;
+    // 队列越接近上限，批量越大；始终受 PostgreSQL 参数上限和 burst 上限约束。
+    const target = pressure >= QUEUE_HIGH_WATERMARK
+        ? Math.ceil(MAX_BATCH_SIZE + (MAX_BURST_BATCH_SIZE - MAX_BATCH_SIZE) * ((pressure - QUEUE_HIGH_WATERMARK) / (1 - QUEUE_HIGH_WATERMARK || 1)))
+        : MAX_BATCH_SIZE;
+    return Math.max(1, Math.min(postgresSafeRows, MAX_BURST_BATCH_SIZE, target));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -86,20 +100,26 @@ const pgQueueDropped = {
 };
 
 let pgFlushTimer = null;
+let pgFlushTimerDelayMs = 0;
 let pgFlushing = null;
 const PG_BASE_RETRY_DELAY_MS = Math.max(FLUSH_INTERVAL_MS, 10);
 const PG_MAX_RETRY_DELAY_MS = Math.max(PG_BASE_RETRY_DELAY_MS * 16, 1000);
 let pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
+const pgQueueHighWaterAlerted = new Set();
 
 function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
     if (QUEUE_DISABLED) return;
-    if (pgFlushTimer) return;
+    const nextDelay = Math.max(10, Number(delayMs) || FLUSH_INTERVAL_MS);
+    if (pgFlushTimer && pgFlushTimerDelayMs <= nextDelay) return;
+    if (pgFlushTimer) clearTimeout(pgFlushTimer);
     pgFlushTimer = setTimeout(() => {
         pgFlushTimer = null;
+        pgFlushTimerDelayMs = 0;
         pgFlush().catch(err => {
             logger.warn({ err: err.message }, '[PG] 写入队列刷新异常');
         });
-    }, Math.max(10, delayMs));
+    }, nextDelay);
+    pgFlushTimerDelayMs = nextDelay;
     pgFlushTimer.unref?.();
 }
 
@@ -113,7 +133,17 @@ function pgEnqueue(queueName, item) {
         logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, '[PG] 写入队列溢出，已丢弃最早任务');
     }
     queue.push(item);
-    pgSchedule();
+    const occupancy = queue.length / Math.max(1, QUEUE_LIMITS[queueName]);
+    if (occupancy >= QUEUE_HIGH_WATERMARK) {
+        if (!pgQueueHighWaterAlerted.has(queueName)) {
+            pgQueueHighWaterAlerted.add(queueName);
+            logger.warn({ queueName, pending: queue.length, max: QUEUE_LIMITS[queueName], threshold: QUEUE_HIGH_WATERMARK }, '[PG] 写入队列达到高水位，已启用快速刷新与批量扩展');
+        }
+        pgSchedule(Math.min(FLUSH_INTERVAL_MS, HIGH_WATERMARK_FLUSH_INTERVAL_MS));
+    } else {
+        pgQueueHighWaterAlerted.delete(queueName);
+        pgSchedule();
+    }
 }
 
 const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast/i;
@@ -147,7 +177,7 @@ function sanitizeQueueValue(field, val) {
 async function pgFlushQueue(queueName) {
     const spec = QUEUE_SPECS[queueName];
     const queue = pgQueues[queueName];
-    const batchRows = safeBatchRows(spec.columns.length);
+    const batchRows = safeBatchRows(spec.columns.length, queueName);
 
     while (queue.length > 0) {
         const batch = queue.splice(0, batchRows);
@@ -250,6 +280,7 @@ async function pgFlushAll() {
     if (pgFlushTimer) {
         clearTimeout(pgFlushTimer);
         pgFlushTimer = null;
+        pgFlushTimerDelayMs = 0;
     }
     while (pgFlushing) {
         await pgFlushing;

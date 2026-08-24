@@ -1225,6 +1225,14 @@ function baseTablesSql() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS rate_limit_counters (
+            key TEXT PRIMARY KEY,
+            window_start_ms INTEGER NOT NULL,
+            reset_at_ms INTEGER NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+        );
+
         CREATE TABLE IF NOT EXISTS analysis_semantic_jobs (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -1336,6 +1344,7 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_memory_jobs_dedupe ON memory_extraction_jobs(dedupe_key, status);
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
         CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+        CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_reset ON rate_limit_counters(reset_at_ms);
         CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
         CREATE INDEX IF NOT EXISTS idx_model_usage_user_model_created ON model_usage_events(user_id, model_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_api_call_logs_created ON api_call_logs(created_at);

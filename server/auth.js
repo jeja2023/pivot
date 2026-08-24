@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { queryOne, execute } = require('./db/client');
+const { queryOne, execute, transaction } = require('./db/client');
 const { getBeijingTimestamp } = require('./time');
 const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
@@ -125,21 +125,27 @@ function hashRefreshToken(token) {
 }
 
 async function generateRefreshToken(userId) {
+    return issueRefreshToken({ execute }, userId);
+}
+
+async function issueRefreshToken(executor, userId) {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
     
-    await execute('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr]);
+    await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr]);
     return token;
 }
 
 async function rotateRefreshToken(tokenHash, userId) {
-    const changes = await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
-    if (changes !== 1) {
-        throw new Error('刷新令牌已被使用或已失效，请重新登录。');
-    }
-    return await generateRefreshToken(userId);
+    return transaction(async trx => {
+        const changes = await trx.execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+        if (changes !== 1) {
+            throw new Error('刷新令牌已被使用或已失效，请重新登录。');
+        }
+        return issueRefreshToken(trx, userId);
+    });
 }
 
 function validatePassword(password) {
@@ -299,23 +305,36 @@ async function login(username, password) {
 // 刷新 Token
 async function refreshTokens(token) {
     const tokenHash = hashRefreshToken(token);
-    const refreshTokenData = await queryOne('SELECT * FROM refresh_tokens WHERE token = ?', [tokenHash]);
-    if (!refreshTokenData) {
-        throw new Error('无效的刷新令牌');
-    }
-    const now = getBeijingTimestamp();
-    if (refreshTokenData.expires_at < now) {
-        await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
-        throw new Error('刷新令牌已过期，请重新登录');
-    }
-    const user = await queryOne('SELECT * FROM users WHERE id = ?', [refreshTokenData.user_id]);
-    if (!user || user.status === 'disabled') {
-        throw new Error('用户状态异常');
-    }
-    const accessToken = generateAccessToken(user);
-    await execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
-    const newRefreshToken = await generateRefreshToken(user.id);
-    return { accessToken, refreshToken: newRefreshToken };
+    let terminalError = null;
+    const result = await transaction(async trx => {
+        // Lock, consume and issue the replacement token in one transaction.
+        const refreshTokenData = await trx.queryOne('SELECT * FROM refresh_tokens WHERE token = ? FOR UPDATE', [tokenHash]);
+        if (!refreshTokenData) {
+            terminalError = new Error('无效的刷新令牌');
+            return null;
+        }
+        const now = getBeijingTimestamp();
+        if (refreshTokenData.expires_at < now) {
+            await trx.execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+            terminalError = new Error('刷新令牌已过期，请重新登录');
+            return null;
+        }
+        const user = await trx.queryOne('SELECT * FROM users WHERE id = ?', [refreshTokenData.user_id]);
+        if (!user || user.status === 'disabled') {
+            terminalError = new Error('用户状态异常');
+            return null;
+        }
+        const changes = await trx.execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+        if (changes !== 1) {
+            terminalError = new Error('刷新令牌已被使用或已失效，请重新登录。');
+            return null;
+        }
+        const accessToken = generateAccessToken(user);
+        const newRefreshToken = await issueRefreshToken(trx, user.id);
+        return { accessToken, refreshToken: newRefreshToken };
+    });
+    if (terminalError) throw terminalError;
+    return result;
 }
 
 // 鉴权中间件

@@ -3,13 +3,13 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
+const { StringDecoder } = require('string_decoder');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
     encodeAttachmentUrl,
-    escapeCsvCell,
-    parseCsvLine
+    escapeCsvCell
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
@@ -28,6 +28,72 @@ const {
     normalizeRole,
     withPermissionFlags
 } = require('../permissions');
+
+const MAX_USER_IMPORT_ROWS = Math.max(100, Math.min(100000, Number.parseInt(process.env.ADMIN_USER_IMPORT_MAX_ROWS || '10000', 10) || 10000));
+
+async function* iterateUserImportCsv(filePath, maxRows = MAX_USER_IMPORT_ROWS) {
+    const stream = fs.createReadStream(filePath);
+    const decoder = new StringDecoder('utf8');
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    let pendingQuote = false;
+    let pendingCarriageReturn = false;
+    let firstCharacter = true;
+    let yielded = 0;
+    const consume = async function* (text) {
+        for (let index = 0; index < text.length; index += 1) {
+            let char = text[index];
+            if (firstCharacter) {
+                firstCharacter = false;
+                if (char === '\uFEFF') continue;
+            }
+            if (pendingQuote) {
+                pendingQuote = false;
+                if (char === '"') { field += '"'; continue; }
+                inQuotes = false;
+            }
+            if (inQuotes) {
+                if (char === '"') {
+                    if (text[index + 1] === '"') { field += '"'; index += 1; }
+                    else if (index === text.length - 1) pendingQuote = true;
+                    else inQuotes = false;
+                } else field += char;
+                continue;
+            }
+            if (pendingCarriageReturn) {
+                pendingCarriageReturn = false;
+                if (char === '\n') continue;
+            }
+            if (char === '"' && field === '') { inQuotes = true; continue; }
+            if (char === ',') { row.push(field); field = ''; continue; }
+            if (char === '\n' || char === '\r') {
+                if (char === '\r') {
+                    if (text[index + 1] === '\n') index += 1;
+                    else pendingCarriageReturn = true;
+                }
+                row.push(field);
+                yield row;
+                row = [];
+                field = '';
+                yielded += 1;
+                if (yielded >= maxRows) return;
+                continue;
+            }
+            field += char;
+        }
+    };
+    for await (const chunk of stream) {
+        for await (const parsedRow of consume(decoder.write(chunk))) yield parsedRow;
+        if (yielded >= maxRows) { stream.destroy(); return; }
+    }
+    if (yielded >= maxRows) return;
+    for await (const parsedRow of consume(decoder.end())) yield parsedRow;
+    if (yielded < maxRows && (field !== '' || row.length)) {
+        row.push(field);
+        yield row;
+    }
+}
 
 async function revokeUserAutomation(userId, now, reason = '账号已被禁用或删除') {
     await execute(`
@@ -331,17 +397,17 @@ function createAdminUsersRouter({
 
     router.post('/admin/users/import', authMiddleware, adminMiddleware, upload.single('file'), asyncHandler(async (req, res) => {
         if (!req.file) return res.status(400).json({ error: '请选择 CSV 文件' });
-        const content = fs.readFileSync(req.file.path, 'utf-8');
-        const lines = content.split('\n').slice(1);
         let count = 0;
         let skipped = 0;
         const skippedRows = [];
         const usernamePattern = /^[a-zA-Z0-9_.-]{3,32}$/;
-
-        for (const [index, line] of lines.entries()) {
-            const cleanLine = line.trim();
-            if (!cleanLine) continue;
-            const parts = parseCsvLine(cleanLine);
+        let rowIndex = 0;
+        try {
+            for await (const parts of iterateUserImportCsv(req.file.path)) {
+                const lineNumber = rowIndex + 1;
+                rowIndex += 1;
+                if (lineNumber === 1) continue;
+                if (!parts.some(value => String(value || '').trim())) continue;
             let username, password, nickname, unit, role, status;
 
             const hasIdColumn = /^\d+$/.test(parts[0] || '');
@@ -365,7 +431,7 @@ function createAdminUsersRouter({
             const cleanUsername = String(username).trim();
             if (!usernamePattern.test(cleanUsername)) {
                 skipped++;
-                skippedRows.push({ line: index + 2, username: cleanUsername, reason: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
+                skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
                 continue;
             }
 
@@ -375,7 +441,7 @@ function createAdminUsersRouter({
                     validatePassword(String(password));
                 } catch (e) {
                     skipped++;
-                    skippedRows.push({ line: index + 2, username: cleanUsername, reason: '密码强度不足：至少 8 位且同时包含字母和数字' });
+                    skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '密码强度不足：至少 8 位且同时包含字母和数字' });
                     continue;
                 }
                 userHash = bcrypt.hashSync(String(password), 10);
@@ -392,13 +458,14 @@ function createAdminUsersRouter({
                 count++;
             } catch (e) {
                 skipped++;
-                skippedRows.push({ line: index + 2, username: cleanUsername, reason: '插入失败（可能用户名已存在）' });
+                skippedRows.push({ line: lineNumber, username: cleanUsername, reason: '插入失败（可能用户名已存在）' });
             }
+            }
+            logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
+            res.json({ success: true, count, skipped, skippedRows, truncated: rowIndex >= MAX_USER_IMPORT_ROWS });
+        } finally {
+            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         }
-
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
-        res.json({ success: true, count, skipped, skippedRows });
     }));
 
     router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -495,4 +562,4 @@ function createAdminUsersRouter({
     return router;
 }
 
-module.exports = { createAdminUsersRouter };
+module.exports = { createAdminUsersRouter, iterateUserImportCsv };

@@ -145,6 +145,36 @@ function dagNodeVisual(toolName) {
 // key = node.id，value = { status, durationMs?, error? }
 if (!window.dagNodeRunStates) window.dagNodeRunStates = new Map();
 
+const DAG_CULL_THRESHOLD = 48;
+
+function dagViewport(ctx) {
+    if (!ctx?.root || !ctx.spec?.nodes || ctx.spec.nodes.length <= DAG_CULL_THRESHOLD) return null;
+    const viewBox = ctx.root.viewBox?.baseVal;
+    if (viewBox && Number.isFinite(viewBox.width) && viewBox.width > 0) {
+        const marginX = Math.max(NODE_WIDTH * 2, viewBox.width * 0.12);
+        const marginY = Math.max(NODE_HEIGHT * 2, viewBox.height * 0.12);
+        return {
+            left: viewBox.x - marginX,
+            top: viewBox.y - marginY,
+            right: viewBox.x + viewBox.width + marginX,
+            bottom: viewBox.y + viewBox.height + marginY
+        };
+    }
+    const raw = String(ctx.root.getAttribute?.('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (raw.length !== 4 || raw.some(value => !Number.isFinite(value))) return null;
+    const [x, y, width, height] = raw;
+    const marginX = Math.max(NODE_WIDTH * 2, width * 0.12);
+    const marginY = Math.max(NODE_HEIGHT * 2, height * 0.12);
+    return { left: x - marginX, top: y - marginY, right: x + width + marginX, bottom: y + height + marginY };
+}
+
+function dagNodeIntersectsViewport(node, viewport) {
+    return !viewport || (
+        node._x < viewport.right && node._x + NODE_WIDTH > viewport.left
+        && node._y < viewport.bottom && node._y + NODE_HEIGHT > viewport.top
+    );
+}
+
 function createEdgePath(fromNode, toNode) {
         const startX = fromNode._x + NODE_WIDTH;
         const startY = fromNode._y + NODE_HEIGHT / 2;
@@ -165,10 +195,12 @@ function createDagRenderController(ctx) {
 const renderEdges = () => {
             ctx.edgesLayer.replaceChildren();
             const byId = new Map(ctx.spec.nodes.map(n => [n.id, n]));
+            const viewport = dagViewport(ctx);
             ctx.spec.nodes.forEach(node => {
                 (node.dependsOn || []).forEach(depId => {
                     const from = byId.get(depId);
                     if (!from) return;
+                    if (viewport && !dagNodeIntersectsViewport(from, viewport) && !dagNodeIntersectsViewport(node, viewport)) return;
                     const selected = ctx.selectedEdge?.fromId === depId && ctx.selectedEdge?.toId === node.id;
                     const group = makeSvgEl('g', {
                         class: `pivot-dag-edge-group${selected ? ' is-selected' : ''}`,
@@ -211,7 +243,9 @@ const renderEdges = () => {
         const renderNodes = () => {
             ctx.nodesLayer.replaceChildren();
             const tools = ctx.currentTools();
+            const viewport = dagViewport(ctx);
             ctx.spec.nodes.forEach(node => {
+                if (!dagNodeIntersectsViewport(node, viewport)) return;
                 const llmNode = isLlmNode(node);
                 const visual = dagNodeVisual(node.tool);
                 const runState = window.dagNodeRunStates.get(node.id);

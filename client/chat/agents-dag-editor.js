@@ -55,6 +55,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         let toolbarStatus = null;
         // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
         const viewState = { x: 0, y: 0, scale: DEFAULT_VIEW_SCALE };
+        let refreshDagViewport = null;
 
         const snapshot = () => JSON.stringify(serialize(spec));
         const recordHistory = () => {
@@ -218,7 +219,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             return { width: w, height: h };
         };
 
-        const updateViewBox = () => {
+        const updateViewBox = ({ refreshCulling = false } = {}) => {
             const rect = canvas.getBoundingClientRect();
             const containerW = rect.width > 50 ? rect.width : MIN_CONTENT_WIDTH;
             const containerH = rect.height > 50 ? rect.height : MIN_CONTENT_HEIGHT;
@@ -229,6 +230,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             root.setAttribute('height', '100%');
             root.style.minHeight = '100%';
             updateMinimap();
+            if (refreshCulling) refreshDagViewport?.();
         };
 
         // 重置缩放/平移到完整内容可见
@@ -610,6 +612,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const { renderEdges, renderNodes } = createDagRenderController({
+            root,
             edgesLayer,
             nodesLayer,
             currentTools,
@@ -618,6 +621,10 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             isNodeSelected: id => selectedIds.has(id),
             get selectedEdge() { return selectedEdge; }
         });
+        refreshDagViewport = () => {
+            renderEdges();
+            renderNodes();
+        };
 
         // 空画布引导：无节点时在画布中央提示从左侧节点库开始
         let emptyHintEl = null;

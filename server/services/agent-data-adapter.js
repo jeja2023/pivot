@@ -1,11 +1,12 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { duckReadAll, sqlLiteral, normalizeHeader, normalizeCell } = require('./data-analysis/shared');
+const { duckReadAll, sqlLiteral, normalizeHeader, normalizeCell, MAX_UPLOAD_ROWS, MAX_UPLOAD_COLUMNS } = require('./data-analysis/shared');
 const { readSpreadsheet, importCsvToParquet, importSqliteToParquet } = require('./data-analysis/datasets');
 const { createParquetFromRows } = require('./data-analysis/shared');
 
 const SUPPORTED_FORMATS = new Set(['csv', 'parquet', 'xlsx', 'xls', 'json', 'sqlite']);
+const MAX_JSON_SOURCE_BYTES = Math.min(Math.max(Number.parseInt(process.env.AGENT_DATA_MAX_JSON_BYTES || String(64 * 1024 * 1024), 10) || 64 * 1024 * 1024, 1 * 1024 * 1024), 256 * 1024 * 1024);
 
 function detectDataSource(filePath) {
     const extension = path.extname(String(filePath || '')).replace(/^\./, '').toLowerCase();
@@ -71,10 +72,16 @@ async function materializeDataSource(filePath, options = {}) {
         await createParquetFromRows(parsed.columns, parsed.rows, target);
     } else if (detected.kind === 'sqlite') await importSqliteToParquet(sourcePath, target);
     else if (detected.kind === 'json') {
+        const stat = fs.statSync(sourcePath);
+        if (stat.size > MAX_JSON_SOURCE_BYTES) {
+            const error = new Error(`JSON 数据源超过 ${Math.round(MAX_JSON_SOURCE_BYTES / 1024 / 1024)}MB 限制。`);
+            error.code = 'AGENT_DATA_JSON_TOO_LARGE';
+            throw error;
+        }
         const parsed = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
-        const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.rows) ? parsed.rows : []);
+        const rows = (Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.rows) ? parsed.rows : [])).slice(0, MAX_UPLOAD_ROWS);
         const normalized = normalizeTabularRows(rows);
-        const keys = [...new Set(normalized.flatMap(row => Object.keys(row)))];
+        const keys = [...new Set(normalized.flatMap(row => Object.keys(row)))].slice(0, MAX_UPLOAD_COLUMNS);
         await createParquetFromRows(keys.map((name, index) => ({ key: `c_${index + 1}`, name, index })), normalized.map(row => Object.fromEntries(keys.map((key, index) => [`c_${index + 1}`, row[key] ?? null]))), target);
     } else throw new Error(`不支持的数据源格式：${detected.extension || '-'}。`);
     return { path: target, cleanup: true };

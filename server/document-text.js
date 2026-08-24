@@ -20,6 +20,39 @@ const MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
 const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 60 * 1024 * 1024;
 // 限制工作簿单表解析行数，缓解超大/恶意表格触发的 CPU 耗尽与 ReDoS（xlsx 0.18.5 无官方修复）
 const MAX_WORKBOOK_SHEET_ROWS = 50000;
+const DEFAULT_TEXT_PREFIX_CHARS = 1_000_000;
+const MAX_DOCUMENT_BUFFER_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_MAX_BUFFER_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
+
+async function readBoundedBuffer(filePath, maxBytes = MAX_DOCUMENT_BUFFER_BYTES) {
+    const stat = await fs.promises.stat(filePath);
+    if (stat.size > maxBytes) {
+        const error = new Error(`文档大小超过解析缓冲区上限 ${Math.round(maxBytes / 1024 / 1024)}MB。`);
+        error.code = 'DOCUMENT_BUFFER_LIMIT_EXCEEDED';
+        error.status = 413;
+        throw error;
+    }
+    return fs.promises.readFile(filePath);
+}
+
+async function readTextPrefix(filePath, maxChars = DEFAULT_TEXT_PREFIX_CHARS) {
+    const limit = Math.max(1, Number.parseInt(maxChars, 10) || DEFAULT_TEXT_PREFIX_CHARS);
+    const stream = fs.createReadStream(filePath);
+    const decoder = new (require('string_decoder').StringDecoder)('utf8');
+    let text = '';
+    try {
+        for await (const chunk of stream) {
+            text += decoder.write(chunk);
+            if (text.length >= limit) {
+                stream.destroy();
+                break;
+            }
+        }
+        if (text.length < limit) text += decoder.end();
+    } catch (error) {
+        if (text.length < limit) throw error;
+    }
+    return text.slice(0, limit);
+}
 
 function isOleFile(buffer) {
     return buffer.length >= 8
@@ -291,7 +324,7 @@ function isPasswordError(error) {
 }
 
 async function extractPdfText(filePath, options = {}) {
-    const buffer = await fs.promises.readFile(filePath);
+    const buffer = await readBoundedBuffer(filePath);
 
     if (typeof pdfParse === 'function') {
         const data = await pdfParse(buffer, options.password ? { password: options.password } : undefined);
@@ -317,7 +350,7 @@ async function extractPdfText(filePath, options = {}) {
 async function renderPdfPages(filePath, options = {}) {
     if (!pdfParse || typeof pdfParse.PDFParse !== 'function') return [];
 
-    const buffer = await fs.promises.readFile(filePath);
+    const buffer = await readBoundedBuffer(filePath);
     const parser = new pdfParse.PDFParse({
         data: buffer,
         ...(options.password ? { password: options.password } : {})
@@ -343,7 +376,7 @@ async function renderPdfPages(filePath, options = {}) {
 }
 
 async function extractDocxText(filePath) {
-    const entries = readZipEntries(await fs.promises.readFile(filePath));
+    const entries = readZipEntries(await readBoundedBuffer(filePath));
     const xmlNames = Array.from(entries.keys())
         .filter(name => /^word\/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/i.test(name))
         .sort((a, b) => {
@@ -401,7 +434,7 @@ function extractCellValue(cellXml, sharedStrings) {
 }
 
 async function extractXlsxText(filePath) {
-    const entries = readZipEntries(await fs.promises.readFile(filePath));
+    const entries = readZipEntries(await readBoundedBuffer(filePath));
     const sharedStrings = entries.has('xl/sharedStrings.xml')
         ? extractSharedStrings(entries.get('xl/sharedStrings.xml').toString('utf8'))
         : [];
@@ -431,7 +464,7 @@ async function extractXlsxText(filePath) {
 }
 
 async function extractWorkbookText(filePath, options = {}) {
-    const buffer = await fs.promises.readFile(filePath);
+    const buffer = await readBoundedBuffer(filePath);
     const workbook = XLSX.read(buffer, {
         type: 'buffer',
         cellDates: true,
@@ -498,7 +531,7 @@ function extractAsciiRuns(buffer, minChars = 4) {
 }
 
 async function extractDocBinaryText(filePath) {
-    const streams = readOleStreams(await fs.promises.readFile(filePath));
+    const streams = readOleStreams(await readBoundedBuffer(filePath));
     const wordDocument = streams.get('WordDocument');
     if (!wordDocument) throw new Error('未找到 WordDocument 数据流');
 
@@ -562,7 +595,7 @@ function decodeXlsNumber(value) {
 }
 
 async function extractXlsBinaryText(filePath) {
-    const streams = readOleStreams(await fs.promises.readFile(filePath));
+    const streams = readOleStreams(await readBoundedBuffer(filePath));
     const workbook = streams.get('Workbook') || streams.get('Book');
     if (!workbook) throw new Error('未找到 Workbook 数据流');
 
@@ -663,7 +696,7 @@ async function extractDocumentText(filePath, mimeType = '', originalName = '', o
             return extractXlsxText(filePath);
         }
     }
-    if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return fs.promises.readFile(filePath, 'utf8');
+    if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return readTextPrefix(filePath, options.maxChars);
     return '';
 }
 
@@ -677,6 +710,7 @@ module.exports = {
     renderPdfPages,
     extractDocumentText,
     truncateExtractedText,
+    MAX_DOCUMENT_BUFFER_BYTES,
     readZipEntries,
     MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES,
     MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES

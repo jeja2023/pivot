@@ -467,7 +467,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
 
             if (localPath) {
                 try {
-                    const text = truncateExtractedText(await extractDocumentText(localPath, '', fileName), attachmentContextMaxChars);
+                    const text = truncateExtractedText(await extractDocumentText(localPath, '', fileName, { maxChars: attachmentContextMaxChars }), attachmentContextMaxChars);
                     fileFinalContent.push({
                         type: 'text',
                         text: text

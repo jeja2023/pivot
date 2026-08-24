@@ -294,6 +294,27 @@ test('safe outbound lookup rejects private resolved addresses during HTTP reques
     );
 });
 
+test('safe outbound lookup pins the first validated address for an agent', async () => {
+    const dns = require('node:dns');
+    const originalLookup = dns.lookup;
+    let calls = 0;
+    try {
+        dns.lookup = (hostname, options, callback) => {
+            calls += 1;
+            callback(null, [{ address: calls === 1 ? '93.184.216.34' : '127.0.0.1', family: 4 }]);
+        };
+        const lookup = createSafeLookup({ blockPrivate: true });
+        const resolveLookup = options => new Promise((resolve, reject) => {
+            lookup('pinned.example.test', options, (error, address, family) => error ? reject(error) : resolve({ address, family }));
+        });
+        assert.deepEqual(await resolveLookup({ all: false }), { address: '93.184.216.34', family: 4 });
+        assert.deepEqual(await resolveLookup({ all: false }), { address: '93.184.216.34', family: 4 });
+        assert.equal(calls, 1);
+    } finally {
+        dns.lookup = originalLookup;
+    }
+});
+
 test('session detail only appends valid attachment tokens', async () => {
     const { createSessionsRouter } = require('../server/routes/sessions');
     const suffix = Date.now().toString(36);
@@ -1120,6 +1141,14 @@ test('refresh tokens are hashed at rest and rotated once', async () => {
         assert.equal(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken)), undefined);
         assert.ok(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(rotated.refreshToken)));
         await assert.rejects(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
+
+        const concurrentSession = await login(username, password);
+        const concurrent = await Promise.allSettled([
+            refreshTokens(concurrentSession.refreshToken),
+            refreshTokens(concurrentSession.refreshToken)
+        ]);
+        assert.equal(concurrent.filter(item => item.status === 'fulfilled').length, 1);
+        assert.equal(concurrent.filter(item => item.status === 'rejected').length, 1);
     } finally {
         db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);

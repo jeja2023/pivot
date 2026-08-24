@@ -185,7 +185,7 @@ function saveRegulationUploadedFile(file, documentId) {
 }
 
 async function readRegulationTextFromPath(filePath, originalName = '') {
-    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10 });
+    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10, maxChars: getKnowledgeLimits().extractMaxChars });
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 

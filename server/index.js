@@ -6,6 +6,7 @@ const {
 } = require('./bootstrap');
 const { startHttpServer } = require('./server');
 const { startMaintenanceTasks } = require('./services/maintenance');
+const { recoverDocumentProcessingJobs } = require('./services/document-processing/jobs');
 
 const { initPostgresDatabase } = require('./db');
 
@@ -13,6 +14,7 @@ registerProcessErrorHandlers({ logger, flushAllWrites });
 
 async function init() {
     await initPostgresDatabase();
+    await recoverDocumentProcessingJobs();
     startBackgroundServices({ logger });
 
     const scheduleMaintenanceTasks = createMaintenanceScheduler({

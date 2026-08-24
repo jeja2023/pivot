@@ -5,7 +5,7 @@ const Module = require('node:module');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadQueueModule({ failTimes = 1, flushMs = 5 } = {}) {
+function loadQueueModule({ failTimes = 1, flushMs = 5, queueMax = '' } = {}) {
     const filename = path.resolve(__dirname, '../server/services/db-write-queue.js');
     const source = fs.readFileSync(filename, 'utf8');
     const module = { exports: {} };
@@ -51,7 +51,8 @@ function loadQueueModule({ failTimes = 1, flushMs = 5 } = {}) {
             ...process.env,
             PIVOT_DB_WRITE_QUEUE_DISABLED: '',
             PIVOT_DB_WRITE_FLUSH_MS: String(flushMs),
-            PIVOT_DB_WRITE_BATCH_SIZE: '1'
+            PIVOT_DB_WRITE_BATCH_SIZE: '1',
+            PIVOT_DB_AUDIT_QUEUE_MAX: queueMax ? String(queueMax) : ''
         },
         once() {}
     };
@@ -116,4 +117,13 @@ test('postgres write queue retries a failed batch without a new enqueue', async 
 
     assert.equal(queue.getQueueStatus().auditLogs, 0);
     assert.equal(pgQueries.filter(item => item.sql.includes('INSERT INTO "audit_logs"')).length, 2);
+});
+
+test('postgres write queue enters fast flush mode at the high-water mark', async () => {
+    const { queue, scheduledDelays, loggerWarnings } = loadQueueModule({ failTimes: 0, flushMs: 250, queueMax: 5 });
+    for (let index = 0; index < 4; index += 1) {
+        queue.enqueueAuditLog({ userId: 1, action: `audit-${index}`, details: '{}', timestamp: '2026-06-26 10:00:00' });
+    }
+    assert.ok(scheduledDelays.includes(50));
+    assert.ok(loggerWarnings.some(args => String(args[1] || '').includes('高水位')));
 });

@@ -306,7 +306,9 @@ function disposePivotEchart(block) {
 }
 
 function teardownPivotCharts(root = document) {
-    root.querySelectorAll?.('.pivot-echart-block').forEach(disposePivotEchart);
+    const blocks = new Set(root.querySelectorAll?.('.pivot-echart-block') || []);
+    if (root.matches?.('.pivot-echart-block')) blocks.add(root);
+    blocks.forEach(disposePivotEchart);
 }
 
 function renderEcharts(block, spec) {

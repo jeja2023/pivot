@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { assertSafeOutboundHost, createSafeHttpAgents, isLoopbackHost } = require('../../../../security');
 const { getAppSettingValue } = require('../../../app-settings');
 const {
     DEFAULT_OCR_SERVICE_URL,
@@ -47,6 +48,18 @@ function buildUrl(pathname) {
     return `${getServiceUrl()}${pathname}`;
 }
 
+async function buildSafeOcrRequestOptions(timeoutMs, maxContentLength) {
+    const serviceUrl = new URL(getServiceUrl());
+    const allowExplicitLoopback = isLoopbackHost(serviceUrl.hostname);
+    await assertSafeOutboundHost(serviceUrl.hostname, { blockPrivate: false, allowExplicitLoopback });
+    return {
+        timeout: timeoutMs,
+        maxContentLength,
+        proxy: false,
+        ...createSafeHttpAgents({ blockPrivate: false, allowExplicitLoopback })
+    };
+}
+
 function getHealthTimeoutMs() {
     const value = Number.parseInt(process.env.OCR_SERVICE_HEALTH_TIMEOUT_MS || '3000', 10);
     return Math.min(Math.max(Number.isFinite(value) ? value : 3000, 1000), 30000);
@@ -90,17 +103,17 @@ async function recognizePage(imagePath, options = {}) {
     const buffer = await fs.promises.readFile(imagePath);
     assertImageWithinLimit(buffer.length, maxImageBytes);
     const requestBodyMaxBytes = Math.ceil(maxImageBytes * 1.5) + 65536;
+    const responseMaxBytes = Math.min(Math.max(Number.parseInt(process.env.OCR_SERVICE_MAX_RESPONSE_BYTES || String(16 * 1024 * 1024), 10) || 16 * 1024 * 1024, 1024 * 1024), 128 * 1024 * 1024);
     try {
+        const requestOptions = await buildSafeOcrRequestOptions(timeoutMs + 5000, responseMaxBytes);
         const response = await axios.post(buildUrl('/ocr'), {
             imageBase64: buffer.toString('base64'),
             fileName: path.basename(imagePath),
             language,
             timeoutMs
         }, {
-            timeout: timeoutMs + 5000,
+            ...requestOptions,
             maxBodyLength: requestBodyMaxBytes,
-            maxContentLength: Infinity,
-            proxy: false,
             headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json'
@@ -122,8 +135,7 @@ async function checkAvailability() {
     const serviceUrl = getServiceUrl();
     try {
         const response = await axios.get(buildUrl('/health'), {
-            timeout: getHealthTimeoutMs(),
-            proxy: false,
+            ...(await buildSafeOcrRequestOptions(getHealthTimeoutMs(), 1024 * 1024)),
             headers: { Accept: 'application/json' },
             validateStatus: status => status >= 200 && status < 300
         });

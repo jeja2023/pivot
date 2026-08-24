@@ -331,7 +331,7 @@ function persistUploadedKnowledgeFile(file, userId, docId) {
 }
 
 async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
-    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10 });
+    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10, maxChars: getKnowledgeLimits().extractMaxChars });
     return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
 }
 

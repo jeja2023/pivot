@@ -83,6 +83,22 @@ async function createAgentBrowserContext(options = {}) {
         }
     });
     context.on('page', page => {
+        const requestBytes = new Map();
+        let cdp = null;
+        // Chromium exposes streamed byte counts before the response body is fully buffered.
+        // Close the page as soon as a chunked response crosses the policy limit.
+        context.newCDPSession?.(page).then(async session => {
+            cdp = session;
+            await session.send('Network.enable');
+            session.on('Network.dataReceived', event => {
+                const total = (requestBytes.get(event.requestId) || 0)
+                    + Number(event.dataLength || event.encodedDataLength || 0);
+                requestBytes.set(event.requestId, total);
+                if (total > policy.max_download_size_bytes) {
+                    page.close({ runBeforeUnload: false }).catch(() => {});
+                }
+            });
+        }).catch(() => {});
         page.on('response', async response => {
             const length = Number(response.headers()['content-length'] || 0);
             if (length > 0 && length > policy.max_download_size_bytes) {
@@ -93,6 +109,13 @@ async function createAgentBrowserContext(options = {}) {
             // Downloads are disabled by default; cancel the event explicitly so a
             // hostile page cannot leave an uncontrolled artifact on disk.
             download.cancel().catch(() => {});
+        });
+        page.on('close', () => {
+            requestBytes.clear();
+            try {
+                const detached = cdp?.detach?.();
+                detached?.catch?.(() => {});
+            } catch (_) {}
         });
     });
     return context;

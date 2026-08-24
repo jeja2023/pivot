@@ -299,3 +299,21 @@ test('报表目录工具读取不带 BOM 的 UTF-8 CSV 不会出现中文乱码'
         sandbox.cleanup();
     }
 });
+
+test('报表 CSV 增量读取支持引号跨行字段并遵守行数上限', async () => {
+    const sandbox = createReportSandbox();
+    const csvPath = path.join(sandbox.root, '跨行.csv');
+    fs.writeFileSync(csvPath, '编号,备注\n1,"第一行\n第二行"\n2,后续\n3,不应读取\n', 'utf8');
+    try {
+        const result = await executeReportConfigTool(sandbox.config, 'reports.query_table', {
+            path: '跨行.csv',
+            limit: 2
+        });
+        assert.deepEqual(result.rows, [
+            { 编号: '1', 备注: '第一行\n第二行' },
+            { 编号: '2', 备注: '后续' }
+        ]);
+    } finally {
+        sandbox.cleanup();
+    }
+});

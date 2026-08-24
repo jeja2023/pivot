@@ -136,7 +136,7 @@ function createDagInteractionController(ctx) {
                 group?.setAttribute('transform', `translate(${node._x}, ${node._y})`);
             });
             ctx.renderEdges();
-            ctx.updateViewBox();
+            ctx.updateViewBox({ refreshCulling: true });
             return;
         }
         if (boxSelecting) {
@@ -148,7 +148,7 @@ function createDagInteractionController(ctx) {
             const { width, height } = ctx.contentBounds();
             ctx.viewState.x = panning.originX - (event.clientX - panning.startClientX) * (width / ctx.viewState.scale) / rect.width;
             ctx.viewState.y = panning.originY - (event.clientY - panning.startClientY) * (height / ctx.viewState.scale) / rect.height;
-            ctx.updateViewBox();
+            ctx.updateViewBox({ refreshCulling: true });
         }
     };
 
@@ -208,7 +208,7 @@ function createDagInteractionController(ctx) {
         const { width, height } = ctx.contentBounds();
         ctx.viewState.x = anchor.x - (event.clientX - rect.left) / rect.width * width / nextScale;
         ctx.viewState.y = anchor.y - (event.clientY - rect.top) / rect.height * height / nextScale;
-        ctx.updateViewBox();
+        ctx.updateViewBox({ refreshCulling: true });
     };
 
     const onDoubleClick = event => {
