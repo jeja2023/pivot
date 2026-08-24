@@ -103,7 +103,11 @@ async function upsertCapabilityPackage({ type, sourceRef, name, description = ''
     return await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [key]);
 }
 
+let lastSyncCapabilityTime = 0;
+const CAPABILITY_SYNC_INTERVAL_MS = 60000;
+
 async function syncCapabilityPackages(user) {
+    lastSyncCapabilityTime = Date.now();
     const builtInDefs = getBuiltInToolDefinitions(user);
     for (const tool of builtInDefs) {
         await upsertCapabilityPackage({
@@ -137,6 +141,14 @@ async function syncCapabilityPackages(user) {
     }
 }
 
+async function maybeSyncCapabilityPackages(user, force = false) {
+    const now = Date.now();
+    if (!force && now - lastSyncCapabilityTime < CAPABILITY_SYNC_INTERVAL_MS) {
+        return;
+    }
+    await syncCapabilityPackages(user);
+}
+
 function canAccessPackage(row, user) {
     if (!row) return false;
     if (isSuperAdmin(user)) return true;
@@ -155,7 +167,7 @@ function canAccessGlobalPolicyPackage(row, user) {
 }
 
 async function listCapabilityPackages(user) {
-    await syncCapabilityPackages(user);
+    await maybeSyncCapabilityPackages(user);
     const rows = await query(`
         SELECT *
         FROM capability_packages
@@ -173,7 +185,7 @@ async function listCapabilityPackages(user) {
 }
 
 async function listGlobalCapabilityPackages(user) {
-    await syncCapabilityPackages(user);
+    await maybeSyncCapabilityPackages(user);
     if (!isAdmin(user)) return [];
     const rows = await query(`
         SELECT *
@@ -193,7 +205,7 @@ async function listGlobalCapabilityPackages(user) {
 }
 
 async function getCapabilityPackage(packageKey, user) {
-    await syncCapabilityPackages(user);
+    await maybeSyncCapabilityPackages(user);
     const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessPackage(row, user)) return null;
     return {
@@ -204,7 +216,7 @@ async function getCapabilityPackage(packageKey, user) {
 }
 
 async function getGlobalCapabilityPackage(packageKey, user) {
-    await syncCapabilityPackages(user);
+    await maybeSyncCapabilityPackages(user);
     const row = await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
     if (!canAccessGlobalPolicyPackage(row, user)) return null;
     return {
@@ -252,14 +264,20 @@ async function isCapabilityEnabled(type, sourceRef, user = null) {
     return row.status !== 'disabled';
 }
 
+function getCapabilityToolGovernanceFromPackage(item, toolName, user = null) {
+    if (!item) return normalizeToolGovernance();
+    if (user && !canAccessPackage(item, user)) return { ...normalizeToolGovernance(), enabled: false };
+    if (item.status === 'disabled') return { ...normalizeToolGovernance(), enabled: false };
+    const config = parsePackageConfig(item.config);
+    const tools = config.tools && typeof config.tools === 'object' ? config.tools : {};
+    return normalizeToolGovernance(tools[toolName] || {});
+}
+
 async function getCapabilityToolGovernance(type, sourceRef, toolName, user = null) {
     const key = sourceKey(type, sourceRef);
     const row = await queryOne('SELECT status, scope, user_id, config FROM capability_packages WHERE package_key = ?', [key]);
     if (!row) return normalizeToolGovernance();
-    if (user && !canAccessPackage(row, user)) return { ...normalizeToolGovernance(), enabled: false };
-    if (row.status === 'disabled') return { ...normalizeToolGovernance(), enabled: false };
-    const config = parsePackageConfig(row.config);
-    return normalizeToolGovernance(config.tools?.[toolName] || {});
+    return getCapabilityToolGovernanceFromPackage(row, toolName, user);
 }
 
 async function isToolCapabilityEnabled(type, sourceRef, toolName, user = null) {
@@ -349,6 +367,7 @@ module.exports = {
     getCapabilityPackage,
     getGlobalCapabilityPackage,
     getCapabilityToolGovernance,
+    getCapabilityToolGovernanceFromPackage,
     isCapabilityEnabled,
     isToolCapabilityEnabled,
     listCapabilityPackages,

@@ -255,25 +255,47 @@ function createAnnouncementsRouter({
             params.push(`%${search}%`, `%${search}%`);
         }
         const where = `WHERE ${conditions.join(' AND ')}`;
-        const rows = await query(`
-            SELECT a.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS created_by_name,
-                   (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.read_at IS NOT NULL) AS read_count,
-                   (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.announcement_id = a.id AND ar.acknowledged_at IS NOT NULL) AS ack_count
-            FROM announcements a
-            LEFT JOIN users u ON u.id = a.created_by
-            ${where}
-            ORDER BY a.updated_at DESC, a.id DESC
-            LIMIT ? OFFSET ?
-        `, [...params, limit, offset]);
+        const [rows, countRow] = await Promise.all([
+            query(`
+                SELECT a.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS created_by_name
+                FROM announcements a
+                LEFT JOIN users u ON u.id = a.created_by
+                ${where}
+                ORDER BY a.updated_at DESC, a.id DESC
+                LIMIT ? OFFSET ?
+            `, [...params, limit, offset]),
+            queryOne(`SELECT COUNT(*) AS count FROM announcements a ${where}`, params)
+        ]);
 
-        const data = rows.map(row => ({
-            ...mapAnnouncementRow(row),
-            readCount: Number(row.read_count || 0),
-            ackCount: Number(row.ack_count || 0),
-            canEdit: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id),
-            canDelete: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id)
-        }));
-        const countRow = await queryOne(`SELECT COUNT(*) AS count FROM announcements a ${where}`, params);
+        const ids = rows.map(r => r.id);
+        const statsMap = new Map();
+        if (ids.length > 0) {
+            const statsRows = await query(`
+                SELECT announcement_id,
+                       COUNT(read_at) AS read_count,
+                       COUNT(acknowledged_at) AS ack_count
+                FROM announcement_reads
+                WHERE announcement_id IN (${ids.map(() => '?').join(',')})
+                GROUP BY announcement_id
+            `, ids);
+            statsRows.forEach(s => {
+                statsMap.set(Number(s.announcement_id), {
+                    readCount: Number(s.read_count || 0),
+                    ackCount: Number(s.ack_count || 0)
+                });
+            });
+        }
+
+        const data = rows.map(row => {
+            const stats = statsMap.get(Number(row.id)) || { readCount: 0, ackCount: 0 };
+            return {
+                ...mapAnnouncementRow(row),
+                readCount: stats.readCount,
+                ackCount: stats.ackCount,
+                canEdit: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id),
+                canDelete: isSuperAdmin(req.user) || Number(row.created_by) === Number(req.user.id)
+            };
+        });
         const total = Number(countRow?.count || 0);
         res.json({ data, total, page, limit, permissions: getAnnouncementAdminPermissions(req.user) });
     }));

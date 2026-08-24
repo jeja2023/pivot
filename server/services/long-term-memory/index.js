@@ -44,14 +44,22 @@ const {
     markModelExtractionTimeout,
     clearModelExtractionCooldown
 } = require('./memory-extraction');
-const { memoryPairSimilarity, mergeMemoryContent } = require('./memory-merge');
+const { mergeMemoryContent } = require('./memory-merge');
 const {
     parseEmbedding,
     keywordScore,
     recencyScore,
     buildLongTermMemoryContextMessage,
     injectLongTermMemoryBeforeLatestUser
-} = require('./memory-retrieval'); const { filterMemoriesForRetrieval, resolveMemoryGovernance } = require('../memory-governance');
+} = require('./memory-retrieval');
+const { filterMemoriesForRetrieval, resolveMemoryGovernance } = require('../memory-governance');
+const {
+    getMemorySummary,
+    getMemoryJobSummary,
+    getMemoryMergeSuggestions,
+    getMemoryQualitySummary,
+    invalidateMemoryQualityCache
+} = require('./memory-quality');
 
 const extractionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, Number.parseInt(process.env.LONG_TERM_MEMORY_EXTRACTION_MAX_CONCURRENT, 10) || 2)
@@ -120,115 +128,8 @@ async function listMemories(userId, options = {}) {
     };
 }
 
-async function getMemorySummary(userId) {
-    const rows = await query(`
-        SELECT type, status, COUNT(*) AS count
-        FROM memories
-        WHERE user_id = ?
-        GROUP BY type, status
-    `, [userId]);
-    const enabled = await isLongTermMemoryEnabled(userId);
-    const summary = {
-        enabled,
-        active: 0,
-        deleted: 0,
-        disabled: 0,
-        byType: Object.fromEntries(Object.values(MEMORY_TYPES).map(type => [type, 0]))
-    };
-    rows.forEach(row => {
-        const count = Number(row.count || 0);
-        if (row.status === MEMORY_STATUS.active) {
-            summary.active += count;
-            summary.byType[normalizeMemoryType(row.type)] = (summary.byType[normalizeMemoryType(row.type)] || 0) + count;
-        } else if (row.status === MEMORY_STATUS.deleted) {
-            summary.deleted += count;
-        } else if (row.status === MEMORY_STATUS.disabled) {
-            summary.disabled += count;
-        }
-    });
-    return summary;
-}
-
-async function getMemoryJobSummary(userId) {
-    const rows = await query(`
-        SELECT status, COUNT(*) AS count
-        FROM memory_extraction_jobs
-        WHERE user_id = ?
-        GROUP BY status
-    `, [userId]);
-    const byStatus = Object.fromEntries(Object.values(MEMORY_JOB_STATUS).map(status => [status, 0]));
-    rows.forEach(row => {
-        byStatus[row.status] = Number(row.count || 0);
-    });
-    const recentRows = await query(`
-        SELECT status
-        FROM memory_extraction_jobs
-        WHERE user_id = ?
-        ORDER BY id DESC
-        LIMIT 50
-    `, [userId]);
-    const completed = recentRows.filter(row => [MEMORY_JOB_STATUS.succeeded, MEMORY_JOB_STATUS.failed, MEMORY_JOB_STATUS.skipped].includes(row.status));
-    const succeeded = completed.filter(row => row.status === MEMORY_JOB_STATUS.succeeded).length;
-    return {
-        byStatus,
-        queued: byStatus[MEMORY_JOB_STATUS.queued] || 0,
-        running: byStatus[MEMORY_JOB_STATUS.running] || 0,
-        failed: byStatus[MEMORY_JOB_STATUS.failed] || 0,
-        recentSuccessRate: completed.length ? succeeded / completed.length : 1
-    };
-}
-
-async function getMemoryQualitySummary(userId) {
-    const now = getBeijingTimestamp();
-    const base = await getMemorySummary(userId);
-    const lowConfidenceRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM memories
-        WHERE user_id = ? AND status = ? AND confidence < 0.55
-    `, [userId, MEMORY_STATUS.active]);
-    const lowConfidence = Number(lowConfidenceRow?.count || 0);
-
-    const expiredRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM memories
-        WHERE user_id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?
-    `, [userId, MEMORY_STATUS.active, now]);
-    const expired = Number(expiredRow?.count || 0);
-
-    const unusedCutoff = getBeijingTimestamp(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-    const unusedRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM memories
-        WHERE user_id = ?
-          AND status = ?
-          AND last_used_at IS NULL
-          AND created_at < ?
-    `, [userId, MEMORY_STATUS.active, unusedCutoff]);
-    const unused = Number(unusedRow?.count || 0);
-
-    const mergeSuggestions = await getMemoryMergeSuggestions(userId, { limit: 20 });
-    const jobSummary = await getMemoryJobSummary(userId);
-    const risks = [];
-    if (lowConfidence > 0) risks.push({ type: 'low_confidence', count: lowConfidence });
-    if (expired > 0) risks.push({ type: 'expired', count: expired });
-    if (mergeSuggestions.length > 0) risks.push({ type: 'duplicates', count: mergeSuggestions.length });
-    if (jobSummary.failed > 0) risks.push({ type: 'failed_jobs', count: jobSummary.failed });
-    if (jobSummary.queued + jobSummary.running > 20) risks.push({ type: 'backlog', count: jobSummary.queued + jobSummary.running });
-    return {
-        ...base,
-        quality: {
-            lowConfidence,
-            expired,
-            unused,
-            duplicateSuggestions: mergeSuggestions.length,
-            jobSummary,
-            risks,
-            status: risks.length === 0 ? 'healthy' : risks.some(risk => ['failed_jobs', 'backlog'].includes(risk.type)) ? 'attention' : 'review'
-        }
-    };
-}
-
 async function softDeleteMemory(userId, memoryId) {
+    invalidateMemoryQualityCache(userId);
     const now = getBeijingTimestamp();
     const changes = await execute(`
         UPDATE memories
@@ -239,6 +140,7 @@ async function softDeleteMemory(userId, memoryId) {
 }
 
 async function updateMemoryStatus(userId, memoryId, status) {
+    invalidateMemoryQualityCache(userId);
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
     const now = getBeijingTimestamp();
     const changes = await execute(`
@@ -258,6 +160,7 @@ function normalizeMemoryIds(ids = []) {
 }
 
 async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STATUS.active) {
+    invalidateMemoryQualityCache(userId);
     const ids = normalizeMemoryIds(memoryIds);
     if (ids.length === 0) return { updated: 0 };
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
@@ -271,6 +174,7 @@ async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STAT
 }
 
 async function archiveExpiredMemories(userId, options = {}) {
+    invalidateMemoryQualityCache(userId);
     const now = getBeijingTimestamp();
     const status = Object.values(MEMORY_STATUS).includes(options.status) ? options.status : MEMORY_STATUS.disabled;
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 500, 1000));
@@ -314,6 +218,7 @@ async function exportMemories(userId, options = {}) {
 }
 
 async function updateMemory(userId, memoryId, updates = {}, options = {}) {
+    invalidateMemoryQualityCache(userId);
     const existing = await getMemoryRow(userId, memoryId);
     if (!existing) return null;
     const hasContent = Object.prototype.hasOwnProperty.call(updates, 'content');
@@ -400,37 +305,6 @@ async function getMemorySource(userId, memoryId) {
     };
 }
 
-async function getMemoryMergeSuggestions(userId, options = {}) {
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 20, 100));
-    const rows = await query(`
-        SELECT *
-        FROM memories
-        WHERE user_id = ?
-          AND status = ?
-        ORDER BY type ASC, salience DESC, updated_at DESC
-        LIMIT 500
-    `, [userId, MEMORY_STATUS.active]);
-    const suggestions = [];
-    for (let i = 0; i < rows.length; i += 1) {
-        for (let j = i + 1; j < rows.length; j += 1) {
-            if (rows[i].type !== rows[j].type) continue;
-            const score = memoryPairSimilarity(rows[i], rows[j]);
-            if (score < 0.52) continue;
-            const first = rows[i];
-            const second = rows[j];
-            const primary = Number(first.salience || 0) >= Number(second.salience || 0) ? first : second;
-            const duplicate = primary.id === first.id ? second : first;
-            suggestions.push({
-                score,
-                reason: score >= 0.9 ? 'overlap' : 'similar_terms',
-                primary: serializeMemory(primary),
-                duplicate: serializeMemory(duplicate)
-            });
-        }
-    }
-    return suggestions.sort((a, b) => b.score - a.score).slice(0, limit);
-}
-
 async function mergeMemories(userId, targetId, sourceId, options = {}) {
     const normalizedTargetId = Number.parseInt(targetId, 10);
     const normalizedSourceId = Number.parseInt(sourceId, 10);
@@ -485,6 +359,7 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
         `, [MEMORY_STATUS.deleted, now, source.id, userId]);
     });
 
+    invalidateMemoryQualityCache(userId);
     const updatedTarget = await queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [target.id, userId]);
     return {
         merged: true,
@@ -537,6 +412,7 @@ async function upsertMemory(userId, candidate, options = {}) {
     const existing = await findSimilarMemory(userId, type, content);
 
     if (existing) {
+        invalidateMemoryQualityCache(userId);
         const mergedMessageIds = [...new Set([
             ...parseJsonArray(existing.source_message_ids),
             ...sourceMessageIds
@@ -588,6 +464,7 @@ async function upsertMemory(userId, candidate, options = {}) {
         now,
         now
     ]);
+    invalidateMemoryQualityCache(userId);
     return { inserted: true, id: row?.id };
 }
 

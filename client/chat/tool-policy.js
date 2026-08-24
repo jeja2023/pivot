@@ -461,7 +461,7 @@ window.loadToolPolicy = async function(options = {}) {
         return;
     }
     renderToolPolicyMessage('正在加载工具策略...');
-    const res = await apiFetch(`${API_BASE}/capabilities/packages`);
+    const res = await apiFetch(`${API_BASE}/capabilities/packages?include_tools=true`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         renderToolPolicyMessage(data.error || '工具策略加载失败', { error: true });
@@ -469,16 +469,13 @@ window.loadToolPolicy = async function(options = {}) {
     }
     const previousToolKey = options.preserveSelection ? toolPolicySelectedToolKey : '';
     toolPolicyPackagesCache = (data.data || []).filter(toolPolicyIsGlobalPackage);
-    const results = await Promise.all(toolPolicyPackagesCache.map(async item => {
-        try {
-            return { entries: await loadToolPolicyToolsForPackage(item), error: '' };
-        } catch (e) {
-            return { entries: [], error: e.message || '工具列表加载失败' };
-        }
-    }));
-    toolPolicyToolsCache = results.flatMap(result => result.entries);
-    const failures = results.filter(result => result.error).length;
-    if (failures) showToast(`${failures} 个工具包加载失败`, 'error');
+    toolPolicyToolsCache = toolPolicyPackagesCache.flatMap(packageItem => {
+        return (packageItem.tools || []).map(tool => ({
+            key: toolPolicyEntryKey(packageItem, tool),
+            item: packageItem,
+            tool
+        }));
+    });
     toolPolicySelectedToolKey = toolPolicyToolsCache.some(entry => entry.key === previousToolKey) ? previousToolKey : '';
     const selected = toolPolicySelectedToolEntry();
     toolPolicySelectedPackageKey = selected?.item?.package_key || '';

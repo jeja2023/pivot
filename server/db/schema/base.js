@@ -1,4 +1,4 @@
-const { db } = require('../connection');
+﻿const { db } = require('../connection');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
 const { enterpriseTablesSql, enterpriseIndexesSql } = require('./enterprise');
 
@@ -1385,6 +1385,7 @@ function baseIndexesSql() {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_requests_callback_token ON agent_approval_requests(callback_token_hash) WHERE callback_token_hash IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_notifications_user ON agent_notifications(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_announcements_status_window ON announcements(status, starts_at, ends_at, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_announcements_deleted_updated ON announcements(deleted_at, updated_at DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_announcements_target ON announcements(target_type, target_value);
         CREATE INDEX IF NOT EXISTS idx_announcement_reads_user ON announcement_reads(user_id, announcement_id);
         CREATE INDEX IF NOT EXISTS idx_announcement_reads_announcement ON announcement_reads(announcement_id);
@@ -1406,35 +1407,6 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_dataset ON analysis_semantic_jobs(dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_due ON analysis_semantic_jobs(status, next_run_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_batches_job_status ON analysis_semantic_batches(job_id, status, batch_index);
-        CREATE INDEX IF NOT EXISTS idx_messages_session_user_created ON messages(session_id, user_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-        CREATE INDEX IF NOT EXISTS idx_sessions_user_archived ON sessions(user_id, is_archived, is_pinned, created_at);
-        CREATE INDEX IF NOT EXISTS idx_prompts_scope_user ON prompts(scope, user_id);
-        CREATE INDEX IF NOT EXISTS idx_prompts_type ON prompts(type, category);
-        CREATE INDEX IF NOT EXISTS idx_attachments_user_session ON attachments(user_id, session_id);
-        CREATE INDEX IF NOT EXISTS idx_attachments_token ON attachments(access_token);
-        CREATE INDEX IF NOT EXISTS idx_document_files_user_created ON document_files(user_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_document_files_source ON document_files(source_module, source_ref);
-        CREATE INDEX IF NOT EXISTS idx_document_jobs_user_status ON document_jobs(user_id, status, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_document_jobs_file ON document_jobs(file_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_document_pages_job_number ON document_pages(job_id, page_number);
-        CREATE INDEX IF NOT EXISTS idx_document_blocks_page_order ON document_ocr_blocks(page_id, sort_order);
-        CREATE INDEX IF NOT EXISTS idx_document_outputs_user_job ON document_outputs(user_id, job_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_document_reviews_page ON document_reviews(page_id, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_collections_user ON knowledge_collections(user_id, deleted_at, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_collections_scope ON knowledge_collections(scope, deleted_at, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_docs_user_status ON knowledge_docs(user_id, status);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(doc_id);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_user_tag ON knowledge_doc_tags(user_id, tag);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tags_doc ON knowledge_doc_tags(doc_id);
-        CREATE INDEX IF NOT EXISTS idx_knowledge_tags_user ON knowledge_tags(user_id, deleted_at, tag);
-        -- 知识图谱：mentions.entity_id 已由 UNIQUE(entity_id,chunk_id) 前缀覆盖，仅补充按用户统计与按 chunk 级联删除的查询
-        CREATE INDEX IF NOT EXISTS idx_kg_mentions_user ON knowledge_entity_mentions(user_id);
-        CREATE INDEX IF NOT EXISTS idx_kg_mentions_chunk ON knowledge_entity_mentions(chunk_id);
-        -- 知识图谱关系：覆盖 user_id+status 统计/过滤、按 source/target 实体的关系展开、按 chunk 删除
-        CREATE INDEX IF NOT EXISTS idx_kg_relations_user_status ON knowledge_relations(user_id, status);
-        CREATE INDEX IF NOT EXISTS idx_kg_relations_source_entity ON knowledge_relations(source_entity_id, status);
-        CREATE INDEX IF NOT EXISTS idx_kg_relations_target_entity ON knowledge_relations(target_entity_id, status);
         CREATE INDEX IF NOT EXISTS idx_kg_relations_source_chunk ON knowledge_relations(source_chunk_id);
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描

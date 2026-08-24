@@ -238,9 +238,8 @@
     }
 
     async function loadScripts(scripts = []) {
-        for (const src of scripts) {
-            await loadScriptOnce(src);
-        }
+        if (!Array.isArray(scripts) || !scripts.length) return;
+        await Promise.all(scripts.map(src => loadScriptOnce(src)));
     }
 
     // 流式渲染节流策略：根据已积累内容长度自适应间隔

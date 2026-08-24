@@ -26,7 +26,7 @@ const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../../service
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
-    getCapabilityToolGovernance,
+    getCapabilityToolGovernanceFromPackage,
     getGlobalCapabilityPackage,
     isToolCapabilityEnabled,
     isCapabilityEnabled,
@@ -251,35 +251,30 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ data: rows });
     }));
 
-    router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        res.json({ data: await listGlobalCapabilityPackages(req.user), scope: 'global' });
-    }));
-
-    router.get('/capabilities/packages/:key/tools', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        const item = await getGlobalCapabilityPackage(req.params.key, req.user);
-        if (!item) return res.status(404).json({ error: '工具包不存在。' });
+    async function resolvePackageTools(item, user) {
+        if (!item) return [];
         const config = item.config || {};
         const storedTools = config.tools && typeof config.tools === 'object' ? config.tools : {};
         let tools = [];
         if (item.type === 'builtin_tool') {
-            const definition = getBuiltInToolDefinitions(req.user).find(tool => tool.name === item.source_ref);
+            const definition = getBuiltInToolDefinitions(user).find(tool => tool.name === item.source_ref);
             if (definition) {
                 tools = [{
                     name: definition.name,
                     fullName: definition.name,
                     title: definition.title || definition.name,
                     description: definition.description || '',
-                    governance: await getCapabilityToolGovernance('builtin_tool', definition.name, definition.name, req.user)
+                    governance: getCapabilityToolGovernanceFromPackage(item, definition.name, user)
                 }];
             }
         } else {
-            const cachedList = await listCachedMcpTools(item.source_ref, req.user);
+            const cachedList = await listCachedMcpTools(item.source_ref, user);
             tools = [];
             for (const tool of cachedList) {
                 if (item.type === 'database_connection' ? tool.serverType !== 'database' : tool.serverType === 'database') {
                     continue;
                 }
-                const gov = await getCapabilityToolGovernance(item.type, item.source_ref, tool.name, req.user);
+                const gov = getCapabilityToolGovernanceFromPackage(item, tool.name, user);
                 const shortName = String(tool.name || '').replace(/^mcp\.\d+\./, '');
                 const title = tool.title && tool.title !== tool.name ? tool.title : (MCP_CHAT_TOOL_TITLES[shortName] || tool.title || tool.name);
                 tools.push({
@@ -294,7 +289,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const known = new Set(tools.map(tool => tool.name));
         for (const name of Object.keys(storedTools)) {
             if (known.has(name)) continue;
-            const gov = await getCapabilityToolGovernance(item.type, item.source_ref, name, req.user);
+            const gov = getCapabilityToolGovernanceFromPackage(item, name, user);
             const shortName = String(name || '').replace(/^mcp\.\d+\./, '');
             const title = MCP_CHAT_TOOL_TITLES[shortName] || name;
             tools.push({
@@ -306,6 +301,25 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 governance: gov
             });
         }
+        return tools;
+    }
+
+    router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const packages = await listGlobalCapabilityPackages(req.user);
+        if (req.query.include_tools === 'true' || req.query.includeTools === 'true') {
+            const enriched = await Promise.all(packages.map(async item => {
+                const tools = await resolvePackageTools(item, req.user);
+                return { ...item, tools };
+            }));
+            return res.json({ data: enriched, scope: 'global' });
+        }
+        res.json({ data: packages, scope: 'global' });
+    }));
+
+    router.get('/capabilities/packages/:key/tools', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const item = await getGlobalCapabilityPackage(req.params.key, req.user);
+        if (!item) return res.status(404).json({ error: '工具包不存在。' });
+        const tools = await resolvePackageTools(item, req.user);
         res.json({ item, tools });
     }));
 

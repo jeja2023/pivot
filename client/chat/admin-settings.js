@@ -480,33 +480,21 @@ async function bulkUpdateMemoryStatus(ids, status) {
 }
 
 async function retryMemoryJobs() {
-    const res = await apiFetch(`${API_BASE}/memories/jobs/retry`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-    });
+    const res = await apiFetch(`${API_BASE}/memories/jobs/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '任务重试失败');
     return data;
 }
 
 async function cleanupMemoryJobs() {
-    const res = await apiFetch(`${API_BASE}/memories/jobs/cleanup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ retentionDays: 30 })
-    });
+    const res = await apiFetch(`${API_BASE}/memories/jobs/cleanup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retentionDays: 30 }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '任务清理失败');
     return data;
 }
 
 async function archiveExpiredMemories() {
-    const res = await apiFetch(`${API_BASE}/memories/maintenance/archive-expired`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'disabled' })
-    });
+    const res = await apiFetch(`${API_BASE}/memories/maintenance/archive-expired`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'disabled' }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '过期记忆归档失败');
     return data;
@@ -517,9 +505,13 @@ window.loadMemories = async function(page = pageState.memories || 1) {
     const requestedPage = Math.max(1, Number.parseInt(page, 10) || 1);
     pageState.memories = requestedPage;
     try {
-        const res = await apiFetch(`${API_BASE}/memories?${memoryQueryParams(requestedPage).toString()}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '长期记忆加载失败');
+        const [memoriesRes, qualitySummary, jobsData] = await Promise.all([
+            apiFetch(`${API_BASE}/memories?${memoryQueryParams(requestedPage).toString()}`),
+            fetchMemoryQuality().catch(() => ({})),
+            fetchMemoryJobs().catch(() => ({}))
+        ]);
+        const data = await memoriesRes.json();
+        if (!memoriesRes.ok) throw new Error(data.error || '长期记忆加载失败');
         if (toggle) toggle.checked = data.enabled !== false;
         const total = Number(data.total || 0);
         const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 15)));
@@ -531,8 +523,8 @@ window.loadMemories = async function(page = pageState.memories || 1) {
         renderEnhancedMemorySummary(data.summary);
         renderProductMemoryRows(currentLongTermMemories);
         renderPagination('memories', total, requestedPage);
-        renderMemoryQualityPanel(await fetchMemoryQuality());
-        renderMemoryJobsPanel(await fetchMemoryJobs());
+        renderMemoryQualityPanel(qualitySummary);
+        renderMemoryJobsPanel(jobsData);
     } catch (e) {
         renderPagination('memories', 0, 1);
         showToast(e.message || '长期记忆加载失败', 'error');
