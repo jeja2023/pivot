@@ -40,6 +40,8 @@ const SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT = 160;
 const SEMANTIC_SPLIT_MAX_DEPTH = 8;
 const JOB_STALE_LOCK_MINUTES = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_STALE_LOCK_MINUTES || '30', 10) || 30);
 const JOB_MAX_ATTEMPTS = Math.max(1, Math.min(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_ATTEMPTS || '3', 10) || 3));
+const DEFAULT_BATCH_CONCURRENCY = 2;
+const MAX_BATCH_CONCURRENCY = 4;
 const JOB_WORKER_LIMIT = 1;
 let workerRunning = false;
 
@@ -56,6 +58,21 @@ function normalizeBatchTokenBudget(value) {
 function normalizeMaxOutputTokens(value) {
     const parsed = Number.parseInt(value, 10);
     return Math.max(256, Math.min(8192, Number.isFinite(parsed) && parsed > 0 ? parsed : 4096));
+}
+
+function normalizeSemanticBatchConcurrency(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Math.max(1, Math.min(MAX_BATCH_CONCURRENCY, Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BATCH_CONCURRENCY));
+}
+
+function resolveSemanticBatchConcurrency(model, requested) {
+    const configured = normalizeSemanticBatchConcurrency(requested);
+    // 额度检查和实际用量写入不是同一事务。额度受限模型保持串行，避免并发批次同时
+    // 通过检查后超发每日 Token；未配置每日额度时再利用端点并发能力缩短总耗时。
+    if (Number(model?.daily_token_limit || 0) > 0) return 1;
+    const endpointLimit = Number.parseInt(model?.max_concurrent, 10);
+    const fallbackLimit = Number.parseInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY || '2', 10) || 2;
+    return Math.max(1, Math.min(configured, Number.isFinite(endpointLimit) && endpointLimit > 0 ? endpointLimit : fallbackLimit));
 }
 
 function resolveEffectiveBatchTokens(model, requested, maxOutputTokens) {
@@ -741,6 +758,68 @@ async function synthesizeSemanticReport(job, batchRows, user, model) {
     return output.content;
 }
 
+async function processSemanticBatch({ job, user, model, batches, options, stopSignal }) {
+    if (stopSignal.stopped) return { claimed: false };
+    const currentJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
+    if (!currentJob || currentJob.status !== SEMANTIC_JOB_STATUS.running) {
+        stopSignal.stopped = true;
+        return { claimed: false };
+    }
+    const batch = await claimSemanticBatch(job.id);
+    if (!batch) return { claimed: false };
+    const batchPayload = {
+        ...batch,
+        segments: batches[Number(batch.batch_index)]?.segments || []
+    };
+    if (!batchPayload.segments.length) {
+        const error = new Error('无法恢复批次文本边界。');
+        await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.failed, { error: error.message });
+        stopSignal.failure = { error, retry: false };
+        stopSignal.stopped = true;
+        return { claimed: true, ok: false };
+    }
+    try {
+        const normalized = await analyzeSemanticBatchSegments({
+            job,
+            batch: batchPayload,
+            segments: batchPayload.segments,
+            options: { ...options, totalBatches: batches.length },
+            user,
+            model
+        });
+        await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.succeeded, {
+            resultText: normalized.responseText,
+            result: normalized
+        });
+        await execute(`
+            UPDATE analysis_semantic_jobs
+            SET completed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
+                succeeded_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
+                failed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
+                locked_at = ?, updated_at = ?
+            WHERE id = ?
+        `, [job.id, SEMANTIC_BATCH_STATUS.succeeded, job.id, SEMANTIC_BATCH_STATUS.succeeded, job.id, SEMANTIC_BATCH_STATUS.failed, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
+        await touchSemanticJob(job.id);
+        return { claimed: true, ok: true };
+    } catch (err) {
+        const exhausted = Number(batch.attempts || 1) >= Number(batch.max_attempts || DEFAULT_BATCH_MAX_ATTEMPTS);
+        const quotaOrContextError = ['INSUFFICIENT_QUOTA', 'SEMANTIC_CONTEXT_TOO_SMALL'].includes(err.code);
+        await finishSemanticBatch(batch, exhausted ? SEMANTIC_BATCH_STATUS.failed : SEMANTIC_BATCH_STATUS.queued, { error: err.message || String(err) });
+        await execute(`
+            UPDATE analysis_semantic_jobs
+            SET failed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
+                locked_at = ?, updated_at = ?
+            WHERE id = ?
+        `, [job.id, SEMANTIC_BATCH_STATUS.failed, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
+        stopSignal.failure = {
+            error: err,
+            retry: !exhausted && !quotaOrContextError
+        };
+        stopSignal.stopped = true;
+        return { claimed: true, ok: false };
+    }
+}
+
 async function processSemanticAnalysisJob(job) {
     const user = await queryOne('SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ?', [job.user_id]);
     if (!user) throw new Error('任务所属用户不存在。');
@@ -755,56 +834,25 @@ async function processSemanticAnalysisJob(job) {
     await ensureSemanticBatches(job, batches);
     await execute(`UPDATE analysis_semantic_jobs SET analyzed_rows = ?, total_batches = ?, updated_at = ? WHERE id = ?`, [rows.length, batches.length, getBeijingTimestamp(), job.id]);
 
-    while (true) {
-        const currentJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
-        if (!currentJob || currentJob.status === SEMANTIC_JOB_STATUS.cancelled) return;
-        const batch = await claimSemanticBatch(job.id);
-        if (!batch) break;
-        const batchPayload = {
-            ...batch,
-            segments: batches[Number(batch.batch_index)]?.segments || []
-        };
-        if (!batchPayload.segments.length) {
-            await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.failed, { error: '无法恢复批次文本边界。' });
-            await markJobFailure(job.id, '无法恢复批次文本边界。', false);
-            return;
+    const stopSignal = { stopped: false, failure: null };
+    const batchConcurrency = resolveSemanticBatchConcurrency(
+        model,
+        options.batchConcurrency || process.env.DATA_ANALYSIS_SEMANTIC_BATCH_CONCURRENCY
+    );
+    const runBatchWorker = async () => {
+        while (!stopSignal.stopped) {
+            const result = await processSemanticBatch({ job, user, model, batches, options, stopSignal });
+            if (!result.claimed) break;
         }
-        try {
-            const normalized = await analyzeSemanticBatchSegments({
-                job,
-                batch: batchPayload,
-                segments: batchPayload.segments,
-                options: { ...options, totalBatches: batches.length },
-                user,
-                model
-            });
-            await finishSemanticBatch(batch, SEMANTIC_BATCH_STATUS.succeeded, {
-                resultText: normalized.responseText,
-                result: normalized
-            });
-            await execute(`
-                UPDATE analysis_semantic_jobs
-                SET completed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
-                    succeeded_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
-                    failed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
-                    locked_at = ?, updated_at = ?
-                WHERE id = ?
-            `, [job.id, SEMANTIC_BATCH_STATUS.succeeded, job.id, SEMANTIC_BATCH_STATUS.succeeded, job.id, SEMANTIC_BATCH_STATUS.failed, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
-            await touchSemanticJob(job.id);
-        } catch (err) {
-            const exhausted = Number(batch.attempts || 1) >= Number(batch.max_attempts || DEFAULT_BATCH_MAX_ATTEMPTS);
-            await finishSemanticBatch(batch, exhausted ? SEMANTIC_BATCH_STATUS.failed : SEMANTIC_BATCH_STATUS.queued, { error: err.message || String(err) });
-            await execute(`
-                UPDATE analysis_semantic_jobs
-                SET failed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
-                    locked_at = ?, updated_at = ?
-                WHERE id = ?
-            `, [job.id, SEMANTIC_BATCH_STATUS.failed, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
-            if (exhausted || err.code === 'INSUFFICIENT_QUOTA' || err.code === 'SEMANTIC_CONTEXT_TOO_SMALL') await markJobFailure(job.id, err.message || String(err), false);
-            else await markJobFailure(job.id, err.message || String(err), true);
-            return;
-        }
+    };
+    await Promise.all(Array.from({ length: batchConcurrency }, () => runBatchWorker()));
+
+    if (stopSignal.failure) {
+        await markJobFailure(job.id, stopSignal.failure.error.message || String(stopSignal.failure.error), stopSignal.failure.retry);
+        return;
     }
+    const latestJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
+    if (!latestJob || latestJob.status === SEMANTIC_JOB_STATUS.cancelled) return;
 
     const failed = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status = ?', [job.id, SEMANTIC_BATCH_STATUS.failed]);
     const pending = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ? AND status != ?', [job.id, SEMANTIC_BATCH_STATUS.succeeded]);
@@ -918,6 +966,8 @@ module.exports = {
     triggerSemanticAnalysisWorker,
     buildSemanticSegments,
     normalizeBatchTokenBudget,
+    normalizeSemanticBatchConcurrency,
+    resolveSemanticBatchConcurrency,
     normalizeBatchResult,
     semanticBatchOutputLimit
 };

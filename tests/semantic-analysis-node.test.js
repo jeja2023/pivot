@@ -4,6 +4,8 @@ const test = require('node:test');
 const {
     buildSemanticSegments,
     normalizeBatchTokenBudget,
+    normalizeSemanticBatchConcurrency,
+    resolveSemanticBatchConcurrency,
     normalizeBatchResult,
     semanticBatchOutputLimit
 } = require('../server/services/data-analysis/semantic-analysis');
@@ -28,6 +30,15 @@ test('全量语义分析批次预算有明确上下界', () => {
     assert.equal(normalizeBatchTokenBudget('invalid'), 24000);
     assert.equal(normalizeBatchTokenBudget(100), 8000);
     assert.equal(normalizeBatchTokenBudget(999999), 60000);
+});
+
+test('全量语义分析批次并发有上限并尊重额度安全边界', () => {
+    assert.equal(normalizeSemanticBatchConcurrency('invalid'), 2);
+    assert.equal(normalizeSemanticBatchConcurrency(0), 2);
+    assert.equal(normalizeSemanticBatchConcurrency(99), 4);
+    assert.equal(resolveSemanticBatchConcurrency({ max_concurrent: 8 }, 4), 4);
+    assert.equal(resolveSemanticBatchConcurrency({ max_concurrent: 1 }, 4), 1);
+    assert.equal(resolveSemanticBatchConcurrency({ max_concurrent: 4, daily_token_limit: 100000 }, 4), 1);
 });
 
 test('全量语义分析识别缺失分块并暴露可恢复信息', () => {
@@ -91,4 +102,3 @@ test('全量语义分析单分块单对象格式及顶层数组格式健壮解�
     assert.equal(normalizedArray.itemCount, 2);
     assert.equal(normalizedArray.parsed.items[1].result, '第二条');
 });
-
