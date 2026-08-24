@@ -6,6 +6,11 @@ const { getGpuMonitorStatus } = require('./services/gpu-monitor');
 const { getMaintenanceStatus } = require('./services/maintenance');
 const { getSystemHealthSnapshot } = require('./services/system-health');
 const { getBeijingTimestamp } = require('./time');
+const {
+    recordRagRetrieval,
+    recordRagIngest,
+    getRagMetricsSnapshot
+} = require('./services/rag-metrics');
 
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10);
@@ -19,24 +24,6 @@ function getBeijingDayBounds(date = new Date()) {
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const routeStats = new Map();
 const startedAt = Date.now();
-const ragStats = {
-    retrievals: 0,
-    retrievalErrors: 0,
-    hits: 0,
-    cacheHits: 0,
-    cacheMisses: 0,
-    emptyResults: 0,
-    totalRetrievalMs: 0,
-    totalCandidates: 0,
-    totalMatches: 0,
-    topScoreSum: 0,
-    topScoreCount: 0,
-    ingests: 0,
-    ingestErrors: 0,
-    totalIngestMs: 0,
-    chunksIndexed: 0
-};
-
 function normalizeRoute(req) {
     const routePath = req.route?.path;
     if (routePath) {
@@ -68,45 +55,6 @@ function recordHttpRequest(method, route, status, durationSeconds) {
     buckets.forEach((bucket, index) => {
         if (durationSeconds <= bucket) stat.buckets[index] += 1;
     });
-}
-
-function recordRagRetrieval({
-    status = 'unknown',
-    durationMs = 0,
-    candidates = 0,
-    matches = 0,
-    topScore = null,
-    cacheHit = false
-} = {}) {
-    ragStats.retrievals += 1;
-    ragStats.totalRetrievalMs += Math.max(Number(durationMs) || 0, 0);
-    ragStats.totalCandidates += Math.max(Number(candidates) || 0, 0);
-    ragStats.totalMatches += Math.max(Number(matches) || 0, 0);
-    if (cacheHit || status === 'cache_hit') {
-        ragStats.cacheHits += 1;
-    } else {
-        ragStats.cacheMisses += 1;
-    }
-    if (status === 'hit' || (status === 'cache_hit' && Number(matches) > 0)) {
-        ragStats.hits += 1;
-    }
-    if (status === 'error') ragStats.retrievalErrors += 1;
-    if (status === 'empty' || status === 'no_match') ragStats.emptyResults += 1;
-    if (Number.isFinite(topScore)) {
-        ragStats.topScoreSum += topScore;
-        ragStats.topScoreCount += 1;
-    }
-}
-
-function recordRagIngest({
-    status = 'unknown',
-    chunks = 0,
-    durationMs = 0
-} = {}) {
-    ragStats.ingests += 1;
-    ragStats.totalIngestMs += Math.max(Number(durationMs) || 0, 0);
-    ragStats.chunksIndexed += Math.max(Number(chunks) || 0, 0);
-    if (status === 'error') ragStats.ingestErrors += 1;
 }
 
 function getHttpMetricsSnapshot() {
@@ -148,27 +96,6 @@ function getHttpMetricsSnapshot() {
         routes: routes
             .sort((a, b) => b.requests - a.requests)
             .slice(0, 10)
-    };
-}
-
-function getRagMetricsSnapshot() {
-    return {
-        retrievals: ragStats.retrievals,
-        retrievalErrors: ragStats.retrievalErrors,
-        hits: ragStats.hits,
-        cacheHits: ragStats.cacheHits,
-        cacheMisses: ragStats.cacheMisses,
-        hitRate: ragStats.retrievals > 0 ? ragStats.hits / ragStats.retrievals : 0,
-        cacheHitRate: ragStats.retrievals > 0 ? ragStats.cacheHits / ragStats.retrievals : 0,
-        emptyResults: ragStats.emptyResults,
-        avgRetrievalMs: ragStats.retrievals > 0 ? ragStats.totalRetrievalMs / ragStats.retrievals : 0,
-        avgCandidates: ragStats.retrievals > 0 ? ragStats.totalCandidates / ragStats.retrievals : 0,
-        avgMatches: ragStats.retrievals > 0 ? ragStats.totalMatches / ragStats.retrievals : 0,
-        avgTopScore: ragStats.topScoreCount > 0 ? ragStats.topScoreSum / ragStats.topScoreCount : 0,
-        ingests: ragStats.ingests,
-        ingestErrors: ragStats.ingestErrors,
-        chunksIndexed: ragStats.chunksIndexed,
-        avgIngestMs: ragStats.ingests > 0 ? ragStats.totalIngestMs / ragStats.ingests : 0
     };
 }
 

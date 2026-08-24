@@ -8,7 +8,7 @@ const {
 const {
     recordRagRetrieval,
     recordRagIngest
-} = require('../../metrics');
+} = require('../rag-metrics');
 const {
     buildRagSearchContent,
     buildRagSearchTerms

@@ -138,6 +138,18 @@ test('desktop config can derive LAN HTTP downloads feed when explicitly allowed'
     assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');
     assert.equal(config.autoUpdate.allowInsecureHttp, true);
 });
+
+test('bundled production desktop config enables only its allowlisted LAN update origin', () => {
+    const productionConfig = require('../config.json');
+    const config = normalizeConfig(productionConfig, {}, {});
+    const remoteOrigin = new URL(config.remoteUrl).origin;
+
+    assert.equal(config.autoUpdate.enabled, true);
+    assert.equal(config.autoUpdate.url, `${remoteOrigin}/downloads/`);
+    assert.equal(config.autoUpdate.allowInsecureHttp, true);
+    assert.deepEqual(config.autoUpdate.allowedOrigins, [remoteOrigin]);
+});
+
 test('desktop renderer policy supports LAN HTTP origins without trusting redirects', () => {
     assert.equal(isTrustedRendererUrl('http://192.168.10.20:9006/chat', 'http://192.168.10.20:9006/'), true);
     assert.equal(isTrustedRendererUrl('http://192.168.10.21:9006/chat', 'http://192.168.10.20:9006/'), false);
