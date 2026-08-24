@@ -1,3 +1,15 @@
+## [v0.1.36] - 2026-08-24
+
+### 生产客户端自动更新与运行依赖修复
+
+- **客户端自动更新启用**：生产桌面配置启用同站 `/downloads/` 更新源，从 `remoteUrl` 推导 `http://50.64.150.51:9006/downloads/`，并以精确 origin 白名单约束受控局域网 HTTP 更新。
+- **双配置分发**：新版安装包同时内置 `resources/config.json` 和 `Pivot.exe` 同目录的 `config.json`；现有客户端也可由 IT 单独投放同一份外置配置，重启后即可激活自动更新，无需用户手动下载安装包。
+- **更新发布产物**：Windows 打包流程继续生成并同步 `latest.yml`、版本安装器、blockmap、`Pivot-Setup.exe` 和 `SHA256SUMS.txt` 到 `downloads/`。
+- **生产依赖修复**：`unzipper` 纳入正式运行依赖并加入 Docker 构建加载校验，避免生产镜像使用 `npm ci --omit=dev` 后启动失败。
+- **RAG 启动告警修复**：RAG 指标计数器拆为无业务依赖的叶子模块，解除 CommonJS 循环依赖，生产启动不再出现 `recordRagRetrieval` / `recordRagIngest` 尚未导出的告警。
+- **数据分析性能优化**：全量语义分析任务支持默认 2 路、最高 4 路批次并发，并继续受模型端点并发和每日 Token 额度约束。
+- **发布验证**：完整 Node 测试 `608/608` 通过，客户端更新策略专项 `10/10` 通过，`npm run check`、ESLint 和差异检查通过。
+
 ## [v0.1.35] - 2026-08-24
 
 ### 安全可靠性、任务恢复与资源边界全面升级

@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "main": "desktop/main.js",
   "engines": {
@@ -155,6 +155,12 @@
       {
         "from": "artifacts/agent-python-pack",
         "to": "agent-runtime/python"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "config.json",
+        "to": "config.json"
       }
     ],
     "nodeGypRebuild": false,

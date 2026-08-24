@@ -141,6 +141,7 @@ test('desktop config can derive LAN HTTP downloads feed when explicitly allowed'
 
 test('bundled production desktop config enables only its allowlisted LAN update origin', () => {
     const productionConfig = require('../config.json');
+    const packageManifest = require('../package.json');
     const config = normalizeConfig(productionConfig, {}, {});
     const remoteOrigin = new URL(config.remoteUrl).origin;
 
@@ -148,6 +149,8 @@ test('bundled production desktop config enables only its allowlisted LAN update 
     assert.equal(config.autoUpdate.url, `${remoteOrigin}/downloads/`);
     assert.equal(config.autoUpdate.allowInsecureHttp, true);
     assert.deepEqual(config.autoUpdate.allowedOrigins, [remoteOrigin]);
+    assert.equal(packageManifest.build.extraResources.some(item => item.from === 'config.json' && item.to === 'config.json'), true);
+    assert.equal(packageManifest.build.extraFiles.some(item => item.from === 'config.json' && item.to === 'config.json'), true);
 });
 
 test('desktop renderer policy supports LAN HTTP origins without trusting redirects', () => {
