@@ -53,7 +53,7 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
     npm ci --omit=dev && \
     ( node -e "require('@duckdb/node-api')" 2>/dev/null || \
       npm install --no-save --omit=dev --registry=https://registry.npmmirror.com @duckdb/node-bindings-linux-x64@1.5.4-r.1 ) && \
-    node -e "require('@duckdb/node-api'); console.log('[build] DuckDB 原生绑定校验通过')" && \
+    node -e "require('@duckdb/node-api'); require('unzipper'); console.log('[build] 生产运行依赖校验通过')" && \
     rm .npmrc
 
 # 只复制生产运行需要的文件，避免安装包、本机配置和开发辅助目录误进镜像

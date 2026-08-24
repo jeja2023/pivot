@@ -73,6 +73,14 @@ function writeZip(target, entries) {
 
 function tempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-agent-packages-')); }
 
+test('skill ZIP runtime declares unzipper as a production dependency and verifies it during image build', () => {
+    const projectRoot = path.resolve(__dirname, '..');
+    const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+    const dockerfile = fs.readFileSync(path.join(projectRoot, 'Dockerfile'), 'utf8');
+    assert.match(String(manifest.dependencies?.unzipper || ''), /^\^?0\.12\./);
+    assert.match(dockerfile, /require\(['"]unzipper['"]\)/);
+});
+
 test('SKILL.zip verifies detached RSA signature, permissions and installs in a jailed directory', async () => {
     const root = tempRoot();
     const zipPath = path.join(root, 'demo.skill.zip');
