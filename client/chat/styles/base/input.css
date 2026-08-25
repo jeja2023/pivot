@@ -149,10 +149,11 @@
 .chat-tools-menu-panel[hidden] { display: none; }
 .chat-mode-selector { position: relative; display: inline-flex; align-items: center; }
 .chat-mode-trigger {
-    display: inline-flex; align-items: center; gap: 4px; min-width: 64px; height: 30px;
-    padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
+    display: inline-flex; align-items: center; justify-content: center; height: 28px;
+    padding: 0 10px; border: 1px solid transparent; border-radius: 6px;
     background: transparent; color: var(--text-muted, #64748b); cursor: pointer;
-    font: inherit; font-size: .73rem; font-weight: 650; transition: .18s ease;
+    font: inherit; font-size: .74rem; font-weight: 650; text-align: center;
+    white-space: nowrap; transition: .18s ease;
 }
 .chat-mode-trigger:hover, .chat-mode-selector.is-open .chat-mode-trigger {
     border-color: var(--primary-border, rgba(16,185,129,.24));
