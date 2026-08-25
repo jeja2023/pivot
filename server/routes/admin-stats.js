@@ -18,6 +18,7 @@ const {
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { normalizePriceCurrency } = require('../services/model-costs');
+const { setBoundedStatsCache, tokenUsageAggregateSubquery } = require('../services/admin-stats-cache');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const {
@@ -192,8 +193,8 @@ function dateGroupExpr(col = 'created_at') {
 }
 
 async function getMonitorKnowledgeChunkCount() {
-    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
-    const enabledDocCond = "COALESCE(d.is_enabled, 1) != 0";
+    // 历史部署可能把 is_enabled 建成 boolean，新部署使用 bigint；转文本后两种类型都可比较。
+    const enabledDocCond = "COALESCE(d.is_enabled::text, '1') NOT IN ('0', 'false', 'f')";
     const row = await queryOne(`
         SELECT COUNT(c.id) AS count
         FROM knowledge_chunks c
@@ -207,12 +208,17 @@ async function getMonitorKnowledgeChunkCount() {
 
 const MONITOR_SUMMARY_CACHE_TTL_MS = 8000;
 let monitorSummaryCache = { data: null, expires: 0 };
+let monitorSummaryInFlight = null;
 const OPS_SUMMARY_CACHE_TTL_MS = 8000;
 const opsSummaryCache = new Map();
+const opsSummaryInFlight = new Map();
 const TREND_CACHE_TTL_MS = 15000;
 const trendCache = new Map();
+const trendInFlight = new Map();
+let statsCacheGeneration = 0;
 
 function invalidateMonitorSummaryCache() {
+    statsCacheGeneration += 1;
     monitorSummaryCache = { data: null, expires: 0 };
     opsSummaryCache.clear();
     trendCache.clear();
@@ -235,6 +241,9 @@ function createAdminStatsRouter({
         if (!forceRefresh && monitorSummaryCache.data && monitorSummaryCache.expires > cacheNow) {
             return res.json(monitorSummaryCache.data);
         }
+        if (monitorSummaryInFlight) return res.json(await monitorSummaryInFlight);
+        const generation = statsCacheGeneration;
+        const buildPromise = (async () => {
         const httpMetrics = getHttpMetricsSnapshot();
         const ragMetrics = {
             ...getRagMetricsSnapshot(),
@@ -299,9 +308,9 @@ function createAdminStatsRouter({
         const { conditions: dayConditions, params: dayParams } = buildDateRangeConditions(dayBounds.start, dayBounds.nextStart);
         const dayWhere = dayConditions.join(' AND ');
         const tokenByModel = await query(
-            `SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.token_count), 0) AS tokens
-             FROM (${tokenUsageSubquery(dayWhere)}) usage
-             LEFT JOIN models md ON md.id = usage.model_id
+            `SELECT COALESCE(md.name, '未知模型') AS model_name, COALESCE(SUM(usage.tokens), 0) AS tokens
+             FROM (${tokenUsageAggregateSubquery('model_id', dayWhere)}) usage
+             LEFT JOIN models md ON md.id = usage.group_key
              GROUP BY COALESCE(md.name, '未知模型')
              ORDER BY tokens DESC
              LIMIT 8`,
@@ -387,8 +396,17 @@ function createAdminStatsRouter({
             },
             activeUsers: activeUsersCount
         };
-        monitorSummaryCache = { data: payload, expires: Date.now() + MONITOR_SUMMARY_CACHE_TTL_MS };
-        res.json(payload);
+        if (generation === statsCacheGeneration) {
+            monitorSummaryCache = { data: payload, expires: Date.now() + MONITOR_SUMMARY_CACHE_TTL_MS };
+        }
+        return payload;
+        })();
+        monitorSummaryInFlight = buildPromise;
+        try {
+            return res.json(await buildPromise);
+        } finally {
+            if (monitorSummaryInFlight === buildPromise) monitorSummaryInFlight = null;
+        }
     }));
 
     router.get('/observability/events', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -507,7 +525,11 @@ function createAdminStatsRouter({
             const cached = trendCache.get(cacheKey);
             if (cached && cached.expires > cacheNow) return res.json(cached.data);
         }
+        const existingTrend = trendInFlight.get(cacheKey);
+        if (existingTrend) return res.json(await existingTrend);
 
+        const generation = statsCacheGeneration;
+        const trendPromise = (async () => {
         const innerConditions = [];
         const innerParams = [];
         const { conditions: dateConditions, params: dateParams } = buildDateRangeConditions(getBeijingDaysAgoStart(30), null);
@@ -520,16 +542,25 @@ function createAdminStatsRouter({
         }
 
         const innerWhere = innerConditions.join(' AND ');
-        const dayExpr = dateGroupExpr('usage.created_at');
+        const dayExpr = dateGroupExpr('created_at');
         const trend = await query(
-            `SELECT ${dayExpr} as day, SUM(token_count) as tokens
-             FROM (${tokenUsageSubquery(innerWhere)}) usage
-             GROUP BY ${dayExpr}
+            `SELECT usage.group_key AS day, SUM(usage.tokens) AS tokens
+             FROM (${tokenUsageAggregateSubquery(dayExpr, innerWhere)}) usage
+             GROUP BY usage.group_key
              ORDER BY day`,
             [...innerParams, ...innerParams]
         );
-        trendCache.set(cacheKey, { data: trend, expires: Date.now() + TREND_CACHE_TTL_MS });
-        res.json(trend);
+        if (generation === statsCacheGeneration) {
+            setBoundedStatsCache(trendCache, cacheKey, { data: trend, expires: Date.now() + TREND_CACHE_TTL_MS });
+        }
+        return trend;
+        })();
+        trendInFlight.set(cacheKey, trendPromise);
+        try {
+            return res.json(await trendPromise);
+        } finally {
+            if (trendInFlight.get(cacheKey) === trendPromise) trendInFlight.delete(cacheKey);
+        }
     }));
 
     router.get('/report', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
@@ -706,14 +737,20 @@ function createAdminStatsRouter({
 
     router.get('/ops-summary', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const cacheKey = canViewAll ? 'all' : `user:${req.user.id}`;
+        const requestHosts = getRequestHostAliases(req);
+        const requestHostKey = requestHosts.slice().sort().join(',');
+        const cacheKey = `${canViewAll ? 'all' : `user:${req.user.id}`}|${requestHostKey}`;
         const cacheNow = Date.now();
         const forceRefresh = req.query?.refresh === '1' || req.query?.force === '1';
         if (!forceRefresh) {
             const cached = opsSummaryCache.get(cacheKey);
             if (cached && cached.expires > cacheNow) return res.json(cached.data);
         }
+        const existingOpsSummary = opsSummaryInFlight.get(cacheKey);
+        if (existingOpsSummary) return res.json(await existingOpsSummary);
 
+        const generation = statsCacheGeneration;
+        const summaryPromise = (async () => {
         if (canViewAll) {
             const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
                 ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -726,7 +763,7 @@ function createAdminStatsRouter({
                 [dayBounds.start, dayBounds.nextStart]
             );
 
-            const [counts, uploadsSize, dataSize] = await Promise.all([
+            const [counts, uploadsSize, dataSize, modelEndpoints] = await Promise.all([
                 (async () => {
                     const [users, activeUsers, sessions, messages, attachments, models, tokens] = await Promise.all([
                         queryOne('SELECT COUNT(*) AS count FROM users'),
@@ -749,7 +786,8 @@ function createAdminStatsRouter({
                     };
                 })(),
                 getCachedDirSize(uploadDir),
-                getCachedDirSize(dataDir)
+                getCachedDirSize(dataDir),
+                summarizeModelEndpoints({ requestHosts, publicUrl })
             ]);
 
             const payload = {
@@ -763,10 +801,13 @@ function createAdminStatsRouter({
                 uploadsSize,
                 dataSize,
                 auditToday: counts.auditToday,
+                modelEndpoints,
                 isPersonal: false
             };
-            opsSummaryCache.set(cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
-            res.json(payload);
+            if (generation === statsCacheGeneration) {
+                setBoundedStatsCache(opsSummaryCache, cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
+            }
+            return payload;
         } else {
             const uid = req.user.id;
             const [sessions, messages, attachments, models, tokens] = await Promise.all([
@@ -784,8 +825,17 @@ function createAdminStatsRouter({
                 tokens: Number(tokens?.total || 0),
                 isPersonal: true
             };
-            opsSummaryCache.set(cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
-            res.json(payload);
+            if (generation === statsCacheGeneration) {
+                setBoundedStatsCache(opsSummaryCache, cacheKey, { data: payload, expires: Date.now() + OPS_SUMMARY_CACHE_TTL_MS });
+            }
+            return payload;
+        }
+        })();
+        opsSummaryInFlight.set(cacheKey, summaryPromise);
+        try {
+            return res.json(await summaryPromise);
+        } finally {
+            if (opsSummaryInFlight.get(cacheKey) === summaryPromise) opsSummaryInFlight.delete(cacheKey);
         }
     }));
 

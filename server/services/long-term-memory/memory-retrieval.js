@@ -62,7 +62,8 @@ function buildLongTermMemoryContextMessage(memories = [], options = {}) {
     let used = estimateTokens(header.join('\n') + '\nPIVOT_LONG_TERM_MEMORY_END');
     for (const memory of memories) {
         const label = MEMORY_TYPE_LABELS[normalizeMemoryType(memory.type)] || '历史片段';
-        const line = `- [${label} | 重要度 ${Number(memory.salience || 0).toFixed(2)} | 置信度 ${Number(memory.confidence || 0).toFixed(2)}] ${memory.content}`;
+        const reason = String(memory.usageReason || memory.usage_reason || '').trim();
+        const line = `- [${label} | 重要度 ${Number(memory.salience || 0).toFixed(2)} | 置信度 ${Number(memory.confidence || 0).toFixed(2)}${reason ? ` | 使用原因：${reason}` : ''}] ${memory.content}`;
         const next = estimateTokens(`${line}\n`);
         if (used + next > maxTokens) break;
         lines.push(line);
@@ -75,7 +76,8 @@ function buildLongTermMemoryContextMessage(memories = [], options = {}) {
         metadata: {
             type: 'long_term_memory',
             memoryCount: lines.length,
-            budgetTokens: maxTokens
+            budgetTokens: maxTokens,
+            usageReasons: memories.slice(0, lines.length).map(memory => ({ id: memory.id || null, reason: memory.usageReason || memory.usage_reason || '与当前任务语义相关' }))
         }
     };
 }

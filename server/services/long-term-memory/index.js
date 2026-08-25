@@ -855,7 +855,8 @@ async function retrieveLongTermMemories(userId, queryText, options = {}) {
             ...serializeMemory(row),
             score,
             relevance,
-            recent
+            recent,
+            usageReason: relevance >= 0.75 ? '与当前任务高度相关' : salience >= 0.75 ? '重要度较高，作为补充上下文' : '结合近期使用和置信度排序'
         };
     })
         .filter(item => item.relevance > 0 || item.salience >= 0.75)

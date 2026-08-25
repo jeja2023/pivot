@@ -1,4 +1,6 @@
 const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
+const { query, queryOne, execute } = require('../db/client');
+const { getBeijingTimestamp } = require('../time');
 const { hasSensitiveContent, normalizeMemoryType } = require('./long-term-memory/memory-utils');
 
 const MEMORY_POLICY_KEY = 'agent_memory_policy';
@@ -28,14 +30,35 @@ function parsePolicy(value) {
 }
 
 async function getMemoryPolicy(userId) {
-    return parsePolicy(await getUserSettingValueAsync(userId, MEMORY_POLICY_KEY));
+    const policy = parsePolicy(await getUserSettingValueAsync(userId, MEMORY_POLICY_KEY));
+    try {
+        const latest = await queryOne('SELECT version, effective_at FROM agent_memory_policy_versions WHERE user_id = ? ORDER BY version DESC LIMIT 1', [Number(userId)]);
+        return { ...policy, version: Number(latest?.version || 1), effectiveAt: latest?.effective_at || null };
+    } catch (_) {
+        return { ...policy, version: 1, effectiveAt: null };
+    }
 }
 
 async function updateMemoryPolicy(userId, patch = {}) {
     const current = await getMemoryPolicy(userId);
     const policy = parsePolicy({ ...current, ...(patch || {}) });
     await setUserSettingAsync(userId, MEMORY_POLICY_KEY, JSON.stringify(policy));
-    return policy;
+    const now = getBeijingTimestamp();
+    const version = Number(current.version || 1) + 1;
+    try {
+        await execute('INSERT INTO agent_memory_policy_versions (user_id, version, policy_json, effective_at, changed_fields, created_at) VALUES (?, ?, ?, ?, ?, ?)', [Number(userId), version, JSON.stringify(policy), now, JSON.stringify(Object.keys(patch || {}).slice(0, 32)), now]);
+    } catch (_) {}
+    return { ...policy, version, effectiveAt: now };
+}
+
+async function listMemoryPolicyVersions(userId, limit = 24) {
+    const rows = await query('SELECT version, policy_json, effective_at, changed_fields, created_at FROM agent_memory_policy_versions WHERE user_id = ? ORDER BY version DESC LIMIT ?', [Number(userId), Math.max(1, Math.min(Number.parseInt(limit, 10) || 24, 100))]);
+    return rows.map(row => ({ version: Number(row.version), policy: parsePolicy(row.policy_json), effectiveAt: row.effective_at || null, changedFields: parsePolicyArray(row.changed_fields), createdAt: row.created_at || null }));
+}
+
+function parsePolicyArray(value) {
+    if (Array.isArray(value)) return value;
+    try { const parsed = JSON.parse(String(value || '[]')); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; }
 }
 
 function classifyMemory({ type = '', category = '', content = '' } = {}) {
@@ -95,6 +118,7 @@ module.exports = {
     classifyMemory,
     evaluateMemoryCapture,
     getMemoryPolicy,
+    listMemoryPolicyVersions,
     parsePolicy,
     normalizeMemoryGovernance,
     resolveMemoryGovernance,

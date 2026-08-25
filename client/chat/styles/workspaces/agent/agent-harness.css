@@ -1475,3 +1475,31 @@ body.dark-mode .agent-harness-pack-sync,
         justify-content: flex-start;
     }
 }
+.agent-control-plane {
+    margin: 12px 0 16px;
+    border: 1px solid var(--border-color, #d9dee8);
+    background: var(--surface-color, #fff);
+    border-radius: 8px;
+    padding: 14px;
+}
+.agent-control-plane-head, .agent-goal-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.agent-control-plane-head strong { display: block; font-size: 15px; }
+.agent-control-plane-head span { color: var(--text-muted, #6b7280); font-size: 12px; }
+.agent-control-plane-actions { display: flex; gap: 8px; }
+.agent-inbox-count { display: inline-flex; min-width: 18px; justify-content: center; padding: 0 4px; border-radius: 9px; background: #dbeafe; color: #1d4ed8; font-size: 11px !important; }
+.agent-inbox-panel, .agent-goals-panel, .agent-reliability-panel, .agent-quality-panel, .agent-channels-panel { margin-top: 10px; min-height: 28px; }
+.agent-channel-editor { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.agent-channel-list { display: grid; gap: 8px; margin-top: 8px; }
+.agent-profile-wizard-panel { display: block; margin-top: 10px; padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; }
+.agent-profile-wizard-panel.hidden { display: none; }
+.agent-inbox-list, .agent-goal-list, .agent-reliability-list { display: grid; gap: 8px; }
+.agent-control-item { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; }
+.agent-control-item strong { font-size: 13px; }
+.agent-control-item small { display: block; color: var(--text-muted, #6b7280); margin-top: 3px; }
+.agent-control-item-meta { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.agent-goal-editor { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 10px; }
+.agent-goal-editor label { display: grid; gap: 4px; font-size: 12px; }
+.agent-goal-editor label:nth-child(2) { grid-column: span 2; }
+.agent-goal-editor-actions { grid-column: 1 / -1; justify-content: flex-end; }
+@media (max-width: 800px) { .agent-goal-editor { grid-template-columns: 1fr 1fr; } .agent-goal-editor label:nth-child(2) { grid-column: span 2; } }
+@media (max-width: 800px) { .agent-channel-editor { grid-template-columns: 1fr 1fr; } }

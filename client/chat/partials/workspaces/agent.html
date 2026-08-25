@@ -17,6 +17,33 @@
                 <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
                 <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-controls="automation-schedules-panel" aria-selected="false" tabindex="-1">计划任务</button>
             </div>
+            <section id="agent-control-plane" class="agent-control-plane" aria-label="Agent 工作台">
+                <div class="agent-control-plane-head">
+                    <div>
+                        <strong>Agent 工作台</strong>
+                        <span>档案、记忆、持续目标、反馈和受控能力进化</span>
+                    </div>
+                    <div class="agent-control-plane-actions">
+                        <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">收件箱 <span id="agent-inbox-count" class="agent-inbox-count">0</span></button>
+                        <button id="agent-goal-create" class="btn-primary btn-xs" type="button">新建持续目标</button>
+                    </div>
+                </div>
+                <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
+                <div id="agent-goals-panel" class="agent-goals-panel"></div>
+                <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
+                <div id="agent-quality-panel" class="agent-quality-panel"></div>
+                <div id="agent-channels-panel" class="agent-channels-panel"></div>
+                <form id="agent-goal-editor" class="agent-goal-editor hidden">
+                    <label><span>目标名称</span><input id="agent-goal-title" class="form-input" maxlength="160" required></label>
+                    <label><span>目标</span><textarea id="agent-goal-goal" class="form-input" rows="2" maxlength="12000" required></textarea></label>
+                    <label><span>事件源</span><select id="agent-goal-trigger" class="form-input"><option value="timer">定时</option><option value="webhook">Webhook</option><option value="file">文件变化</option><option value="database">数据变化</option><option value="manual">手动</option></select></label>
+                    <label id="agent-goal-time-field"><span>执行时间</span><input id="agent-goal-time" class="form-input" type="time" value="09:00"></label>
+                    <label id="agent-goal-directory-field" class="hidden"><span>监听目录</span><input id="agent-goal-directory" class="form-input" placeholder="必须位于受控目录根内"></label>
+                    <label id="agent-goal-query-field" class="hidden"><span>只读增量查询</span><input id="agent-goal-query" class="form-input" placeholder="SELECT ... WHERE updated_at > '{{watermark}}'"></label>
+                    <div class="agent-goal-editor-actions"><button type="button" id="agent-goal-cancel" class="btn-secondary btn-xs">取消</button><button type="submit" class="btn-primary btn-xs">保存</button></div>
+                    <div id="agent-goal-token-notice" class="agent-harness-notice" role="status"></div>
+                </form>
+            </section>
             <div class="agent-workbench">
                 <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog" aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
                     <div id="agent-run-panel" class="modal agent-task-editor-modal">
@@ -325,6 +352,16 @@ permissions: []"></textarea>
                                 </div>
                                 <div class="agent-harness-form-actions">
                                     <button id="agent-profile-save" class="btn-primary" type="button">保存档案</button>
+                                    <button id="agent-profile-wizard" class="btn-secondary" type="button">快速设置</button>
+                                </div>
+                                <div id="agent-profile-wizard-panel" class="agent-profile-wizard-panel hidden" role="dialog" aria-label="Agent 快速设置">
+                                    <div class="agent-harness-subhead"><strong>3 分钟快速设置</strong><span>先设置称呼、语言、详略和常见工作类型，再补充高级档案。</span></div>
+                                    <div class="agent-harness-form-grid agent-harness-form-grid-3col">
+                                        <label><span>称呼</span><input id="agent-wizard-name" class="form-input" maxlength="120"></label>
+                                        <label><span>语言</span><select id="agent-wizard-language" class="form-input"><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
+                                        <label><span>输出详略</span><select id="agent-wizard-verbosity" class="form-input"><option value="concise">精简</option><option value="balanced">平衡</option><option value="detailed">详细</option></select></label>
+                                    </div>
+                                    <div class="agent-harness-form-actions"><button id="agent-wizard-save" class="btn-primary" type="button">完成设置</button></div>
                                 </div>
                             </section>
 

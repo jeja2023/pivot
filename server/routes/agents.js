@@ -1,6 +1,7 @@
 const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { queryOne } = require('../db/client');
+const { createAgentControlPlaneRouter } = require('./agent-control-plane');
 const { isSuperAdmin } = require('../permissions');
 const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
@@ -13,7 +14,7 @@ const {
     updateAgentRunTitleAndGoalForUser
 } = require('../services/agent-runs');
 const { preflightAgentRun } = require('../services/agent-preflight');
-const { resolveAgentWorkflowVersion } = require('../services/agent-workflows');
+const { getAgentWorkflowForUser, resolveAgentWorkflowVersion } = require('../services/agent-workflows');
 const {
     getAgentWorkflowDependencyConfiguration,
     saveAgentWorkflowDependencyConfiguration
@@ -34,7 +35,7 @@ const { getAgentRunResources } = require('../services/agent-run-resources');
 const { listAgentToolCalls } = require('../services/agent-tool-audit');
 const { listChatAgentRunsForSession } = require('../services/chat-agent-bridge');
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
-const { disableAgentSkill, listAgentSkillsForUser, registerAgentSkill } = require('../services/agent-skills');
+const { disableAgentSkill, listAgentSkillsForUser } = require('../services/agent-skills');
 const { installSkillPackage, verifySkillPackage } = require('../services/agent-skill-packages');
 const { listRuntimePacks, syncRuntimePack } = require('../services/agent-runtime-packs');
 const { createAgentResidencyStore } = require('../services/agent-residency');
@@ -49,18 +50,10 @@ const {
 } = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
-const { getAgentProfile, updateAgentProfile } = require('../services/agent-profile');
-const {
-    applyEvolutionProposal,
-    createEvolutionProposal,
-    decideEvolutionProposal,
-    listEvolutionProposals
-} = require('../services/agent-evolution');
-const {
-    getAgentFeedbackSummary,
-    listAgentFeedback,
-    recordAgentFeedback
-} = require('../services/agent-feedback');
+const { recordAgentFeedback } = require('../services/agent-feedback');
+const { createSkillVersion } = require('../services/agent-releases');
+const { publishWorkflowRelease } = require('../services/agent-releases');
+const { buildDelegationContext, listCollaboratorRuns, normalizeDelegationInput } = require('../services/agent-collaboration');
 const {
     createWorkflowCredential,
     deleteWorkflowCredential,
@@ -101,7 +94,6 @@ const {
     getAgentMetrics,
     getAgentRuntimeStatus,
     markAgentNotificationRead,
-    publishAgentWorkflowVersion,
     rerunAgentRun,
     rerunAgentDagFromNode,
     resumeAgentRun,
@@ -125,57 +117,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
     const residency = createAgentResidencyStore();
+    router.use(createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter }));
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
-    }));
-
-    router.get('/agents/profile', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, profile: await getAgentProfile(req.user.id) });
-    }));
-
-    router.put('/agents/profile', authMiddleware, asyncHandler(async (req, res) => {
-        const profile = await updateAgentProfile(req.user.id, req.body || {});
-        logAction(req, '更新个人 Agent 档案', `档案版本: ${profile.version}`);
-        res.json({ success: true, profile });
-    }));
-
-    router.get('/agents/feedback', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, data: await listAgentFeedback(req.user, { limit: req.query.limit }) });
-    }));
-
-    router.get('/agents/feedback/summary', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, summary: await getAgentFeedbackSummary(req.user, { days: req.query.days }) });
-    }));
-
-    router.post('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => {
-        const proposal = await createEvolutionProposal(req.user, req.body || {});
-        logAction(req, '创建 Agent 进化提议', `提议ID: ${proposal.id}，类型: ${proposal.kind}`);
-        res.status(201).json({ success: true, proposal });
-    }));
-
-    router.post('/agents/runs/:id/evolution-proposals', authMiddleware, asyncHandler(async (req, res) => {
-        const proposal = await createEvolutionProposal(req.user, { ...(req.body || {}), sourceRunId: req.params.id });
-        logAction(req, '从 Agent 任务创建进化提议', `任务ID: ${req.params.id}，提议ID: ${proposal.id}`);
-        res.status(201).json({ success: true, proposal });
-    }));
-
-    router.get('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, data: await listEvolutionProposals(req.user, { status: req.query.status, limit: req.query.limit }) });
-    }));
-
-    router.post('/agents/evolution/proposals/:id/decision', authMiddleware, asyncHandler(async (req, res) => {
-        const proposal = await decideEvolutionProposal(req.user, req.params.id, req.body?.decision, req.body?.note || req.body?.reviewNote);
-        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
-        logAction(req, proposal.status === 'approved' ? '批准 Agent 进化提议' : '拒绝 Agent 进化提议', `提议ID: ${proposal.id}`);
-        res.json({ success: true, proposal });
-    }));
-
-    router.post('/agents/evolution/proposals/:id/apply', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await applyEvolutionProposal(req.user, req.params.id);
-        if (!result) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
-        if (result.applied) logAction(req, '应用 Agent 进化提议', `提议ID: ${req.params.id}`);
-        res.json({ success: true, ...result });
     }));
 
     router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
@@ -185,15 +130,17 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     router.post('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
         const allowedPermissions = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '')
             .split(',').map(item => item.trim()).filter(Boolean);
-        const skill = await registerAgentSkill(req.user, req.body?.manifest || req.body?.manifestYaml, req.body?.instructions || '', {
+        const version = await createSkillVersion(req.user, {
+            manifest: req.body?.manifest || req.body?.manifestYaml,
+            instructions: req.body?.instructions || '',
             // The client cannot widen the permission set. An empty server-side
             // allowlist intentionally rejects manifests that request privileges.
             allowedPermissions,
             requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false' || req.body?.requireSignature === true,
             publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
         });
-        logAction(req, '注册 Agent Skill', `Skill: ${skill.name}`);
-        res.status(201).json({ success: true, skill });
+        logAction(req, '创建 Agent Skill 版本草稿', `Skill: ${version.name}@${version.version}`);
+        res.status(201).json({ success: true, version, status: 'draft' });
     }));
 
     router.post('/agents/skills/package', authMiddleware, uploadLimiter || ((_req, _res, next) => next()), ...(skillUpload?.single ? skillUpload.single('file') : []), asyncHandler(async (req, res) => {
@@ -212,13 +159,17 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
                 publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || '',
                 installRoot: process.env.AGENT_SKILL_ROOT
             });
-            const skill = await registerAgentSkill(req.user, verified.manifest.manifest, verified.package.instructions, {
+            const version = await createSkillVersion(req.user, {
+                manifest: verified.manifest.manifest,
+                instructions: verified.package.instructions,
+                packageRoot: installed.installDir,
                 allowedPermissions,
-                requireSignature: false,
+                requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false',
+                signatureVerified: Boolean(verified.signatureValid),
                 publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
             });
-            logAction(req, '导入 Agent Skill 包', `Skill: ${skill.name}，包摘要: ${installed.package.digest}`);
-            res.status(201).json({ success: true, skill, package: { digest: installed.package.digest, installDir: installed.installDir, bytes: installed.package.bytes } });
+            logAction(req, '导入 Agent Skill 包草稿', `Skill: ${version.name}@${version.version}，包摘要: ${installed.package.digest}`);
+            res.status(201).json({ success: true, version, package: { digest: installed.package.digest, installDir: installed.installDir, bytes: installed.package.bytes }, status: 'draft' });
         } finally {
             try { require('fs').rmSync(req.file.path, { force: true }); } catch (_) {}
         }
@@ -423,10 +374,11 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     }));
 
     router.post('/agents/workflows/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
-        const workflow = await publishAgentWorkflowVersion(req.params.id, req.user, req.body?.version || 'current');
-        if (!workflow) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
-        logAction(req, '发布智能体工作流版本', `工作流ID: ${workflow.id}，发布版本: ${workflow.published_version || '-'}`);
-        res.json({ success: true, workflow });
+        const release = await publishWorkflowRelease(req.params.id, req.user, { ...(req.body || {}), version: req.body?.version || 'current', fixedEvaluationRequired: req.body?.fixedEvaluationRequired !== false });
+        if (!release) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
+        const workflow = await getAgentWorkflowForUser(req.params.id, req.user);
+        logAction(req, '发布智能体工作流版本', `工作流ID: ${req.params.id}，发布版本: ${workflow?.published_version || '-'}`);
+        res.json({ success: true, workflow, release });
     }));
 
     router.get('/agents/workflows/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
@@ -728,6 +680,33 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
         const checkpoints = await listAgentCheckpointsForUser(req.params.id, req.user, { limit: req.query.limit });
         if (!checkpoints) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json({ data: checkpoints });
+    }));
+
+    router.get('/agents/runs/:id/collaborators', authMiddleware, asyncHandler(async (req, res) => {
+        const collaborators = await listCollaboratorRuns(req.params.id, req.user);
+        if (!collaborators) return res.status(404).json({ error: '父任务不存在或无权访问。' });
+        res.json({ success: true, data: collaborators });
+    }));
+
+    router.post('/agents/runs/:id/delegate', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const context = await buildDelegationContext(req.params.id, req.user);
+        if (!context) return res.status(404).json({ error: '父任务不存在或无权委派。' });
+        const delegation = normalizeDelegationInput(req.body || {});
+        const child = await createAgentRun({
+            user: req.user,
+            parentRunId: context.parentRunId,
+            goal: delegation.goal,
+            title: delegation.title,
+            maxSteps: delegation.maxSteps,
+            maxTokenBudget: delegation.maxTokenBudget,
+            approvalPolicy: delegation.approvalPolicy,
+            toolPolicy: delegation.toolPolicy,
+            forkHistory: delegation.forkHistory,
+            dedupeKey: req.get('Idempotency-Key') ? `delegate:${context.parentRunId}:${String(req.get('Idempotency-Key')).slice(0, 180)}` : null,
+            metadata: { source: 'delegation', parentRunId: context.parentRunId, collaboration: { parentTitle: context.parentTitle } }
+        });
+        logAction(req, '委派 Agent 协作子任务', `父任务ID: ${context.parentRunId}，子任务ID: ${child.id}`);
+        res.status(202).json({ success: true, run: child, parent: context });
     }));
 
     router.get('/agents/runs/:id/events', authMiddleware, asyncHandler(async (req, res) => {

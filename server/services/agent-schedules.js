@@ -34,12 +34,16 @@ let createAgentNotificationCallback = () => null;
 // 触发器轮询入口由运行时注入，避免计划服务和触发器服务互相引用
 let pollingTriggerRunner = null;
 let approvalTimeoutRunner = null;
+let proactiveGoalRunner = null;
+let channelDeliveryRunner = null;
 
-function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts } = {}) {
+function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts, runProactiveGoals, runChannelDeliveries } = {}) {
     if (typeof createAgentRun === 'function') createAgentRunCallback = createAgentRun;
     if (typeof createAgentNotification === 'function') createAgentNotificationCallback = createAgentNotification;
     if (typeof runPollingTriggers === 'function') pollingTriggerRunner = runPollingTriggers;
     if (typeof runApprovalTimeouts === 'function') approvalTimeoutRunner = runApprovalTimeouts;
+    if (typeof runProactiveGoals === 'function') proactiveGoalRunner = runProactiveGoals;
+    if (typeof runChannelDeliveries === 'function') channelDeliveryRunner = runChannelDeliveries;
 }
 
 function parseBeijingDate(value) {
@@ -427,19 +431,29 @@ async function runDueAgentSchedules(limit = 20) {
 }
 
 function startAgentScheduleRunner() {
-    const tick = () => {
-        runDueAgentSchedules().catch(e => {
-            logger.error({ err: e.message }, '智能体计划调度器执行失败');
-        });
-        // 文件落地和数据变更触发器共用同一个 tick，失败不影响计划调度
-        Promise.resolve()
-            .then(() => pollingTriggerRunner?.())
-            .catch(e => logger.error({ err: e.message }, '触发器轮询执行失败'));
-        Promise.resolve()
-            .then(() => approvalTimeoutRunner?.())
-            .catch(e => logger.error({ err: e.message }, '审批超时处理执行失败'));
+    let running = false;
+    const tick = async () => {
+        if (running) return;
+        running = true;
+        try {
+            const jobs = [
+                ['智能体计划调度失败', () => runDueAgentSchedules()],
+                ['触发器轮询执行失败', () => pollingTriggerRunner?.()],
+                ['审批超时处理执行失败', () => approvalTimeoutRunner?.()],
+                ['持续目标调度执行失败', () => proactiveGoalRunner?.()],
+                ['渠道投递执行失败', () => channelDeliveryRunner?.()]
+            ];
+            const results = await Promise.allSettled(jobs.map(([, job]) => Promise.resolve().then(job)));
+            results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                    logger.error({ err: result.reason?.message || String(result.reason) }, jobs[index][0]);
+                }
+            });
+        } finally {
+            running = false;
+        }
     };
-    const initial = setTimeout(tick, 5000);
+    const initial = setTimeout(() => { void tick(); }, 5000);
     initial.unref?.();
     const timer = setInterval(tick, 60 * 1000);
     timer.unref?.();

@@ -3,6 +3,8 @@ const { buildRagSearchContent } = require('../../services/rag-tokenizer');
 const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
 const personalAgentMigrations = require('./personal-agent');
+const personalAgentControlPlaneMigrations = require('./personal-agent-control-plane');
+const agentProductionControlPlaneMigrations = require('./agent-production-control-plane');
 
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -874,6 +876,8 @@ const migrations = [
         }
     },
     ...personalAgentMigrations,
+    ...personalAgentControlPlaneMigrations,
+    ...agentProductionControlPlaneMigrations,
     ...regulationsMigrations
 ];
 

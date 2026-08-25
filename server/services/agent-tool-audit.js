@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { query, execute } = require('../db/client');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
 const { redactTraceValue } = require('./agent-traces');
@@ -20,7 +20,8 @@ async function recordAgentToolCall(data = {}) {
             policy_version, approval_id, idempotent, input_payload, input_hash,
             output_payload_ref, output_hash, status, error_category, error_message,
             duration_ms, created_at, attempt, operation_key, context_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ,tenant_id, tool_version, task_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const params = [
         id,
@@ -45,6 +46,9 @@ async function recordAgentToolCall(data = {}) {
         Math.max(Number(data.attempt) || 1, 1),
         data.operationKey || null,
         String(data.contextHash || '').slice(0, 64)
+        ,data.tenantId || data.tenant_id || null
+        ,String(data.toolVersion || data.tool_version || '').slice(0, 64)
+        ,String(data.taskType || data.task_type || '').slice(0, 160)
     ];
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -66,6 +70,15 @@ async function recordAgentToolCall(data = {}) {
         }
         lastError.code = lastError.code || 'AGENT_AUDIT_WRITE_FAILED';
         throw lastError;
+    }
+    if (String(data.status || '') === 'error' || String(data.status || '') === 'failed' || String(data.status || '') === 'denied') {
+        try {
+            const run = await queryOne('SELECT user_id FROM agent_runs WHERE id = ?', [data.runId]);
+            if (run?.user_id) {
+                const { createAgentInboxEvent } = require('./agent-inbox');
+                await createAgentInboxEvent({ id: run.user_id }, { eventKey: `tool.error:${data.runId}:${data.toolName}:${data.inputHash || digest(input)}`, eventType: 'tool.error', sourceRunId: data.runId, sourceId: data.toolName, title: '工具调用异常', body: String(data.errorMessage || data.errorCategory || '工具调用失败').slice(0, 1000), risk: data.policyDecision === 'denied' ? 'high' : 'medium', payload: { tool: data.toolName, status: data.status, category: data.errorCategory || '' } });
+            }
+        } catch (_) {}
     }
     return id;
 }

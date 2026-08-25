@@ -1,4 +1,5 @@
-const { queryOne, execute } = require('../db/client');
+const crypto = require('crypto');
+const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
     parseJsonObject,
@@ -17,6 +18,7 @@ const {
 } = require('./unit-visibility');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
+const { getPrimaryTenantId } = require('./enterprise-access');
 
 /**
  * 工作流访问判定：所有者可读写，共享工作流按部门范围只读可运行。
@@ -266,7 +268,18 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
             err.status = 400;
             throw err;
         }
-        versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.published_version_id);
+        const tenantId = user.tenant_id || await getPrimaryTenantId(user.id);
+        const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
+        const userId = Number(user?.id || 0);
+        const userUnit = String(user?.unit || '').trim();
+        const selectedRelease = releaseRows.find(release => {
+            const ids = parseJsonObject(release.target_user_ids) || [];
+            const units = parseJsonObject(release.target_units) || [];
+            const hash = crypto.createHash('sha256').update(`${userId}:${release.id}`).digest().readUInt32BE(0) % 100;
+            return (!ids.length || ids.includes(userId)) && (!units.length || units.includes(userUnit)) && hash < Number(release.rollout_percent || 100);
+        });
+        const fallbackVersionId = selectedRelease?.workflow_version_id || releaseRows[1]?.workflow_version_id || workflow.published_version_id;
+        versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, fallbackVersionId);
     } else if (requested === 'current') {
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.current_version_id);
     } else {
@@ -394,7 +407,7 @@ async function updateAgentWorkflowSharing(workflowId, user, body = {}) {
     return await getAgentWorkflowForUser(current.id, user);
 }
 
-async function publishAgentWorkflowVersion(workflowId, user, version = 'current') {
+async function publishAgentWorkflowVersion(workflowId, user, version = 'current', options = {}) {
     if (!await findOwnedWorkflowRow(workflowId, user)) return null;
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current');
     if (!resolved) return null;
@@ -421,12 +434,32 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
             throw err;
         }
     }
+    const evaluation = await queryOne(`
+        SELECT er.summary
+        FROM agent_eval_runs er
+        JOIN agent_eval_suites es ON es.id = er.suite_id
+        WHERE es.workflow_id = ? AND er.user_id = ? AND er.status = 'completed'
+        ORDER BY er.created_at DESC LIMIT 1
+    `, [resolved.workflow.id, user.id]);
+    const passRate = Number(parseJsonObject(evaluation?.summary)?.passRate || 0);
+    if (options.skipEvaluationGate !== true && (!evaluation || passRate < 80)) {
+        const err = new Error('工作流必须通过固定评测集（通过率至少 80%）后才能发布。');
+        err.status = 409;
+        err.code = 'WORKFLOW_EVALUATION_GATE_FAILED';
+        throw err;
+    }
     const now = getBeijingTimestamp();
     await execute(`
         UPDATE agent_workflows
         SET published_version_id = ?, published_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [resolved.version_id, now, now, resolved.workflow.id, user.id]);
+    if (options.skipRelease !== true) try {
+        await execute(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, published_by, published_at) VALUES (?, ?, 'personal', 100, '[]'::jsonb, '[]'::jsonb, 'published', ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET status = 'published', rollout_percent = 100, published_by = excluded.published_by, published_at = excluded.published_at`, [resolved.workflow.id, resolved.version_id, user.id, now]);
+    } catch (releaseError) {
+        releaseError.code = releaseError.code || 'WORKFLOW_RELEASE_RECORD_FAILED';
+        throw releaseError;
+    }
     return await getAgentWorkflowForUser(resolved.workflow.id, user);
 }
 

@@ -206,6 +206,7 @@ const adminFeatureScripts = [
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
     '/chat/admin-settings.js',
+    '/chat/memory-usage.js',
     '/chat/admin-memory-ui.js',
     '/chat/announcements-admin.js',
     '/chat/tool-policy.js',
@@ -297,6 +298,9 @@ window.openAdminPanel = async (options = {}) => {
 };
 
 window.closeModal = () => {
+    window.cancelSettingsLoad?.();
+    window.cancelOpsSummaryLoad?.();
+    window.cancelMonitorSummaryLoad?.();
     window.clearMonitorRefreshTimer?.();
     document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
     return window.showMainWorkspace?.('chat');
@@ -313,7 +317,14 @@ window.switchTab = async (tab, options = {}) => {
     }
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
+    if (tab !== 'ops') {
+        window.cancelOpsSummaryLoad?.();
+    }
+    if (tab !== 'global-params') {
+        window.cancelSettingsLoad?.();
+    }
     if (tab !== 'monitor') {
+        window.cancelMonitorSummaryLoad?.();
         window.clearMonitorRefreshTimer?.();
     }
     const currentTab = document.querySelector('.admin-tab.active')?.id?.replace(/^tab-/, '');

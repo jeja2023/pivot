@@ -108,12 +108,12 @@ async function registerAgentSkill(user, manifestValue, instructions = '', option
     const ownerKey = scope === 'user' ? `user:${user?.id || 0}` : `scope:${scope}`;
     await execute(`
         INSERT INTO agent_skills (id, name, version, title, description, publisher, digest, manifest_yaml, instructions_md, scope, user_id, owner_key, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'enabled', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner_key, name) DO UPDATE SET
             version = excluded.version, title = excluded.title, description = excluded.description,
             publisher = excluded.publisher, digest = excluded.digest, manifest_yaml = excluded.manifest_yaml,
             instructions_md = excluded.instructions_md, scope = excluded.scope, user_id = excluded.user_id, owner_key = excluded.owner_key,
-            status = 'enabled', updated_at = excluded.updated_at
+            status = excluded.status, updated_at = excluded.updated_at
     `, [
         id,
         String(manifest.name).slice(0, 128),
@@ -127,6 +127,7 @@ async function registerAgentSkill(user, manifestValue, instructions = '', option
         scope,
         user?.id || null,
         ownerKey,
+        options.status === 'disabled' ? 'disabled' : 'enabled',
         now,
         now
     ]);
@@ -136,23 +137,35 @@ async function registerAgentSkill(user, manifestValue, instructions = '', option
 async function getAgentSkillExecutionContext(user, reference) {
     const value = String(reference || '').trim();
     if (!value) return null;
-    const row = await queryOne(`
-        SELECT id, name, version, manifest_yaml, scope, user_id, status
-        FROM agent_skills
-        WHERE (id = ? OR name = ?)
-          AND (user_id = ? OR scope IN ('shared', 'global'))
-          AND status = 'enabled'
-        ORDER BY updated_at DESC
-        LIMIT 1
-    `, [value, value, user?.id || 0]);
-    if (!row) {
-        const error = new Error('Skill 不存在、已停用或当前用户无权使用。');
-        error.code = 'AGENT_SKILL_FORBIDDEN';
-        error.status = 403;
+    try {
+        const { resolvePublishedSkill } = require('./agent-releases');
+        const release = await resolvePublishedSkill(value, user);
+        if (release) {
+            const context = buildSkillExecutionContext(release.manifest_yaml);
+            return {
+                ...context,
+                skillName: release.name,
+                skillVersion: release.version,
+                skillScope: release.rollout_scope,
+                releaseId: release.id,
+                rolloutPercent: Number(release.rollout_percent || 100)
+            };
+        }
+        const configured = await queryOne("SELECT id FROM agent_skill_releases WHERE name = ? AND status = 'published' LIMIT 1", [value]);
+        if (configured) {
+            const error = new Error('Skill 当前未命中灰度范围或没有可用发布版本。');
+            error.code = 'AGENT_SKILL_ROLLOUT_EXCLUDED';
+            error.status = 403;
+            throw error;
+        }
+    } catch (error) {
+        if (error?.code === 'AGENT_SKILL_ROLLOUT_EXCLUDED') throw error;
         throw error;
     }
-    const context = buildSkillExecutionContext(row.manifest_yaml);
-    return { ...context, skillName: row.name, skillScope: row.scope };
+    const error = new Error('Skill 不存在、未发布或当前用户未命中灰度范围。');
+    error.code = 'AGENT_SKILL_FORBIDDEN';
+    error.status = 403;
+    throw error;
 }
 
 async function listAgentSkillsForUser(user, options = {}) {

@@ -95,6 +95,7 @@ async function assembleChatContext({
                     status: 'hit',
                     message: `已检索到 ${memoryMatches.length} 条相关长期记忆`,
                     memoryCount: memoryMatches.length
+                    ,usageReasons: memoryMessage.metadata?.usageReasons || []
                 }));
             }
         } catch (err) {

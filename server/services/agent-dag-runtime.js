@@ -652,6 +652,13 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             const nodeStepIndex = stepIndex;
             stepIndex += 1;
             const selectedTool = findAgentToolByName(node.tool, toolList);
+            const runMetadata = typeof run.metadata === 'string' ? (() => { try { return JSON.parse(run.metadata); } catch (_) { return {}; } })() : (run.metadata || {});
+            if (String(runMetadata.workflowRunSource || runMetadata.runSource || '').toLowerCase() === 'preview'
+                && (selectedTool?.side_effect || selectedTool?.sideEffect || selectedTool?.requiresApproval || selectedTool?.approval_required)) {
+                const previewError = new Error('预览模式禁止执行副作用节点。');
+                previewError.code = 'AGENT_PREVIEW_SIDE_EFFECT_BLOCKED';
+                throw previewError;
+            }
             const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, {
                 goal: run.goal,
                 inputs: dagInputs,

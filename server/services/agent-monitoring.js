@@ -2,6 +2,7 @@ const { query, queryOne } = require('../db/client');
 const { nowOffsetExpr } = require('../db/dialect');
 const { normalizePositiveInt } = require('./agent-validators');
 const { isSuperAdmin } = require('../permissions');
+const { getPrimaryTenantId } = require('./enterprise-access');
 
 async function getAgentRuntimeStatus(options = {}) {
     const user = options.user || null;
@@ -34,11 +35,12 @@ async function getAgentRuntimeStatus(options = {}) {
 async function getAgentMetrics(user, days = 7) {
     const safeDays = normalizePositiveInt(days, 7, 1, 90);
     const superAdmin = isSuperAdmin(user);
+    const tenantId = user?.tenant_id || await getPrimaryTenantId(user?.id);
     const timeFilter = nowOffsetExpr(`-${safeDays} days`);
     const baseWhere = superAdmin
         ? `created_at >= ${timeFilter}`
-        : `user_id = ? AND created_at >= ${timeFilter}`;
-    const actualParams = superAdmin ? [] : [user.id];
+        : `user_id = ? AND (tenant_id IS NULL OR tenant_id = ?) AND created_at >= ${timeFilter}`;
+    const actualParams = superAdmin ? [] : [user.id, tenantId];
     const summary = await queryOne(`
         SELECT
             COUNT(*) AS total,

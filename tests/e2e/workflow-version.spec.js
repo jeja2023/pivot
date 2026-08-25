@@ -96,7 +96,7 @@ test('receiver dependency mapping becomes stale after a newly published workflow
         assert.ok(workflowId > 0);
 
         const firstPublish = await call(request, 'post', `/api/agents/workflows/${workflowId}/publish`, adminToken, {
-            version: 'current'
+            version: 'current', fixedEvaluationRequired: false
         });
         assert.equal(firstPublish.response.status(), 200, JSON.stringify(firstPublish.body));
 
@@ -136,7 +136,7 @@ test('receiver dependency mapping becomes stale after a newly published workflow
         assert.equal(Number(updatedWorkflow.body.workflow.current_version), 2);
 
         const secondPublish = await call(request, 'post', `/api/agents/workflows/${workflowId}/publish`, adminToken, {
-            version: 'current'
+            version: 'current', fixedEvaluationRequired: false
         });
         assert.equal(secondPublish.response.status(), 200, JSON.stringify(secondPublish.body));
         assert.equal(Number(secondPublish.body.workflow.published_version), 2);

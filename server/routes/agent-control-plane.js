@@ -1,0 +1,215 @@
+const express = require('express');
+const { asyncHandler } = require('../http');
+const { queryOne } = require('../db/client');
+const { getAgentProfile, listAgentProfileVersions, restoreAgentProfileVersion, updateAgentProfile } = require('../services/agent-profile');
+const {
+    applyEvolutionProposal, createEvolutionProposal, decideEvolutionProposal,
+    listEvolutionProposals, listEvolutionValidations, publishEvolutionProposal,
+    rollbackEvolutionProposal, validateEvolutionProposal
+} = require('../services/agent-evolution');
+const { getAgentFeedbackSummary, listAgentFeedback } = require('../services/agent-feedback');
+const { createAgentGoal, listAgentGoals, runAgentGoalNow, setAgentGoalStatus, updateAgentGoal } = require('../services/agent-goals');
+const { createAgentChannel, deleteAgentChannel, listAgentChannels, updateAgentChannel } = require('../services/agent-channels');
+const { listAgentInbox, markInboxItem } = require('../services/agent-inbox');
+const { listToolReliability } = require('../services/agent-tool-reliability');
+const { deleteAgentPersonalData, exportAgentPersonalData } = require('../services/agent-data');
+const { createSkillVersion, publishSkillVersion, publishWorkflowRelease, rollbackSkillRelease, rollbackWorkflowRelease, validateSkillVersion } = require('../services/agent-releases');
+const { getAgentQualityDashboard } = require('../services/agent-quality');
+const { getAgentImprovementSuggestions } = require('../services/agent-improvement-suggestions');
+
+function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter } = {}) {
+    const router = express.Router();
+    const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (_req, _res, next) => next();
+    const writeLog = typeof logAction === 'function' ? logAction : () => {};
+
+    router.get('/agents/profile', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, profile: await getAgentProfile(req.user.id) })));
+    router.get('/agents/profile/versions', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentProfileVersions(req.user.id, req.query.limit) })));
+    router.put('/agents/profile', authMiddleware, asyncHandler(async (req, res) => {
+        const profile = await updateAgentProfile(req.user.id, req.body || {}, { expectedVersion: req.body?.expectedVersion ?? req.body?.expected_version, source: req.body?.source || 'user' });
+        writeLog(req, '更新个人 Agent 档案', `档案版本: ${profile.version}`);
+        res.json({ success: true, profile });
+    }));
+    router.post('/agents/profile/versions/:version/restore', authMiddleware, asyncHandler(async (req, res) => {
+        const profile = await restoreAgentProfileVersion(req.user.id, req.params.version);
+        if (!profile) return res.status(404).json({ error: '档案版本不存在。', code: 'PROFILE_VERSION_NOT_FOUND' });
+        writeLog(req, '恢复个人 Agent 档案版本', `版本: ${req.params.version}，新版本: ${profile.version}`);
+        res.json({ success: true, profile });
+    }));
+
+    router.get('/agents/data/export', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, export: await exportAgentPersonalData(req.user) })));
+    router.delete('/agents/data', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await deleteAgentPersonalData(req.user, { reason: req.body?.reason || 'user_request' });
+        writeLog(req, '删除个人 Agent 数据', result);
+        res.json({ success: true, result });
+    }));
+
+    router.get('/agents/goals', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentGoals(req.user, { status: req.query.status, limit: req.query.limit }) })));
+    router.post('/agents/goals', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = await createAgentGoal(req.user, req.body || {});
+        writeLog(req, '创建 Agent 持续目标', `目标ID: ${result.goal.id}，标题: ${result.goal.title}`);
+        res.status(201).json({ success: true, ...result });
+    }));
+    router.patch('/agents/goals/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const goal = await updateAgentGoal(req.params.id, req.user, req.body || {});
+        if (!goal) return res.status(404).json({ error: '持续目标不存在或无权修改。', code: 'AGENT_GOAL_NOT_FOUND' });
+        writeLog(req, '更新 Agent 持续目标', `目标ID: ${goal.id}，版本: ${goal.version}`);
+        res.json({ success: true, goal });
+    }));
+    for (const [path, status, action] of [['pause', 'paused', '暂停'], ['resume', 'active', '恢复'], ['terminate', 'completed', '终止']]) {
+        router.post(`/agents/goals/:id/${path}`, authMiddleware, asyncHandler(async (req, res) => {
+            const goal = await setAgentGoalStatus(req.params.id, req.user, status);
+            if (!goal) return res.status(404).json({ error: '持续目标不存在或无权操作。' });
+            writeLog(req, `${action} Agent 持续目标`, `目标ID: ${goal.id}`);
+            res.json({ success: true, goal });
+        }));
+    }
+    router.post('/agents/goals/:id/run', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const goal = await queryOne("SELECT * FROM agent_goals WHERE id = ? AND user_id = ? AND status = 'active'", [req.params.id, req.user.id]);
+        if (!goal) return res.status(404).json({ error: '持续目标不存在、已暂停或无权运行。' });
+        const run = await runAgentGoalNow(goal, req.user, { triggerType: 'manual', triggerKey: `goal:${goal.id}:manual:${req.get('Idempotency-Key') || Date.now()}` });
+        writeLog(req, '手动运行 Agent 持续目标', `目标ID: ${goal.id}，任务ID: ${run.id}`);
+        res.status(202).json({ success: true, run });
+    }));
+    router.delete('/agents/goals/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const goal = await setAgentGoalStatus(req.params.id, req.user, 'deleted');
+        if (!goal) return res.status(404).json({ error: '持续目标不存在或无权删除。' });
+        writeLog(req, '删除 Agent 持续目标', `目标ID: ${goal.id}`);
+        res.json({ success: true, goal });
+    }));
+
+    router.get('/agents/inbox', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await listAgentInbox(req.user, { type: req.query.type, limit: req.query.limit })) })));
+    router.post('/agents/inbox/:sourceType/:sourceId/:action', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await markInboxItem(req.user, req.params.sourceType, req.params.sourceId, req.params.action, req.body || {});
+        if (!result) return res.status(404).json({ error: '收件箱条目不存在或无权操作。' });
+        res.json({ success: true, item: result });
+    }));
+    router.get('/agents/tools/reliability', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await listToolReliability(req.user, { days: req.query.days, scope: req.query.scope === 'tenant' && ['admin', 'root'].includes(String(req.user?.role || '').toLowerCase()) ? 'tenant' : 'user', persist: req.query.persist !== 'false' })) })));
+    router.get('/agents/improvements', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await getAgentImprovementSuggestions(req.user, { days: req.query.days })) })));
+    router.get('/agents/quality', authMiddleware, asyncHandler(async (req, res) => {
+        if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) return res.status(403).json({ error: '质量仪表盘仅管理员可访问。', code: 'AGENT_QUALITY_ADMIN_REQUIRED' });
+        res.json({ success: true, dashboard: await getAgentQualityDashboard(req.user, { days: req.query.days }) });
+    }));
+
+    router.get('/agents/channels', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentChannels(req.user, { status: req.query.status }) })));
+    router.post('/agents/channels', authMiddleware, asyncHandler(async (req, res) => {
+        const channel = await createAgentChannel(req.user, req.body || {});
+        writeLog(req, '创建 Agent 渠道绑定', `渠道ID: ${channel.id}，类型: ${channel.channelType}`);
+        res.status(201).json({ success: true, channel });
+    }));
+    router.post('/agents/channels/:id/test', authMiddleware, asyncHandler(async (req, res) => {
+        const { enqueueChannelDelivery, deliverChannelDelivery } = require('../services/agent-channel-adapters');
+        const queued = await enqueueChannelDelivery(req.user, { bindingId: req.params.id, eventType: 'channel.test', idempotencyKey: req.get('Idempotency-Key') || `test:${Date.now()}`, subject: 'Pivot 渠道测试', body: String(req.body?.body || '渠道连通性测试').slice(0, 2000), attachments: req.body?.attachments, interaction: { test: true } });
+        if (!queued) return res.status(404).json({ error: '渠道不存在或已停用。' });
+        const delivery = await deliverChannelDelivery(queued.id);
+        res.status(202).json({ success: true, delivery });
+    }));
+    router.patch('/agents/channels/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const channel = await updateAgentChannel(req.params.id, req.user, req.body || {});
+        if (!channel) return res.status(404).json({ error: '渠道绑定不存在或无权修改。' });
+        res.json({ success: true, channel });
+    }));
+    router.delete('/agents/channels/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const channel = await deleteAgentChannel(req.params.id, req.user);
+        if (!channel) return res.status(404).json({ error: '渠道绑定不存在或无权删除。' });
+        res.json({ success: true, channel });
+    }));
+
+    router.get('/agents/feedback', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentFeedback(req.user, { limit: req.query.limit }) })));
+    router.get('/agents/feedback/summary', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, summary: await getAgentFeedbackSummary(req.user, { days: req.query.days }) })));
+
+    router.post('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await createEvolutionProposal(req.user, req.body || {});
+        writeLog(req, '创建 Agent 进化提议', `提议ID: ${proposal.id}，类型: ${proposal.kind}`);
+        res.status(201).json({ success: true, proposal });
+    }));
+    router.get('/agents/evolution/proposals', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listEvolutionProposals(req.user, { status: req.query.status, limit: req.query.limit }) })));
+    router.post('/agents/evolution/proposals/:id/decision', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await decideEvolutionProposal(req.user, req.params.id, req.body?.decision, req.body?.note || req.body?.reviewNote);
+        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
+        writeLog(req, proposal.status === 'approved' || proposal.status === 'pending_review' ? '批准 Agent 进化提议' : '拒绝 Agent 进化提议', `提议ID: ${proposal.id}`);
+        res.json({ success: true, proposal });
+    }));
+    router.post('/agents/evolution/proposals/:id/apply', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await applyEvolutionProposal(req.user, req.params.id);
+        if (!result) return res.status(404).json({ error: '进化提议不存在或无权操作。' });
+        if (result.applied) writeLog(req, '应用 Agent 进化提议', `提议ID: ${req.params.id}`);
+        res.json({ success: true, ...result });
+    }));
+    router.get('/agents/evolution/proposals/:id/validations', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await queryOne('SELECT id FROM agent_evolution_proposals WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权访问。' });
+        res.json({ success: true, data: await listEvolutionValidations(req.user, req.params.id) });
+    }));
+    router.post('/agents/evolution/proposals/:id/validate', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await validateEvolutionProposal(req.user, req.params.id, req.body || {});
+        if (!result) return res.status(404).json({ error: '进化提议不存在或无权验证。' });
+        writeLog(req, '验证 Agent 进化提议', `提议ID: ${req.params.id}，结果: ${result.validation.passed ? '通过' : '失败'}`);
+        res.status(result.validation.passed ? 200 : 422).json({ success: result.validation.passed, ...result });
+    }));
+    router.post('/agents/evolution/proposals/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await publishEvolutionProposal(req.user, req.params.id);
+        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权发布。' });
+        writeLog(req, '发布 Agent 进化版本', `提议ID: ${proposal.id}，版本: ${proposal.version}`);
+        res.json({ success: true, proposal });
+    }));
+    router.post('/agents/evolution/proposals/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await rollbackEvolutionProposal(req.user, req.params.id);
+        if (!result) return res.status(404).json({ error: '进化提议不存在或无权回滚。' });
+        writeLog(req, '回滚 Agent 进化版本', `提议ID: ${req.params.id}，回滚目标: ${result.rollbackTargetId || '无'}`);
+        res.json({ success: true, ...result });
+    }));
+    router.get('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
+        const rows = await require('../db/client').query('SELECT id, skill_id, name, version, digest, status, source_run_id, created_at, updated_at FROM agent_skill_versions WHERE created_by = ? ORDER BY updated_at DESC LIMIT ?', [req.user.id, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
+        res.json({ success: true, data: rows });
+    }));
+    router.get('/agents/skills/releases', authMiddleware, asyncHandler(async (req, res) => {
+        const rows = await require('../db/client').query(`SELECT r.*, v.version, v.digest, v.manifest_yaml FROM agent_skill_releases r JOIN agent_skill_versions v ON v.id = r.skill_version_id WHERE r.owner_key = ? OR r.rollout_scope IN ('team', 'organization') ORDER BY r.published_at DESC LIMIT ?`, [`user:${req.user.id}`, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
+        res.json({ success: true, data: rows.map(row => ({ ...row, manifest_yaml: undefined, target_user_ids: typeof row.target_user_ids === 'string' ? JSON.parse(row.target_user_ids || '[]') : row.target_user_ids, target_units: typeof row.target_units === 'string' ? JSON.parse(row.target_units || '[]') : row.target_units })) });
+    }));
+    router.get('/agents/skills/catalog', authMiddleware, asyncHandler(async (req, res) => {
+        const tenantId = req.user.tenant_id || (await require('../services/enterprise-access').getPrimaryTenantId(req.user.id));
+        const rows = await require('../db/client').query(`SELECT r.id, r.name, r.rollout_scope, r.rollout_percent, r.status, r.published_at, v.version, v.digest, v.title, v.description, v.publisher FROM agent_skill_releases r JOIN agent_skill_versions v ON v.id = r.skill_version_id WHERE r.status = 'published' AND ((r.owner_key = ? AND r.rollout_scope = 'personal') OR (r.tenant_id = ? AND r.rollout_scope IN ('team', 'organization'))) ORDER BY r.published_at DESC LIMIT ?`, [`user:${req.user.id}`, tenantId, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 200, 500))]);
+        res.json({ success: true, data: rows });
+    }));
+    router.post('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
+        const version = await createSkillVersion(req.user, req.body || {});
+        res.status(201).json({ success: true, version });
+    }));
+    router.post('/agents/skills/versions/:id/validate', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await validateSkillVersion(req.params.id, req.user, { ...(req.body || {}), publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || req.body?.publicKey || '', allowedPermissions: String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean) });
+        if (!result) return res.status(404).json({ error: 'Skill 版本不存在或无权访问。' });
+        res.status(result.passed ? 200 : 422).json({ success: result.passed, ...result });
+    }));
+    router.post('/agents/skills/versions/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
+        const release = await publishSkillVersion(req.params.id, req.user, req.body || {});
+        if (!release) return res.status(404).json({ error: 'Skill 版本不存在或无权发布。' });
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/skills/releases/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
+        const release = await rollbackSkillRelease(req.params.id, req.user);
+        if (!release) return res.status(404).json({ error: 'Skill 发布不存在或无权回滚。' });
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/workflows/:id/releases', authMiddleware, asyncHandler(async (req, res) => {
+        const release = await publishWorkflowRelease(req.params.id, req.user, req.body || {});
+        if (!release) return res.status(404).json({ error: '工作流不存在或无权发布。' });
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/workflows/releases/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
+        const release = await rollbackWorkflowRelease(req.params.id, req.user);
+        if (!release) return res.status(404).json({ error: '工作流发布不存在或无权回滚。' });
+        res.json({ success: true, release });
+    }));
+    router.get('/agents/workflows/:id/releases', authMiddleware, asyncHandler(async (req, res) => {
+        const rows = await require('../db/client').query(`SELECT r.*, v.version, v.note FROM agent_workflow_releases r JOIN agent_workflow_versions v ON v.id = r.workflow_version_id WHERE r.workflow_id = ? ORDER BY r.published_at DESC LIMIT ?`, [req.params.id, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
+        res.json({ success: true, data: rows });
+    }));
+    router.post('/agents/runs/:id/evolution-proposals', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await createEvolutionProposal(req.user, { ...(req.body || {}), sourceRunId: req.params.id });
+        writeLog(req, '从 Agent 任务创建进化提议', `任务ID: ${req.params.id}，提议ID: ${proposal.id}`);
+        res.status(201).json({ success: true, proposal });
+    }));
+    return router;
+}
+
+module.exports = { createAgentControlPlaneRouter };

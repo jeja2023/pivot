@@ -2,7 +2,7 @@ const { queryOne } = require('../../db/client');
 const { looksLikeCorruptTitle } = require('../agent-validators');
 const { getAgentRunTitle, isPreviewAgentRun } = require('./metadata');
 
-function createAgentNotificationFactory({ getTimestamp, publishUserEvent }) {
+function createAgentNotificationFactory({ getTimestamp, publishUserEvent, deliverNotification, createInboxEvent }) {
     return async function createAgentNotification(userId, runId, type, title, body = '') {
         if (!userId || !title) return null;
         const run = runId
@@ -27,6 +27,8 @@ function createAgentNotificationFactory({ getTimestamp, publishUserEvent }) {
         const notification = await queryOne('SELECT * FROM agent_notifications WHERE id = ?', [row?.id]);
         if (notification) {
             publishUserEvent(userId, 'agent.notification', { notification });
+            try { await createInboxEvent?.({ id: userId }, { eventKey: `notification:${notification.id}`, eventType: `notification.${notification.type || 'info'}`, sourceId: notification.id, runId: notification.run_id, title: notification.title, body: notification.body || '', risk: ['approval', 'error'].includes(notification.type) ? 'high' : 'low' }); } catch (_) {}
+            try { await deliverNotification?.(userId, notification); } catch (_) {}
         }
         return notification;
     };

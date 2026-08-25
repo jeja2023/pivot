@@ -20,7 +20,7 @@ const {
     updateMemoryStatus,
     updateMemoryStatuses
 } = require('../services/long-term-memory');
-const { getMemoryPolicy, updateMemoryPolicy } = require('../services/memory-governance');
+const { getMemoryPolicy, listMemoryPolicyVersions, updateMemoryPolicy } = require('../services/memory-governance');
 
 function normalizeMemoryId(raw) {
     const id = Number.parseInt(raw, 10);
@@ -153,6 +153,10 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         res.json({ success: true, policy });
     }));
 
+    router.get('/memories/policy/versions', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, data: await listMemoryPolicyVersions(req.user.id, req.query.limit) });
+    }));
+
     router.put('/memories/status/bulk', authMiddleware, asyncHandler(async (req, res) => {
         const status = String(req.body?.status || MEMORY_STATUS.active);
         if (!Object.values(MEMORY_STATUS).includes(status)) {
@@ -188,6 +192,14 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         const source = await getMemorySource(req.user.id, id);
         if (!source) return res.status(404).json({ error: '未找到指定的长期记忆记录' });
         return res.json({ success: true, ...source });
+    }));
+
+    router.get('/memories/:id/usage', authMiddleware, asyncHandler(async (req, res) => {
+        const id = normalizeMemoryId(req.params.id);
+        if (!id) return res.status(400).json({ error: '记忆 ID 参数非法', code: 'MEMORY_ID_INVALID' });
+        const memory = await getMemorySource(req.user.id, id);
+        if (!memory) return res.status(404).json({ error: '未找到指定的长期记忆记录', code: 'MEMORY_NOT_FOUND' });
+        res.json({ success: true, usage: { memoryId: id, reason: '该记忆在检索中按相关性、重要度、置信度和近期性排序；只有满足相关性或高重要度时才注入上下文。', source: memory } });
     }));
 
     router.put('/memories/:id', authMiddleware, asyncHandler(async (req, res) => {

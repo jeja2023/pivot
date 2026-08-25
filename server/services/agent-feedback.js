@@ -1,5 +1,7 @@
 const { query, queryOne } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { hasSensitiveContent } = require('./long-term-memory/memory-utils');
+const { getPrimaryTenantId } = require('./enterprise-access');
 
 const OUTCOMES = Object.freeze(['success', 'partial', 'failure', 'unknown']);
 
@@ -31,6 +33,11 @@ function normalizeFailures(value) {
     }).filter(item => item.tool);
 }
 
+function redactSensitiveText(value, maxLength) {
+    const text = String(value || '').trim().slice(0, maxLength);
+    return hasSensitiveContent(text) ? '[已按记忆治理策略脱敏]' : text;
+}
+
 function serializeFeedback(row) {
     if (!row) return null;
     return {
@@ -39,8 +46,8 @@ function serializeFeedback(row) {
         runId: row.run_id,
         outcome: normalizeOutcome(row.outcome),
         rating: normalizeRating(row.rating),
-        correction: String(row.correction || ''),
-        modifiedAnswer: String(row.modified_answer || ''),
+        correction: redactSensitiveText(row.correction || '', 4000),
+        modifiedAnswer: redactSensitiveText(row.modified_answer || '', 12000),
         toolFailures: normalizeFailures(parseJson(row.tool_failures, [])),
         metadata: parseJson(row.metadata, {}),
         source: String(row.source || 'user'),
@@ -60,12 +67,13 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
     const run = await getOwnedRun(userId, normalizedRunId);
     if (!run) return null;
     const now = getBeijingTimestamp();
+    const tenantId = options.tenantId || await getPrimaryTenantId(userId);
     const outcome = normalizeOutcome(input.outcome || (['completed'].includes(run.status) ? 'success' : ['failed', 'error', 'cancelled'].includes(run.status) ? 'failure' : 'unknown'));
     const feedback = {
         outcome,
         rating: normalizeRating(input.rating),
-        correction: String(input.correction || '').trim().slice(0, 4000),
-        modifiedAnswer: String(input.modifiedAnswer || input.modified_answer || '').trim().slice(0, 12000),
+        correction: redactSensitiveText(input.correction || '', 4000),
+        modifiedAnswer: redactSensitiveText(input.modifiedAnswer || input.modified_answer || '', 12000),
         toolFailures: normalizeFailures(input.toolFailures || input.tool_failures),
         metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
         source: String(options.source || input.source || 'user').slice(0, 32)
@@ -73,8 +81,8 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
     if (JSON.stringify(feedback.metadata).length > 8000) feedback.metadata = { truncated: true };
     if (feedback.source !== 'user' && !['runtime', 'system'].includes(feedback.source)) feedback.source = 'user';
     const row = await queryOne(`
-        INSERT INTO agent_feedback (user_id, run_id, outcome, rating, correction, modified_answer, tool_failures, metadata, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO agent_feedback (user_id, tenant_id, run_id, outcome, rating, correction, modified_answer, tool_failures, metadata, source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, run_id) DO UPDATE SET
             outcome = excluded.outcome,
             rating = COALESCE(excluded.rating, agent_feedback.rating),
@@ -85,7 +93,7 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
             source = excluded.source,
             updated_at = excluded.updated_at
         RETURNING *
-    `, [userId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
+    `, [userId, tenantId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
     return serializeFeedback(row);
 }
 
@@ -97,25 +105,32 @@ async function recordAgentRunOutcome(runId, status, options = {}) {
         const rows = await query(`SELECT tool_name AS tool, COUNT(*) AS count FROM agent_tool_calls WHERE run_id = ? AND status IN ('error', 'failed', 'denied') GROUP BY tool_name ORDER BY count DESC LIMIT 20`, [String(run.id)]);
         failures = rows.map(row => ({ tool: row.tool, count: Number(row.count || 0) }));
     } catch (_) {}
-    return recordAgentFeedback({ id: run.user_id }, run.id, {
+    const result = await recordAgentFeedback({ id: run.user_id }, run.id, {
         outcome: ['completed'].includes(String(status)) ? 'success' : ['completed_with_errors'].includes(String(status)) ? 'partial' : 'failure',
         toolFailures: failures,
         metadata: { status, finalAnswerPresent: Boolean(run.final_answer), error: String(run.error_message || '').slice(0, 500) }
     }, { source: options.source || 'runtime' });
+    try {
+        const { recordAgentGoalRunOutcome } = require('./agent-goals');
+        await recordAgentGoalRunOutcome(run.id, result?.outcome);
+    } catch (_) {}
+    return result;
 }
 
 async function listAgentFeedback(user, options = {}) {
     const userId = Number.parseInt(user?.id || user, 10);
+    const tenantId = options.tenantId || user?.tenant_id || await getPrimaryTenantId(userId);
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 50, 200));
-    const rows = await query('SELECT * FROM agent_feedback WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?', [userId, limit]);
+    const rows = await query('SELECT * FROM agent_feedback WHERE user_id = ? AND (tenant_id IS NULL OR tenant_id = ?) ORDER BY updated_at DESC, id DESC LIMIT ?', [userId, tenantId, limit]);
     return rows.map(serializeFeedback);
 }
 
 async function getAgentFeedbackSummary(user, options = {}) {
     const userId = Number.parseInt(user?.id || user, 10);
+    const tenantId = options.tenantId || user?.tenant_id || await getPrimaryTenantId(userId);
     const days = Math.max(1, Math.min(Number.parseInt(options.days, 10) || 30, 365));
     const cutoff = getBeijingTimestamp(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
-    const rows = await query('SELECT * FROM agent_feedback WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC', [userId, cutoff]);
+    const rows = await query('SELECT * FROM agent_feedback WHERE user_id = ? AND (tenant_id IS NULL OR tenant_id = ?) AND created_at >= ? ORDER BY created_at DESC', [userId, tenantId, cutoff]);
     const feedback = rows.map(serializeFeedback);
     const byOutcome = Object.fromEntries(OUTCOMES.map(key => [key, 0]));
     const toolFailures = {};

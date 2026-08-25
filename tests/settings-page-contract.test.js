@@ -23,6 +23,9 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(settings, /async function loadSettings\(\)/);
     assert.match(settings, /globalName: 'loadSettings'/);
     assert.match(settings, /const requestId = \+\+settingsLoadSequence/);
+    assert.match(settings, /settingsLoadController\?\.abort\(\)/);
+    assert.match(settings, /globalName: 'cancelSettingsLoad'/);
+    assert.match(settings, /timeoutMs: 30000/);
     assert.match(settings, /settings-state-retry/);
     assert.match(settings, /chat_auto_agent_enabled/);
     assert.match(settings, /关闭后用户不能选择聊天 Agent 执行模式/);
@@ -40,6 +43,23 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(admin, /limit:\s*15/);
     assert.match(read('client/chat/config.js'), /CLIENT_REQUEST_TIMEOUT/);
     assert.match(read('server/services/host-classifier.js'), /PIVOT_DNS_LOOKUP_TIMEOUT_MS/);
+    const monitor = read('client/chat/stats-monitor.js');
+    const statsRoute = read('server/routes/admin-stats.js');
+    assert.match(monitor, /opsSummaryLoadPromise/);
+    assert.match(monitor, /monitorSummaryLoadPromise/);
+    assert.doesNotMatch(monitor, /const \[summaryRes, trendRes, monitorRes\]/);
+    assert.match(statsRoute, /monitorSummaryInFlight/);
+    assert.match(statsRoute, /opsSummaryInFlight/);
+    assert.match(statsRoute, /trendInFlight/);
+    assert.match(statsRoute, /tokenUsageAggregateSubquery/);
+    assert.match(statsRoute, /modelEndpoints/);
+});
+
+test('后台调度轮询具备防重入保护', () => {
+    const schedules = read('server/services/agent-schedules.js');
+    assert.match(schedules, /let running = false/);
+    assert.match(schedules, /if \(running\) return/);
+    assert.match(schedules, /Promise\.allSettled/);
 });
 
 test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {

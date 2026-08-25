@@ -94,12 +94,22 @@ async function getUserEnterpriseContext(userId) {
     }
 }
 
+async function getPrimaryTenantId(userId) {
+    const safeUserId = Number(userId || 0);
+    if (!safeUserId) return null;
+    try {
+        const row = await query(`SELECT o.id FROM team_members tm JOIN teams t ON t.id = tm.team_id AND t.status = 'active' JOIN organizations o ON o.id = t.organization_id AND o.status = 'active' WHERE tm.user_id = ? AND tm.status = 'active' ORDER BY o.id LIMIT 1`, [safeUserId]);
+        return row?.[0]?.id ? Number(row[0].id) : null;
+    } catch (_) { return null; }
+}
+
 function isEnterpriseAccessEnabled(env = process.env) {
     return String(env.PIVOT_ENTERPRISE_ACCESS || '').trim().toLowerCase() === 'true';
 }
 
 module.exports = {
     getUserEnterpriseContext,
+    getPrimaryTenantId,
     isEnterpriseAccessEnabled,
     listResourcePermissions,
     normalizeResourceType,

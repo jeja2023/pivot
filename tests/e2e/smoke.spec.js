@@ -2,6 +2,31 @@
 const { expect, test } = require('@playwright/test');
 
 test.describe('Pivot browser smoke', () => {
+    test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: {
+                username: 'admin',
+                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
+            }
+        });
+        expect(login.ok()).toBeTruthy();
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.locator('#automation-workbench-btn').click();
+        await expect(page.locator('#agent-control-plane')).toBeVisible();
+        await expect(page.locator('#agent-inbox-panel')).toBeVisible();
+        await expect(page.locator('#agent-goals-panel')).toBeVisible();
+        await expect(page.locator('#agent-channels-panel')).toBeVisible();
+        await page.locator('#agent-profile-wizard-panel').evaluate(panel => { panel.classList.remove('hidden'); panel.style.display = 'block'; });
+        await expect(page.locator('#agent-profile-wizard-panel')).toHaveClass(/agent-profile-wizard-panel/);
+        await page.locator('#agent-goal-create').evaluate(button => button.click());
+        await expect(page.locator('#agent-goal-editor')).toBeVisible();
+        await page.locator('#agent-goal-title').fill('E2E 临时目标');
+        await page.locator('#agent-goal-goal').fill('E2E 验证持续目标入口');
+        await page.locator('#agent-goal-trigger').selectOption('manual');
+        await page.locator('#agent-goal-editor button[type="submit"]').click();
+        await expect(page.locator('#agent-goals-panel')).toContainText('E2E 临时目标');
+    });
+
     test('chat shell loads safe HTML and Pivot module namespace', async ({ page }) => {
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await expect(page.locator('body')).toBeVisible();

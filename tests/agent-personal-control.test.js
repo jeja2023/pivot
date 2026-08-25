@@ -5,6 +5,8 @@ const { buildAgentProfileContext, normalizeAgentProfile } = require('../server/s
 const { classifyMemory, normalizeMemoryGovernance, parsePolicy } = require('../server/services/memory-governance');
 const { normalizeProposalInput } = require('../server/services/agent-evolution');
 const { serializeFeedback } = require('../server/services/agent-feedback');
+const { normalizeGoalInput, normalizeTriggerSpec } = require('../server/services/agent-goals');
+const { calculateToolScore, normalizeReliabilitySignal } = require('../server/services/agent-tool-reliability');
 
 test('personal Agent profile is normalized into bounded, explicit fields', () => {
     const profile = normalizeAgentProfile({
@@ -37,4 +39,20 @@ test('feedback serialization keeps correction and tool failure signals', () => {
     assert.equal(feedback.outcome, 'success');
     assert.equal(feedback.toolFailures[0].tool, 'rag.search');
     assert.equal(feedback.correction, '补充来源');
+});
+
+test('continuous goals normalize governed timer and webhook triggers', () => {
+    const timer = normalizeGoalInput({ title: '每日巡检', goal: '检查资料目录并汇总变化', triggerSpec: { type: 'timer', frequency: 'weekdays', timeOfDay: '09:00' } });
+    assert.equal(timer.triggerSpec.frequency, 'weekdays');
+    assert.equal(timer.authorizationSpec.approvalPolicy, 'safe_mcp_auto');
+    assert.throws(() => normalizeTriggerSpec({ type: 'webhook' }), /访问令牌/);
+    const webhook = normalizeTriggerSpec({ type: 'webhook', token: 'agt_test-token-value-1234567890' });
+    assert.match(webhook.tokenHash, /^[a-f0-9]{64}$/);
+});
+
+test('tool reliability score follows the governed weighted formula and confidence floor', () => {
+    assert.equal(calculateToolScore({ successRate: 1, timeoutRate: 0, helpfulRate: 1, schemaValidRate: 1 }), 1);
+    const sparse = normalizeReliabilitySignal({ toolName: 'demo', sampleCount: 2, successRate: 1, schemaValidRate: 1 });
+    assert.equal(sparse.confidence, 0);
+    assert.equal(sparse.minSampleCount, 3);
 });

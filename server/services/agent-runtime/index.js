@@ -113,6 +113,9 @@ const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
 const { diagnoseError } = require('../agent-diagnosis');
 const { recordAgentToolCall } = require('../agent-tool-audit');
 const { recordAgentRunOutcome } = require('../agent-feedback');
+const { listToolReliability, selectToolOrder } = require('../agent-tool-reliability');
+const { enqueueChannelDelivery, dispatchChannelDeliveries } = require('../agent-channel-adapters');
+const { createAgentInboxEvent } = require('../agent-inbox');
 const { createPersistedAgentStepContext } = require('../agent-world-state-store');
 const { recordAgentEvent } = require('../agent-event-log');
 const { claimAgentControlMessages } = require('../agent-control');
@@ -125,6 +128,18 @@ const {
     waitForWorkflowApproval,
     waitForWorkflowDelay
 } = require('../agent-approval-requests');
+const {
+    configureAgentGoals,
+    createAgentGoal,
+    dispatchAgentGoalWebhook,
+    getAgentGoal,
+    listAgentGoals,
+    recordAgentGoalRunOutcome,
+    runAgentGoalNow,
+    runDueAgentGoals,
+    setAgentGoalStatus,
+    updateAgentGoal
+} = require('../agent-goals');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { createAgentNotificationFactory } = require('./notifications');
@@ -143,7 +158,12 @@ const taskBudgetsBySignal = new WeakMap();
 let agentRecoveryTimer = null;
 const createAgentNotification = createAgentNotificationFactory({
     getTimestamp: getBeijingTimestamp,
-    publishUserEvent
+    publishUserEvent,
+    createInboxEvent: createAgentInboxEvent,
+    deliverNotification: async (userId, notification) => {
+        const bindings = await query('SELECT id FROM agent_channel_bindings WHERE user_id = ? AND status = \'active\'', [userId]);
+        for (const binding of bindings) await enqueueChannelDelivery({ id: userId }, { bindingId: binding.id, eventType: `agent.notification.${notification.type || 'info'}`, sourceId: notification.id, runId: notification.run_id, idempotencyKey: `notification:${notification.id}`, subject: notification.title, body: notification.body || '' });
+    }
 });
 const { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers({
     getRunMetadata,
@@ -543,7 +563,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
         title: `重跑节点：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
         priority: run.priority,
-        runMode: 'dag',
+            runMode: 'dag',
         toolPolicy: run.tool_policy,
         approvalPolicy: run.approval_policy,
         toolAllowlist: normalizeToolAllowlist(run.tool_allowlist),
@@ -916,6 +936,13 @@ async function runAgent(runId, user) {
             toolPolicy: run.tool_policy,
             toolAllowlist: run.tool_allowlist
         });
+        try {
+            const reliability = await listToolReliability(user, { days: 30, persist: false });
+            toolList = selectToolOrder(toolList, reliability.signals);
+            await setRunMetadata(runId, { toolReliabilityWindow: { days: reliability.days, minSampleCount: reliability.minSampleCount, signals: reliability.signals.slice(0, 100) } });
+        } catch (reliabilityError) {
+            logger.warn({ runId, err: reliabilityError.message }, '工具可靠性信号加载失败，继续固定排序');
+        }
         const chatBridge = runtimeMetadata.chatBridge;
         const plannerChatContext = chatBridge
             ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null }
@@ -1264,7 +1291,10 @@ async function runAgent(runId, user) {
                         policyDecision: 'allow',
                         status: 'success',
                         durationMs: Date.now() - startedAt,
-                        contextHash: stepContext.contextHash
+                        contextHash: stepContext.contextHash,
+                        tenantId: user.tenant_id || user.tenantId || null,
+                        toolVersion: findAgentToolByName(plan.tool, toolList)?.version || findAgentToolByName(plan.tool, toolList)?.tool_version || '',
+                        taskType: run.run_mode || ''
                     });
                 } catch (auditError) {
                     throw auditError;
@@ -1321,7 +1351,10 @@ async function runAgent(runId, user) {
                         errorCategory: diagnosis.category,
                         errorMessage: toolErr.message,
                         durationMs: Date.now() - startedAt,
-                        contextHash: stepContext.contextHash
+                        contextHash: stepContext.contextHash,
+                        tenantId: user.tenant_id || user.tenantId || null,
+                        toolVersion: findAgentToolByName(plan.tool, toolList)?.version || findAgentToolByName(plan.tool, toolList)?.tool_version || '',
+                        taskType: run.run_mode || ''
                     });
                 } catch (auditError) {
                     auditError.cause = toolErr;
@@ -1733,7 +1766,15 @@ configureAgentSchedules({
             { source: 'trigger' }
         )
     }),
-    runApprovalTimeouts
+    runApprovalTimeouts,
+    runProactiveGoals: () => runDueAgentGoals(),
+    runChannelDeliveries: () => dispatchChannelDeliveries(50, { onDeadLetter: delivery => createAgentInboxEvent({ id: delivery.user_id }, { eventKey: `channel.dead_letter:${delivery.id}`, eventType: 'channel.dead_letter', sourceId: String(delivery.id), title: '渠道消息进入死信', body: delivery.last_error || '渠道投递失败次数超过上限。', risk: 'high', payload: { deliveryId: delivery.id, attempts: delivery.attempts } }) })
+});
+
+configureAgentGoals({
+    createAgentRun,
+    createAgentNotification,
+    executeReadOnlyQuery: async (connectionId, sql, triggerUser) => executeToolByName('db.run_readonly_query', { connectionId, sql }, triggerUser, await formatToolList(triggerUser, { toolPolicy: 'builtin_only' }), { source: 'goal' })
 });
 
 configureAgentApprovalRequests({
@@ -1808,6 +1849,15 @@ module.exports = {
     runAgentScheduleNow,
     runDueAgentSchedules,
     runDuePollingTriggers,
+    createAgentGoal,
+    dispatchAgentGoalWebhook,
+    getAgentGoal,
+    listAgentGoals,
+    recordAgentGoalRunOutcome,
+    runAgentGoalNow,
+    runDueAgentGoals,
+    setAgentGoalStatus,
+    updateAgentGoal,
     createWorkflowTrigger,
     deleteWorkflowTrigger,
     listWorkflowTriggers,

@@ -1,20 +1,23 @@
-window.loadOpsSummary = async function(options = {}) {
+let opsSummaryLoadController = null;
+let opsSummaryLoadPromise = null;
+
+window.loadOpsSummary = function(options = {}) {
+    if (opsSummaryLoadPromise && !options.force && !options.refresh) return opsSummaryLoadPromise;
+    opsSummaryLoadController?.abort();
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const signalOptions = controller ? { signal: controller.signal, timeoutMs: 30000 } : {};
+    const loadPromise = (async () => {
     try {
-        const includeMonitor = isAdminUser();
-        const [summaryRes, trendRes, monitorRes] = await Promise.all([
-            apiFetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders() }),
-            apiFetch(`${API_BASE}/stats/trend`, { headers: authHeaders() }),
-            includeMonitor ? apiFetch(`${API_BASE}/stats/monitor-summary`) : Promise.resolve(null)
+        const [summaryRes, trendRes] = await Promise.all([
+            apiFetch(`${API_BASE}/stats/ops-summary`, { headers: authHeaders(), ...signalOptions }),
+            apiFetch(`${API_BASE}/stats/trend`, { headers: authHeaders(), ...signalOptions })
         ]);
         if (!summaryRes?.ok) {
             throw new Error(`加载数据概览失败（HTTP ${summaryRes?.status || 500}）`);
         }
         const summary = await summaryRes.json().catch(() => ({}));
         const trend = trendRes?.ok ? (await trendRes.json().catch(() => [])) : [];
-        if (monitorRes?.ok) {
-            const monitorSummary = await monitorRes.json().catch(() => ({}));
-            renderMonitorEndpointLists(monitorSummary.modelEndpoints || {});
-        }
+        renderMonitorEndpointLists(summary.modelEndpoints || {});
         const formatSize = (bytes) => {
             const v = Number(bytes) || 0;
             if (v > 1024**3) return `${(v / 1024**3).toFixed(1)} GB`;
@@ -32,19 +35,43 @@ window.loadOpsSummary = async function(options = {}) {
         renderTrendChart('usage-trend-chart', Array.isArray(trend) ? trend : []);
         window.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
+        if (e?.name === 'AbortError') return false;
         showToast(e.message || '加载概览失败', 'error');
         if (options.propagateErrors) throw e;
     }
+    })();
+    opsSummaryLoadController = controller;
+    const settledPromise = loadPromise.finally(() => {
+        if (opsSummaryLoadPromise === settledPromise) {
+            opsSummaryLoadPromise = null;
+            opsSummaryLoadController = null;
+        }
+    });
+    opsSummaryLoadPromise = settledPromise;
+    return opsSummaryLoadPromise;
 };
 
 let monitorTimer = null;
+let monitorSummaryLoadController = null;
+let monitorSummaryLoadPromise = null;
+
+function cancelOpsSummaryLoad() {
+    opsSummaryLoadController?.abort();
+    opsSummaryLoadController = null;
+    opsSummaryLoadPromise = null;
+}
 
 window.loadMonitorSummary = async function(options = {}) {
     if (!isAdminUser()) return;
+    if (monitorSummaryLoadPromise && !options.force && !options.refresh) return monitorSummaryLoadPromise;
+    monitorSummaryLoadController?.abort();
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const signalOptions = controller ? { signal: controller.signal, timeoutMs: 30000 } : {};
+    const loadPromise = (async () => {
     try {
         const forceRefresh = options?.force === true || options?.refresh === true;
         const suffix = forceRefresh ? '?refresh=1' : '';
-        const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`);
+        const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`, signalOptions);
         if (!res.ok) throw new Error(`系统监控加载失败（HTTP ${res.status}）`);
         const data = await res.json();
         const system = data.system || {};
@@ -301,9 +328,20 @@ window.loadMonitorSummary = async function(options = {}) {
         scheduleMonitorRefresh();
         window.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
+        if (e?.name === 'AbortError') return false;
         showToast(e.message || '系统监控加载失败', 'error');
         if (options.propagateErrors) throw e;
     }
+    })();
+    monitorSummaryLoadController = controller;
+    const settledPromise = loadPromise.finally(() => {
+        if (monitorSummaryLoadPromise === settledPromise) {
+            monitorSummaryLoadPromise = null;
+            monitorSummaryLoadController = null;
+        }
+    });
+    monitorSummaryLoadPromise = settledPromise;
+    return monitorSummaryLoadPromise;
 };
 function clearMonitorRefreshTimer() {
     if (monitorTimer) {
@@ -312,9 +350,18 @@ function clearMonitorRefreshTimer() {
     }
 }
 
+function cancelMonitorSummaryLoad() {
+    const controller = monitorSummaryLoadController;
+    controller?.abort();
+    monitorSummaryLoadController = null;
+    monitorSummaryLoadPromise = null;
+}
+
 window.Pivot?.exposeModule?.('settings.monitor', {
-    clearMonitorRefreshTimer
-}, ['clearMonitorRefreshTimer']);
+    clearMonitorRefreshTimer,
+    cancelMonitorSummaryLoad,
+    cancelOpsSummaryLoad
+}, ['clearMonitorRefreshTimer', 'cancelMonitorSummaryLoad', 'cancelOpsSummaryLoad']);
 
 window.refreshMonitorSummary = function(options = {}) {
     return window.loadMonitorSummary({ ...options, force: true });

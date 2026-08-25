@@ -1,4 +1,4 @@
-let settingsLoadSequence = 0;
+let settingsLoadSequence = 0, settingsLoadController = null;
 
 function setSettingsInitialValues(selector = '') {
     document.querySelectorAll(selector).forEach(input => {
@@ -64,9 +64,11 @@ function setSettingsTabState(state = '', message = '', { retry = false, tab = ''
 
 async function loadSettings() {
     const requestId = ++settingsLoadSequence;
+    settingsLoadController?.abort();
+    const controller = typeof AbortController === 'function' ? new AbortController() : null; settingsLoadController = controller;
     setSettingsLoadState('loading', '正在加载设置…');
     try {
-        const res = await apiFetch(`${API_BASE}/settings`);
+        const res = await apiFetch(`${API_BASE}/settings`, controller ? { signal: controller.signal, timeoutMs: 30000 } : {});
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `系统设置加载失败（HTTP ${res.status}）`);
         if (requestId !== settingsLoadSequence) return false;
@@ -89,22 +91,28 @@ async function loadSettings() {
         setSettingsLoadState('', '');
         return true;
     } catch (error) {
-        if (requestId !== settingsLoadSequence) return false;
+        if (requestId !== settingsLoadSequence || error?.name === 'AbortError') return false;
         const message = error.message || '系统设置加载失败';
         setSettingsLoadState('error', message, { retry: true });
         showToast(message, 'error');
         return false;
+    } finally {
+        if (settingsLoadController === controller) settingsLoadController = null;
     }
 }
 
+const cancelSettingsLoad = () => { settingsLoadController?.abort(); settingsLoadController = null; };
+
 window.Pivot?.exposeModule?.('settings.core', {
     clearSettingsDirty,
+    cancelSettingsLoad,
     loadSettings,
     setSettingsLoadState,
     setSettingsTabState,
     settingsHasUnsavedChanges
 }, [
     { globalName: 'clearSettingsDirty', exportName: 'clearSettingsDirty' },
+    { globalName: 'cancelSettingsLoad', exportName: 'cancelSettingsLoad' },
     { globalName: 'loadSettings', exportName: 'loadSettings' },
     { globalName: 'setSettingsLoadState', exportName: 'setSettingsLoadState' },
     { globalName: 'setSettingsTabState', exportName: 'setSettingsTabState' },
@@ -235,6 +243,13 @@ async function fetchMemorySource(memoryId) {
     return data;
 }
 
+async function fetchMemoryUsage(memoryId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/usage`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆使用说明加载失败');
+    return data.usage || {};
+}
+
 async function fetchMemoryMergeSuggestions() {
     const res = await apiFetch(`${API_BASE}/memories/merge-suggestions?limit=20`);
     const data = await res.json();
@@ -319,6 +334,22 @@ window.openMemorySourceModal = async function(memoryId) {
     } catch (e) {
         if (body) PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(e.message || '记忆来源加载失败')}</p>`);
         showToast(e.message || '记忆来源加载失败', 'error');
+    }
+};
+
+async function openMemoryUsageModal(memoryId) {
+    window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
+    const modal = document.getElementById('memory-source-modal');
+    const body = document.getElementById('memory-source-body');
+    if (!modal || !body) return;
+    PivotSafeHtml.setHtml(body, '<p class="muted">正在加载使用说明...</p>');
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    try {
+        const usage = await fetchMemoryUsage(memoryId);
+        PivotSafeHtml.setHtml(body, `<div class="memory-source-meta"><strong>为何使用这条记忆</strong><span>记忆 #${escapeHtml(String(usage.memoryId || memoryId))}</span></div><div class="memory-source-message"><pre>${escapeHtml(usage.reason || '该记忆与当前任务相关。')}</pre></div>`);
+    } catch (error) {
+        PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(error.message || '记忆使用说明加载失败')}</p>`);
     }
 };
 
@@ -438,6 +469,7 @@ function renderProductMemoryRows(memories = []) {
             <td>${escapeHtml(formatMemoryStatusLabel(memory.status))}</td>
             <td>
                 <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
+                <button class="btn-secondary memory-source-btn" data-memory-action="usage" data-memory-id="${memory.id}">使用原因</button>
             </td>
             <td>${escapeHtml(memory.lastUsedAt || memory.updatedAt || '-')}</td>
             <td class="text-center memory-action-cell">
@@ -903,6 +935,8 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
             window.openMemoryEditModal?.(memory);
         } else if (action === 'source') {
             await window.openMemorySourceModal?.(memoryId);
+        } else if (action === 'usage') {
+            await openMemoryUsageModal(memoryId);
         } else if (action === 'disable') {
             await updateMemoryStatus(memoryId, 'disabled');
             showToast('长期记忆已禁用');
