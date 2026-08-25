@@ -127,6 +127,19 @@ const agentToolDisplayMap = {
     'filesystem.write_workspace': { title: '写入工作区文件', description: '在任务受控工作区内安全保存生成的文件。' }
 };
 
+const GENERIC_TOOL_TITLES = {
+    plan: '任务规划', flow_rule: '流程规则', tool: '工具调用',
+    llm: '大模型分析', 'agent.llm': '大模型节点', thought: '思考推理',
+    action: '执行动作', observation: '观察结果', message: '消息交互',
+    approval: '人工审批', routing: '条件路由', delegate: '委派智能体',
+    'agent.delegate': '委派智能体', handoff: '智能体交接', 'agent.handoff': '智能体交接',
+    'agent.code': '代码执行', 'agent.http': 'HTTP 请求', 'agent.browser': '浏览器自动化',
+    'agent.merge': '变量聚合', 'agent.content_review': '富文本校对',
+    dag_node: '工作流节点', control: '任务控制', note: '执行记录',
+    error: '执行异常', completed: '执行完成', pending: '等待执行',
+    running: '正在运行', skipped: '已跳过', failed: '执行失败'
+};
+
 function agentToolShortName(toolOrName) {
     const name = typeof toolOrName === 'string' ? toolOrName : (toolOrName?.name || toolOrName?.fullName || '');
     const match = String(name || '').match(/^(?:mcp\.\d+\.)?(.+)$/);
@@ -138,6 +151,10 @@ function agentToolTitle(tool) {
     const shortName = agentToolShortName(tool);
     if (agentToolDisplayMap[shortName]?.title) {
         return agentToolDisplayMap[shortName].title;
+    }
+    const lowerKey = shortName?.toLowerCase?.();
+    if (lowerKey && GENERIC_TOOL_TITLES[lowerKey]) {
+        return GENERIC_TOOL_TITLES[lowerKey];
     }
     if (typeof tool === 'object' && tool?.title && tool.title !== shortName && tool.title !== name && !/^[a-z_]+(?:\.[a-z0-9_-]+)+$/i.test(tool.title)) {
         return tool.title;
@@ -213,7 +230,8 @@ function isAdminOnlyAgentTool(tool) {
 }
 
 function agentStepTitle(step) {
-    const raw = step?.title || step?.type || '';
+    const raw = String(step?.title || step?.type || '').trim();
+    if (!raw) return '执行步骤';
     if (raw === 'plan') return '任务规划';
     if (raw === 'flow_rule') return '流程规则';
     if (raw === 'tool') return `调用工具：${agentToolTitle(step?.tool_name)}`;
@@ -221,12 +239,21 @@ function agentStepTitle(step) {
     if (raw === 'control') return '任务控制';
     if (raw === 'thought') return '思考推理';
     if (raw === 'action') return '执行动作';
+    if (raw === 'observation') return '观察结果';
     if (raw === 'approval') return '人工审批';
+    if (raw === 'llm' || raw === 'agent.llm') return '大模型分析';
+    if (raw === 'delegate' || raw === 'agent.delegate') return '委派智能体';
+    if (raw === 'handoff' || raw === 'agent.handoff') return '智能体交接';
     if (raw === 'note') return '执行记录';
-    if (raw === 'Planning') return '规划下一步';
+    if (raw === 'Planning' || raw === 'planning') return '规划下一步';
+    if (raw === 'Finished' || raw === 'completed') return '执行完成';
     if (raw.startsWith('Tool failed: ')) return `工具调用失败：${agentToolTitle(raw.replace('Tool failed: ', ''))}`;
     if (raw.startsWith('Tool: ')) return `调用工具：${agentToolTitle(raw.replace('Tool: ', ''))}`;
     if (raw.startsWith('调用工具：')) return `调用工具：${agentToolTitle(raw.replace('调用工具：', ''))}`;
     if (raw.startsWith('工具调用失败：')) return `工具调用失败：${agentToolTitle(raw.replace('工具调用失败：', ''))}`;
-    return raw || '执行步骤';
+    if (raw.startsWith('LLM: ')) return `大模型分析：${raw.replace('LLM: ', '')}`;
+    if (raw.startsWith('Delegate: ')) return `委派智能体：${raw.replace('Delegate: ', '')}`;
+    if (raw.startsWith('Handoff: ')) return `智能体交接：${raw.replace('Handoff: ', '')}`;
+    if (/^Step \d+$/i.test(raw)) return `执行第 ${raw.replace(/Step /i, '')} 步`;
+    return agentToolTitle(raw) || raw;
 }

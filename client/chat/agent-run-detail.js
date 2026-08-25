@@ -66,9 +66,11 @@ function ensureAgentRunDetailModalVisible() {
 
 function agentTraceTypeLabel(type = '') {
     return ({
-        model: '模型', tool: '工具', plan: '规划', dag: '工作流', dag_node: '节点',
-        agent: '智能体', handoff: '交接', routing: '路由', control: '控制', note: '记录'
-    })[String(type || '').toLowerCase()] || '步骤';
+        model: '模型调用', tool: '工具执行', plan: '任务规划', dag: '工作流', dag_node: '节点执行',
+        agent: '智能体', handoff: '交接上下文', routing: '条件路由', control: '控制流程', note: '运行记录',
+        llm: '大模型分析', observation: '观察结果', prompt: '提示词', action: '执行动作',
+        error: '执行异常', execute: '任务执行', eval: '质量评测', review: '内容校对'
+    })[String(type || '').toLowerCase()] || '执行步骤';
 }
 
 function agentTraceDuration(value) {
@@ -82,7 +84,14 @@ function agentTraceDisplayName(span = {}) {
     const name = String(span.name || '').trim();
     if (!name) return '运行步骤';
     if (/^(?:mcp\.\d+\.)?[a-z][\w-]*(?:\.[\w-]+)+$/i.test(name)) return agentToolTitle(name);
-    return name;
+    const mapped = {
+        plan: '任务规划', llm: '大模型分析', model: '模型调用', agent: '智能体运行',
+        delegate: '委派智能体', handoff: '智能体交接', tool: '工具调用', action: '执行动作',
+        observation: '观察结果', flow_rule: '流程规则', control: '任务控制',
+        execute: '执行操作', eval: '评测分析', router: '路由分发'
+    }[name.toLowerCase()];
+    if (mapped) return mapped;
+    return agentToolTitle(name) || name;
 }
 
 function agentTraceTimestamp(value) {
@@ -487,7 +496,7 @@ window.openAgentRun = async function(runId, options = {}) {
         </details>
         ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
         ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
-        ${!isPreview && !isAgentRunActive(run.status) ? `<section class="agent-run-feedback" data-agent-run-feedback="${agentEscapeAttr(run.id)}"><div class="agent-tool-section-head compact"><strong>结果反馈</strong><span>反馈会用于改进提示词、工具选择和工作流建议，不会自动修改系统。</span></div><div class="agent-run-feedback-actions"><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="success">有帮助</button><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="partial">部分有帮助</button><button type="button" class="btn-secondary btn-xs" data-agent-feedback-outcome="failure">需要修正</button><select class="form-input" data-agent-feedback-rating aria-label="结果评分"><option value="">评分</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></div><textarea class="form-input" rows="2" data-agent-feedback-correction placeholder="可选：指出缺失、错误或你修改后的答案"></textarea><button type="button" class="btn-primary btn-xs" data-agent-feedback-submit>提交反馈</button><span class="agent-run-feedback-status" data-agent-feedback-status role="status"></span></section>` : ''}
+        ${!isPreview && !isAgentRunActive(run.status) ? `<section class="agent-run-feedback" data-agent-run-feedback="${agentEscapeAttr(run.id)}"><div class="agent-run-feedback-head"><div class="agent-run-feedback-title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><strong>结果反馈</strong></div><span class="agent-run-feedback-hint">用于改进提示词、工具选择和工作流建议</span></div><div class="agent-run-feedback-toolbar"><div class="agent-run-feedback-pills" role="radiogroup" aria-label="结果评价"><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="success"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg><span>有帮助</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="partial"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg><span>部分有用</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="failure"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg><span>需要修正</span></button></div><div class="agent-run-feedback-rating-wrap"><label class="agent-run-feedback-rating-label"><span>评分</span><select class="agent-run-feedback-rating-select" data-agent-feedback-rating aria-label="结果评分"><option value="">未评</option><option value="5">5 分 (完美)</option><option value="4">4 分 (良好)</option><option value="3">3 分 (一般)</option><option value="2">2 分 (较差)</option><option value="1">1 分 (无效)</option></select></label></div></div><textarea class="agent-run-feedback-textarea" rows="2" data-agent-feedback-correction placeholder="补充说明（可选）：指出缺失、错误或您期望的修正答案..."></textarea><div class="agent-run-feedback-footer"><span class="agent-run-feedback-status" data-agent-feedback-status role="status"></span><button type="button" class="btn-primary btn-xs" data-agent-feedback-submit>提交反馈</button></div></section>` : ''}
         ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
         ${visualOutputs}
         <details class="agent-run-process"${processExpanded}>
@@ -527,8 +536,15 @@ window.openAgentRun = async function(runId, options = {}) {
     });
     detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(button => {
         button.addEventListener('click', () => {
+            const outcome = button.dataset.agentFeedbackOutcome || 'unknown';
             detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(item => item.classList.toggle('active', item === button));
-            detail.querySelector('[data-agent-feedback-submit]')?.setAttribute('data-outcome', button.dataset.agentFeedbackOutcome || 'unknown');
+            detail.querySelector('[data-agent-feedback-submit]')?.setAttribute('data-outcome', outcome);
+            const ratingSelect = detail.querySelector('[data-agent-feedback-rating]');
+            if (ratingSelect) {
+                if (outcome === 'success') ratingSelect.value = '5';
+                else if (outcome === 'partial') ratingSelect.value = '3';
+                else if (outcome === 'failure') ratingSelect.value = '1';
+            }
         });
     });
     detail.querySelector('[data-agent-feedback-submit]')?.addEventListener('click', async event => {

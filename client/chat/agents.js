@@ -144,7 +144,8 @@ window.bindUnifiedAutomationTabs = function() {
                     const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
                     if (!confirmed) return;
                 }
-                if (section === 'tasks') return window.openAgentWorkbench?.();
+                if (section === 'tasks') return window.openAgentWorkbench?.({ tab: 'tasks' });
+                if (section === 'workbench') return window.openAgentWorkbench?.({ tab: 'workbench' });
                 return window.openAgentDagWorkbench?.({ tab: section });
             } catch (error) {
                 showToast(error.message || '自动化页面加载失败', 'error');
@@ -153,11 +154,44 @@ window.bindUnifiedAutomationTabs = function() {
     });
 };
 
+window.bindAgentWorkbenchShortcuts = function() {
+    document.querySelectorAll('[data-automation-jump="workbench"]').forEach(btn => {
+        if (btn.dataset.boundAutomationJump === '1') return;
+        btn.dataset.boundAutomationJump = '1';
+        btn.addEventListener('click', () => {
+            window.openAgentWorkbench?.({ tab: 'workbench' });
+        });
+    });
+};
+
 window.openAgentWorkbench = async function(options = {}) {
     window.showMainWorkspace?.('agent');
-    window.syncAutomationPrimaryTabs('tasks');
+    const tab = options.tab === 'workbench' ? 'workbench' : 'tasks';
+    window.syncAutomationPrimaryTabs(tab);
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;
+
+    const tasksView = document.getElementById('agent-tasks-view');
+    const controlPlaneView = document.getElementById('agent-control-plane');
+    const newTaskBtn = document.getElementById('task-create-open-btn');
+    const newGoalTopBtn = document.getElementById('agent-goal-create-top-btn');
+    const subtitle = panel.querySelector('.agent-modal-header p');
+
+    if (tab === 'workbench') {
+        if (tasksView) tasksView.classList.add('hidden');
+        if (controlPlaneView) controlPlaneView.classList.remove('hidden');
+        if (newTaskBtn) newTaskBtn.classList.add('hidden');
+        if (newGoalTopBtn) newGoalTopBtn.classList.remove('hidden');
+        if (subtitle) subtitle.textContent = '管理持续目标、事件收件箱、通知渠道与智能体能力受控进化。';
+        window.Pivot?.moduleApi?.('agent.harness')?.loadAgentControlPlane?.();
+    } else {
+        if (tasksView) tasksView.classList.remove('hidden');
+        if (controlPlaneView) controlPlaneView.classList.add('hidden');
+        if (newTaskBtn) newTaskBtn.classList.remove('hidden');
+        if (newGoalTopBtn) newGoalTopBtn.classList.add('hidden');
+        if (subtitle) subtitle.textContent = '运行一次性多步骤任务，并统一查看所有自动化执行记录。';
+    }
+
     const queryInput = document.getElementById('agent-filter-query');
     const runTypeInput = document.getElementById('agent-filter-run-type');
     agentScheduleFilterId = Object.hasOwn(options, 'scheduleId') ? String(options.scheduleId || '') : '';
@@ -170,13 +204,16 @@ window.openAgentWorkbench = async function(options = {}) {
     // 智能体脚本按需加载；登录时如果尚未进入工作区，实时脚本不会参与初始化。
     // 在脚本就绪后补建 SSE，确保新任务的状态和执行步骤无需手动刷新即可显示。
     window.initAgentRealtime?.();
-    await window.loadAgentWorkbench();
+    if (tab === 'tasks') {
+        await window.loadAgentWorkbench();
+    }
     // 智能体工作区脚本按需加载，主程序初始化时可能还找不到快速目标按钮。
     window.bindAgentGoalTemplates?.();
     window.bindAgentFilters?.();
     window.bindAgentEnterpriseControls?.();
     window.bindAgentConfigModal?.();
     window.bindUnifiedAutomationTabs?.();
+    window.bindAgentWorkbenchShortcuts?.();
 };
 
 window.closeAgentWorkbench = function() {

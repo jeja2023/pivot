@@ -472,9 +472,15 @@
 
 .agent-config-modal-head .btn-secondary {
     height: 30px;
+    min-width: 58px;
     padding: 0 12px;
     border-radius: 8px;
     font-size: 0.78rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-color: rgba(239, 68, 68, 0.38);
     background: #fff;
     color: var(--danger);

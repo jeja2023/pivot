@@ -39,22 +39,86 @@
         return text.length > max ? `${text.slice(0, max)}...` : text;
     };
 
+    const getInboxTypeMeta = t => ({
+        approval: { label: '待审批', badgeClass: 'badge-approval' },
+        evolution: { label: '进化提议', badgeClass: 'badge-evolution' },
+        run: { label: '任务运行', badgeClass: 'badge-run' },
+        notification: { label: '运行通知', badgeClass: 'badge-notification' }
+    }[t] || { label: '系统事件', badgeClass: 'badge-event' });
+
+    const formatInboxTitle = item => {
+        const raw = String(item.title || item.sourceType || '').trim();
+        if (raw === 'DAG run completed' || raw.startsWith('DAG run')) return '工作流执行完成';
+        if (raw === 'Run completed' || raw === 'Agent run completed') return '自主任务执行完成';
+        if (raw === 'Task completed with errors') return '任务执行完成（含局部告警）';
+        if (raw === 'Approval required' || raw === '任务需要审批') return '任务需要人工审批确认';
+        if (raw === 'Evolution proposal' || raw === '智能体进化提案') return '智能体自进化提案';
+        if (raw === 'Memory consolidated' || raw === '智能体结果已沉淀') return '智能体知识与记忆沉淀';
+        return raw || '未命名通知';
+    };
+
+    const formatGoalTrigger = (spec = {}) => {
+        const type = spec?.type || spec?.trigger_type || 'timer';
+        if (type === 'timer') return `定时 ${spec?.timeOfDay || spec?.time || '09:00'}`;
+        if (type === 'webhook') return 'Webhook 外部调用';
+        if (type === 'file') return `文件变更 ${spec?.directory ? shortText(spec.directory, 20) : ''}`;
+        if (type === 'database') return '数据变更增量监控';
+        return '手动触发';
+    };
+
+    function openGoalModal() {
+        const modal = document.getElementById('agent-goal-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            const notice = document.getElementById('agent-goal-token-notice');
+            if (notice) { notice.textContent = ''; notice.classList.add('hidden'); }
+            setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
+        }
+    }
+
+    function closeGoalModal() {
+        const modal = document.getElementById('agent-goal-modal');
+        if (modal) { modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
+    }
+
     function renderAgentControlPlane() {
         const inboxPanel = document.getElementById('agent-inbox-panel');
         const goalsPanel = document.getElementById('agent-goals-panel');
         const reliabilityPanel = document.getElementById('agent-reliability-panel');
         const qualityPanel = document.getElementById('agent-quality-panel');
         const channelsPanel = document.getElementById('agent-channels-panel');
+        const unreadCount = state.inbox.filter(item => item.unread).length;
+        const activeGoalsCount = state.goals.filter(g => g.status === 'active').length;
         const count = document.getElementById('agent-inbox-count');
-        if (count) count.textContent = String(state.inbox.filter(item => item.unread).length);
-        if (inboxPanel) setMarkup(inboxPanel, `<div class="agent-harness-subhead"><strong>统一收件箱</strong><span>运行、审批、提醒和进化提议</span></div>${state.inbox.length ? `<div class="agent-inbox-list">${state.inbox.slice(0, 8).map(item => `<article class="agent-control-item"><div><strong>${escape(item.title || item.sourceType)}</strong><small>${escape(shortText(item.body || item.status || '', 180))}</small></div><div class="agent-control-item-meta"><small>${escape(formatDate(item.createdAt))}</small>${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无待处理事项</div>'}`);
-        if (goalsPanel) setMarkup(goalsPanel, `<div class="agent-harness-subhead"><strong>持续目标</strong><span>定时和 Webhook 目标会独立创建可审计任务</span></div>${state.goals.length ? `<div class="agent-goal-list">${state.goals.slice(0, 6).map(goal => `<article class="agent-control-item"><div><strong>${escape(goal.title)}</strong><small>${escape(shortText(goal.goal, 160))}</small></div><div class="agent-control-item-meta"><span class="agent-harness-status-pill ${goal.status === 'active' ? 'is-active' : 'is-inactive'}">${escape(goal.status === 'active' ? '运行中' : goal.status === 'paused' ? '已暂停' : goal.status)}</span>${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无持续目标</div>'}`);
-        if (reliabilityPanel) setMarkup(reliabilityPanel, `<div class="agent-harness-subhead"><strong>工具可靠性</strong><span>仅使用有足够样本的信号调整推荐</span></div>${state.reliability.length ? `<div class="agent-reliability-list">${state.reliability.slice(0, 5).map(signal => `<article class="agent-control-item"><div><strong>${escape(signal.toolName)}</strong><small>${escape(`${signal.sampleCount} 个样本 · ${Math.round(signal.score * 100)} 分`)}</small></div><div class="agent-control-item-meta"><span class="agent-harness-status-pill ${signal.confidence > 0 ? 'is-active' : 'is-idle'}">${signal.confidence > 0 ? '可解释' : '样本不足'}</span></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无工具可靠性样本</div>'}`);
-        if (qualityPanel && state.quality) {
-            const q = state.quality;
-            setMarkup(qualityPanel, `<div class="agent-harness-subhead"><strong>质量指标</strong><span>近 ${escape(q.days || 30)} 天</span></div><div class="agent-control-item"><div><strong>任务成功率 ${Math.round(Number(q.runs?.successRate || 0) * 100)}%</strong><small>审批中位数 ${Math.round(Number(q.approvals?.medianSeconds || 0) / 60)} 分钟 · 工具错误率 ${Math.round(Number(q.tools?.errorRate || 0) * 100)}%</small></div><div class="agent-control-item-meta"><span>渠道死信 ${escape(q.deliveries?.deadLetter || 0)}</span></div></div>`);
+        if (count) count.textContent = String(unreadCount);
+        const shortcutBadge = document.getElementById('agent-inbox-shortcut-badge');
+        if (shortcutBadge) { shortcutBadge.textContent = String(unreadCount); shortcutBadge.classList.toggle('hidden', unreadCount === 0); }
+        const badgeInbox = document.getElementById('agent-cp-inbox-badge');
+        if (badgeInbox) { badgeInbox.textContent = String(unreadCount); badgeInbox.classList.toggle('hidden', unreadCount === 0); }
+        const badgeGoals = document.getElementById('agent-cp-goals-badge');
+        if (badgeGoals) badgeGoals.textContent = `${activeGoalsCount}/${state.goals.length}`;
+        const badgeChannels = document.getElementById('agent-cp-channels-badge');
+        if (badgeChannels) badgeChannels.textContent = String(state.channels.length);
+        if (goalsPanel) {
+            setMarkup(goalsPanel, state.goals.length ? `<div class="agent-goal-list">${state.goals.map(goal => `<article class="agent-goal-card-item ${goal.status === 'active' ? 'is-active' : 'is-paused'}"><div class="agent-goal-card-main"><div class="agent-goal-card-head"><span class="agent-harness-status-pill ${goal.status === 'active' ? 'is-active' : 'is-inactive'}">${goal.status === 'active' ? '● 运行中' : goal.status === 'paused' ? '○ 已暂停' : goal.status}</span><strong class="agent-goal-card-title">${escape(goal.title)}</strong><span class="agent-goal-trigger-badge">${escape(formatGoalTrigger(goal.triggerSpec))}</span></div><p class="agent-goal-card-body">${escape(shortText(goal.goal, 160))}</p></div><div class="agent-goal-card-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
         }
-        if (channelsPanel) setMarkup(channelsPanel, `<div class="agent-harness-subhead"><strong>通知渠道</strong><span>身份映射、凭据引用和受控投递</span></div><div class="agent-channel-editor"><select id="agent-channel-type" class="form-input"><option value="webhook">Webhook</option><option value="im">企业 IM</option><option value="email">邮件</option><option value="web">Web/Electron</option></select><input id="agent-channel-key" class="form-input" placeholder="目标地址 / 邮箱 / 用户标识"><input id="agent-channel-credential" class="form-input" placeholder="凭据引用（可选）"><input id="agent-channel-endpoint" class="form-input" placeholder="受控 endpoint（IM/邮件可选）"><button type="button" class="btn-primary btn-xs" data-agent-channel-create>添加渠道</button></div>${state.channels.length ? `<div class="agent-channel-list">${state.channels.map(channel => `<article class="agent-control-item"><div><strong>${escape(channel.channelType)} · ${escape(channel.channelKey)}</strong><small>${escape(channel.credentialRef || '未绑定凭据')} · ${escape(channel.status)}</small></div><div class="agent-control-item-meta"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(channel.id)}">测试</button></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无渠道绑定</div>'}`);
+        if (inboxPanel) {
+            setMarkup(inboxPanel, state.inbox.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 76px;">类型</th><th style="width: 140px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${state.inbox.slice(0, 20).map(item => {
+                const meta = getInboxTypeMeta(item.sourceType);
+                return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${escape(item.title || '')}">${escape(formatInboxTitle(item))}</strong></td><td><span class="agent-inbox-table-desc" title="${escape(item.body || '')}">${escape(shortText(item.body || '-', 120))}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}">详情</button>` : ''}</div></td></tr>`;
+            }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>任务运行结果、人工审批请求与智能体进化提醒将在此实时汇聚</span></div>');
+        }
+        if (channelsPanel) {
+            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">Webhook</option><option value="im">企业 IM (企微/钉钉/飞书)</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="目标地址 / 接收人"></label></div><div class="agent-channel-form-row"><label class="modal-form-field"><span>凭据引用 (可选)</span><input id="agent-channel-credential" class="form-input" placeholder="例如 secret_key"></label><label class="modal-form-field"><span>受控 endpoint (可选)</span><input id="agent-channel-endpoint" class="form-input" placeholder="网关 endpoint"></label></div><div class="agent-channel-form-actions"><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${state.channels.length ? `<div class="agent-channel-list">${state.channels.map(channel => `<article class="agent-control-item"><div><strong>${escape(channel.channelType)} · ${escape(channel.channelKey)}</strong><small>${escape(channel.credentialRef || '未绑定外部凭据')} · ${escape(channel.status)}</small></div><div class="agent-control-item-meta"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(channel.id)}">测试</button></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无活跃外部通知渠道</div>'}`);
+        }
+        if (reliabilityPanel) {
+            setMarkup(reliabilityPanel, state.reliability.length ? `<div class="agent-reliability-list">${state.reliability.slice(0, 5).map(signal => `<article class="agent-control-item"><div><strong>${escape(signal.toolName)}</strong><small>${escape(`${signal.sampleCount} 个执行样本 · ${Math.round(signal.score * 100)} 分`)}</small></div><div class="agent-control-item-meta"><span class="agent-harness-status-pill ${signal.confidence > 0 ? 'is-active' : 'is-idle'}">${signal.confidence > 0 ? '置信度高' : '样本积累中'}</span></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card"><strong>暂无工具可靠性样本</strong><span>随智能体任务执行自动记录各工具调用稳定性</span></div>');
+        }
+        if (qualityPanel) {
+            const q = state.quality || {};
+            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>任务成功率</span><strong>${Math.round(Number(q.runs?.successRate ?? 1) * 100)}%</strong><small>近 30 天完成率</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${Math.round(Number(q.approvals?.medianSeconds || 0) / 60)} 分钟</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${Math.round(Number(q.tools?.errorRate || 0) * 100)}%</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>`);
+        }
     }
 
     async function loadControlPlane() {
@@ -84,14 +148,30 @@
                     ? { type: 'database', query: document.getElementById('agent-goal-query')?.value || '' }
                     : { type: triggerType };
         try {
-            const response = await apiJson(`${API_BASE}/agents/goals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, triggerSpec }) });
+            const response = await apiJson(`${API_BASE}/agents/goals`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: document.getElementById('agent-goal-title')?.value,
+                    goal: document.getElementById('agent-goal-goal')?.value,
+                    triggerSpec
+                })
+            });
             const tokenNotice = document.getElementById('agent-goal-token-notice');
-            if (tokenNotice && response.token) tokenNotice.textContent = `Webhook 令牌只显示这一次：${response.token}`;
-            if (!response.token) document.getElementById('agent-goal-editor')?.classList.add('hidden');
-            document.getElementById('agent-goal-editor')?.reset();
+            if (tokenNotice && response.token) {
+                tokenNotice.textContent = `Webhook 令牌（仅展示一次，请妥善保存）：${response.token}`;
+                tokenNotice.classList.remove('hidden');
+            } else {
+                closeGoalModal();
+                document.getElementById('agent-goal-editor')?.reset();
+            }
+            if (typeof showToast === 'function') showToast('持续目标已成功创建', 'success');
             setNotice('持续目标已创建。', 'success');
             await loadControlPlane();
-        } catch (error) { setNotice(error.message || '持续目标创建失败。', 'error'); }
+        } catch (error) {
+            if (typeof showToast === 'function') showToast(error.message || '持续目标创建失败', 'error');
+            setNotice(error.message || '持续目标创建失败。', 'error');
+        }
     }
 
     async function changeAgentGoal(id, action) {
@@ -206,20 +286,13 @@
         const button = document.getElementById('agent-harness-skill-register');
         if (button) button.disabled = true;
         try {
-            await apiJson(`${API_BASE}/agents/skills`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ manifest, instructions })
-            });
+            await apiJson(`${API_BASE}/agents/skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, instructions }) });
             setNotice('技能包注册成功。', 'success');
             document.getElementById('agent-harness-skill-manifest').value = '';
             document.getElementById('agent-harness-skill-instructions').value = '';
             await loadSkills();
-        } catch (error) {
-            setNotice(error.message || '技能包注册失败。', 'error');
-        } finally {
-            if (button) button.disabled = false;
-        }
+        } catch (error) { setNotice(error.message || '技能包注册失败。', 'error'); }
+        finally { if (button) button.disabled = false; }
     }
 
     async function uploadSkillPackage(file) {
@@ -232,14 +305,8 @@
             await apiJson(`${API_BASE}/agents/skills/package`, { method: 'POST', body: formData });
             setNotice('技能包导入并校验成功。', 'success');
             await loadSkills();
-        } catch (error) {
-            setNotice(error.message || '技能包导入失败。', 'error');
-        } finally {
-            if (input) {
-                input.disabled = false;
-                input.value = '';
-            }
-        }
+        } catch (error) { setNotice(error.message || '技能包导入失败。', 'error'); }
+        finally { if (input) { input.disabled = false; input.value = ''; } }
     }
 
     async function disableSkill(name) {
@@ -247,9 +314,7 @@
             await apiJson(`${API_BASE}/agents/skills/${encodeURIComponent(name)}/disable`, { method: 'POST' });
             setNotice('技能包已停用。', 'success');
             await loadSkills();
-        } catch (error) {
-            setNotice(error.message || '技能包停用失败。', 'error');
-        }
+        } catch (error) { setNotice(error.message || '技能包停用失败。', 'error'); }
     }
 
     async function validateSkillVersion(id) {
@@ -264,30 +329,10 @@
         const list = document.getElementById('agent-harness-pack-list');
         if (!list) return;
         if (!state.packs.length) {
-            setMarkup(list, `<div class="agent-harness-empty-card">
-                <svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                    <path d="M3 9h18"></path>
-                    <path d="M9 21V9"></path>
-                </svg>
-                <strong>暂无已安装运行资源包</strong>
-                <span>由系统自动下载、校验完整性后安装</span>
-            </div>`);
+            setMarkup(list, '<div class="agent-harness-empty-card"><strong>暂无已安装运行资源包</strong><span>由系统自动下载、校验完整性后安装</span></div>');
             return;
         }
-        setMarkup(list, state.packs.map(pack => `<article class="agent-harness-item">
-            <div class="agent-harness-item-main">
-                <div class="agent-harness-item-title-row">
-                    <strong>${escape(pack.id || '运行资源')}</strong>
-                    <span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</span>
-                </div>
-                <span class="agent-harness-item-id">版本 v${escape(pack.version || '1.0.0')} · ${escape(String(pack.size || 0))} 字节</span>
-                <small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 28))}</small>
-            </div>
-            <div class="agent-harness-item-meta">
-                <span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span>
-            </div>
-        </article>`).join(''));
+        setMarkup(list, state.packs.map(pack => `<article class="agent-harness-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(pack.id || '运行资源')}</strong><span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</span></div><span class="agent-harness-item-id">版本 v${escape(pack.version || '1.0.0')} · ${escape(String(pack.size || 0))} 字节</span><small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 28))}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span></div></article>`).join(''));
     }
 
     async function loadPacks() {
@@ -299,8 +344,7 @@
 
     async function syncPack() {
         if (!isAdminUser()) return setNotice('只有管理员可以同步运行资源包。', 'error');
-        const origins = String(document.getElementById('agent-harness-pack-origins')?.value || '')
-            .split(/[\n,]/).map(value => value.trim()).filter(Boolean);
+        const origins = String(document.getElementById('agent-harness-pack-origins')?.value || '').split(/[\n,]/).map(value => value.trim()).filter(Boolean);
         const manifest = {
             type: document.getElementById('agent-harness-pack-type')?.value || 'data',
             id: document.getElementById('agent-harness-pack-id')?.value.trim(),
@@ -315,60 +359,28 @@
             const parsed = new URL(manifest.url);
             const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
             allowedPorts = [...new Set([...allowedPorts, port])];
-        } catch (_) {
-            return setNotice('运行资源包地址无效。', 'error');
-        }
+        } catch (_) { return setNotice('运行资源包地址无效。', 'error'); }
         const button = document.getElementById('agent-harness-pack-sync');
         if (button) button.disabled = true;
         try {
-            await apiJson(`${API_BASE}/agents/runtime-packs/sync`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ manifest, networkPolicy: { allowed_origins: origins, allowed_ports: allowedPorts, allow_redirect: false } })
-            });
+            await apiJson(`${API_BASE}/agents/runtime-packs/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, networkPolicy: { allowed_origins: origins, allowed_ports: allowedPorts, allow_redirect: false } }) });
             setNotice('运行资源包同步完成并通过完整性校验。', 'success');
             await loadPacks();
-        } catch (error) {
-            setNotice(error.message || '运行资源包同步失败。', 'error');
-        } finally {
-            if (button) button.disabled = false;
-        }
+        } catch (error) { setNotice(error.message || '运行资源包同步失败。', 'error'); }
+        finally { if (button) button.disabled = false; }
     }
 
     function renderResidents() {
         const list = document.getElementById('agent-harness-residency-list');
         if (!list) return;
         if (!state.residents.length) {
-            setMarkup(list, `<div class="agent-harness-empty-card agent-harness-empty-card--wide">
-                <svg class="agent-harness-empty-svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-                    <line x1="6" y1="6" x2="6.01" y2="6"></line>
-                    <line x1="6" y1="18" x2="6.01" y2="18"></line>
-                </svg>
-                <strong>当前暂无活跃的常驻实例</strong>
-                <span>自主任务或复杂会话启用环境复用后，常驻实例将在此处展示运行租约、命中次数与生命周期状态。</span>
-            </div>`);
+            setMarkup(list, '<div class="agent-harness-empty-card agent-harness-empty-card--wide"><strong>当前暂无活跃的常驻实例</strong><span>自主任务或复杂会话启用环境复用后，常驻实例将在此处展示运行租约、命中次数与生命周期状态。</span></div>');
             return;
         }
         setMarkup(list, state.residents.map(item => {
             const status = String(item.status || '').toLowerCase();
             const statusLabel = ({ active: '活跃中', idle: '空闲中', evicted: '已驱逐', stopped: '已停止' })[status] || status || '空闲中';
-            return `<article class="agent-harness-item agent-harness-item--resident">
-                <div class="agent-harness-item-main">
-                    <div class="agent-harness-item-title-row">
-                        <strong>${escape(item.resident_key || item.resident_id)}</strong>
-                        <span class="agent-harness-status-pill ${status === 'active' ? 'is-active' : 'is-idle'}">${escape(statusLabel)}</span>
-                        <span class="agent-harness-badge">命中 ${escape(item.hit_count || 0)} 次</span>
-                    </div>
-                    <span class="agent-harness-item-id">关联运行 ${escape(item.run_id || '-')} · 上下文摘要 ${escape(shortText(item.context_hash || '-', 18))}</span>
-                </div>
-                <div class="agent-harness-item-meta">
-                    <span>最近访问 ${escape(formatDate(item.last_accessed_at))}</span>
-                    <span>过期时间 ${escape(formatDate(item.expires_at))}</span>
-                    <button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button>
-                </div>
-            </article>`;
+            return `<article class="agent-harness-item agent-harness-item--resident"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(item.resident_key || item.resident_id)}</strong><span class="agent-harness-status-pill ${status === 'active' ? 'is-active' : 'is-idle'}">${escape(statusLabel)}</span><span class="agent-harness-badge">命中 ${escape(item.hit_count || 0)} 次</span></div><span class="agent-harness-item-id">关联运行 ${escape(item.run_id || '-')} · 上下文摘要 ${escape(shortText(item.context_hash || '-', 18))}</span></div><div class="agent-harness-item-meta"><span>最近访问 ${escape(formatDate(item.last_accessed_at))}</span><span>过期时间 ${escape(formatDate(item.expires_at))}</span><button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button></div></article>`;
         }).join(''));
     }
 
@@ -901,9 +913,28 @@
             const publish = event.target.closest('[data-agent-evolution-publish]');
             if (publish) publishProposal(publish.dataset.agentEvolutionPublish);
         });
-        document.getElementById('agent-inbox-refresh')?.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error')));
-        document.getElementById('agent-goal-create')?.addEventListener('click', () => document.getElementById('agent-goal-editor')?.classList.toggle('hidden'));
-        document.getElementById('agent-goal-cancel')?.addEventListener('click', () => document.getElementById('agent-goal-editor')?.classList.add('hidden'));
+        document.querySelectorAll('[data-agent-cp-subview]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const subview = tab.dataset.agentCpSubview;
+                document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
+                    const active = t.dataset.agentCpSubview === subview;
+                    t.classList.toggle('active', active);
+                    t.setAttribute('aria-selected', active ? 'true' : 'false');
+                });
+                document.querySelectorAll('[data-agent-cp-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.agentCpPane !== subview));
+            });
+        });
+        document.querySelectorAll('#agent-inbox-refresh').forEach(btn => {
+            btn.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error')));
+        });
+        document.querySelectorAll('#agent-goal-create, #agent-goal-create-top-btn, [data-agent-goal-create]').forEach(el => {
+            el.addEventListener('click', openGoalModal);
+        });
+        document.getElementById('agent-goal-cancel')?.addEventListener('click', closeGoalModal);
+        document.getElementById('agent-goal-modal-close')?.addEventListener('click', closeGoalModal);
+        document.getElementById('agent-goal-modal')?.addEventListener('click', event => {
+            if (event.target.id === 'agent-goal-modal') closeGoalModal();
+        });
         document.getElementById('agent-goal-editor')?.addEventListener('submit', saveAgentGoal);
         document.getElementById('agent-goal-trigger')?.addEventListener('change', event => {
             const type = event.target.value;
@@ -912,10 +943,32 @@
             document.getElementById('agent-goal-query-field')?.classList.toggle('hidden', type !== 'database');
         });
         document.getElementById('agent-inbox-panel')?.addEventListener('click', event => {
+            const openRun = event.target.closest('[data-agent-inbox-open-run]');
+            if (openRun) {
+                const runId = openRun.dataset.agentInboxOpenRun;
+                if (runId && typeof globalThis['openAgentRun'] === 'function') {
+                    globalThis['openAgentRun'](runId);
+                }
+                return;
+            }
             const button = event.target.closest('[data-agent-inbox-read]');
             if (button) apiJson(`${API_BASE}/agents/inbox/notification/${encodeURIComponent(button.dataset.agentInboxRead)}/read`, { method: 'POST' }).then(loadControlPlane).catch(error => setNotice(error.message, 'error'));
             const action = event.target.closest('[data-agent-inbox-action]');
-            if (action) apiJson(`${API_BASE}/agents/inbox/${encodeURIComponent(action.dataset.agentInboxType)}/${encodeURIComponent(action.dataset.agentInboxId)}/${encodeURIComponent(action.dataset.agentInboxAction)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(loadControlPlane).catch(error => setNotice(error.message, 'error'));
+            if (action) {
+                const isRead = action.dataset.agentInboxAction === 'read';
+                const url = isRead
+                    ? `${API_BASE}/agents/inbox/notification/${encodeURIComponent(action.dataset.agentInboxId)}/read`
+                    : `${API_BASE}/agents/inbox/${encodeURIComponent(action.dataset.agentInboxType)}/${encodeURIComponent(action.dataset.agentInboxId)}/${encodeURIComponent(action.dataset.agentInboxAction)}`;
+                apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+                    .then(() => {
+                        if (typeof showToast === 'function') showToast('收件箱状态已更新', 'success');
+                        loadControlPlane();
+                    })
+                    .catch(error => {
+                        if (typeof showToast === 'function') showToast(error.message || '操作失败', 'error');
+                        setNotice(error.message, 'error');
+                    });
+            }
         });
         document.getElementById('agent-goals-panel')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-goal-action]');
@@ -929,21 +982,14 @@
             const test = event.target.closest('[data-agent-channel-test]');
             if (test) apiJson(`${API_BASE}/agents/channels/${encodeURIComponent(test.dataset.agentChannelTest)}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Pivot 渠道连通性测试' }) }).then(() => setNotice('渠道测试已提交。', 'success')).catch(error => setNotice(error.message, 'error'));
         });
+        loadControlPlane().catch(() => {});
     }
 
     window.Pivot?.exposeModule?.('agent.harness', {
-        loadAgentHarnessManagement: loadHarnessManagement,
-        bindAgentRunHarnessDiagnostics: bindRunDiagnostics,
-        renderAgentHarnessDiagnosticMarkup: diagnosticTabMarkup,
-        loadAgentHarnessSkills: loadSkills,
-        getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || ''
-    }, [
-        'loadAgentHarnessManagement',
-        'bindAgentRunHarnessDiagnostics',
-        'renderAgentHarnessDiagnosticMarkup',
-        'loadAgentHarnessSkills',
-        'getAgentHarnessSkillId'
-    ]);
+        loadAgentHarnessManagement: loadHarnessManagement, loadAgentControlPlane: loadControlPlane,
+        bindAgentRunHarnessDiagnostics: bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: diagnosticTabMarkup,
+        loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || ''
+    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId']);
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindManagement, { once: true });
     else bindManagement();

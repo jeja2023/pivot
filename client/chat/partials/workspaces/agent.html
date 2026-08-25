@@ -8,6 +8,7 @@
                 </div>
                 <div class="agent-modal-header-actions">
                     <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog" aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
+                    <button id="agent-goal-create-top-btn" class="btn-primary hidden" type="button">新建持续目标</button>
                     <button id="agent-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
                 </div>
@@ -16,35 +17,63 @@
                 <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务运行</button>
                 <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
                 <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-controls="automation-schedules-panel" aria-selected="false" tabindex="-1">计划任务</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab" aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 工作台</button>
             </div>
-            <section id="agent-control-plane" class="agent-control-plane" aria-label="Agent 工作台">
-                <div class="agent-control-plane-head">
-                    <div>
-                        <strong>Agent 工作台</strong>
-                        <span>档案、记忆、持续目标、反馈和受控能力进化</span>
+            <!-- Agent 持续目标创建模态弹窗 -->
+            <div id="agent-goal-modal" class="modal-overlay hidden" style="z-index: 1860;" role="dialog" aria-modal="true" aria-labelledby="agent-goal-modal-title" aria-hidden="true">
+                <div class="modal agent-task-editor-modal agent-goal-modal-dialog">
+                    <div class="agent-config-modal-head">
+                        <div>
+                            <h3 id="agent-goal-modal-title">新建持续目标</h3>
+                            <span>配置由定时调度或外部事件源自动触发的自主 Agent 持续目标</span>
+                        </div>
                     </div>
-                    <div class="agent-control-plane-actions">
-                        <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">收件箱 <span id="agent-inbox-count" class="agent-inbox-count">0</span></button>
-                        <button id="agent-goal-create" class="btn-primary btn-xs" type="button">新建持续目标</button>
-                    </div>
+                    <form id="agent-goal-editor" class="agent-task-editor-body agent-goal-modal-form">
+                        <label class="modal-form-field">
+                            <span>目标名称</span>
+                            <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160" placeholder="例如：每日晨间项目风险与待办巡检" required>
+                        </label>
+                        <label class="modal-form-field agent-task-goal-field">
+                            <span>目标描述</span>
+                            <textarea id="agent-goal-goal" class="form-input agent-goal-input" rows="3" maxlength="12000" placeholder="清晰描述该持续目标每次被触发时需要执行的操作" required></textarea>
+                        </label>
+                        <div class="modal-form-grid modal-form-grid--2">
+                            <label class="modal-form-field">
+                                <span>触发方式</span>
+                                <select id="agent-goal-trigger" class="form-input">
+                                    <option value="timer">定时调度 (每天固定时间)</option>
+                                    <option value="webhook">Webhook 外部调用</option>
+                                    <option value="file">受控文件目录变化</option>
+                                    <option value="database">数据库只读增量变化</option>
+                                    <option value="manual">仅手动触发</option>
+                                </select>
+                            </label>
+                            <label id="agent-goal-time-field" class="modal-form-field">
+                                <span>每日执行时间</span>
+                                <input id="agent-goal-time" class="form-input" type="time" value="09:00">
+                            </label>
+                        </div>
+                        <label id="agent-goal-directory-field" class="modal-form-field hidden">
+                            <span>监听目录路径</span>
+                            <input id="agent-goal-directory" class="form-input" placeholder="请输入受控目录根内的相对路径">
+                        </label>
+                        <label id="agent-goal-query-field" class="modal-form-field hidden">
+                            <span>只读增量 SQL 查询</span>
+                            <input id="agent-goal-query" class="form-input" placeholder="SELECT id, updated_at FROM my_table WHERE updated_at > '{{watermark}}'">
+                        </label>
+                        <div id="agent-goal-token-notice" class="agent-goal-notice hidden" role="status"></div>
+                        <div class="agent-task-editor-footer">
+                            <span class="agent-goal-hint">后台自动监听并生成独立审计记录</span>
+                            <div>
+                                <button type="button" id="agent-goal-cancel" class="btn-secondary">取消</button>
+                                <button type="submit" class="btn-primary">保存持续目标</button>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-                <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
-                <div id="agent-goals-panel" class="agent-goals-panel"></div>
-                <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
-                <div id="agent-quality-panel" class="agent-quality-panel"></div>
-                <div id="agent-channels-panel" class="agent-channels-panel"></div>
-                <form id="agent-goal-editor" class="agent-goal-editor hidden">
-                    <label><span>目标名称</span><input id="agent-goal-title" class="form-input" maxlength="160" required></label>
-                    <label><span>目标</span><textarea id="agent-goal-goal" class="form-input" rows="2" maxlength="12000" required></textarea></label>
-                    <label><span>事件源</span><select id="agent-goal-trigger" class="form-input"><option value="timer">定时</option><option value="webhook">Webhook</option><option value="file">文件变化</option><option value="database">数据变化</option><option value="manual">手动</option></select></label>
-                    <label id="agent-goal-time-field"><span>执行时间</span><input id="agent-goal-time" class="form-input" type="time" value="09:00"></label>
-                    <label id="agent-goal-directory-field" class="hidden"><span>监听目录</span><input id="agent-goal-directory" class="form-input" placeholder="必须位于受控目录根内"></label>
-                    <label id="agent-goal-query-field" class="hidden"><span>只读增量查询</span><input id="agent-goal-query" class="form-input" placeholder="SELECT ... WHERE updated_at > '{{watermark}}'"></label>
-                    <div class="agent-goal-editor-actions"><button type="button" id="agent-goal-cancel" class="btn-secondary btn-xs">取消</button><button type="submit" class="btn-primary btn-xs">保存</button></div>
-                    <div id="agent-goal-token-notice" class="agent-harness-notice" role="status"></div>
-                </form>
-            </section>
-            <div class="agent-workbench">
+            </div>
+            <!-- 视图 1：任务运行 (默认展示) -->
+            <div id="agent-tasks-view" class="agent-workbench">
                 <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog" aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
                     <div id="agent-run-panel" class="modal agent-task-editor-modal">
                         <div class="agent-config-modal-head">
@@ -597,6 +626,7 @@ permissions: []"></textarea>
                                 <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
                                 <button class="btn-secondary" type="button" data-agent-config-open="harness">运行环境</button>
                                 <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
+                                <button id="agent-inbox-shortcut-btn" class="btn-secondary" type="button" data-automation-jump="workbench" title="前往 Agent 工作台">工作台与收件箱 <span id="agent-inbox-shortcut-badge" class="agent-inbox-count hidden">0</span></button>
                             </div>
                             <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                         </div>
@@ -625,6 +655,109 @@ permissions: []"></textarea>
                     </div>
                     <div id="agent-runs-list" class="agent-runs-list"></div>
                     <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
+                </div>
+            </div>
+            <!-- 视图 2：Agent 工作台 (独立 Tab 页面，模块化清晰布局) -->
+            <div id="agent-control-plane" class="agent-control-plane-view hidden" aria-label="Agent 工作台">
+                <!-- 顶部子导航栏：清晰分类，告别杂乱拥挤 -->
+                <div class="agent-cp-subnav-bar">
+                    <div class="agent-cp-subnav-tabs" role="tablist" aria-label="Agent 工作台导航">
+                        <button class="agent-cp-subnav-tab active" type="button" data-agent-cp-subview="inbox" role="tab" aria-selected="true">
+                            <span>统一收件箱</span>
+                            <span id="agent-cp-inbox-badge" class="agent-cp-subnav-badge">0</span>
+                        </button>
+                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="goals" role="tab" aria-selected="false">
+                            <span>持续目标</span>
+                            <span id="agent-cp-goals-badge" class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
+                        </button>
+                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="channels" role="tab" aria-selected="false">
+                            <span>通知渠道</span>
+                            <span id="agent-cp-channels-badge" class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
+                        </button>
+                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="quality" role="tab" aria-selected="false">
+                            <span>质量与可靠性</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 子视图 1：统一收件箱 (宽幅专业表格) -->
+                <div class="agent-cp-subview-pane" data-agent-cp-pane="inbox">
+                    <section class="agent-cp-card" aria-labelledby="agent-inbox-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-inbox-card-title">统一收件箱</h4>
+                                <span>集中接收任务运行结果、人工审批请求与智能体自进化提案</span>
+                            </div>
+                            <div class="agent-cp-card-actions">
+                                <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">刷新收件箱</button>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 子视图 2：持续目标 (列表与新建) -->
+                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="goals">
+                    <section class="agent-cp-card" aria-labelledby="agent-goals-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-goals-card-title">持续目标</h4>
+                                <span>配置由定时调度、外部 Webhook 或数据库文件变更自动触发的常驻 Agent 目标</span>
+                            </div>
+                            <div class="agent-cp-card-actions">
+                                <button id="agent-goal-create" class="btn-primary btn-xs" type="button">+ 新建持续目标</button>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-goals-panel" class="agent-goals-panel"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 子视图 3：通知与审批渠道 -->
+                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="channels">
+                    <section class="agent-cp-card" aria-labelledby="agent-channels-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-channels-card-title">通知与审批渠道</h4>
+                                <span>配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与人工审批</span>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-channels-panel" class="agent-channels-panel"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 子视图 4：质量与可靠性大屏 -->
+                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
+                    <div class="agent-cp-quality-layout">
+                        <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-quality-card-title">运行质量与运维指标</h4>
+                                    <span>近 30 天自主任务完成率、人工审批中位数耗时与渠道投递健康度</span>
+                                </div>
+                            </div>
+                            <div class="agent-cp-card-body">
+                                <div id="agent-quality-panel" class="agent-quality-panel"></div>
+                            </div>
+                        </section>
+
+                        <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-reliability-card-title">工具调用可靠性监控</h4>
+                                    <span>各接入工具调用成功率、加权可靠度评分与样本置信度</span>
+                                </div>
+                            </div>
+                            <div class="agent-cp-card-body">
+                                <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </div>
         </div>
