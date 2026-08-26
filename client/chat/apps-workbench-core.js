@@ -480,15 +480,6 @@ function renderAppsGrid() {
                     </div>
                 ` : ''}
             </div>
-            <div class="app-card-footer">
-                <span class="app-card-action">
-                    <span>进入工作台</span>
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                        <path d="M5 12h14"></path>
-                        <path d="M12 5l7 7-7 7"></path>
-                    </svg>
-                </span>
-            </div>
         </button>
     `).join(''));
 }
