@@ -1,5 +1,7 @@
 .apps-workspace-modal .workspace-modal-body {
     padding: 16px 20px 24px;
+    display: flex;
+    flex-direction: column;
 }
 
 .apps-workspace-body {
