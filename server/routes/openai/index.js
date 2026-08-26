@@ -345,6 +345,9 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 req.body = buildPromptBody(prompt);
                 const proxyRes = createCompletionResponseProxy(res, buildProxyOptions(prompt, 0));
                 await runRouteHandlers(chatHandlers, req, proxyRes);
+                if (stream && proxyRes.streamFinished) {
+                    await proxyRes.streamFinished;
+                }
                 return;
             }
 
@@ -366,6 +369,9 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         }
                     }));
                     await runRouteHandlers(chatHandlers, req, proxyRes);
+                    if (proxyRes.streamFinished) {
+                        await proxyRes.streamFinished;
+                    }
                     if (streamErrored || res.writableEnded) break;
                 }
                 if (!streamErrored && !res.writableEnded) {
@@ -633,8 +639,8 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             try { abortController.abort(); } catch (_) {}
             releaseSemaphore();
         };
-        req.once('aborted', onClientDisconnect);
-        res.once('close', onClientDisconnect);
+        if (typeof req.once === 'function') req.once('aborted', onClientDisconnect);
+        if (typeof res.once === 'function') res.once('close', onClientDisconnect);
 
         // 3. 构建下游请求
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
@@ -763,10 +769,15 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     endStreamWithError(res, err);
                     releaseSemaphore();
                 });
-                req.on('close', () => {
-                    if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                    onClientDisconnect();
+                response.data.on('close', () => {
+                    releaseSemaphore();
                 });
+                if (typeof req.on === 'function') {
+                    req.on('close', () => {
+                        if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
+                        onClientDisconnect();
+                    });
+                }
             } else {
                 if (directCompletionTracker) directCompletionTracker.observeResponse(response.data);
                 res.json(response.data);

@@ -38,10 +38,21 @@ test('real PostgreSQL integration is explicit when DATABASE_URL is available', {
     assert.equal(result.rows[0].ok, 1);
 });
 
+async function ensureTestUser(pool, username = 'integration_admin') {
+    const existing = await pool.query('SELECT id, role, unit FROM users WHERE username = $1', [username]);
+    if (existing.rows.length > 0) return { id: Number(existing.rows[0].id), username, role: existing.rows[0].role, unit: existing.rows[0].unit || '' };
+    const res = await pool.query(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES ($1, 'hash', 'Integration Admin', 'QA', 'admin', 'active', NOW())
+        RETURNING id, role, unit
+    `, [username]);
+    return { id: Number(res.rows[0].id), username, role: res.rows[0].role, unit: res.rows[0].unit || '' };
+}
+
 test('PostgreSQL Skill release path enforces signature, sandbox regression and runtime resolution', { skip: !process.env.DATABASE_URL }, async () => {
     const { getPgPool } = require('../server/db/pg-connection');
     const pool = getPgPool();
-    const user = { id: 491, role: 'admin', unit: '' };
+    const user = await ensureTestUser(pool, 'integration_skill_admin');
     const id = `integration.skill.${Date.now()}`;
     const name = `integration-skill-${Date.now()}`;
     const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -91,7 +102,10 @@ test('Webhook Channel Adapter performs bounded chunked delivery over a real loca
 });
 
 test('PostgreSQL profile field versions reject stale concurrent updates', { skip: !process.env.DATABASE_URL }, async () => {
-    const userId = 491;
+    const { getPgPool } = require('../server/db/pg-connection');
+    const pool = getPgPool();
+    const user = await ensureTestUser(pool, 'integration_profile_admin');
+    const userId = user.id;
     const before = await getAgentProfile(userId);
     const next = await updateAgentProfile(userId, { displayName: `field-test-${Date.now()}`, fieldVersions: { displayName: Number(before.fieldVersions?.displayName || 0) } }, { source: 'integration-test' });
     assert.equal(Number(next.fieldVersions.displayName), Number(before.fieldVersions?.displayName || 0) + 1);
@@ -102,7 +116,7 @@ test('PostgreSQL profile field versions reject stale concurrent updates', { skip
 test('workflow release gate requires a completed fixed evaluation batch', { skip: !process.env.DATABASE_URL }, async () => {
     const { getPgPool } = require('../server/db/pg-connection');
     const pool = getPgPool();
-    const user = { id: 491, role: 'admin', unit: '' };
+    const user = await ensureTestUser(pool, 'integration_workflow_admin');
     const suffix = Date.now();
     const workflow = await createAgentWorkflow(user, { name: `integration-gate-${suffix}`, description: 'gate', dagSpec: { nodes: [{ id: 'output', tool: 'workflow.output', input: { name: 'answer', value: 'ok' } }] } });
     try {

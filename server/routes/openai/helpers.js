@@ -641,6 +641,14 @@ function createCompletionResponseProxy(res, {
     let completionStreamDone = false;
     let completionStreamErrored = false;
     let completionStreamErrorPayload = null;
+    let notifyStreamFinished = null;
+    const streamFinished = new Promise(resolve => { notifyStreamFinished = resolve; });
+    const finishStreamPromise = () => {
+        if (typeof notifyStreamFinished === 'function') {
+            notifyStreamFinished();
+            notifyStreamFinished = null;
+        }
+    };
     const completionStates = new Map();
     const visibilityTracker = createCompletionVisibilityTracker({ model, stream, onEmptyCompletion });
 
@@ -755,6 +763,7 @@ function createCompletionResponseProxy(res, {
         completionStreamErrorPayload = payload;
         res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
         if (typeof onStreamError === 'function') onStreamError(payload);
+        finishStreamPromise();
     };
 
     return {
@@ -776,6 +785,9 @@ function createCompletionResponseProxy(res, {
         get streamErrorPayload() {
             return completionStreamErrorPayload;
         },
+        get streamFinished() {
+            return streamFinished;
+        },
         status(code) {
             res.status(code);
             return this;
@@ -792,6 +804,7 @@ function createCompletionResponseProxy(res, {
             return this;
         },
         json(body) {
+            finishStreamPromise();
             if (stream && body?.error && res.headersSent) {
                 writeSseError(body);
                 if (endResponse && !res.writableEnded) res.end();
@@ -803,6 +816,7 @@ function createCompletionResponseProxy(res, {
             return res.json(body);
         },
         send(body) {
+            finishStreamPromise();
             if (stream && body?.error && res.headersSent) {
                 writeSseError(body);
                 if (endResponse && !res.writableEnded) res.end();
@@ -832,6 +846,7 @@ function createCompletionResponseProxy(res, {
         },
         writeSseError,
         end(chunk) {
+            finishStreamPromise();
             if (stream && completionParser) {
                 if (chunk !== undefined && chunk !== null && chunk !== '') {
                     this.write(chunk);

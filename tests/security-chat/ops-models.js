@@ -980,10 +980,8 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
             chunks: []
         };
         const done = new Promise(resolve => { res.onEnd = resolve; });
-        await Promise.race([
-            runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res),
-            done
-        ]);
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        await done;
 
         const output = res.chunks.join('');
         assert.equal(res.statusCode, 200);
@@ -1097,11 +1095,8 @@ test('OpenAI completions 上游流中断会返回 SSE error 且不伪造 DONE', 
             const timer = setTimeout(() => reject(new Error('stream error test timed out')), 3000);
             done.finally(() => clearTimeout(timer));
         });
-        await Promise.race([
-            runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res),
-            done,
-            timeout
-        ]);
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        await Promise.race([done, timeout]);
 
         const output = res.chunks.join('');
         assert.match(output, /"text":"partial"/);

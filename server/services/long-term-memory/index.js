@@ -447,7 +447,7 @@ async function upsertMemory(userId, candidate, options = {}) {
         INSERT INTO memories (
             user_id, scope, type, governance_class, retention_mode, sensitive, content, embedding, salience, confidence, source_session_id, source_message_ids, status, expires_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
     `, [
         userId,

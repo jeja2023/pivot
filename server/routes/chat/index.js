@@ -742,6 +742,10 @@ function createChatRouter({
                 releaseSemaphore(); // 传输错误释放
             });
 
+            response.data.on('close', () => {
+                releaseSemaphore();
+            });
+
             req.on('close', () => {
                 onClientDisconnect();
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();

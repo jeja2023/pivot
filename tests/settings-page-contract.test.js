@@ -53,6 +53,8 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(statsRoute, /trendInFlight/);
     assert.match(statsRoute, /tokenUsageAggregateSubquery/);
     assert.match(statsRoute, /modelEndpoints/);
+    assert.match(statsRoute, /getCachedDatabaseSize\(\)/);
+    assert.match(read('server/services/admin-stats-cache.js'), /DATABASE_SIZE_TTL_MS/);
 });
 
 test('后台调度轮询具备防重入保护', () => {

@@ -18,7 +18,7 @@ const {
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { normalizePriceCurrency } = require('../services/model-costs');
-const { setBoundedStatsCache, tokenUsageAggregateSubquery } = require('../services/admin-stats-cache');
+const { getCachedDatabaseSize, setBoundedStatsCache, tokenUsageAggregateSubquery } = require('../services/admin-stats-cache');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const {
@@ -270,13 +270,7 @@ function createAdminStatsRouter({
         const activeUsersCount = Number(activeUsersRow?.count || 0);
 
         // 获取存储统计
-        let dbSize = 0;
-        try {
-            const dbSizeRow = await queryOne('SELECT pg_database_size(current_database()) AS db_size');
-            if (dbSizeRow && dbSizeRow.db_size) {
-                dbSize = Number(dbSizeRow.db_size) || 0;
-            }
-        } catch (_) {}
+        const dbSize = getCachedDatabaseSize();
 
         const uploadsDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
             ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)

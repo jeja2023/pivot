@@ -31,8 +31,8 @@ test('safe HTTP helpers reject multipart-like payloads by default', () => {
 test('forwardChatCompletion rejects multipart-like payloads before axios dispatch', async () => {
     await assert.rejects(
         () => forwardChatCompletion({
-            modelCfg: { id: 1, user_id: null, url: 'https://model.example/v1' },
-            url: 'https://model.example/v1/chat/completions',
+            modelCfg: { id: 1, user_id: null, url: 'http://127.0.0.1:1/v1' },
+            url: 'http://127.0.0.1:1/v1/chat/completions',
             data: { getBoundary() { return 'boundary'; } },
             headers: {}
         }),

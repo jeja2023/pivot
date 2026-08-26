@@ -52,7 +52,7 @@ function buildLongTermMemoryContextMessage(memories = [], options = {}) {
     );
     const inputBudget = Math.max(0, Number(options.inputBudget || 0));
     const maxTokens = inputBudget > 0
-        ? Math.max(256, Math.floor(inputBudget * ratio))
+        ? Math.max(384, Math.floor(inputBudget * ratio))
         : Math.max(512, Number(options.maxTokens || 1200));
     const header = [
         'PIVOT_LONG_TERM_MEMORY_BEGIN',

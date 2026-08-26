@@ -10,9 +10,14 @@ function ensureLegacyColumnBeforeSchema(table, column, definition) {
 
 const PRE_SCHEMA_COLUMNS = [
     ['users', 'status', "TEXT DEFAULT 'active'"],
+    ['users', 'deleted_at', 'DATETIME'],
     ['sessions', 'is_pinned', 'INTEGER DEFAULT 0'],
     ['sessions', 'is_archived', 'INTEGER DEFAULT 0'],
+    ['sessions', 'deleted_at', 'DATETIME'],
     ['sessions', 'created_at', 'DATETIME'],
+    ['messages', 'deleted_at', 'DATETIME'],
+    ['attachments', 'deleted_at', 'DATETIME'],
+    ['knowledge_docs', 'deleted_at', 'DATETIME'],
     ['prompts', 'user_id', 'INTEGER'],
     ['prompts', 'scope', "TEXT DEFAULT 'global'"],
     ['prompts', 'created_at', 'DATETIME'],

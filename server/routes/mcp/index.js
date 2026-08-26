@@ -306,7 +306,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const packages = await listGlobalCapabilityPackages(req.user);
-        if (req.query.include_tools === 'true' || req.query.includeTools === 'true') {
+        if (req.query?.include_tools === 'true' || req.query?.includeTools === 'true') {
             const enriched = await Promise.all(packages.map(async item => {
                 const tools = await resolvePackageTools(item, req.user);
                 return { ...item, tools };

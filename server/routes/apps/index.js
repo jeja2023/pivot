@@ -150,8 +150,8 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         try { abortController.abort(); } catch (_e) {}
         releaseSlots();
     };
-    req.once('aborted', onClientDisconnect);
-    res.once('close', onClientDisconnect);
+    if (typeof req.once === 'function') req.once('aborted', onClientDisconnect);
+    if (typeof res.once === 'function') res.once('close', onClientDisconnect);
     const requestStartedAt = Date.now();
     const upstreamPayloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
     try {
@@ -345,8 +345,8 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
         clientDisconnected = true;
         abortController.abort();
     };
-    req.once('aborted', abortForDisconnect);
-    res.once('close', abortForDisconnect);
+    if (typeof req.once === 'function') req.once('aborted', abortForDisconnect);
+    if (typeof res.once === 'function') res.once('close', abortForDisconnect);
 
     const callAgentModel = async (currentMessages) => {
         if (modelCallCount >= ANALYSIS_AGENT_MAX_CALLS) {
@@ -802,8 +802,8 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             try { abortController.abort(); } catch (_) {}
             releaseSemaphore();
         };
-        req.once('aborted', onClientDisconnect);
-        res.once('close', onClientDisconnect);
+        if (typeof req.once === 'function') req.once('aborted', onClientDisconnect);
+        if (typeof res.once === 'function') res.once('close', onClientDisconnect);
 
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true });
         const payload = {
@@ -861,10 +861,15 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                     if (!res.writableEnded) res.end();
                     releaseSemaphore();
                 });
-                req.on('close', () => {
-                    if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                    onClientDisconnect();
+                response.data.on('close', () => {
+                    releaseSemaphore();
                 });
+                if (typeof req.on === 'function') {
+                    req.on('close', () => {
+                        if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
+                        onClientDisconnect();
+                    });
+                }
             } else {
                 const choice = response.data?.choices?.[0];
                 const finishReason = choice?.finish_reason || null;
