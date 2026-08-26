@@ -15,8 +15,11 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#agent-workbench-modal [data-automation-section="workbench"]').click();
         await expect(page.locator('#agent-control-plane')).toBeVisible();
         await expect(page.locator('#agent-inbox-panel')).toBeVisible();
+        await page.locator('[data-agent-cp-subview="goals"]').click();
         await expect(page.locator('#agent-goals-panel')).toBeVisible();
+        await page.locator('[data-agent-cp-subview="channels"]').click();
         await expect(page.locator('#agent-channels-panel')).toBeVisible();
+        await page.locator('[data-agent-cp-subview="goals"]').click();
         await page.locator('#agent-profile-wizard-panel').evaluate(panel => { panel.classList.remove('hidden'); panel.style.display = 'block'; });
         await expect(page.locator('#agent-profile-wizard-panel')).toHaveClass(/agent-profile-wizard-panel/);
         await page.locator('#agent-goal-create').evaluate(button => button.click());
