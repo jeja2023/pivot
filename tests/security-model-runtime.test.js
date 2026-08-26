@@ -267,3 +267,23 @@ test('model runtime request path preserves shared endpoint max while active rows
 
     assert.equal(getSemaphores()[0].maxConcurrent, 2);
 });
+
+test('getModelEndpointRuntimeStatus accepts direct model rows and immediately syncs endpoints', async () => {
+    const { runtime } = loadModelRuntimeHarness({ defaultConcurrency: 3, models: [] });
+    const directModels = [
+        {
+            id: 10,
+            name: 'Direct Model',
+            url: 'https://direct.example/v1',
+            monitor_url: '',
+            max_concurrent: 4,
+            supports_vision: 0,
+            status: 'active'
+        }
+    ];
+    const status = runtime.getModelEndpointRuntimeStatus(directModels);
+    assert.equal(status.length, 1);
+    assert.equal(status[0].host, 'direct.example');
+    assert.equal(status[0].configuredMaxConcurrent, 4);
+    assert.equal(status[0].concurrency.max, 4);
+});

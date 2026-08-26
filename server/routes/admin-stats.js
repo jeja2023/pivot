@@ -123,7 +123,7 @@ async function summarizeModelEndpoints({ requestHosts = [], publicUrl = '' } = {
 
     summary.hasRemoteModels = summary.remoteCount > 0;
     summary.hasLocalModels = summary.localCount > 0;
-    summary.runtime = getModelEndpointRuntimeStatus();
+    summary.runtime = getModelEndpointRuntimeStatus(rows);
     summary.gpuScope = summary.hasRemoteModels
         ? (summary.hasLocalModels ? 'mixed' : 'local_only_not_model_host')
         : 'local';

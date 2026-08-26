@@ -306,8 +306,11 @@ async function startModelEndpointMonitor() {
     scheduleNextMonitorRefresh();
 }
 
-function getModelEndpointRuntimeStatus() {
-    syncConfiguredRuntimes();
+function getModelEndpointRuntimeStatus(models) {
+    if (Array.isArray(models)) {
+        cachedActiveEndpointModels = models;
+    }
+    syncConfiguredRuntimes(models || getActiveEndpointModels());
     return Array.from(runtimes.values()).map(runtime => {
         const status = runtime.semaphore.getStatus();
         const circuitOpenMs = Math.max(0, runtime.circuitOpenUntil - Date.now());
