@@ -403,30 +403,52 @@
     font-size: 0.85rem;
 }
 
-.data-analysis-ai-columns-container {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 16px;
-    width: 100%;
-    box-sizing: border-box;
+.data-analysis-subtabs-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+    margin-bottom: 12px;
+    background: rgba(241, 245, 249, 0.95);
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    border-radius: 8px;
 }
 
-.data-analysis-ai-col {
+.data-analysis-subtab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.data-analysis-subtab:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.65);
+}
+
+.data-analysis-subtab.active {
+    background: #ffffff;
+    color: #2563eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.data-analysis-ai-subpanel {
+    width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
 }
 
-.data-analysis-ai-left-col {
-    flex: 0 0 calc(46% - 8px);
-    width: calc(46% - 8px);
-}
-
-.data-analysis-ai-right-col {
-    flex: 0 0 calc(54% - 8px);
-    width: calc(54% - 8px);
+.data-analysis-ai-subpanel.hidden {
+    display: none !important;
 }
 
 .data-analysis-ai-col-header {
@@ -832,19 +854,6 @@
     }
 }
 
-@media (max-width: 1100px) {
-    .data-analysis-ai-columns-container {
-        flex-direction: column;
-        gap: 16px;
-    }
-
-    .data-analysis-ai-left-col,
-    .data-analysis-ai-right-col {
-        flex: 1 1 100%;
-        width: 100%;
-    }
-}
-
 @media (max-width: 820px) {
     .data-analysis-panel,
     .data-analysis-kpis,
@@ -861,6 +870,30 @@
 }
 
 /* 暗黑模式适配 */
+body.dark-mode .data-analysis-subtabs-nav,
+.dark-mode .data-analysis-subtabs-nav {
+    background: rgba(15, 23, 42, 0.65);
+    border-color: rgba(51, 65, 85, 0.8);
+}
+
+body.dark-mode .data-analysis-subtab,
+.dark-mode .data-analysis-subtab {
+    color: #94a3b8;
+}
+
+body.dark-mode .data-analysis-subtab:hover,
+.dark-mode .data-analysis-subtab:hover {
+    color: #f8fafc;
+    background: rgba(30, 41, 59, 0.6);
+}
+
+body.dark-mode .data-analysis-subtab.active,
+.dark-mode .data-analysis-subtab.active {
+    background: #1e293b;
+    color: #60a5fa;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
 body.dark-mode .data-analysis-ai-box,
 .dark-mode .data-analysis-ai-box {
     background: rgba(30, 41, 59, 0.75);

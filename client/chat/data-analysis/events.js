@@ -296,6 +296,19 @@
                 await submitDatabaseImport();
                 return;
             }
+            const subtab = event.target.closest('[data-ai-subtab]');
+            if (subtab) {
+                const subtabName = subtab.dataset.aiSubtab;
+                document.querySelectorAll('.data-analysis-subtab').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.aiSubtab === subtabName);
+                });
+                document.getElementById('data-analysis-ai-subpanel-chat')?.classList.toggle('hidden', subtabName !== 'chat');
+                document.getElementById('data-analysis-ai-subpanel-semantic')?.classList.toggle('hidden', subtabName !== 'semantic');
+                if (subtabName === 'semantic' && typeof app.renderSemanticControls === 'function') {
+                    app.renderSemanticControls();
+                }
+                return;
+            }
             const tab = event.target.closest('[data-data-analysis-tab]');
             if (tab) {
                 const name = tab.dataset.dataAnalysisTab;
@@ -316,9 +329,19 @@
                     renderChart();
                 } else if (item && item.analysis) {
                     activateTab('ai');
+                    document.querySelectorAll('.data-analysis-subtab').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.aiSubtab === 'chat');
+                    });
+                    document.getElementById('data-analysis-ai-subpanel-chat')?.classList.remove('hidden');
+                    document.getElementById('data-analysis-ai-subpanel-semantic')?.classList.add('hidden');
                     renderAgentResult(document.getElementById('data-analysis-ai-result'), item.analysis);
                 } else if (item && item.semantic) {
                     activateTab('ai');
+                    document.querySelectorAll('.data-analysis-subtab').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.aiSubtab === 'semantic');
+                    });
+                    document.getElementById('data-analysis-ai-subpanel-chat')?.classList.add('hidden');
+                    document.getElementById('data-analysis-ai-subpanel-semantic')?.classList.remove('hidden');
                     state.semanticJob = {
                         id: item.semantic.jobId || '',
                         status: 'succeeded',
