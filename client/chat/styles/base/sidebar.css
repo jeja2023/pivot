@@ -579,19 +579,24 @@ body.pivot-desktop-runtime .desktop-app-menu {
     background: transparent;
     color: var(--primary);
     flex-shrink: 0;
+    vertical-align: middle;
 }
 .admin-badge-icon {
     display: none;
     flex: 0 0 auto;
 }
 .admin-badge.is-super-admin {
-    color: var(--primary);
+    color: var(--primary, #10b981);
 }
 .admin-badge.is-role-admin {
+    color: #2563eb;
+}
+.admin-badge.is-regular-user {
     color: #64748b;
 }
 .admin-badge.is-super-admin .admin-badge-icon-super,
-.admin-badge.is-role-admin .admin-badge-icon-role {
+.admin-badge.is-role-admin .admin-badge-icon-role,
+.admin-badge.is-regular-user .admin-badge-icon-user {
     display: block;
 }
 .model-name-cell {

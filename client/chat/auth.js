@@ -89,12 +89,16 @@ window.showApp = (options = {}) => {
     
     const isSuperAdmin = isSuperAdminUser(currentUser);
     const isAdminRole = isAdminUser(currentUser);
+    const tier = typeof getPermissionTier === 'function' ? getPermissionTier(currentUser) : (isSuperAdmin ? 'admin' : (isAdminRole ? 'manager' : 'user'));
+    const isRoleAdmin = (tier === 'manager' || isAdminRole) && !isSuperAdmin;
+    const isRegular = tier === 'user' && !isAdminRole && !isSuperAdmin;
     const tag = document.getElementById('admin-tag');
     if (tag) {
-        tag.classList.toggle('hidden', !isAdminRole);
-        tag.classList.toggle('is-super-admin', isSuperAdmin);
-        tag.classList.toggle('is-role-admin', isAdminRole && !isSuperAdmin);
-        const label = getPermissionLabel(currentUser);
+        tag.classList.remove('hidden');
+        tag.classList.toggle('is-super-admin', isSuperAdmin || tier === 'admin');
+        tag.classList.toggle('is-role-admin', isRoleAdmin);
+        tag.classList.toggle('is-regular-user', isRegular);
+        const label = typeof getPermissionLabel === 'function' ? getPermissionLabel(currentUser) : (isSuperAdmin ? '系统管理员' : (isRoleAdmin ? '管理员' : '用户'));
         tag.title = label;
         tag.setAttribute('aria-label', label);
     }
