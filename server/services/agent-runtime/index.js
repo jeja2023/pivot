@@ -7,7 +7,7 @@ const { clampText, compactToolOutputForModel, executeToolByName, findAgentToolBy
 const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
 const { createAgentQueue } = require('../agent-queue');
-const { callModelText, recordAgentModelUsage } = require('../agent-model');
+const { callModelText, recordAgentModelUsage, AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
 const { normalizeToolInput } = require('../agent-policy');
 const { publishUserEvent } = require('../realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('../model-router');
@@ -1116,8 +1116,18 @@ async function runAgent(runId, user) {
                     });
                 } catch (_) {}
                 const usageRef = {};
-                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal, usageRef }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
+                // 规划一步可能直接内联 {"action":"final","answer":"…"} 给出完整答案，
+                // 那段 answer 同样受本次调用的输出预算限制，因此按最终答案的下限给足。
+                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal, usageRef, minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
                 plannedTextUsageRef = usageRef;
+                if (usageRef.truncated) {
+                    logger.warn({
+                        runId,
+                        step,
+                        maxTokens: usageRef.maxTokens,
+                        outputTokens: usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens ?? null
+                    }, 'Agent 规划输出因预算耗尽被截断，本步结果可能不完整');
+                }
                 try {
                     await recordAgentEvent({
                         runId,

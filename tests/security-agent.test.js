@@ -57,7 +57,7 @@ const {
     resolveMaxSteps
 } = require('../server/services/agent-validators');
 const { dagConditionSatisfied } = require('../server/services/agent-dag-utils');
-const { applyAgentThinkingControls, resolveAgentMaxTokens, agentThinkingKept } = require('../server/services/agent-model');
+const { applyAgentThinkingControls, resolveAgentMaxTokens, agentThinkingKept, AGENT_ANSWER_MIN_MAX_TOKENS } = require('../server/services/agent-model');
 const { runDueAgentSchedules } = require('../server/services/agent-schedules');
 const {
     executeContentReview,
@@ -1094,6 +1094,33 @@ test('agent thinking follows the run model configuration without code changes', 
     assert.equal(agentThinkingKept(plainModel, { enableThinking: true }), true);
     // 「聊天中开启思考」必须以「思考模型」为前提，缺一不可。
     assert.equal(agentThinkingKept({ ...plainModel, chat_thinking_enabled: 1 }), false);
+});
+
+test('agent answer budget floor keeps final replies from being truncated', () => {
+    const model = { model_name: 'Qwen3.6-35B' };
+    // 面向用户的完整回复不能沿用规划一步的 1200 兜底，否则综合多步观察的答案会被截断。
+    assert.ok(AGENT_ANSWER_MIN_MAX_TOKENS >= 4096);
+    assert.equal(resolveAgentMaxTokens(model, {}), 1200);
+    assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }), AGENT_ANSWER_MIN_MAX_TOKENS);
+    // 下限只抬高不压低：模型自身配置更大时保持原值。
+    assert.equal(
+        resolveAgentMaxTokens({ ...model, max_tokens: 8192 }, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }),
+        8192
+    );
+    // 模型配得过小时被抬到下限——这正是生产上"回复被截断"的成因。
+    assert.equal(
+        resolveAgentMaxTokens({ ...model, max_tokens: 600 }, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }),
+        AGENT_ANSWER_MIN_MAX_TOKENS
+    );
+    // 调用方显式 maxTokens 始终最高优先，便于个别步骤压成本。
+    assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS, maxTokens: 500 }), 500);
+    // 与思维链下限共存时取最大者。
+    const deepModel = { ...model, supports_reasoning: 1, chat_thinking_enabled: 1 };
+    assert.ok(resolveAgentMaxTokens(deepModel, { minMaxTokens: 2048 }) >= 4096);
+    assert.equal(resolveAgentMaxTokens(deepModel, { minMaxTokens: 12000 }), 12000);
+    // 非法下限被忽略，不影响既有行为。
+    assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: 'abc' }), 1200);
+    assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: -1 }), 1200);
 });
 
 test('built-in agent tools expose user-safe tool definitions and execute model list', async () => {

@@ -25,6 +25,10 @@ const AGENT_DEFAULT_MAX_TOKENS = 1200;
 // 显式保留思维链时，思考本身就要吃掉上千 tokens，输出预算必须同步抬高，
 // 否则正式结果会被挤没——这正是"思考耗尽、正文为空"的成因。
 const AGENT_THINKING_MIN_MAX_TOKENS = Math.max(2048, Math.min(16384, Number.parseInt(process.env.AGENT_THINKING_MIN_MAX_TOKENS || '4096', 10) || 4096));
+// 面向用户的完整回复与"规划一步"的输出量级完全不同：1200 兜底会把综合多步观察的
+// 答案直接截断。规划调用同样需要这个下限——模型经常在第一步就用
+// {"action":"final","answer":"…"} 内联完整答案，那段 answer 同样受本次调用的预算限制。
+const AGENT_ANSWER_MIN_MAX_TOKENS = Math.max(1024, Math.min(32768, Number.parseInt(process.env.AGENT_ANSWER_MIN_MAX_TOKENS || '4096', 10) || 4096));
 
 /**
  * 判断本次 Agent 调用是否保留思维链。
@@ -44,7 +48,11 @@ function resolveAgentMaxTokens(modelCfg, options = {}) {
     if (typeof options.maxTokens === 'number') return options.maxTokens;
     const configured = Number(modelCfg?.max_tokens);
     const base = Number.isFinite(configured) && configured > 0 ? configured : AGENT_DEFAULT_MAX_TOKENS;
-    return agentThinkingKept(modelCfg, options) ? Math.max(base, AGENT_THINKING_MIN_MAX_TOKENS) : base;
+    // 各场景各有自己的输出下限（面向用户的完整回复、保留思维链），取最大者；
+    // 模型自身配置更高时不被压低。
+    const floors = [Number.parseInt(options.minMaxTokens, 10) || 0];
+    if (agentThinkingKept(modelCfg, options)) floors.push(AGENT_THINKING_MIN_MAX_TOKENS);
+    return Math.max(base, ...floors);
 }
 
 function applyAgentThinkingControls(data, modelCfg, options = {}) {
@@ -100,7 +108,15 @@ async function callModelJson(modelCfg, messages, options = {}) {
             signal: options.signal || null
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
-        if (options.usageRef && typeof options.usageRef === 'object') options.usageRef.usage = usage;
+        const finishReason = String(response.data?.choices?.[0]?.finish_reason || '');
+        if (options.usageRef && typeof options.usageRef === 'object') {
+            options.usageRef.usage = usage;
+            // 回传截断信号：finish_reason='length' 意味着输出预算耗尽、内容不完整。
+            // 静默返回半截答案是最难排查的故障，调用方据此告警或改走更大预算重试。
+            options.usageRef.finishReason = finishReason;
+            options.usageRef.truncated = finishReason === 'length';
+            options.usageRef.maxTokens = maxTokens;
+        }
         if (usage && typeof options.onUsage === 'function') {
             try { options.onUsage(usage); } catch (_) {}
         }
@@ -270,5 +286,6 @@ module.exports = {
     withAgentModelConcurrency,
     resolveAgentMaxTokens,
     applyAgentThinkingControls,
-    agentThinkingKept
+    agentThinkingKept,
+    AGENT_ANSWER_MIN_MAX_TOKENS
 };

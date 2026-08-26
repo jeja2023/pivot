@@ -1,3 +1,14 @@
+## [v0.1.52] - 2026-08-26
+
+### 模型端点运行时监控与智能体长文本生成保底加固
+
+- **模型端点运行时监控实时同步修复**：修复生产环境下模型正常可用但概览页面偶发显示“暂无模型端点运行数据”的时序脱节问题；在 `summarizeModelEndpoints()` 中将实时查询出的活跃模型行数据直接透传至 `getModelEndpointRuntimeStatus(rows)`，解除对后台异步 30 秒轮询更新周期的强依赖，并即时更新内部缓存。
+- **Agent 智能体规划与长篇最终回复防截断机制**：引入全局长文本回复最低预算保障机制（`AGENT_ANSWER_MIN_MAX_TOKENS = 4096`），彻底杜绝 Agent 在输出综合性总结大报告时因沿用单步 1200 兜底预算被截断的问题；规划阶段模型若直接生成 `{"action":"final","answer":"…"}` 同样享受最低输出预算，并在输出触碰上限（`finish_reason === 'length'`）时透传截断标记并记录警示日志。
+- **前端 DOM API 防御与测试沙箱健壮性加固**：在 `client/chat/agents.js` 的 `syncAutomationPrimaryTabs`、`bindUnifiedAutomationTabs`、`bindAgentWorkbenchShortcuts`、`bindAgentConfigModal` 等函数入口处添加 `typeof document?.querySelectorAll !== 'function'` 防御判断，避免轻量测试沙箱抛出 TypeError；在 `tests/security-helpers.js` 的 `createChatRenderSandbox` 中为 mock `document` 对象补全 `querySelector`、`querySelectorAll`、`getElementById` 等标准 DOM 方法。
+- **Agent 工作台选项卡绑定时序优化与 E2E 冒烟测试对齐**：提前自动化工作台选项卡交互绑定至网络请求之前，杜绝慢网络下的点击丢失；完善 E2E 冒烟测试在验证子面板前按选项卡进行视图切换，确保测试断言与真实 UI 行为 100% 对齐。
+
+详细发布记录见 [v0.1.52 发布记录](docs/releases/v0.1.52-模型端点运行时监控与智能体长文本生成保底加固.md)。
+
 ## [v0.1.51] - 2026-08-26
 
 ### 智能分析二级 Sub-Tab 标签页架构重构与场景化聚焦升级

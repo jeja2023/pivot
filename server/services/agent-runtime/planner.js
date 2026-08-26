@@ -1,6 +1,8 @@
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
 const { fitMessagesToContextBudget } = require('../context-budget');
+const { logger } = require('../../logger');
+const { AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
 
 const AGENT_CONTEXT_FALLBACK_TOKENS = Math.max(
     Number.parseInt(process.env.AGENT_CONTEXT_WINDOW_TOKENS || '32768', 10) || 32768,
@@ -142,7 +144,22 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     ];
     const fitted = { messages: fitAgentMessages(messages, modelCfg) };
     const usageRef = {};
-    const content = await callModelText(modelCfg, fitted.messages, { user, signal: options.signal || null, usageRef });
+    // 最终答案是面向用户的完整回复，不能沿用规划一步的 1200 兜底预算，否则综合
+    // 多步观察的答案会被直接截断。minMaxTokens 只抬下限，模型配置更高时不被压低。
+    const content = await callModelText(modelCfg, fitted.messages, {
+        user,
+        signal: options.signal || null,
+        usageRef,
+        minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS
+    });
+    if (usageRef.truncated) {
+        logger.warn({
+            runId,
+            maxTokens: usageRef.maxTokens,
+            outputTokens: usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens ?? null,
+            observations: observations.length
+        }, 'Agent 最终答案因输出预算耗尽被截断，请提高模型的最大输出 Token 或 AGENT_ANSWER_MIN_MAX_TOKENS');
+    }
     if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, {
         budget: options.budget,
         usageRef,
