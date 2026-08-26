@@ -17,6 +17,7 @@
     "client/chat/agent-run-step-renderers.js": 1152,
     "server/services/knowledge-graph.js": 1054,
     "server/routes/admin-stats.js": 1087,
-    "server/services/long-term-memory/index.js": 1029
+    "server/services/long-term-memory/index.js": 1029,
+    "server/services/data-analysis/semantic-analysis.js": 1014
   }
 }

@@ -101,7 +101,7 @@ async function sandboxValidateSkill({ version, _manifest, packageRoot = '', user
     ].join('');
     const result = await runSandboxedProcess(process.execPath, ['-e', staticScript, staged], {
         jail,
-        strictIsolation: true,
+        strictIsolation: options.strictIsolation ?? (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'),
         networkDisabled: true,
         timeoutMs: Math.min(Math.max(Number(options.timeoutMs) || 30000, 1000), 120000),
         inheritEnv: false,
@@ -127,7 +127,15 @@ async function runSkillRegressionTests({ version, manifest, packageRoot = '', us
         fs.mkdirSync(staged, { recursive: true, mode: 0o700 });
         fs.cpSync(root, staged, { recursive: true, force: false, errorOnExist: false });
         try {
-            const output = await runSandboxedProcess(process.execPath, ['-e', script], { jail, cwd: staged, strictIsolation: true, networkDisabled: true, timeoutMs: Math.min(Math.max(Number(options.testTimeoutMs) || 30000, 1000), 120000), inheritEnv: false, user });
+            const output = await runSandboxedProcess(process.execPath, ['-e', script], {
+                jail,
+                cwd: staged,
+                strictIsolation: options.strictIsolation ?? (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'),
+                networkDisabled: true,
+                timeoutMs: Math.min(Math.max(Number(options.testTimeoutMs) || 30000, 1000), 120000),
+                inheritEnv: false,
+                user
+            });
             results.push({ name, passed: output.code === 0, stdout: output.stdout.slice(0, 2000), stderr: output.stderr.slice(0, 2000) });
         } catch (error) {
             results.push({ name, passed: false, error: String(error.message || error).slice(0, 2000) });

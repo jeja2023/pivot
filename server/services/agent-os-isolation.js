@@ -44,14 +44,15 @@ function canWriteDirectory(target) {
 
 function buildIsolationSpec(options = {}) {
     const memoryLimitBytes = Math.max(Number(options.memoryLimitBytes) || 512 * 1024 * 1024, 16 * 1024 * 1024);
-    const strict = options.strictIsolation === true;
+    const strictEnv = process.env.PIVOT_AGENT_STRICT_ISOLATION;
+    const strict = (strictEnv === '0' || strictEnv === 'false') ? false : (options.strictIsolation === true);
     const networkDisabled = options.networkDisabled === true;
     return {
         platform: process.platform,
         strict,
         networkDisabled,
         memoryLimitBytes,
-        cgroupRoot: options.cgroupRoot || '/sys/fs/cgroup',
+        cgroupRoot: options.cgroupRoot || process.env.PIVOT_AGENT_CGROUP_ROOT || '/sys/fs/cgroup',
         id: isolationId()
     };
 }

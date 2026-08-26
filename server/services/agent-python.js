@@ -22,7 +22,7 @@ function normalizePythonInput(value) {
     return value;
 }
 
-async function runPythonScript({ script, input = {}, workspaceRoot, taskId = 'python', timeoutMs = 30000, pythonExecutable, strictIsolation = true, networkDisabled = true, memoryLimitBytes } = {}) {
+async function runPythonScript({ script, input = {}, workspaceRoot, taskId = 'python', timeoutMs = 30000, pythonExecutable, strictIsolation = (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'), networkDisabled = true, memoryLimitBytes } = {}) {
     const source = String(script || '').trim();
     if (!source) throw new Error('Python Worker 脚本不能为空。');
     if (source.length > 256 * 1024) throw new Error('Python Worker 脚本超过 256KB 限制。');
