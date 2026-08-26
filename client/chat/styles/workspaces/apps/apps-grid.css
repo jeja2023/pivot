@@ -1,34 +1,42 @@
-
-
 .apps-panel {
-    flex: 1;
+    flex: 1 1 auto;
     width: 100%;
-    min-width: 0;
-    gap: 0;
+    max-width: 1140px;
+    margin: 0 auto;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 6px 8px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
 }
 
 .apps-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 18px;
     align-content: start;
-    overflow: auto;
     padding: 4px;
 }
 
 .app-card {
-    min-height: 128px;
+    min-height: 184px;
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px;
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 8px;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 20px 22px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 12px;
     background: #fff;
     color: var(--text-main);
     text-align: left;
     cursor: pointer;
-    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.035);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    outline: none;
 }
 
 .app-card:disabled {
@@ -39,68 +47,128 @@
 
 .app-card:hover,
 .app-card:focus-visible {
-    border-color: rgba(16, 185, 129, 0.38);
-    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
-    transform: translateY(-1px);
-    outline: none;
+    border-color: rgba(16, 185, 129, 0.48);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(16, 185, 129, 0.16);
+    transform: translateY(-2px);
+}
+
+.app-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
 }
 
 .app-card-icon {
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    border-radius: 8px;
-    border: 1px solid rgba(16, 185, 129, 0.18);
-    background: rgba(16, 185, 129, 0.08);
-    color: var(--primary);
+    border-radius: 10px;
+    border: 1px solid rgba(16, 185, 129, 0.22);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%);
+    color: var(--primary, #10b981);
+    transition: transform 0.2s ease;
+}
+
+.app-card:hover .app-card-icon,
+.app-card:focus-visible .app-card-icon {
+    transform: scale(1.05);
+}
+
+.app-card-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.app-card-category {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #475569;
+    background: rgba(148, 163, 184, 0.12);
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+
+.app-card-status {
+    font-style: normal;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #059669;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.22);
+    border-radius: 6px;
+    padding: 2px 7px;
 }
 
 .app-card-main {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 7px;
+    flex: 1 1 auto;
+    margin-bottom: 14px;
 }
 
-.app-card-topline {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-.app-card-topline strong {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.9rem;
-}
-
-.app-card-topline em {
-    flex: 0 0 auto;
-    font-style: normal;
-    color: var(--primary);
-    background: rgba(16, 185, 129, 0.08);
-    border-radius: 999px;
-    padding: 2px 7px;
-    font-size: 0.68rem;
+.app-card-title {
+    font-size: 1.05rem;
     font-weight: 700;
-}
-
-.app-card-category {
-    color: #475569;
-    font-size: 0.72rem;
-    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    letter-spacing: -0.01em;
 }
 
 .app-card-desc {
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    line-height: 1.45;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--text-muted, #64748b);
+    margin: 0;
+}
+
+.app-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.app-card-tag {
+    font-size: 0.72rem;
+    color: #334155;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 5px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    font-weight: 500;
+}
+
+.app-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-top: 12px;
+    border-top: 1px solid rgba(241, 245, 249, 0.95);
+    margin-top: auto;
+}
+
+.app-card-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary, #10b981);
+    transition: gap 0.18s ease;
+}
+
+.app-card:hover .app-card-action,
+.app-card:focus-visible .app-card-action {
+    gap: 8px;
 }
 
 .apps-empty {
@@ -109,27 +177,64 @@
     min-height: 180px;
     color: var(--text-muted);
     border: 1px dashed rgba(148, 163, 184, 0.28);
-    border-radius: 8px;
+    border-radius: 10px;
     background: rgba(248, 250, 252, 0.74);
-    font-size: 0.82rem;
+    font-size: 0.84rem;
 }
 
-@media (max-width: 720px) {
+/* 暗黑模式适配 */
+body.dark-mode .app-card,
+.dark-mode .app-card {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.18);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
+}
+
+body.dark-mode .app-card:hover,
+body.dark-mode .app-card:focus-visible,
+.dark-mode .app-card:hover,
+.dark-mode .app-card:focus-visible {
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(16, 185, 129, 0.22);
+}
+
+body.dark-mode .app-card-title,
+.dark-mode .app-card-title {
+    color: #f8fafc;
+}
+
+body.dark-mode .app-card-desc,
+.dark-mode .app-card-desc {
+    color: #94a3b8;
+}
+
+body.dark-mode .app-card-category,
+.dark-mode .app-card-category {
+    background: rgba(51, 65, 85, 0.7);
+    color: #cbd5e1;
+}
+
+body.dark-mode .app-card-tag,
+.dark-mode .app-card-tag {
+    background: rgba(51, 65, 85, 0.6);
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+body.dark-mode .app-card-footer,
+.dark-mode .app-card-footer {
+    border-top-color: rgba(51, 65, 85, 0.6);
+}
+
+@media (max-width: 768px) {
     .apps-grid {
         grid-template-columns: 1fr;
+        gap: 14px;
         padding: 2px;
     }
 
     .app-card {
-        min-height: 112px;
-        padding: 12px;
-    }
-
-    .app-card-topline {
-        align-items: flex-start;
-    }
-
-    .app-card-topline strong {
-        white-space: normal;
+        min-height: 150px;
+        padding: 16px;
     }
 }

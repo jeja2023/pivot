@@ -4,8 +4,9 @@ const PIVOT_APP_REGISTRY = [
         id: 'official-writing',
         name: '公文写作',
         category: '办公写作',
-        description: '辅助起草、润色、局部修改和审校公文内容。',
+        description: '辅助起草、润色、局部修改和审校公文内容，支持发文要素与红头版记规范排版。',
         icon: 'file-text',
+        tags: ['规范起草', '红头版头', '合规审校'],
         status: 'available',
         openMode: 'inline'
     },
@@ -15,33 +16,37 @@ const PIVOT_APP_REGISTRY = [
         category: '数据工具',
         description: '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和 AI 辅助洞察。',
         icon: 'bar-chart',
+        tags: ['字段画像', '数据透视', 'AI 图表洞察'],
         status: 'available',
         openMode: 'inline'
     },
     {
         id: 'regulations',
-        name: '\u6cd5\u89c4\u67e5\u8be2',
-        category: '\u6cd5\u89c4\u68c0\u7d22',
-        description: '\u67e5\u8be2\u6cd5\u89c4\u5236\u5ea6\u6587\u6863\uff0c\u6309\u6761\u6587\u68c0\u7d22\u3001\u67e5\u770b\u7248\u672c\uff0c\u5e76\u57fa\u4e8e\u547d\u4e2d\u6761\u6587\u8fdb\u884c AI \u95ee\u7b54\u3002',
+        name: '法规查询',
+        category: '法规检索',
+        description: '查询法规制度文档，按条文分级检索、查看历史版本，并基于命中条文进行智能问答。',
         icon: 'book-open',
+        tags: ['条文检索', '版本追溯', '依据问答'],
         status: 'available',
         openMode: 'inline'
     },
     {
         id: 'ocr',
-        name: '\u6587\u5b57\u8bc6\u522b',
-        category: '\u6587\u6863\u5904\u7406',
-        description: '\u4e0a\u4f20\u56fe\u7247\u6216 PDF\uff0c\u8bc6\u522b\u6b63\u6587\u3001\u590d\u6838\u4f4e\u7f6e\u4fe1\u5ea6\u9875\u9762\u5e76\u5bfc\u51fa\u7ed3\u6784\u5316\u7ed3\u679c\u3002',
+        name: '文字识别',
+        category: '文档处理',
+        description: '上传图片或扫描件 PDF，识别正文、复核低置信度页面并导出高精结构化结果。',
         icon: 'scan-text',
+        tags: ['双栏复核', '表格提取', '结构化导出'],
         status: 'available',
         openMode: 'inline'
     },
     {
         id: 'pdf-tools',
-        name: 'PDF \u5de5\u5177',
-        category: '\u6587\u6863\u5904\u7406',
-        description: '\u5408\u5e76\u3001\u62c6\u5206\u3001\u65cb\u8f6c\u3001\u5220\u9664\u3001\u91cd\u6392 PDF \u9875\u9762\uff0c\u5e76\u5bfc\u51fa\u56fe\u7247\u6216\u6587\u672c\u3002',
+        name: 'PDF 工具',
+        category: '文档处理',
+        description: '合并、拆分、旋转、删除、重排 PDF 页面，并支持高精度批量导出图片或文本。',
         icon: 'file-cog',
+        tags: ['页面重排', '快速拆合', '图文提取'],
         status: 'available',
         openMode: 'inline'
     }
@@ -383,7 +388,7 @@ function setAppsWorkbenchVisibility(open) {
 function getAppIconSvg(icon) {
     if (icon === 'file-text') {
         return `
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <path d="M14 2v6h6"></path>
                 <path d="M8 13h8"></path>
@@ -395,7 +400,7 @@ function getAppIconSvg(icon) {
 
     if (icon === 'book-open') {
         return `
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"></path>
                 <path d="M4 5.5v16"></path>
                 <path d="M8 7h8"></path>
@@ -405,7 +410,7 @@ function getAppIconSvg(icon) {
     }
     if (icon === 'bar-chart') {
         return `
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M3 3v18h18"></path>
                 <path d="M7 16V9"></path>
                 <path d="M12 16V5"></path>
@@ -415,7 +420,7 @@ function getAppIconSvg(icon) {
     }
     if (icon === 'scan-text') {
         return `
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M4 7V5a1 1 0 0 1 1-1h2"></path>
                 <path d="M17 4h2a1 1 0 0 1 1 1v2"></path>
                 <path d="M20 17v2a1 1 0 0 1-1 1h-2"></path>
@@ -428,7 +433,7 @@ function getAppIconSvg(icon) {
     }
     if (icon === 'file-cog') {
         return `
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <path d="M14 2v6h6"></path>
                 <circle cx="12" cy="15" r="2"></circle>
@@ -442,7 +447,7 @@ function getAppIconSvg(icon) {
         `;
     }
     return `
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
             <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
             <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
@@ -459,15 +464,31 @@ function renderAppsGrid() {
     empty.classList.toggle('hidden', apps.length > 0);
     PivotSafeHtml.setHtml(grid, apps.map(app => `
         <button class="app-card" type="button" data-app-id="${escapeAppsHtml(app.id)}" aria-label="打开${escapeAppsHtml(app.name)}">
-            <span class="app-card-icon">${getAppIconSvg(app.icon)}</span>
-            <span class="app-card-main">
-                <span class="app-card-topline">
-                    <strong>${escapeAppsHtml(app.name)}</strong>
-                    <em>${app.status === 'available' ? '可用' : '规划中'}</em>
+            <div class="app-card-head">
+                <span class="app-card-icon">${getAppIconSvg(app.icon)}</span>
+                <div class="app-card-badges">
+                    <span class="app-card-category">${escapeAppsHtml(app.category)}</span>
+                    <em class="app-card-status">${app.status === 'available' ? '可用' : '规划中'}</em>
+                </div>
+            </div>
+            <div class="app-card-main">
+                <strong class="app-card-title">${escapeAppsHtml(app.name)}</strong>
+                <p class="app-card-desc">${escapeAppsHtml(app.description)}</p>
+                ${Array.isArray(app.tags) && app.tags.length ? `
+                    <div class="app-card-tags">
+                        ${app.tags.map(tag => `<span class="app-card-tag">${escapeAppsHtml(tag)}</span>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+            <div class="app-card-footer">
+                <span class="app-card-action">
+                    <span>进入工作台</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                        <path d="M5 12h14"></path>
+                        <path d="M12 5l7 7-7 7"></path>
+                    </svg>
                 </span>
-                <span class="app-card-category">${escapeAppsHtml(app.category)}</span>
-                <span class="app-card-desc">${escapeAppsHtml(app.description)}</span>
-            </span>
+            </div>
         </button>
     `).join(''));
 }
