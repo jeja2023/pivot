@@ -8,9 +8,12 @@ const {
     runApprovalTimeouts,
     waitForWorkflowApproval
 } = require('../server/services/agent-approval-requests');
+const { getAgentQueue } = require('../server/services/agent-runtime');
 const { db } = require('./security-helpers');
 const { encryptSecret } = require('../server/security');
 const { getBeijingTimestamp } = require('../server/time');
+
+getAgentQueue().updateMaxConcurrent(0);
 
 function cleanup(runId, requestId, credentialSlug = '') {
     if (requestId) db.prepare('DELETE FROM agent_approval_requests WHERE id = ?').run(requestId);

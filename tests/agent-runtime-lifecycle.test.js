@@ -86,6 +86,9 @@ test('runtime recovery leaves stale awaiting approval runs suspended', async () 
 });
 
 test('runtime recovery requeues stale idempotent checkpoints and suspends side effects for approval', async () => {
+    const globalQueue = getAgentQueue();
+    const previousMax = globalQueue.getStatus().maxConcurrent;
+    globalQueue.updateMaxConcurrent(0);
     const userId = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()?.id;
     assert.ok(userId);
     const suffix = process.pid + '-' + Date.now();
@@ -105,6 +108,7 @@ test('runtime recovery requeues stale idempotent checkpoints and suspends side e
         assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(safeId).status, 'queued');
         assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(unsafeId).status, 'approval_required');
     } finally {
+        globalQueue.updateMaxConcurrent(previousMax);
         db.prepare('DELETE FROM agent_run_checkpoints WHERE run_id IN (?,?)').run(safeId, unsafeId);
         db.prepare('DELETE FROM agent_runs WHERE id IN (?,?)').run(safeId, unsafeId);
     }

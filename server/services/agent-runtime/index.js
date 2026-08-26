@@ -1301,7 +1301,7 @@ async function runAgent(runId, user) {
                 }
                 taskBudget.recordSuccess();
             } catch (toolErr) {
-                if (toolErr.code === 'AGENT_APPROVAL_REQUIRED') throw toolErr;
+                if (toolErr.code === 'AGENT_APPROVAL_REQUIRED' || toolErr.code === 'AGENT_RUN_CANCELLED' || isRunCancelled(runId)) throw toolErr;
                 if (toolErr.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {
                     const now = getBeijingTimestamp();
                     await setRunMetadata(runId, {
