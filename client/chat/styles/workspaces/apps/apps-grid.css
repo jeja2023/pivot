@@ -1,32 +1,36 @@
 .apps-panel {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     width: 100%;
     max-width: 1140px;
-    margin: 0 auto;
+    margin: auto;
     background: transparent;
     border: none;
     box-shadow: none;
-    padding: 6px 8px 24px;
+    padding: 10px 0;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 16px;
     min-height: 0;
 }
 
 .apps-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-    gap: 18px;
-    align-content: start;
-    padding: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 22px;
+    width: 100%;
+    padding: 6px;
 }
 
 .app-card {
-    min-height: 184px;
+    flex: 0 1 336px;
+    width: 336px;
+    min-height: 190px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 20px 22px;
+    padding: 22px 24px;
     border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 12px;
     background: #fff;
@@ -228,12 +232,13 @@ body.dark-mode .app-card-footer,
 
 @media (max-width: 768px) {
     .apps-grid {
-        grid-template-columns: 1fr;
         gap: 14px;
         padding: 2px;
     }
 
     .app-card {
+        flex: 1 1 100%;
+        width: 100%;
         min-height: 150px;
         padding: 16px;
     }
