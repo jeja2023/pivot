@@ -27,6 +27,12 @@
     font-size: 0.8rem;
 }
 
+.apps-workbench-state[hidden],
+.apps-workbench-state.hidden,
+.apps-workbench-state:empty {
+    display: none !important;
+}
+
 .apps-workbench-state[data-state="loading"] {
     border-color: rgba(37, 99, 235, 0.24);
     background: rgba(37, 99, 235, 0.07);
