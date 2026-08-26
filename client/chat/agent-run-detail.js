@@ -375,15 +375,15 @@ const agentRunDisclosureSelectors = Object.freeze({
     process: '.agent-run-process'
 });
 
-function captureAgentRunDisclosureState(detail, runId) {
-    if (!detail || String(detail.dataset.agentDisclosureRunId || '') !== String(runId)) return null;
-    const state = {};
-    Object.entries(agentRunDisclosureSelectors).forEach(([key, selector]) => {
-        const element = detail.querySelector(selector);
-        if (element) state[key] = element.open === true;
+function captureAgentRunDisclosureState(container, runId) {
+    if (!container || !runId) return null;
+    const key = String(runId);
+    const state = agentRunDisclosureStates.get(key) || {};
+    Object.entries(agentRunDisclosureSelectors).forEach(([prop, selector]) => {
+        const element = container.querySelector(selector);
+        if (element) state[prop] = element.open === true;
     });
     if (Object.keys(state).length) {
-        const key = String(runId);
         agentRunDisclosureStates.set(key, state);
         if (agentRunDisclosureStates.size > 50) {
             const oldestKey = agentRunDisclosureStates.keys().next().value;
@@ -393,16 +393,28 @@ function captureAgentRunDisclosureState(detail, runId) {
     return state;
 }
 
-function restoreAgentRunDisclosureState(detail, runId) {
-    if (!detail) return;
+function restoreAgentRunDisclosureState(container, runId) {
+    if (!container || !runId) return;
     const state = agentRunDisclosureStates.get(String(runId)) || {};
-    Object.entries(agentRunDisclosureSelectors).forEach(([key, selector]) => {
-        const element = detail.querySelector(selector);
-        if (!element || !Object.hasOwn(state, key)) return;
-        element.open = state[key] === true;
+    Object.entries(agentRunDisclosureSelectors).forEach(([prop, selector]) => {
+        const element = container.querySelector(selector);
+        if (!element || !Object.hasOwn(state, prop)) return;
+        element.open = state[prop] === true;
     });
-    detail.dataset.agentDisclosureRunId = String(runId);
 }
+
+document.addEventListener('toggle', event => {
+    const detailsEl = event.target?.closest?.('details');
+    if (!detailsEl || !activeAgentRunId) return;
+    const key = String(activeAgentRunId);
+    const state = agentRunDisclosureStates.get(key) || {};
+    Object.entries(agentRunDisclosureSelectors).forEach(([prop, selector]) => {
+        if (detailsEl.matches(selector)) {
+            state[prop] = detailsEl.open === true;
+        }
+    });
+    agentRunDisclosureStates.set(key, state);
+}, true);
 
 let currentActiveRunSubtab = 'overview';
 
@@ -508,8 +520,9 @@ window.openAgentRun = async function(runId, options = {}) {
     const workbenchDetailContainer = document.getElementById('agent-tasks-detail-container');
     const activeWorkspace = document.body?.dataset.activeWorkspace || '';
     const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');
+    const currentContainer = isWorkbenchLayout ? workbenchDetailContainer : detail;
+    if (currentContainer) captureAgentRunDisclosureState(currentContainer, runId);
 
-    if (detail) captureAgentRunDisclosureState(detail, runId);
     document.querySelectorAll('[data-agent-run-id]').forEach(row => {
         const active = row.dataset.agentRunId === runId;
         row.classList.toggle('active', active);
@@ -787,6 +800,7 @@ window.openAgentRun = async function(runId, options = {}) {
         }
 
         switchAgentRunSubtab(currentActiveRunSubtab || 'overview');
+        restoreAgentRunDisclosureState(workbenchDetailContainer, run.id);
         bindAgentRunDetailDomEvents(workbenchDetailContainer, run, isPreview);
     }
 
