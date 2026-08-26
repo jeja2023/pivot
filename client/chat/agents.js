@@ -185,14 +185,14 @@ window.openAgentWorkbench = async function(options = {}) {
         if (controlPlaneView) controlPlaneView.classList.remove('hidden');
         if (newTaskBtn) newTaskBtn.classList.add('hidden');
         if (newGoalTopBtn) newGoalTopBtn.classList.remove('hidden');
-        if (subtitle) subtitle.textContent = '管理持续目标、事件收件箱、通知渠道与智能体能力受控进化。';
+        if (subtitle) subtitle.textContent = '智能体控制面：持续目标、事件收件箱、通知渠道与能力治理。';
         window.Pivot?.moduleApi?.('agent.harness')?.loadAgentControlPlane?.();
     } else {
         if (tasksView) tasksView.classList.remove('hidden');
         if (controlPlaneView) controlPlaneView.classList.add('hidden');
         if (newTaskBtn) newTaskBtn.classList.remove('hidden');
         if (newGoalTopBtn) newGoalTopBtn.classList.add('hidden');
-        if (subtitle) subtitle.textContent = '运行一次性多步骤任务，并统一查看所有自动化执行记录。';
+        if (subtitle) subtitle.textContent = '集中创建、运行与审计一次性后台任务、工作流任务与计划执行。';
     }
 
     const queryInput = document.getElementById('agent-filter-query');
@@ -385,4 +385,3 @@ window.bindAgentConfigModal = function() {
 
 window.bindUnifiedAutomationTabs?.();
 window.bindAgentWorkbenchShortcuts?.();
-

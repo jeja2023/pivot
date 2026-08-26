@@ -275,25 +275,49 @@
     flex-basis: 34px;
 }
 
-/* All full-page workspaces share the same rhythm without changing their internals. */
+/* All full-page workspaces share the exact same rhythm and header dimensions to prevent layout jump. */
 .workspace-modal-header,
-.agent-modal-header {
-    min-height: 66px;
-    padding: 14px 24px 12px;
-    background: rgba(255, 255, 255, 0.9);
-    border-bottom-color: var(--ui-line);
+.agent-modal-header,
+.agent-dag-modal-header {
+    height: 64px;
+    min-height: 64px;
+    max-height: 64px;
+    padding: 12px 20px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.workspace-modal-header > div,
+.agent-modal-header > div,
+.agent-dag-modal-header > div {
+    min-width: 0;
 }
 
 .workspace-modal-header h3,
 .agent-modal-header h3,
 .agent-dag-modal-header h3 {
-    color: var(--ui-ink);
-    font-size: 1rem;
+    margin: 0 0 3px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.25;
+    color: var(--text-main);
 }
 
 .workspace-modal-header p,
-.agent-modal-header p {
-    color: var(--ui-muted);
+.agent-modal-header p,
+.agent-dag-modal-header p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .workspace-modal-body,
@@ -311,13 +335,183 @@
     box-shadow: 0 5px 16px rgba(15, 23, 42, 0.035);
 }
 
+.agent-modal-header-actions,
+.agent-dag-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
 .workspace-toolbar .btn-primary,
 .workspace-toolbar .btn-secondary,
 .agent-modal-header-actions > button,
+.agent-dag-header-actions > button,
 .workspace-modal-close,
 .agent-modal-close {
+    height: 34px;
     min-height: 34px;
+    padding: 0 14px;
     border-radius: 7px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    box-sizing: border-box;
+}
+
+.automation-primary-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 24px;
+    height: 43px;
+    min-height: 43px;
+    max-height: 43px;
+    padding: 0 20px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+    box-sizing: border-box;
+    scrollbar-width: none;
+}
+
+/* Task workbench: master list and immersive detail view */
+#agent-tasks-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    height: calc(100vh - 107px);
+    min-height: 0;
+    overflow: hidden;
+    padding: 14px 18px 18px;
+    background: #f8fafc;
+    box-sizing: border-box;
+}
+
+#agent-tasks-view .agent-history-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    padding: 14px;
+    border-color: var(--ui-line);
+    border-radius: 10px;
+    background: var(--ui-surface);
+    box-shadow: 0 5px 16px rgba(15, 23, 42, 0.035);
+}
+
+#agent-tasks-view .agent-history-head {
+    align-items: center;
+    padding: 0 0 12px;
+    border-bottom-color: var(--ui-line);
+}
+
+#agent-tasks-view .agent-history-head h3 {
+    color: var(--ui-ink);
+    font-size: 0.96rem;
+}
+
+#agent-tasks-view .agent-history-head p {
+    color: var(--ui-muted);
+}
+
+#agent-tasks-view .agent-history-tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+#agent-tasks-view .agent-history-tools .btn-secondary {
+    border-color: #dbe3ea;
+    background: #fbfdfd;
+}
+
+#agent-tasks-view .agent-history-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid #e6edf1;
+    border-radius: 8px;
+    background: #f8fafb;
+}
+
+#agent-tasks-view .agent-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    min-height: 0;
+    margin: 0;
+}
+
+#agent-tasks-view .agent-metrics span {
+    min-width: 0;
+    height: 34px;
+    justify-content: center;
+    padding: 0 8px;
+    overflow: hidden;
+    border-color: #dce8e2;
+    border-radius: 7px;
+    background: var(--ui-surface);
+    color: #3f5d51;
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#agent-tasks-view .agent-history-filters {
+    width: 100%;
+    grid-template-columns: 132px 132px minmax(0, 1fr);
+}
+
+#agent-tasks-view .agent-history-filters .form-input {
+    border-color: #dbe3ea;
+    background: var(--ui-surface);
+}
+
+#agent-tasks-view .agent-runs-list {
+    border-color: var(--ui-line);
+    border-radius: 8px;
+    background: #fff;
+}
+
+#agent-tasks-view .agent-runs-table th {
+    background: #f8fafb;
+    color: #526274;
+}
+
+#agent-tasks-view .agent-runs-table tbody tr.active,
+#agent-tasks-view .agent-runs-table tbody tr:hover {
+    background: var(--ui-primary-soft);
+}
+
+/* Opening a run keeps the activity list in context and turns the old modal into a drawer. */
+#agent-run-detail-modal {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.18);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+#agent-run-detail-modal .agent-run-detail-modal {
+    width: min(560px, 100%);
+    height: 100%;
+    max-height: none;
+    border-radius: 12px;
+    box-shadow: -18px 0 44px rgba(15, 23, 42, 0.15), 0 18px 48px rgba(15, 23, 42, 0.16);
+    animation: agent-workbench-drawer-in 0.22s ease-out;
+}
+
+#agent-run-detail-modal .agent-run-detail {
+    padding: 16px 18px 24px;
+}
+
+@keyframes agent-workbench-drawer-in {
+    from { opacity: 0; transform: translateX(24px); }
+    to { opacity: 1; transform: translateX(0); }
 }
 
 @media (max-width: 720px) {
@@ -364,6 +558,40 @@
     .workspace-modal-body,
     .agent-modal > .agent-workbench {
         padding: 12px 10px 14px;
+    }
+
+    #agent-tasks-view {
+        gap: 10px;
+    }
+
+    #agent-tasks-view .agent-history-panel {
+        padding: 10px;
+    }
+
+    #agent-tasks-view .agent-history-head {
+        align-items: stretch;
+    }
+
+    #agent-tasks-view .agent-history-tools {
+        justify-content: flex-start;
+    }
+
+    #agent-tasks-view .agent-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #agent-tasks-view .agent-history-filters {
+        grid-template-columns: 1fr;
+    }
+
+    #agent-run-detail-modal {
+        padding: 0;
+    }
+
+    #agent-run-detail-modal .agent-run-detail-modal {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
     }
 }
 

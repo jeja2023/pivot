@@ -228,11 +228,38 @@ document.addEventListener('click', async (event) => {
         if (text) {
             try {
                 await navigator.clipboard.writeText(text);
+                const originalText = copyGoalBtn.textContent;
+                copyGoalBtn.textContent = '已复制 ✓';
+                setTimeout(() => { copyGoalBtn.textContent = originalText; }, 1600);
                 if (typeof showToast === 'function') showToast('已成功复制任务目标到剪贴板', 'success');
             } catch (e) {
                 if (typeof showToast === 'function') showToast('复制失败，请手动选择文本复制', 'error');
             }
         }
+        return;
+    }
+    const closeDetailBtn = event.target.closest('#agent-run-detail-close, [data-agent-run-modal-close]');
+    if (closeDetailBtn || event.target.id === 'agent-run-detail-modal') {
+        closeAgentRunDetailModal();
+        return;
+    }
+    const subtabBtn = event.target.closest('[data-agent-run-subtab]');
+    if (subtabBtn) {
+        const subtab = subtabBtn.dataset.agentRunSubtab || 'overview';
+        switchAgentRunSubtab(subtab);
+        return;
+    }
+    const breadcrumbBackBtn = event.target.closest('#agent-breadcrumb-back-btn');
+    if (breadcrumbBackBtn) {
+        document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
+        activeAgentRunId = '';
+        currentRunDetailRecord = null;
+        document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
+        return;
+    }
+    const emptyCreateBtn = event.target.closest('#agent-empty-create-btn');
+    if (emptyCreateBtn) {
+        window.setTaskComposerOpen?.(true);
         return;
     }
     const editBtn = event.target.closest('[data-agent-run-edit], [data-agent-edit-run]');
@@ -260,6 +287,12 @@ document.addEventListener('click', async (event) => {
         }
     } else {
         document.querySelectorAll('.agent-run-more-actions').forEach(menu => menu.removeAttribute('open'));
+    }
+});
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && isAgentRunDetailModalOpen()) {
+        closeAgentRunDetailModal();
     }
 });
 
@@ -371,26 +404,130 @@ function restoreAgentRunDisclosureState(detail, runId) {
     detail.dataset.agentDisclosureRunId = String(runId);
 }
 
+let currentActiveRunSubtab = 'overview';
+
+function bindAgentRunSubtabs() {
+    const tabsContainer = document.querySelector('.agent-run-tabs');
+    if (tabsContainer && tabsContainer.dataset.boundSubtabs !== '1') {
+        tabsContainer.dataset.boundSubtabs = '1';
+        tabsContainer.addEventListener('click', event => {
+            const tabBtn = event.target.closest('[data-agent-run-subtab]');
+            if (!tabBtn) return;
+            switchAgentRunSubtab(tabBtn.dataset.agentRunSubtab);
+        });
+    }
+
+    const backBtn = document.getElementById('agent-breadcrumb-back-btn');
+    if (backBtn && backBtn.dataset.boundBack !== '1') {
+        backBtn.dataset.boundBack = '1';
+        backBtn.addEventListener('click', () => {
+            document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
+        });
+    }
+}
+
+function switchAgentRunSubtab(subtab = 'overview') {
+    currentActiveRunSubtab = subtab;
+    document.querySelectorAll('[data-agent-run-subtab]').forEach(btn => {
+        const active = btn.dataset.agentRunSubtab === subtab;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    const panes = document.querySelectorAll('[data-agent-run-pane]');
+    panes.forEach(pane => {
+        const active = pane.dataset.agentRunPane === subtab;
+        pane.classList.toggle('hidden', !active);
+    });
+
+    if (!currentRunDetailRecord && (activeAgentRunId || (Array.isArray(agentRunsCache) && agentRunsCache.length > 0))) {
+        const targetId = activeAgentRunId || agentRunsCache[0].id;
+        if (targetId) window.openAgentRun?.(targetId, { silent: true });
+    }
+}
+
+function renderAgentFeedbackBlock(run) {
+    return `<section class="agent-run-feedback" data-agent-run-feedback="${agentEscapeAttr(run.id)}"><div class="agent-run-feedback-head"><div class="agent-run-feedback-title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><strong>结果反馈</strong></div><span class="agent-run-feedback-hint">用于改进提示词、工具选择和工作流建议</span></div><div class="agent-run-feedback-toolbar"><div class="agent-run-feedback-pills" role="radiogroup" aria-label="结果评价"><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="success"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg><span>有帮助</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="partial"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg><span>部分有用</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="failure"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg><span>需要修正</span></button></div><div class="agent-run-feedback-rating-wrap"><label class="agent-run-feedback-rating-label"><span>评分</span><select class="agent-run-feedback-rating-select" data-agent-feedback-rating aria-label="结果评分"><option value="">未评</option><option value="5">5 分 (完美)</option><option value="4">4 分 (良好)</option><option value="3">3 分 (一般)</option><option value="2">2 分 (较差)</option><option value="1">1 分 (无效)</option></select></label></div></div><textarea class="agent-run-feedback-textarea" rows="2" data-agent-feedback-correction placeholder="补充说明（可选）：指出缺失、错误或您期望的修正答案..."></textarea><div class="agent-run-feedback-footer"><span class="agent-run-feedback-status" data-agent-feedback-status role="status"></span><button type="button" class="btn-primary btn-xs" data-agent-feedback-submit>提交反馈</button></div></section>`;
+}
+
+function bindAgentRunDetailDomEvents(container, run, isPreview) {
+    if (!container) return;
+    container.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
+        if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
+        return window.cancelAgentRun(run.id);
+    });
+    container.querySelector('[data-agent-approve]')?.addEventListener('click', () => window.approveAgentRun(run.id, true));
+    container.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.approveAgentRun(run.id, false));
+    container.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
+    container.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.resumeAgentRun(run.id));
+    container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.createWorkflowDraftFromAgentRun(run.id));
+    container.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
+        btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
+    });
+    container.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.Pivot.moduleApi('agent.artifacts').saveFromRun?.(run.id));
+    container.querySelector('[data-agent-add-evaluation]')?.addEventListener('click', () => {
+        window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
+    });
+    container.querySelectorAll('[data-agent-feedback-outcome]').forEach(button => {
+        button.addEventListener('click', () => {
+            const outcome = button.dataset.agentFeedbackOutcome || 'unknown';
+            container.querySelectorAll('[data-agent-feedback-outcome]').forEach(item => item.classList.toggle('active', item === button));
+            container.querySelector('[data-agent-feedback-submit]')?.setAttribute('data-outcome', outcome);
+            const ratingSelect = container.querySelector('[data-agent-feedback-rating]');
+            if (ratingSelect) {
+                if (outcome === 'success') ratingSelect.value = '5';
+                else if (outcome === 'partial') ratingSelect.value = '3';
+                else if (outcome === 'failure') ratingSelect.value = '1';
+            }
+        });
+    });
+    container.querySelector('[data-agent-feedback-submit]')?.addEventListener('click', async event => {
+        const section = container.querySelector('[data-agent-run-feedback]');
+        const status = section?.querySelector('[data-agent-feedback-status]');
+        const outcome = event.currentTarget.dataset.outcome || 'unknown';
+        try {
+            const correction = section?.querySelector('[data-agent-feedback-correction]')?.value || '';
+            const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, rating: section?.querySelector('[data-agent-feedback-rating]')?.value || null, correction, modifiedAnswer: correction }) });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '反馈提交失败');
+            if (status) { status.textContent = '已记录，谢谢反馈。'; status.className = 'agent-run-feedback-status is-success'; }
+            event.currentTarget.disabled = true;
+        } catch (error) {
+            if (status) { status.textContent = error.message || '反馈提交失败'; status.className = 'agent-run-feedback-status is-error'; }
+        }
+    });
+    container.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
+    window.bindAgentRunHarnessDiagnostics?.(container, run.id);
+}
+
 window.openAgentRun = async function(runId, options = {}) {
     const requestId = ++agentRunDetailRequestId;
     activeAgentRunId = runId;
+    bindAgentRunSubtabs();
     const modal = ensureAgentRunDetailModalVisible();
     const detail = document.getElementById('agent-run-detail');
-    if (!detail) return null;
-    captureAgentRunDisclosureState(detail, runId);
+    const workbenchDetailContainer = document.getElementById('agent-tasks-detail-container');
+    const activeWorkspace = document.body?.dataset.activeWorkspace || '';
+    const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');
+
+    if (detail) captureAgentRunDisclosureState(detail, runId);
     document.querySelectorAll('[data-agent-run-id]').forEach(row => {
         const active = row.dataset.agentRunId === runId;
         row.classList.toggle('active', active);
     });
-    modal?.classList.remove('hidden');
-    modal?.setAttribute('aria-hidden', 'false');
-    if (!options.silent) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
+
+    if (!isWorkbenchLayout || options.workflowPreview) {
+        modal?.classList.remove('hidden');
+        modal?.setAttribute('aria-hidden', 'false');
+    }
+    if (!options.silent) {
+        if (detail) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
+    }
+
     const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
     const data = await res.json();
-    // 轮询和 SSE 可能同时触发详情请求，只接受最后一次请求的结果。
     if (requestId !== agentRunDetailRequestId || activeAgentRunId !== runId) return null;
     if (!res.ok) {
-        PivotSafeHtml.setHtml(detail, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
+        if (detail) PivotSafeHtml.setHtml(detail, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
         return null;
     }
     const run = data.run;
@@ -437,11 +574,7 @@ window.openAgentRun = async function(runId, options = {}) {
         checkpoints,
         isActive: isAgentRunActive(run.status)
     });
-    // The detail body is rebuilt after every polling/SSE refresh. Capture the
-    // latest state immediately before replacement so a click during a slow
-    // request is not overwritten by an older snapshot.
-    captureAgentRunDisclosureState(detail, runId);
-    const processExpanded = ' open';
+
     const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流节点配置' : '');
     const technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
@@ -452,118 +585,283 @@ window.openAgentRun = async function(runId, options = {}) {
         `<div><dt>检查点</dt><dd>${Number(checkpoints.total || 0)} 个</dd></div>`,
         friendlyTokenUsage ? `<div><dt>模型用量</dt><dd>${agentEscape(friendlyTokenUsage)}</dd></div>` : ''
     ].join('');
-    PivotSafeHtml.setHtml(detail, `
-        <section class="agent-run-overview ${agentEscape(runStatus)}">
-            <div class="agent-run-overview-top">
-                <div class="agent-run-status-copy">
-                    <span class="agent-run-status-icon" aria-hidden="true"></span>
-                    <div>
-                        <span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span>
-                        <h4>${agentEscape(statusLabel)}</h4>
-                        <p>${agentEscape(friendlySummary)}</p>
-                    </div>
-                </div>
-                <div class="agent-run-actions">${actionMarkup}</div>
-            </div>
-            <div class="agent-run-goal-box">
-                <div class="agent-run-meta-item">
-                    <span class="agent-run-meta-label">任务标题</span>
-                    <strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong>
-                </div>
-                <div class="agent-run-meta-item agent-run-goal-item">
-                    <div class="agent-run-goal-head">
-                        <span class="agent-run-meta-label">任务目标</span>
-                        <div class="agent-run-goal-actions">
-                            ${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}
-                            <button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button>
+
+    // --- 1. 渲染分栏工作台 (In-place Workbench 5 Tabs) ---
+    if (workbenchDetailContainer && isWorkbenchLayout) {
+        document.getElementById('agent-tasks-view')?.classList.add('has-active-detail');
+        const emptyEl = document.getElementById('agent-run-detail-empty');
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        const breadcrumbTitle = document.getElementById('agent-breadcrumb-active-title');
+        if (breadcrumbTitle) {
+            breadcrumbTitle.textContent = `${displayTitle} (#${String(run.id || '').slice(0, 8)})`;
+            breadcrumbTitle.setAttribute('title', displayTitle);
+        }
+        const topActions = document.getElementById('agent-detail-header-actions');
+        if (topActions) PivotSafeHtml.setHtml(topActions, actionMarkup);
+
+        // Subtab Badges
+        const stepsBadge = document.getElementById('agent-run-tab-steps-count');
+        if (stepsBadge) stepsBadge.textContent = String(showDagNodeDetails ? dagNodes.length : steps.length);
+
+        const artifactsBadge = document.getElementById('agent-run-tab-artifacts-count');
+        if (artifactsBadge) {
+            const artCount = visualOutputs ? 1 : 0;
+            artifactsBadge.textContent = String(artCount);
+        }
+
+        const approvalsBadge = document.getElementById('agent-run-tab-approvals-count');
+        if (approvalsBadge) {
+            if (run.status === 'approval_required') {
+                approvalsBadge.textContent = '待审批';
+                approvalsBadge.classList.remove('hidden');
+                approvalsBadge.classList.add('agent-run-tab-badge--warning');
+            } else if (run.error_message || Number(progress.errorCount || 0) > 0) {
+                approvalsBadge.textContent = '异常';
+                approvalsBadge.classList.remove('hidden');
+                approvalsBadge.classList.add('agent-run-tab-badge--warning');
+            } else {
+                approvalsBadge.classList.add('hidden');
+            }
+        }
+
+        // Pane 1: Overview
+        const paneOverview = document.getElementById('agent-pane-overview');
+        if (paneOverview) {
+            PivotSafeHtml.setHtml(paneOverview, `
+                <section class="agent-run-overview ${agentEscape(runStatus)}">
+                    <div class="agent-run-overview-top">
+                        <div class="agent-run-status-copy">
+                            <span class="agent-run-status-icon" aria-hidden="true"></span>
+                            <div>
+                                <span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span>
+                                <h4>${agentEscape(statusLabel)}</h4>
+                                <p>${agentEscape(friendlySummary)}</p>
+                            </div>
                         </div>
                     </div>
-                    <div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div>
-                </div>
-            </div>
-            <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
-            <dl class="agent-run-key-metrics">
-                ${String(run.run_mode || '') === 'dag'
-                    ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
-                    : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
-                <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
-                <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
-            </dl>
-        </section>
-        <details class="agent-run-technical-summary">
-            <summary><span>运行信息</span><em>${agentEscape(progressLabel)} · ${agentEscape(agentRunModeLabel(run.run_mode))}</em></summary>
-            <dl>${technicalSummary}</dl>
-        </details>
-        ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
-        ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
-        ${!isPreview && !isAgentRunActive(run.status) ? `<section class="agent-run-feedback" data-agent-run-feedback="${agentEscapeAttr(run.id)}"><div class="agent-run-feedback-head"><div class="agent-run-feedback-title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><strong>结果反馈</strong></div><span class="agent-run-feedback-hint">用于改进提示词、工具选择和工作流建议</span></div><div class="agent-run-feedback-toolbar"><div class="agent-run-feedback-pills" role="radiogroup" aria-label="结果评价"><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="success"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg><span>有帮助</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="partial"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg><span>部分有用</span></button><button type="button" class="agent-feedback-pill" data-agent-feedback-outcome="failure"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg><span>需要修正</span></button></div><div class="agent-run-feedback-rating-wrap"><label class="agent-run-feedback-rating-label"><span>评分</span><select class="agent-run-feedback-rating-select" data-agent-feedback-rating aria-label="结果评分"><option value="">未评</option><option value="5">5 分 (完美)</option><option value="4">4 分 (良好)</option><option value="3">3 分 (一般)</option><option value="2">2 分 (较差)</option><option value="1">1 分 (无效)</option></select></label></div></div><textarea class="agent-run-feedback-textarea" rows="2" data-agent-feedback-correction placeholder="补充说明（可选）：指出缺失、错误或您期望的修正答案..."></textarea><div class="agent-run-feedback-footer"><span class="agent-run-feedback-status" data-agent-feedback-status role="status"></span><button type="button" class="btn-primary btn-xs" data-agent-feedback-submit>提交反馈</button></div></section>` : ''}
-        ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
-        ${visualOutputs}
-        <details class="agent-run-process"${processExpanded}>
-            <summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary>
-            <div class="agent-run-process-body">
-                ${showDagNodeDetails ? `
-                    <div class="agent-dag-list">
-                        ${renderAgentDagRunGraph(dagNodes)}
-                        <div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>
-                        ${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}
+                    <div class="agent-run-goal-box">
+                        <div class="agent-run-meta-item">
+                            <span class="agent-run-meta-label">任务标题</span>
+                            <strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong>
+                        </div>
+                        <div class="agent-run-meta-item agent-run-goal-item">
+                            <div class="agent-run-goal-head">
+                                <span class="agent-run-meta-label">任务目标</span>
+                                <div class="agent-run-goal-actions">
+                                    ${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}
+                                    <button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button>
+                                </div>
+                            </div>
+                            <div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div>
+                        </div>
                     </div>
-                ` : ''}
-                ${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}
-                ${showDagNodeDetails ? '' : `<div class="agent-step-list">
-                    ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
-                </div>`}
-                ${renderAgentTrace(trace, run.status)}
-            </div>
-        </details>
-    `);
-    restoreAgentRunDisclosureState(detail, run.id);
-    detail.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
-        if (isPreview) return window.cancelAgentWorkflowPreviewRun(run.id);
-        return window.cancelAgentRun(run.id);
-    });
-    detail.querySelector('[data-agent-approve]')?.addEventListener('click', () => window.approveAgentRun(run.id, true));
-    detail.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.approveAgentRun(run.id, false));
-    detail.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
-    detail.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.resumeAgentRun(run.id));
-    detail.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.createWorkflowDraftFromAgentRun(run.id));
-    detail.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
-        btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
-    });
-    detail.querySelector('[data-agent-save-artifact]')?.addEventListener('click', () => window.Pivot.moduleApi('agent.artifacts').saveFromRun?.(run.id));
-    detail.querySelector('[data-agent-add-evaluation]')?.addEventListener('click', () => {
-        window.Pivot.moduleApi('agent.evaluations').openForRun?.(run);
-    });
-    detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(button => {
-        button.addEventListener('click', () => {
-            const outcome = button.dataset.agentFeedbackOutcome || 'unknown';
-            detail.querySelectorAll('[data-agent-feedback-outcome]').forEach(item => item.classList.toggle('active', item === button));
-            detail.querySelector('[data-agent-feedback-submit]')?.setAttribute('data-outcome', outcome);
-            const ratingSelect = detail.querySelector('[data-agent-feedback-rating]');
-            if (ratingSelect) {
-                if (outcome === 'success') ratingSelect.value = '5';
-                else if (outcome === 'partial') ratingSelect.value = '3';
-                else if (outcome === 'failure') ratingSelect.value = '1';
-            }
-        });
-    });
-    detail.querySelector('[data-agent-feedback-submit]')?.addEventListener('click', async event => {
-        const section = detail.querySelector('[data-agent-run-feedback]');
-        const status = section?.querySelector('[data-agent-feedback-status]');
-        const outcome = event.currentTarget.dataset.outcome || 'unknown';
-        try {
-            const correction = section?.querySelector('[data-agent-feedback-correction]')?.value || '';
-            const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, rating: section?.querySelector('[data-agent-feedback-rating]')?.value || null, correction, modifiedAnswer: correction }) });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || '反馈提交失败');
-            if (status) { status.textContent = '已记录，谢谢反馈。'; status.className = 'agent-run-feedback-status is-success'; }
-            event.currentTarget.disabled = true;
-        } catch (error) {
-            if (status) { status.textContent = error.message || '反馈提交失败'; status.className = 'agent-run-feedback-status is-error'; }
+                    <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
+                    <dl class="agent-run-key-metrics">
+                        ${String(run.run_mode || '') === 'dag'
+                            ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
+                            : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
+                        <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
+                        <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
+                    </dl>
+                </section>
+                ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
+                ${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}
+            `);
         }
-    });
-    detail.querySelector('[data-agent-export-md]')?.addEventListener('click', () => agentDownload(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/export?format=markdown`));
-    window.bindAgentRunHarnessDiagnostics?.(detail, run.id);
+
+        // Pane 2: Steps
+        const paneSteps = document.getElementById('agent-pane-steps');
+        if (paneSteps) {
+            PivotSafeHtml.setHtml(paneSteps, showDagNodeDetails ? `
+                <div class="agent-dag-list">
+                    ${renderAgentDagRunGraph(dagNodes)}
+                    <div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>
+                    ${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}
+                </div>
+            ` : `
+                ${buildAgentToolStatsMarkup(steps)}
+                <div class="agent-step-list">
+                    ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
+                </div>
+            `);
+        }
+
+        // Pane 3: Logs
+        const paneLogs = document.getElementById('agent-pane-logs');
+        if (paneLogs) {
+            PivotSafeHtml.setHtml(paneLogs, `
+                ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
+                ${renderAgentTrace(trace, run.status)}
+            `);
+        }
+
+        // Pane 4: Artifacts
+        const paneArtifacts = document.getElementById('agent-pane-artifacts');
+        if (paneArtifacts) {
+            PivotSafeHtml.setHtml(paneArtifacts, visualOutputs ? `
+                <div class="agent-run-artifacts-wrap">
+                    ${visualOutputs}
+                    <div class="agent-tool-section-head compact" style="margin-top: 14px;">
+                        <strong>快捷动作</strong>
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn-secondary btn-xs" data-agent-save-artifact>保存到结果沉淀</button>
+                        <button type="button" class="btn-secondary btn-xs" data-agent-export-md>导出 Markdown 报告</button>
+                        ${canCreateWorkflowDraft ? `<button type="button" class="btn-secondary btn-xs" data-agent-create-workflow-draft>沉淀为工作流草稿</button>` : ''}
+                    </div>
+                </div>
+            ` : `
+                <div class="empty-state agent-empty-state">
+                    <p>该任务尚未生成独立结构化图表或报表产物。</p>
+                    <div style="margin-top: 8px;">
+                        <button type="button" class="btn-secondary btn-xs" data-agent-export-md>导出 Markdown 运行摘要</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        // Pane 5: Approvals & Errors
+        const paneApprovals = document.getElementById('agent-pane-approvals');
+        if (paneApprovals) {
+            let approvalsHtml = '';
+            if (run.status === 'approval_required') {
+                approvalsHtml += `
+                    <div class="agent-approval-card" style="padding: 14px; border: 1px solid var(--primary); border-radius: 8px; background: rgba(16, 185, 129, 0.05); margin-bottom: 12px;">
+                        <h4 style="margin: 0 0 6px; color: var(--text-main); font-size: 0.88rem;">待人工授权执行</h4>
+                        <p style="margin: 0 0 10px; font-size: 0.78rem; color: var(--text-muted);">智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button>
+                            <button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button>
+                        </div>
+                    </div>
+                `;
+            }
+            if (run.error_message) {
+                approvalsHtml += `
+                    <div class="error-detail" style="margin-bottom: 12px;">
+                        <strong>执行异常原因：</strong>
+                        <div style="margin-top: 4px;">${agentEscape(run.error_message)}</div>
+                        <div style="margin-top: 10px; display: flex; gap: 8px;">
+                            <button type="button" class="btn-secondary btn-xs" data-agent-rerun>重试整项任务</button>
+                            ${checkpoints?.total ? `<button type="button" class="btn-secondary btn-xs" data-agent-resume>从检查点恢复</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            if (!run.error_message && run.status !== 'approval_required') {
+                approvalsHtml += `
+                    <div class="empty-state agent-empty-state">
+                        <p>当前任务无待处理的人工审批或执行异常。</p>
+                    </div>
+                `;
+            }
+            PivotSafeHtml.setHtml(paneApprovals, approvalsHtml);
+        }
+
+        // Context Pane
+        const contextBody = document.getElementById('agent-context-pane-body');
+        const contextPill = document.getElementById('agent-context-status-pill');
+        if (contextPill) contextPill.textContent = statusLabel;
+        if (contextBody) {
+            PivotSafeHtml.setHtml(contextBody, `
+                <div class="agent-context-card">
+                    <h5>基础配置</h5>
+                    <div class="agent-context-row"><span>运行模式</span><strong>${agentEscape(agentRunModeLabel(run.run_mode))}</strong></div>
+                    ${modelLabel ? `<div class="agent-context-row"><span>调用模型</span><strong>${agentEscape(modelLabel)}</strong></div>` : ''}
+                    <div class="agent-context-row"><span>工具权限</span><strong>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</strong></div>
+                </div>
+                <div class="agent-context-card">
+                    <h5>运行指标</h5>
+                    <div class="agent-context-row"><span>执行记录</span><strong>${Number(progress.stepCount || 0)} 条</strong></div>
+                    <div class="agent-context-row"><span>工具调用</span><strong>${Number(progress.toolCount || 0)} 次</strong></div>
+                    <div class="agent-context-row"><span>总耗时</span><strong>${agentEscape(durationLabel)}</strong></div>
+                    ${friendlyTokenUsage ? `<div class="agent-context-row"><span>模型用量</span><strong>${agentEscape(friendlyTokenUsage)}</strong></div>` : ''}
+                </div>
+                <div class="agent-context-card">
+                    <h5>检查点与安全</h5>
+                    <div class="agent-context-row"><span>检查点</span><strong>${Number(checkpoints.total || 0)} 个</strong></div>
+                    <div class="agent-context-row"><span>异常数</span><strong class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</strong></div>
+                </div>
+            `);
+        }
+
+        switchAgentRunSubtab(currentActiveRunSubtab || 'overview');
+        bindAgentRunDetailDomEvents(workbenchDetailContainer, run, isPreview);
+    }
+
+    // --- 2. 渲染独立弹窗 (Modal Fallback) ---
+    if (detail && (!isWorkbenchLayout || options.workflowPreview)) {
+        captureAgentRunDisclosureState(detail, runId);
+        PivotSafeHtml.setHtml(detail, `
+            <section class="agent-run-overview ${agentEscape(runStatus)}">
+                <div class="agent-run-overview-top">
+                    <div class="agent-run-status-copy">
+                        <span class="agent-run-status-icon" aria-hidden="true"></span>
+                        <div>
+                            <span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span>
+                            <h4>${agentEscape(statusLabel)}</h4>
+                            <p>${agentEscape(friendlySummary)}</p>
+                        </div>
+                    </div>
+                    <div class="agent-run-actions">${actionMarkup}</div>
+                </div>
+                <div class="agent-run-goal-box">
+                    <div class="agent-run-meta-item">
+                        <span class="agent-run-meta-label">任务标题</span>
+                        <strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong>
+                    </div>
+                    <div class="agent-run-meta-item agent-run-goal-item">
+                        <div class="agent-run-goal-head">
+                            <span class="agent-run-meta-label">任务目标</span>
+                            <div class="agent-run-goal-actions">
+                                ${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}
+                                <button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button>
+                            </div>
+                        </div>
+                        <div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div>
+                    </div>
+                </div>
+                <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
+                <dl class="agent-run-key-metrics">
+                    ${String(run.run_mode || '') === 'dag'
+                        ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
+                        : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
+                    <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
+                    <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
+                </dl>
+            </section>
+            <details class="agent-run-technical-summary">
+                <summary><span>运行信息</span><em>${agentEscape(progressLabel)} · ${agentEscape(agentRunModeLabel(run.run_mode))}</em></summary>
+                <dl>${technicalSummary}</dl>
+            </details>
+            ${window.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}
+            ${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}
+            ${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}
+            ${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}
+            ${visualOutputs}
+            <details class="agent-run-process" open>
+                <summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary>
+                <div class="agent-run-process-body">
+                    ${showDagNodeDetails ? `
+                        <div class="agent-dag-list">
+                            ${renderAgentDagRunGraph(dagNodes)}
+                            <div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>
+                            ${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}
+                        </div>
+                    ` : ''}
+                    ${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}
+                    ${showDagNodeDetails ? '' : `<div class="agent-step-list">
+                        ${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}
+                    </div>`}
+                    ${renderAgentTrace(trace, run.status)}
+                </div>
+            </details>
+        `);
+        restoreAgentRunDisclosureState(detail, run.id);
+        bindAgentRunDetailDomEvents(detail, run, isPreview);
+    }
+
     if (isAgentRunActive(run.status)) {
         startAgentWorkflowPreviewPolling(run.id, isPreview);
     } else {

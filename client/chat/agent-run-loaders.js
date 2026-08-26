@@ -363,11 +363,11 @@ async function loadAgentRuns(page = agentRunsPage) {
                 </thead>
                 <tbody>
                     ${displayRuns.map((run, index) => {
-        const title = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '自主任务';
+        const title = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '一次性任务';
         const goalText = String(run.goal || '').trim();
         const mode = agentRunModeLabel(run.run_mode);
         const isScheduled = Boolean(run.schedule_id);
-        const runTypeLabel = isScheduled ? '计划执行' : (run.run_mode === 'dag' ? '工作流任务' : '自主任务');
+        const runTypeLabel = isScheduled ? '计划执行' : (run.run_mode === 'dag' ? '工作流任务' : '一次性任务');
         const runTypeClass = isScheduled ? 'scheduled' : (run.run_mode === 'dag' ? 'workflow' : 'free');
         const tokenTotal = Number(run.total_tokens || 0);
         const inputTokens = Number(run.input_tokens || 0);
@@ -416,6 +416,12 @@ async function loadAgentRuns(page = agentRunsPage) {
             </table>
         </div>
     `);
+    list.querySelectorAll('tbody tr[data-agent-run-id]').forEach(row => {
+        row.addEventListener('click', event => {
+            if (event.target.closest('button, a, input, select, textarea')) return;
+            window.openAgentRun(row.dataset.agentRunId);
+        });
+    });
     list.querySelectorAll('[data-agent-run-detail]').forEach(btn => {
         btn.addEventListener('click', () => window.openAgentRun(btn.dataset.agentRunDetail));
     });
@@ -423,4 +429,10 @@ async function loadAgentRuns(page = agentRunsPage) {
         btn.addEventListener('click', () => window.deleteAgentRun(btn.dataset.agentRunDelete));
     });
     bindAgentRunTitleTooltip(list);
+
+    if (hasSelectedRun && activeAgentRunId && document.getElementById('agent-tasks-detail-container')) {
+        window.openAgentRun(activeAgentRunId, { silent: true });
+    } else if (!hasSelectedRun) {
+        document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
+    }
 }

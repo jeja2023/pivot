@@ -4,7 +4,7 @@
             <div class="agent-modal-header">
                 <div>
                     <h3>自动化</h3>
-                    <p>运行一次性多步骤任务，并统一查看所有自动化执行记录。</p>
+                    <p id="agent-workspace-subtitle">集中创建、运行和复盘自主任务、工作流任务与计划执行。</p>
                 </div>
                 <div class="agent-modal-header-actions">
                     <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog" aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
@@ -14,10 +14,9 @@
                 </div>
             </div>
             <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
-                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务运行</button>
+                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务</button>
                 <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="schedules" role="tab" aria-controls="automation-schedules-panel" aria-selected="false" tabindex="-1">计划任务</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab" aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 工作台</button>
+                <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab" aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 控制台</button>
             </div>
             <!-- Agent 持续目标创建模态弹窗 -->
             <div id="agent-goal-modal" class="modal-overlay hidden" style="z-index: 1860;" role="dialog" aria-modal="true" aria-labelledby="agent-goal-modal-title" aria-hidden="true">
@@ -614,25 +613,24 @@ permissions: []"></textarea>
                         </div>
                     </div>
                 </div>
-                <div class="agent-history-panel">
+                <!-- 左侧主面板：紧凑任务过滤与选择列表 Master Pane -->
+                <div class="agent-tasks-master-pane">
                     <div class="agent-history-head">
                         <div>
-                            <h3>运行记录</h3>
-                            <p>统一查看自主任务、工作流任务及计划运行记录。</p>
+                            <h3>任务活动</h3>
+                            <p>一次性后台任务、工作流及计划执行状态。</p>
                         </div>
                         <div class="agent-history-head-actions">
                             <div class="agent-history-tools" aria-label="任务工具">
-                                <button class="btn-secondary" type="button" data-agent-config-open="templates">任务模板</button>
-                                <button class="btn-secondary" type="button" data-agent-config-open="results">能力与结果</button>
-                                <button class="btn-secondary" type="button" data-agent-config-open="harness">运行环境</button>
-                                <button class="btn-secondary" type="button" data-agent-config-open="evaluations">质量评测</button>
-                                <button id="agent-inbox-shortcut-btn" class="btn-secondary" type="button" data-automation-jump="workbench" title="前往 Agent 工作台">工作台与收件箱 <span id="agent-inbox-shortcut-badge" class="agent-inbox-count hidden">0</span></button>
+                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="templates" title="任务模板">模板</button>
+                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="results" title="能力与结果">能力</button>
+                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="harness" title="运行环境">环境</button>
+                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="evaluations" title="质量评测">评测</button>
                             </div>
                             <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                         </div>
                     </div>
                     <div class="agent-history-toolbar">
-                        <div id="agent-metrics" class="agent-runtime-status agent-metrics"></div>
                         <div class="agent-history-filters">
                             <select id="agent-filter-status" class="form-input">
                                 <option value="">全部状态</option>
@@ -640,21 +638,97 @@ permissions: []"></textarea>
                                 <option value="running">运行中</option>
                                 <option value="approval_required">待审批</option>
                                 <option value="completed">已完成</option>
-                                <option value="completed_with_errors">完成但有错误</option>
+                                <option value="completed_with_errors">异常完成</option>
                                 <option value="error">失败</option>
                                 <option value="cancelled">已停止</option>
                             </select>
                             <select id="agent-filter-run-type" class="form-input">
                                 <option value="">全部类型</option>
-                                <option value="free">自主任务</option>
+                                <option value="free">一次性任务</option>
                                 <option value="workflow">工作流任务</option>
                                 <option value="scheduled">计划执行</option>
                             </select>
-                            <input id="agent-filter-query" class="form-input" placeholder="搜索任务">
+                            <input id="agent-filter-query" class="form-input" placeholder="搜索任务标题或目标">
                         </div>
                     </div>
                     <div id="agent-runs-list" class="agent-runs-list"></div>
                     <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
+                </div>
+
+                <!-- 中部与右侧：任务详情与运行上下文工作台主区 Detail & Context Panes -->
+                <div class="agent-tasks-detail-container" id="agent-tasks-detail-container">
+                    <div class="agent-detail-header-bar">
+                        <div class="agent-detail-breadcrumb" id="agent-detail-breadcrumb">
+                            <button type="button" class="agent-breadcrumb-back" id="agent-breadcrumb-back-btn" title="返回任务列表">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                                <span>返回列表</span>
+                            </button>
+                            <span class="agent-breadcrumb-item">任务</span>
+                            <span class="agent-breadcrumb-sep">/</span>
+                            <span class="agent-breadcrumb-item active" id="agent-breadcrumb-active-title">选择任务查看详情</span>
+                        </div>
+                        <div class="agent-detail-header-actions" id="agent-detail-header-actions"></div>
+                    </div>
+
+                    <!-- 5 大结构化详情 Tab 栏 -->
+                    <div class="agent-run-tabs" role="tablist" aria-label="任务详情分类">
+                        <button class="agent-run-tab active" type="button" data-agent-run-subtab="overview" role="tab" aria-selected="true">
+                            <span>概览</span>
+                        </button>
+                        <button class="agent-run-tab" type="button" data-agent-run-subtab="steps" role="tab" aria-selected="false">
+                            <span>执行步骤</span>
+                            <span class="agent-run-tab-badge" id="agent-run-tab-steps-count">0</span>
+                        </button>
+                        <button class="agent-run-tab" type="button" data-agent-run-subtab="logs" role="tab" aria-selected="false">
+                            <span>实时日志</span>
+                        </button>
+                        <button class="agent-run-tab" type="button" data-agent-run-subtab="artifacts" role="tab" aria-selected="false">
+                            <span>输出物</span>
+                            <span class="agent-run-tab-badge" id="agent-run-tab-artifacts-count">0</span>
+                        </button>
+                        <button class="agent-run-tab" type="button" data-agent-run-subtab="approvals" role="tab" aria-selected="false">
+                            <span>审批与异常</span>
+                            <span class="agent-run-tab-badge agent-run-tab-badge--warning hidden" id="agent-run-tab-approvals-count">0</span>
+                        </button>
+                    </div>
+
+                    <!-- 5 个 Tab 对应的内容面板容器 + 嵌套右侧上下文面板 -->
+                    <div class="agent-tasks-content-and-context">
+                        <div class="agent-run-tab-panes" id="agent-run-tab-panes">
+                            <!-- 空状态提示（未选中任务时） -->
+                            <div id="agent-run-detail-empty" class="agent-run-detail-empty">
+                                <div class="empty-icon-wrap">
+                                    <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                        <line x1="9" y1="9" x2="15" y2="9"></line>
+                                        <line x1="9" y1="13" x2="15" y2="13"></line>
+                                        <line x1="9" y1="17" x2="11" y2="17"></line>
+                                    </svg>
+                                </div>
+                                <h4>请选择任务或发起新任务</h4>
+                                <p>从左侧列表中点击任务记录查看执行进度与生成产物，或直接新建一个任务。</p>
+                                <div class="agent-empty-actions" style="margin-top: 14px;">
+                                    <button type="button" class="btn-primary" id="agent-empty-create-btn">+ 新建任务</button>
+                                </div>
+                            </div>
+                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="overview" id="agent-pane-overview"></div>
+                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="steps" id="agent-pane-steps"></div>
+                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="logs" id="agent-pane-logs"></div>
+                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="artifacts" id="agent-pane-artifacts"></div>
+                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="approvals" id="agent-pane-approvals"></div>
+                        </div>
+
+                        <!-- 右侧可折叠运行上下文 Inspector Pane -->
+                        <aside class="agent-tasks-context-pane" id="agent-tasks-context-pane">
+                            <div class="agent-context-pane-head">
+                                <strong>运行上下文</strong>
+                                <span id="agent-context-status-pill" class="agent-context-status-pill">--</span>
+                            </div>
+                            <div class="agent-context-pane-body" id="agent-context-pane-body">
+                                <div class="agent-context-loading-hint">选择任务后展示运行参数与环境指标</div>
+                            </div>
+                        </aside>
+                    </div>
                 </div>
             </div>
             <!-- 视图 2：Agent 工作台 (独立 Tab 页面，模块化清晰布局) -->
