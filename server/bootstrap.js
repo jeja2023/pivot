@@ -3,6 +3,7 @@ const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
 const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
+const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -61,9 +62,16 @@ function startBackgroundServices({
         recoverAgentRuns,
         startAgentRecoveryRunner,
         startAgentScheduleRunner,
-        startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start()
+        startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
+        startRuntimeDiagnostics
     }
 }) {
+    // 运行时压力采样必须最先起来：故障往往在数小时后才发作，届时需要有历史序列可查。
+    if (typeof dependencies.startRuntimeDiagnostics === 'function') {
+        try { dependencies.startRuntimeDiagnostics(); } catch (err) {
+            logger.warn({ err: err && err.message ? err.message : err }, '运行时压力采样启动失败');
+        }
+    }
     dependencies.startGpuMonitor().catch(err => {
         logger.warn({ err: err && err.message ? err.message : err }, 'GPU 监控服务启动失败');
     });

@@ -18,6 +18,7 @@ const {
 } = require('../../services/model-runtime');
 const { createProviderEventStateMachine, createSseEventParser, createStreamAccumulator, splitStreamTextForDisplay } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
+const { createStreamIdleWatchdog } = require('../../services/stream-idle-watchdog');
 const { openChatModelStream } = require('../../services/model-stream-service');
 const {
     extractModelTextFromRawResponse,
@@ -619,12 +620,49 @@ function createChatRouter({
                 rawStreamText += text;
             };
 
+            // 上游把响应头发完之后再静默挂住时，axios 的 timeout 已经不起作用了——它只覆盖
+            // 「发出请求到收到响应头」这一段，不覆盖流体传输。此时既不会有 'end' 也不会有
+            // 'error'，于是 aiSemaphore 许可、模型端点许可和客户端 socket 会被永久持有，
+            // 只能靠重启进程释放。看门狗在「多久没收到任何字节」这个维度补上超时。
+            let streamIdleAborted = false;
+            const streamIdleWatchdog = createStreamIdleWatchdog({
+                onIdle: (idleMs) => {
+                    streamIdleAborted = true;
+                    const idleError = new Error(`上游模型流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
+                    idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
+                    req.log.error({ sessionId, userId, modelId: modelCfg.id, idleMs }, '上游模型流长时间无数据，已主动中止');
+                    recordModelFailure(modelCfg, idleError);
+                    finishChatTrace('error', { phase: 'stream', error: idleError.message, code: idleError.code });
+                    // 不带参数 destroy：只触发 'close' 而不再触发 'error'，避免与下面的
+                    // 'error' 处理器重复给客户端写错误帧。
+                    try { response.data?.destroy?.(); } catch (_) {}
+                    try { abortController.abort(); } catch (_) {}
+                    if (!res.writableEnded) {
+                        writeChatErrorSse({
+                            writeSse,
+                            sessionId,
+                            userId,
+                            modelId: modelCfg.id,
+                            error: '模型响应超时中断',
+                            detail: idleError.message,
+                            code: idleError.code,
+                            retryable: true,
+                            persist: userMessagePersisted || regenerate,
+                            log: req.log
+                        }).then(() => res.end()).catch(() => res.end());
+                    }
+                    releaseSemaphore();
+                }
+            });
+
             response.data.on('data', chunk => {
+                streamIdleWatchdog.touch();
                 captureRawStreamChunk(chunk);
                 parser.write(chunk);
             });
 
             response.data.on('end', async () => {
+                streamIdleWatchdog.stop();
                 try {
                     parser.end();
                     accumulator.finish();
@@ -717,6 +755,12 @@ function createChatRouter({
             });
 
             response.data.on('error', err => {
+                streamIdleWatchdog.stop();
+                // 空闲看门狗已经中止上游并回过错误帧，这里不再重复通知客户端
+                if (streamIdleAborted) {
+                    releaseSemaphore();
+                    return;
+                }
                 if (res.writableEnded) return; // 如果已经结束，忽略后续网络层错误
                 
                 if (err.code === 'ECONNRESET' || err.message.includes('aborted')) {
@@ -743,10 +787,12 @@ function createChatRouter({
             });
 
             response.data.on('close', () => {
+                streamIdleWatchdog.stop();
                 releaseSemaphore();
             });
 
             req.on('close', () => {
+                streamIdleWatchdog.stop();
                 onClientDisconnect();
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
                 releaseSemaphore(); // 客户端主动断开释放

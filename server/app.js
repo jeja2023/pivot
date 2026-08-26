@@ -23,8 +23,9 @@ const {
 } = require('./metrics');
 const { 
     asyncHandler,
-    getClientIp, 
-    normalizePage, 
+    getClientIp,
+    isApiRequestPath,
+    normalizePage,
     normalizeLimit
 } = require('./http');
 const { validateConfig } = require('./config');
@@ -82,6 +83,11 @@ const {
 } = require('./services/models');
 const { getPublicRegistrationSetting } = require('./services/registration-settings');
 const { getSystemHealthSnapshot } = require('./services/system-health');
+const {
+    apiRequestWatchdog,
+    getRuntimeDiagnostics,
+    inFlightRequestMiddleware
+} = require('./services/runtime-diagnostics');
 const { getChatAgentRuntimeConfig } = require('./services/runtime-settings');
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
@@ -117,6 +123,8 @@ app.use((req, res, next) => {
 });
 app.use(httpLogger); // 注入请求日志和请求 ID
 app.use(metricsMiddleware);
+app.use(inFlightRequestMiddleware); // 统计在途请求，供 /api/health/details 定位「请求只进不出」
+app.use(apiRequestWatchdog);        // 接口悬挂兜底：超时返回 503 并留下现场，避免前端等满 30 秒
 const rateLimit = require('express-rate-limit');
 const { createRateLimitStore } = require('./services/rate-limit-store');
 
@@ -247,10 +255,19 @@ app.get('/api/health', healthLimiter, (req, res) => {
 
 app.get('/api/health/details', healthLimiter, authMiddleware, (req, res) => {
     const health = getSystemHealthSnapshot();
-    return res.status(health.status === 'error' ? 503 : 200).json({
+    // runtime 探针是排查「全站一起卡住」的关键现场：事件循环延迟、连接池水位、
+    // 在途请求与堆占用，四项同时给出才能区分「PG 慢」「线程池饿死」「GC 抖动」。
+    const runtime = getRuntimeDiagnostics();
+    const checks = [...health.checks, { name: 'runtime', ...runtime }];
+    const status = checks.some(item => item.status === 'error')
+        ? 'error'
+        : (checks.some(item => item.status === 'degraded') ? 'degraded' : 'ok');
+    return res.status(status === 'error' ? 503 : 200).json({
         service: 'pivot-ai',
         timestamp: getBeijingTimestamp(),
-        ...health
+        ...health,
+        status,
+        checks
     });
 });
 
@@ -418,7 +435,7 @@ app.get(['/manual', '/manual/'], async (req, res) => {
 // 静态文件服务：通过 setHeaders 动态控制缓存策略
 // 注意：express.static 会在发送文件时覆盖已设置的 Cache-Control 头，
 // 因此必须在 setHeaders 回调中设置，而不是在前置中间件中设置
-app.use(express.static(path.join(__dirname, '../client'), {
+const clientStaticMiddleware = express.static(path.join(__dirname, '../client'), {
     maxAge: appConfig.staticMaxAge,
     setHeaders: (res, filePath) => {
         const urlPath = '/' + path.relative(path.join(__dirname, '../client'), filePath).replace(/\\/g, '/');
@@ -427,7 +444,16 @@ app.use(express.static(path.join(__dirname, '../client'), {
             noCacheHeaders(res);
         }
     }
-}));
+});
+// 接口请求必须跳过静态文件探测。express.static 挂在 '/' 上会对每个 GET 请求做
+// fs.stat（send/index.js:716，无扩展名时还会尝试多个候选路径），而这些 fs 调用与
+// DNS 解析共用同一个 libuv 线程池（默认 4 线程）。文档解析、目录扫描或出站 DNS
+// 一旦把线程池占满，连 GET /api/settings 这种纯内存接口都会一起悬停——表现为
+// 「所有页面都打不开」。按前缀短路后，接口链路不再依赖文件系统。
+app.use((req, res, next) => {
+    if (isApiRequestPath(req.path)) return next();
+    return clientStaticMiddleware(req, res, next);
+});
 const upload = createUploadMiddleware();
 const skillUpload = createSafeUpload({
     root: path.join(process.env.DATA_DIR || path.join(__dirname, '../data'), 'skill-package-uploads'),
@@ -626,6 +652,12 @@ app.use((err, req, res, _next) => {
     // 5xx 服务端错误默认返回通用消息，避免泄漏 SQL 错误、内部路径或堆栈，
     // 不依赖 NODE_ENV（运维若漏设环境变量也不会泄漏）。503 保留原始提示以传递可重试信息。
     // 个别需要透出的 5xx 可在抛出时显式标记 err.expose = true。
+    // 响应头已发出时（SSE / 流式 / 已被超时兜底回过 503）不能再写状态行，
+    // 否则会抛 ERR_HTTP_HEADERS_SENT 并把连接留在半开状态。
+    if (res.headersSent) {
+        if (!res.writableEnded) res.end();
+        return;
+    }
     const exposeMessage = isClientError || status === 503 || err.expose === true;
     res.status(status).json({
         error: exposeMessage ? err.message : '服务器内部错误，请联系管理员'

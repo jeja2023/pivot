@@ -23,6 +23,7 @@ const {
 } = require('../../capabilities');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
+const { createStreamIdleWatchdog } = require('../../services/stream-idle-watchdog');
 const {
     buildChatCompletionsUrl,
     buildModelHeaders
@@ -709,12 +710,34 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         if (directCompletionTracker) directCompletionTracker.observeStreamPayload(payload);
                     }
                 });
+                // 上游发完响应头再静默挂住时 axios 的 timeout 已失效（只覆盖到响应头），
+                // 没有看门狗则 aiSemaphore 许可与 socket 会被永久持有，只能重启进程释放。
+                const streamIdleWatchdog = createStreamIdleWatchdog({
+                    onIdle: (idleMs) => {
+                        if (streamFailed) return;
+                        streamFailed = true;
+                        const idleError = new Error(`Upstream stream idle for more than ${Math.round(idleMs / 1000)}s.`);
+                        idleError.code = 'upstream_stream_idle_timeout';
+                        logger.error({ model: modelCfg.name, idleMs }, 'OpenAI 流式上游长时间无数据，已主动中止');
+                        recordModelFailure(modelCfg, idleError);
+                        recordApiCallLog(req, modelCfg, upstreamMessages, {
+                            status: 'error',
+                            errorMessage: idleError.message,
+                            stream: true
+                        });
+                        try { response.data?.destroy?.(); } catch (_) {}
+                        endStreamWithError(res, idleError);
+                        releaseSemaphore();
+                    }
+                });
                 response.data.on('data', chunk => {
+                    streamIdleWatchdog.touch();
                     sse.writeRaw(chunk);
                     parser.write(chunk);
                 });
 
                 response.data.on('end', () => {
+                    streamIdleWatchdog.stop();
                     if (streamFailed) return;
                     parser.end();
                     const completionProxyError = res.streamErrored ? res.streamErrorPayload : null;
@@ -757,6 +780,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     releaseSemaphore();
                 });
                 response.data.on('error', err => {
+                    streamIdleWatchdog.stop();
                     if (streamFailed) return;
                     streamFailed = true;
                     logger.error({ err: err.message, model: modelCfg.name }, 'OpenAI 流式转发中断');
@@ -770,6 +794,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     releaseSemaphore();
                 });
                 response.data.on('close', () => {
+                    streamIdleWatchdog.stop();
                     releaseSemaphore();
                 });
                 if (typeof req.on === 'function') {

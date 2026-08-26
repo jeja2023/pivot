@@ -48,8 +48,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 ARG PIVOT_BUILD_REVISION=
+# UV_THREADPOOL_SIZE 必须在进程启动前生效：文件系统操作与 DNS 解析共用 libuv 线程池，
+# 默认 4 个线程在文档解析、目录扫描或出站 DNS 变慢时会被占满，届时连纯内存接口都会
+# 一起悬停。运行时通过 .env 覆盖同名变量同样有效（docker-compose 的 env_file 会注入）。
 ENV NODE_ENV=production \
   TZ=Asia/Shanghai \
+  UV_THREADPOOL_SIZE=16 \
   PIVOT_BUILD_REVISION=${PIVOT_BUILD_REVISION} \
   PYTHON=python3 \
   SHARP_IGNORE_GLOBAL_LIBVIPS=1 \

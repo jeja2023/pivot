@@ -168,6 +168,7 @@ async function execute(sql, params = []) {
  */
 async function transaction(fn) {
     const client = await getPgPool().connect();
+    let releaseError = null;
     try {
         await client.query('BEGIN');
         const trx = {
@@ -188,10 +189,20 @@ async function transaction(fn) {
         await client.query('COMMIT');
         return result;
     } catch (err) {
-        await client.query('ROLLBACK');
+        // 回滚本身可能再次失败（连接已断、statement_timeout 触发、事务已中断）。
+        // 此时连接可能仍停在未结束的事务里：若无参数 release()，pg-pool 会把它放回
+        // 空闲池（pg-pool/index.js:392 仅在传入 err 时才 _remove），后续使用者都会拿到
+        // "current transaction is aborted"，坏连接逐个累积直到池被占满——表现为全站
+        // 接口不可用且只有重启进程才能恢复。所以回滚失败必须让连接池销毁该连接。
+        try {
+            await client.query('ROLLBACK');
+        } catch (rollbackError) {
+            releaseError = rollbackError;
+        }
         throw err;
     } finally {
-        client.release();
+        // 传入错误 => pg-pool 销毁连接；无错误 => 正常归还。
+        client.release(releaseError || undefined);
     }
 }
 

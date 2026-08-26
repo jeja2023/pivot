@@ -18,7 +18,13 @@ const {
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
 const { normalizePriceCurrency } = require('../services/model-costs');
-const { getCachedDatabaseSize, setBoundedStatsCache, tokenUsageAggregateSubquery } = require('../services/admin-stats-cache');
+const {
+    getCachedDatabaseSize,
+    getCachedGlobalCounts,
+    invalidateGlobalCountsCache,
+    setBoundedStatsCache,
+    tokenUsageAggregateSubquery
+} = require('../services/admin-stats-cache');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const {
@@ -223,6 +229,9 @@ function invalidateMonitorSummaryCache() {
     opsSummaryCache.clear();
     trendCache.clear();
     modelEndpointsCache = { data: null, expires: 0, key: '' };
+    // 全库总量缓存只标记过期，不清空数值：下一次读取立即拿到旧值并后台刷新，
+    // 避免「清空后第一个请求同步等一遍全表扫描」把连接池重新拖住。
+    invalidateGlobalCountsCache();
 }
 
 function createAdminStatsRouter({
@@ -288,10 +297,9 @@ function createAdminStatsRouter({
         );
         const todayTokens = Number(todayTokensRow?.total || 0);
 
-        const totalTokensRow = await queryOne(
-            'SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events)) AS total'
-        );
-        const totalTokens = Number(totalTokensRow?.total || 0);
+        // 全库累计 token 是无 WHERE 的双表 SUM，一定全表扫描。监控面板 8 秒刷新一次，
+        // 不能每次都重算：复用长 TTL + SWR 的全库总量缓存。
+        const totalTokens = Number((await getCachedGlobalCounts())?.tokens || 0);
 
         const todayMessagesRow = await queryOne(
             "SELECT COUNT(*) AS count FROM messages WHERE created_at >= (? :: timestamp AT TIME ZONE 'Asia/Shanghai') AND created_at < (? :: timestamp AT TIME ZONE 'Asia/Shanghai')",
@@ -759,23 +767,12 @@ function createAdminStatsRouter({
 
             const [counts, uploadsSize, dataSize, modelEndpoints] = await Promise.all([
                 (async () => {
-                    const [users, activeUsers, sessions, messages, attachments, models, tokens] = await Promise.all([
-                        queryOne('SELECT COUNT(*) AS count FROM users'),
-                        queryOne("SELECT COUNT(*) AS count FROM users WHERE status != 'disabled' AND deleted_at IS NULL"),
-                        queryOne('SELECT COUNT(*) AS count FROM sessions'),
-                        queryOne('SELECT COUNT(*) AS count FROM messages'),
-                        queryOne('SELECT COUNT(*) AS count FROM attachments'),
-                        queryOne('SELECT COUNT(*) AS count FROM models'),
-                        queryOne('SELECT ((SELECT COALESCE(SUM(token_count), 0) FROM messages) + (SELECT COALESCE(SUM(token_count), 0) FROM model_usage_events)) AS total')
-                    ]);
+                    // 全库总量走长 TTL + 串行 + SWR 缓存：原先这里用 Promise.all 并发发出
+                    // 7 条全表扫描，一个管理员打开运维面板就能占掉 7/10 个池连接，
+                    // 池一满，所有接口（含每请求都要查 users 的鉴权中间件）一起拿不到连接。
+                    const globalCounts = await getCachedGlobalCounts();
                     return {
-                        users: Number(users?.count || 0),
-                        activeUsers: Number(activeUsers?.count || 0),
-                        sessions: Number(sessions?.count || 0),
-                        messages: Number(messages?.count || 0),
-                        attachments: Number(attachments?.count || 0),
-                        models: Number(models?.count || 0),
-                        tokens: Number(tokens?.total || 0),
+                        ...globalCounts,
                         auditToday: Number(auditCountRow?.count || 0)
                     };
                 })(),

@@ -71,9 +71,21 @@ const normalizePage = (value, fallback = 1) => Math.max(parseInt(value, 10) || f
 
 const normalizeLimit = (value, fallback = 10, max = 100) => Math.min(Math.max(parseInt(value, 10) || fallback, 1), max);
 
+/**
+ * 判断请求是否属于接口链路（/api 与 OpenAI 兼容的 /v1）。
+ * 接口链路要绕开静态文件探测、并接受悬挂兜底，两处判定必须完全一致，
+ * 否则会出现「静态中间件跳过了但兜底没覆盖」这类难查的不一致。
+ */
+const isApiRequestPath = (requestPath) => {
+    const path = String(requestPath || '');
+    return path === '/api' || path.startsWith('/api/')
+        || path === '/v1' || path.startsWith('/v1/');
+};
+
 module.exports = {
     asyncHandler,
     getClientIp,
+    isApiRequestPath,
     isTrustedProxyIp,
     normalizeIpAddress,
     normalizePage,

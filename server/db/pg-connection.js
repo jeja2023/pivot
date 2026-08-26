@@ -89,6 +89,14 @@ function getPgPool() {
     return pgPool;
 }
 
+/**
+ * 只读取已初始化的连接池，绝不触发懒初始化。
+ * 诊断与健康检查必须用这个入口，避免观测行为本身建出一个连接池。
+ */
+function peekPgPool() {
+    return pgPool;
+}
+
 async function closePgPool() {
     if (pgPool) {
         await pgPool.end();
@@ -110,6 +118,7 @@ async function checkPgConnection() {
 
 module.exports = {
     getPgPool,
+    peekPgPool,
     closePgPool,
     checkPgConnection,
     normalizePgTimestamp,

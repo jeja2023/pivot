@@ -21,6 +21,7 @@ const {
 } = require('../../services/model-runtime');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
+const { createStreamIdleWatchdog } = require('../../services/stream-idle-watchdog');
 const { callModelTextWithBudget } = require('../../services/model-text-call');
 const {
     buildChatCompletionsUrl,
@@ -176,11 +177,32 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             const sse = createSseResponseWriter(res);
             const accumulator = createStreamAccumulator();
             const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
+            // 上游发完响应头再静默挂住时 axios 的 timeout 已失效（只覆盖到响应头），
+            // 没有看门狗则 aiSemaphore 与端点许可会被永久持有，只能重启进程释放。
+            let streamIdleAborted = false;
+            const streamIdleWatchdog = createStreamIdleWatchdog({
+                onIdle: (idleMs) => {
+                    streamIdleAborted = true;
+                    const idleError = new Error(`上游流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
+                    idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
+                    logger.error({ model: modelCfg.name, source, idleMs }, '应用中心 AI 流式上游长时间无数据，已主动中止');
+                    recordModelFailure(modelCfg, idleError);
+                    try { response.data?.destroy?.(); } catch (_) {}
+                    try { abortController.abort(); } catch (_) {}
+                    if (!res.writableEnded) {
+                        sse.writeData({ error: { message: idleError.message, code: idleError.code, type: 'upstream_timeout' } });
+                        res.end();
+                    }
+                    releaseSlots();
+                }
+            });
             response.data.on('data', chunk => {
+                streamIdleWatchdog.touch();
                 sse.writeRaw(chunk);
                 parser.write(chunk);
             });
             response.data.on('end', () => {
+                streamIdleWatchdog.stop();
                 parser.end();
                 accumulator.finish();
                 const totalContent = accumulator.getContent();
@@ -199,12 +221,19 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                 releaseSlots();
             });
             response.data.on('error', err => {
+                streamIdleWatchdog.stop();
+                // 空闲看门狗已经中止上游并回过错误帧，这里不再重复处理
+                if (streamIdleAborted) {
+                    releaseSlots();
+                    return;
+                }
                 logger.error({ err: err.message, model: modelCfg.name, source }, '应用中心 AI 流式转发中断');
                 recordModelFailure(modelCfg, err);
                 if (!res.writableEnded) res.end();
                 releaseSlots();
             });
             req.on('close', () => {
+                streamIdleWatchdog.stop();
                 if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
                 onClientDisconnect();
             });
@@ -836,11 +865,31 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
                 const accumulator = createStreamAccumulator();
                 const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
+                // 与上面同理：axios 的 timeout 不覆盖流体传输，上游静默挂住需要看门狗兜底
+                let streamIdleAborted = false;
+                const streamIdleWatchdog = createStreamIdleWatchdog({
+                    onIdle: (idleMs) => {
+                        streamIdleAborted = true;
+                        const idleError = new Error(`上游流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
+                        idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
+                        logger.error({ model: modelCfg.name, idleMs }, '公文写作流式上游长时间无数据，已主动中止');
+                        recordModelFailure(modelCfg, idleError);
+                        try { response.data?.destroy?.(); } catch (_) {}
+                        try { abortController.abort(); } catch (_) {}
+                        if (!res.writableEnded) {
+                            sse.writeData({ error: { message: idleError.message, code: idleError.code, type: 'upstream_timeout' } });
+                            res.end();
+                        }
+                        releaseSemaphore();
+                    }
+                });
                 response.data.on('data', chunk => {
+                    streamIdleWatchdog.touch();
                     sse.writeRaw(chunk);
                     parser.write(chunk);
                 });
                 response.data.on('end', () => {
+                    streamIdleWatchdog.stop();
                     parser.end();
                     accumulator.finish();
                     const totalContent = accumulator.getContent();
@@ -856,16 +905,23 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                     releaseSemaphore();
                 });
                 response.data.on('error', err => {
+                    streamIdleWatchdog.stop();
+                    if (streamIdleAborted) {
+                        releaseSemaphore();
+                        return;
+                    }
                     logger.error({ err: err.message, model: modelCfg.name }, '公文写作流式转发中断');
                     recordModelFailure(modelCfg, err);
                     if (!res.writableEnded) res.end();
                     releaseSemaphore();
                 });
                 response.data.on('close', () => {
+                    streamIdleWatchdog.stop();
                     releaseSemaphore();
                 });
                 if (typeof req.on === 'function') {
                     req.on('close', () => {
+                        streamIdleWatchdog.stop();
                         if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
                         onClientDisconnect();
                     });

@@ -20,13 +20,34 @@ function checkDatabase() {
     }
 }
 
+// 可写性探针文件名必须是「固定」的：早期实现用 pid+时间戳命名，一旦 unlinkSync 因
+// 磁盘瞬时异常失败，残留文件就永久堆积（生产已实测 data/ 残留 73 个、uploads/ 残留
+// 333 个 .pivot-health-*.tmp），使目录条目数单调增长并拖慢目录遍历类操作。
+const PROBE_FILE_NAME = '.pivot-health-probe.tmp';
+const LEGACY_PROBE_PATTERN = /^\.pivot-health-\d+-\d+\.tmp$/;
+const sweptProbeDirs = new Set();
+
+/** 清理历史残留探针文件：每个目录每进程只异步执行一次，不阻塞请求链路。 */
+function sweepLegacyProbeFiles(resolvedDir) {
+    if (sweptProbeDirs.has(resolvedDir)) return;
+    sweptProbeDirs.add(resolvedDir);
+    fs.promises.readdir(resolvedDir)
+        .then(names => Promise.all(
+            names
+                .filter(name => LEGACY_PROBE_PATTERN.test(name))
+                .map(name => fs.promises.unlink(path.join(resolvedDir, name)).catch(() => {}))
+        ))
+        .catch(() => {});
+}
+
 function checkWritableDirectory(label, dir) {
     const resolved = path.resolve(dir);
-    const probe = path.join(resolved, `.pivot-health-${process.pid}-${Date.now()}.tmp`);
+    const probe = path.join(resolved, PROBE_FILE_NAME);
     try {
         fs.mkdirSync(resolved, { recursive: true });
         fs.writeFileSync(probe, 'ok');
         fs.unlinkSync(probe);
+        sweepLegacyProbeFiles(resolved);
         return { label, path: resolved, status: 'ok', message: '目录正常可写' };
     } catch (e) {
         try {
