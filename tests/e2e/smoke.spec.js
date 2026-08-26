@@ -12,6 +12,7 @@ test.describe('Pivot browser smoke', () => {
         expect(login.ok()).toBeTruthy();
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await page.locator('#automation-workbench-btn').click();
+        await page.locator('[data-automation-section="workbench"]').click();
         await expect(page.locator('#agent-control-plane')).toBeVisible();
         await expect(page.locator('#agent-inbox-panel')).toBeVisible();
         await expect(page.locator('#agent-goals-panel')).toBeVisible();
