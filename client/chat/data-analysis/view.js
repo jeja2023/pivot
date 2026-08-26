@@ -232,42 +232,57 @@
                         </div>
                     </section>
                     <section id="data-analysis-ai-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 8px;">
+                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 12px;">
                             <span>分析数据集</span>
                             <select id="data-analysis-ai-dataset" class="form-input"></select>
                         </div>
-                        <div class="data-analysis-ai-box">
-                            <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
-                            <div class="data-analysis-ai-actions">
-                                <label class="data-analysis-ai-toggle"><input type="checkbox" id="data-analysis-ai-deep"> 深度分析（可查询数据 / 生成图表）</label>
-                                <div class="data-analysis-ai-buttons">
-                                    <button id="data-analysis-ai-stop" class="btn-danger-outline hidden" type="button">停止生成</button>
-                                    <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                        <div class="data-analysis-ai-columns-container">
+                            <!-- 左栏：即时 AI 探索与图表 (46%) -->
+                            <div class="data-analysis-ai-col data-analysis-ai-left-col">
+                                <div class="data-analysis-ai-col-header">
+                                    <div class="data-analysis-ai-col-title-group">
+                                        <h5>即时 AI 探索与图表</h5>
+                                        <p>询问当前数据集的分析方向、风险点、推荐图表或报告摘要</p>
+                                    </div>
+                                </div>
+                                <div class="data-analysis-ai-box">
+                                    <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
+                                    <div class="data-analysis-ai-actions">
+                                        <label class="data-analysis-ai-toggle"><input type="checkbox" id="data-analysis-ai-deep"> 深度分析（可查询数据 / 生成图表）</label>
+                                        <div class="data-analysis-ai-buttons">
+                                            <button id="data-analysis-ai-stop" class="btn-danger-outline hidden" type="button">停止生成</button>
+                                            <button id="data-analysis-ai-run" class="btn-primary" type="button">生成建议</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="data-analysis-ai-result" class="data-analysis-ai-result message-content"></div>
+                            </div>
+
+                            <!-- 右栏：全量语义分析任务 (54%) -->
+                            <div class="data-analysis-ai-col data-analysis-ai-right-col">
+                                <div class="data-analysis-semantic-box">
+                                    <div class="data-analysis-semantic-heading">
+                                        <div class="data-analysis-ai-col-title-group">
+                                            <h5>全量语义分析任务</h5>
+                                            <p>按 Token 分批处理所选文本字段，所有记录完成后生成汇总报告。</p>
+                                        </div>
+                                        <span id="data-analysis-semantic-status" class="data-analysis-semantic-status">未创建任务</span>
+                                    </div>
+                                    <div class="data-analysis-form-grid data-analysis-semantic-controls">
+                                        <label>文本字段<select id="data-analysis-semantic-field" class="form-input"></select></label>
+                                        <label>记录标识字段（可选）<select id="data-analysis-semantic-id-field" class="form-input"></select></label>
+                                        <label>每批 Token 预算<input id="data-analysis-semantic-batch-tokens" class="form-input" type="number" min="8000" max="60000" step="1000" value="24000"></label>
+                                    </div>
+                                    <textarea id="data-analysis-semantic-instruction" class="form-input data-analysis-semantic-instruction" placeholder="例如：逐条提取主题、情感、风险和摘要；不得跳过任何记录，最后汇总主要问题与建议。"></textarea>
+                                    <div class="data-analysis-semantic-actions">
+                                        <button id="data-analysis-semantic-run" class="btn-primary" type="button">启动全量任务</button>
+                                        <button id="data-analysis-semantic-cancel" class="btn-secondary hidden" type="button">取消任务</button>
+                                        <button id="data-analysis-semantic-retry" class="btn-secondary hidden" type="button">重试失败任务</button>
+                                    </div>
+                                    <div id="data-analysis-semantic-progress" class="data-analysis-semantic-progress"></div>
+                                    <div id="data-analysis-semantic-report" class="data-analysis-semantic-report message-content"></div>
                                 </div>
                             </div>
-                        </div>
-                        <div id="data-analysis-ai-result" class="data-analysis-ai-result message-content"></div>
-                        <div class="data-analysis-semantic-box">
-                            <div class="data-analysis-semantic-heading">
-                                <div>
-                                    <h5>全量语义分析任务</h5>
-                                    <p>按 Token 分批处理所选文本字段，所有记录完成后生成汇总报告。</p>
-                                </div>
-                                <span id="data-analysis-semantic-status" class="data-analysis-semantic-status">未创建任务</span>
-                            </div>
-                            <div class="data-analysis-form-grid data-analysis-semantic-controls">
-                                <label>文本字段<select id="data-analysis-semantic-field" class="form-input"></select></label>
-                                <label>记录标识字段（可选）<select id="data-analysis-semantic-id-field" class="form-input"></select></label>
-                                <label>每批 Token 预算<input id="data-analysis-semantic-batch-tokens" class="form-input" type="number" min="8000" max="60000" step="1000" value="24000"></label>
-                            </div>
-                            <textarea id="data-analysis-semantic-instruction" class="form-input data-analysis-semantic-instruction" placeholder="例如：逐条提取主题、情感、风险和摘要；不得跳过任何记录，最后汇总主要问题与建议。"></textarea>
-                            <div class="data-analysis-semantic-actions">
-                                <button id="data-analysis-semantic-run" class="btn-primary" type="button">启动全量任务</button>
-                                <button id="data-analysis-semantic-cancel" class="btn-secondary hidden" type="button">取消任务</button>
-                                <button id="data-analysis-semantic-retry" class="btn-secondary hidden" type="button">重试失败任务</button>
-                            </div>
-                            <div id="data-analysis-semantic-progress" class="data-analysis-semantic-progress"></div>
-                            <div id="data-analysis-semantic-report" class="data-analysis-semantic-report message-content"></div>
                         </div>
                     </section>
 
