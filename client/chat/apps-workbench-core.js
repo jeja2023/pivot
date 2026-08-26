@@ -352,27 +352,18 @@ function setAppsSessionValue(key, value) {
 
 function setAppsWorkbenchState(state = '', message = '', { retryApp = '' } = {}) {
     const el = document.getElementById('apps-workbench-state');
-    if (!el) return;
-    appsWorkbenchRetryApp = retryApp || '';
-    el.dataset.state = state || '';
-    el.hidden = !message;
-    PivotSafeHtml.setHtml(el, '');
-    if (!message) return;
-    const text = document.createElement('span');
-    text.textContent = message;
-    el.appendChild(text);
-    if (retryApp) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn-secondary apps-state-retry';
-        button.textContent = '重试';
-        button.addEventListener('click', () => {
-            const target = appsWorkbenchRetryApp;
-            if (!target) return;
-            setAppsWorkbenchState('loading', '正在重新加载应用…');
-            openRegisteredApp(target);
-        });
-        el.appendChild(button);
+    if (el) {
+        appsWorkbenchRetryApp = retryApp || '';
+        el.dataset.state = state || '';
+        el.hidden = true;
+        PivotSafeHtml.setHtml(el, '');
+    }
+    if (message && state === 'error') {
+        if (typeof showToast === 'function') {
+            showToast(message, 'error');
+        } else if (typeof window.showToast === 'function') {
+            window.showToast(message, 'error');
+        }
     }
 }
 
@@ -591,7 +582,6 @@ function openRegisteredApp(appId) {
             .then(() => setAppsWorkbenchState())
             .catch(() => {
                 handleFailure();
-                if (typeof showToast === 'function') showToast('\u6570\u636e\u5206\u6790\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'regulations') {
@@ -599,7 +589,6 @@ function openRegisteredApp(appId) {
             .then(() => setAppsWorkbenchState())
             .catch(() => {
                 handleFailure();
-                if (typeof showToast === 'function') showToast('\u6cd5\u89c4\u67e5\u8be2\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'ocr') {
@@ -607,7 +596,6 @@ function openRegisteredApp(appId) {
             .then(() => setAppsWorkbenchState())
             .catch(() => {
                 handleFailure();
-                if (typeof showToast === 'function') showToast('\u6587\u5b57\u8bc6\u522b\u5e94\u7528\u52a0\u8f7d\u5931\u8d25', 'error');
             });
     }
     if (app.id === 'pdf-tools') {
@@ -615,7 +603,6 @@ function openRegisteredApp(appId) {
             .then(() => setAppsWorkbenchState())
             .catch(() => {
                 handleFailure();
-                if (typeof showToast === 'function') showToast('PDF 工具加载失败', 'error');
             });
     }
 }
