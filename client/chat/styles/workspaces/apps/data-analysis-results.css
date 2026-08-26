@@ -456,8 +456,12 @@
 }
 
 .data-analysis-semantic-box {
+    width: 100%;
+    max-width: none !important;
+    min-width: 0;
+    box-sizing: border-box;
     margin-top: 10px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border: 1px solid rgba(37, 99, 235, 0.18);
     border-radius: 8px;
     background: rgba(248, 250, 252, 0.82);
@@ -558,20 +562,26 @@
 }
 
 .data-analysis-semantic-report {
-    margin-top: 10px;
-    padding: 10px 12px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 6px;
+    width: 100%;
+    max-width: none !important;
+    min-width: 0;
+    box-sizing: border-box;
+    margin-top: 12px;
+    padding: 14px 16px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
     background: #ffffff;
-    max-height: 320px;
+    max-height: 540px;
     overflow: auto;
     color: var(--text-main);
+    line-height: 1.7;
+    font-size: 0.84rem;
 }
 
 .data-analysis-semantic-report-title {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     color: var(--text-main);
-    font-size: 0.84rem;
+    font-size: 0.9rem;
     font-weight: 800;
 }
 
@@ -598,6 +608,7 @@
 }
 
 .data-analysis-ai-result.message-content,
+.data-analysis-semantic-report.message-content,
 .data-analysis-ai-answer {
     width: 100%;
     max-width: none !important;
@@ -613,11 +624,20 @@
     box-shadow: none;
 }
 
+.data-analysis-semantic-report > *,
+.data-analysis-semantic-report p,
+.data-analysis-semantic-report ul,
+.data-analysis-semantic-report ol,
+.data-analysis-semantic-report table,
+.data-analysis-semantic-report blockquote,
+.data-analysis-semantic-report pre,
 .data-analysis-ai-answer > *,
 .data-analysis-ai-answer p,
 .data-analysis-ai-answer ul,
 .data-analysis-ai-answer ol {
-    max-width: none;
+    width: 100%;
+    max-width: none !important;
+    box-sizing: border-box;
 }
 
 .data-analysis-ai-thinking {
@@ -776,3 +796,32 @@
         max-height: 260px;
     }
 }
+
+/* 暗黑模式适配 */
+body.dark-mode .data-analysis-semantic-box,
+.dark-mode .data-analysis-semantic-box {
+    background: rgba(30, 41, 59, 0.75);
+    border-color: rgba(59, 130, 246, 0.28);
+}
+
+body.dark-mode .data-analysis-semantic-report,
+.dark-mode .data-analysis-semantic-report {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.2);
+    color: #cbd5e1;
+}
+
+body.dark-mode .data-analysis-semantic-heading h5,
+body.dark-mode .data-analysis-semantic-report-title,
+.dark-mode .data-analysis-semantic-heading h5,
+.dark-mode .data-analysis-semantic-report-title {
+    color: #f8fafc;
+}
+
+body.dark-mode .data-analysis-ai-result,
+.dark-mode .data-analysis-ai-result {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.2);
+    color: #cbd5e1;
+}
+
