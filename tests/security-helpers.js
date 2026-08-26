@@ -507,6 +507,9 @@ function createChatRenderSandbox() {
                     textContent: ''
                 };
             },
+            querySelector() { return null; },
+            querySelectorAll() { return []; },
+            getElementById() { return null; },
             body: {
                 appendChild() {}
             },

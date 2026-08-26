@@ -122,6 +122,7 @@ window.setTaskComposerOpen = function(isOpen = true) {
 };
 
 window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
+    if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-section]').forEach(button => {
         const isActive = button.dataset.automationSection === activeSection;
         button.classList.toggle('active', isActive);
@@ -131,6 +132,7 @@ window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
 };
 
 window.bindUnifiedAutomationTabs = function() {
+    if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-section]').forEach(button => {
         if (button.dataset.boundAutomationSection === '1') return;
         button.dataset.boundAutomationSection = '1';
@@ -155,6 +157,7 @@ window.bindUnifiedAutomationTabs = function() {
 };
 
 window.bindAgentWorkbenchShortcuts = function() {
+    if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-jump="workbench"]').forEach(btn => {
         if (btn.dataset.boundAutomationJump === '1') return;
         btn.dataset.boundAutomationJump = '1';
@@ -354,6 +357,7 @@ window.closeAgentConfigModal = closeAgentConfigModal;
 window.openAgentConfigSection = openAgentConfigSection;
 
 window.bindAgentConfigModal = function() {
+    if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-agent-config-open]').forEach(btn => {
         if (btn.dataset.boundAgentConfigOpen === '1') return;
         btn.dataset.boundAgentConfigOpen = '1';
