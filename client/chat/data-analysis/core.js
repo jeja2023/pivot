@@ -67,8 +67,10 @@
         state.query = null;
         state.pivot = null;
         state.artifacts = [];
-        state.semanticJobs = [];
-        state.semanticJob = null;
+        if (!state.semanticDatasetId) {
+            state.semanticJobs = [];
+            state.semanticJob = null;
+        }
         state.visualQuery = {
             logicalOperator: 'AND',
             filters: [
@@ -80,7 +82,9 @@
         };
         render();
         await loadSummary(id);
-        if (typeof app.loadSemanticJobs === 'function') await app.loadSemanticJobs(id);
+        if (typeof app.loadSemanticJobs === 'function' && state.semanticDatasetId) {
+            await app.loadSemanticJobs(state.semanticDatasetId);
+        }
     }
 
     async function loadSummary(id) {

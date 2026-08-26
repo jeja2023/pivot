@@ -85,6 +85,33 @@
                 syncChartTypeControls('type');
                 return;
             }
+            if (event.target?.id === 'data-analysis-semantic-dataset') {
+                const targetDatasetId = event.target.value;
+                state.semanticDatasetId = targetDatasetId || '';
+                if (targetDatasetId) {
+                    let dataset = state.datasets.find(item => item.id === targetDatasetId);
+                    if (!dataset || !Array.isArray(dataset.columns) || dataset.columns.length === 0) {
+                        try {
+                            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(targetDatasetId)}`);
+                            const index = state.datasets.findIndex(item => item.id === targetDatasetId);
+                            if (index >= 0) state.datasets[index] = data.dataset;
+                            else state.datasets.push(data.dataset);
+                        } catch (e) {
+                            console.error('[data-analysis] 获取全量分析数据集详情失败', e);
+                        }
+                    }
+                    if (typeof app.loadSemanticJobs === 'function') {
+                        await app.loadSemanticJobs(targetDatasetId);
+                    }
+                } else {
+                    state.semanticJobs = [];
+                    state.semanticJob = null;
+                    if (typeof app.renderSemanticControls === 'function') {
+                        app.renderSemanticControls();
+                    }
+                }
+                return;
+            }
             if ([
                 'data-analysis-chart-dataset',
                 'data-analysis-query-dataset',

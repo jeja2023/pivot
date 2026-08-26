@@ -232,10 +232,6 @@
                         </div>
                     </section>
                     <section id="data-analysis-ai-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 12px;">
-                            <span>分析数据集</span>
-                            <select id="data-analysis-ai-dataset" class="form-input"></select>
-                        </div>
                         <div class="data-analysis-ai-columns-container">
                             <!-- 左栏：即时 AI 探索与图表 (46%) -->
                             <div class="data-analysis-ai-col data-analysis-ai-left-col">
@@ -244,6 +240,10 @@
                                         <h5>即时 AI 探索与图表</h5>
                                         <p>询问当前数据集的分析方向、风险点、推荐图表或报告摘要</p>
                                     </div>
+                                </div>
+                                <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 10px;">
+                                    <span>分析数据集</span>
+                                    <select id="data-analysis-ai-dataset" class="form-input"></select>
                                 </div>
                                 <div class="data-analysis-ai-box">
                                     <textarea id="data-analysis-ai-prompt" class="form-input" placeholder="询问这个数据集的分析方向、风险点、推荐图表或报告摘要"></textarea>
@@ -266,7 +266,11 @@
                                             <h5>全量语义分析任务</h5>
                                             <p>按 Token 分批处理所选文本字段，所有记录完成后生成汇总报告。</p>
                                         </div>
-                                        <span id="data-analysis-semantic-status" class="data-analysis-semantic-status">未创建任务</span>
+                                        <span id="data-analysis-semantic-status" class="data-analysis-semantic-status">未选择分析数据集</span>
+                                    </div>
+                                    <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 10px;">
+                                        <span>分析数据集</span>
+                                        <select id="data-analysis-semantic-dataset" class="form-input"></select>
                                     </div>
                                     <div class="data-analysis-form-grid data-analysis-semantic-controls">
                                         <label>文本字段<select id="data-analysis-semantic-field" class="form-input"></select></label>
@@ -537,6 +541,7 @@
         setSelectOptions('data-analysis-query-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-pivot-dataset', datasetOptions, state.activeId);
         setSelectOptions('data-analysis-ai-dataset', datasetOptions, state.activeId);
+        setSelectOptions('data-analysis-semantic-dataset', datasetOptions, state.semanticDatasetId || '');
         setSelectOptions('data-analysis-history-dataset', datasetOptions, state.activeId);
         
         // 渲染可视化查询编辑器

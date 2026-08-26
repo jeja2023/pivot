@@ -13,6 +13,7 @@
         query: null,
         pivot: null,
         artifacts: [],
+        semanticDatasetId: '',
         semanticJobs: [],
         semanticJob: null,
         semanticPollTimer: null,

@@ -86,10 +86,39 @@
         if (isActiveSemanticJob(state.semanticJob)) startSemanticPoll(state.semanticJob.id);
     }
 
+    function semanticDataset() {
+        const datasetId = state.semanticDatasetId || document.getElementById('data-analysis-semantic-dataset')?.value;
+        if (!datasetId) return null;
+        return state.datasets?.find(item => item.id === datasetId) || null;
+    }
+
     function renderSemanticControls() {
-        const dataset = activeDataset();
-        const columns = dataset?.columns || [];
         if (!document.getElementById('data-analysis-semantic-field')) return;
+        const dataset = semanticDataset();
+        const columns = dataset?.columns || [];
+
+        const status = document.getElementById('data-analysis-semantic-status');
+        const progress = document.getElementById('data-analysis-semantic-progress');
+        const report = document.getElementById('data-analysis-semantic-report');
+        const run = document.getElementById('data-analysis-semantic-run');
+        const cancel = document.getElementById('data-analysis-semantic-cancel');
+        const retry = document.getElementById('data-analysis-semantic-retry');
+
+        if (!dataset) {
+            setSelectOptions('data-analysis-semantic-field', '<option value="">请先选择全量分析数据集</option>', '');
+            setSelectOptions('data-analysis-semantic-id-field', '<option value="">请先选择全量分析数据集</option>', '');
+            if (status) {
+                status.textContent = '未选择分析数据集';
+                delete status.dataset.status;
+            }
+            if (progress) PivotSafeHtml.setHtml(progress, '');
+            if (report) PivotSafeHtml.setHtml(report, '');
+            cancel?.classList.add('hidden');
+            retry?.classList.add('hidden');
+            if (run) run.disabled = true;
+            return;
+        }
+
         const profile = Array.isArray(dataset?.profile) ? dataset.profile : [];
         const textColumns = columns.filter(column => profile.find(item => item.key === column.key && item.type === 'text'));
         const textOptions = buildOptions(textColumns.length ? textColumns : columns, { includeEmpty: true, emptyLabel: '请选择文本字段' });
@@ -97,14 +126,11 @@
         setSelectOptions('data-analysis-semantic-id-field', buildOptions(columns, { includeEmpty: true, emptyLabel: '按行号标识' }));
 
         const job = state.semanticJob;
-        const status = document.getElementById('data-analysis-semantic-status');
-        const progress = document.getElementById('data-analysis-semantic-progress');
-        const report = document.getElementById('data-analysis-semantic-report');
-        const run = document.getElementById('data-analysis-semantic-run');
-        const cancel = document.getElementById('data-analysis-semantic-cancel');
-        const retry = document.getElementById('data-analysis-semantic-retry');
         if (!job) {
-            if (status) status.textContent = '未创建任务';
+            if (status) {
+                status.textContent = '未创建任务';
+                delete status.dataset.status;
+            }
             if (progress) PivotSafeHtml.setHtml(progress, '');
             if (report) PivotSafeHtml.setHtml(report, '');
             cancel?.classList.add('hidden');
@@ -136,7 +162,7 @@
         retry?.classList.toggle('hidden', job.status !== 'failed' && job.status !== 'cancelled');
     }
 
-    async function loadSemanticJobs(datasetId = activeDataset()?.id) {
+    async function loadSemanticJobs(datasetId = state.semanticDatasetId) {
         clearSemanticPoll();
         state.semanticJobs = [];
         state.semanticJob = null;
@@ -177,8 +203,8 @@
     }
 
     async function runSemanticAnalysis() {
-        const dataset = activeDataset();
-        if (!dataset) return toast('请选择分析数据集', 'warning');
+        const dataset = semanticDataset();
+        if (!dataset) return toast('请先选择全量分析数据集', 'warning');
         const textField = document.getElementById('data-analysis-semantic-field')?.value;
         const instruction = document.getElementById('data-analysis-semantic-instruction')?.value.trim();
         if (!textField) return toast('请选择文本字段', 'warning');
