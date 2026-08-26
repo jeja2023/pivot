@@ -1,10 +1,24 @@
 const { query, queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
-const { getAccessibleModelAsync, getModelDailyUsageAsync } = require('../models');
+const { getAccessibleModelAsync } = require('../models');
 const { callModelTextWithBudget } = require('../model-text-call');
-const { getModelContextBudget } = require('../context-budget');
-const { estimateTokens } = require('../../llm');
-const { parseModelJson, splitTextByTokenBudget } = require('../agent-content-review');
+const { aiSemaphore } = require('../concurrency');
+const { parseModelJson } = require('../agent-content-review');
+const {
+    DEFAULT_BATCH_TOKEN_BUDGET,
+    clampText,
+    normalizeBatchTokenBudget,
+    normalizeMaxOutputTokens,
+    normalizeSemanticBatchConcurrency,
+    resolveSemanticBatchConcurrency,
+    resolveEffectiveBatchTokens,
+    semanticBatchOutputLimit,
+    normalizeMaxSegmentsPerBatch,
+    buildSemanticSegments,
+    buildSemanticSubBatch,
+    mergeSemanticBatchResults
+} = require('./semantic-batching');
+const { ensureSemanticQuota } = require('./semantic-quota');
 const {
     analysisId,
     getDatasetForUser,
@@ -28,21 +42,15 @@ const SEMANTIC_JOB_STATUS = Object.freeze({
     cancelled: 'cancelled'
 });
 const SEMANTIC_BATCH_STATUS = SEMANTIC_JOB_STATUS;
-const DEFAULT_BATCH_TOKEN_BUDGET = 24000;
-const MAX_BATCH_TOKEN_BUDGET = 60000;
 const DEFAULT_BATCH_MAX_ATTEMPTS = 3;
-const MAX_BATCH_SEGMENTS = Math.max(5, Math.min(60, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_SEGMENTS || '30', 10) || 30));
-// 每个结果项都需要 row_id、chunk 和 result。为输出 JSON 预留固定空间后，
-// 按每个分块的保守输出成本限制子批次大小，避免 30 个分块在 2400 tokens
-// 的输出上限下被模型截断。实际响应仍会经过完整性校验和递归拆分。
-const SEMANTIC_OUTPUT_RESERVE_TOKENS = 512;
-const SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT = 160;
 const SEMANTIC_SPLIT_MAX_DEPTH = 8;
 const JOB_STALE_LOCK_MINUTES = Math.max(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_STALE_LOCK_MINUTES || '30', 10) || 30);
 const JOB_MAX_ATTEMPTS = Math.max(1, Math.min(5, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_MAX_ATTEMPTS || '3', 10) || 3));
-const DEFAULT_BATCH_CONCURRENCY = 2;
-const MAX_BATCH_CONCURRENCY = 4;
 const JOB_WORKER_LIMIT = 1;
+// 一个批次要一次性产出数十条结论，输出耗时远高于交互式问答。
+// 沿用通用的 3 分钟默认超时会让慢端点在快要返回时被掐断并重试，
+// 白跑一次的代价比多等两分钟高得多，因此后台批次单独放宽并可配置。
+const SEMANTIC_REQUEST_TIMEOUT_MS = Math.max(60000, Math.min(900000, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_REQUEST_TIMEOUT_MS || '300000', 10) || 300000));
 let workerRunning = false;
 const activeJobControllers = new Map();
 
@@ -51,50 +59,6 @@ function isAbortError(err, signal) {
     if (!err) return false;
     if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.code === 'ECONNABORTED') return true;
     return typeof err.message === 'string' && /abort|canceled|cancelled|cancel/i.test(err.message);
-}
-
-function clampText(value, max = 4000) {
-    const text = String(value ?? '');
-    return text.length > max ? `${text.slice(0, max)}…（已截断）` : text;
-}
-
-function normalizeBatchTokenBudget(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Math.max(8000, Math.min(MAX_BATCH_TOKEN_BUDGET, Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BATCH_TOKEN_BUDGET));
-}
-
-function normalizeMaxOutputTokens(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Math.max(256, Math.min(8192, Number.isFinite(parsed) && parsed > 0 ? parsed : 4096));
-}
-
-function normalizeSemanticBatchConcurrency(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Math.max(1, Math.min(MAX_BATCH_CONCURRENCY, Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BATCH_CONCURRENCY));
-}
-
-function resolveSemanticBatchConcurrency(model, requested) {
-    const configured = normalizeSemanticBatchConcurrency(requested);
-    // 额度检查和实际用量写入不是同一事务。额度受限模型保持串行，避免并发批次同时
-    // 通过检查后超发每日 Token；未配置每日额度时再利用端点并发能力缩短总耗时。
-    if (Number(model?.daily_token_limit || 0) > 0) return 1;
-    const endpointLimit = Number.parseInt(model?.max_concurrent, 10);
-    const fallbackLimit = Number.parseInt(process.env.MODEL_ENDPOINT_DEFAULT_CONCURRENCY || '2', 10) || 2;
-    return Math.max(1, Math.min(configured, Number.isFinite(endpointLimit) && endpointLimit > 0 ? endpointLimit : fallbackLimit));
-}
-
-function resolveEffectiveBatchTokens(model, requested, maxOutputTokens) {
-    const configured = normalizeBatchTokenBudget(requested);
-    const budget = getModelContextBudget(model, { maxOutputTokens });
-    if (budget.unbounded) return configured;
-    const safe = Math.floor(Number(budget.inputBudget || 0) * 0.65);
-    if (safe < 8000) {
-        const err = new Error('当前模型可用上下文不足以执行全量语义分析，请为模型配置至少 16K 上下文窗口。');
-        err.status = 400;
-        err.code = 'SEMANTIC_CONTEXT_TOO_SMALL';
-        throw err;
-    }
-    return Math.min(configured, safe);
 }
 
 function serializeSemanticBatch(row) {
@@ -257,6 +221,8 @@ async function createSemanticAnalysisJob({ user, datasetId, textField, idField =
     const options = {
         batchTokens: resolveEffectiveBatchTokens(model, batchTokens, outputTokens),
         maxOutputTokens: outputTokens,
+        // 切分阶段就对齐模型输出上限，避免每个批次在分析时必然被二分成两次串行请求。
+        maxSegmentsPerBatch: semanticBatchOutputLimit(outputTokens),
         textFieldName: textColumn.name,
         idFieldName: idColumn?.name || '',
         modelName: model.name || model.model_name || ''
@@ -313,60 +279,6 @@ async function loadSemanticRows(datasetRow, textColumn, idColumn) {
     });
 }
 
-function buildSemanticSegments(rows, batchTokens) {
-    const batchBudget = normalizeBatchTokenBudget(batchTokens);
-    const segmentBudget = Math.max(1024, Math.floor(batchBudget * 0.72));
-    const segments = [];
-    rows.forEach(row => {
-        const source = row.text;
-        const chunks = source ? splitTextByTokenBudget(source, segmentBudget, 0) : [''];
-        chunks.forEach((text, chunkIndex) => {
-            segments.push({
-                rowNo: row.rowNo,
-                rowId: row.rowId,
-                chunkIndex,
-                chunkCount: chunks.length,
-                text,
-                charCount: text.length,
-                tokenEstimate: estimateTokens(text)
-            });
-        });
-    });
-    const contentBudget = Math.max(1024, batchBudget - 1800);
-    const batches = [];
-    let current = [];
-    let currentTokens = 0;
-    const flush = () => {
-        if (!current.length) return;
-        const rowNumbers = Array.from(new Set(current.map(item => item.rowNo)));
-        batches.push({
-            segments: current,
-            segmentStart: segments.indexOf(current[0]),
-            segmentEnd: segments.indexOf(current[current.length - 1]),
-            rowStart: Math.min(...rowNumbers),
-            rowEnd: Math.max(...rowNumbers),
-            rowCount: rowNumbers.length,
-            charCount: current.reduce((sum, item) => sum + item.charCount, 0)
-        });
-        current = [];
-        currentTokens = 0;
-    };
-    segments.forEach(segment => {
-        const entryTokens = estimateTokens(JSON.stringify({ row_id: segment.rowId, chunk: `${segment.chunkIndex + 1}/${segment.chunkCount}`, text: segment.text }));
-        if (current.length && (currentTokens + entryTokens > contentBudget || current.length >= MAX_BATCH_SEGMENTS)) flush();
-        current.push(segment);
-        currentTokens += entryTokens;
-    });
-    flush();
-    // Array.indexOf 上面按对象引用定位，批次切片范围需要全局序号，避免同值文本造成边界歧义。
-    let cursor = 0;
-    return batches.map(batch => {
-        const segmentStart = cursor;
-        cursor += batch.segments.length;
-        return { ...batch, segmentStart, segmentEnd: cursor - 1 };
-    });
-}
-
 async function ensureSemanticBatches(job, batches) {
     const existing = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ?', [job.id]);
     if (Number(existing?.count || 0) > 0) return;
@@ -417,18 +329,21 @@ async function claimSemanticJob() {
     return changes > 0 ? await queryOne('SELECT * FROM analysis_semantic_jobs WHERE id = ?', [row.id]) : null;
 }
 
-async function claimSemanticBatch(jobId) {
+async function claimSemanticBatch(jobId, excludeIds = []) {
     const now = getBeijingTimestamp();
     const staleBefore = getBeijingTimestamp(new Date(Date.now() - JOB_STALE_LOCK_MINUTES * 60000));
+    // 本轮刚失败的批次先跳过，避免 worker 立刻重取同一批次形成紧密重试循环。
+    const excluded = Array.from(new Set(excludeIds.map(id => String(id || '')).filter(Boolean)));
+    const excludeClause = excluded.length ? ` AND id NOT IN (${excluded.map(() => '?').join(', ')})` : '';
     const row = await queryOne(`
         SELECT * FROM analysis_semantic_batches
         WHERE job_id = ? AND (
             (status = ? AND attempts < max_attempts) OR
             (status = ? AND locked_at IS NOT NULL AND locked_at < ? AND attempts < max_attempts)
-        )
+        )${excludeClause}
         ORDER BY batch_index ASC
         LIMIT 1
-    `, [jobId, SEMANTIC_BATCH_STATUS.queued, SEMANTIC_BATCH_STATUS.running, staleBefore]);
+    `, [jobId, SEMANTIC_BATCH_STATUS.queued, SEMANTIC_BATCH_STATUS.running, staleBefore, ...excluded]);
     if (!row) return null;
     const changes = await execute(`
         UPDATE analysis_semantic_batches
@@ -587,45 +502,6 @@ function normalizeBatchResult(content, expectedSegments = []) {
     };
 }
 
-function semanticBatchOutputLimit(maxOutputTokens) {
-    const outputBudget = Math.max(256, Number.parseInt(maxOutputTokens, 10) || 2400);
-    const available = outputBudget - SEMANTIC_OUTPUT_RESERVE_TOKENS;
-    return Math.max(1, Math.min(MAX_BATCH_SEGMENTS, Math.floor(available / SEMANTIC_OUTPUT_TOKENS_PER_SEGMENT)));
-}
-
-function buildSemanticSubBatch(batch, segments) {
-    const rows = Array.from(new Set(segments.map(segment => segment.rowNo)));
-    return {
-        ...batch,
-        segments,
-        segment_count: segments.length,
-        row_count: rows.length,
-        char_count: segments.reduce((sum, segment) => sum + segment.charCount, 0)
-    };
-}
-
-function mergeSemanticBatchResults(left, right) {
-    const items = [
-        ...(Array.isArray(left?.parsed?.items) ? left.parsed.items : []),
-        ...(Array.isArray(right?.parsed?.items) ? right.parsed.items : [])
-    ];
-    const summary = [left?.summary, right?.summary].filter(Boolean).join('\n');
-    const usage = {
-        inputTokens: Number(left?.usage?.inputTokens || 0) + Number(right?.usage?.inputTokens || 0),
-        outputTokens: Number(left?.usage?.outputTokens || 0) + Number(right?.usage?.outputTokens || 0),
-        totalTokens: Number(left?.usage?.totalTokens || 0) + Number(right?.usage?.totalTokens || 0)
-    };
-    const parsed = { batch_summary: summary, items };
-    return {
-        parsed,
-        summary: clampText(summary || '模型未返回批次摘要。', 1800),
-        itemCount: items.length,
-        responseText: JSON.stringify(parsed),
-        usage,
-        contextBudget: left?.contextBudget || right?.contextBudget || null
-    };
-}
-
 function buildBatchMessages(job, batch, options) {
     const entries = batch.segments.map(segment => ({
         row_id: segment.rowId,
@@ -649,45 +525,52 @@ function buildBatchMessages(job, batch, options) {
     return [{ role: 'system', content: system }, { role: 'user', content: user }];
 }
 
+/**
+ * 把一组分块二分后分别分析再合并。两半之间没有依赖关系，因此并行发起：
+ * 真实并发上限仍由全局 AI 信号量和模型端点槽位统一约束，这里只是把原先
+ * "左半段跑完才发右半段"的串行等待交还给调度器。
+ */
+async function splitAndAnalyzeSemanticSegments({ job, batch, segments, options, user, model, depth }) {
+    const splitAt = Math.ceil(segments.length / 2);
+    const [left, right] = await Promise.all([segments.slice(0, splitAt), segments.slice(splitAt)].map(part => analyzeSemanticBatchSegments({
+        job,
+        batch,
+        segments: part,
+        options,
+        user,
+        model,
+        depth: depth + 1
+    })));
+    return mergeSemanticBatchResults(left, right);
+}
+
 async function analyzeSemanticBatchSegments({ job, batch, segments, options, user, model, depth = 0 }) {
     const maxOutputTokens = options.maxOutputTokens || 2400;
     const outputLimit = semanticBatchOutputLimit(maxOutputTokens);
     if (segments.length > outputLimit && depth < SEMANTIC_SPLIT_MAX_DEPTH) {
-        const splitAt = Math.ceil(segments.length / 2);
-        const left = await analyzeSemanticBatchSegments({
-            job,
-            batch,
-            segments: segments.slice(0, splitAt),
-            options,
-            user,
-            model,
-            depth: depth + 1
-        });
-        const right = await analyzeSemanticBatchSegments({
-            job,
-            batch,
-            segments: segments.slice(splitAt),
-            options,
-            user,
-            model,
-            depth: depth + 1
-        });
-        return mergeSemanticBatchResults(left, right);
+        return await splitAndAnalyzeSemanticSegments({ job, batch, segments, options, user, model, depth });
     }
 
     const payload = buildSemanticSubBatch(batch, segments);
     const messages = buildBatchMessages(job, payload, { totalBatches: options.totalBatches });
-    await ensureSemanticQuota(user, model, messages, maxOutputTokens);
-    const response = await callModelTextWithBudget({
-        modelCfg: model,
-        user,
-        messages,
-        source: 'data_analysis_semantic_batch',
-        maxTokens: maxOutputTokens,
-        maxOutputTokensCap: maxOutputTokens,
-        temperature: 0.1,
-        signal: options.signal || null
-    });
+    const releaseQuota = await ensureSemanticQuota(user, model, messages, maxOutputTokens);
+    let response;
+    try {
+        response = await callModelTextWithBudget({
+            modelCfg: model,
+            user,
+            messages,
+            source: 'data_analysis_semantic_batch',
+            maxTokens: maxOutputTokens,
+            maxOutputTokensCap: maxOutputTokens,
+            temperature: 0.1,
+            signal: options.signal || null,
+            timeout: SEMANTIC_REQUEST_TIMEOUT_MS
+        });
+    } finally {
+        // 用量已在调用内同步入队，此刻释放预留不会留下额度空窗。
+        releaseQuota();
+    }
     try {
         const normalized = normalizeBatchResult(response.content, segments);
         return {
@@ -699,40 +582,8 @@ async function analyzeSemanticBatchSegments({ job, batch, segments, options, use
     } catch (err) {
         if (err.code !== 'SEMANTIC_BATCH_INCOMPLETE' || segments.length <= 1 || depth >= SEMANTIC_SPLIT_MAX_DEPTH) throw err;
         // 截断响应通常已经消耗了全部输出预算。将原批次二分后重新请求，
-        // 比重复发送同样的 30 个分块更可能在模型上限内得到完整 JSON。
-        const splitAt = Math.ceil(segments.length / 2);
-        const left = await analyzeSemanticBatchSegments({
-            job,
-            batch,
-            segments: segments.slice(0, splitAt),
-            options,
-            user,
-            model,
-            depth: depth + 1
-        });
-        const right = await analyzeSemanticBatchSegments({
-            job,
-            batch,
-            segments: segments.slice(splitAt),
-            options,
-            user,
-            model,
-            depth: depth + 1
-        });
-        return mergeSemanticBatchResults(left, right);
-    }
-}
-
-async function ensureSemanticQuota(user, model, messages, maxOutputTokens) {
-    const limit = Number(model?.daily_token_limit || 0);
-    if (limit <= 0) return;
-    const estimated = estimateTokens(JSON.stringify(messages)) + Math.max(256, Number(maxOutputTokens) || 1200);
-    const used = await getModelDailyUsageAsync(user.id, model.id);
-    if (used + estimated > limit) {
-        const err = new Error('模型今日额度不足以继续完成全量语义分析，请提高额度或切换模型。');
-        err.status = 429;
-        err.code = 'INSUFFICIENT_QUOTA';
-        throw err;
+        // 比重复发送同样的分块数更可能在模型上限内得到完整 JSON。
+        return await splitAndAnalyzeSemanticSegments({ job, batch, segments, options, user, model, depth });
     }
 }
 
@@ -754,28 +605,33 @@ async function synthesizeSemanticReport(job, batchRows, user, model, { signal = 
             content: `任务要求：${job.instruction}\n模型批次预算：${options.batchTokens || DEFAULT_BATCH_TOKEN_BUDGET}\n全部批次摘要：\n${summaries}\n\n请输出中文最终报告。`
         }
     ];
-    await ensureSemanticQuota(user, model, messages, options.maxOutputTokens || 1200);
-    const output = await callModelTextWithBudget({
-        modelCfg: model,
-        user,
-        messages,
-        source: 'data_analysis_semantic_summary',
-        maxTokens: options.maxOutputTokens || 1200,
-        maxOutputTokensCap: options.maxOutputTokens || 1200,
-        temperature: 0.15,
-        signal
-    });
-    return output.content;
+    const releaseQuota = await ensureSemanticQuota(user, model, messages, options.maxOutputTokens || 1200);
+    try {
+        const output = await callModelTextWithBudget({
+            modelCfg: model,
+            user,
+            messages,
+            source: 'data_analysis_semantic_summary',
+            maxTokens: options.maxOutputTokens || 1200,
+            maxOutputTokensCap: options.maxOutputTokens || 1200,
+            temperature: 0.15,
+            signal,
+            timeout: SEMANTIC_REQUEST_TIMEOUT_MS
+        });
+        return output.content;
+    } finally {
+        releaseQuota();
+    }
 }
 
-async function processSemanticBatch({ job, user, model, batches, options, stopSignal }) {
+async function processSemanticBatch({ job, user, model, batches, options, stopSignal, deferredBatchIds = new Set() }) {
     if (stopSignal.stopped || options.signal?.aborted) return { claimed: false };
     const currentJob = await queryOne('SELECT status FROM analysis_semantic_jobs WHERE id = ?', [job.id]);
     if (!currentJob || currentJob.status !== SEMANTIC_JOB_STATUS.running || options.signal?.aborted) {
         stopSignal.stopped = true;
         return { claimed: false };
     }
-    const batch = await claimSemanticBatch(job.id);
+    const batch = await claimSemanticBatch(job.id, Array.from(deferredBatchIds));
     if (!batch) return { claimed: false };
     const batchPayload = {
         ...batch,
@@ -819,18 +675,28 @@ async function processSemanticBatch({ job, user, model, batches, options, stopSi
         }
         const exhausted = Number(batch.attempts || 1) >= Number(batch.max_attempts || DEFAULT_BATCH_MAX_ATTEMPTS);
         const quotaOrContextError = ['INSUFFICIENT_QUOTA', 'SEMANTIC_CONTEXT_TOO_SMALL'].includes(err.code);
-        await finishSemanticBatch(batch, exhausted ? SEMANTIC_BATCH_STATUS.failed : SEMANTIC_BATCH_STATUS.queued, { error: err.message || String(err) });
+        await finishSemanticBatch(batch, exhausted || quotaOrContextError ? SEMANTIC_BATCH_STATUS.failed : SEMANTIC_BATCH_STATUS.queued, { error: err.message || String(err) });
         await execute(`
             UPDATE analysis_semantic_jobs
             SET failed_batches = (SELECT COUNT(*) FROM analysis_semantic_batches WHERE job_id = ? AND status = ?),
                 locked_at = ?, updated_at = ?
             WHERE id = ?
         `, [job.id, SEMANTIC_BATCH_STATUS.failed, getBeijingTimestamp(), getBeijingTimestamp(), job.id]);
-        stopSignal.failure = {
-            error: err,
-            retry: !exhausted && !quotaOrContextError
-        };
-        stopSignal.stopped = true;
+        // 额度不足、上下文过小属于整任务级问题，必须立即停机；其余错误只让该批次退避，
+        // 本轮继续消费剩余批次，任务收尾时统一按"仍有未完成批次"判定是否整体重试。
+        if (exhausted || quotaOrContextError) {
+            stopSignal.failure = { error: err, retry: false };
+            stopSignal.stopped = true;
+        } else {
+            deferredBatchIds.add(batch.id);
+            logger.warn({
+                jobId: job.id,
+                batchId: batch.id,
+                batchIndex: Number(batch.batch_index) || 0,
+                attempts: Number(batch.attempts) || 0,
+                err: err.message || String(err)
+            }, '全量语义分析批次失败并退避，本轮继续处理其余批次');
+        }
         return { claimed: true, ok: false };
     }
 }
@@ -845,7 +711,7 @@ async function processSemanticAnalysisJob(job) {
     if (!model || model.secret_error) throw new Error(model?.secret_error || '任务模型不可用。');
     const options = jsonParse(job.options_json, {});
     const rows = await loadSemanticRows(dataset, textColumn, idColumn);
-    const batches = buildSemanticSegments(rows, options.batchTokens || DEFAULT_BATCH_TOKEN_BUDGET);
+    const batches = buildSemanticSegments(rows, options.batchTokens || DEFAULT_BATCH_TOKEN_BUDGET, options.maxSegmentsPerBatch);
     await ensureSemanticBatches(job, batches);
     await execute(`UPDATE analysis_semantic_jobs SET analyzed_rows = ?, total_batches = ?, updated_at = ? WHERE id = ?`, [rows.length, batches.length, getBeijingTimestamp(), job.id]);
 
@@ -857,10 +723,26 @@ async function processSemanticAnalysisJob(job) {
             model,
             options.batchConcurrency || process.env.DATA_ANALYSIS_SEMANTIC_BATCH_CONCURRENCY
         );
+        // 批次并发会被全局 AI 信号量和模型端点槽位二次收窄，把三者一起打出来，
+        // 便于在耗时异常时直接定位到底是哪一层把并发压回了串行。
+        const globalAiMax = Math.max(1, Number(aiSemaphore.getStatus().max) || 1);
+        logger.info({
+            jobId: job.id,
+            totalRows: rows.length,
+            totalBatches: batches.length,
+            maxSegmentsPerBatch: normalizeMaxSegmentsPerBatch(options.maxSegmentsPerBatch),
+            maxOutputTokens: options.maxOutputTokens || null,
+            batchConcurrency,
+            globalAiMaxConcurrent: globalAiMax,
+            modelEndpointConcurrency: Number.parseInt(model.max_concurrent, 10) || null,
+            effectiveConcurrency: Math.min(batchConcurrency, globalAiMax),
+            requestTimeoutMs: SEMANTIC_REQUEST_TIMEOUT_MS
+        }, '全量语义分析开始执行');
         const jobOptions = { ...options, signal: jobController.signal };
+        const deferredBatchIds = new Set();
         const runBatchWorker = async () => {
             while (!stopSignal.stopped && !jobController.signal.aborted) {
-                const result = await processSemanticBatch({ job, user, model, batches, options: jobOptions, stopSignal });
+                const result = await processSemanticBatch({ job, user, model, batches, options: jobOptions, stopSignal, deferredBatchIds });
                 if (!result.claimed) break;
             }
         };
@@ -985,8 +867,10 @@ module.exports = {
     buildSemanticSegments,
     normalizeBatchTokenBudget,
     normalizeSemanticBatchConcurrency,
+    normalizeMaxSegmentsPerBatch,
     resolveSemanticBatchConcurrency,
     normalizeBatchResult,
+    analyzeSemanticBatchSegments,
     semanticBatchOutputLimit,
     getActiveJobControllers: () => activeJobControllers
 };

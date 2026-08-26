@@ -16,6 +16,7 @@ const {
     parsePlannerJson
 } = require('./chat-route-helpers');
 const { forwardChatCompletion } = require('./model-forwarder');
+const { buildThinkingControlPayload } = require('./models');
 const { buildToolExecutionPlan, summarizeToolExecutionPlan } = require('./agent-tool-execution-plan');
 
 const MCP_CHAT_TOOL_TITLES = {
@@ -601,7 +602,8 @@ async function callChatMcpPlanner(modelCfg, messages, user = null, options = {})
                     input: convertChatMessagesToResponsesInput(messages),
                     stream: false,
                     temperature: 0,
-                    max_output_tokens: 600
+                    max_output_tokens: 600,
+                    ...buildThinkingControlPayload(modelCfg)
                 },
                 timeout: 120000,
                 signal: options.signal || null
@@ -622,7 +624,9 @@ async function callChatMcpPlanner(modelCfg, messages, user = null, options = {})
             messages,
             stream: false,
             temperature: 0,
-            max_tokens: 600
+            max_tokens: 600,
+            // 工具调用决策要的是结构化判断，600 tokens 预算容不下思维链。
+            ...buildThinkingControlPayload(modelCfg)
         },
         timeout: 120000,
         signal: options.signal || null

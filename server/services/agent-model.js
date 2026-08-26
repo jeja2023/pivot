@@ -1,6 +1,6 @@
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { recordModelTokenUsage } = require('./models');
+const { recordModelTokenUsage, buildThinkingControlPayload, isChatThinkingEnabled } = require('./models');
 const { normalizeTaskBudget } = require('./agent-budget');
 const {
     buildChatCompletionsUrl,
@@ -22,10 +22,34 @@ const { estimateProviderUsage, recordProviderUsageCalibration } = require('./pro
 // Agent 调用的输出上限：优先调用方显式值，其次模型配置的 max_tokens，最后回退 1200。
 // 与 chat/openai/apps 一致地尊重模型配置，避免推理型模型（如 Qwen3）被 1200 写死后思考耗尽、正文为空。
 const AGENT_DEFAULT_MAX_TOKENS = 1200;
+// 显式保留思维链时，思考本身就要吃掉上千 tokens，输出预算必须同步抬高，
+// 否则正式结果会被挤没——这正是"思考耗尽、正文为空"的成因。
+const AGENT_THINKING_MIN_MAX_TOKENS = Math.max(2048, Math.min(16384, Number.parseInt(process.env.AGENT_THINKING_MIN_MAX_TOKENS || '4096', 10) || 4096));
+
+/**
+ * 判断本次 Agent 调用是否保留思维链。
+ *
+ * Agent 靠多步规划实现推理，单次调用内的思维链会污染结构化输出并挤占有限的输出预算，
+ * 因此默认关闭。需要思维链时有两条途径：
+ *   1) 管理员给这次运行指定一个开启了「聊天中开启思考」的模型条目（无需改代码）；
+ *   2) 调用方显式传 enableThinking，用于按步骤精确控制——例如工具参数生成必须严格 JSON
+ *      时传 false 强制关闭，即便模型条目开着思考。
+ */
+function agentThinkingKept(modelCfg, options = {}) {
+    if (typeof options.enableThinking === 'boolean') return options.enableThinking;
+    return isChatThinkingEnabled(modelCfg);
+}
+
 function resolveAgentMaxTokens(modelCfg, options = {}) {
     if (typeof options.maxTokens === 'number') return options.maxTokens;
     const configured = Number(modelCfg?.max_tokens);
-    return Number.isFinite(configured) && configured > 0 ? configured : AGENT_DEFAULT_MAX_TOKENS;
+    const base = Number.isFinite(configured) && configured > 0 ? configured : AGENT_DEFAULT_MAX_TOKENS;
+    return agentThinkingKept(modelCfg, options) ? Math.max(base, AGENT_THINKING_MIN_MAX_TOKENS) : base;
+}
+
+function applyAgentThinkingControls(data, modelCfg, options = {}) {
+    if (agentThinkingKept(modelCfg, options)) return data;
+    return Object.assign(data, buildThinkingControlPayload(modelCfg));
 }
 
 async function withAgentModelConcurrency(modelCfg, operation) {
@@ -65,6 +89,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
         if (options.responseFormat && typeof options.responseFormat === 'object') {
             data.response_format = options.responseFormat;
         }
+        applyAgentThinkingControls(data, modelCfg, options);
         const response = await forwardChatCompletion({
             modelCfg,
             user: options.user || null,
@@ -116,6 +141,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             payload.tools = toolsPayload;
             if (options.toolChoice) payload.tool_choice = options.toolChoice;
         }
+        applyAgentThinkingControls(payload, modelCfg, options);
         const sseParser = createSseEventParser({
             onData(payload) {
                 if (!payload) return;
@@ -242,5 +268,7 @@ module.exports = {
     callModelStreamingWithTools,
     recordAgentModelUsage,
     withAgentModelConcurrency,
-    resolveAgentMaxTokens
+    resolveAgentMaxTokens,
+    applyAgentThinkingControls,
+    agentThinkingKept
 };

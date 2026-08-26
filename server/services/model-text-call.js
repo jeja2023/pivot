@@ -8,7 +8,7 @@ const {
 } = require('./model-runtime');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
-const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch } = require('../routes/apps/helpers');
+const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch, buildThinkingControlPayload } = require('../routes/apps/helpers');
 const { fitMessagesToContextBudget } = require('./context-budget');
 
 /**
@@ -41,7 +41,8 @@ async function callModelTextWithBudget({ modelCfg, user, messages, source = 'ai'
                 messages: payloadMessages,
                 stream: false,
                 temperature,
-                max_tokens: outputTokens
+                max_tokens: outputTokens,
+                ...buildThinkingControlPayload(modelCfg)
             },
             headers: buildModelHeaders(modelCfg),
             stream: false,

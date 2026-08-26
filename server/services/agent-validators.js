@@ -42,9 +42,31 @@ const CORRUPT_TITLE_FULL_RE = new RegExp(`^[?${REPLACEMENT_CHAR}\\s._-]+$`);
 const CORRUPT_TITLE_RUN_RE = new RegExp(`[?${REPLACEMENT_CHAR}]{3,}`);
 const CORRUPT_TITLE_COUNT_RE = new RegExp(`[?${REPLACEMENT_CHAR}]`, 'g');
 
+// 与 llm.js 的 stripThoughtContent 同一组模式：闭合块整段删除，未闭合块删到文末
+//（未闭合意味着思考把输出预算耗尽、正式结果压根没生成，返回空比返回半截思考更正确）。
+const THOUGHT_BLOCK_PATTERNS = [
+    /<thought\b[^>]*>[\s\S]*?<\/thought>/gi,
+    /<thought\b[^>]*>[\s\S]*$/gi,
+    /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi,
+    /<thinking\b[^>]*>[\s\S]*$/gi,
+    /<think\b[^>]*>[\s\S]*?<\/think>/gi,
+    /<think\b[^>]*>[\s\S]*$/gi
+];
+
+function stripThoughtBlocks(text = '') {
+    let value = String(text ?? '');
+    THOUGHT_BLOCK_PATTERNS.forEach(pattern => {
+        value = value.replace(pattern, '\n');
+    });
+    return value;
+}
+
 function parseJsonObject(text) {
     if (text && typeof text === 'object' && !Array.isArray(text)) return text;
-    const raw = String(text || '').trim();
+    // 端点忽略 chat_template_kwargs 时思维链会混在响应里，而思考中往往含 JSON 草稿：
+    // 下面的花括号兜底匹配会从思考里的第一个 { 一直吃到正式答案的最后一个 }，必然解析失败。
+    // 所以先剥掉思维链再解析。本文件约定不引入业务依赖，故与 llm.js 的 stripThoughtContent 同源内联。
+    const raw = stripThoughtBlocks(text).trim();
     if (!raw) return null;
     try {
         return JSON.parse(raw);

@@ -3,6 +3,7 @@ const { getBeijingTimestamp } = require('../../time');
 const { enqueueApiCallLog } = require('../../services/db-write-queue');
 const { createVisibleReasoningStreamFilter } = require('../../llm');
 const { normalizeTokenUsage } = require('../../services/token-accounting');
+const { buildThinkingControlPayload } = require('../../services/models');
 const { createSseEventParser } = require('../../streaming');
 
 const COMPLETION_NO_THINK_DIRECTIVE = '/no_think';
@@ -288,12 +289,14 @@ function isReasoningCompletionModel(modelCfg = {}) {
 }
 
 function isQwen3CompletionModel(modelCfg = {}) {
-    const name = `${modelCfg.model_name || ''} ${modelCfg.name || ''}`;
-    return /qwen-?3/i.test(name);
+    // 与 services/models.js 的 buildThinkingControlPayload 共用同一份判定，
+    // 避免模型名匹配范围在补全路径和其他路径之间出现两套口径。
+    return Boolean(buildThinkingControlPayload(modelCfg).chat_template_kwargs);
 }
 
 function applyCompletionThinkingControls(payload = {}, modelCfg = {}) {
-    if (!isQwen3CompletionModel(modelCfg)) return payload;
+    const control = buildThinkingControlPayload(modelCfg);
+    if (!control.chat_template_kwargs) return payload;
     const existingKwargs = payload.chat_template_kwargs
         && typeof payload.chat_template_kwargs === 'object'
         && !Array.isArray(payload.chat_template_kwargs)
@@ -303,7 +306,7 @@ function applyCompletionThinkingControls(payload = {}, modelCfg = {}) {
         ...payload,
         chat_template_kwargs: {
             ...existingKwargs,
-            enable_thinking: false
+            ...control.chat_template_kwargs
         }
     };
 }

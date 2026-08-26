@@ -5,6 +5,8 @@ const {
 } = require('./model-adapter');
 const { countVisibleConversationMessages } = require('./chat-messages');
 const { forwardChatCompletion } = require('./model-forwarder');
+const { buildThinkingControlPayload } = require('./models');
+const { stripThoughtContent } = require('../llm');
 const sessionsRepository = require('../repositories/sessions');
 
 function normalizeTitleText(value) {
@@ -39,7 +41,8 @@ function buildFallbackTitle(userMsg, aiMsg = '') {
 }
 
 function sanitizeGeneratedTitle(value, fallbackTitle) {
-    let title = normalizeTitleText(value)
+    // 端点忽略 chat_template_kwargs 时思考内容会直接落进标题，先剥掉思维链再清洗。
+    let title = normalizeTitleText(stripThoughtContent(String(value ?? '')))
         .replace(/^#+\s*/, '')
         .replace(/^(会话)?标题\s*[:：]\s*/i, '')
         .replace(/^["'“”‘’《》【】「」\[\]\s]+|["'“”‘’《》【】「」\[\]\s]+$/g, '')
@@ -98,7 +101,9 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
                     }
                 ],
                 max_tokens: 32,
-                temperature: 0.2
+                temperature: 0.2,
+                // 标题只留 32 tokens 的输出预算，思考模式会把它整段吃掉导致标题为空或变成思维碎片。
+                ...buildThinkingControlPayload(modelCfg)
             },
             timeout: 60000,
             signal: options.signal || null

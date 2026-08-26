@@ -1,3 +1,13 @@
+## [v0.1.49] - 2026-08-26
+
+### Linux 容器环境智能体沙箱兼容性加固与全链路推理思考治理
+
+- **Linux 非特权容器与 CI 智能体沙箱降级兼容性加固**：彻底修复在 Docker 镜像非 root 用户（`USER node`）、GitHub Actions Runner 及 Kubernetes Pod 等无法写入 `/sys/fs/cgroup` 的环境下，Skill 静态校验与回归测试因硬编码严格沙箱抛出 `AGENT_CGROUP_UNAVAILABLE` 导致发布流程中断的缺陷；解耦隔离配置并支持 `PIVOT_AGENT_STRICT_ISOLATION` 环境变量控制，自动平滑降级为进程组（`process-group`）沙箱与工作区 Jail 隔离。
+- **深度推理模型思考过程全链路治理与极速模式机制**：全面梳理并确立了针对 Qwen3 / QwQ / DeepSeek-R1 等深度推理模型的“默认极速（关闭思考）+ 按需深度思考”架构；统一对话流（`chat_template_kwargs: { enable_thinking: false }` + `/no_think` 软开关双保险）、应用中心（公文写作/数据分析默认关闭思考并自动剥离 `<think>` 标签）、后台批处理（严格防 JSON 干扰与 Token 超预算）以及 OpenAI 代理补全等全链路思考控制逻辑，首字响应延迟大幅缩短 3~8 倍。
+- **大文件架构治理基准同步**：在 `scripts/governance_baseline.json` 中将全量语义分析模块 `semantic-analysis.js`（1014 行）纳入受控基线，严格执行大文件“只减不增”的长期治理规范。
+
+详细发布记录见 [v0.1.49 发布记录](docs/releases/v0.1.49-Linux容器环境智能体沙箱兼容性加固与全链路推理思考治理.md)。
+
 ## [v0.1.48] - 2026-08-26
 
 ### 应用中心大卡片对称居中重构与全栈运行防护对齐

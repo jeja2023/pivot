@@ -1,5 +1,5 @@
 const { extractModelText } = require('../../services/chat-route-helpers');
-const { getAccessibleModelAsync, modelSupportsReasoning } = require('../../services/models');
+const { getAccessibleModelAsync, modelSupportsReasoning, buildThinkingControlPayload } = require('../../services/models');
 
 function stripThinkTags(text) {
     return String(text || '')
@@ -57,6 +57,9 @@ function applyNoThinkSoftSwitch(messages) {
     });
 }
 
+// Qwen3 的思考模式控制实现在 services/models.js，那里是模型能力判定的归属地；
+// 聊天流式路径与后台文本调用共用同一份实现，避免模型名匹配范围出现两套口径。
+
 // 解析公文写作可用模型：优先显式选择，其次个人默认模型，最后系统默认模型。
 async function resolveOfficialWritingModel(requestedModel, user) {
     if (requestedModel) {
@@ -82,6 +85,7 @@ module.exports = {
     clampText,
     shouldDisableThinking,
     applyNoThinkSoftSwitch,
+    buildThinkingControlPayload,
     resolveOfficialWritingModel,
     resolveAppsModel
 };

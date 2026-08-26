@@ -57,6 +57,7 @@ const {
     resolveMaxSteps
 } = require('../server/services/agent-validators');
 const { dagConditionSatisfied } = require('../server/services/agent-dag-utils');
+const { applyAgentThinkingControls, resolveAgentMaxTokens, agentThinkingKept } = require('../server/services/agent-model');
 const { runDueAgentSchedules } = require('../server/services/agent-schedules');
 const {
     executeContentReview,
@@ -1013,6 +1014,86 @@ test('agent JSON parser extracts strict object from model text', () => {
     assert.deepEqual(parseJsonObject('{"action":"final","answer":"ok"}'), { action: 'final', answer: 'ok' });
     assert.deepEqual(parseJsonObject('```json\n{"tool":"models.list","input":{}}\n```'), { tool: 'models.list', input: {} });
     assert.equal(parseJsonObject('no json here'), null);
+});
+
+test('agent JSON parser strips reasoning before brace fallback', () => {
+    // 思维链里往往含 JSON 草稿，若不先剥离，花括号兜底会从草稿的 { 一直吃到正式答案的 }。
+    assert.deepEqual(
+        parseJsonObject('<think>先草拟 {"action":"draft"} 再定稿</think>{"action":"final","answer":"ok"}'),
+        { action: 'final', answer: 'ok' }
+    );
+    assert.deepEqual(
+        parseJsonObject('<think>方案A {"a":1} 方案B {"b":2}</think>\n{"action":"final","ok":true}'),
+        { action: 'final', ok: true }
+    );
+    assert.deepEqual(
+        parseJsonObject('<thinking>reasoning</thinking>\n```json\n{"tool":"models.list","input":{}}\n```'),
+        { tool: 'models.list', input: {} }
+    );
+    // 思考未闭合说明输出预算已被耗尽、正式结果没生成，返回 null 比返回半截思考更正确。
+    assert.equal(parseJsonObject('<think>让我思考一下这个问题的'), null);
+    // 非字符串入参与既有行为保持一致。
+    assert.deepEqual(parseJsonObject({ action: 'final' }), { action: 'final' });
+    assert.equal(parseJsonObject(''), null);
+    assert.equal(parseJsonObject(null), null);
+});
+
+test('agent model calls close Qwen3 thinking by default and widen budget when kept', () => {
+    const qwen3 = { model_name: 'Qwen3.6-35B' };
+    // 默认关闭：Agent 靠多步规划推理，单次调用的思维链只会污染结构化输出。
+    assert.deepEqual(
+        applyAgentThinkingControls({ max_tokens: 1200 }, qwen3).chat_template_kwargs,
+        { enable_thinking: false }
+    );
+    // 仅勾「思考模型」但未开「聊天中开启思考」时仍然关闭。
+    assert.deepEqual(
+        applyAgentThinkingControls({}, { ...qwen3, supports_reasoning: 1, chat_thinking_enabled: 0 }).chat_template_kwargs,
+        { enable_thinking: false }
+    );
+    // 显式保留思维链时不下发关闭指令。
+    assert.equal(
+        applyAgentThinkingControls({ max_tokens: 1200 }, qwen3, { enableThinking: true }).chat_template_kwargs,
+        undefined
+    );
+    // 其他厂商不附加未知字段。
+    assert.equal(
+        applyAgentThinkingControls({ max_tokens: 1200 }, { model_name: 'gpt-4o' }).chat_template_kwargs,
+        undefined
+    );
+
+    // 输出预算：默认沿用模型配置或 1200 兜底；保留思维链时抬高到能容纳思考的水位。
+    assert.equal(resolveAgentMaxTokens(qwen3), 1200);
+    assert.equal(resolveAgentMaxTokens({ ...qwen3, max_tokens: 2000 }), 2000);
+    assert.equal(resolveAgentMaxTokens(qwen3, { maxTokens: 800 }), 800);
+    assert.ok(resolveAgentMaxTokens(qwen3, { enableThinking: true }) >= 4096);
+    // 模型自身配置更高时不被压低。
+    assert.equal(resolveAgentMaxTokens({ ...qwen3, max_tokens: 8192 }, { enableThinking: true }), 8192);
+    // 调用方显式指定的上限始终优先，便于按步骤精确控制成本。
+    assert.equal(resolveAgentMaxTokens(qwen3, { enableThinking: true, maxTokens: 600 }), 600);
+});
+
+test('agent thinking follows the run model configuration without code changes', () => {
+    const deepModel = { model_name: 'Qwen3.6-35B', supports_reasoning: 1, chat_thinking_enabled: 1 };
+    const plainModel = { model_name: 'Qwen3.6-35B' };
+
+    // 管理员给这次运行指定开启了「聊天中开启思考」的模型条目即可启用思维链，无需改代码。
+    assert.equal(agentThinkingKept(deepModel), true);
+    assert.equal(agentThinkingKept(plainModel), false);
+    assert.equal(applyAgentThinkingControls({}, deepModel).chat_template_kwargs, undefined);
+    // 预算随之放宽，否则思考会把正式结果挤没。
+    assert.ok(resolveAgentMaxTokens(deepModel) >= 4096);
+    assert.equal(resolveAgentMaxTokens(plainModel), 1200);
+
+    // 调用方的显式布尔值双向覆盖模型配置：结构化步骤可以强制关闭。
+    assert.equal(agentThinkingKept(deepModel, { enableThinking: false }), false);
+    assert.deepEqual(
+        applyAgentThinkingControls({}, deepModel, { enableThinking: false }).chat_template_kwargs,
+        { enable_thinking: false }
+    );
+    assert.equal(resolveAgentMaxTokens(deepModel, { enableThinking: false }), 1200);
+    assert.equal(agentThinkingKept(plainModel, { enableThinking: true }), true);
+    // 「聊天中开启思考」必须以「思考模型」为前提，缺一不可。
+    assert.equal(agentThinkingKept({ ...plainModel, chat_thinking_enabled: 1 }), false);
 });
 
 test('built-in agent tools expose user-safe tool definitions and execute model list', async () => {

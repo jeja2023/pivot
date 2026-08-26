@@ -1,5 +1,6 @@
 const { forwardChatCompletion } = require('../model-forwarder');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('../model-adapter');
+const { buildThinkingControlPayload } = require('../models');
 const {
     MEMORY_TYPES,
     MIN_MEMORY_CONTENT_CHARS,
@@ -152,7 +153,9 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
             temperature: 0,
             stream: false,
             max_tokens: MODEL_EXTRACTION_MAX_OUTPUT_TOKENS,
-            response_format: { type: 'json_object' }
+            response_format: { type: 'json_object' },
+            // 抽取要求严格 JSON，思维链会挤占有限的输出预算并把 JSON 截断。
+            ...buildThinkingControlPayload(modelCfg)
         }
     });
     const rawCandidates = parseExtractorJson(extractModelMessageText(res.data));

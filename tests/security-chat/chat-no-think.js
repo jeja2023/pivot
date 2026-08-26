@@ -9,6 +9,8 @@ const {
     test
 } = require('../security-helpers');
 const { limitVisionImages } = require('../../server/services/chat-vision');
+const { buildThinkingControlPayload } = require('../../server/routes/apps/helpers');
+const { buildChatRequestData } = require('../../server/services/model-stream-service');
 
 test('chat no-think switch only applies to reasoning models', () => {
     assert.equal(modelSupportsReasoning({ supports_reasoning: 1 }), true);
@@ -124,4 +126,57 @@ test('chat no-think stream filter passes normal answer chunks immediately', () =
     assert.equal(filter.push('你好，'), '你好，');
     assert.equal(filter.push('我是通义千问。'), '我是通义千问。');
     assert.equal(filter.finish(), '');
+});
+
+test('thinking control payload targets self-hosted Qwen3 only', () => {
+    const disabled = { chat_template_kwargs: { enable_thinking: false } };
+    // Qwen3 / QwQ 的 /no_think 软开关在部分版本失效，必须显式下发 chat_template_kwargs。
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'Qwen3.6-35B' }), disabled);
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'Qwen/Qwen3.6-35B-A3B-FP8' }), disabled);
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'qwen-3-32b' }), disabled);
+    assert.deepEqual(buildThinkingControlPayload({ name: 'QwQ-32B' }), disabled);
+    // 其他厂商对未知字段会直接返回 400，即使标记了 supports_reasoning 也不能附加。
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'gpt-4o', supports_reasoning: 1 }), {});
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'deepseek-r1' }), {});
+    assert.deepEqual(buildThinkingControlPayload({ model_name: 'qwen2.5-72b' }), {});
+    assert.deepEqual(buildThinkingControlPayload({}), {});
+});
+
+test('thinking control payload can be disabled for incompatible endpoints', () => {
+    const previous = process.env.MODEL_THINKING_TEMPLATE_KWARGS;
+    try {
+        process.env.MODEL_THINKING_TEMPLATE_KWARGS = '0';
+        assert.deepEqual(buildThinkingControlPayload({ model_name: 'Qwen3.6-35B' }), {});
+    } finally {
+        if (previous === undefined) delete process.env.MODEL_THINKING_TEMPLATE_KWARGS;
+        else process.env.MODEL_THINKING_TEMPLATE_KWARGS = previous;
+    }
+});
+
+test('chat stream payload closes Qwen3 thinking unless explicitly enabled', () => {
+    const disabled = { enable_thinking: false };
+    // 未勾选"支持推理"的遗漏配置：Qwen3 会先在思考里写完答案再正式输出一遍，必须在模型端关闭。
+    assert.deepEqual(
+        buildChatRequestData({ model_name: 'Qwen3.6-35B' }, 'Qwen3.6-35B').chat_template_kwargs,
+        disabled
+    );
+    // 已勾选但未开启对话思考：与既有 /no_think 软开关一致地关闭。
+    assert.deepEqual(
+        buildChatRequestData({ model_name: 'Qwen3.6-35B', supports_reasoning: 1, chat_thinking_enabled: 0 }, 'Qwen3.6-35B').chat_template_kwargs,
+        disabled
+    );
+    // 管理员显式开启对话思考时必须保留思维链，不能被强制关闭。
+    assert.equal(
+        buildChatRequestData({ model_name: 'Qwen3.6-35B', supports_reasoning: 1, chat_thinking_enabled: 1 }, 'Qwen3.6-35B').chat_template_kwargs,
+        undefined
+    );
+    // 其他厂商即使关闭思考也不能附加该字段，否则会因未知字段返回 400。
+    assert.equal(
+        buildChatRequestData({ model_name: 'gpt-4o', supports_reasoning: 1, chat_thinking_enabled: 0 }, 'gpt-4o').chat_template_kwargs,
+        undefined
+    );
+    assert.equal(
+        buildChatRequestData({ model_name: 'qwen2.5-72b' }, 'qwen2.5-72b').chat_template_kwargs,
+        undefined
+    );
 });

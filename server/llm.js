@@ -16,6 +16,7 @@ const {
 } = require('./services/memory-config');
 const { getBackgroundRuntimeConfig, getGlobalContextRuntimeConfig } = require('./services/runtime-settings');
 const { forwardChatCompletion } = require('./services/model-forwarder');
+const { buildThinkingControlPayload } = require('./services/models');
 const { getAppSettingValue } = require('./services/app-settings');
 const { getAttachmentContextLimit } = require('./services/resource-limits');
 
@@ -600,12 +601,14 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
                     { role: 'system', content: 'Compress the long conversation history into concise key memory fragments.' },
                     { role: 'user', content: summaryPrompt }
                 ],
-                stream: false
+                stream: false,
+                // 摘要会被注入后续每一次请求，思维链混进来等于污染整条会话上下文。
+                ...buildThinkingControlPayload(modelCfg)
             },
             signal: options.signal,
             timeout: MEMORY_COMPRESSION_TIMEOUT_MS
         });
-        const summaryText = `【短期会话记忆摘要】： ${response.data.choices[0].message.content}`;
+        const summaryText = `【短期会话记忆摘要】： ${stripThoughtContent(response.data.choices[0].message.content).trim()}`;
         const now = getBeijingTimestamp();
         const ids = toSummarize.map(m => m.id);
         if (ids.length > 0) {

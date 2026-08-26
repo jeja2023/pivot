@@ -82,6 +82,22 @@ function isChatThinkingEnabled(model) {
     return modelSupportsReasoning(model) && !shouldDisableChatThinking(model);
 }
 
+// Qwen3 系列的思考模式默认开启，而 /no_think 软开关只在部分版本的 chat template 中生效。
+// 软开关失效时模型会在思考里先写完答案、再正式输出一遍：输出 token 翻倍、首字延迟翻倍，
+// 输出预算紧的场景（标题 32 tokens、记忆抽取 800 tokens）还会被思考整段吃掉而彻底失效。
+// 这里按 vLLM / SGLang 的约定显式关闭。
+//
+// 函数自带模型判定，调用方无需再包条件：只对 Qwen3 / QwQ 这类自部署模型返回非空，
+// 其他厂商（如 OpenAI）会因未知字段直接返回 400，因此一律返回空对象。
+// 需要保留思维链的路径（对话的第三档配置、Agent 规划）不要调用它。
+function buildThinkingControlPayload(model) {
+    if (String(process.env.MODEL_THINKING_TEMPLATE_KWARGS || '1') === '0') return {};
+    // 管理员可能只在显示名里写明 Qwen3，因此模型名和显示名一起参与匹配。
+    const name = `${model?.model_name || ''} ${model?.name || ''}`;
+    if (!/qwen-?3|qwq/i.test(name)) return {};
+    return { chat_template_kwargs: { enable_thinking: false } };
+}
+
 function contentContainsVisionInput(content) {
     if (Array.isArray(content)) {
         return content.some(part => {
@@ -300,6 +316,7 @@ module.exports = {
     modelSupportsReasoning,
     shouldDisableChatThinking,
     isChatThinkingEnabled,
+    buildThinkingControlPayload,
     contentContainsVisionInput,
     messagesContainVisionInput,
     getAccessibleModel,

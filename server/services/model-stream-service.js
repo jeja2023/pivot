@@ -9,6 +9,7 @@ const {
     shouldUseResponsesApi
 } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
+const { isChatThinkingEnabled, buildThinkingControlPayload } = require('./models');
 
 function buildChatRequestData(modelCfg, modelName) {
     const runtimeSampling = getGlobalSamplingRuntimeConfig();
@@ -26,6 +27,12 @@ function buildChatRequestData(modelCfg, modelName) {
     }
     if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
         requestData.max_input_tokens = modelCfg.max_input_tokens;
+    }
+    // 只有管理员显式开启"对话思考"时才保留思维链。未开启时（含未勾选"支持推理"的
+    // 遗漏配置）在模型端直接关闭，否则 Qwen3 会先在思考里写完答案再正式输出一遍，
+    // 用户看到重复内容，输出 token 和首字延迟都翻倍。
+    if (!isChatThinkingEnabled(modelCfg)) {
+        Object.assign(requestData, buildThinkingControlPayload(modelCfg));
     }
     return requestData;
 }

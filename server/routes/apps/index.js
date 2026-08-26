@@ -73,6 +73,7 @@ const {
     clampText,
     shouldDisableThinking,
     applyNoThinkSoftSwitch,
+    buildThinkingControlPayload,
     resolveOfficialWritingModel,
     resolveAppsModel
 } = require('./helpers');
@@ -166,7 +167,8 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                 messages: upstreamPayloadMessages,
                 stream,
                 temperature,
-                max_tokens: outputTokens
+                max_tokens: outputTokens,
+                ...buildThinkingControlPayload(modelCfg)
             },
             headers: buildModelHeaders(modelCfg),
             stream,
@@ -847,6 +849,9 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         if (modelCfg.max_input_tokens !== null && modelCfg.max_input_tokens !== undefined) {
             payload.max_input_tokens = modelCfg.max_input_tokens;
         }
+        // 上面的 /no_think 软开关在 Qwen3.6 的 chat template 中已不生效，必须再显式关闭，
+        // 否则思考会吃掉输出预算导致正文为空。是否附加由 buildThinkingControlPayload 自行按模型判定。
+        Object.assign(payload, buildThinkingControlPayload(modelCfg));
         const headers = buildModelHeaders(modelCfg);
 
         try {
