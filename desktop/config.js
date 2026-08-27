@@ -59,14 +59,39 @@ function getResourceDir(app) {
     return app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..');
 }
 
+function getUserConfigPath(app) {
+    if (!app) return '';
+    const userDataDir = typeof app.getPath === 'function' ? app.getPath('userData') : (typeof app === 'string' ? app : '');
+    return userDataDir ? path.join(userDataDir, 'user-config.json') : '';
+}
+
+function saveUserDesktopConfig(app, overrides = {}) {
+    const configPath = getUserConfigPath(app);
+    if (!configPath) throw new Error('无法定位用户配置目录。');
+    let existing = {};
+    if (existingFile(configPath)) {
+        try {
+            existing = readJsonFile(configPath);
+        } catch (_) {
+            existing = {};
+        }
+    }
+    const merged = { ...existing, ...overrides };
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), 'utf8');
+    return merged;
+}
+
 function candidateConfigPaths(app, argv = process.argv, env = process.env) {
     const explicitArg = normalizePath(getArgValue(argv, '--config'));
     const explicitEnv = normalizePath(env.PIVOT_DESKTOP_CONFIG);
+    const userConfigPath = getUserConfigPath(app);
     const executableDir = getExecutableDir(app);
     const resourceDir = getResourceDir(app);
     return [
         { source: 'cli', path: explicitArg },
         { source: 'env', path: explicitEnv },
+        { source: 'user', path: userConfigPath },
         { source: 'executable', path: path.join(executableDir, 'config.json') },
         { source: 'resources', path: path.join(resourceDir, 'config.json') }
     ].filter(item => item.path);
@@ -174,6 +199,7 @@ function normalizeConfig(raw, meta = {}, env = process.env) {
         allowExternalOpen: merged.allowExternalOpen !== false,
         allowedExternalOrigins: normalizeStringList(merged.allowedExternalOrigins),
         sandbox: merged.sandbox !== false,
+        stealthSecret: typeof merged.stealthSecret === 'string' ? merged.stealthSecret.trim() : (env.PIVOT_STEALTH_SECRET || ''),
         autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl }),
         source: meta.source || 'default',
         path: meta.path || ''
@@ -192,10 +218,12 @@ module.exports = {
     DEFAULT_CONFIG,
     DEFAULT_AUTO_UPDATE,
     candidateConfigPaths,
+    getUserConfigPath,
     loadDesktopConfig,
     normalizeAutoUpdate,
     normalizeConfig,
     normalizeRemoteUrl,
     normalizeUpdatePath,
-    resolveUpdateUrlFromRemote
+    resolveUpdateUrlFromRemote,
+    saveUserDesktopConfig
 };

@@ -89,6 +89,7 @@ const {
     inFlightRequestMiddleware
 } = require('./services/runtime-diagnostics');
 const { getChatAgentRuntimeConfig } = require('./services/runtime-settings');
+const { stealthAccessGuard } = require('./middleware/stealth-guard');
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
 
@@ -117,6 +118,7 @@ const logAction = (req, action, details) => {
 const isPublicRegistrationEnabled = () => getPublicRegistrationSetting();
 const app = express();
 app.locals.appVersion = appVersion;
+app.use(stealthAccessGuard); // 客户端独占隐身模式门禁：拦截未授权连接并静默掐断 TCP Socket
 app.use((req, res, next) => {
     res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
     next();

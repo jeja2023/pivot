@@ -44,6 +44,7 @@ const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getPermissionCapabilities, isAdmin, isSuperAdmin } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
 const { invalidateMonitorSummaryCache } = require('./admin-stats');
+const { getStealthConfig, setStealthConfigAsync } = require('../services/stealth-service');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -408,6 +409,32 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         logAction(req, '修改密码', '用户自主修改了登录密码');
         res.json({ success: true, message: '密码修改成功' });
+    }));
+
+    router.get('/settings/stealth', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({ error: '需要管理员权限' });
+        }
+        const config = await getStealthConfig();
+        res.json({ success: true, ...config });
+    }));
+
+    router.put('/settings/stealth', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({ error: '需要管理员权限' });
+        }
+        const { enabled, secret, regenerateSecret } = req.body || {};
+        const updated = await setStealthConfigAsync({
+            enabled: typeof enabled === 'boolean' ? enabled : undefined,
+            secret: typeof secret === 'string' ? secret : undefined,
+            regenerateSecret: Boolean(regenerateSecret),
+            userId: req.user.id
+        });
+        logAction(req, '更新隐身模式配置', {
+            enabled: updated.enabled,
+            regenerateSecret: Boolean(regenerateSecret)
+        });
+        res.json({ success: true, ...updated });
     }));
 
     return router;

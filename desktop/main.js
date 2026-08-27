@@ -3,7 +3,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require('electron');
 
 // 提前初始化桌面环境基础路径，避免引入 server 模块时因 asar 路径导致 ENOTDIR
 function initEarlyDesktopEnv() {
@@ -18,7 +18,7 @@ function initEarlyDesktopEnv() {
 }
 initEarlyDesktopEnv();
 
-const { loadDesktopConfig } = require('./config');
+const { loadDesktopConfig, normalizeRemoteUrl, saveUserDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
@@ -36,6 +36,7 @@ let currentTargetUrl = '';
 let lastLoadError = null;
 let updaterController = null;
 let aboutWindow = null;
+let serverConfigWindow = null;
 const workerApprovals = createWorkerApprovalStore();
 
 function randomSecret() {
@@ -77,18 +78,43 @@ function findAvailablePort() {
 
 
 
+function sanitizeErrorMessage(msg) {
+    if (!msg) return '无法连接到智枢服务器，请检查您的网络连接或服务器运行状态。';
+    const text = String(msg);
+    if (text.includes('ERR_EMPTY_RESPONSE')) {
+        return '目标服务器已开启「客户端隐身模式」，当前客户端未携带或配置了错误的通信密钥，连接已被阻断。';
+    }
+    if (text.includes('ERR_CONNECTION_REFUSED')) {
+        return '无法连接到目标服务器，请确认服务端进程已启动且端口正常监听。';
+    }
+    if (text.includes('ERR_ABORTED')) {
+        return '连接被中断或重置，请重试或检查服务器配置。';
+    }
+    return text
+        .replace(/(?:https?|file):\/\/[^\s'")]+/gi, '')
+        .replace(/loading\s*['"][^'"]*['"]/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim() || '无法连接到智枢服务器，请检查您的网络连接或服务器运行状态。';
+}
+
+let isLoadingErrorPage = false;
 async function loadErrorPage(message) {
-    if (!mainWindow) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (isLoadingErrorPage) return;
+    isLoadingErrorPage = true;
     try {
         await mainWindow.loadFile(path.join(__dirname, 'error.html'), {
             query: {
-                message: message || '连接失败。',
-                env: runtimeConfig && runtimeConfig.environmentName ? runtimeConfig.environmentName : '',
-                target: currentTargetUrl || ''
+                message: sanitizeErrorMessage(message),
+                env: runtimeConfig && runtimeConfig.environmentName ? runtimeConfig.environmentName : ''
             }
         });
     } catch (err) {
-        console.error('加载错误页面失败:', err);
+        if (err?.code !== 'ERR_ABORTED') {
+            console.error('加载错误页面失败:', err);
+        }
+    } finally {
+        isLoadingErrorPage = false;
     }
 }
 
@@ -192,6 +218,42 @@ function showAboutDialog() {
     });
 }
 
+function showServerConfigDialog() {
+    if (serverConfigWindow && !serverConfigWindow.isDestroyed()) {
+        serverConfigWindow.focus();
+        return;
+    }
+    serverConfigWindow = new BrowserWindow({
+        width: 520,
+        height: 480,
+        resizable: false,
+        maximizable: false,
+        minimizable: false,
+        fullscreenable: false,
+        show: false,
+        frame: false,
+        modal: Boolean(mainWindow),
+        parent: mainWindow || undefined,
+        title: '服务器连接配置',
+        backgroundColor: '#ffffff',
+        autoHideMenuBar: true,
+        webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            preload: path.join(__dirname, 'server-config-preload.js')
+        }
+    });
+    serverConfigWindow.once('ready-to-show', () => serverConfigWindow && serverConfigWindow.show());
+    serverConfigWindow.on('closed', () => {
+        serverConfigWindow = null;
+    });
+    serverConfigWindow.loadFile(path.join(__dirname, 'server-config.html')).catch((error) => {
+        console.error('加载服务器配置窗口失败:', error);
+        if (serverConfigWindow && !serverConfigWindow.isDestroyed()) serverConfigWindow.close();
+    });
+}
+
 function runWindowAction(action) {
     if (!mainWindow || mainWindow.isDestroyed()) return false;
     const webContents = mainWindow.webContents;
@@ -210,6 +272,9 @@ function runWindowAction(action) {
             return true;
         case 'about':
             showAboutDialog();
+            return true;
+        case 'server-config':
+            showServerConfigDialog();
             return true;
         default:
             return false;
@@ -238,6 +303,8 @@ function buildApplicationMenu() {
         {
             label: '客户端',
             submenu: [
+                { label: '服务器连接配置...', accelerator: 'CmdOrCtrl+,', click: () => showServerConfigDialog() },
+                { type: 'separator' },
                 { label: '检查客户端更新', click: () => updaterController?.checkForUpdates?.(true) },
                 { type: 'separator' },
                 { label: '关于 Pivot', click: () => showAboutDialog() },
@@ -263,6 +330,10 @@ async function configureLocalEnvironment() {
         secrets.dataEncryptionKey = randomSecret();
         changed = true;
     }
+    if (!secrets.stealthSecret) {
+        secrets.stealthSecret = randomSecret();
+        changed = true;
+    }
     if (changed) writeJson(secretsPath, secrets);
 
     process.env.PIVOT_DESKTOP = 'true';
@@ -272,6 +343,7 @@ async function configureLocalEnvironment() {
     process.env.PORT = process.env.PORT || process.env.PIVOT_DESKTOP_PORT || String(await findAvailablePort());
     process.env.JWT_SECRET = process.env.JWT_SECRET || secrets.jwtSecret;
     process.env.DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY || secrets.dataEncryptionKey;
+    process.env.PIVOT_STEALTH_SECRET = process.env.PIVOT_STEALTH_SECRET || secrets.stealthSecret;
     process.env.DATA_DIR = process.env.DATA_DIR || path.join(userData, 'data');
     process.env.PIVOT_UPLOAD_DIR = process.env.PIVOT_UPLOAD_DIR || path.join(userData, 'uploads');
     process.env.PIVOT_ANALYSIS_DIR = process.env.PIVOT_ANALYSIS_DIR || path.join(userData, 'data', 'analysis');
@@ -330,7 +402,12 @@ function shouldOpenExternal(targetUrl) {
 }
 
 function trustedRendererOptions() {
-    return { allowedFilePaths: [path.join(__dirname, 'error.html')] };
+    return {
+        allowedFilePaths: [
+            path.join(__dirname, 'error.html'),
+            path.join(__dirname, 'server-config.html')
+        ]
+    };
 }
 
 function isTrustedMainRendererUrl(targetUrl) {
@@ -369,6 +446,43 @@ function handleRendererNavigation(event, targetUrl, openExternal) {
     }
 }
 
+function resolveStealthSecret(currentConfig, targetUrl) {
+    if (process.env.PIVOT_STEALTH_SECRET) return process.env.PIVOT_STEALTH_SECRET;
+    const activeConfig = currentConfig || runtimeConfig;
+    if (activeConfig?.stealthSecret) return activeConfig.stealthSecret;
+    try {
+        const userData = app.getPath('userData');
+        const userConfig = readJson(path.join(userData, 'user-config.json'));
+        if (userConfig?.stealthSecret) return userConfig.stealthSecret;
+
+        // 如果是本机/本地回环地址，自动回退读取同一机器上的 desktop-secrets.json
+        const parsed = new URL(targetUrl || currentTargetUrl || '');
+        if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+            const localSecrets = readJson(path.join(userData, 'desktop-secrets.json'));
+            if (localSecrets?.stealthSecret) return localSecrets.stealthSecret;
+        }
+    } catch (_) {}
+    return '';
+}
+
+function attachStealthHeaderInterceptor(targetSession) {
+    if (!targetSession || !targetSession.webRequest) return;
+    try {
+        targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
+            try {
+                const secret = resolveStealthSecret(runtimeConfig, details.url);
+                if (secret && typeof secret === 'string') {
+                    const now = Date.now().toString();
+                    const token = crypto.createHmac('sha256', secret).update(now).digest('hex');
+                    details.requestHeaders['X-Pivot-Stealth-Time'] = now;
+                    details.requestHeaders['X-Pivot-Stealth-Token'] = token;
+                }
+            } catch (_) {}
+            callback({ requestHeaders: details.requestHeaders });
+        });
+    } catch (_) {}
+}
+
 function createMainWindow(config) {
     mainWindow = new BrowserWindow({
         width: 1320,
@@ -397,6 +511,8 @@ function createMainWindow(config) {
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
     });
+    const webSession = mainWindow.webContents.session;
+    attachStealthHeaderInterceptor(webSession);
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
         if (shouldOpenExternal(targetUrl)) shell.openExternal(targetUrl);
         return { action: 'deny' };
@@ -428,6 +544,9 @@ async function loadTarget() {
         await mainWindow.loadURL(currentTargetUrl);
     } catch (err) {
         if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (err?.code === 'ERR_ABORTED' || err?.errno === -3) {
+            return;
+        }
         const message = err && err.message ? err.message : String(err);
         lastLoadError = {
             errorCode: 'LOAD_FAILED',
@@ -711,6 +830,92 @@ ipcMain.handle('pivot-about:close', async (event) => {
     if (window && !window.isDestroyed()) window.close();
     return true;
 });
+
+ipcMain.handle('pivot-server-config:close', async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window && !window.isDestroyed()) window.close();
+    return true;
+});
+
+ipcMain.handle('pivot-desktop:get-server-config', async (event) => {
+    assertTrustedIpcSender(event);
+    return {
+        mode: runtimeConfig?.mode || 'local',
+        remoteUrl: runtimeConfig?.remoteUrl || '',
+        stealthSecret: process.env.PIVOT_STEALTH_SECRET || runtimeConfig?.stealthSecret || '',
+        environmentName: runtimeConfig?.environmentName || ''
+    };
+});
+
+ipcMain.handle('pivot-desktop:open-server-config-dialog', async (event) => {
+    assertTrustedIpcSender(event);
+    showServerConfigDialog();
+    return true;
+});
+
+ipcMain.handle('pivot-desktop:test-server-connection', async (event, payload = {}) => {
+    assertTrustedIpcSender(event);
+    const targetUrl = String(payload.url || '').trim();
+    if (!targetUrl) return { success: false, error: '缺少服务器访问地址' };
+    try {
+        const parsed = new URL(targetUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return { success: false, error: '访问地址必须使用 http:// 或 https:// 协议' };
+        }
+        const secret = String(payload.stealthSecret || process.env.PIVOT_STEALTH_SECRET || runtimeConfig?.stealthSecret || '').trim();
+        const healthUrl = new URL('/api/health', parsed).toString();
+        const headers = {};
+        if (secret) {
+            const now = Date.now().toString();
+            const token = crypto.createHmac('sha256', secret).update(now).digest('hex');
+            headers['X-Pivot-Stealth-Time'] = now;
+            headers['X-Pivot-Stealth-Token'] = token;
+        }
+        const start = Date.now();
+        const res = await fetch(healthUrl, {
+            headers,
+            signal: AbortSignal.timeout(6000)
+        });
+        const latencyMs = Date.now() - start;
+        if (res.ok) {
+            return { success: true, latencyMs };
+        }
+        return { success: false, error: `服务器返回异常状态码 HTTP ${res.status}` };
+    } catch (err) {
+        const msg = err.name === 'TimeoutError' ? '连接超时（6秒未响应）' : (err.message || String(err));
+        return { success: false, error: msg };
+    }
+});
+
+ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) => {
+    assertTrustedIpcSender(event);
+    const mode = payload.mode === 'local' ? 'local' : 'remote';
+    let remoteUrl = '';
+    if (mode === 'remote') {
+        try {
+            remoteUrl = normalizeRemoteUrl(payload.remoteUrl);
+        } catch (err) {
+            return { success: false, error: err.message || '远程服务器地址无效' };
+        }
+    }
+    const stealthSecret = typeof payload.stealthSecret === 'string' ? payload.stealthSecret.trim() : undefined;
+    
+    saveUserDesktopConfig(app, {
+        mode,
+        remoteUrl,
+        ...(stealthSecret !== undefined ? { stealthSecret } : {})
+    });
+
+    if (stealthSecret !== undefined) {
+        process.env.PIVOT_STEALTH_SECRET = stealthSecret;
+    }
+
+    runtimeConfig = loadDesktopConfig(app);
+    currentTargetUrl = '';
+    lastLoadError = null;
+    await loadTarget();
+    return { success: true };
+});
 ipcMain.handle('pivot-desktop:status', async (event) => {
     assertTrustedIpcSender(event);
     return {
@@ -736,6 +941,10 @@ if (!gotLock) {
         Menu.setApplicationMenu(buildApplicationMenu());
         try {
             runtimeConfig = loadDesktopConfig(app);
+            if (runtimeConfig.partition) {
+                attachStealthHeaderInterceptor(session.fromPartition(runtimeConfig.partition));
+            }
+            attachStealthHeaderInterceptor(session.defaultSession);
             createMainWindow(runtimeConfig);
             await loadTarget();
             updaterController = setupAutoUpdater({

@@ -231,5 +231,31 @@
                                     </div>
                                 </div>
                             </section>
+
+                            <section class="stat-card global-params-section global-params-stealth-section">
+                                <h4>安全与终端隐身</h4>
+                                <p class="global-params-section-desc">开启后服务端将对普通 Web 浏览器和外部扫描完全隐身（直接掐断连接，显示 ERR_EMPTY_RESPONSE），只有官方 Pivot 桌面客户端可连接访问。</p>
+                                <div class="global-params-stealth-grid">
+                                    <div class="form-item runtime-agent-toggle-item">
+                                        <label for="runtime-setting-stealth-mode-enabled">客户端独占隐身模式</label>
+                                        <small class="runtime-key-note">stealth_mode_enabled · 开启后外部访问将直接物理断开连接</small>
+                                        <label class="runtime-agent-toggle">
+                                            <input id="runtime-setting-stealth-mode-enabled" type="checkbox">
+                                            <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
+                                            <span id="runtime-setting-stealth-mode-status-label" class="runtime-agent-toggle-label">已关闭</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-item">
+                                        <label for="runtime-setting-stealth-secret">客户端通信密钥 (Stealth Secret)</label>
+                                        <small class="runtime-key-note">远程客户端连接时填入 desktop-config.json 或连接配置窗口中</small>
+                                        <div class="global-params-stealth-secret-wrap">
+                                            <input id="runtime-setting-stealth-secret" type="password" class="form-input" readonly>
+                                            <button type="button" id="runtime-setting-stealth-secret-toggle" class="btn-secondary btn-xs">显示密钥</button>
+                                            <button type="button" id="runtime-setting-stealth-secret-copy" class="btn-secondary btn-xs">复制密钥</button>
+                                            <button type="button" id="runtime-setting-stealth-secret-refresh" class="btn-secondary btn-xs super-admin-only hidden">重新生成</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </section>

@@ -8,6 +8,18 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getStatus() {
         return ipcRenderer.invoke('pivot-desktop:status');
     },
+    getServerConfig() {
+        return ipcRenderer.invoke('pivot-desktop:get-server-config');
+    },
+    setServerConfig(payload = {}) {
+        return ipcRenderer.invoke('pivot-desktop:set-server-config', payload);
+    },
+    testServerConnection(payload = {}) {
+        return ipcRenderer.invoke('pivot-desktop:test-server-connection', payload);
+    },
+    openServerConfigDialog() {
+        return ipcRenderer.invoke('pivot-desktop:open-server-config-dialog');
+    },
     reload(options = {}) {
         return ipcRenderer.invoke('pivot-desktop:reload', {
             clearCache: options && options.clearCache === true

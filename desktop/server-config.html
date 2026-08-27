@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>服务器连接配置</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --surface: #f8fafc;
+            --surface-hover: #f1f5f9;
+            --text: #0f172a;
+            --muted: #64748b;
+            --line: #e2e8f0;
+            --brand: #059669;
+            --brand-hover: #047857;
+            --brand-light: #ecfdf5;
+            --danger: #ef4444;
+            --danger-light: #fef2f2;
+            --info: #0284c7;
+            --info-light: #f0f9ff;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f172a;
+                --surface: #1e293b;
+                --surface-hover: #334155;
+                --text: #f8fafc;
+                --muted: #94a3b8;
+                --line: #334155;
+                --brand: #10b981;
+                --brand-hover: #059669;
+                --brand-light: rgba(16, 185, 129, 0.15);
+                --danger: #f87171;
+                --danger-light: rgba(239, 68, 68, 0.15);
+                --info: #38bdf8;
+                --info-light: rgba(56, 189, 248, 0.15);
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            background: var(--bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .dialog {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--line);
+        }
+
+        .titlebar {
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 8px 0 16px;
+            border-bottom: 1px solid var(--line);
+            background: var(--surface);
+            -webkit-app-region: drag;
+        }
+
+        .titlebar strong {
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .close-btn {
+            width: 30px;
+            height: 30px;
+            border: 0;
+            border-radius: 6px;
+            color: var(--muted);
+            background: transparent;
+            font-size: 18px;
+            cursor: pointer;
+            -webkit-app-region: no-drag;
+            display: grid;
+            place-items: center;
+        }
+
+        .close-btn:hover {
+            color: #ffffff;
+            background: var(--danger);
+        }
+
+        .content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        .segmented-control {
+            display: flex;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 3px;
+            gap: 4px;
+        }
+
+        .segment-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .segment-btn.active {
+            background: var(--bg);
+            color: var(--text);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.4;
+        }
+
+        .input-wrap {
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            height: 36px;
+            padding: 0 12px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+
+        input:focus {
+            border-color: var(--brand);
+        }
+
+        .toggle-pwd-btn {
+            position: absolute;
+            right: 8px;
+            border: 0;
+            background: transparent;
+            color: var(--muted);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+        }
+
+        .toggle-pwd-btn:hover {
+            color: var(--text);
+        }
+
+        .status-badge {
+            display: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .status-badge.info {
+            display: block;
+            background: var(--info-light);
+            color: var(--info);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .status-badge.success {
+            display: block;
+            background: var(--brand-light);
+            color: var(--brand);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-badge.error {
+            display: block;
+            background: var(--danger-light);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .footer {
+            padding: 12px 20px;
+            border-top: 1px solid var(--line);
+            background: var(--surface);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .btn {
+            height: 34px;
+            padding: 0 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-secondary {
+            border: 1px solid var(--line);
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+        }
+
+        .btn-primary {
+            border: 0;
+            background: var(--brand);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: var(--brand-hover);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog">
+        <div class="titlebar">
+            <strong>⚙️ 服务器连接配置</strong>
+            <button type="button" class="close-btn" id="btn-close" title="关闭">×</button>
+        </div>
+
+        <div class="content">
+            <div class="segmented-control">
+                <button type="button" class="segment-btn active" id="btn-mode-remote" data-mode="remote">远程集中服务器 (Remote)</button>
+                <button type="button" class="segment-btn" id="btn-mode-local" data-mode="local">本地内置服务 (Local)</button>
+            </div>
+
+            <div id="section-remote">
+                <div class="form-group">
+                    <label for="input-url">服务端访问地址 (Server URL)</label>
+                    <input type="text" id="input-url" placeholder="例如：http://192.168.1.100:3000 或 https://pivot.internal" spellcheck="false">
+                    <span class="form-hint">请输入企业中央服务器的 HTTP 或 HTTPS 访问地址。</span>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                    <label for="input-secret">客户端通信密钥 (Stealth Secret - 可选)</label>
+                    <div class="input-wrap">
+                        <input type="password" id="input-secret" placeholder="若服务端开启了隐身模式，请在此填写对应的通信密钥" spellcheck="false">
+                        <button type="button" class="toggle-pwd-btn" id="btn-toggle-secret">显示</button>
+                    </div>
+                    <span class="form-hint">当服务器开启「客户端独占隐身模式」时，客户端需配置匹配的通信密钥方可连接。</span>
+                </div>
+            </div>
+
+            <div id="section-local" class="hidden">
+                <div class="form-group">
+                    <label>本地内置服务模式</label>
+                    <span class="form-hint">客户端将自动拉起随客户端自带的本地单机服务端进程，无需连接任何外部网络服务器。</span>
+                </div>
+            </div>
+
+            <div id="status-box" class="status-badge"></div>
+        </div>
+
+        <div class="footer">
+            <button type="button" class="btn btn-secondary" id="btn-test">测试连接</button>
+            <button type="button" class="btn btn-secondary" id="btn-cancel">取消</button>
+            <button type="button" class="btn btn-primary" id="btn-save">保存并连接</button>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            let currentMode = 'remote';
+            const api = window.pivotServerConfig || {};
+
+            const btnModeRemote = document.getElementById('btn-mode-remote');
+            const btnModeLocal = document.getElementById('btn-mode-local');
+            const sectionRemote = document.getElementById('section-remote');
+            const sectionLocal = document.getElementById('section-local');
+            const inputUrl = document.getElementById('input-url');
+            const inputSecret = document.getElementById('input-secret');
+            const btnToggleSecret = document.getElementById('btn-toggle-secret');
+            const statusBox = document.getElementById('status-box');
+            const btnTest = document.getElementById('btn-test');
+            const btnSave = document.getElementById('btn-save');
+            const btnCancel = document.getElementById('btn-cancel');
+            const btnClose = document.getElementById('btn-close');
+
+            function setMode(mode) {
+                currentMode = mode === 'local' ? 'local' : 'remote';
+                btnModeRemote.classList.toggle('active', currentMode === 'remote');
+                btnModeLocal.classList.toggle('active', currentMode === 'local');
+                sectionRemote.classList.toggle('hidden', currentMode !== 'remote');
+                sectionLocal.classList.toggle('hidden', currentMode !== 'local');
+                btnTest.classList.toggle('hidden', currentMode !== 'remote');
+                clearStatus();
+            }
+
+            function showStatus(text, type = 'info') {
+                statusBox.className = `status-badge ${type}`;
+                statusBox.textContent = text;
+            }
+
+            function clearStatus() {
+                statusBox.className = 'status-badge';
+                statusBox.textContent = '';
+            }
+
+            async function init() {
+                try {
+                    const cfg = await api.getConfig?.();
+                    if (cfg) {
+                        setMode(cfg.mode || 'remote');
+                        if (cfg.remoteUrl) inputUrl.value = cfg.remoteUrl;
+                        if (cfg.stealthSecret) inputSecret.value = cfg.stealthSecret;
+                    }
+                } catch (_) {}
+            }
+
+            btnModeRemote.addEventListener('click', () => setMode('remote'));
+            btnModeLocal.addEventListener('click', () => setMode('local'));
+
+            btnToggleSecret.addEventListener('click', () => {
+                if (inputSecret.type === 'password') {
+                    inputSecret.type = 'text';
+                    btnToggleSecret.textContent = '隐藏';
+                } else {
+                    inputSecret.type = 'password';
+                    btnToggleSecret.textContent = '显示';
+                }
+            });
+
+            btnTest.addEventListener('click', async () => {
+                const targetUrl = (inputUrl.value || '').trim();
+                const secret = (inputSecret.value || '').trim();
+                if (!targetUrl) {
+                    showStatus('请先填写服务器访问地址', 'error');
+                    inputUrl.focus();
+                    return;
+                }
+
+                showStatus('正在测试与服务器的连通性…', 'info');
+                btnTest.disabled = true;
+                try {
+                    const res = await api.testConnection?.(targetUrl, secret);
+                    if (res && res.success) {
+                        showStatus(`连接成功！服务正常（响应耗时：${res.latencyMs || 0} ms）`, 'success');
+                    } else {
+                        showStatus(`连接失败：${res?.error || '无法与目标服务器建立连接，请检查地址或网络'}`, 'error');
+                    }
+                } catch (err) {
+                    showStatus(`连接测试异常：${err.message || String(err)}`, 'error');
+                } finally {
+                    btnTest.disabled = false;
+                }
+            });
+
+            btnSave.addEventListener('click', async () => {
+                const mode = currentMode;
+                const remoteUrl = (inputUrl.value || '').trim();
+                const stealthSecret = (inputSecret.value || '').trim();
+
+                if (mode === 'remote' && !remoteUrl) {
+                    showStatus('请填写服务器访问地址', 'error');
+                    inputUrl.focus();
+                    return;
+                }
+
+                btnSave.disabled = true;
+                showStatus('正在保存并重新连接…', 'info');
+                try {
+                    const res = await api.saveConfig?.({
+                        mode,
+                        remoteUrl: mode === 'remote' ? remoteUrl : '',
+                        stealthSecret
+                    });
+                    if (res && res.success === false) {
+                        showStatus(`保存失败：${res.error || '配置格式无效'}`, 'error');
+                        btnSave.disabled = false;
+                        return;
+                    }
+                    api.close?.();
+                } catch (err) {
+                    showStatus(`保存失败：${err.message || String(err)}`, 'error');
+                    btnSave.disabled = false;
+                }
+            });
+
+            btnCancel.addEventListener('click', () => api.close?.());
+            btnClose.addEventListener('click', () => api.close?.());
+
+            init();
+        })();
+    </script>
+</body>
+</html>

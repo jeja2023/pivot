@@ -25,7 +25,6 @@
         }
         h1 { margin: 0 0 10px; font-size: 22px; }
         p { margin: 8px 0; color: #526070; line-height: 1.6; }
-        code { word-break: break-all; }
         button {
             margin-top: 18px;
             height: 36px;
@@ -49,20 +48,22 @@
     <main>
         <h1>智枢 Pivot 连接错误</h1>
         <p id="message">无法连接到智枢服务器，请检查您的网络连接或服务器运行状态。</p>
-        <p class="meta" id="target"></p>
-        <button id="retry">重新连接</button>
+        <p class="meta" id="env-info"></p>
+        <div style="display: flex; gap: 10px; margin-top: 18px;">
+            <button id="retry">重新连接</button>
+            <button id="config" style="background: transparent; color: inherit; border: 1px solid #cbd5e1;">配置服务器</button>
+        </div>
     </main>
     <script>
         const params = new URLSearchParams(location.search);
         const message = params.get('message');
-        const target = params.get('target');
         const env = params.get('env');
         if (message) document.getElementById('message').textContent = message;
-        document.getElementById('target').innerHTML = [
-            env ? '当前环境：' + env : '',
-            target ? '目标地址：<code>' + target.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) + '</code>' : ''
-        ].filter(Boolean).join('<br>');
-        document.getElementById('retry').addEventListener('click', () => window.pivotDesktop.retry());
+        if (env) {
+            document.getElementById('env-info').textContent = '当前运行环境：' + env;
+        }
+        document.getElementById('retry').addEventListener('click', () => window.pivotDesktop?.retry?.());
+        document.getElementById('config').addEventListener('click', () => window.pivotDesktop?.openServerConfigDialog?.());
     </script>
 </body>
 </html>

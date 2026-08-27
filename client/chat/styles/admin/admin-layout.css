@@ -506,6 +506,62 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }
+.global-params-tab .global-params-stealth-section {
+    grid-column: 1 / -1;
+    margin-top: 2px;
+}
+.global-params-tab .global-params-stealth-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 24px;
+    align-items: start;
+}
+@media (max-width: 900px) {
+    .global-params-tab .global-params-stealth-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.global-params-tab .global-params-stealth-secret-wrap {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 2px;
+}
+.global-params-tab .global-params-stealth-secret-wrap .form-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.04em;
+    height: 28px !important;
+    min-height: 28px !important;
+    max-height: 28px !important;
+    line-height: 26px !important;
+    padding: 0 8px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    vertical-align: middle;
+    align-self: center;
+}
+.global-params-tab .global-params-stealth-secret-wrap button.btn-secondary,
+.global-params-tab .global-params-stealth-secret-wrap .btn-xs {
+    height: 28px !important;
+    min-height: 28px !important;
+    max-height: 28px !important;
+    line-height: 26px !important;
+    padding: 0 10px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    font-size: 0.72rem !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    flex: 0 0 auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    align-self: center;
+}
 .settings-workspace-view .btn-primary,
 .settings-workspace-view .btn-secondary,
 .settings-workspace-view .btn-danger,
