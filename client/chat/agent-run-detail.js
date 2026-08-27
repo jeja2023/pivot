@@ -599,7 +599,7 @@ window.openAgentRun = async function (runId, options = {}) {
     const canCreateWorkflowDraft = !isPreview && run.run_mode !== 'dag';
     const tokenUsage = formatAgentTokenUsage(run);
     const progressPercent = Math.max(0, Math.min(Number(progress.percent || 0), 100));
-    const progressLabel = agentProgressLabel(run, progress);
+    const _progressLabel = agentProgressLabel(run, progress);
     if (isPreview) {
         run.title = agentPreviewDisplayTitle(agentDisplayTitle(run));
         run.final_answer = stripAgentWorkflowReportHeading(run.final_answer);
@@ -631,7 +631,7 @@ window.openAgentRun = async function (runId, options = {}) {
     });
 
     const modelLabel = run.model_name || (run.run_mode === 'dag' ? '工作流节点配置' : '');
-    const technicalSummary = [
+    const _technicalSummary = [
         `<div><dt>运行模式</dt><dd>${agentEscape(agentRunModeLabel(run.run_mode))}</dd></div>`,
         modelLabel ? `<div><dt>调用模型</dt><dd>${agentEscape(modelLabel)}</dd></div>` : '',
         `<div><dt>工具权限</dt><dd>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</dd></div>`,

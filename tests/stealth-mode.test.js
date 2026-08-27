@@ -1,18 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 require('../server/db');
 const {
     generateStealthSignature,
     getStealthConfig,
-    getStealthSecret,
     isStealthModeEnabled,
-    setStealthConfigAsync,
-    verifyStealthRequest,
-    STEALTH_SETTING_ENABLED_KEY,
-    STEALTH_SETTING_SECRET_KEY
+    verifyStealthRequest
 } = require('../server/services/stealth-service');
 const { stealthAccessGuard } = require('../server/middleware/stealth-guard');
 const { createSettingsRouter } = require('../server/routes/settings');

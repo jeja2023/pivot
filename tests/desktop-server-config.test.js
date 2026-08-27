@@ -8,10 +8,8 @@ const http = require('http');
 const crypto = require('crypto');
 
 const {
-    candidateConfigPaths,
     getUserConfigPath,
     loadDesktopConfig,
-    normalizeConfig,
     normalizeRemoteUrl,
     saveUserDesktopConfig
 } = require('../desktop/config');

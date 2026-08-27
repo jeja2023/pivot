@@ -1,7 +1,5 @@
 /* 客户端独占隐身模式管理模块 */
 (function() {
-    let stealthConfig = { enabled: false, secret: '', envOverridden: false };
-
     async function loadStealthSettings() {
         const toggle = document.getElementById('runtime-setting-stealth-mode-enabled');
         const statusLabel = document.getElementById('runtime-setting-stealth-mode-status-label');
@@ -14,7 +12,6 @@
             const res = await apiFetchFn(`${apiBase}/settings/stealth`);
             if (!res.ok) return;
             const data = await res.json();
-            stealthConfig = data;
 
             toggle.checked = Boolean(data.enabled);
             if (statusLabel) {
@@ -65,7 +62,6 @@
             if (!res.ok) {
                 throw new Error(data.error || '保存隐身模式设置失败');
             }
-            stealthConfig = data;
             if (statusLabel) {
                 statusLabel.textContent = data.enabled ? '已开启（隐身中）' : '已关闭';
                 statusLabel.style.color = data.enabled ? 'var(--color-success, #10b981)' : '';
@@ -99,7 +95,6 @@
             if (!res.ok) {
                 throw new Error(data.error || '重新生成密钥失败');
             }
-            stealthConfig = data;
             const secretInput = document.getElementById('runtime-setting-stealth-secret');
             if (secretInput) secretInput.value = data.secret || '';
             if (typeof showToast === 'function') {

@@ -10,6 +10,7 @@ const nodeGlobals = {
     clearTimeout: 'readonly',
     console: 'readonly',
     exports: 'readonly',
+    fetch: 'readonly',
     module: 'readonly',
     process: 'readonly',
     require: 'readonly',
