@@ -68,13 +68,12 @@
 
     function openGoalModal() {
         const modal = document.getElementById('agent-goal-modal');
-        if (modal) {
-            modal.classList.remove('hidden');
-            modal.setAttribute('aria-hidden', 'false');
-            const notice = document.getElementById('agent-goal-token-notice');
-            if (notice) { notice.textContent = ''; notice.classList.add('hidden'); }
-            setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
-        }
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        const notice = document.getElementById('agent-goal-token-notice');
+        if (notice) { notice.textContent = ''; notice.classList.add('hidden'); }
+        setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
     }
 
     function closeGoalModal() {
@@ -104,9 +103,9 @@
             setMarkup(goalsPanel, state.goals.length ? `<div class="agent-goal-list">${state.goals.map(goal => `<article class="agent-goal-card-item ${goal.status === 'active' ? 'is-active' : 'is-paused'}"><div class="agent-goal-card-main"><div class="agent-goal-card-head"><span class="agent-harness-status-pill ${goal.status === 'active' ? 'is-active' : 'is-inactive'}">${goal.status === 'active' ? '● 运行中' : goal.status === 'paused' ? '○ 已暂停' : goal.status}</span><strong class="agent-goal-card-title">${escape(goal.title)}</strong><span class="agent-goal-trigger-badge">${escape(formatGoalTrigger(goal.triggerSpec))}</span></div><p class="agent-goal-card-body">${escape(shortText(goal.goal, 160))}</p></div><div class="agent-goal-card-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
         }
         if (inboxPanel) {
-            setMarkup(inboxPanel, state.inbox.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 76px;">类型</th><th style="width: 140px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${state.inbox.slice(0, 20).map(item => {
+            setMarkup(inboxPanel, state.inbox.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 50px;">序号</th><th class="text-center" style="width: 76px;">类型</th><th style="width: 140px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${state.inbox.slice(0, 20).map((item, index) => {
                 const meta = getInboxTypeMeta(item.sourceType);
-                return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${escape(item.title || '')}">${escape(formatInboxTitle(item))}</strong></td><td><span class="agent-inbox-table-desc" title="${escape(item.body || '')}">${escape(shortText(item.body || '-', 120))}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}">详情</button>` : ''}</div></td></tr>`;
+                return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center">${index + 1}</td><td class="text-center"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${escape(item.title || '')}">${escape(formatInboxTitle(item))}</strong></td><td><span class="agent-inbox-table-desc" title="${escape(item.body || '')}">${escape(shortText(item.body || '-', 120))}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}">详情</button>` : ''}</div></td></tr>`;
             }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>任务运行结果、人工审批请求与智能体进化提醒将在此实时汇聚</span></div>');
         }
         if (channelsPanel) {
@@ -913,17 +912,21 @@
             const publish = event.target.closest('[data-agent-evolution-publish]');
             if (publish) publishProposal(publish.dataset.agentEvolutionPublish);
         });
-        document.querySelectorAll('[data-agent-cp-subview]').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const subview = tab.dataset.agentCpSubview;
-                document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
-                    const active = t.dataset.agentCpSubview === subview;
-                    t.classList.toggle('active', active);
-                    t.setAttribute('aria-selected', active ? 'true' : 'false');
-                });
-                document.querySelectorAll('[data-agent-cp-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.agentCpPane !== subview));
+        const switchAgentCpSubview = (subview = 'inbox') => {
+            try { sessionStorage.setItem('pivot.agent.cp_subview', subview); } catch (_) {}
+            document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
+                const active = t.dataset.agentCpSubview === subview;
+                t.classList.toggle('active', active);
+                t.setAttribute('aria-selected', active ? 'true' : 'false');
             });
+            document.querySelectorAll('[data-agent-cp-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.agentCpPane !== subview));
+        };
+        document.querySelectorAll('[data-agent-cp-subview]').forEach(tab => {
+            tab.addEventListener('click', () => switchAgentCpSubview(tab.dataset.agentCpSubview));
         });
+        let savedSubview = null;
+        try { savedSubview = sessionStorage.getItem('pivot.agent.cp_subview'); } catch (_) {}
+        if (savedSubview) switchAgentCpSubview(savedSubview);
         document.querySelectorAll('#agent-inbox-refresh').forEach(btn => {
             btn.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error')));
         });
@@ -932,9 +935,7 @@
         });
         document.getElementById('agent-goal-cancel')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal-close')?.addEventListener('click', closeGoalModal);
-        document.getElementById('agent-goal-modal')?.addEventListener('click', event => {
-            if (event.target.id === 'agent-goal-modal') closeGoalModal();
-        });
+        document.getElementById('agent-goal-modal')?.addEventListener('click', event => { if (event.target.id === 'agent-goal-modal') closeGoalModal(); });
         document.getElementById('agent-goal-editor')?.addEventListener('submit', saveAgentGoal);
         document.getElementById('agent-goal-trigger')?.addEventListener('change', event => {
             const type = event.target.value;
@@ -976,9 +977,7 @@
         });
         document.getElementById('agent-channels-panel')?.addEventListener('click', event => {
             const create = event.target.closest('[data-agent-channel-create]');
-            if (create) {
-                apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType: document.getElementById('agent-channel-type')?.value, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint: document.getElementById('agent-channel-endpoint')?.value } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
-            }
+            if (create) apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType: document.getElementById('agent-channel-type')?.value, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint: document.getElementById('agent-channel-endpoint')?.value } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
             const test = event.target.closest('[data-agent-channel-test]');
             if (test) apiJson(`${API_BASE}/agents/channels/${encodeURIComponent(test.dataset.agentChannelTest)}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Pivot 渠道连通性测试' }) }).then(() => setNotice('渠道测试已提交。', 'success')).catch(error => setNotice(error.message, 'error'));
         });

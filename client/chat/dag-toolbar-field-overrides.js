@@ -447,6 +447,8 @@ const FIELD_PLACEHOLDER_OVERRIDES = {
         max_headings: '例如 20',
         maxItems: '例如 50',
         max_items: '例如 50',
+        credentialSecret: '例如 ERP_API_KEY，可在工具库「连接与安全凭据」中创建与引用',
+        credential_secret: '例如 ERP_API_KEY，可在工具库「连接与安全凭据」中创建与引用',
         maxTokens: '例如 1024',
         max_tokens: '例如 1024',
         message: '填写要发送的消息内容',

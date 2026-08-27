@@ -221,7 +221,6 @@ function showAutomationAssetCenter(options = {}) {
     document.getElementById('automation-editor-view')?.classList.add('hidden');
     document.getElementById('automation-new-workflow-btn')?.classList.remove('hidden');
     document.getElementById('automation-refresh-btn')?.classList.remove('hidden');
-    document.getElementById('automation-resources-btn')?.classList.remove('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.add('hidden');
     document.getElementById('agent-workflow-dependency-btn')?.classList.add('hidden');
     document.getElementById('agent-workflow-triggers-btn')?.classList.add('hidden');
@@ -244,7 +243,6 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     document.getElementById('automation-new-workflow-btn')?.classList.add('hidden');
     document.getElementById('automation-new-schedule-btn')?.classList.add('hidden');
     document.getElementById('automation-refresh-btn')?.classList.add('hidden');
-    document.getElementById('automation-resources-btn')?.classList.add('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.toggle('hidden', agentWorkflowReadOnly);
     document.getElementById('agent-workflow-dependency-btn')?.classList.toggle('hidden', !agentWorkflowReadOnly);
     document.getElementById('agent-workflow-triggers-btn')?.classList.toggle('hidden', agentWorkflowReadOnly || !workflowId);
@@ -362,11 +360,6 @@ window.bindAgentDagWorkbench = function() {
     if (newWorkflowBtn && newWorkflowBtn.dataset.boundAutomationNew !== '1') {
         newWorkflowBtn.dataset.boundAutomationNew = '1';
         newWorkflowBtn.addEventListener('click', () => showAutomationWorkflowEditor());
-    }
-    const automationResourcesBtn = document.getElementById('automation-resources-btn');
-    if (automationResourcesBtn && automationResourcesBtn.dataset.boundAutomationResources !== '1') {
-        automationResourcesBtn.dataset.boundAutomationResources = '1';
-        automationResourcesBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.automationResources').open?.({ tab: 'credentials' }));
     }
     const refreshAutomationBtn = document.getElementById('automation-refresh-btn');
     if (refreshAutomationBtn && refreshAutomationBtn.dataset.boundAutomationRefresh !== '1') {

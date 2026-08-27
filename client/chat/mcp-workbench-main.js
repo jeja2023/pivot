@@ -5,18 +5,9 @@ const mcpModalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
 
 function setMcpWorkbenchState(kind = '', message = '') {
     const state = document.getElementById('mcp-workbench-state');
-    if (!state) return;
-    state.className = `mcp-workbench-state${kind ? ` is-${kind}` : ''}`;
-    state.hidden = !message;
-    if (!message) {
-        state.textContent = '';
-        return;
-    }
-    if (kind === 'error') {
-        PivotSafeHtml.setHtml(state, `<span>${mcpEscape(message)}</span><button type="button" class="btn-secondary" data-mcp-retry>重试</button>`);
-        state.querySelector('[data-mcp-retry]')?.addEventListener('click', () => window.loadMcpWorkbench?.());
-    } else {
-        state.textContent = message;
+    if (state) state.hidden = true;
+    if (kind === 'error' && message) {
+        showToast(message, 'error');
     }
 }
 
@@ -268,7 +259,7 @@ async function loadMcpServers() {
     const databaseServers = workbenchServers.filter(server => server.server_type === 'database');
     const externalServers = workbenchServers.filter(server => !personalBuiltinTypes.has(server.server_type) && server.server_type !== 'database');
     renderMcpSystemServices();
-
+    window.Pivot?.moduleApi?.('mcp.credentials')?.load?.();
     const databaseEntry = mcpServiceCatalog.map(service => renderMcpCatalogCard(service, {
         count: databaseServers.length,
         metaText: databaseServers.length ? '可继续添加服务器可访问数据库' : '配置后可查看数据库工具'
@@ -1405,19 +1396,17 @@ window.Pivot?.exposeModule?.('mcp.workbench', {
 
 window.loadMcpWorkbench = async function () {
     if (mcpWorkbenchLoadPromise) return mcpWorkbenchLoadPromise;
-    setMcpWorkbenchState('loading', '正在加载工具库...');
     mcpWorkbenchLoadPromise = (async () => {
         try {
+            window.Pivot?.moduleApi?.('mcp.tabs')?.bindTabs?.();
             await loadMcpGovernance();
             await (window.syncMcpLocalExecutionBridge
                 ? window.syncMcpLocalExecutionBridge()
                 : Promise.resolve(null)).catch(() => null);
             await loadMcpTools();
             await loadMcpServers();
-            setMcpWorkbenchState('', '');
         } catch (e) {
-            setMcpWorkbenchState('error', e?.message || '工具库加载失败，请重试。');
-            showToast(e?.message || '工具库加载失败，请重试', 'error');
+            showToast(e?.message || '工具库加载失败，请检查网络连接', 'error');
         } finally {
             mcpWorkbenchLoadPromise = null;
         }

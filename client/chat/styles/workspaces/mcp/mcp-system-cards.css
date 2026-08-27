@@ -928,3 +928,44 @@
     font-weight: 700;
     white-space: nowrap;
 }
+
+/* --- 连接与安全凭据卡片样式 --- */
+.mcp-card-slug {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0;
+}
+
+.mcp-card-slug code {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--primary);
+    background: rgba(16, 163, 127, 0.08);
+    border: 1px solid rgba(16, 163, 127, 0.2);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.mcp-credential-manage-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mcp-badge.is-shared {
+    background: #e0f2fe;
+    color: #0369a1;
+    border: 1px solid rgba(3, 105, 161, 0.2);
+    border-radius: 999px;
+    padding: 0 6px;
+    font-size: 0.62rem;
+    font-weight: 700;
+}
+
+.mcp-readonly-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+}

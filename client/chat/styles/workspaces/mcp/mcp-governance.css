@@ -1,5 +1,75 @@
-/* 拆自 workspaces/mcp.css。 */
 /* MCP 治理指标、工作区布局与工具缓存卡片样式。 */
+.mcp-primary-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 20px;
+    min-height: 44px;
+    padding: 0 20px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    background: #fff;
+    scrollbar-width: none;
+}
+
+.mcp-primary-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.mcp-primary-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: stretch;
+    flex: 0 0 auto;
+    padding: 0 4px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.mcp-primary-tab::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2.5px;
+    border-radius: 2px 2px 0 0;
+    background: transparent;
+    transition: background 0.15s ease;
+}
+
+.mcp-primary-tab:hover {
+    color: var(--text-main, #1e293b);
+}
+
+.mcp-primary-tab.active {
+    color: var(--primary, #10a37f);
+    font-weight: 700;
+}
+
+.mcp-primary-tab.active::after {
+    background: var(--primary, #10a37f);
+}
+
+.mcp-tab-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.mcp-tab-pane.hidden {
+    display: none !important;
+}
+
 .mcp-governance-panel {
     display: grid;
     grid-template-columns: minmax(220px, 1.2fr) minmax(0, 1.8fr);
@@ -189,19 +259,7 @@
 }
 
 .mcp-workbench-state {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-height: 34px;
-    margin: 0 8px 8px;
-    padding: 7px 10px;
-    border: 1px solid var(--border, rgba(148, 163, 184, 0.22));
-    border-radius: 8px;
-    color: var(--text-muted);
-    background: var(--bg-secondary, #f8fafc);
-    font-size: 0.74rem;
-    line-height: 1.4;
+    display: none !important;
 }
 
 .mcp-workbench-state.is-loading {

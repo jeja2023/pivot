@@ -799,15 +799,15 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(chatPartial, /data-global-search-type="workflows"/);
     assert.match(sidebarCss, /@media \(max-width: 720px\)/);
     assert.match(agentPartial, /<h3>自动化<\/h3>/);
-    assert.match(agentPartial, /data-automation-section="tasks"[\s\S]*?data-automation-section="workflows"[\s\S]*?data-automation-section="schedules"/);
+    assert.match(agentPartial, /data-automation-section="tasks"[\s\S]*?data-automation-section="workflows"[\s\S]*?data-automation-section="workbench"/);
     assert.match(agentPartial, /id="task-create-open-btn"/);
     assert.match(agentPartial, /id="agent-task-editor-modal" class="modal-overlay hidden"/);
     assert.match(agentPartial, /id="agent-run-panel" class="modal agent-task-editor-modal"/);
     assert.match(agentPartial, /<h3 id="agent-task-editor-title">新建任务<\/h3>/);
     assert.match(agentPartial, /class="agent-history-head"[\s\S]*?class="agent-history-tools"/);
-    assert.match(agentPartial, /<h3>运行记录<\/h3>/);
+    assert.match(agentPartial, /<h3>任务活动<\/h3>/);
     assert.match(agentPartial, /id="agent-filter-run-type"/);
-    assert.match(agentPartial, /<option value="free">自主任务<\/option>/);
+    assert.match(agentPartial, /<option value="free">一次性任务<\/option>/);
     assert.match(agentPartial, /<option value="workflow">工作流任务<\/option>/);
     assert.match(agentPartial, /<option value="scheduled">计划执行<\/option>/);
     assert.match(agentPartial, /id="agent-save-plan-btn"/);
@@ -820,7 +820,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(dagPartial, /name="agent-workflow-share-scope"/);
     assert.match(dagPartial, /id="agent-workflow-metadata-modal"/);
     assert.match(dagPartial, /id="agent-workflow-metadata-description"/);
-    assert.match(dagPartial, /class="agent-workflow-share-tree"/);
+    assert.match(dagPartial, /id="agent-workflow-share-form-content"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-rename-btn"/);
     assert.match(dagPartial, /id="agent-workflow-readonly-run-btn"/);
     assert.match(dagPartial, /class="agent-dag-header-actions"[\s\S]*?id="automation-new-workflow-btn"[\s\S]*?id="automation-new-schedule-btn"[\s\S]*?id="automation-refresh-btn"/);
@@ -1067,7 +1067,7 @@ test('agent model calls close Qwen3 thinking by default and widen budget when ke
     assert.equal(resolveAgentMaxTokens(qwen3, { maxTokens: 800 }), 800);
     assert.ok(resolveAgentMaxTokens(qwen3, { enableThinking: true }) >= 4096);
     // 模型自身配置更高时不被压低。
-    assert.equal(resolveAgentMaxTokens({ ...qwen3, max_tokens: 8192 }, { enableThinking: true }), 8192);
+    assert.equal(resolveAgentMaxTokens({ ...qwen3, max_tokens: 32768 }, { enableThinking: true }), 32768);
     // 调用方显式指定的上限始终优先，便于按步骤精确控制成本。
     assert.equal(resolveAgentMaxTokens(qwen3, { enableThinking: true, maxTokens: 600 }), 600);
 });
@@ -1104,8 +1104,8 @@ test('agent answer budget floor keeps final replies from being truncated', () =>
     assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }), AGENT_ANSWER_MIN_MAX_TOKENS);
     // 下限只抬高不压低：模型自身配置更大时保持原值。
     assert.equal(
-        resolveAgentMaxTokens({ ...model, max_tokens: 8192 }, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }),
-        8192
+        resolveAgentMaxTokens({ ...model, max_tokens: 32768 }, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }),
+        32768
     );
     // 模型配得过小时被抬到下限——这正是生产上"回复被截断"的成因。
     assert.equal(
@@ -1117,7 +1117,7 @@ test('agent answer budget floor keeps final replies from being truncated', () =>
     // 与思维链下限共存时取最大者。
     const deepModel = { ...model, supports_reasoning: 1, chat_thinking_enabled: 1 };
     assert.ok(resolveAgentMaxTokens(deepModel, { minMaxTokens: 2048 }) >= 4096);
-    assert.equal(resolveAgentMaxTokens(deepModel, { minMaxTokens: 12000 }), 12000);
+    assert.equal(resolveAgentMaxTokens(deepModel, { minMaxTokens: 32000 }), 32000);
     // 非法下限被忽略，不影响既有行为。
     assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: 'abc' }), 1200);
     assert.equal(resolveAgentMaxTokens(model, { minMaxTokens: -1 }), 1200);

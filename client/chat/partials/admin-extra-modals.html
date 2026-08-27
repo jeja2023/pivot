@@ -205,6 +205,32 @@
             <p style="margin-top: 15px; font-size: 0.8rem; color: var(--text-muted);">数据每 10 秒随监控面板同步刷新。此列表仅显示请求频率较高的接口路径。</p>
         </div>
     </div>
+
+    <!-- 安全凭据与自动化资源全局模态抽屉 -->
+    <div id="agent-automation-resources-modal" class="modal-overlay hidden agent-automation-resources-modal-overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="agent-automation-resources-title" style="z-index: 5600;">
+        <div class="modal agent-automation-resources-modal" role="document">
+            <div class="agent-workflow-share-head">
+                <div>
+                    <h3 id="agent-automation-resources-title">安全凭据与自动化资源</h3>
+                    <p id="agent-automation-resources-subtitle">集中管理供工作流、Agent 工具、通知渠道及自动化回调调用的受控鉴权凭据与 API Key。</p>
+                </div>
+                <button id="agent-automation-resources-close-btn" class="btn-danger-outline" type="button" aria-label="关闭安全凭据与自动化资源" title="关闭安全凭据与自动化资源">关闭</button>
+            </div>
+            <div class="agent-automation-resources-body">
+                <div id="agent-automation-resources-tabs" class="agent-automation-resources-tabs" role="tablist" aria-label="自动化资源">
+                    <button id="agent-automation-triggers-tab" class="agent-automation-resources-tab active" type="button" role="tab" aria-selected="true" aria-controls="agent-automation-resources-list" tabindex="0" data-agent-automation-resource-tab="triggers">触发器</button>
+                    <button id="agent-automation-credentials-tab" class="agent-automation-resources-tab" type="button" role="tab" aria-selected="false" aria-controls="agent-automation-resources-list" tabindex="-1" data-agent-automation-resource-tab="credentials">安全凭据</button>
+                </div>
+                <div id="agent-automation-resources-notice" class="agent-automation-resources-notice hidden" role="status" aria-live="polite"></div>
+                <div id="agent-automation-resources-actions" class="agent-automation-resources-actions">
+                    <button id="agent-automation-resources-new-btn" class="btn-primary" type="button">新建触发器</button>
+                </div>
+                <div id="agent-automation-resources-list" class="agent-automation-resources-list" role="tabpanel" aria-labelledby="agent-automation-triggers-tab"></div>
+                <form id="agent-automation-resources-editor" class="agent-automation-resources-editor hidden" novalidate></form>
+            </div>
+        </div>
+    </div>
+
     <style>
         #rag-debug-btn:active { transform: scale(0.96); box-shadow: none; opacity: 0.8; }
         .btn-red-outline { background: transparent; border: 1px solid #ef4444 !important; color: #ef4444 !important; }

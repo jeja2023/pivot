@@ -1,5 +1,6 @@
 // 工作流触发器与凭据库管理。敏感值只写入服务端，浏览器不缓存或回显凭据明文。
 /* eslint-disable no-undef */
+(function () {
 let agentAutomationResourceTab = 'triggers';
 let agentWorkflowTriggersCache = [];
 let agentWorkflowCredentialsCache = [];
@@ -9,6 +10,8 @@ let agentAutomationResourceModalOpener = null;
 let agentAutomationResourceWorkflowId = '';
 let agentAutomationShareOptions = null;
 const agentAutomationResourceActionLocks = new Set();
+const agentEscape = (value) => window.PivotSafeHtml?.escapeHtml ? window.PivotSafeHtml.escapeHtml(value) : (typeof escapeHtml === 'function' ? escapeHtml(value) : String(value ?? ''));
+const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr ? window.PivotSafeHtml.escapeAttr(value) : agentEscape(value).replace(/"/g, '&quot;');
 
 function agentAutomationResourceModal() {
     return document.getElementById('agent-automation-resources-modal');
@@ -97,6 +100,9 @@ async function loadAgentAutomationResources(options = {}) {
         errors.push(credentialsResult.reason);
     }
     renderAgentAutomationResourceList();
+    if (document.getElementById('mcp-security-credentials')) {
+        window.Pivot?.moduleApi?.('mcp.credentials')?.load?.();
+    }
     if (errors.length) throw new Error(errors[0]?.message || '自动化资源加载失败');
     return true;
 }
@@ -109,7 +115,7 @@ function renderAgentAutomationResourceTabs() {
     const triggerTab = document.getElementById('agent-automation-triggers-tab');
     const credentialsTab = document.getElementById('agent-automation-credentials-tab');
 
-    // 针对特定工作流的自动启动配置，隐藏多余的单项 Tab 栏；全局打开凭据库时展示切换
+    // 针对特定工作流的自动启动配置，隐藏多余的单项 Tab 栏；全局打开凭据时展示切换
     tablist.classList.toggle('hidden', contextualTriggers);
     triggerTab?.classList.toggle('hidden', !contextualTriggers);
     credentialsTab?.classList.toggle('hidden', contextualTriggers);
@@ -128,7 +134,7 @@ function renderAgentAutomationResourceTabs() {
         ? 'agent-automation-triggers-tab'
         : 'agent-automation-credentials-tab');
     const create = document.getElementById('agent-automation-resources-new-btn');
-    if (create) create.textContent = agentAutomationResourceTab === 'triggers' ? '新建触发器' : '新建凭据';
+    if (create) create.textContent = agentAutomationResourceTab === 'triggers' ? '新建触发器' : '新建安全凭据';
 }
 
 function renderAgentAutomationResourceList() {
@@ -788,10 +794,10 @@ async function openAgentAutomationResources(options = {}) {
     const workflow = (typeof agentWorkflowsCache !== 'undefined' && Array.isArray(agentWorkflowsCache))
         ? agentWorkflowsCache.find(item => String(item.id) === agentAutomationResourceWorkflowId)
         : null;
-    if (title) title.textContent = agentAutomationResourceWorkflowId ? '自动启动' : '凭据库';
+    if (title) title.textContent = agentAutomationResourceWorkflowId ? '自动启动' : '安全凭据与自动化资源';
     if (subtitle) subtitle.textContent = agentAutomationResourceWorkflowId
         ? `为“${workflow?.name || `工作流 #${agentAutomationResourceWorkflowId}`}”配置事件触发方式。`
-        : '集中管理工作流运行时需要使用的受控凭据。';
+        : '集中管理供工作流、Agent 工具、通知渠道及自动化回调调用的受控鉴权凭据与 API Key。';
     renderAgentAutomationResourceTabs();
     setAgentAutomationResourcesModalVisible(true);
     try {
@@ -805,6 +811,23 @@ async function openAgentAutomationResources(options = {}) {
             if (loadedWorkflow) subtitle.textContent = `为“${loadedWorkflow.name}”配置事件触发方式。`;
         }
         renderAgentAutomationResourceList();
+        if (options.action === 'create') {
+            renderAgentAutomationResourceEditor(agentAutomationResourceTab === 'triggers' ? 'trigger' : 'credential');
+        } else if (options.action === 'edit' && options.id) {
+            const item = (agentAutomationResourceTab === 'triggers' ? agentWorkflowTriggersCache : agentWorkflowCredentialsCache)
+                .find(entry => String(entry.id) === String(options.id));
+            if (item) {
+                if (agentAutomationResourceTab === 'credentials') await loadAgentAutomationShareOptions();
+                renderAgentAutomationResourceEditor(agentAutomationResourceTab === 'triggers' ? 'trigger' : 'credential', item);
+            }
+        } else if (options.action === 'rotate' && options.id) {
+            const item = agentWorkflowCredentialsCache.find(entry => String(entry.id) === String(options.id));
+            if (item) renderAgentAutomationResourceEditor('credential-rotate', item);
+        } else if (options.action === 'revert' && options.id) {
+            rollbackAgentWorkflowCredential(options.id);
+        } else if (options.action === 'delete' && options.id) {
+            deleteAgentWorkflowCredential(options.id);
+        }
     } catch (error) {
         showToast(error.message || '自动化资源加载失败', 'error');
     }
@@ -822,3 +845,4 @@ window.Pivot.exposeModule('agent.automationResources', {
     listTriggers: () => agentWorkflowTriggersCache.map(item => ({ ...item })),
     listCredentials: () => agentWorkflowCredentialsCache.map(item => ({ ...item }))
 });
+})();

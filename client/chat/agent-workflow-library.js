@@ -621,6 +621,9 @@ function bindAgentWorkflowDependencyModal() {
     const close = () => setAgentWorkflowLibraryModalVisibility(modal, false);
     document.getElementById('agent-workflow-dependency-close-btn')?.addEventListener('click', close);
     document.getElementById('agent-workflow-dependency-cancel-btn')?.addEventListener('click', close);
+    document.getElementById('agent-workflow-dependency-manage-creds-btn')?.addEventListener('click', () => {
+        window.Pivot?.moduleApi?.('agent.automationResources')?.open?.({ tab: 'credentials' });
+    });
     modal.addEventListener('change', event => {
         if (event.target?.matches?.('[data-agent-dependency-kind]')) setAgentWorkflowDependencyError('');
     });

@@ -744,6 +744,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/tool-policy.js',
         '/chat/mcp-workbench-common.js',
         '/chat/mcp-workbench-local-auth.js',
+        '/chat/mcp-workbench-credentials.js',
         '/chat/mcp-workbench-form.js',
         '/chat/mcp-workbench-main.js'
     ]

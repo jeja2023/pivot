@@ -10,23 +10,17 @@ const knowledgeModalFocus = new Map();
 const ragControlLoadErrors = new Set();
 let ragDocsLoadSequence = 0;
 
-function setKnowledgeWorkbenchState(state = '', message = '', { retry = false } = {}) {
+function setKnowledgeWorkbenchState(state = '', message = '', { _retry = false } = {}) {
     const el = document.getElementById('rag-workbench-state');
-    if (!el) return;
-    el.dataset.state = state || '';
-    el.hidden = !message;
-    PivotSafeHtml.setHtml(el, '');
-    if (!message) return;
-    const text = document.createElement('span');
-    text.textContent = message;
-    el.appendChild(text);
-    if (retry) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn-secondary knowledge-state-retry';
-        button.textContent = '重试';
-        button.addEventListener('click', () => window.loadKnowledgeDocs?.());
-        el.appendChild(button);
+    if (el) {
+        el.dataset.state = state || '';
+        el.hidden = true;
+        PivotSafeHtml.setHtml(el, '');
+    }
+    if (message && state === 'error') {
+        showToast(message, 'error');
+    } else if (message && state === 'partial') {
+        showToast(message, 'warning');
     }
 }
 

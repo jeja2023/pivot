@@ -60,14 +60,11 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     const credentials = read('server/services/workflow-credentials.js');
     const migrations = read('server/db/migrations/index.js');
 
-    assert.match(dag, /id="automation-resources-btn"/);
-    assert.match(dag, />凭据库</);
+    const extraModals = read('client/chat/partials/admin-extra-modals.html');
+    assert.match(dag, /id="agent-workflow-dependency-manage-creds-btn"/);
     assert.match(dag, /id="agent-workflow-triggers-btn"[^>]*>自动启动</);
-    const workflowsSource = read('client/chat/agent-workflows.js');
-    assert.match(workflowsSource, /automation-resources-btn.*classList\.add\('hidden'\)/s);
-    assert.match(workflowsSource, /automation-resources-btn.*classList\.remove\('hidden'\)/s);
-    assert.match(dag, /id="agent-automation-resources-modal"[^>]*role="dialog"[^>]*aria-hidden="true"/);
-    assert.match(dag, /id="agent-automation-triggers-tab"[^>]*role="tab"/);
+    assert.match(extraModals, /id="agent-automation-resources-modal"[^>]*role="dialog"[^>]*aria-hidden="true"/);
+    assert.match(extraModals, /id="agent-automation-triggers-tab"[^>]*role="tab"/);
     assert.match(resources, /apiFetch\(`\$\{API_BASE\}\/agents\/triggers`\)/);
     assert.match(resources, /apiFetch\(`\$\{API_BASE\}\/agents\/credentials`\)/);
     assert.match(resources, /const agentAutomationResourceActionLocks = new Set/);

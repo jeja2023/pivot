@@ -254,6 +254,7 @@ const ROUTE_NAME_MAP = {
     '/chat/agent-artifacts.js': '智能体产物脚本',
     '/chat/mcp-workbench-common.js': 'MCP 工作台通用脚本',
     '/chat/mcp-workbench-local-auth.js': 'MCP 本机授权中心脚本',
+    '/chat/mcp-workbench-credentials.js': 'MCP 安全凭据管理脚本',
     '/chat/mcp-workbench-form.js': 'MCP 工作台表单脚本',
     '/chat/mcp-workbench-main.js': 'MCP 工作台主脚本',
     '/chat/rag-format.js': 'RAG 格式脚本',

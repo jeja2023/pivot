@@ -169,7 +169,10 @@ window.bindAgentWorkbenchShortcuts = function() {
 
 window.openAgentWorkbench = async function(options = {}) {
     window.showMainWorkspace?.('agent');
-    const tab = options.tab === 'workbench' ? 'workbench' : 'tasks';
+    let savedTab = null;
+    try { savedTab = sessionStorage.getItem('pivot.agent.active_tab'); } catch (_) {}
+    const tab = (options.tab || savedTab) === 'workbench' ? 'workbench' : 'tasks';
+    try { sessionStorage.setItem('pivot.agent.active_tab', tab); } catch (_) {}
     window.syncAutomationPrimaryTabs(tab);
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;

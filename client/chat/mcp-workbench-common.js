@@ -259,6 +259,40 @@ function renderMcpSourceActionPanel(cards = [], { title = '', description = '' }
     `;
 }
 
+function setMcpActiveTab(section = 'tools') {
+    const modal = document.getElementById('mcp-workbench-modal');
+    if (!modal) return;
+    try { sessionStorage.setItem('pivot.mcp.active_tab', section); } catch (_) {}
+    modal.querySelectorAll('.mcp-primary-tab').forEach(tab => {
+        const isActive = tab.dataset.mcpSection === section;
+        tab.classList.toggle('active', isActive);
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        tab.tabIndex = isActive ? 0 : -1;
+    });
+    modal.querySelectorAll('.mcp-tab-pane').forEach(pane => {
+        const isActive = pane.dataset.mcpPane === section;
+        pane.classList.toggle('hidden', !isActive);
+    });
+}
+
+function bindMcpTabs() {
+    const modal = document.getElementById('mcp-workbench-modal');
+    if (!modal) return;
+    modal.querySelectorAll('.mcp-primary-tab').forEach(tab => {
+        if (tab.dataset.boundMcpTab === '1') return;
+        tab.dataset.boundMcpTab = '1';
+        tab.addEventListener('click', () => {
+            const section = tab.dataset.mcpSection;
+            setMcpActiveTab(section);
+        });
+    });
+}
+
+window.Pivot?.exposeModule?.('mcp.tabs', {
+    setActiveTab: setMcpActiveTab,
+    bindTabs: bindMcpTabs
+});
+
 function renderMcpSection(title, description, cardsHtml, { emptyText = '', beforeGridHtml = '' } = {}) {
     const content = String(cardsHtml || '').trim();
     const beforeGrid = String(beforeGridHtml || '').trim();

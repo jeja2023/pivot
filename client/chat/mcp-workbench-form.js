@@ -352,8 +352,14 @@ function bindMcpToolsModalControls() {
     });
 }
 
-window.openMcpWorkbench = async function() {
+window.openMcpWorkbench = async function(options = {}) {
     bindMcpModalAccessibility();
+    const tabsApi = window.Pivot?.moduleApi?.('mcp.tabs', {}) || {};
+    tabsApi.bindTabs?.();
+    let savedTab = null;
+    try { savedTab = sessionStorage.getItem('pivot.mcp.active_tab'); } catch (_) {}
+    const activeTab = options?.tab || savedTab || 'tools';
+    tabsApi.setActiveTab?.(activeTab);
     window.showMainWorkspace?.('mcp');
     const panel = document.getElementById('mcp-workbench-modal');
     if (!panel) return;

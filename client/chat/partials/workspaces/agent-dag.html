@@ -9,7 +9,6 @@
                 <div class="agent-dag-header-actions">
                     <button id="automation-new-workflow-btn" class="btn-primary" type="button">新建工作流</button>
                     <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
-                    <button id="automation-resources-btn" class="btn-secondary" type="button">凭据库</button>
                     <button id="automation-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-dag-save-btn" class="btn-primary hidden" type="button">保存</button>
                     <button id="agent-workflow-dependency-btn" class="btn-secondary hidden" type="button">配置依赖</button>
@@ -195,23 +194,7 @@
                                 <span><strong>共享</strong><small>共享用户只能查看和运行已发布版本，不能编辑工作流。</small></span>
                             </label>
                         </fieldset>
-                        <section id="agent-workflow-share-units-section" class="agent-workflow-share-units-section hidden" aria-labelledby="agent-workflow-share-units-title">
-                            <label id="agent-workflow-share-all-label" class="agent-workflow-share-all hidden">
-                                <input id="agent-workflow-share-all" type="checkbox">
-                                <span>共享给全体成员</span>
-                            </label>
-                            <div class="agent-workflow-share-units-head">
-                                <div>
-                                    <strong id="agent-workflow-share-units-title">共享对象</strong>
-                                    <span id="agent-workflow-share-units-hint">按单位展开并选择整个单位或其中的用户。</span>
-                                </div>
-                                <div class="agent-workflow-share-target-actions">
-                                    <button type="button" class="btn-secondary" data-agent-share-select="tree">全选</button>
-                                    <button type="button" class="btn-secondary" data-agent-share-clear="tree">全不选</button>
-                                </div>
-                            </div>
-                            <div id="agent-workflow-share-units-list" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户"></div>
-                        </section>
+                        <div id="agent-workflow-share-form-content"></div>
                         <div id="agent-workflow-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
                     </div>
                     <div class="agent-workflow-share-footer">
@@ -227,7 +210,10 @@
                             <h3 id="agent-workflow-dependency-title">配置运行依赖</h3>
                             <p id="agent-workflow-dependency-subtitle">为当前账号选择可用的等价模型、工具和受控凭据。</p>
                         </div>
-                        <button id="agent-workflow-dependency-close-btn" class="btn-danger-outline" type="button" aria-label="关闭依赖配置" title="关闭依赖配置">关闭</button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button id="agent-workflow-dependency-manage-creds-btn" class="btn-secondary" type="button" style="font-size: 0.72rem; padding: 3px 8px;">管理安全凭据</button>
+                            <button id="agent-workflow-dependency-close-btn" class="btn-danger-outline" type="button" aria-label="关闭依赖配置" title="关闭依赖配置">关闭</button>
+                        </div>
                     </div>
                     <div class="agent-workflow-dependency-body">
                         <div id="agent-workflow-dependency-summary" class="agent-workflow-dependency-summary"></div>
@@ -237,29 +223,6 @@
                     <div class="agent-workflow-share-footer">
                         <button id="agent-workflow-dependency-cancel-btn" class="btn-secondary" type="button">取消</button>
                         <button id="agent-workflow-dependency-save-btn" class="btn-primary" type="button">确认依赖映射</button>
-                    </div>
-                </div>
-            </div>
-            <div id="agent-automation-resources-modal" class="modal-overlay hidden agent-automation-resources-modal-overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="agent-automation-resources-title" style="z-index: 1960;">
-                <div class="modal agent-automation-resources-modal" role="document">
-                    <div class="agent-workflow-share-head">
-                        <div>
-                            <h3 id="agent-automation-resources-title">凭据库</h3>
-                            <p id="agent-automation-resources-subtitle">集中管理工作流运行时需要使用的受控凭据。</p>
-                        </div>
-                        <button id="agent-automation-resources-close-btn" class="btn-danger-outline" type="button" aria-label="关闭凭据库" title="关闭凭据库">关闭</button>
-                    </div>
-                    <div class="agent-automation-resources-body">
-                        <div id="agent-automation-resources-tabs" class="agent-automation-resources-tabs" role="tablist" aria-label="自动化资源">
-                            <button id="agent-automation-triggers-tab" class="agent-automation-resources-tab active" type="button" role="tab" aria-selected="true" aria-controls="agent-automation-resources-list" tabindex="0" data-agent-automation-resource-tab="triggers">触发器</button>
-                            <button id="agent-automation-credentials-tab" class="agent-automation-resources-tab" type="button" role="tab" aria-selected="false" aria-controls="agent-automation-resources-list" tabindex="-1" data-agent-automation-resource-tab="credentials">凭据</button>
-                        </div>
-                        <div id="agent-automation-resources-notice" class="agent-automation-resources-notice hidden" role="status" aria-live="polite"></div>
-                        <div id="agent-automation-resources-actions" class="agent-automation-resources-actions">
-                            <button id="agent-automation-resources-new-btn" class="btn-primary" type="button">新建触发器</button>
-                        </div>
-                        <div id="agent-automation-resources-list" class="agent-automation-resources-list" role="tabpanel" aria-labelledby="agent-automation-triggers-tab"></div>
-                        <form id="agent-automation-resources-editor" class="agent-automation-resources-editor hidden" novalidate></form>
                     </div>
                 </div>
             </div>
