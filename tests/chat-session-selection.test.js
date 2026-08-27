@@ -184,3 +184,28 @@ test('selecting a session reattaches active chat Agents and refreshes on termina
     await new Promise(resolve => setImmediate(resolve));
     assert.ok(harness.unregisteredRuns.includes('run-agent-1'));
 });
+
+test('会话界面消息记录恢复在两侧全宽显示，不强制 920px 居中', () => {
+    const layoutRefreshCss = fs.readFileSync(path.join(__dirname, '../client/chat/styles/layout-refresh.css'), 'utf8');
+    assert.match(layoutRefreshCss, /\.message-container > \.message\s*\{[\s\S]*?width:\s*100%;/);
+    assert.doesNotMatch(layoutRefreshCss, /\.message-container > \.message\s*\{[\s\S]*?margin-inline:\s*auto;/);
+    assert.doesNotMatch(layoutRefreshCss, /\.message-container > \.message\s*\{[\s\S]*?width:\s*min\(100%,\s*920px\);/);
+});
+
+test('长会话虚拟滚动具备防闪烁保护：增量DOM复用、程序滚动保护与禁用不可控动画', () => {
+    const virtualizerJs = fs.readFileSync(path.join(__dirname, '../client/chat/message-virtualizer.js'), 'utf8');
+    const shellCss = fs.readFileSync(path.join(__dirname, '../client/chat/styles/base/chat-shell.css'), 'utf8');
+
+    // 1. CSS 不应有 content-visibility: auto，避免尺寸震荡
+    assert.doesNotMatch(shellCss, /content-visibility:\s*auto/);
+    // 2. 虚拟容器下必须禁用气泡入场动画，防止滑动时每次重新计算透明度导致白闪
+    assert.match(shellCss, /\.message-container\.is-virtualized\s+\.message-content\s*\{[\s\S]*?animation:\s*none\s*!important/);
+    // 3. 必须具备 isProgrammaticScroll 保护，防止修改 scrollTop 导致递归事件死循环
+    assert.match(virtualizerJs, /isProgrammaticScroll/);
+    assert.match(virtualizerJs, /setProgrammaticScrollTop/);
+    // 4. renderWindow 内部不得使用 setHtml(state.container, '') 全量清空，必须增量复用 DOM
+    const renderWindowMatch = virtualizerJs.match(/function renderWindow[\s\S]*?function scheduleRender/);
+    assert.ok(renderWindowMatch);
+    assert.doesNotMatch(renderWindowMatch[0], /PivotSafeHtml\.setHtml\(state\.container/);
+});
+

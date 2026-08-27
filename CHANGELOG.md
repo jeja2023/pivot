@@ -1,3 +1,16 @@
+## [v0.1.57] - 2026-08-27
+
+### 会话全屏展示恢复与长会话防闪烁及工作流发布门禁体验优化
+
+- **会话界面消息记录恢复两侧全屏全宽展示**：移除了 `.message-container > .message` 上强加的 920px 居中宽度与居中外边距限制，恢复标准全屏间距（`padding: 20px 24px 218px`），放宽内容气泡最大宽度至 `min(92%, 960px)`，完美恢复助手消息靠最左、用户消息靠最右的两侧全屏展示效果。
+- **生产环境长会话持续死循环闪烁根因彻底修复**：全面推行增量 Keyed DOM 节点复用（Reconciliation），废除滚动重绘时清空容器的破坏性操作；引入程序化滚动保护标志（`isProgrammaticScroll`）与用户上滑主动释放机制，彻底切断 `ResizeObserver` 与滚动事件互锁的 60FPS 死循环；移除 `content-visibility: auto` 消除高度塌陷抖动，并在虚拟化模式下禁用气泡淡入动画防频闪。
+- **Web 版 Agent 控制台数据表类型列防截断防护**：将收件箱表格类型列宽度由 76px 放宽至 96px，设置 `text-overflow: clip; overflow: visible; padding: 4px 2px;` 消除 Web 端 CJK 最小字号强制策略引发的省略号截断；同步将任务运行列表类型列放宽至 96px 并添加防截断保护。
+- **统一收件箱与持续目标页面底部大块空白消除**：为单卡片视图容器配置 `flex: 1 1 auto; height: 100%; min-height: 0; display: flex; flex-direction: column;` 使卡片自适应延伸至工作区底部；解除收件箱表格 `max-height: 400px` 限制改为自适应占满卡片全高；持续目标列表改为纵向弹性滚动并居中空状态。
+- **工作流发布固定评测集 409 门禁拦截修复与交互优化**：后端路由支持 `skipEvaluationGate: true` 与 `fixedEvaluationRequired: false`；全局错误中间件在 4xx 时透传 `code: err.code`；前端发布方法在遇到 409 门禁拦截时提供交互确认弹窗支持一键跳过门禁完成发布；工作流画布顶部工具栏新增「跳过门禁发布」快捷按钮。
+- **契约测试全量守护**：扩展 `tests/automation-page-contract.test.js` 至 16 项全绿通过；`tests/chat-session-selection.test.js` 4 项全绿通过；`eslint` 与全局变量扫描 0 报错通过。
+
+详细发布记录见 [v0.1.57 发布记录](docs/releases/v0.1.57-会话全屏展示恢复与长会话防闪烁及工作流发布门禁体验优化.md)。
+
 ## [v0.1.56] - 2026-08-27
 
 ### 自动化与数据分析界面交互精细化与弹窗组件去重规范

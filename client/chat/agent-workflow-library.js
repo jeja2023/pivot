@@ -881,7 +881,7 @@ function deleteSelectedAgentWorkflow() {
     });
 }
 
-async function publishSelectedAgentWorkflow(version = 'current') {
+async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
     let workflow = selectedAgentWorkflow();
     if (workflow && !workflow.can_edit) {
         showToast('共享工作流不能由接收方发布', 'warning');
@@ -892,13 +892,29 @@ async function publishSelectedAgentWorkflow(version = 'current') {
         if (!workflow) return;
     }
     if (!workflow) return showToast('请选择要发布的工作流', 'warning');
+    const skipEvaluationGate = options?.skipEvaluationGate === true || options?.fixedEvaluationRequired === false;
+    const reqBody = { version };
+    if (skipEvaluationGate) {
+        reqBody.skipEvaluationGate = true;
+        reqBody.fixedEvaluationRequired = false;
+    }
     const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version })
+        body: JSON.stringify(reqBody)
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '发布工作流失败', 'error');
+    if (!res.ok) {
+        if (res.status === 409 && (data.code === 'WORKFLOW_EVALUATION_GATE_FAILED' || String(data.error || '').includes('评测集') || String(data.error || '').includes('门禁'))) {
+            if (typeof showConfirm === 'function') {
+                showConfirm('发布门禁提示', '当前工作流尚未通过固定评测集（要求评测通过率 ≥ 80%）。是否跳过评测门禁直接发布当前版本？', async () => {
+                    await publishSelectedAgentWorkflow(version, { skipEvaluationGate: true });
+                });
+                return null;
+            }
+        }
+        return showToast(data.error || '发布工作流失败', 'error');
+    }
     activeAgentWorkflowId = String(data.workflow.id);
     agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
     agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;

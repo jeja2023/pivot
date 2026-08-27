@@ -204,3 +204,64 @@ test('数据分析应用数据总览表格中行高统一为38px且操作按钮�
     assert.match(overviewCss, /\.data-analysis-table-actions\s*\{[\s\S]*?height:\s*24px;/);
     assert.match(overviewCss, /\.data-analysis-table-btn\s*\{[\s\S]*?height:\s*24px;/);
 });
+
+test('Agent控制台数据表类型列具备防省略号截断保护', () => {
+    const harnessJs = read('client/chat/agent-harness.js');
+    const harnessCss = read('client/chat/styles/workspaces/agent/agent-harness.css');
+    const runsListCss = read('client/chat/styles/workspaces/agent/agent-runs-list-table.css');
+
+    // 1. 收件箱类型列宽度不小于 96px，并挂载 agent-inbox-type-col 类
+    assert.match(harnessJs, /<th class="text-center" style="width:\s*96px;">类型<\/th>/);
+    assert.match(harnessJs, /<td class="text-center agent-inbox-type-col">/);
+
+    // 2. CSS 对类型列与徽标设置专用宽度与 text-overflow: clip
+    assert.match(harnessCss, /\.agent-inbox-table td\.agent-inbox-type-col\s*\{[\s\S]*?width:\s*96px;/);
+    assert.match(harnessCss, /\.agent-inbox-table td\.agent-inbox-type-col\s*\{[\s\S]*?text-overflow:\s*clip;/);
+    assert.match(harnessCss, /\.agent-inbox-type-badge\s*\{[\s\S]*?text-overflow:\s*clip;/);
+
+    // 3. 任务运行列表类型列宽度扩展为 96px 且具备防截断
+    assert.match(runsListCss, /\.agent-runs-table th:nth-child\(4\)[\s\S]*?width:\s*96px;/);
+    assert.match(runsListCss, /\.agent-run-type\s*\{[\s\S]*?text-overflow:\s*clip;/);
+});
+
+test('Agent控制台统一收件箱与持续目标卡片自适应撑满高度，消除底部大块空白', () => {
+    const harnessCss = read('client/chat/styles/workspaces/agent/agent-harness.css');
+
+    // 1. 单卡片子视图容器内的卡片必须 flex: 1 1 auto 且 height: 100%
+    assert.match(harnessCss, /\.agent-cp-subview-pane:not\(\[data-agent-cp-pane="quality"\]\)\s*>\s*\.agent-cp-card\s*\{[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(harnessCss, /\.agent-cp-subview-pane:not\(\[data-agent-cp-pane="quality"\]\)\s*>\s*\.agent-cp-card\s*\{[\s\S]*?height:\s*100%;/);
+
+    // 2. 收件箱表格容器自适应填满卡片，不得设置 400px 最大高度截断
+    assert.match(harnessCss, /\.agent-inbox-table-wrap\s*\{[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(harnessCss, /\.agent-inbox-table-wrap\s*\{[\s\S]*?max-height:\s*none;/);
+    assert.doesNotMatch(harnessCss, /\.agent-inbox-table-wrap\s*\{[\s\S]*?max-height:\s*400px;/);
+
+    // 3. 持续目标列表自适应铺满卡片并支持独立滚动
+    assert.match(harnessCss, /\.agent-goal-list[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(harnessCss, /\.agent-goal-list[\s\S]*?overflow-y:\s*auto;/);
+});
+
+test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认发布', () => {
+    const routeJs = read('server/routes/agents.js');
+    const libraryJs = read('client/chat/agent-workflow-library.js');
+    const toolbarJs = read('client/chat/dag-toolbar.js');
+    const appJs = read('server/app.js');
+
+    // 1. 服务端发布路由支持 skipEvaluationGate 参数
+    assert.match(routeJs, /skipEvaluationGate\s*=\s*req\.body\?\.skipEvaluationGate === true \|\| req\.body\?\.fixedEvaluationRequired === false/);
+
+    // 2. 全局错误中间件在 4xx 时透传 err.code
+    assert.match(appJs, /isClientError && err\.code \? \{ code: err\.code \} : \{\}/);
+
+    // 3. 前端工作流发布方法支持 skipEvaluationGate 并在 409 拦截时弹出提示确认
+    assert.match(libraryJs, /async function publishSelectedAgentWorkflow\(version = 'current', options = \{\}\)/);
+    assert.match(libraryJs, /WORKFLOW_EVALUATION_GATE_FAILED/);
+    assert.match(libraryJs, /showConfirm\('发布门禁提示'/);
+
+    // 4. 画布工具栏发布菜单包含「发布当前版本」与「跳过门禁发布」
+    assert.match(toolbarJs, /makeButton\('发布当前版本'/);
+    assert.match(toolbarJs, /makeButton\('跳过门禁发布'/);
+});
+
+
+

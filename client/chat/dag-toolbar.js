@@ -144,7 +144,8 @@ function renderDagToolbar(ctx) {
                 })
             ], 'is-action-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('发布', [
-                makeButton('发布当前版本', '保存并发布当前工作流版本', () => window.publishSelectedAgentWorkflow?.('current'))
+                makeButton('发布当前版本', '保存并发布当前工作流版本', () => window.publishSelectedAgentWorkflow?.('current')),
+                makeButton('跳过门禁发布', '跳过固定评测集门禁直接发布', () => window.publishSelectedAgentWorkflow?.('current', { skipEvaluationGate: true }))
             ], 'is-publish-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('运行', [
                 makeButton('预览运行', '使用当前画布快照运行一次', () => window.runAgentWorkflowPreview?.(), { runSource: 'draft' }),

@@ -374,7 +374,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     }));
 
     router.post('/agents/workflows/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
-        const release = await publishWorkflowRelease(req.params.id, req.user, { ...(req.body || {}), version: req.body?.version || 'current', fixedEvaluationRequired: req.body?.fixedEvaluationRequired !== false });
+        const skipEvaluationGate = req.body?.skipEvaluationGate === true || req.body?.fixedEvaluationRequired === false;
+        const release = await publishWorkflowRelease(req.params.id, req.user, { ...(req.body || {}), version: req.body?.version || 'current', fixedEvaluationRequired: !skipEvaluationGate });
         if (!release) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
         const workflow = await getAgentWorkflowForUser(req.params.id, req.user);
         logAction(req, '发布智能体工作流版本', `工作流ID: ${req.params.id}，发布版本: ${workflow?.published_version || '-'}`);

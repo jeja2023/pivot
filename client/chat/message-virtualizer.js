@@ -79,6 +79,17 @@
         state.offsets = offsets;
     }
 
+    function setProgrammaticScrollTop(container, top) {
+        if (!state) return;
+        const targetTop = Math.max(0, Math.round(top));
+        if (Math.abs(container.scrollTop - targetTop) <= 1) return;
+        state.isProgrammaticScroll = true;
+        container.scrollTop = targetTop;
+        requestAnimationFrame(() => {
+            if (state) state.isProgrammaticScroll = false;
+        });
+    }
+
     function cancelBottomPinRelease(activeState = state) {
         if (!activeState?.bottomPinTimer) return;
         clearTimeout(activeState.bottomPinTimer);
@@ -87,11 +98,11 @@
 
     function pinToBottomUntilStable(activeState = state) {
         if (state !== activeState || !activeState?.active || !activeState.pinBottom) return;
-        activeState.container.scrollTop = activeState.container.scrollHeight;
+        setProgrammaticScrollTop(activeState.container, activeState.container.scrollHeight);
         cancelBottomPinRelease(activeState);
         activeState.bottomPinTimer = setTimeout(() => {
             if (state !== activeState || !activeState.active || !activeState.pinBottom) return;
-            activeState.container.scrollTop = activeState.container.scrollHeight;
+            setProgrammaticScrollTop(activeState.container, activeState.container.scrollHeight);
             activeState.pinBottom = false;
             activeState.bottomPinTimer = 0;
         }, BOTTOM_PIN_SETTLE_MS);
@@ -118,8 +129,11 @@
             });
             if (changed) {
                 updateSpacerHeights();
-                if (activeState.pinBottom) pinToBottomUntilStable(activeState);
-                else if (scrollAdjustment) activeState.container.scrollTop += scrollAdjustment;
+                if (activeState.pinBottom) {
+                    pinToBottomUntilStable(activeState);
+                } else if (scrollAdjustment && Math.abs(scrollAdjustment) > 2) {
+                    setProgrammaticScrollTop(activeState.container, activeState.container.scrollTop + scrollAdjustment);
+                }
             }
         });
         state.container.querySelectorAll('.message[data-virtual-message-key]').forEach(message => state.resizeObserver.observe(message));
@@ -149,55 +163,88 @@
 
     function renderWindow(force = false) {
         if (!state?.active) return;
-        const activeState = state;
         const nextRange = computeRange();
         if (!force && nextRange.start === state.range.start && nextRange.end === state.range.end) return;
-        const previousScrollTop = state.container.scrollTop;
         captureMountedState();
-        window.teardownPivotCharts?.(state.container);
-        state.resizeObserver?.disconnect();
 
         const offsets = buildOffsets(state.records);
-        const fragment = document.createDocumentFragment();
-        fragment.appendChild(createSpacer('message-virtual-spacer-top', offsets[nextRange.start] || 0));
-        for (let index = nextRange.start; index < nextRange.end; index += 1) {
-            const record = state.records[index];
-            const content = appendMessage(record.role, record.content, record.id, messageStats(record), {
-                target: fragment,
-                deferRender: true,
-                disableImagePinning: true
-            });
-            const message = content?.closest('.message');
-            if (!message) continue;
-            message.dataset.virtualMessageKey = recordKey(record);
-            restoreMountedState(message, record);
+        let topSpacer = state.container.querySelector('.message-virtual-spacer-top');
+        let bottomSpacer = state.container.querySelector('.message-virtual-spacer-bottom');
+
+        if (!topSpacer) {
+            topSpacer = createSpacer('message-virtual-spacer-top', offsets[nextRange.start] || 0);
+            state.container.prepend(topSpacer);
+        } else {
+            topSpacer.style.height = `${offsets[nextRange.start] || 0}px`;
         }
-        fragment.appendChild(createSpacer(
-            'message-virtual-spacer-bottom',
-            Math.max(0, offsets[offsets.length - 1] - offsets[nextRange.end])
-        ));
-        PivotSafeHtml.setHtml(state.container, '');
-        state.container.appendChild(fragment);
+
+        if (!bottomSpacer) {
+            bottomSpacer = createSpacer('message-virtual-spacer-bottom', Math.max(0, offsets[offsets.length - 1] - offsets[nextRange.end]));
+            state.container.appendChild(bottomSpacer);
+        } else {
+            bottomSpacer.style.height = `${Math.max(0, offsets[offsets.length - 1] - offsets[nextRange.end])}px`;
+        }
+
+        const existingMessages = new Map();
+        state.container.querySelectorAll('.message[data-virtual-message-key]').forEach(el => {
+            existingMessages.set(el.dataset.virtualMessageKey, el);
+        });
+
+        const activeKeys = new Set();
+        const newlyMountedAssistantNodes = [];
+        let insertRefNode = bottomSpacer;
+
+        for (let index = nextRange.end - 1; index >= nextRange.start; index -= 1) {
+            const record = state.records[index];
+            const key = recordKey(record);
+            activeKeys.add(key);
+
+            let messageEl = existingMessages.get(key);
+            if (messageEl) {
+                if (messageEl.nextSibling !== insertRefNode) {
+                    state.container.insertBefore(messageEl, insertRefNode);
+                }
+            } else {
+                const tempDiv = document.createElement('div');
+                appendMessage(record.role, record.content, record.id, messageStats(record), {
+                    target: tempDiv,
+                    deferRender: true,
+                    disableImagePinning: true
+                });
+                messageEl = tempDiv.querySelector('.message');
+                if (messageEl) {
+                    messageEl.dataset.virtualMessageKey = key;
+                    restoreMountedState(messageEl, record);
+                    state.container.insertBefore(messageEl, insertRefNode);
+                    if (record.role === 'assistant') {
+                        const contentNode = messageEl.querySelector('.message-content');
+                        if (contentNode) newlyMountedAssistantNodes.push(contentNode);
+                    }
+                }
+            }
+            if (messageEl) insertRefNode = messageEl;
+        }
+
+        existingMessages.forEach((messageEl, key) => {
+            if (!activeKeys.has(key)) {
+                window.teardownPivotCharts?.(messageEl);
+                messageEl.remove();
+            }
+        });
+
         state.range = nextRange;
         state.offsets = offsets;
-        state.container.scrollTop = state.pinBottom
-            ? state.container.scrollHeight
-            : Math.min(previousScrollTop, Math.max(0, state.container.scrollHeight - state.container.clientHeight));
-        state.container.querySelectorAll('.message.assistant .message-content').forEach(node => window.renderPivotCharts?.(node));
+
+        newlyMountedAssistantNodes.forEach(node => window.renderPivotCharts?.(node));
         observeMountedMessages();
 
         if (state.pinBottom) {
-            requestAnimationFrame(() => {
-                if (state?.active) pinToBottomUntilStable(state);
-            });
+            pinToBottomUntilStable(state);
         } else {
-            requestAnimationFrame(() => {
-                if (state !== activeState || !activeState.active) return;
-                activeState.container.scrollTop = Math.min(
-                    previousScrollTop,
-                    Math.max(0, activeState.container.scrollHeight - activeState.container.clientHeight)
-                );
-            });
+            const maxScrollTop = Math.max(0, state.container.scrollHeight - state.container.clientHeight);
+            if (state.container.scrollTop > maxScrollTop) {
+                setProgrammaticScrollTop(state.container, maxScrollTop);
+            }
         }
     }
 
@@ -227,11 +274,8 @@
             const previousTop = state.container.scrollTop;
             state.records = older.concat(state.records);
             state.page = data.page || { hasMore: false, beforeId: null };
-            state.container.scrollTop = previousTop + addedHeight;
+            setProgrammaticScrollTop(state.container, previousTop + addedHeight);
             renderWindow(true);
-            requestAnimationFrame(() => {
-                if (state === activeState) state.container.scrollTop = previousTop + addedHeight;
-            });
         } catch (error) {
             showToast(error.message || '历史消息加载失败', 'error');
         } finally {
@@ -241,6 +285,17 @@
 
     function handleScroll() {
         if (!state?.active) return;
+        if (state.isProgrammaticScroll) {
+            state.isProgrammaticScroll = false;
+            return;
+        }
+        if (state.pinBottom) {
+            const distanceFromBottom = state.container.scrollHeight - state.container.clientHeight - state.container.scrollTop;
+            if (distanceFromBottom > 48) {
+                cancelBottomPinRelease(state);
+                state.pinBottom = false;
+            }
+        }
         if (state.container.scrollTop < 500) loadOlderMessages();
         scheduleRender();
     }
@@ -276,8 +331,10 @@
             renderFrame: 0,
             bottomPinTimer: 0,
             loading: false,
-            pinBottom: true
+            pinBottom: true,
+            isProgrammaticScroll: false
         };
+        PivotSafeHtml.setHtml(container, '');
         container.classList.add('is-virtualized');
         container.addEventListener('scroll', handleScroll, { passive: true });
         renderWindow(true);

@@ -223,17 +223,17 @@
 
 .message-container {
     gap: 12px;
-    padding: 28px clamp(20px, 5vw, 72px) 218px;
+    padding: 20px 24px 218px;
     background: var(--ui-page);
 }
 
 .message-container > .message {
-    width: min(100%, 920px);
-    margin-inline: auto;
+    width: 100%;
+    margin-inline: 0;
 }
 
 .message-content {
-    max-width: min(88%, 780px);
+    max-width: min(92%, 960px);
     border-radius: 14px;
     box-shadow: 0 1px 1px rgba(15, 23, 42, 0.025);
 }
