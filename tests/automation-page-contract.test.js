@@ -82,3 +82,125 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     assert.match(credentials, /allowed_units = \?, allowed_user_ids = \?, updated_at/);
     assert.match(migrations, /202608220008_workflow_credential_user_visibility/);
 });
+
+test('工作流资产列表仅对已发布工作流展示计划按钮，未发布工作流不可见', () => {
+    const workflows = read('client/chat/agent-workflows.js');
+    assert.match(workflows, /workflow\.can_edit && publishedVersion \? `<button[^>]*data-automation-workflow-schedule=/);
+    assert.doesNotMatch(workflows, /disabled title="发布后可创建计划"/);
+});
+
+test('新建评测集弹窗右上角不展示关闭按钮，由底部取消按钮关闭', () => {
+    const evaluations = read('client/chat/agent-evaluations.js');
+    const headMatch = evaluations.match(/<div class="agent-config-modal-head">([\s\S]*?)<\/div>\s*<div class="agent-eval-editor-body">/);
+    assert.ok(headMatch);
+    assert.doesNotMatch(headMatch[1], /data-agent-eval-editor-close/);
+    assert.match(evaluations, /agent-eval-editor-footer[\s\S]*?data-agent-eval-editor-close[\s\S]*?取消/);
+});
+
+test('质量与可靠性大屏采用左右双栏布局与紧凑指标卡片', () => {
+    const agent = read('client/chat/partials/workspaces/agent.html');
+    const harnessCss = read('client/chat/styles/workspaces/agent/agent-harness.css');
+    const evalCss = read('client/chat/styles/workspaces/agent/agent-evaluations.css');
+
+    // HTML 左右双栏结构
+    assert.match(agent, /class="agent-cp-quality-col agent-cp-quality-col--left"[\s\S]*?agent-quality-panel[\s\S]*?agent-eval-overview/);
+    assert.match(agent, /class="agent-cp-quality-col agent-cp-quality-col--right"[\s\S]*?agent-reliability-panel[\s\S]*?agent-feedback-summary/);
+
+    // CSS 双栏与紧凑网格
+    assert.match(harnessCss, /\.agent-cp-quality-layout\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+    assert.match(harnessCss, /\.agent-cp-quality-col\s*\{[\s\S]*?flex-direction:\s*column;/);
+    assert.match(harnessCss, /\.agent-quality-metrics-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
+    assert.match(harnessCss, /\.agent-feedback-metrics\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
+    assert.match(evalCss, /\.agent-eval-overview\s*\{[\s\S]*?grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/);
+});
+
+test('新建评测集弹窗主体使用自适应滚动且无多余预留槽', () => {
+    const evalCss = read('client/chat/styles/workspaces/agent/agent-evaluations.css');
+    assert.match(evalCss, /\.agent-eval-editor-body\s*\{[\s\S]*?overflow-y:\s*auto;/);
+    assert.doesNotMatch(evalCss, /\.agent-eval-editor-body\s*\{[\s\S]*?scrollbar-gutter:/);
+});
+
+test('任务页面新建任务按钮移动至删除审计左侧，工作流搜索栏居左且新建按钮居右，控制台持续目标按钮去重去加号', () => {
+    const agent = read('client/chat/partials/workspaces/agent.html');
+    const dag = read('client/chat/partials/workspaces/agent-dag.html');
+    const dagCss = read('client/chat/styles/workspaces/agent/agent-dag-workspace-shell.css');
+
+    // 1. 任务页面：新建任务按钮在删除审计左侧，顶栏不再放置新建任务
+    assert.match(agent, /class="agent-history-head-actions"[\s\S]*?id="task-create-open-btn"[\s\S]*?id="agent-audit-btn"/);
+    const topActions = agent.match(/<div class="agent-modal-header-actions">([\s\S]*?)<\/div>/)?.[1] || '';
+    assert.doesNotMatch(topActions, /id="task-create-open-btn"/);
+    assert.doesNotMatch(topActions, /id="agent-goal-create-top-btn"/);
+
+    // 2. 工作流页面：搜索栏靠左，新建工作流靠右
+    assert.match(dag, /class="automation-assets-toolbar"[\s\S]*?class="automation-assets-search"[\s\S]*?class="automation-assets-actions"[\s\S]*?id="automation-new-workflow-btn"/);
+    assert.match(dagCss, /\.automation-assets-toolbar\s*\{[\s\S]*?justify-content:\s*space-between;/);
+
+    // 3. Agent 控制台：持续目标卡片内按钮去除加号
+    assert.match(agent, /id="agent-goal-create"[^>]*>新建持续目标<\/button>/);
+});
+
+test('新建任务弹窗中模板区域采用按钮加独立弹窗样式，表单主体不内嵌模板条', () => {
+    const agent = read('client/chat/partials/workspaces/agent.html');
+    const templatesJs = read('client/chat/agent-templates.js');
+
+    // 1. 新建任务表单主体不内嵌模板条
+    const bodyContent = agent.match(/<div class="agent-task-editor-body">([\s\S]*?)<\/div>\s*<div class="agent-task-editor-footer">/)?.[1] || '';
+    assert.doesNotMatch(bodyContent, /class="agent-task-composer-templates-bar"/);
+
+    // 2. 常用模板按钮位于底部左侧与保存为模板并列，头部不重复放置避免错位
+    assert.match(agent, /class="agent-task-footer-left-actions"[\s\S]*?id="agent-footer-templates-btn"[^>]*>常用模板<\/button>[\s\S]*?data-agent-save-template/);
+    const taskHeadActions = agent.match(/<div id="agent-run-panel"[^>]*>[\s\S]*?<div class="agent-config-modal-head">([\s\S]*?)<\/div>/)?.[1] || '';
+    assert.doesNotMatch(taskHeadActions, /常用模板/);
+
+    // 3. 独立存在常用模板弹窗
+    assert.match(agent, /id="agent-template-modal"[^>]*class="modal-overlay hidden"[\s\S]*?id="agent-template-list"/);
+
+    // 4. JS 提供开闭模板弹窗函数
+    assert.match(templatesJs, /function openAgentTemplateModal/);
+    assert.match(templatesJs, /function closeAgentTemplateModal/);
+});
+
+test('新建任务弹窗右上角不展示关闭按钮，由底部取消按钮关闭', () => {
+    const agent = read('client/chat/partials/workspaces/agent.html');
+    const headMatch = agent.match(/<div id="agent-run-panel"[^>]*>[\s\S]*?<div class="agent-config-modal-head">([\s\S]*?)<\/div>\s*<div class="agent-task-editor-body">/);
+    assert.ok(headMatch);
+    assert.doesNotMatch(headMatch[1], /id="task-create-close-btn"/);
+    assert.doesNotMatch(headMatch[1], /<button/);
+    assert.match(agent, /id="task-create-cancel-btn"[^>]*>取消<\/button>/);
+});
+
+test('常用任务模板弹窗右下角不展示关闭按钮，由右上角关闭按钮关闭', () => {
+    const agent = read('client/chat/partials/workspaces/agent.html');
+    const modalMatch = agent.match(/<div id="agent-template-modal"[^>]*>([\s\S]*?)<\/div>\s*<!-- 新建任务弹窗 -->/);
+    assert.ok(modalMatch);
+    // 右上角有关闭按钮
+    assert.match(modalMatch[1], /class="agent-config-modal-head"[\s\S]*?id="agent-template-modal-close"/);
+    // 右下角（footer）无关闭按钮
+    const footerMatch = modalMatch[1].match(/<div class="agent-task-editor-footer">([\s\S]*?)<\/div>/);
+    assert.ok(footerMatch);
+    assert.doesNotMatch(footerMatch[1], /<button/);
+});
+
+test('数据分析应用数据总览表格中行高统一为38px且操作按钮统一为24px', () => {
+    const viewJs = read('client/chat/data-analysis/view.js');
+    const overviewCss = read('client/chat/styles/workspaces/apps/data-analysis-overview.css');
+
+    // 1. 确保 7 列完整且顺序正确（序号、名称、文件名、大小、类型、时间、操作）
+    assert.match(viewJs, /data-analysis-row-index[\s\S]*?data-analysis-dataset-name[\s\S]*?data-analysis-break-text[\s\S]*?data-analysis-size-cell[\s\S]*?data-analysis-file-type[\s\S]*?data-analysis-muted-cell[\s\S]*?data-analysis-table-actions/);
+
+    // 2. view.js 中不使用 <br> 换行
+    assert.doesNotMatch(viewJs, /dataset\.columnCount\)[^<]*<br>/);
+    assert.match(viewJs, /class="data-analysis-size-cell"><div class="data-analysis-size-wrapper"/);
+
+    // 3. CSS 中声明了 white-space: nowrap
+    assert.match(overviewCss, /\.data-analysis-size-cell\s*\{[\s\S]*?white-space:\s*nowrap;/);
+    assert.match(overviewCss, /\.data-analysis-size-wrapper\s*\{[\s\S]*?white-space:\s*nowrap;/);
+
+    // 4. 表格行高与单元格高度统一为全局 38px
+    assert.match(overviewCss, /\.data-analysis-dataset-table td\s*\{[\s\S]*?height:\s*38px;/);
+    assert.match(overviewCss, /\.data-analysis-dataset-table td\s*\{[\s\S]*?padding:\s*6px 8px;/);
+
+    // 5. 操作按钮高度统一为全局 24px
+    assert.match(overviewCss, /\.data-analysis-table-actions\s*\{[\s\S]*?height:\s*24px;/);
+    assert.match(overviewCss, /\.data-analysis-table-btn\s*\{[\s\S]*?height:\s*24px;/);
+});

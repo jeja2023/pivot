@@ -7,9 +7,6 @@
                 <p id="agent-workspace-subtitle">集中创建、运行和复盘自主任务、工作流任务与计划执行。</p>
             </div>
             <div class="agent-modal-header-actions">
-                <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog"
-                    aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
-                <button id="agent-goal-create-top-btn" class="btn-primary hidden" type="button">新建持续目标</button>
                 <button id="agent-refresh-btn" class="btn-secondary" type="button">刷新</button>
                 <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
             </div>
@@ -81,6 +78,29 @@
         </div>
         <!-- 视图 1：任务工作台 (默认展示) -->
         <div id="agent-tasks-view" class="agent-workbench">
+            <!-- 常用任务模板选择弹窗 -->
+            <div id="agent-template-modal" class="modal-overlay hidden" style="z-index: 1870;" role="dialog"
+                aria-modal="true" aria-labelledby="agent-template-modal-title" aria-hidden="true">
+                <div class="modal agent-template-dialog">
+                    <div class="agent-config-modal-head">
+                        <div>
+                            <h3 id="agent-template-modal-title">常用任务模板</h3>
+                            <span>选择已有模板快速填充任务目标与执行参数</span>
+                        </div>
+                        <button type="button" class="btn-secondary" id="agent-template-modal-close">关闭</button>
+                    </div>
+                    <div class="agent-template-modal-body">
+                        <div class="agent-task-composer-templates-bar">
+                            <div id="agent-template-list" class="agent-template-list"></div>
+                        </div>
+                    </div>
+                    <div class="agent-task-editor-footer">
+                        <span class="agent-goal-hint">点击任意模板即可直接填充至新建任务表单</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 新建任务弹窗 -->
             <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog"
                 aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
                 <div id="agent-run-panel" class="modal agent-task-editor-modal">
@@ -89,27 +109,8 @@
                             <h3 id="agent-task-editor-title">新建任务</h3>
                             <span>由智能助手根据目标自主规划并执行多步骤任务</span>
                         </div>
-                        <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
                     </div>
                     <div class="agent-task-editor-body">
-                        <!-- 任务模板快速选择条 -->
-                        <div class="agent-task-composer-templates-bar">
-                            <div class="agent-task-composer-templates-head">
-                                <span class="composer-templates-label">
-                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-                                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
-                                        aria-hidden="true">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                        <line x1="3" y1="9" x2="21" y2="9"></line>
-                                        <line x1="9" y1="21" x2="9" y2="9"></line>
-                                    </svg>
-                                    <span>常用模板</span>
-                                </span>
-                                <button type="button" class="btn-text-action btn-xs" data-agent-save-template
-                                    title="将当前填写的任务目标与参数保存为模板">+ 保存当前为模板</button>
-                            </div>
-                            <div id="agent-template-list" class="agent-template-list"></div>
-                        </div>
                         <label class="modal-form-field agent-task-title-field">
                             <span>任务标题</span>
                             <input type="text" id="agent-title-input" class="form-input agent-title-input"
@@ -225,7 +226,10 @@
                         <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
                     </div>
                     <div class="agent-task-editor-footer">
-                        <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
+                        <div class="agent-task-footer-left-actions">
+                            <button class="btn-secondary" type="button" id="agent-footer-templates-btn">常用模板</button>
+                            <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
+                        </div>
                         <div>
                             <button id="task-create-cancel-btn" class="btn-secondary" type="button">取消</button>
                             <button id="agent-save-plan-btn" class="btn-secondary" type="button">保存为计划</button>
@@ -242,6 +246,8 @@
                         <p>一次性后台任务、工作流及计划执行状态。</p>
                     </div>
                     <div class="agent-history-head-actions">
+                        <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog"
+                            aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
                         <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
                     </div>
                 </div>
@@ -420,7 +426,7 @@
                             <span>配置由定时调度、外部 Webhook 或数据库文件变更自动触发的常驻 Agent 目标</span>
                         </div>
                         <div class="agent-cp-card-actions">
-                            <button id="agent-goal-create" class="btn-primary btn-xs" type="button">+ 新建持续目标</button>
+                            <button id="agent-goal-create" class="btn-primary btn-xs" type="button">新建持续目标</button>
                         </div>
                     </div>
                     <div class="agent-cp-card-body">
@@ -447,78 +453,84 @@
             <!-- 子视图 4：质量与可靠性大屏 (指标看板 + 评测中心 + 工具可靠性 + 闭环反馈) -->
             <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
                 <div class="agent-cp-quality-layout">
-                    <!-- 1. 运行质量与运维指标 -->
-                    <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-quality-card-title">运行质量与运维指标</h4>
-                                <span>近 30 天自主任务完成率、人工审批中位数耗时与渠道投递健康度</span>
-                            </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-quality-panel" class="agent-quality-panel"></div>
-                        </div>
-                    </section>
-
-                    <!-- 2. 质量评测中心 -->
-                    <section class="agent-cp-card" aria-labelledby="agent-eval-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-eval-card-title"><strong>评测概览</strong></h4>
-                                <span id="agent-eval-center-status">尚未运行评测</span>
-                            </div>
-                            <div class="agent-cp-card-actions">
-                                <button id="agent-eval-refresh-btn" class="btn-secondary btn-xs"
-                                    type="button">刷新评测集</button>
-                                <button id="agent-eval-create-btn" class="btn-primary btn-xs" type="button">+
-                                    新建评测集</button>
-                            </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div class="agent-eval-center">
-                                <div id="agent-eval-overview" class="agent-eval-overview"></div>
-                                <div class="agent-eval-layout">
-                                    <div id="agent-eval-suite-list" class="agent-eval-suite-list"></div>
-                                    <div id="agent-eval-suite-detail" class="agent-eval-suite-detail"></div>
+                    <!-- 左栏：运行质量与质量评测中心 -->
+                    <div class="agent-cp-quality-col agent-cp-quality-col--left">
+                        <!-- 1. 运行质量与运维指标 -->
+                        <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-quality-card-title">运行质量与运维指标</h4>
+                                    <span>近 30 天自主任务完成率、人工审批中位数耗时与渠道投递健康度</span>
                                 </div>
                             </div>
-                        </div>
-                    </section>
+                            <div class="agent-cp-card-body">
+                                <div id="agent-quality-panel" class="agent-quality-panel"></div>
+                            </div>
+                        </section>
 
-                    <!-- 3. 工具调用可靠性监控 -->
-                    <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-reliability-card-title">工具调用可靠性监控</h4>
-                                <span>各接入工具调用成功率、加权可靠度评分与样本置信度</span>
+                        <!-- 2. 质量评测中心 -->
+                        <section class="agent-cp-card" aria-labelledby="agent-eval-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-eval-card-title"><strong>评测概览</strong></h4>
+                                    <span id="agent-eval-center-status">尚未运行评测</span>
+                                </div>
+                                <div class="agent-cp-card-actions">
+                                    <button id="agent-eval-refresh-btn" class="btn-secondary btn-xs"
+                                        type="button">刷新评测集</button>
+                                    <button id="agent-eval-create-btn" class="btn-primary btn-xs" type="button">+
+                                        新建评测集</button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
-                        </div>
-                    </section>
+                            <div class="agent-cp-card-body">
+                                <div class="agent-eval-center">
+                                    <div id="agent-eval-overview" class="agent-eval-overview"></div>
+                                    <div class="agent-eval-layout">
+                                        <div id="agent-eval-suite-list" class="agent-eval-suite-list"></div>
+                                        <div id="agent-eval-suite-detail" class="agent-eval-suite-detail"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
 
-                    <!-- 4. 结果反馈闭环 -->
-                    <section class="agent-cp-card" aria-labelledby="agent-feedback-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-feedback-card-title">结果反馈闭环</h4>
-                                <span>汇总任务成败、评分和工具失败信号，用于提示词与工具选择改进</span>
+                    <!-- 右栏：工具可靠性与结果反馈闭环 -->
+                    <div class="agent-cp-quality-col agent-cp-quality-col--right">
+                        <!-- 3. 工具调用可靠性监控 -->
+                        <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-reliability-card-title">工具调用可靠性监控</h4>
+                                    <span>各接入工具调用成功率、加权可靠度评分与样本置信度</span>
+                                </div>
                             </div>
-                            <div class="agent-cp-card-actions">
-                                <button id="agent-feedback-refresh" class="btn-secondary btn-xs"
-                                    type="button">刷新反馈</button>
+                            <div class="agent-cp-card-body">
+                                <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
                             </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-feedback-summary" class="agent-feedback-summary-container"></div>
-                            <div class="agent-harness-subhead" style="margin-top: 14px;">
-                                <strong>近期反馈明细</strong>
-                                <span>按任务展示执行结论与人工修正意见</span>
+                        </section>
+
+                        <!-- 4. 结果反馈闭环 -->
+                        <section class="agent-cp-card" aria-labelledby="agent-feedback-card-title">
+                            <div class="agent-cp-card-head">
+                                <div>
+                                    <h4 id="agent-feedback-card-title">结果反馈闭环</h4>
+                                    <span>汇总任务成败、评分和工具失败信号，用于提示词与工具选择改进</span>
+                                </div>
+                                <div class="agent-cp-card-actions">
+                                    <button id="agent-feedback-refresh" class="btn-secondary btn-xs"
+                                        type="button">刷新反馈</button>
+                                </div>
                             </div>
-                            <div id="agent-feedback-list" class="agent-harness-list full-width"></div>
-                        </div>
-                    </section>
+                            <div class="agent-cp-card-body">
+                                <div id="agent-feedback-summary" class="agent-feedback-summary-container"></div>
+                                <div class="agent-harness-subhead" style="margin-top: 14px;">
+                                    <strong>近期反馈明细</strong>
+                                    <span>按任务展示执行结论与人工修正意见</span>
+                                </div>
+                                <div id="agent-feedback-list" class="agent-harness-list full-width"></div>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </div>
 

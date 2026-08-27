@@ -71,6 +71,12 @@ test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {
     assert.match(route, /redacted: true/);
 });
 
+test('审计日志读取不会等待整个异步写入队列', () => {
+    const route = read('server/routes/admin-users.js');
+    assert.doesNotMatch(route, /const \{ flushAllWrites \} = require\('\.\.\/services\/db-write-queue'\)/);
+    assert.doesNotMatch(route, /await flushAllWrites\(\)/);
+});
+
 test('工具策略卡片具备工具名称与简介全量中文化映射', () => {
     const toolPolicy = read('client/chat/tool-policy.js');
     assert.match(toolPolicy, /'data\.group_summary':\s*'分组汇总数据'/);

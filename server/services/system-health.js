@@ -107,12 +107,19 @@ function checkWriteQueue() {
         const queues = getQueueDiagnostics();
         const pending = Object.values(queues).reduce((sum, item) => sum + Number(item.pending || 0), 0);
         const dropped = Object.values(queues).reduce((sum, item) => sum + Number(item.dropped || 0), 0);
+        const failed = Object.entries(queues).filter(([, item]) => item.lastError);
+        const firstError = failed[0]?.[1]?.lastError;
+        const status = dropped > 0 || failed.length > 0 ? 'degraded' : 'ok';
         return {
-            status: dropped > 0 ? 'degraded' : 'ok',
+            status,
             pending,
             dropped,
             queues,
-            message: dropped > 0 ? `写入队列累计丢弃 ${dropped} 条记录` : `写入队列待处理 ${pending} 条记录`
+            message: dropped > 0
+                ? `写入队列累计丢弃 ${dropped} 条记录`
+                : failed.length > 0
+                    ? `写入队列最近一次写入失败：${firstError?.message || '未知错误'}`
+                    : `写入队列待处理 ${pending} 条记录`
         };
     } catch (e) {
         return { status: 'error', message: e.message };

@@ -220,6 +220,66 @@
     color: var(--text-muted);
 }
 
+/* 常用任务模板弹窗 */
+.agent-template-dialog {
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(540px, calc(100vh - 40px));
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-template-modal-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 120px;
+    max-height: 380px;
+    background: var(--bg-secondary, #f8fafc);
+}
+
+.agent-template-modal-body .agent-task-composer-templates-bar {
+    margin-bottom: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+.agent-template-modal-body .agent-template-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+    overflow-x: visible;
+    padding: 2px 0;
+}
+
+.agent-template-modal-body .agent-template-item {
+    min-width: 0;
+    max-width: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-template-modal-body .agent-template-item:hover {
+    border-color: var(--primary, #10a37f);
+    box-shadow: 0 1px 4px rgba(16, 163, 127, 0.12);
+}
+
+.agent-task-footer-left-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .agent-ops-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

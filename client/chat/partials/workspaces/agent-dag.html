@@ -7,8 +7,6 @@
                     <p id="automation-workspace-description">集中管理工作流与计划任务，并跟踪发布和运行状态。</p>
                 </div>
                 <div class="agent-dag-header-actions">
-                    <button id="automation-new-workflow-btn" class="btn-primary" type="button">新建工作流</button>
-                    <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
                     <button id="automation-refresh-btn" class="btn-secondary" type="button">刷新</button>
                     <button id="agent-dag-save-btn" class="btn-primary hidden" type="button">保存</button>
                     <button id="agent-workflow-dependency-btn" class="btn-secondary hidden" type="button">配置依赖</button>
@@ -42,11 +40,13 @@
                     </div>
                 </div>
                 <div class="automation-assets-toolbar">
+                    <div class="automation-assets-search">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                        <input id="automation-assets-search-input" class="form-input" type="search" placeholder="搜索工作流" autocomplete="off">
+                    </div>
                     <div class="automation-assets-actions">
-                        <div class="automation-assets-search">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                            <input id="automation-assets-search-input" class="form-input" type="search" placeholder="搜索工作流" autocomplete="off">
-                        </div>
+                        <button id="automation-new-workflow-btn" class="btn-primary" type="button">新建工作流</button>
+                        <button id="automation-new-schedule-btn" class="btn-primary hidden" type="button">新建计划</button>
                     </div>
                 </div>
                 <div id="automation-workflows-panel" class="automation-assets-panel" role="tabpanel" aria-label="工作流列表" aria-hidden="false">
@@ -88,7 +88,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
                             <span>版本历史</span>
                         </button>
-                        <button id="agent-workflow-schedule-btn" class="agent-workflow-management-item" type="button" role="menuitem">
+                        <button id="agent-workflow-schedule-btn" class="agent-workflow-management-item" type="button" role="menuitem" disabled title="发布工作流后可创建计划任务">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
                             <span>计划任务</span>
                         </button>

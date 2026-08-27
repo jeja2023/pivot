@@ -13,7 +13,6 @@ const {
 } = require('../security');
 const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
-const { flushAllWrites } = require('../services/db-write-queue');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
 const { archiveDeletedUsernameAsync } = require('../services/user-identity');
 const { hashPasswordsOffThread } = require('../services/password-hasher');
@@ -229,8 +228,9 @@ function createAdminUsersRouter({
         res.json({ success: true });
     }));
 
+    // 审计写入是异步队列，读取接口只读已提交数据并允许最多一个刷新周期的最终一致性。
+    // 这里不能等待 flushAllWrites：单条坏连接/慢写入不应阻塞管理员查看历史日志。
     router.get('/admin/logs/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        await flushAllWrites().catch(() => {});
         const { username, action, details, ip, start, end } = req.query;
         let conditions = [];
         let params = [];
@@ -505,8 +505,8 @@ function createAdminUsersRouter({
         }
     }));
 
+    // 不在查询前等待整个写队列，避免审计写入故障反向拖死设置页。
     router.get('/admin/logs', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
-        await flushAllWrites().catch(() => {});
         const page = normalizePage(req.query.page);
         const limit = normalizeLimit(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;

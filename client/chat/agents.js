@@ -286,6 +286,7 @@ window.syncAgentRunModeStepLimit = function() {
 };
 
 window.bindAgentEnterpriseControls = function() {
+    if (typeof bindAgentTemplateModal === 'function') bindAgentTemplateModal();
     document.querySelectorAll('[data-agent-save-template]').forEach(saveTemplateBtn => {
         if (saveTemplateBtn.dataset.boundAgentTemplateSave === '1') return;
         saveTemplateBtn.dataset.boundAgentTemplateSave = '1';

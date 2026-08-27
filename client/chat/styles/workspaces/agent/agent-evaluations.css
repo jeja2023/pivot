@@ -114,8 +114,8 @@
 .agent-eval-overview {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 6px;
-    margin: 4px 0 8px;
+    gap: 5px;
+    margin: 2px 0 6px;
     width: 100%;
     background: transparent;
     border: none;
@@ -125,27 +125,31 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    min-height: 44px;
-    gap: 2px;
-    padding: 5px 8px;
+    min-height: 36px;
+    gap: 1px;
+    padding: 3px 6px;
     background: #f8fafc;
     border: 1px solid rgba(226, 232, 240, 0.9);
-    border-radius: 6px;
+    border-radius: 5px;
     text-align: left;
+    min-width: 0;
 }
 
 .agent-eval-overview span,
 .agent-eval-batch-summary span {
     color: #64748b;
-    font-size: 0.66rem;
+    font-size: 0.62rem;
     font-weight: 600;
     text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-eval-overview strong,
 .agent-eval-batch-summary strong {
     color: #0f172a;
-    font-size: 0.98rem;
+    font-size: 0.88rem;
     font-weight: 750;
     line-height: 1.15;
     text-align: left;
@@ -154,8 +158,8 @@
 .agent-eval-layout {
     display: flex;
     flex: 1;
-    min-height: 240px;
-    max-height: 420px;
+    min-height: 220px;
+    max-height: 380px;
     overflow: hidden;
     border-top: 1px solid rgba(226, 232, 240, 0.9);
 }
@@ -171,10 +175,10 @@
 }
 
 .agent-eval-suite-list {
-    flex: 0 0 230px;
-    width: 230px;
+    flex: 0 0 200px;
+    width: 200px;
     min-width: 0;
-    padding: 6px 8px 6px 0;
+    padding: 4px 6px 4px 0;
     overflow-y: auto;
     border-right: 1px solid rgba(226, 232, 240, 0.9);
 }
@@ -493,10 +497,10 @@
 .agent-eval-editor-modal {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    width: min(980px, calc(100vw - 32px));
-    max-width: 980px;
-    height: min(780px, calc(100vh - 32px));
-    max-height: 780px;
+    width: min(880px, calc(100vw - 32px));
+    max-width: 880px;
+    height: min(710px, calc(100vh - 32px));
+    max-height: min(710px, calc(100vh - 32px));
     padding: 0;
     overflow: hidden;
     text-align: left;
@@ -504,7 +508,7 @@
 
 .agent-eval-editor-modal .agent-config-modal-head,
 .agent-eval-editor-footer {
-    padding: 13px 18px;
+    padding: 10px 16px;
 }
 
 .agent-eval-editor-heading {
@@ -512,33 +516,42 @@
 }
 
 .agent-eval-editor-modal .agent-config-modal-head p {
-    margin: 4px 0 0;
+    margin: 2px 0 0;
     color: var(--text-secondary);
     font-size: 12px;
 }
 
 .agent-eval-editor-body {
     min-height: 0;
-    padding: 16px 18px 20px;
-    overflow: auto;
+    padding: 10px 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
     background: var(--bg-secondary);
-    scrollbar-gutter: stable;
 }
 
 .agent-eval-editor-section+.agent-eval-editor-section {
-    margin-top: 18px;
-    padding-top: 18px;
+    margin-top: 10px;
+    padding-top: 10px;
     border-top: 1px solid var(--border-color);
 }
 
 .agent-eval-editor-section-head {
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 .agent-eval-editor-section-head strong,
 .agent-eval-editor-case-toolbar strong {
     color: var(--text-primary);
     font-size: 13px;
+}
+
+.agent-eval-suite-fields,
+.agent-eval-case-fields {
+    gap: 8px 10px;
+}
+
+.agent-eval-editor-modal .modal-form-field {
+    gap: 4px;
 }
 
 .agent-eval-editor-case-toolbar>div {
@@ -553,23 +566,23 @@
 }
 
 .agent-eval-editor-case-toolbar {
-    margin: 0 0 10px;
+    margin: 0 0 6px;
 }
 
 .agent-eval-editor-cases {
     display: grid;
-    gap: 10px;
+    gap: 8px;
 }
 
 .agent-eval-case-editor {
-    padding: 14px;
+    padding: 8px 12px;
     border: 1px solid var(--border-color);
-    border-radius: 7px;
+    border-radius: 6px;
     background: var(--bg-primary);
 }
 
 .agent-eval-case-editor-head {
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 .agent-eval-case-editor-head strong {
@@ -577,9 +590,15 @@
     font-size: 13px;
 }
 
+.agent-eval-case-editor-head .btn-danger-outline {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12px;
+}
+
 .agent-eval-case-advanced {
-    margin-top: 14px;
-    padding-top: 12px;
+    margin-top: 6px;
+    padding-top: 6px;
     border-top: 1px solid var(--border-color);
     color: var(--text-secondary);
     font-size: 12px;
@@ -593,7 +612,7 @@
 }
 
 .agent-eval-case-advanced>.modal-form-field {
-    margin-top: 10px;
+    margin-top: 6px;
 }
 
 .agent-eval-code {
@@ -609,8 +628,8 @@
 
 .agent-eval-editor-footer .btn-primary,
 .agent-eval-editor-footer .btn-secondary {
-    min-width: 72px;
-    height: 34px;
+    min-width: 68px;
+    height: 32px;
 }
 
 #agent-config-modal[data-agent-config-section="evaluations"] .agent-config-modal.is-empty {

@@ -34,7 +34,35 @@ function applyAgentTemplate(template) {
     document.querySelectorAll('[data-agent-tool-allow]').forEach(input => {
         input.checked = selectedTools.length === 0 ? true : selectedTools.includes(input.dataset.agentToolAllow);
     });
+    closeAgentTemplateModal();
     showToast('模板已应用', 'success');
+}
+
+function openAgentTemplateModal() {
+    const modal = document.getElementById('agent-template-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    loadAgentTemplates().catch(() => {});
+}
+
+function closeAgentTemplateModal() {
+    const modal = document.getElementById('agent-template-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function bindAgentTemplateModal() {
+    document.getElementById('agent-footer-templates-btn')?.addEventListener('click', openAgentTemplateModal);
+    document.getElementById('agent-template-modal-close')?.addEventListener('click', closeAgentTemplateModal);
+    const modal = document.getElementById('agent-template-modal');
+    if (modal && modal.dataset.boundOverlay !== '1') {
+        modal.dataset.boundOverlay = '1';
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeAgentTemplateModal();
+        });
+    }
 }
 
 async function loadAgentTemplates() {
@@ -44,15 +72,15 @@ async function loadAgentTemplates() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '模板库加载失败');
     agentTemplatesCache = data.data || [];
-    PivotSafeHtml.setHtml(list, agentTemplatesCache.length ? agentTemplatesCache.slice(0, 8).map(template => `
-        <div class="agent-template-item" title="${agentEscape(template.description || template.goal_template)}">
+    PivotSafeHtml.setHtml(list, agentTemplatesCache.length ? agentTemplatesCache.map(template => `
+        <div class="agent-template-item" title="${agentEscape(template.description || template.goal_template || '')}">
             <button type="button" class="agent-template-apply" data-agent-template-id="${agentEscape(template.id)}">
                 <strong>${agentEscape(template.name)}</strong>
                 <span>${agentEscape(template.scope === 'shared' ? '共享' : '个人')}</span>
             </button>
             ${template.scope === 'personal' ? `<button type="button" class="agent-mini-danger" data-agent-template-delete="${agentEscape(template.id)}">删除</button>` : ''}
         </div>
-    `).join('') : '<div class="empty-state agent-empty-state compact">暂无模板</div>');
+    `).join('') : '<div class="empty-state agent-empty-state compact" style="grid-column: 1 / -1; width: 100%;">暂无模板。填写任务目标后可点击「保存为模板」沉淀常用任务。</div>');
     list.querySelectorAll('[data-agent-template-id]').forEach(btn => {
         btn.addEventListener('click', () => applyAgentTemplate(agentTemplatesCache.find(item => String(item.id) === String(btn.dataset.agentTemplateId))));
     });

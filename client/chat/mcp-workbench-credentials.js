@@ -85,6 +85,8 @@ function renderMcpCredentialsSection(credentials = []) {
         const api = window.Pivot?.moduleApi?.('agent.automationResources');
         if (typeof api?.open === 'function') {
             api.open({ tab: 'credentials', ...opts });
+        } else {
+            showToast('受控凭据管理尚未就绪，请刷新页面后重试', 'error');
         }
     };
 

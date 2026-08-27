@@ -306,35 +306,39 @@
 .agent-feedback-metrics {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    gap: 5px;
 }
 
 .agent-feedback-metric-card {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 5px 8px;
+    gap: 1px;
+    padding: 4px 6px;
     border: 1px solid var(--border, #e2e8f0);
     border-radius: 5px;
     background: var(--bg-secondary, #f8fafc);
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+    min-width: 0;
 }
 
 .agent-feedback-metric-card .metric-label {
     color: var(--text-muted, #64748b);
-    font-size: 0.66rem;
+    font-size: 0.62rem;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-feedback-metric-card .metric-value {
     color: var(--text-primary, #0f172a);
-    font-size: 0.98rem;
+    font-size: 0.88rem;
     font-weight: 750;
     line-height: 1.15;
 }
 
 .agent-feedback-metric-card .metric-value small {
-    font-size: 0.64rem;
+    font-size: 0.6rem;
     font-weight: 600;
     color: var(--text-muted, #64748b);
 }
@@ -1561,14 +1565,16 @@ body.dark-mode .agent-harness-pack-sync,
 
 .agent-cp-quality-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
     align-items: start;
 }
 
-.agent-cp-quality-layout .agent-cp-card[aria-labelledby="agent-eval-card-title"],
-.agent-cp-quality-layout .agent-cp-card[aria-labelledby="agent-feedback-card-title"] {
-    grid-column: 1 / -1;
+.agent-cp-quality-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
 }
 
 .agent-cp-card {
@@ -1936,36 +1942,43 @@ body.dark-mode .agent-harness-pack-sync,
 /* 质量大屏指标卡片 */
 .agent-quality-metrics-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
 }
 
 .agent-metric-tile {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding: 4px 8px;
+    padding: 4px 6px;
     background: #f8fafc;
     border: 1px solid rgba(148, 163, 184, 0.16);
     border-radius: 5px;
+    min-width: 0;
 }
 
 .agent-metric-tile span {
-    font-size: 0.64rem;
+    font-size: 0.62rem;
     font-weight: 650;
     color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-metric-tile strong {
-    font-size: 0.95rem;
+    font-size: 0.88rem;
     font-weight: 750;
     color: var(--text-main);
     line-height: 1.15;
 }
 
 .agent-metric-tile small {
-    font-size: 0.6rem;
+    font-size: 0.58rem;
     color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* 持续目标模态弹窗 */
@@ -2015,6 +2028,10 @@ body.dark-mode .agent-harness-pack-sync,
 @media (max-width: 1024px) {
     .agent-cp-quality-layout {
         grid-template-columns: 1fr;
+    }
+
+    .agent-quality-metrics-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

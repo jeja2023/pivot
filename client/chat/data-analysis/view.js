@@ -447,9 +447,9 @@
             return (
                 '<tr>' +
                     '<td class="text-center data-analysis-row-index">' + (rowIndex + 1) + '</td>' +
-                    '<td class="data-analysis-dataset-name">' + esc(dataset.name) + '</td>' +
-                    '<td class="data-analysis-break-text">' + esc(dataset.originalName || '-') + '</td>' +
-                    '<td>' + fmtNumber(dataset.rowCount) + ' \u884c / ' + fmtNumber(dataset.columnCount) + ' \u5217<br>' + scopeBadge + '</td>' +
+                    '<td class="data-analysis-dataset-name" title="' + esc(dataset.name) + '">' + esc(dataset.name) + '</td>' +
+                    '<td class="data-analysis-break-text" title="' + esc(dataset.originalName || '-') + '">' + esc(dataset.originalName || '-') + '</td>' +
+                    '<td class="data-analysis-size-cell"><div class="data-analysis-size-wrapper"><span>' + fmtNumber(dataset.rowCount) + ' \u884c / ' + fmtNumber(dataset.columnCount) + ' \u5217</span>' + scopeBadge + '</div></td>' +
                     '<td><span class="data-analysis-file-type">' + esc(dataset.fileType || '\u8868\u683c') + '</span></td>' +
                     '<td class="data-analysis-muted-cell">' + esc(dataset.createdAt || '-') + '</td>' +
                     '<td class="text-center"><div class="data-analysis-table-actions">' +

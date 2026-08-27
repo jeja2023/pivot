@@ -68,6 +68,12 @@ const MAX_BURST_BATCH_SIZE = Math.max(
     MAX_BATCH_SIZE,
     Math.min(60000, Number.parseInt(process.env.PIVOT_DB_WRITE_MAX_BATCH_SIZE, 10) || 1000)
 );
+// 写入队列不能依赖 PostgreSQL 永远及时返回：网络黑洞或半开连接不能把队列 worker
+// 永久挂住。该超时只保护队列连接，业务请求不会等待它。
+const WRITE_QUERY_TIMEOUT_MS = Math.max(
+    10,
+    Number.parseInt(process.env.PIVOT_DB_WRITE_QUERY_TIMEOUT_MS, 10) || 15000
+);
 
 // PG 单条语句绑定参数上限 65535，按列数换算每批安全行数
 function safeBatchRows(columnCount, queueName) {
@@ -98,6 +104,18 @@ const pgQueueDropped = {
     mcpCallLogs: 0,
     modelUsageEvents: 0,
 };
+const pgQueueLastError = {
+    auditLogs: null,
+    apiCallLogs: null,
+    mcpCallLogs: null,
+    modelUsageEvents: null,
+};
+const pgQueueLastSuccessAt = {
+    auditLogs: null,
+    apiCallLogs: null,
+    mcpCallLogs: null,
+    modelUsageEvents: null,
+};
 
 let pgFlushTimer = null;
 let pgFlushTimerDelayMs = 0;
@@ -106,6 +124,19 @@ const PG_BASE_RETRY_DELAY_MS = Math.max(FLUSH_INTERVAL_MS, 10);
 const PG_MAX_RETRY_DELAY_MS = Math.max(PG_BASE_RETRY_DELAY_MS * 16, 1000);
 let pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
 const pgQueueHighWaterAlerted = new Set();
+
+function markQueueSuccess(queueName) {
+    pgQueueLastError[queueName] = null;
+    pgQueueLastSuccessAt[queueName] = new Date().toISOString();
+}
+
+function markQueueError(queueName, err) {
+    pgQueueLastError[queueName] = {
+        message: String(err?.message || err || '未知数据库错误').slice(0, 500),
+        code: err?.code || null,
+        at: new Date().toISOString()
+    };
+}
 
 function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
     if (QUEUE_DISABLED) return;
@@ -148,6 +179,48 @@ function pgEnqueue(queueName, item) {
 
 const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast/i;
 
+/**
+ * 使用独立 client 执行队列写入，以便超时后销毁坏连接。
+ * 测试桩可能只提供 pool.query，此时退回普通调用。
+ */
+async function runPgWriteQuery(pool, sql, params) {
+    if (!pool || typeof pool.connect !== 'function') return pool.query(sql, params);
+
+    const client = await pool.connect();
+    let released = false;
+    let timer = null;
+    let timedOut = false;
+    const release = (err) => {
+        if (released) return;
+        released = true;
+        try { client.release(err); } catch (_) {}
+    };
+
+    const queryPromise = Promise.resolve().then(() => client.query(sql, params));
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            timedOut = true;
+            const error = new Error(`数据库写入超时（已等待 ${WRITE_QUERY_TIMEOUT_MS} 毫秒）`);
+            error.code = 'PG_WRITE_QUEUE_QUERY_TIMEOUT';
+            // release(error) 会让 pg-pool 移除连接；主动断开 socket 可避免半开连接继续占池。
+            try { client.connection?.stream?.destroy(); } catch (_) {}
+            release(error);
+            reject(error);
+        }, WRITE_QUERY_TIMEOUT_MS);
+        timer.unref?.();
+    });
+
+    try {
+        return await Promise.race([queryPromise, timeoutPromise]);
+    } catch (err) {
+        if (!timedOut) release();
+        throw err;
+    } finally {
+        if (timer) clearTimeout(timer);
+        if (!released) release();
+    }
+}
+
 function sanitizeQueueValue(field, val) {
     if (val === undefined || val === null) return null;
     // 整型与主外键列校验：严格防范 Object/Promise/NaN/无效字符传进 PostgreSQL BIGINT/INTEGER 列
@@ -179,56 +252,64 @@ async function pgFlushQueue(queueName) {
     const queue = pgQueues[queueName];
     const batchRows = safeBatchRows(spec.columns.length, queueName);
 
-    while (queue.length > 0) {
-        const batch = queue.splice(0, batchRows);
-        const params = [];
-        const rowPlaceholders = [];
-        let paramIndex = 1;
+    // 只取刷新开始时的一批。若生产者持续入队，新记录留给下一轮，保证 flush 本身会返回。
+    const batch = queue.splice(0, Math.min(queue.length, batchRows));
+    if (batch.length === 0) return;
+    const params = [];
+    const rowPlaceholders = [];
+    let paramIndex = 1;
 
-        for (const item of batch) {
-            const placeholders = spec.fields.map(() => `$${paramIndex++}`);
-            rowPlaceholders.push(`(${placeholders.join(', ')})`);
-            for (const field of spec.fields) {
-                params.push(sanitizeQueueValue(field, item[field]));
-            }
+    for (const item of batch) {
+        const placeholders = spec.fields.map(() => `$${paramIndex++}`);
+        rowPlaceholders.push(`(${placeholders.join(', ')})`);
+        for (const field of spec.fields) {
+            params.push(sanitizeQueueValue(field, item[field]));
         }
+    }
 
-        const sql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES ${rowPlaceholders.join(', ')}`;
+    const sql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES ${rowPlaceholders.join(', ')}`;
+    let pool = null;
 
-        try {
-            const { getPgPool } = require('../db/pg-connection');
-            await getPgPool().query(sql, params);
-        } catch (err) {
-            const isUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(err.message || '');
-            // 如果是多条记录批量写入失败，先降级尝试单行逐条插入，避免 1 条脏数据阻塞整批 50 条正常日志
-            if (batch.length > 1) {
-                const { getPgPool } = require('../db/pg-connection');
-                const pool = getPgPool();
-                const singleSql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES (${spec.fields.map((_, i) => `$${i + 1}`).join(', ')})`;
-                for (const item of batch) {
-                    try {
-                        const singleParams = spec.fields.map(f => sanitizeQueueValue(f, item[f]));
-                        await pool.query(singleSql, singleParams);
-                    } catch (singleErr) {
-                        const singleUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(singleErr.message || '');
-                        if (singleUnrecoverable) {
-                            logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
-                        } else {
-                            // 临时数据库连接异常，单条放回队首并抛出重试
-                            queue.unshift(item);
-                            throw singleErr;
-                        }
+    try {
+        const { getPgPool } = require('../db/pg-connection');
+        pool = getPgPool();
+        await runPgWriteQuery(pool, sql, params);
+        markQueueSuccess(queueName);
+    } catch (err) {
+        const isUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(err.message || '');
+        // 网络/连接/超时错误不做逐条降级：逐条尝试只会把一次故障放大成
+        // batch.length 次超时。整批回队首并走指数退避，保持故障恢复边界明确。
+        if (!isUnrecoverable) {
+            queue.unshift(...batch);
+            markQueueError(queueName, err);
+            throw err;
+        }
+        // 多行批量失败时逐条降级，避免一条脏数据阻塞整批正常日志。
+        if (batch.length > 1) {
+            const singleSql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES (${spec.fields.map((_, i) => `$${i + 1}`).join(', ')})`;
+            for (let index = 0; index < batch.length; index += 1) {
+                const item = batch[index];
+                try {
+                    const singleParams = spec.fields.map(f => sanitizeQueueValue(f, item[f]));
+                    await runPgWriteQuery(pool, singleSql, singleParams);
+                } catch (singleErr) {
+                    const singleUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(singleErr.message || '');
+                    if (singleUnrecoverable) {
+                        logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
+                        continue;
                     }
-                }
-            } else {
-                if (isUnrecoverable) {
-                    logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
-                } else {
-                    queue.unshift(...batch);
-                    throw err;
+                    // 当前失败项及其后续项都尚未尝试，必须完整放回队首，不能丢批次尾部数据。
+                    queue.unshift(item, ...batch.slice(index + 1));
+                    markQueueError(queueName, singleErr);
+                    throw singleErr;
                 }
             }
+            markQueueSuccess(queueName);
+            return;
         }
+
+        logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
+        markQueueError(queueName, err);
     }
 }
 
@@ -238,30 +319,25 @@ async function pgFlush() {
 
     pgFlushing = (async () => {
         try {
-            while (true) {
-                const hasPending = Object.values(pgQueues).some(q => q.length > 0);
-                if (!hasPending) break;
-
-                let hasError = false;
-                for (const queueName of Object.keys(pgQueues)) {
-                    if (pgQueues[queueName].length === 0) continue;
-                    try {
-                        await pgFlushQueue(queueName);
-                    } catch (err) {
-                        hasError = true;
-                        logger.warn(
-                            { err: err.message, queueName, pending: pgQueues[queueName].length },
-                            '[PG] 写入队列刷新失败，稍后重试'
-                        );
-                    }
+            let hasError = false;
+            // 每个队列本轮最多一批，且并行隔离：审计写入异常不能阻塞 API/MCP/用量队列。
+            await Promise.all(Object.keys(pgQueues).map(async queueName => {
+                if (pgQueues[queueName].length === 0) return;
+                try {
+                    await pgFlushQueue(queueName);
+                } catch (err) {
+                    hasError = true;
+                    logger.warn(
+                        { err: err.message, queueName, pending: pgQueues[queueName].length },
+                        '[PG] 写入队列刷新失败，稍后重试'
+                    );
                 }
-                if (hasError) {
-                    pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
-                    pgSchedule(pgRetryDelayMs);
-                    break;
-                } else {
-                    pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
-                }
+            }));
+            if (hasError) {
+                pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
+                pgSchedule(pgRetryDelayMs);
+            } else {
+                pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
             }
         } finally {
             pgFlushing = null;
@@ -317,7 +393,9 @@ function pgQueueDiagnostics() {
     return Object.fromEntries(Object.entries(pgQueues).map(([name, queue]) => [name, {
         pending: queue.length,
         dropped: pgQueueDropped[name] || 0,
-        max: QUEUE_LIMITS[name]
+        max: QUEUE_LIMITS[name],
+        lastError: pgQueueLastError[name],
+        lastSuccessAt: pgQueueLastSuccessAt[name]
     }]));
 }
 

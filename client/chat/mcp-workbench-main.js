@@ -337,53 +337,55 @@ async function loadMcpServers() {
         `);
     }
 
-    const container = document.querySelector('.mcp-list-wrap') || list || document;
-    container.querySelectorAll('[data-mcp-tools]').forEach(btn => {
-        const server = mcpServersCache.find(item => String(item.id) === String(btn.dataset.mcpTools));
-        if (!server) return;
-        const owner = mcpServerBelongsToCurrentUser(server) || (server.user_id === null && isSuperAdminUser());
-        const readOnly = server.read_only === true || String(server.scope || '').toLowerCase() === 'shared' && !owner;
-        if (readOnly) {
-            const card = btn.closest('.mcp-instance-card');
-            card?.querySelectorAll('[data-mcp-edit], [data-mcp-delete], [data-mcp-toggle]').forEach(action => {
-                action.disabled = true;
-                action.hidden = true;
-            });
-        } else if (server.server_type === 'database' && owner && !btn.closest('.mcp-instance-actions')?.querySelector('[data-mcp-share]')) {
-            const share = document.createElement('button');
-            share.type = 'button';
-            share.className = 'btn-secondary';
-            share.dataset.mcpShare = String(server.id);
-            share.textContent = '分享';
-            btn.parentElement?.insertBefore(share, btn);
-        }
-    });
-    container.querySelectorAll('[data-mcp-open-data-analysis]').forEach(btn => {
-        btn.addEventListener('click', () => openMcpDataAnalysisImport({
-            datasetId: btn.dataset.mcpOpenDataAnalysisDataset || '',
-            tab: btn.dataset.mcpOpenDataAnalysisTab || btn.dataset.mcpOpenDataAnalysis || 'overview'
+    const containers = [dataSourcesBox, notificationsBox, list].filter(Boolean);
+    containers.forEach(container => {
+        container.querySelectorAll('[data-mcp-tools]').forEach(btn => {
+            const server = mcpServersCache.find(item => String(item.id) === String(btn.dataset.mcpTools));
+            if (!server) return;
+            const owner = mcpServerBelongsToCurrentUser(server) || (server.user_id === null && isSuperAdminUser());
+            const readOnly = server.read_only === true || String(server.scope || '').toLowerCase() === 'shared' && !owner;
+            if (readOnly) {
+                const card = btn.closest('.mcp-instance-card');
+                card?.querySelectorAll('[data-mcp-edit], [data-mcp-delete], [data-mcp-toggle]').forEach(action => {
+                    action.disabled = true;
+                    action.hidden = true;
+                });
+            } else if (server.server_type === 'database' && owner && !btn.closest('.mcp-instance-actions')?.querySelector('[data-mcp-share]')) {
+                const share = document.createElement('button');
+                share.type = 'button';
+                share.className = 'btn-secondary';
+                share.dataset.mcpShare = String(server.id);
+                share.textContent = '分享';
+                btn.parentElement?.insertBefore(share, btn);
+            }
+        });
+        container.querySelectorAll('[data-mcp-open-data-analysis]').forEach(btn => {
+            btn.addEventListener('click', () => openMcpDataAnalysisImport({
+                datasetId: btn.dataset.mcpOpenDataAnalysisDataset || '',
+                tab: btn.dataset.mcpOpenDataAnalysisTab || btn.dataset.mcpOpenDataAnalysis || 'overview'
+            }));
+        });
+        container.querySelectorAll('[data-mcp-open-local-auth]').forEach(btn => {
+            btn.addEventListener('click', () => window.openMcpLocalAuthorizationCenter?.(btn.dataset.mcpOpenLocalAuth || 'local_database'));
+        });
+        container.querySelectorAll('[data-mcp-create]').forEach(btn => {
+            btn.addEventListener('click', () => window.openMcpCreateModal(btn.dataset.mcpCreate));
+        });
+        container.querySelectorAll('[data-mcp-system-config]').forEach(btn => {
+            btn.addEventListener('click', () => window.openMcpSystemConfig(btn.dataset.mcpSystemConfig));
+        });
+        container.querySelectorAll('[data-mcp-edit]').forEach(btn => btn.addEventListener('click', () => {
+            window.openMcpEditModal(btn.dataset.mcpEdit);
         }));
-    });
-    container.querySelectorAll('[data-mcp-open-local-auth]').forEach(btn => {
-        btn.addEventListener('click', () => window.openMcpLocalAuthorizationCenter?.(btn.dataset.mcpOpenLocalAuth || 'local_database'));
-    });
-    container.querySelectorAll('[data-mcp-create]').forEach(btn => {
-        btn.addEventListener('click', () => window.openMcpCreateModal(btn.dataset.mcpCreate));
-    });
-    container.querySelectorAll('[data-mcp-system-config]').forEach(btn => {
-        btn.addEventListener('click', () => window.openMcpSystemConfig(btn.dataset.mcpSystemConfig));
-    });
-    container.querySelectorAll('[data-mcp-edit]').forEach(btn => btn.addEventListener('click', () => {
-        window.openMcpEditModal(btn.dataset.mcpEdit);
-    }));
-    container.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools)));
-    container.querySelectorAll('[data-mcp-share]').forEach(btn => btn.addEventListener('click', () => openMcpShareModal(btn.dataset.mcpShare)));
-    container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn)));
-    container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete, btn)));
-    container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            await window.openAdminPanel?.({ restore: false });
-            await window.switchTab?.('tool-policy');
+        container.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.openMcpToolsModal(btn.dataset.mcpTools)));
+        container.querySelectorAll('[data-mcp-share]').forEach(btn => btn.addEventListener('click', () => openMcpShareModal(btn.dataset.mcpShare)));
+        container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn)));
+        container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.deleteMcpServer(btn.dataset.mcpDelete, btn)));
+        container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                await window.openAdminPanel?.({ restore: false });
+                await window.switchTab?.('tool-policy');
+            });
         });
     });
 }

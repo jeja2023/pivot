@@ -240,7 +240,7 @@ function renderAgentEvalEditorCases() {
                 <input type="hidden" data-eval-field="id" value="${agentEscapeAttr(item.id || '')}">
                 <div class="modal-form-grid modal-form-grid--3 agent-eval-case-fields">
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-name">名称</label><input id="agent-eval-case-${index}-name" class="form-input" data-eval-field="name" value="${agentEscapeAttr(item.name || '')}" maxlength="100"></div>
-                    <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-case-${index}-input">任务输入</label><textarea id="agent-eval-case-${index}-input" class="form-input" data-eval-field="input" rows="3">${agentEscape(item.input || '')}</textarea></div>
+                    <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-case-${index}-input">任务输入</label><textarea id="agent-eval-case-${index}-input" class="form-input" data-eval-field="input" rows="2">${agentEscape(item.input || '')}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-required">必须包含</label><textarea id="agent-eval-case-${index}-required" class="form-input" data-eval-field="requiredPhrases" rows="2" placeholder="每行一个关键短语">${agentEscape((assertions.requiredPhrases || []).join('\n'))}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-forbidden">禁止包含</label><textarea id="agent-eval-case-${index}-forbidden" class="form-input" data-eval-field="forbiddenPhrases" rows="2" placeholder="每行一个禁用短语">${agentEscape((assertions.forbiddenPhrases || []).join('\n'))}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-min-length">最少字数</label><input id="agent-eval-case-${index}-min-length" class="form-input" data-eval-field="minLength" type="number" min="0" value="${Number(assertions.minLength || 0)}"></div>
@@ -251,8 +251,8 @@ function renderAgentEvalEditorCases() {
                 <details class="agent-eval-case-advanced">
                     <summary>高级断言与工作流变量</summary>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-expected">必须包含的参考文本</label><textarea id="agent-eval-case-${index}-expected" class="form-input" data-eval-field="expectedOutput" rows="2">${agentEscape(item.expected_output || '')}</textarea></div>
-                    <div class="modal-form-field"><label for="agent-eval-case-${index}-variables">工作流输入变量（结构化配置）</label><textarea id="agent-eval-case-${index}-variables" class="form-input agent-eval-code" data-eval-field="inputVariables" rows="4">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></div>
-                    <div class="modal-form-field"><label for="agent-eval-case-${index}-schema">输出结构（高级配置）</label><textarea id="agent-eval-case-${index}-schema" class="form-input agent-eval-code" data-eval-field="outputSchema" rows="5">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-variables">工作流输入变量（结构化配置）</label><textarea id="agent-eval-case-${index}-variables" class="form-input agent-eval-code" data-eval-field="inputVariables" rows="3">${agentEscape(JSON.stringify(item.input_variables || {}, null, 2))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-schema">输出结构（高级配置）</label><textarea id="agent-eval-case-${index}-schema" class="form-input agent-eval-code" data-eval-field="outputSchema" rows="4">${agentEscape(JSON.stringify(assertions.outputSchema || {}, null, 2))}</textarea></div>
                 </details>
             </div>
         `;
@@ -324,7 +324,6 @@ function ensureAgentEvalEditorModal() {
                     <h3 id="agent-eval-editor-title">新建评测集</h3>
                     <p>配置评测目标、通过标准与用例</p>
                 </div>
-                <button type="button" class="btn-secondary" data-agent-eval-editor-close>关闭</button>
             </div>
             <div class="agent-eval-editor-body">
                 <input type="hidden" id="agent-eval-editor-id">

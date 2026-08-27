@@ -561,8 +561,8 @@ test('agent quick task uses a modal editor with complete actions', () => {
     const css = readAgentCssBundle();
     assert.match(agentPartial, /id="task-create-open-btn"[^>]*aria-haspopup="dialog"[^>]*aria-controls="agent-task-editor-modal"/);
     assert.match(agentPartial, /id="agent-task-editor-modal" class="modal-overlay hidden"[^>]*role="dialog"[^>]*aria-modal="true"/);
-    assert.match(agentPartial, /id="agent-run-panel" class="modal agent-task-editor-modal"/);
-    assert.match(agentPartial, /class="agent-config-modal-head"[\s\S]*?id="agent-task-editor-title">新建任务<\/h3>[\s\S]*?id="task-create-close-btn"/);
+    assert.match(agentPartial, /class="agent-config-modal-head"[\s\S]*?id="agent-task-editor-title">新建任务<\/h3>/);
+    assert.doesNotMatch(agentPartial, /id="task-create-close-btn"/);
     assert.match(agentPartial, /class="agent-task-editor-body"[\s\S]*?id="agent-goal-input"/);
     assert.match(agentPartial, /class="agent-task-editor-footer"[\s\S]*?data-agent-save-template[\s\S]*?id="task-create-cancel-btn"[\s\S]*?id="agent-save-plan-btn"[\s\S]*?id="agent-run-btn"/);
     assert.doesNotMatch(agentPartial, /class="agent-config-launcher"/);
@@ -820,9 +820,8 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(dagPartial, /id="agent-workflow-metadata-description"/);
     assert.match(dagPartial, /id="agent-workflow-share-form-content"/);
     assert.doesNotMatch(dagPartial, /id="agent-workflow-rename-btn"/);
-    assert.match(dagPartial, /id="agent-workflow-readonly-run-btn"/);
-    assert.match(dagPartial, /class="agent-dag-header-actions"[\s\S]*?id="automation-new-workflow-btn"[\s\S]*?id="automation-new-schedule-btn"[\s\S]*?id="automation-refresh-btn"/);
-    assert.doesNotMatch(dagPartial, /class="automation-assets-actions"[\s\S]*?id="automation-new-schedule-btn"/);
+    assert.match(dagPartial, /class="automation-assets-toolbar"[\s\S]*?class="automation-assets-search"[\s\S]*?class="automation-assets-actions"[\s\S]*?id="automation-new-workflow-btn"[\s\S]*?id="automation-new-schedule-btn"/);
+    assert.match(dagPartial, /class="agent-dag-header-actions"[\s\S]*?id="automation-refresh-btn"/);
     assert.match(dagPartial, /id="automation-editor-view" class="automation-editor-view hidden"/);
     assert.match(dagPartial, /工作流[\s\S]*?计划任务/);
     assert.match(dagPartial, /aria-label="当前工作流与工作流库"/);

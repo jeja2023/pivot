@@ -120,7 +120,7 @@ function renderAutomationAssetCenter() {
                             ${publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}">版本</button>` : ''}
                             ${workflow.can_edit && publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-triggers="${agentEscapeAttr(workflow.id)}">自动启动</button>` : ''}
-                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}" ${publishedVersion ? '' : 'disabled title="发布后可创建计划"'}>计划</button>` : ''}
+                            ${workflow.can_edit && publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}">计划</button>` : ''}
                             ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-share="${agentEscapeAttr(workflow.id)}" title="设置共享范围">分享</button>` : ''}
                         </div></td>
                     </tr>`;
