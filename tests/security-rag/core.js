@@ -5,6 +5,7 @@ const path = require('node:path');
 const Module = require('node:module');
 const Sqlite = require('better-sqlite3');
 const { sql } = require('../../server/db/statements');
+const { execute: dbExecute, queryOne: dbQueryOne } = require('../../server/db/client');
 
 const {
     ContextLengthExceededError,
@@ -401,41 +402,41 @@ test('知识图谱会治理低可信关系并支持确认、质量摘要和图�
 
 test('知识图谱支持按单个文档范围隔离概览、实体列表、关系地图和图谱查询', async () => {
     const suffix = Date.now().toString(36);
-    const userInfo = db.prepare(`
+    const userInfo = await dbQueryOne(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(`kg_scope_${suffix}`, 'hash', 'KG Scope Test', 'Sec', 'user', 'active');
-    const userId = userInfo.lastInsertRowid;
+        VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+    `, [`kg_scope_${suffix}`, 'hash', 'KG Scope Test', 'Sec', 'user', 'active']);
+    const userId = userInfo.id;
     const user = { id: userId, role: 'user', unit: 'Sec' };
     const now = getBeijingTimestamp();
 
     // 文档 A: 网络安全
-    const docAInfo = db.prepare(`
+    const docAInfo = await dbQueryOne(`
         INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, `network_sec_${suffix}.md`, 'ready', 1, 1, 100, now, now);
-    const docAId = docAInfo.lastInsertRowid;
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `, [userId, `network_sec_${suffix}.md`, 'ready', 1, 1, 100, now, now]);
+    const docAId = docAInfo.id;
     const textA = '网络安全组负责防火墙系统。防火墙系统依赖核心路由。';
-    const chunkA = db.prepare(`
+    const chunkA = await dbQueryOne(`
         INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
-        VALUES (?, ?, ?, ?)
-    `).run(docAId, textA, buildRagSearchContent(textA), JSON.stringify([1, 0]));
+        VALUES (?, ?, ?, ?) RETURNING id
+    `, [docAId, textA, buildRagSearchContent(textA), JSON.stringify([1, 0])]);
 
     // 文档 B: 财务流程
-    const docBInfo = db.prepare(`
+    const docBInfo = await dbQueryOne(`
         INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, `finance_proc_${suffix}.md`, 'ready', 1, 1, 100, now, now);
-    const docBId = docBInfo.lastInsertRowid;
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `, [userId, `finance_proc_${suffix}.md`, 'ready', 1, 1, 100, now, now]);
+    const docBId = docBInfo.id;
     const textB = '财务核算组负责报销系统。报销系统依赖网银接口。';
-    const chunkB = db.prepare(`
+    const chunkB = await dbQueryOne(`
         INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
-        VALUES (?, ?, ?, ?)
-    `).run(docBId, textB, buildRagSearchContent(textB), JSON.stringify([0, 1]));
+        VALUES (?, ?, ?, ?) RETURNING id
+    `, [docBId, textB, buildRagSearchContent(textB), JSON.stringify([0, 1])]);
 
     try {
-        await indexKnowledgeGraphForChunks({ userId, docId: docAId, chunks: [{ chunkId: chunkA.lastInsertRowid, content: textA }] });
-        await indexKnowledgeGraphForChunks({ userId, docId: docBId, chunks: [{ chunkId: chunkB.lastInsertRowid, content: textB }] });
+        await indexKnowledgeGraphForChunks({ userId, docId: docAId, chunks: [{ chunkId: chunkA.id, content: textA }] });
+        await indexKnowledgeGraphForChunks({ userId, docId: docBId, chunks: [{ chunkId: chunkB.id, content: textB }] });
 
         // 1. 全局概览包含两份文档数据
         const globalSummary = await getGraphSummary(user);
@@ -470,12 +471,12 @@ test('知识图谱支持按单个文档范围隔离概览、实体列表、关�
         assert.ok(docAQuery.context.includes('防火墙系统'));
         assert.ok(!docAQuery.context.includes('报销系统'));
     } finally {
-        db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
-        db.prepare('DELETE FROM knowledge_entity_mentions WHERE user_id = ?').run(userId);
-        db.prepare('DELETE FROM knowledge_entities WHERE user_id = ?').run(userId);
-        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id IN (?, ?)').run(docAId, docBId);
-        db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(docAId, docBId);
-        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        await dbExecute('DELETE FROM knowledge_relations WHERE user_id = ?', [userId]);
+        await dbExecute('DELETE FROM knowledge_entity_mentions WHERE user_id = ?', [userId]);
+        await dbExecute('DELETE FROM knowledge_entities WHERE user_id = ?', [userId]);
+        await dbExecute('DELETE FROM knowledge_chunks WHERE doc_id IN (?, ?)', [docAId, docBId]);
+        await dbExecute('DELETE FROM knowledge_docs WHERE id IN (?, ?)', [docAId, docBId]);
+        await dbExecute('DELETE FROM users WHERE id = ?', [userId]);
     }
 });
 

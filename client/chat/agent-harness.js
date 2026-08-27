@@ -107,7 +107,7 @@
 
             const paginationContainer = document.getElementById('agent-goals-pagination');
             if (paginationContainer) {
-                if (typeof window.renderWorkspacePagination === 'function') {
+                if (window.renderWorkspacePagination) {
                     window.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
@@ -139,7 +139,7 @@
 
             const paginationContainer = document.getElementById('agent-inbox-pagination');
             if (paginationContainer) {
-                if (typeof window.renderWorkspacePagination === 'function') {
+                if (window.renderWorkspacePagination) {
                     window.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
@@ -171,7 +171,7 @@
 
             const paginationContainer = document.getElementById('agent-reliability-pagination');
             if (paginationContainer) {
-                if (typeof window.renderWorkspacePagination === 'function') {
+                if (window.renderWorkspacePagination) {
                     window.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
@@ -293,7 +293,7 @@
         }).join(''));
 
         if (paginationContainer) {
-            if (typeof window.renderWorkspacePagination === 'function') {
+            if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } });
             } else { paginationContainer.replaceChildren(); }
         }
@@ -384,7 +384,7 @@
         const startIndex = (currentPage - 1) * limit, pagePacks = state.packs.slice(startIndex, startIndex + limit);
         setMarkup(list, pagePacks.map(pack => `<article class="agent-harness-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(pack.id || '运行资源')}</strong><span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</span></div><span class="agent-harness-item-id">版本 v${escape(pack.version || '1.0.0')} · ${escape(String(pack.size || 0))} 字节</span><small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 28))}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span></div></article>`).join(''));
         if (paginationContainer) {
-            if (typeof window.renderWorkspacePagination === 'function') {
+            if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.packsPage = newPage; renderPacks(); } });
             } else { paginationContainer.replaceChildren(); }
         }
@@ -444,7 +444,7 @@
         }).join(''));
 
         if (paginationContainer) {
-            if (typeof window.renderWorkspacePagination === 'function') {
+            if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.residentsPage = newPage; renderResidents(); } });
             } else { paginationContainer.replaceChildren(); }
         }
@@ -592,7 +592,7 @@
         const startIndex = (currentPage - 1) * limit, pageFeedback = state.feedback.slice(startIndex, startIndex + limit);
         setMarkup(list, pageFeedback.map(item => `<article class="agent-harness-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>任务 #${escape(item.runId)}</strong><span class="agent-harness-badge ${item.outcome === 'success' ? 'badge-success' : item.outcome === 'failure' ? 'badge-error' : 'badge-neutral'}">${escape(item.outcome === 'success' ? '成功' : item.outcome === 'failure' ? '失败' : item.outcome || '反馈')}</span>${item.rating ? `<span class="agent-harness-status-pill is-active">评分: ${escape(`${item.rating}/5`)}</span>` : ''}</div><small>${escape(shortText(item.correction || item.modifiedAnswer || '未填写修正意见', 180))}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(item.updatedAt))}</span></div></article>`).join(''));
         if (paginationContainer) {
-            if (typeof window.renderWorkspacePagination === 'function') {
+            if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.feedbackPage = newPage; renderFeedback(); } });
             } else { paginationContainer.replaceChildren(); }
         }
@@ -625,7 +625,7 @@
         setMarkup(list, pageProposals.map(item => `<article class="agent-harness-item agent-evolution-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(item.title || '未命名提议')}</strong><span class="agent-harness-badge">${escape(kindLabels[item.kind] || item.kind || '提议')}</span><span class="agent-harness-status-pill ${item.status === 'approved' ? 'is-active' : item.status === 'pending' ? 'is-idle' : 'is-inactive'}">${escape(statusLabels[item.status] || item.status)}</span></div><small>${escape(shortText(item.description || '无详细说明', 180))}</small><code class="agent-evolution-code-preview">${escape(shortText(jsonText(item.proposedChange), 220))}</code></div><div class="agent-harness-item-meta">${item.status === 'pending' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用此偏好</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></article>`).join(''));
 
         if (paginationContainer) {
-            if (typeof window.renderWorkspacePagination === 'function') {
+            if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.proposalsPage = newPage; renderProposals(); } });
             } else { paginationContainer.replaceChildren(); }
         }
