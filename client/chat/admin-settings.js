@@ -454,7 +454,7 @@ function renderMemoryJobsPanel(jobsData = {}) {
 function renderProductMemoryRows(memories = []) {
     const body = document.getElementById('memory-list-body');
     if (!body) return;
-    const colspan = 9;
+    const colspan = 8;
     if (!memories.length) {
         PivotSafeHtml.setHtml(body, `<tr><td colspan="${colspan}" class="text-center muted">暂无长期记忆</td></tr>`);
         return;
@@ -467,13 +467,10 @@ function renderProductMemoryRows(memories = []) {
             <td>${Number(memory.salience || 0).toFixed(2)}</td>
             <td>${Number(memory.confidence || 0).toFixed(2)}</td>
             <td>${escapeHtml(formatMemoryStatusLabel(memory.status))}</td>
-            <td>
-                <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
-                <button class="btn-secondary memory-source-btn" data-memory-action="usage" data-memory-id="${memory.id}">使用原因</button>
-            </td>
             <td>${escapeHtml(memory.lastUsedAt || memory.updatedAt || '-')}</td>
             <td class="text-center memory-action-cell">
                 <div class="memory-action-buttons">
+                    <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
                     <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
                     ${memory.status === 'active'
                         ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`

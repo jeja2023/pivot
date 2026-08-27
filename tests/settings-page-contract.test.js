@@ -85,3 +85,17 @@ test('工具策略卡片具备工具名称与简介全量中文化映射', () =>
     assert.match(toolPolicy, /function toolPolicyToolTitle/);
     assert.match(toolPolicy, /function toolPolicyToolDescription/);
 });
+
+test('长期记忆表格移除独立来源列并将来源按钮移入操作列，来源弹窗关闭按钮靠右', () => {
+    const html = read('client/chat/partials/settings/memories.html');
+    const js = read('client/chat/admin-settings.js');
+    const css = read('client/chat/styles/admin/admin-layout.css');
+
+    assert.doesNotMatch(html, /<th[^>]*>来源<\/th>/);
+    assert.doesNotMatch(html, /<col class="memory-col-source">/);
+    assert.match(js, /const colspan = 8/);
+    assert.match(js, /<div class="memory-action-buttons">[\s\S]*?data-memory-action="source"[\s\S]*?data-memory-action="edit"/);
+    assert.match(css, /\.memory-modal-header[\s\S]*?display:\s*flex;/);
+    assert.match(css, /\.memory-source-close[\s\S]*?margin-left:\s*auto;/);
+});
+

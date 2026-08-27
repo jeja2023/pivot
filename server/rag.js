@@ -226,7 +226,7 @@ ragRouter.get('/quality-report', authMiddleware, asyncHandler(async (req, res) =
 }));
 
 ragRouter.get('/graph/summary', authMiddleware, asyncHandler(async (req, res) => {
-    res.json(await getGraphSummaryAsync(req.user));
+    res.json(await getGraphSummaryAsync(req.user, { docId: req.query.docId }));
 }));
 
 ragRouter.get('/graph/entities', authMiddleware, asyncHandler(async (req, res) => {
@@ -236,6 +236,7 @@ ragRouter.get('/graph/entities', authMiddleware, asyncHandler(async (req, res) =
         query: req.query.query,
         type: req.query.type,
         quality: req.query.quality,
+        scope: { docId: req.query.docId },
         limit: req.query.limit,
         offset: req.query.offset
     }));
@@ -261,7 +262,8 @@ ragRouter.get('/graph/query', authMiddleware, asyncHandler(async (req, res) => {
         user: req.user,
         query: req.query.query,
         entityLimit: req.query.entityLimit,
-        relationLimit: req.query.relationLimit
+        relationLimit: req.query.relationLimit,
+        scope: { docId: req.query.docId }
     }));
 }));
 
@@ -273,6 +275,7 @@ ragRouter.get('/graph/entities/:id', authMiddleware, asyncHandler(async (req, re
         depth: req.query.depth,
         status: req.query.status,
         relationType: req.query.relationType,
+        scope: { docId: req.query.docId },
         limit: req.query.limit
     });
     if (!graph) return res.status(404).json({ error: '实体不存在' });

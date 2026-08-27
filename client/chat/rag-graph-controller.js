@@ -312,9 +312,16 @@ const renderGraphRelations = (payload = {}) => {
 };
 
 const loadGraphSummary = async () => {
-    const res = await apiFetch(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() });
+    const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
+    const params = new URLSearchParams();
+    if (docId) params.set('docId', docId);
+    const res = await apiFetch(`${API_BASE}/rag/graph/summary${params.toString() ? `?${params}` : ''}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '图谱概览加载失败');
+    if (data.doc?.name && docId) {
+        const title = document.getElementById('rag-graph-modal-title');
+        if (title) title.textContent = `知识图谱 · ${data.doc.name}`;
+    }
     renderGraphSummary(data);
     return data;
 };
@@ -322,9 +329,11 @@ const loadGraphSummary = async () => {
 const loadGraphEntities = async () => {
     const { query, type, quality } = getGraphEntityFilters();
     const params = new URLSearchParams({ limit: '80' });
+    const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
     if (query) params.set('query', query);
     if (type) params.set('type', type);
     if (quality) params.set('quality', quality);
+    if (docId) params.set('docId', docId);
     const res = await apiFetch(`${API_BASE}/rag/graph/entities?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '实体加载失败');
@@ -379,11 +388,22 @@ const renderGraphQueryResult = (result = {}) => {
 
 window.openKnowledgeGraph = async (docId = null) => {
     const modal = ensureRagGraphModal();
-    modal.dataset.docId = docId || '';
+    const normalizedDocId = Number.parseInt(docId, 10);
+    const scopedDocId = Number.isSafeInteger(normalizedDocId) && normalizedDocId > 0 ? normalizedDocId : null;
+    const scopedDoc = scopedDocId ? getCachedKnowledgeDoc(scopedDocId) : null;
+    modal.dataset.docId = scopedDocId ? String(scopedDocId) : '';
+    const title = document.getElementById('rag-graph-modal-title');
+    const description = document.getElementById('rag-graph-modal-description');
+    if (title) title.textContent = scopedDocId ? `知识图谱 · ${scopedDoc?.name || '当前文档'}` : '知识图谱';
+    if (description) {
+        description.textContent = scopedDocId
+            ? '仅显示当前文档抽取出的实体、关系与来源，可重建本文档图谱。'
+            : '查看全部知识库中的实体关系、来源文档，并校准图谱节点与关系。';
+    }
     ragGraphState.selectedEntityId = null;
     ragGraphState.selectedEntity = null;
-    setKnowledgeGraphRestoreState(true, docId || '');
-    document.getElementById('rag-graph-rebuild-doc-btn')?.classList.toggle('hidden', !docId);
+    setKnowledgeGraphRestoreState(true, scopedDocId || '');
+    document.getElementById('rag-graph-rebuild-doc-btn')?.classList.toggle('hidden', !scopedDocId);
     modal.classList.remove('hidden');
     try {
         await loadGraphSummary();
@@ -407,8 +427,10 @@ window.selectKnowledgeGraphEntity = async (entityId) => {
     try {
         const { status, relationType } = getGraphRelationFilters();
         const graphParams = new URLSearchParams({ limit: '120' });
+        const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
         if (status) graphParams.set('status', status);
         if (relationType) graphParams.set('relationType', relationType);
+        if (docId) graphParams.set('docId', docId);
         const [graphRes] = await Promise.all([
             apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?${graphParams}`, { headers: authHeaders() }),
             loadGraphRelations(entityId)
@@ -470,6 +492,7 @@ window.saveKnowledgeGraphEntity = async (entityId) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '实体保存失败');
     showToast('实体已保存');
+    await loadGraphSummary();
     await loadGraphEntities();
     await window.selectKnowledgeGraphEntity(entityId);
     closeKnowledgeGraphEditorModal();
@@ -488,6 +511,7 @@ window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '实体合并失败');
     showToast('实体已合并');
+    await loadGraphSummary();
     await loadGraphEntities();
     await window.selectKnowledgeGraphEntity(targetEntityId);
     closeKnowledgeGraphEditorModal();
@@ -537,7 +561,9 @@ window.saveKnowledgeGraphRelation = async (relationId) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系保存失败');
     showToast('关系已保存');
-    await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    await loadGraphSummary();
+    if (ragGraphState.selectedEntityId) await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    else await loadGraphRelations();
     closeKnowledgeGraphEditorModal();
 };
 
@@ -578,6 +604,8 @@ window.debugKnowledgeGraphQuery = async () => {
         return;
     }
     const params = new URLSearchParams({ query, entityLimit: '6', relationLimit: '12' });
+    const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
+    if (docId) params.set('docId', docId);
     const res = await apiFetch(`${API_BASE}/rag/graph/query?${params}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '图谱查询失败');

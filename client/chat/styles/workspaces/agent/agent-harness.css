@@ -1792,6 +1792,62 @@ body.dark-mode .agent-harness-pack-sync,
     border-radius: 4px;
 }
 
+.agent-inbox-pagination,
+.agent-goals-pagination,
+.agent-reliability-pagination,
+.agent-feedback-pagination,
+.agent-evolution-pagination,
+.agent-harness-residency-pagination,
+.agent-harness-skill-pagination,
+.agent-harness-pack-pagination {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.agent-inbox-pagination:empty,
+.agent-goals-pagination:empty,
+.agent-reliability-pagination:empty,
+.agent-feedback-pagination:empty,
+.agent-evolution-pagination:empty,
+.agent-harness-residency-pagination:empty,
+.agent-harness-skill-pagination:empty,
+.agent-harness-pack-pagination:empty {
+    display: none;
+}
+
+.agent-inbox-pagination .btn-secondary,
+.agent-goals-pagination .btn-secondary,
+.agent-reliability-pagination .btn-secondary,
+.agent-feedback-pagination .btn-secondary,
+.agent-evolution-pagination .btn-secondary,
+.agent-harness-residency-pagination .btn-secondary,
+.agent-harness-skill-pagination .btn-secondary,
+.agent-harness-pack-pagination .btn-secondary {
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+}
+
+.agent-inbox-pagination span,
+.agent-goals-pagination span,
+.agent-reliability-pagination span,
+.agent-feedback-pagination span,
+.agent-evolution-pagination span,
+.agent-harness-residency-pagination span,
+.agent-harness-skill-pagination span,
+.agent-harness-pack-pagination span {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
 /* 持续目标列表：自适应铺满并支持独立滚动 */
 .agent-goal-list,
 .agent-channel-list {

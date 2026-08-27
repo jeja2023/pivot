@@ -286,9 +286,9 @@
                                 stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M15 18l-6-6 6-6" />
                             </svg>
-                            <span>返回列表</span>
+                            <span id="agent-breadcrumb-back-label">返回列表</span>
                         </button>
-                        <span class="agent-breadcrumb-item">任务</span>
+                        <span class="agent-breadcrumb-item" id="agent-breadcrumb-parent-label">任务</span>
                         <span class="agent-breadcrumb-sep">/</span>
                         <span class="agent-breadcrumb-item active" id="agent-breadcrumb-active-title">选择任务查看详情</span>
                     </div>
@@ -413,6 +413,7 @@
                     </div>
                     <div class="agent-cp-card-body">
                         <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
+                        <div id="agent-inbox-pagination" class="pagination workspace-pagination agent-inbox-pagination"></div>
                     </div>
                 </section>
             </div>
@@ -431,6 +432,7 @@
                     </div>
                     <div class="agent-cp-card-body">
                         <div id="agent-goals-panel" class="agent-goals-panel"></div>
+                        <div id="agent-goals-pagination" class="pagination workspace-pagination agent-goals-pagination"></div>
                     </div>
                 </section>
             </div>
@@ -506,6 +508,7 @@
                             </div>
                             <div class="agent-cp-card-body">
                                 <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
+                                <div id="agent-reliability-pagination" class="pagination workspace-pagination agent-reliability-pagination"></div>
                             </div>
                         </section>
 
@@ -528,6 +531,7 @@
                                     <span>按任务展示执行结论与人工修正意见</span>
                                 </div>
                                 <div id="agent-feedback-list" class="agent-harness-list full-width"></div>
+                                <div id="agent-feedback-pagination" class="pagination workspace-pagination agent-feedback-pagination"></div>
                             </div>
                         </section>
                     </div>
@@ -657,6 +661,7 @@
                                 class="btn-secondary" type="button">刷新</button></div>
                     </div>
                     <div id="agent-harness-residency-list" class="agent-harness-list full-width"></div>
+                    <div id="agent-harness-residency-pagination" class="pagination workspace-pagination agent-harness-residency-pagination"></div>
                 </section>
 
                 <!-- 3. 进化提议 -->
@@ -713,6 +718,7 @@
                                 <span>查看待确认及已应用的进化提议</span>
                             </div>
                             <div id="agent-evolution-list" class="agent-harness-list full-width"></div>
+                            <div id="agent-evolution-pagination" class="pagination workspace-pagination agent-evolution-pagination"></div>
                         </div>
                     </div>
                 </section>
@@ -734,6 +740,7 @@
                         <div class="agent-harness-skill-list-wrap">
                             <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>
                             <div id="agent-harness-skill-list" class="agent-harness-list"></div>
+                            <div id="agent-harness-skill-pagination" class="pagination workspace-pagination agent-harness-skill-pagination"></div>
                         </div>
                         <div class="agent-harness-skill-form-wrap">
                             <div class="agent-harness-subhead"><strong>注册 / 导入技能</strong><span>通过 YAML 清单注册或导入
@@ -785,6 +792,7 @@ permissions: []"></textarea>
                         <div class="agent-harness-skill-list-wrap">
                             <div class="agent-harness-subhead"><strong>已安装资源包</strong><span>系统已缓存并校验的运行时包</span></div>
                             <div id="agent-harness-pack-list" class="agent-harness-list"></div>
+                            <div id="agent-harness-pack-pagination" class="pagination workspace-pagination agent-harness-pack-pagination"></div>
                         </div>
                         <div class="agent-harness-pack-sync admin-only hidden">
                             <div class="agent-harness-subhead"><strong>同步运行资源包</strong><span>必须提供资源地址和访问来源白名单。</span>

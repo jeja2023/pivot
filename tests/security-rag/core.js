@@ -399,6 +399,86 @@ test('知识图谱会治理低可信关系并支持确认、质量摘要和图�
     }
 });
 
+test('知识图谱支持按单个文档范围隔离概览、实体列表、关系地图和图谱查询', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(`kg_scope_${suffix}`, 'hash', 'KG Scope Test', 'Sec', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const user = { id: userId, role: 'user', unit: 'Sec' };
+    const now = getBeijingTimestamp();
+
+    // 文档 A: 网络安全
+    const docAInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, `network_sec_${suffix}.md`, 'ready', 1, 1, 100, now, now);
+    const docAId = docAInfo.lastInsertRowid;
+    const textA = '网络安全组负责防火墙系统。防火墙系统依赖核心路由。';
+    const chunkA = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docAId, textA, buildRagSearchContent(textA), JSON.stringify([1, 0]));
+
+    // 文档 B: 财务流程
+    const docBInfo = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, `finance_proc_${suffix}.md`, 'ready', 1, 1, 100, now, now);
+    const docBId = docBInfo.lastInsertRowid;
+    const textB = '财务核算组负责报销系统。报销系统依赖网银接口。';
+    const chunkB = db.prepare(`
+        INSERT INTO knowledge_chunks (doc_id, content, search_content, embedding)
+        VALUES (?, ?, ?, ?)
+    `).run(docBId, textB, buildRagSearchContent(textB), JSON.stringify([0, 1]));
+
+    try {
+        await indexKnowledgeGraphForChunks({ userId, docId: docAId, chunks: [{ chunkId: chunkA.lastInsertRowid, content: textA }] });
+        await indexKnowledgeGraphForChunks({ userId, docId: docBId, chunks: [{ chunkId: chunkB.lastInsertRowid, content: textB }] });
+
+        // 1. 全局概览包含两份文档数据
+        const globalSummary = await getGraphSummary(user);
+        assert.ok(globalSummary.entities >= 6);
+        assert.ok(globalSummary.relations >= 4);
+
+        // 2. 文档 A 作用域概览仅包含文档 A
+        const docASummary = await getGraphSummary(user, { docId: docAId });
+        assert.ok(docASummary.entities >= 3 && docASummary.entities < globalSummary.entities);
+        assert.ok(docASummary.relations >= 2 && docASummary.relations < globalSummary.relations);
+
+        // 3. 文档 A 实体列表仅返回网络安全实体，不返回财务实体
+        const docAEntities = await listEntities({ userId, user, scope: { docId: docAId }, limit: 50 });
+        const docANames = docAEntities.data.map(e => e.name);
+        assert.ok(docANames.includes('防火墙系统'));
+        assert.ok(!docANames.includes('报销系统'));
+
+        // 4. 文档 A 关系列表仅返回文档 A 关系
+        const docARelations = await listRelations({ userId, user, docId: docAId });
+        assert.ok(docARelations.data.some(r => r.source_name === '网络安全组' || r.target_name === '防火墙系统'));
+        assert.ok(!docARelations.data.some(r => r.source_name === '财务核算组' || r.target_name === '报销系统'));
+
+        // 5. 实体关系地图在 docA 作用域下正常展示
+        const firewall = docAEntities.data.find(e => e.name === '防火墙系统');
+        assert.ok(firewall);
+        const firewallGraph = await getEntityGraph({ userId, user, entityId: firewall.id, scope: { docId: docAId } });
+        assert.ok(firewallGraph.nodes.some(n => n.name === '防火墙系统'));
+        assert.ok(firewallGraph.relations.length > 0);
+
+        // 6. 图谱查询在 docA 作用域下限定在文档 A
+        const docAQuery = await queryKnowledgeGraph({ userId, user, query: '防火墙系统由谁负责', scope: { docId: docAId } });
+        assert.ok(docAQuery.context.includes('防火墙系统'));
+        assert.ok(!docAQuery.context.includes('报销系统'));
+    } finally {
+        db.prepare('DELETE FROM knowledge_relations WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entity_mentions WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_entities WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM knowledge_chunks WHERE doc_id IN (?, ?)').run(docAId, docBId);
+        db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(docAId, docBId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('RAG 指标会分别报告检索命中率和缓存命中率', () => {
     const before = getRagMetricsSnapshot();
     recordRagRetrieval({ status: 'hit', matches: 2, durationMs: 10 });

@@ -263,5 +263,94 @@ test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认�
     assert.match(toolbarJs, /makeButton\('跳过门禁发布'/);
 });
 
+test('Agent控制台各模块具备分页控件且收件箱点击详情自动标记已读', () => {
+    const html = read('client/chat/partials/workspaces/agent.html');
+    const js = read('client/chat/agent-harness.js');
+    const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
 
+    // 1. HTML 包含所有控制台分页容器
+    assert.match(html, /id="agent-inbox-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-goals-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-reliability-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-feedback-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-harness-residency-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-evolution-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-harness-skill-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
+    assert.match(html, /id="agent-harness-pack-pagination"[^>]*class="[^"]*workspace-pagination[^"]*"/);
 
+    // 2. JS 包含分页与详情自动标记已读逻辑
+    assert.match(js, /document\.getElementById\(['"]agent-inbox-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-goals-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-reliability-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-feedback-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-harness-residency-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-evolution-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-harness-skill-pagination['"]\)/);
+    assert.match(js, /document\.getElementById\(['"]agent-harness-pack-pagination['"]\)/);
+    assert.match(js, /renderWorkspacePagination/);
+    assert.match(js, /data-agent-inbox-open-run/);
+    assert.match(js, /data-agent-inbox-unread/);
+    assert.match(js, /\/agents\/inbox\/[\s\S]*?\/read/);
+
+    // 3. CSS 包含分页样式
+    assert.match(css, /\.agent-inbox-pagination/);
+    assert.match(css, /\.agent-goals-pagination/);
+    assert.match(css, /\.agent-reliability-pagination/);
+    assert.match(css, /\.agent-feedback-pagination/);
+    assert.match(css, /\.agent-evolution-pagination/);
+    assert.match(css, /\.agent-harness-residency-pagination/);
+    assert.match(css, /\.agent-harness-skill-pagination/);
+    assert.match(css, /\.agent-harness-pack-pagination/);
+});
+
+test('Agent统一收件箱和评测中心查看详情支持返回原页面原选项卡', () => {
+    const harnessJs = read('client/chat/agent-harness.js');
+    const evalJs = read('client/chat/agent-evaluations.js');
+    const detailJs = read('client/chat/agent-run-detail.js');
+    const html = read('client/chat/partials/workspaces/agent.html');
+
+    // 1. 收件箱与评测中心在 openAgentRun 时传递 returnTab 上下文
+    assert.match(harnessJs, /openAgentRun.*returnTab:\s*'workbench'.*returnSubview:\s*'inbox'/);
+    assert.match(evalJs, /openAgentRun.*returnTab:\s*'workbench'.*returnSubview:\s*'quality'/);
+
+    // 2. 详情逻辑保存与恢复 returnContext
+    assert.match(detailJs, /activeAgentRunReturnContext/);
+    assert.match(detailJs, /openAgentWorkbench.*tab:\s*targetTab/);
+    assert.match(detailJs, /switchAgentCpSubview.*targetSubview/);
+
+    // 3. 面包屑包含父级和返回按钮定制标识
+    assert.match(html, /id="agent-breadcrumb-back-label"/);
+    assert.match(html, /id="agent-breadcrumb-parent-label"/);
+});
+
+test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {
+    const ragJs = read('client/chat/rag.js');
+    const graphControllerJs = read('client/chat/rag-graph-controller.js');
+    const ragServerJs = read('server/rag.js');
+    const kgServiceJs = require('fs').readFileSync('server/services/knowledge-graph.js', 'utf8');
+
+    // 1. 前端列表行按钮传入对应文档 docId，顶部入口传入全局（无 docId）
+    assert.match(ragJs, /docGraphBtn[\s\S]*?window\.openKnowledgeGraph\(docGraphBtn\.dataset\.ragId\)/);
+    assert.match(ragJs, /#rag-graph-open-btn[\s\S]*?window\.openKnowledgeGraph\(\)/);
+
+    // 2. 前端控制器将 docId 贯穿到概览、实体列表、关系地图、关系列表与图谱查询
+    assert.match(graphControllerJs, /modal\.dataset\.docId\s*=/);
+    assert.match(graphControllerJs, /title\.textContent\s*=\s*scopedDocId/);
+    assert.match(graphControllerJs, /loadGraphSummary[\s\S]*?params\.set\('docId',\s*docId\)/);
+    assert.match(graphControllerJs, /loadGraphEntities[\s\S]*?params\.set\('docId',\s*docId\)/);
+    assert.match(graphControllerJs, /loadGraphRelations[\s\S]*?params\.set\('docId',\s*docId\)/);
+    assert.match(graphControllerJs, /selectKnowledgeGraphEntity[\s\S]*?graphParams\.set\('docId',\s*docId\)/);
+    assert.match(graphControllerJs, /debugKnowledgeGraphQuery[\s\S]*?params\.set\('docId',\s*docId\)/);
+
+    // 3. 后端路由在各图谱接口均提取并转发 docId
+    assert.match(ragServerJs, /\/graph\/summary[\s\S]*?docId:\s*req\.query\.docId/);
+    assert.match(ragServerJs, /\/graph\/entities(?!\/)[\s\S]*?scope:\s*\{\s*docId:\s*req\.query\.docId\s*\}/);
+    assert.match(ragServerJs, /\/graph\/relations[\s\S]*?docId:\s*req\.query\.docId/);
+    assert.match(ragServerJs, /\/graph\/query[\s\S]*?scope:\s*\{\s*docId:\s*req\.query\.docId\s*\}/);
+    assert.match(ragServerJs, /\/graph\/entities\/:id[\s\S]*?scope:\s*\{\s*docId:\s*req\.query\.docId\s*\}/);
+
+    // 4. 后端实体统计与关系查询在文档作用域下隔离 mention_count 与 relation_count
+    assert.match(kgServiceJs, /buildGraphEntityScopeSql/);
+    assert.match(kgServiceJs, /buildGraphRelationRecordScopeSql/);
+    assert.match(kgServiceJs, /buildGraphMentionScopeSql/);
+});

@@ -66,14 +66,19 @@ function normalizeGraphScopeTags(value, max = 20) {
 function normalizeGraphScope(scope = {}) {
     const raw = scope && typeof scope === 'object' ? scope : {};
     return {
+        docIds: normalizeGraphScopeIds(raw.docIds ?? raw.docId),
         collectionIds: normalizeGraphScopeIds(raw.collectionIds ?? raw.collectionId),
         tagNames: normalizeGraphScopeTags(raw.tagNames ?? raw.tagName ?? raw.tag)
     };
 }
 
-function buildGraphDocScopeClauses(normalized, docAlias) {
-    const clauses = [`${docAlias}.user_id = e.user_id`, `${docAlias}.deleted_at IS NULL`];
+function buildGraphDocScopeClauses(normalized, docAlias, ownerExpression = 'e.user_id') {
+    const clauses = [`${docAlias}.user_id = ${ownerExpression}`, `${docAlias}.deleted_at IS NULL`];
     const params = [];
+    if (normalized.docIds.length) {
+        clauses.push(`${docAlias}.id IN (${normalized.docIds.map(() => '?').join(',')})`);
+        params.push(...normalized.docIds);
+    }
     if (normalized.collectionIds.length) {
         clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
         params.push(...normalized.collectionIds);
@@ -93,53 +98,39 @@ function buildGraphDocScopeClauses(normalized, docAlias) {
 
 function buildGraphEntityScopeSql(scope) {
     const normalized = normalizeGraphScope(scope);
-    if (!normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
     const mentionDocScope = buildGraphDocScopeClauses(normalized, 'd_scope');
     const sourceDocScope = buildGraphDocScopeClauses(normalized, 'sd_scope');
     return {
-        sql: `
-          AND (
-              EXISTS (
-                  SELECT 1
-                  FROM knowledge_entity_mentions m_scope
-                  JOIN knowledge_docs d_scope ON d_scope.id = m_scope.doc_id
-                  WHERE m_scope.entity_id = e.id
-                    AND ${mentionDocScope.clauses.join(' AND ')}
-              )
-              OR EXISTS (
-                  SELECT 1
-                  FROM knowledge_docs sd_scope
-                  WHERE sd_scope.id = e.source_doc_id
-                    AND ${sourceDocScope.clauses.join(' AND ')}
-              )
-          )`,
+        sql: ` AND (EXISTS (SELECT 1 FROM knowledge_entity_mentions m_scope JOIN knowledge_docs d_scope ON d_scope.id = m_scope.doc_id WHERE m_scope.entity_id = e.id AND ${mentionDocScope.clauses.join(' AND ')}) OR EXISTS (SELECT 1 FROM knowledge_docs sd_scope WHERE sd_scope.id = e.source_doc_id AND ${sourceDocScope.clauses.join(' AND ')}))`,
         params: [...mentionDocScope.params, ...sourceDocScope.params]
     };
 }
 
 function buildGraphRelationScopeSql(scope, docAlias = 'd') {
     const normalized = normalizeGraphScope(scope);
-    if (!normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
-    const clauses = [];
-    const params = [];
-    if (normalized.collectionIds.length) {
-        clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
-        params.push(...normalized.collectionIds);
-    }
-    if (normalized.tagNames.length) {
-        clauses.push(`EXISTS (
-            SELECT 1
-            FROM knowledge_doc_tags tag_scope
-            WHERE tag_scope.doc_id = ${docAlias}.id
-              AND tag_scope.user_id = ${docAlias}.user_id
-              AND tag_scope.tag IN (${normalized.tagNames.map(() => '?').join(',')})
-        )`);
-        params.push(...normalized.tagNames);
-    }
-    return {
-        sql: ` AND ${clauses.join(' AND ')}`,
-        params
-    };
+    if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    const scoped = buildGraphDocScopeClauses(normalized, docAlias, 'r.user_id');
+    return { sql: ` AND ${scoped.clauses.join(' AND ')}`, params: scoped.params };
+}
+
+function buildGraphRelationRecordScopeSql(scope, relationAlias = 'r') {
+    const normalized = normalizeGraphScope(scope);
+    if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    const scoped = buildGraphDocScopeClauses(normalized, 'd_scope', `${relationAlias}.user_id`);
+    return { sql: ` AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${relationAlias}.source_doc_id AND ${scoped.clauses.join(' AND ')})`, params: scoped.params };
+}
+
+function buildGraphMentionScopeSql(scope, mentionAlias = 'm') {
+    const normalized = normalizeGraphScope(scope);
+    if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
+    const scoped = buildGraphDocScopeClauses(normalized, 'd_scope', `${mentionAlias}.user_id`);
+    return { sql: ` AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${mentionAlias}.doc_id AND ${scoped.clauses.join(' AND ')})`, params: scoped.params };
+}
+
+function hasGraphScope(scope) {
+    const normalized = normalizeGraphScope(scope);
+    return normalized.docIds.length > 0 || normalized.collectionIds.length > 0 || normalized.tagNames.length > 0;
 }
 
 // 汉字基本区间 U+4E00–U+9FA5。用 String.fromCharCode 构造，避免在源码中散落生僻字或转义序列。
@@ -451,173 +442,104 @@ async function clearKnowledgeGraphForDocument(docId) {
     await execute(`DELETE FROM knowledge_entity_mentions WHERE chunk_id IN (${placeholders})`, chunkIds);
 }
 
-async function getGraphSummaryAsync(userOrId) {
+async function getGraphSummaryAsync(userOrId, scope = {}) {
     const entityAccess = buildGraphEntityAccessFilter(userOrId, 'e');
     const relationAccess = buildGraphRelationAccessFilter(userOrId, 'r');
+    const entityScope = buildGraphEntityScopeSql(scope);
+    const relationScope = buildGraphRelationRecordScopeSql(scope, 'r');
+    const mentionScope = buildGraphMentionScopeSql(scope, 'm');
     const userId = entityAccess.params[0];
-    const entityRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL`, entityAccess.params);
+    const entityRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL ${entityScope.sql}`, [...entityAccess.params, ...entityScope.params]);
     const entityCount = Number(entityRow?.count || 0);
 
-    const relationRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'active'`, relationAccess.params);
+    const relationRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'active' ${relationScope.sql}`, [...relationAccess.params, ...relationScope.params]);
     const relationCount = Number(relationRow?.count || 0);
 
-    const pendingRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'pending'`, relationAccess.params);
+    const pendingRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND r.status = 'pending' ${relationScope.sql}`, [...relationAccess.params, ...relationScope.params]);
     const pendingRelationCount = Number(pendingRow?.count || 0);
 
     const docAccess = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
-    const mentionRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entity_mentions m WHERE m.user_id = ? OR EXISTS (SELECT 1 FROM knowledge_docs d_access LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL WHERE d_access.id = m.doc_id AND ${docAccess.sql})`, [userId, ...docAccess.params]);
+    const mentionRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entity_mentions m WHERE (m.user_id = ? OR EXISTS (SELECT 1 FROM knowledge_docs d_access LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL WHERE d_access.id = m.doc_id AND ${docAccess.sql})) ${mentionScope.sql}`, [userId, ...docAccess.params, ...mentionScope.params]);
     const mentionCount = Number(mentionRow?.count || 0);
-
-    const orphanRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM knowledge_entities e
-        WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM knowledge_relations r
-              WHERE ${relationAccess.sql.replace(/\br\./g, 'r.')}
-                AND r.status IN ('active', 'pending')
-                AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
-          )
-    `, [...entityAccess.params, ...relationAccess.params]);
+    const orphanRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL ${entityScope.sql} AND NOT EXISTS (SELECT 1 FROM knowledge_relations r WHERE ${relationAccess.sql.replace(/\br\./g, 'r.')} AND r.status IN ('active', 'pending') AND (r.source_entity_id = e.id OR r.target_entity_id = e.id) ${relationScope.sql})`, [...entityAccess.params, ...entityScope.params, ...relationAccess.params, ...relationScope.params]);
     const orphanEntities = Number(orphanRow?.count || 0);
-
-    const lowConfidenceRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM knowledge_relations r
-        WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND confidence < ?
-    `, [...relationAccess.params, LOW_CONFIDENCE_THRESHOLD]);
+    const lowConfidenceRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND confidence < ? ${relationScope.sql}`, [...relationAccess.params, LOW_CONFIDENCE_THRESHOLD, ...relationScope.params]);
     const lowConfidenceRelations = Number(lowConfidenceRow?.count || 0);
-
-    const sourceLessRow = await queryOne(`
-        SELECT COUNT(*) AS count
-        FROM knowledge_relations r
-        WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND source_doc_id IS NULL
-    `, relationAccess.params);
+    const sourceLessRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_relations r WHERE ${relationAccess.sql} AND status IN ('active', 'pending') AND source_doc_id IS NULL ${relationScope.sql}`, [...relationAccess.params, ...relationScope.params]);
     const sourceLessRelations = Number(sourceLessRow?.count || 0);
-
-    const topTypes = await query(`
-        SELECT type, COUNT(*) AS count
-        FROM knowledge_entities e
-        WHERE ${entityAccess.sql} AND e.deleted_at IS NULL
-        GROUP BY type
-        ORDER BY count DESC, type ASC
-        LIMIT 12
-    `, entityAccess.params);
-
-    const duplicateSuggestions = await suggestDuplicateEntities(userId, 5);
-    const quality = buildGraphQualitySignals({
-        entityCount,
-        relationCount,
-        mentionCount,
-        pendingRelationCount,
-        orphanEntities,
-        lowConfidenceRelations,
-        sourceLessRelations,
-        duplicateSuggestions
-    });
+    const topTypes = await query(`SELECT type, COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL ${entityScope.sql} GROUP BY type ORDER BY count DESC, type ASC LIMIT 12`, [...entityAccess.params, ...entityScope.params]);
+    const duplicateSuggestions = hasGraphScope(scope) ? [] : await suggestDuplicateEntities(userId, 5);
+    const quality = buildGraphQualitySignals({ entityCount, relationCount, mentionCount, pendingRelationCount, orphanEntities, lowConfidenceRelations, sourceLessRelations, duplicateSuggestions });
+    let scopedDoc = null;
+    const normalizedScope = normalizeGraphScope(scope);
+    if (normalizedScope.docIds.length === 1) {
+        scopedDoc = await queryOne('SELECT id, name FROM knowledge_docs WHERE id = ? AND deleted_at IS NULL', [normalizedScope.docIds[0]]);
+    }
     return {
-        extractionMode: GRAPH_EXTRACTION_MODE,
-        qualityNotice: GRAPH_QUALITY_NOTICE,
-        entities: entityCount,
-        relations: relationCount,
-        pendingRelations: pendingRelationCount,
-        mentions: mentionCount,
-        topTypes: topTypes || [],
-        quality,
-        suggestions: quality.recommendations,
-        duplicateSuggestions
+        extractionMode: GRAPH_EXTRACTION_MODE, qualityNotice: GRAPH_QUALITY_NOTICE,
+        entities: entityCount, relations: relationCount, pendingRelations: pendingRelationCount,
+        mentions: mentionCount, topTypes: topTypes || [], quality,
+        suggestions: quality.recommendations, duplicateSuggestions,
+        doc: scopedDoc ? { id: scopedDoc.id, name: scopedDoc.name } : null
     };
 }
 
 const getGraphSummary = getGraphSummaryAsync;
 
-async function listEntities({ userId, user = null, query: queryText = '', type = '', quality = '', limit = 50, offset = 0 }) {
-    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
-    const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const where = [entityAccess.sql, 'e.deleted_at IS NULL'];
-    const params = [...entityAccess.params];
+async function listEntities({ userId, user = null, query: queryText = '', type = '', quality = '', scope = {}, limit = 50, offset = 0 }) {
+    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e'), entityScope = buildGraphEntityScopeSql(scope);
+    const mentionScope = buildGraphMentionScopeSql(scope, 'm'), relationScope1 = buildGraphRelationRecordScopeSql(scope, 'r1');
+    const relationScope2 = buildGraphRelationRecordScopeSql(scope, 'r2'), orphanRelationScope = buildGraphRelationRecordScopeSql(scope, 'r');
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200), safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+    const where = [entityAccess.sql, 'e.deleted_at IS NULL'], params = [...entityAccess.params, ...entityScope.params];
+    if (entityScope.sql) where.push(entityScope.sql.replace(/^\s*AND\s+/i, ''));
     const normalizedQuery = normalizeEntityName(queryText);
-    if (normalizedQuery) {
-        where.push('(e.normalized_name LIKE ? OR e.name LIKE ?)');
-        params.push(`%${normalizedQuery}%`, `%${String(queryText).trim()}%`);
-    }
-    if (type) {
-        where.push('e.type = ?');
-        params.push(type);
-    }
+    if (normalizedQuery) { where.push('(e.normalized_name LIKE ? OR e.name LIKE ?)'); params.push(`%${normalizedQuery}%`, `%${String(queryText).trim()}%`); }
+    if (type) { where.push('e.type = ?'); params.push(type); }
     if (quality === 'orphan') {
-        where.push(`NOT EXISTS (
-            SELECT 1 FROM knowledge_relations r
-            WHERE r.user_id = e.user_id
-              AND r.status IN ('active', 'pending')
-              AND (r.source_entity_id = e.id OR r.target_entity_id = e.id)
-        )`);
+        where.push(`NOT EXISTS (SELECT 1 FROM knowledge_relations r WHERE r.user_id = e.user_id AND r.status IN ('active', 'pending') AND (r.source_entity_id = e.id OR r.target_entity_id = e.id) ${orphanRelationScope.sql})`);
+        params.push(...orphanRelationScope.params);
     }
-    if (quality === 'low') {
-        where.push('e.confidence < ?');
-        params.push(0.62);
-    }
+    if (quality === 'low') { where.push('e.confidence < ?'); params.push(0.62); }
     const whereSql = where.join(' AND ');
-    const relationAccess1 = buildGraphRelationAccessFilter(user || userId, 'r1');
-    const relationAccess2 = buildGraphRelationAccessFilter(user || userId, 'r2');
+    const relationAccess1 = buildGraphRelationAccessFilter(user || userId, 'r1'), relationAccess2 = buildGraphRelationAccessFilter(user || userId, 'r2');
     const data = await query(`
-        SELECT e.*,
-            COUNT(DISTINCT m.id) AS mention_count,
-            COUNT(DISTINCT r1.id) + COUNT(DISTINCT r2.id) AS relation_count
+        SELECT e.*, COUNT(DISTINCT m.id) AS mention_count, COUNT(DISTINCT r1.id) + COUNT(DISTINCT r2.id) AS relation_count
         FROM knowledge_entities e
-        LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id
-        LEFT JOIN knowledge_relations r1 ON r1.source_entity_id = e.id AND r1.status = 'active'
-            AND (${relationAccess1.sql})
-        LEFT JOIN knowledge_relations r2 ON r2.target_entity_id = e.id AND r2.status = 'active'
-            AND (${relationAccess2.sql})
-        WHERE ${whereSql}
-        GROUP BY e.id
-        ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC
-        LIMIT ? OFFSET ?
-    `, [...relationAccess1.params, ...relationAccess2.params, ...params, safeLimit, safeOffset]);
+        LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id ${mentionScope.sql}
+        LEFT JOIN knowledge_relations r1 ON r1.source_entity_id = e.id AND r1.status = 'active' AND (${relationAccess1.sql}) ${relationScope1.sql}
+        LEFT JOIN knowledge_relations r2 ON r2.target_entity_id = e.id AND r2.status = 'active' AND (${relationAccess2.sql}) ${relationScope2.sql}
+        WHERE ${whereSql} GROUP BY e.id ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC LIMIT ? OFFSET ?
+    `, [...mentionScope.params, ...relationAccess1.params, ...relationScope1.params, ...relationAccess2.params, ...relationScope2.params, ...params, safeLimit, safeOffset]);
     const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${whereSql}`, params);
-    const total = Number(totalRow?.count || 0);
-    return { data: data || [], total, limit: safeLimit, offset: safeOffset };
+    return { data: data || [], total: Number(totalRow?.count || 0), limit: safeLimit, offset: safeOffset };
 }
 
-async function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, status = 'active', relationType = '' }) {
-    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e');
-    const entity = await queryOne(`SELECT * FROM knowledge_entities e WHERE e.id = ? AND ${entityAccess.sql} AND e.deleted_at IS NULL`, [entityId, ...entityAccess.params]);
+async function getEntityGraph({ userId, user = null, entityId, depth = 1, limit = 80, status = 'active', relationType = '', scope = {} }) {
+    const entityAccess = buildGraphEntityAccessFilter(user || userId, 'e'), entityScope = buildGraphEntityScopeSql(scope);
+    const entity = await queryOne(`SELECT * FROM knowledge_entities e WHERE e.id = ? AND ${entityAccess.sql} AND e.deleted_at IS NULL ${entityScope.sql}`, [entityId, ...entityAccess.params, ...entityScope.params]);
     if (!entity) return null;
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 80, 10), 300);
-    const statusList = normalizeRelationStatusFilter(status);
-    const statusPlaceholders = statusList.map(() => '?').join(',');
-    const relationAccess = buildGraphRelationAccessFilter(user || userId, 'r');
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 80, 10), 300), statusList = normalizeRelationStatusFilter(status);
+    const statusPlaceholders = statusList.map(() => '?').join(','), relationAccess = buildGraphRelationAccessFilter(user || userId, 'r'), relationScope = buildGraphRelationRecordScopeSql(scope, 'r');
     const relationWhere = [relationAccess.sql, `r.status IN (${statusPlaceholders})`, '(r.source_entity_id = ? OR r.target_entity_id = ?)'];
     const params = [...relationAccess.params, ...statusList, entity.id, entity.id];
-    if (relationType) {
-        relationWhere.push('r.relation_type = ?');
-        params.push(String(relationType).trim());
-    }
+    if (relationScope.sql) { relationWhere.push(relationScope.sql.replace(/^\s*AND\s+/i, '')); params.push(...relationScope.params); }
+    if (relationType) { relationWhere.push('r.relation_type = ?'); params.push(String(relationType).trim()); }
     const relations = await query(`
-        SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
-               d.name AS doc_name, c.content AS chunk_text
+        SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type, d.name AS doc_name, c.content AS chunk_text
         FROM knowledge_relations r
         JOIN knowledge_entities s ON s.id = r.source_entity_id
         JOIN knowledge_entities t ON t.id = r.target_entity_id
         LEFT JOIN knowledge_docs d ON d.id = r.source_doc_id
         LEFT JOIN knowledge_chunks c ON c.id = r.source_chunk_id
-        WHERE ${relationWhere.join(' AND ')}
-        ORDER BY r.confidence DESC, r.updated_at DESC
-        LIMIT ?
+        WHERE ${relationWhere.join(' AND ')} ORDER BY r.confidence DESC, r.updated_at DESC LIMIT ?
     `, [...params, safeLimit]);
     const nodeMap = new Map([[entity.id, entity]]);
     (relations || []).forEach(row => {
         nodeMap.set(row.source_entity_id, { id: row.source_entity_id, name: row.source_name, type: row.source_type });
         nodeMap.set(row.target_entity_id, { id: row.target_entity_id, name: row.target_name, type: row.target_type });
     });
-    return {
-        center: entity,
-        depth: Math.min(Math.max(Number.parseInt(depth, 10) || 1, 1), 2),
-        nodes: Array.from(nodeMap.values()),
-        relations: relations || []
-    };
+    return { center: entity, depth: Math.min(Math.max(Number.parseInt(depth, 10) || 1, 1), 2), nodes: Array.from(nodeMap.values()), relations: relations || [] };
 }
 
 function normalizeRelationStatusFilter(status = 'active') {
@@ -628,32 +550,18 @@ function normalizeRelationStatusFilter(status = 'active') {
     return ['active'];
 }
 
-async function listRelations({ userId, user = null, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, limit = 100, offset = 0 }) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300);
-    const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
-    const statusList = normalizeRelationStatusFilter(status);
-    const relationAccess = buildGraphRelationAccessFilter(user || userId, 'r');
+async function listRelations({ userId, user = null, entityId = null, relationType = '', status = 'active', minConfidence = null, docId = null, scope = {}, limit = 100, offset = 0 }) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300), safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+    const statusList = normalizeRelationStatusFilter(status), relationAccess = buildGraphRelationAccessFilter(user || userId, 'r');
     const where = [relationAccess.sql, `r.status IN (${statusList.map(() => '?').join(',')})`];
     const params = [...relationAccess.params, ...statusList];
+    const relationScope = buildGraphRelationRecordScopeSql({ ...scope, docId: docId || scope?.docId }, 'r');
+    if (relationScope.sql) { where.push(relationScope.sql.replace(/^\s*AND\s+/i, '')); params.push(...relationScope.params); }
     const safeEntityId = Number.parseInt(entityId, 10);
-    if (Number.isSafeInteger(safeEntityId) && safeEntityId > 0) {
-        where.push('(r.source_entity_id = ? OR r.target_entity_id = ?)');
-        params.push(safeEntityId, safeEntityId);
-    }
-    if (relationType) {
-        where.push('r.relation_type = ?');
-        params.push(String(relationType).trim());
-    }
+    if (Number.isSafeInteger(safeEntityId) && safeEntityId > 0) { where.push('(r.source_entity_id = ? OR r.target_entity_id = ?)'); params.push(safeEntityId, safeEntityId); }
+    if (relationType) { where.push('r.relation_type = ?'); params.push(String(relationType).trim()); }
     const min = Number(minConfidence);
-    if (Number.isFinite(min)) {
-        where.push('r.confidence >= ?');
-        params.push(Math.min(Math.max(min, 0), 1));
-    }
-    const safeDocId = Number.parseInt(docId, 10);
-    if (Number.isSafeInteger(safeDocId) && safeDocId > 0) {
-        where.push('r.source_doc_id = ?');
-        params.push(safeDocId);
-    }
+    if (Number.isFinite(min)) { where.push('r.confidence >= ?'); params.push(Math.min(Math.max(min, 0), 1)); }
     const whereSql = where.join(' AND ');
     const data = await query(`
         SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,

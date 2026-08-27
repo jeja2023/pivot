@@ -356,8 +356,8 @@
         <div class="modal rag-graph-modal">
             <div class="rag-detail-header">
                 <div>
-                    <h3>${escapeHtml(messages.title || '')}</h3>
-                    <p class="model-modal-desc">${escapeHtml(messages.description || '')}</p>
+                    <h3 id="rag-graph-modal-title">${escapeHtml(messages.title || '')}</h3>
+                    <p id="rag-graph-modal-description" class="model-modal-desc">${escapeHtml(messages.description || '')}</p>
                 </div>
                 <button type="button" id="rag-graph-close-btn" class="btn-danger-outline">${escapeHtml(messages.closeLabel || '')}</button>
             </div>

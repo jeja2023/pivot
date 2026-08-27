@@ -138,7 +138,7 @@ function renderAgentEvalRunDetail(payload = {}) {
         </div>
     `);
     target.querySelectorAll('[data-agent-eval-open-run]').forEach(button => {
-        button.addEventListener('click', () => window.openAgentRun(button.dataset.agentEvalOpenRun));
+        button.addEventListener('click', () => window.openAgentRun(button.dataset.agentEvalOpenRun, { returnTab: 'workbench', returnSubview: 'quality', returnLabel: '质量评测' }));
     });
 }
 

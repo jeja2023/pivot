@@ -962,9 +962,8 @@
 .settings-workspace-view .memories-table .memory-col-content { width: auto; }
 .settings-workspace-view .memories-table .memory-col-score { width: 72px; }
 .settings-workspace-view .memories-table .memory-col-status { width: 68px; }
-.settings-workspace-view .memories-table .memory-col-source { width: 66px; }
 .settings-workspace-view .memories-table .memory-col-used { width: 140px; }
-.settings-workspace-view .memories-table .memory-col-actions { width: 148px; }
+.settings-workspace-view .memories-table .memory-col-actions { width: 196px; }
 
 .settings-workspace-view .memories-table th,
 .settings-workspace-view .memories-table td {
@@ -977,9 +976,7 @@
 .settings-workspace-view .memories-table th:nth-child(5),
 .settings-workspace-view .memories-table td:nth-child(5),
 .settings-workspace-view .memories-table th:nth-child(6),
-.settings-workspace-view .memories-table td:nth-child(6),
-.settings-workspace-view .memories-table th:nth-child(7),
-.settings-workspace-view .memories-table td:nth-child(7) {
+.settings-workspace-view .memories-table td:nth-child(6) {
     text-align: center;
 }
 .settings-workspace-view .memory-type-badge {
@@ -1077,14 +1074,17 @@
     font-size: 0.82rem;
     line-height: 1.45;
 }
+.memory-edit-modal,
 .settings-workspace-view .memory-edit-modal {
     width: min(680px, calc(100vw - 32px));
     max-height: min(760px, calc(100vh - 40px));
 }
+.memory-source-modal,
 .settings-workspace-view .memory-source-modal {
     width: min(820px, calc(100vw - 32px));
     max-height: min(780px, calc(100vh - 40px));
 }
+.memory-modal-header,
 .settings-workspace-view .memory-modal-header {
     display: flex;
     align-items: center;
