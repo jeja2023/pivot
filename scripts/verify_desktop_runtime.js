@@ -8,10 +8,20 @@ if (expectedArch && process.arch !== expectedArch) {
     throw new Error(`Electron 运行架构不匹配：${process.arch} != ${expectedArch}`);
 }
 
-const Database = require('better-sqlite3');
-const db = new Database(':memory:');
-db.prepare('SELECT 1').get();
-db.close();
+let sqliteDriver = '';
+try {
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.prepare('SELECT 1').get();
+    db.close();
+    sqliteDriver = 'node:sqlite';
+} catch (_) {
+    const Database = require('better-sqlite3');
+    const db = new Database(':memory:');
+    db.prepare('SELECT 1').get();
+    db.close();
+    sqliteDriver = 'better-sqlite3';
+}
 
 require('@duckdb/node-api');
 const sharp = require('sharp');
@@ -22,6 +32,7 @@ console.log(JSON.stringify({
     ok: true,
     platform: process.platform,
     arch: process.arch,
+    sqlite: sqliteDriver,
     sharp: sharp.versions.sharp,
     vips: sharp.versions.vips
 }));

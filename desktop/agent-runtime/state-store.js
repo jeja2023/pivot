@@ -1,11 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
 const {
     assertAgentRunStatusTransition,
     TERMINAL_STATUSES
 } = require('../../server/services/agent-runtime/state-machine');
+
+function openSqliteDatabase(target) {
+    try {
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(target);
+        db.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA foreign_keys = ON;');
+        return db;
+    } catch (_) {
+        const Database = require('better-sqlite3');
+        const db = new Database(target);
+        db.pragma('journal_mode = WAL');
+        db.pragma('foreign_keys = ON');
+        return db;
+    }
+}
 
 function json(value, fallback = {}) {
     try { return JSON.stringify(value ?? fallback); } catch (_) { return JSON.stringify(fallback); }
@@ -22,9 +37,7 @@ class DesktopAgentStateStore {
     constructor(dbPath) {
         const target = path.resolve(String(dbPath || path.join(process.cwd(), 'data', 'agent-state.db')));
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        this.db = new Database(target);
-        this.db.pragma('journal_mode = WAL');
-        this.db.pragma('foreign_keys = ON');
+        this.db = openSqliteDatabase(target);
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS agent_runs (
                 id TEXT PRIMARY KEY,
