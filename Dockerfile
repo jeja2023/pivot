@@ -72,7 +72,7 @@ RUN node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper');
 
 # 预建默认持久化目录。宿主机 bind mount 也必须允许 UID/GID 1000 写入。
 RUN mkdir -p /app/data /app/uploads /app/downloads /app/logs && \
-  chown -R node:node /app
+  chown -R node:node /app/data /app/uploads /app/downloads /app/logs
 
 USER node
 EXPOSE 3000
