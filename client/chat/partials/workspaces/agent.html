@@ -1,881 +1,974 @@
-<!-- 自动化：任务运行 -->
-    <section id="agent-workbench-modal" class="main-workspace-view agent-workspace-view hidden">
-        <div class="agent-modal">
-            <div class="agent-modal-header">
-                <div>
-                    <h3>自动化</h3>
-                    <p id="agent-workspace-subtitle">集中创建、运行和复盘自主任务、工作流任务与计划执行。</p>
-                </div>
-                <div class="agent-modal-header-actions">
-                    <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog" aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
-                    <button id="agent-goal-create-top-btn" class="btn-primary hidden" type="button">新建持续目标</button>
-                    <button id="agent-refresh-btn" class="btn-secondary" type="button">刷新</button>
-                    <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
-                </div>
+<!-- 自动化：任务运行与智能体控制台 -->
+<section id="agent-workbench-modal" class="main-workspace-view agent-workspace-view hidden">
+    <div class="agent-modal">
+        <div class="agent-modal-header">
+            <div>
+                <h3>自动化</h3>
+                <p id="agent-workspace-subtitle">集中创建、运行和复盘自主任务、工作流任务与计划执行。</p>
             </div>
-            <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
-                <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab" aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab" aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
-                <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab" aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 控制台</button>
+            <div class="agent-modal-header-actions">
+                <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog"
+                    aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
+                <button id="agent-goal-create-top-btn" class="btn-primary hidden" type="button">新建持续目标</button>
+                <button id="agent-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                <button id="agent-modal-close" class="btn-secondary agent-modal-close">关闭</button>
             </div>
-            <!-- Agent 持续目标创建模态弹窗 -->
-            <div id="agent-goal-modal" class="modal-overlay hidden" style="z-index: 1860;" role="dialog" aria-modal="true" aria-labelledby="agent-goal-modal-title" aria-hidden="true">
-                <div class="modal agent-task-editor-modal agent-goal-modal-dialog">
-                    <div class="agent-config-modal-head">
+        </div>
+        <div class="automation-primary-tabs" role="tablist" aria-label="自动化功能">
+            <button class="automation-primary-tab active" type="button" data-automation-section="tasks" role="tab"
+                aria-controls="agent-workbench-modal" aria-selected="true" tabindex="0">任务</button>
+            <button class="automation-primary-tab" type="button" data-automation-section="workflows" role="tab"
+                aria-controls="automation-workflows-panel" aria-selected="false" tabindex="-1">工作流</button>
+            <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab"
+                aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 控制台</button>
+        </div>
+        <!-- Agent 持续目标创建模态弹窗 -->
+        <div id="agent-goal-modal" class="modal-overlay hidden" style="z-index: 1860;" role="dialog" aria-modal="true"
+            aria-labelledby="agent-goal-modal-title" aria-hidden="true">
+            <div class="modal agent-task-editor-modal agent-goal-modal-dialog">
+                <div class="agent-config-modal-head">
+                    <div>
+                        <h3 id="agent-goal-modal-title">新建持续目标</h3>
+                        <span>配置由定时调度或外部事件源自动触发的自主 Agent 持续目标</span>
+                    </div>
+                </div>
+                <form id="agent-goal-editor" class="agent-task-editor-body agent-goal-modal-form">
+                    <label class="modal-form-field">
+                        <span>目标名称</span>
+                        <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160"
+                            placeholder="例如：每日晨间项目风险与待办巡检" required>
+                    </label>
+                    <label class="modal-form-field agent-task-goal-field">
+                        <span>目标描述</span>
+                        <textarea id="agent-goal-goal" class="form-input agent-goal-input" rows="3" maxlength="12000"
+                            placeholder="清晰描述该持续目标每次被触发时需要执行的操作" required></textarea>
+                    </label>
+                    <div class="modal-form-grid modal-form-grid--2">
+                        <label class="modal-form-field">
+                            <span>触发方式</span>
+                            <select id="agent-goal-trigger" class="form-input">
+                                <option value="timer">定时调度 (每天固定时间)</option>
+                                <option value="webhook">Webhook 外部调用</option>
+                                <option value="file">受控文件目录变化</option>
+                                <option value="database">数据库只读增量变化</option>
+                                <option value="manual">仅手动触发</option>
+                            </select>
+                        </label>
+                        <label id="agent-goal-time-field" class="modal-form-field">
+                            <span>每日执行时间</span>
+                            <input id="agent-goal-time" class="form-input" type="time" value="09:00">
+                        </label>
+                    </div>
+                    <label id="agent-goal-directory-field" class="modal-form-field hidden">
+                        <span>监听目录路径</span>
+                        <input id="agent-goal-directory" class="form-input" placeholder="请输入受控目录根内的相对路径">
+                    </label>
+                    <label id="agent-goal-query-field" class="modal-form-field hidden">
+                        <span>只读增量 SQL 查询</span>
+                        <input id="agent-goal-query" class="form-input"
+                            placeholder="SELECT id, updated_at FROM my_table WHERE updated_at > '{{watermark}}'">
+                    </label>
+                    <div id="agent-goal-token-notice" class="agent-goal-notice hidden" role="status"></div>
+                    <div class="agent-task-editor-footer">
+                        <span class="agent-goal-hint">后台自动监听并生成独立审计记录</span>
                         <div>
-                            <h3 id="agent-goal-modal-title">新建持续目标</h3>
-                            <span>配置由定时调度或外部事件源自动触发的自主 Agent 持续目标</span>
+                            <button type="button" id="agent-goal-cancel" class="btn-secondary">取消</button>
+                            <button type="submit" class="btn-primary">保存持续目标</button>
                         </div>
                     </div>
-                    <form id="agent-goal-editor" class="agent-task-editor-body agent-goal-modal-form">
-                        <label class="modal-form-field">
-                            <span>目标名称</span>
-                            <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160" placeholder="例如：每日晨间项目风险与待办巡检" required>
+                </form>
+            </div>
+        </div>
+        <!-- 视图 1：任务工作台 (默认展示) -->
+        <div id="agent-tasks-view" class="agent-workbench">
+            <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog"
+                aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
+                <div id="agent-run-panel" class="modal agent-task-editor-modal">
+                    <div class="agent-config-modal-head">
+                        <div>
+                            <h3 id="agent-task-editor-title">新建任务</h3>
+                            <span>由智能助手根据目标自主规划并执行多步骤任务</span>
+                        </div>
+                        <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
+                    </div>
+                    <div class="agent-task-editor-body">
+                        <!-- 任务模板快速选择条 -->
+                        <div class="agent-task-composer-templates-bar">
+                            <div class="agent-task-composer-templates-head">
+                                <span class="composer-templates-label">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                        aria-hidden="true">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                                    </svg>
+                                    <span>常用模板</span>
+                                </span>
+                                <button type="button" class="btn-text-action btn-xs" data-agent-save-template
+                                    title="将当前填写的任务目标与参数保存为模板">+ 保存当前为模板</button>
+                            </div>
+                            <div id="agent-template-list" class="agent-template-list"></div>
+                        </div>
+                        <label class="modal-form-field agent-task-title-field">
+                            <span>任务标题</span>
+                            <input type="text" id="agent-title-input" class="form-input agent-title-input"
+                                placeholder="输入简短任务标题（可选，留空将自动根据目标词句生成）">
                         </label>
                         <label class="modal-form-field agent-task-goal-field">
-                            <span>目标描述</span>
-                            <textarea id="agent-goal-goal" class="form-input agent-goal-input" rows="3" maxlength="12000" placeholder="清晰描述该持续目标每次被触发时需要执行的操作" required></textarea>
+                            <span>任务目标</span>
+                            <textarea id="agent-goal-input" class="form-input agent-goal-input"
+                                placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
                         </label>
-                        <div class="modal-form-grid modal-form-grid--2">
-                            <label class="modal-form-field">
-                                <span>触发方式</span>
-                                <select id="agent-goal-trigger" class="form-input">
-                                    <option value="timer">定时调度 (每天固定时间)</option>
-                                    <option value="webhook">Webhook 外部调用</option>
-                                    <option value="file">受控文件目录变化</option>
-                                    <option value="database">数据库只读增量变化</option>
-                                    <option value="manual">仅手动触发</option>
-                                </select>
-                            </label>
-                            <label id="agent-goal-time-field" class="modal-form-field">
-                                <span>每日执行时间</span>
-                                <input id="agent-goal-time" class="form-input" type="time" value="09:00">
-                            </label>
+                        <div class="agent-quick-goals" aria-label="常用自主任务目标">
+                            <button type="button" data-agent-run-mode="audit" data-agent-mcp="true"
+                                data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
+                            <button type="button" data-agent-run-mode="standard" data-agent-mcp="false"
+                                data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
+                            <button type="button" data-agent-run-mode="audit" data-agent-mcp="false"
+                                data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
                         </div>
-                        <label id="agent-goal-directory-field" class="modal-form-field hidden">
-                            <span>监听目录路径</span>
-                            <input id="agent-goal-directory" class="form-input" placeholder="请输入受控目录根内的相对路径">
-                        </label>
-                        <label id="agent-goal-query-field" class="modal-form-field hidden">
-                            <span>只读增量 SQL 查询</span>
-                            <input id="agent-goal-query" class="form-input" placeholder="SELECT id, updated_at FROM my_table WHERE updated_at > '{{watermark}}'">
-                        </label>
-                        <div id="agent-goal-token-notice" class="agent-goal-notice hidden" role="status"></div>
-                        <div class="agent-task-editor-footer">
-                            <span class="agent-goal-hint">后台自动监听并生成独立审计记录</span>
-                            <div>
-                                <button type="button" id="agent-goal-cancel" class="btn-secondary">取消</button>
-                                <button type="submit" class="btn-primary">保存持续目标</button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <!-- 视图 1：任务运行 (默认展示) -->
-            <div id="agent-tasks-view" class="agent-workbench">
-                <div id="agent-task-editor-modal" class="modal-overlay hidden" style="z-index: 1850;" role="dialog" aria-modal="true" aria-labelledby="agent-task-editor-title" aria-hidden="true">
-                    <div id="agent-run-panel" class="modal agent-task-editor-modal">
-                        <div class="agent-config-modal-head">
-                            <div>
-                                <h3 id="agent-task-editor-title">新建任务</h3>
-                                <span>由智能助手根据目标自主规划并执行多步骤任务</span>
-                            </div>
-                            <button id="task-create-close-btn" class="btn-secondary" type="button">关闭</button>
-                        </div>
-                        <div class="agent-task-editor-body">
-                            <label class="modal-form-field agent-task-title-field">
-                                <span>任务标题</span>
-                                <input type="text" id="agent-title-input" class="form-input agent-title-input" placeholder="输入简短任务标题（可选，留空将自动根据目标词句生成）">
-                            </label>
-                            <label class="modal-form-field agent-task-goal-field">
-                                <span>任务目标</span>
-                                <textarea id="agent-goal-input" class="form-input agent-goal-input" placeholder="输入一个明确目标，例如：检索知识库并总结最近某项目的关键风险"></textarea>
-                            </label>
-                            <div class="agent-quick-goals" aria-label="常用自主任务目标">
-                                <button type="button" data-agent-run-mode="audit" data-agent-mcp="true" data-agent-goal-template="检索知识库并总结最近项目的关键风险，按严重程度给出处理建议。">风险总结</button>
-                                <button type="button" data-agent-run-mode="standard" data-agent-mcp="false" data-agent-goal-template="整理最近会话中的待办事项，按项目和优先级归类。">待办整理</button>
-                                <button type="button" data-agent-run-mode="audit" data-agent-mcp="false" data-agent-goal-template="检查知识库文档状态，列出失败或未启用的资料，并给出修复建议。">资料检查</button>
-                            </div>
-                            <div class="modal-form-grid modal-form-grid--3 agent-task-primary-fields">
+                        <div class="modal-form-grid modal-form-grid--3 agent-task-primary-fields">
                             <label class="modal-form-field modal-form-field--span-3">
                                 <span>模型</span>
                                 <select id="agent-model-select" class="form-input hidden"></select>
                                 <div id="agent-model-picker" class="agent-model-picker">
-                                    <button id="agent-model-trigger" class="agent-model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                                    <button id="agent-model-trigger" class="agent-model-trigger" type="button"
+                                        aria-haspopup="listbox" aria-expanded="false">
                                         <span id="agent-selected-model-name">请选择模型</span>
-                                        <span id="agent-selected-model-caps" class="agent-model-caps" aria-label="当前模型能力"></span>
+                                        <span id="agent-selected-model-caps" class="agent-model-caps"
+                                            aria-label="当前模型能力"></span>
                                     </button>
                                     <div id="agent-model-list" class="agent-model-list hidden" role="listbox"></div>
                                 </div>
                             </label>
                         </div>
-                    <div class="agent-inline-settings" aria-label="高级设置">
-                        <div class="agent-inline-settings-head">
-                            <strong>高级设置</strong>
+                        <div class="agent-inline-settings" aria-label="高级设置">
+                            <div class="agent-inline-settings-head">
+                                <strong>高级设置</strong>
+                            </div>
+                            <div class="agent-inline-settings-grid">
+                                <label class="agent-toggle-field" title="开启后，自主任务可以调用已接入的工具库工具。关闭时仅使用系统只读工具。">
+                                    <input id="agent-allow-mcp" type="checkbox" checked>
+                                    <span>允许工具库工具</span>
+                                    <i class="agent-switch-track" aria-hidden="true"></i>
+                                </label>
+                                <label>
+                                    <span>运行模式</span>
+                                    <select id="agent-run-mode" class="form-input">
+                                        <option value="standard">标准</option>
+                                        <option value="deep">深度</option>
+                                        <option value="audit">审查</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>工具审批</span>
+                                    <select id="agent-approval-policy" class="form-input">
+                                        <option value="safe_mcp_auto">只审批高风险</option>
+                                        <option value="approve_all_mcp">所有工具均审批</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>模型路由</span>
+                                    <select id="agent-model-router" class="form-input"
+                                        title="按策略自动从可见模型中选择；固定模型会保持当前选择">
+                                        <option value="fixed">固定模型</option>
+                                        <option value="auto-vision">视觉优先</option>
+                                        <option value="auto-context">上下文匹配</option>
+                                        <option value="auto-cost">成本优先</option>
+                                        <option value="auto-load">负载均衡</option>
+                                        <option value="auto-escalate">成本升级（置信不足时升级）</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>最大执行轮次</span>
+                                    <input id="agent-max-steps" class="form-input" type="number" min="1" max="60"
+                                        placeholder="自动" aria-describedby="agent-max-steps-help"
+                                        title="留空时自动设置：标准模式 30 轮，深度模式 50 轮，审查模式 60 轮；达到上限后将基于已有结果生成总结。">
+                                </label>
+                                <label>
+                                    <span>失败重试</span>
+                                    <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5"
+                                        value="1">
+                                </label>
+                                <label>
+                                    <span>上下文来源</span>
+                                    <select id="agent-context-mode" class="form-input">
+                                        <option value="auto">自动选择</option>
+                                        <option value="recent">最近会话</option>
+                                        <option value="knowledge">知识库优先</option>
+                                        <option value="custom">自定义说明</option>
+                                        <option value="none">不扩展</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>执行技能</span>
+                                    <select id="agent-skill-select" class="form-input">
+                                        <option value="">不指定技能</option>
+                                    </select>
+                                </label>
+                                <label class="agent-token-budget-field">
+                                    <span>单次任务 Token 上限</span>
+                                    <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000"
+                                        placeholder="留空表示不限" aria-describedby="agent-token-budget-help"
+                                        title="累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。">
+                                </label>
+                                <p id="agent-token-budget-help" class="agent-token-budget-help hidden">累计计算输入和输出
+                                    Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
+                                <label class="agent-context-notes-field">
+                                    <span>补充说明</span>
+                                    <textarea id="agent-context-notes" class="form-input" rows="2"
+                                        placeholder="可选，限定范围、部门或资料来源"></textarea>
+                                </label>
+                            </div>
                         </div>
-                        <div class="agent-inline-settings-grid">
-                            <label class="agent-toggle-field" title="开启后，自主任务可以调用已接入的工具库工具。关闭时仅使用系统只读工具。">
-                                <input id="agent-allow-mcp" type="checkbox" checked>
-                                <span>允许工具库工具</span>
-                                <i class="agent-switch-track" aria-hidden="true"></i>
-                            </label>
-                            <label>
-                                <span>运行模式</span>
-                                <select id="agent-run-mode" class="form-input">
-                                    <option value="standard">标准</option>
-                                    <option value="deep">深度</option>
-                                    <option value="audit">审查</option>
-                                </select>
-                            </label>
-                            <label>
-                                <span>工具审批</span>
-                                <select id="agent-approval-policy" class="form-input">
-                                    <option value="safe_mcp_auto">只审批高风险</option>
-                                    <option value="approve_all_mcp">所有工具均审批</option>
-                                </select>
-                            </label>
-                            <label>
-                                <span>模型路由</span>
-                                <select id="agent-model-router" class="form-input" title="按策略自动从可见模型中选择；固定模型会保持当前选择">
-                                    <option value="fixed">固定模型</option>
-                                    <option value="auto-vision">视觉优先</option>
-                                    <option value="auto-context">上下文匹配</option>
-                                    <option value="auto-cost">成本优先</option>
-                                    <option value="auto-load">负载均衡</option>
-                                    <option value="auto-escalate">成本升级（置信不足时升级）</option>
-                                </select>
-                            </label>
-                            <label>
-                                <span>最大执行轮次</span>
-                                <input id="agent-max-steps" class="form-input" type="number" min="1" max="60" placeholder="自动" aria-describedby="agent-max-steps-help" title="留空时自动设置：标准模式 30 轮，深度模式 50 轮，审查模式 60 轮；达到上限后将基于已有结果生成总结。">
-                            </label>
-                            <label>
-                                <span>失败重试</span>
-                                <input id="agent-retry-limit" class="form-input" type="number" min="0" max="5" value="1">
-                            </label>
-                            <label>
-                                <span>上下文来源</span>
-                                <select id="agent-context-mode" class="form-input">
-                                    <option value="auto">自动选择</option>
-                                    <option value="recent">最近会话</option>
-                                    <option value="knowledge">知识库优先</option>
-                                    <option value="custom">自定义说明</option>
-                                    <option value="none">不扩展</option>
-                                </select>
-                            </label>
-                            <label>
-                                <span>执行技能</span>
-                                <select id="agent-skill-select" class="form-input">
-                                    <option value="">不指定技能</option>
-                                </select>
-                            </label>
-                            <label class="agent-token-budget-field">
-                                <span>单次任务 Token 上限</span>
-                                <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000" placeholder="留空表示不限" aria-describedby="agent-token-budget-help" title="累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。">
-                            </label>
-                            <p id="agent-token-budget-help" class="agent-token-budget-help hidden">累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
-                            <label class="agent-context-notes-field">
-                                <span>补充说明</span>
-                                <textarea id="agent-context-notes" class="form-input" rows="2" placeholder="可选，限定范围、部门或资料来源"></textarea>
+                        <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
+                    </div>
+                    <div class="agent-task-editor-footer">
+                        <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
+                        <div>
+                            <button id="task-create-cancel-btn" class="btn-secondary" type="button">取消</button>
+                            <button id="agent-save-plan-btn" class="btn-secondary" type="button">保存为计划</button>
+                            <button id="agent-run-btn" class="btn-primary" type="button">运行任务</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 左侧主面板：紧凑任务过滤与选择列表 Master Pane -->
+            <div class="agent-tasks-master-pane">
+                <div class="agent-history-head">
+                    <div>
+                        <h3>任务活动</h3>
+                        <p>一次性后台任务、工作流及计划执行状态。</p>
+                    </div>
+                    <div class="agent-history-head-actions">
+                        <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                    </div>
+                </div>
+                <div class="agent-history-toolbar">
+                    <div class="agent-history-filters">
+                        <select id="agent-filter-status" class="form-input">
+                            <option value="">全部状态</option>
+                            <option value="queued">排队中</option>
+                            <option value="running">运行中</option>
+                            <option value="approval_required">待审批</option>
+                            <option value="completed">已完成</option>
+                            <option value="completed_with_errors">异常完成</option>
+                            <option value="error">失败</option>
+                            <option value="cancelled">已停止</option>
+                        </select>
+                        <select id="agent-filter-run-type" class="form-input">
+                            <option value="">全部类型</option>
+                            <option value="free">一次性任务</option>
+                            <option value="workflow">工作流任务</option>
+                            <option value="scheduled">计划执行</option>
+                        </select>
+                        <input id="agent-filter-query" class="form-input" placeholder="搜索任务标题或目标">
+                    </div>
+                </div>
+                <div id="agent-runs-list" class="agent-runs-list"></div>
+                <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
+            </div>
+
+            <!-- 中部与右侧：任务详情与运行上下文工作台主区 Detail & Context Panes -->
+            <div class="agent-tasks-detail-container" id="agent-tasks-detail-container">
+                <div class="agent-detail-header-bar">
+                    <div class="agent-detail-breadcrumb" id="agent-detail-breadcrumb">
+                        <button type="button" class="agent-breadcrumb-back" id="agent-breadcrumb-back-btn"
+                            title="返回任务列表">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 18l-6-6 6-6" />
+                            </svg>
+                            <span>返回列表</span>
+                        </button>
+                        <span class="agent-breadcrumb-item">任务</span>
+                        <span class="agent-breadcrumb-sep">/</span>
+                        <span class="agent-breadcrumb-item active" id="agent-breadcrumb-active-title">选择任务查看详情</span>
+                    </div>
+                    <div class="agent-detail-header-actions" id="agent-detail-header-actions"></div>
+                </div>
+
+                <!-- 5 大结构化详情 Tab 栏 -->
+                <div class="agent-run-tabs" role="tablist" aria-label="任务详情分类">
+                    <button class="agent-run-tab active" type="button" data-agent-run-subtab="overview" role="tab"
+                        aria-selected="true">
+                        <span>概览</span>
+                    </button>
+                    <button class="agent-run-tab" type="button" data-agent-run-subtab="steps" role="tab"
+                        aria-selected="false">
+                        <span>执行步骤</span>
+                        <span class="agent-run-tab-badge" id="agent-run-tab-steps-count">0</span>
+                    </button>
+                    <button class="agent-run-tab" type="button" data-agent-run-subtab="logs" role="tab"
+                        aria-selected="false">
+                        <span>实时日志</span>
+                    </button>
+                    <button class="agent-run-tab" type="button" data-agent-run-subtab="artifacts" role="tab"
+                        aria-selected="false">
+                        <span>输出物</span>
+                        <span class="agent-run-tab-badge" id="agent-run-tab-artifacts-count">0</span>
+                    </button>
+                    <button class="agent-run-tab" type="button" data-agent-run-subtab="approvals" role="tab"
+                        aria-selected="false">
+                        <span>审批与异常</span>
+                        <span class="agent-run-tab-badge agent-run-tab-badge--warning hidden"
+                            id="agent-run-tab-approvals-count">0</span>
+                    </button>
+                </div>
+
+                <!-- 5 个 Tab 对应的内容面板容器 + 嵌套右侧上下文面板 -->
+                <div class="agent-tasks-content-and-context">
+                    <div class="agent-run-tab-panes" id="agent-run-tab-panes">
+                        <!-- 空状态提示（未选中任务时） -->
+                        <div id="agent-run-detail-empty" class="agent-run-detail-empty">
+                            <div class="empty-icon-wrap">
+                                <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor"
+                                    stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="9" y1="9" x2="15" y2="9"></line>
+                                    <line x1="9" y1="13" x2="15" y2="13"></line>
+                                    <line x1="9" y1="17" x2="11" y2="17"></line>
+                                </svg>
+                            </div>
+                            <h4>请选择任务或发起新任务</h4>
+                            <p>从左侧列表中点击任务记录查看执行进度与生成产物，或直接新建一个任务。</p>
+                            <div class="agent-empty-actions" style="margin-top: 14px;">
+                                <button type="button" class="btn-primary" id="agent-empty-create-btn">+ 新建任务</button>
+                            </div>
+                        </div>
+                        <div class="agent-run-tab-pane hidden" data-agent-run-pane="overview" id="agent-pane-overview">
+                        </div>
+                        <div class="agent-run-tab-pane hidden" data-agent-run-pane="steps" id="agent-pane-steps"></div>
+                        <div class="agent-run-tab-pane hidden" data-agent-run-pane="logs" id="agent-pane-logs"></div>
+                        <div class="agent-run-tab-pane hidden" data-agent-run-pane="artifacts"
+                            id="agent-pane-artifacts"></div>
+                        <div class="agent-run-tab-pane hidden" data-agent-run-pane="approvals"
+                            id="agent-pane-approvals"></div>
+                    </div>
+
+                    <!-- 右侧可折叠运行上下文 Inspector Pane -->
+                    <aside class="agent-tasks-context-pane" id="agent-tasks-context-pane">
+                        <div class="agent-context-pane-head">
+                            <strong>运行上下文</strong>
+                            <span id="agent-context-status-pill" class="agent-context-status-pill">--</span>
+                        </div>
+                        <div class="agent-context-pane-body" id="agent-context-pane-body">
+                            <div class="agent-context-loading-hint">选择任务后展示运行参数与环境指标</div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
+        <!-- 视图 2：Agent 控制台 (独立 Tab 页面，模块化架构) -->
+        <div id="agent-control-plane" class="agent-control-plane-view hidden" aria-label="Agent 控制台">
+            <!-- 顶部子导航栏：清晰五大领域分类 -->
+            <div class="agent-cp-subnav-bar">
+                <div class="agent-cp-subnav-tabs" role="tablist" aria-label="Agent 控制台导航">
+                    <button class="agent-cp-subnav-tab active" type="button" data-agent-cp-subview="inbox" role="tab"
+                        aria-selected="true">
+                        <span>统一收件箱</span>
+                        <span id="agent-cp-inbox-badge" class="agent-cp-subnav-badge">0</span>
+                    </button>
+                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="goals" role="tab"
+                        aria-selected="false">
+                        <span>持续目标</span>
+                        <span id="agent-cp-goals-badge"
+                            class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
+                    </button>
+                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="channels" role="tab"
+                        aria-selected="false">
+                        <span>通知渠道</span>
+                        <span id="agent-cp-channels-badge"
+                            class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
+                    </button>
+                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="quality" role="tab"
+                        aria-selected="false">
+                        <span>质量与可靠性</span>
+                    </button>
+                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="governance" role="tab"
+                        aria-selected="false">
+                        <span>能力与治理</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 子视图 1：统一收件箱 (宽幅专业表格) -->
+            <div class="agent-cp-subview-pane" data-agent-cp-pane="inbox">
+                <section class="agent-cp-card" aria-labelledby="agent-inbox-card-title">
+                    <div class="agent-cp-card-head">
+                        <div>
+                            <h4 id="agent-inbox-card-title">统一收件箱</h4>
+                            <span>集中接收任务运行结果、人工审批请求与智能体自进化提案</span>
+                        </div>
+                        <div class="agent-cp-card-actions">
+                            <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">刷新收件箱</button>
+                        </div>
+                    </div>
+                    <div class="agent-cp-card-body">
+                        <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 子视图 2：持续目标 (列表与新建) -->
+            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="goals">
+                <section class="agent-cp-card" aria-labelledby="agent-goals-card-title">
+                    <div class="agent-cp-card-head">
+                        <div>
+                            <h4 id="agent-goals-card-title">持续目标</h4>
+                            <span>配置由定时调度、外部 Webhook 或数据库文件变更自动触发的常驻 Agent 目标</span>
+                        </div>
+                        <div class="agent-cp-card-actions">
+                            <button id="agent-goal-create" class="btn-primary btn-xs" type="button">+ 新建持续目标</button>
+                        </div>
+                    </div>
+                    <div class="agent-cp-card-body">
+                        <div id="agent-goals-panel" class="agent-goals-panel"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 子视图 3：通知与审批渠道 -->
+            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="channels">
+                <section class="agent-cp-card" aria-labelledby="agent-channels-card-title">
+                    <div class="agent-cp-card-head">
+                        <div>
+                            <h4 id="agent-channels-card-title">通知与审批渠道</h4>
+                            <span>配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与人工审批</span>
+                        </div>
+                    </div>
+                    <div class="agent-cp-card-body">
+                        <div id="agent-channels-panel" class="agent-channels-panel"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 子视图 4：质量与可靠性大屏 (指标看板 + 评测中心 + 工具可靠性 + 闭环反馈) -->
+            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
+                <div class="agent-cp-quality-layout">
+                    <!-- 1. 运行质量与运维指标 -->
+                    <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-quality-card-title">运行质量与运维指标</h4>
+                                <span>近 30 天自主任务完成率、人工审批中位数耗时与渠道投递健康度</span>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-quality-panel" class="agent-quality-panel"></div>
+                        </div>
+                    </section>
+
+                    <!-- 2. 质量评测中心 -->
+                    <section class="agent-cp-card" aria-labelledby="agent-eval-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-eval-card-title"><strong>评测概览</strong></h4>
+                                <span id="agent-eval-center-status">尚未运行评测</span>
+                            </div>
+                            <div class="agent-cp-card-actions">
+                                <button id="agent-eval-refresh-btn" class="btn-secondary btn-xs"
+                                    type="button">刷新评测集</button>
+                                <button id="agent-eval-create-btn" class="btn-primary btn-xs" type="button">+
+                                    新建评测集</button>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div class="agent-eval-center">
+                                <div id="agent-eval-overview" class="agent-eval-overview"></div>
+                                <div class="agent-eval-layout">
+                                    <div id="agent-eval-suite-list" class="agent-eval-suite-list"></div>
+                                    <div id="agent-eval-suite-detail" class="agent-eval-suite-detail"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 3. 工具调用可靠性监控 -->
+                    <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-reliability-card-title">工具调用可靠性监控</h4>
+                                <span>各接入工具调用成功率、加权可靠度评分与样本置信度</span>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
+                        </div>
+                    </section>
+
+                    <!-- 4. 结果反馈闭环 -->
+                    <section class="agent-cp-card" aria-labelledby="agent-feedback-card-title">
+                        <div class="agent-cp-card-head">
+                            <div>
+                                <h4 id="agent-feedback-card-title">结果反馈闭环</h4>
+                                <span>汇总任务成败、评分和工具失败信号，用于提示词与工具选择改进</span>
+                            </div>
+                            <div class="agent-cp-card-actions">
+                                <button id="agent-feedback-refresh" class="btn-secondary btn-xs"
+                                    type="button">刷新反馈</button>
+                            </div>
+                        </div>
+                        <div class="agent-cp-card-body">
+                            <div id="agent-feedback-summary" class="agent-feedback-summary-container"></div>
+                            <div class="agent-harness-subhead" style="margin-top: 14px;">
+                                <strong>近期反馈明细</strong>
+                                <span>按任务展示执行结论与人工修正意见</span>
+                            </div>
+                            <div id="agent-feedback-list" class="agent-harness-list full-width"></div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- 子视图 5：能力与治理大屏 (个人档案 + 常驻实例 + 进化提议 + 技能与资源) -->
+            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="governance">
+                <div class="agent-harness-nav-tabs" role="tablist" aria-label="能力与治理模块">
+                    <button class="agent-harness-nav-tab active" type="button" data-agent-harness-nav="profile"
+                        role="tab" aria-selected="true">个人档案</button>
+                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="residency" role="tab"
+                        aria-selected="false">常驻实例</button>
+                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="evolution" role="tab"
+                        aria-selected="false">进化提议</button>
+                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="skills" role="tab"
+                        aria-selected="false">技能包清单</button>
+                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="packs" role="tab"
+                        aria-selected="false">运行资源包</button>
+                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="governance" role="tab"
+                        aria-selected="false">记忆治理策略</button>
+                </div>
+                <div id="agent-harness-notice" class="agent-harness-notice" role="status" aria-live="polite"></div>
+
+                <!-- 1. 个人档案 -->
+                <section class="agent-harness-panel" data-agent-harness-section="profile"
+                    aria-labelledby="agent-profile-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-profile-title">个人 Agent 档案</strong>
+                            <span>保存长期偏好、工作习惯和沟通方式，作为受限运行上下文。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-profile-refresh" class="btn-secondary" type="button">刷新</button>
+                        </div>
+                    </div>
+                    <div class="agent-profile-sections">
+                        <div class="agent-profile-card">
+                            <div class="agent-harness-subhead">
+                                <strong>身份与沟通偏好</strong>
+                                <span>定义智能体称呼、职责定位与响应语气</span>
+                            </div>
+                            <div class="agent-harness-form-grid agent-harness-form-grid-4col">
+                                <label><span>称呼</span><input id="agent-profile-display-name" class="form-input"
+                                        placeholder="例如：架构专家" maxlength="120"></label>
+                                <label><span>角色 / 职责</span><input id="agent-profile-role" class="form-input"
+                                        placeholder="例如：系统架构设计与代码审查" maxlength="160"></label>
+                                <label><span>沟通语气</span><select id="agent-profile-tone" class="form-input">
+                                        <option value="professional">专业严谨</option>
+                                        <option value="friendly">亲切友好</option>
+                                        <option value="concise">精简高效</option>
+                                    </select></label>
+                                <label><span>详略程度</span><select id="agent-profile-verbosity" class="form-input">
+                                        <option value="concise">精简扼要</option>
+                                        <option value="balanced">平衡适中</option>
+                                        <option value="detailed">详尽全面</option>
+                                    </select></label>
+                            </div>
+                        </div>
+                        <div class="agent-profile-card">
+                            <div class="agent-harness-subhead">
+                                <strong>工作习惯与工具偏好</strong>
+                                <span>按行输入长期积累的执行习惯、常用工具与常见任务</span>
+                            </div>
+                            <div class="agent-harness-form-grid agent-harness-form-grid-3col">
+                                <label><span>工作习惯（每行一项）</span><textarea id="agent-profile-work-habits"
+                                        class="form-input" rows="5"
+                                        placeholder="优先使用标准库&#10;输出需附带关键理由"></textarea></label>
+                                <label><span>常用工具（每行一项）</span><textarea id="agent-profile-tools" class="form-input"
+                                        rows="5"
+                                        placeholder="db.run_readonly_query&#10;format.to_markdown_table"></textarea></label>
+                                <label><span>常见任务（每行一项）</span><textarea id="agent-profile-tasks" class="form-input"
+                                        rows="5" placeholder="数据库表结构分析&#10;业务指标分组统计"></textarea></label>
+                            </div>
+                        </div>
+                        <div class="agent-profile-card">
+                            <div class="agent-harness-subhead">
+                                <strong>扩展配置字典 (JSON)</strong>
+                                <span>自定义键值偏好（支持多行结构化配置）</span>
+                            </div>
+                            <label class="agent-harness-form-field-wide">
+                                <textarea id="agent-profile-preferences" class="form-input form-input-mono" rows="4"
+                                    spellcheck="false" placeholder='{"语言":"中文","时区":"Asia/Shanghai"}'></textarea>
                             </label>
                         </div>
                     </div>
-                    <div id="agent-preflight-panel" class="workspace-governance-panel agent-preflight-panel"></div>
-                    <div id="agent-config-section-store" class="agent-config-section-store">
-                    <details class="agent-collapse-section" data-agent-config-section="templates">
-                        <summary>
-                            <span>自主任务模板</span>
-                            <small>复用目标、模型和执行参数</small>
-                        </summary>
-                        <div class="agent-collapse-body">
-                            <div class="agent-template-strip">
-                                <div class="agent-tool-section-head compact">
-                                    <strong>自主任务模板库</strong>
-                                    <button id="agent-save-template-btn" class="btn-secondary" type="button" data-agent-save-template>保存当前任务</button>
-                                </div>
-                                <div id="agent-template-list" class="agent-template-list"></div>
-                            </div>
-                            <div class="agent-template-notifications">
-                                <div class="agent-tool-section-head compact">
-                                    <strong>通知中心</strong>
-                                    <span>审批、失败与完成</span>
-                                </div>
-                                <div id="agent-notification-list" class="agent-ops-list"></div>
-                            </div>
+                    <div class="agent-harness-form-actions">
+                        <button id="agent-profile-save" class="btn-primary" type="button">保存档案</button>
+                        <button id="agent-profile-wizard" class="btn-secondary" type="button">快速设置</button>
+                    </div>
+                    <div id="agent-profile-wizard-panel" class="agent-profile-wizard-panel hidden" role="dialog"
+                        aria-label="Agent 快速设置">
+                        <div class="agent-harness-subhead"><strong>3
+                                分钟快速设置</strong><span>先设置称呼、语言、详略和常见工作类型，再补充高级档案。</span></div>
+                        <div class="agent-harness-form-grid agent-harness-form-grid-3col">
+                            <label><span>称呼</span><input id="agent-wizard-name" class="form-input"
+                                    maxlength="120"></label>
+                            <label><span>语言</span><select id="agent-wizard-language" class="form-input">
+                                    <option value="zh-CN">中文</option>
+                                    <option value="en-US">English</option>
+                                </select></label>
+                            <label><span>输出详略</span><select id="agent-wizard-verbosity" class="form-input">
+                                    <option value="concise">精简</option>
+                                    <option value="balanced">平衡</option>
+                                    <option value="detailed">详细</option>
+                                </select></label>
                         </div>
-                    </details>
-                    <details class="agent-collapse-section agent-collapse-results" data-agent-config-section="results">
-                        <summary>
-                            <span>能力与结果</span>
-                            <small>工具、状态、沉淀</small>
-                        </summary>
-                        <div class="agent-collapse-body">
-                            <div id="agent-runtime-status" class="agent-runtime-status"></div>
-                            <div class="agent-results-panel agent-results-tools-panel">
-                            <div class="agent-tool-section-head compact agent-available-tools-head">
-                                <strong>可用工具</strong>
-                                <span>已启用的系统与个人工具</span>
-                            </div>
-                            <div id="agent-tool-list" class="agent-tool-list"></div>
-                            </div>
-                            <div class="agent-results-panel agent-results-artifacts-panel">
-                                <div class="agent-tool-section-head compact">
-                                    <strong>结果沉淀</strong>
-                                    <span>已保存的自主任务输出</span>
-                                </div>
-                                <div id="agent-artifact-list" class="agent-ops-list agent-artifact-list"></div>
-                            </div>
-                        </div>
-                    </details>
-                    <details class="agent-collapse-section agent-collapse-harness" data-agent-config-section="harness">
-                        <summary>
-                            <span>运行环境</span>
-                            <small>技能包、运行资源与常驻实例</small>
-                        </summary>
-                        <div class="agent-collapse-body">
-                            <div class="agent-harness-nav-tabs" role="tablist" aria-label="运行环境模块">
-                                <button class="agent-harness-nav-tab active" type="button" data-agent-harness-nav="skills" role="tab" aria-selected="true">技能包管理</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="packs" role="tab" aria-selected="false">运行资源包</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="residency" role="tab" aria-selected="false">常驻实例</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="profile" role="tab" aria-selected="false">个人档案</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="governance" role="tab" aria-selected="false">记忆治理</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="feedback" role="tab" aria-selected="false">结果反馈</button>
-                                <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="evolution" role="tab" aria-selected="false">进化提议</button>
-                            </div>
-                            <div id="agent-harness-notice" class="agent-harness-notice" role="status" aria-live="polite"></div>
+                        <div class="agent-harness-form-actions"><button id="agent-wizard-save" class="btn-primary"
+                                type="button">完成设置</button></div>
+                    </div>
+                </section>
 
-                            <!-- 1. 技能包管理 -->
-                            <section class="agent-harness-panel" data-agent-harness-section="skills" aria-labelledby="agent-harness-skills-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-harness-skills-title">技能包</strong>
-                                        <span>安装后可在自主任务中复用受控指令、工具和权限。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-harness-skills-refresh" class="btn-secondary" type="button" title="刷新技能列表">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="agent-harness-skill-layout">
-                                    <div class="agent-harness-skill-list-wrap">
-                                        <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>
-                                        <div id="agent-harness-skill-list" class="agent-harness-list"></div>
-                                    </div>
-                                    <div class="agent-harness-skill-form-wrap">
-                                        <div class="agent-harness-subhead"><strong>注册 / 导入技能</strong><span>通过 YAML 清单注册或导入 .skill.zip 压缩包</span></div>
-                                        <div class="agent-harness-form-grid">
-                                            <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                                <span>技能清单（YAML / JSON）</span>
-                                                <textarea id="agent-harness-skill-manifest" class="form-input" rows="12" placeholder="id: project-review
+                <!-- 2. 常驻实例 -->
+                <section class="agent-harness-panel hidden" data-agent-harness-section="residency"
+                    aria-labelledby="agent-harness-residency-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-harness-residency-title">常驻实例</strong>
+                            <span>查看当前账号的上下文复用实例、租约和过期时间。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions"><select id="agent-harness-residency-scope"
+                                class="form-input admin-only hidden" aria-label="常驻实例查看范围">
+                                <option value="self">当前账号</option>
+                                <option value="all">全部用户</option>
+                            </select><button id="agent-harness-residency-sweep" class="btn-secondary"
+                                type="button">清理过期实例</button><button id="agent-harness-residency-refresh"
+                                class="btn-secondary" type="button">刷新</button></div>
+                    </div>
+                    <div id="agent-harness-residency-list" class="agent-harness-list full-width"></div>
+                </section>
+
+                <!-- 3. 进化提议 -->
+                <section class="agent-harness-panel hidden" data-agent-harness-section="evolution"
+                    aria-labelledby="agent-evolution-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-evolution-title">受控能力进化</strong>
+                            <span>Agent 只能提出建议；确认后才可应用，Skill 和工作流仍需版本化编辑器。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-evolution-refresh" class="btn-secondary" type="button">刷新</button>
+                        </div>
+                    </div>
+                    <div class="agent-evolution-layout">
+                        <div class="agent-evolution-form-card">
+                            <div class="agent-harness-subhead">
+                                <strong>发起进化提议</strong>
+                                <span>提交对 Agent 偏好、Skill 或工作流的改进建议</span>
+                            </div>
+                            <div class="agent-harness-form-grid">
+                                <label>
+                                    <span>提议类型</span>
+                                    <select id="agent-evolution-kind" class="form-input">
+                                        <option value="preference">调整偏好 (Preference)</option>
+                                        <option value="skill">创建 Skill</option>
+                                        <option value="workflow">保存工作流 (Workflow)</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>提议标题</span>
+                                    <input id="agent-evolution-title-input" class="form-input" placeholder="简要概括进化目标"
+                                        maxlength="255">
+                                </label>
+                                <label class="agent-harness-form-field-wide">
+                                    <span>提议说明</span>
+                                    <textarea id="agent-evolution-description" class="form-input" rows="2"
+                                        placeholder="详细说明优化的原因与预期效果..."></textarea>
+                                </label>
+                                <label class="agent-harness-form-field-wide">
+                                    <span>结构化变更 (JSON)</span>
+                                    <textarea id="agent-evolution-change" class="form-input form-input-mono" rows="4"
+                                        spellcheck="false"
+                                        placeholder='{"communicationStyle":{"verbosity":"concise"}}'></textarea>
+                                </label>
+                            </div>
+                            <div class="agent-harness-form-actions">
+                                <button id="agent-evolution-create" class="btn-primary" type="button">提交提议</button>
+                            </div>
+                        </div>
+                        <div class="agent-evolution-list-card">
+                            <div class="agent-harness-subhead">
+                                <strong>提议审批与变更记录</strong>
+                                <span>查看待确认及已应用的进化提议</span>
+                            </div>
+                            <div id="agent-evolution-list" class="agent-harness-list full-width"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 4. 技能包管理 -->
+                <section class="agent-harness-panel hidden" data-agent-harness-section="skills"
+                    aria-labelledby="agent-harness-skills-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-harness-skills-title">技能包</strong>
+                            <span>安装后可在自主任务中复用受控指令、工具和权限。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-harness-skills-refresh" class="btn-secondary" type="button"
+                                title="刷新技能列表">刷新</button>
+                        </div>
+                    </div>
+                    <div class="agent-harness-skill-layout">
+                        <div class="agent-harness-skill-list-wrap">
+                            <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>
+                            <div id="agent-harness-skill-list" class="agent-harness-list"></div>
+                        </div>
+                        <div class="agent-harness-skill-form-wrap">
+                            <div class="agent-harness-subhead"><strong>注册 / 导入技能</strong><span>通过 YAML 清单注册或导入
+                                    .skill.zip 压缩包</span></div>
+                            <div class="agent-harness-form-grid">
+                                <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                    <span>技能清单（YAML / JSON）</span>
+                                    <textarea id="agent-harness-skill-manifest" class="form-input" rows="12"
+                                        placeholder="id: project-review
 name: project-review
 version: 1.0.0
 title: 项目审查
 description: 检查项目资料并输出风险摘要。
 tools: []
 permissions: []"></textarea>
-                                            </label>
-                                            <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                                <span>技能补充说明（可选）</span>
-                                                <textarea id="agent-harness-skill-instructions" class="form-input" rows="3" placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
-                                            </label>
-                                        </div>
-                                        <div class="agent-harness-form-actions">
-                                            <button id="agent-harness-skill-register" class="btn-primary" type="button">注册技能</button>
-                                            <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
-                                                <span>导入技能包</span>
-                                                <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <!-- 2. 运行资源包 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="packs" aria-labelledby="agent-harness-packs-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-harness-packs-title">运行资源包</strong>
-                                        <span>浏览器和数据处理资源由系统下载、校验完整性后安装。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-harness-packs-refresh" class="btn-secondary" type="button" title="刷新运行资源包">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="agent-harness-skill-layout">
-                                    <div class="agent-harness-skill-list-wrap">
-                                        <div class="agent-harness-subhead"><strong>已安装资源包</strong><span>系统已缓存并校验的运行时包</span></div>
-                                        <div id="agent-harness-pack-list" class="agent-harness-list"></div>
-                                    </div>
-                                    <div class="agent-harness-pack-sync admin-only hidden">
-                                        <div class="agent-harness-subhead"><strong>同步运行资源包</strong><span>必须提供资源地址和访问来源白名单。</span></div>
-                                        <div class="agent-harness-form-grid">
-                                            <label><span>资源类型</span><select id="agent-harness-pack-type" class="form-input"><option value="data">数据资源</option><option value="browser">浏览器资源</option></select></label>
-                                            <label><span>ID</span><input id="agent-harness-pack-id" class="form-input" placeholder="python-runtime"></label>
-                                            <label><span>版本</span><input id="agent-harness-pack-version" class="form-input" placeholder="1.0.0"></label>
-                                            <label><span>大小（字节，可选）</span><input id="agent-harness-pack-size" class="form-input" type="number" min="0" placeholder="0"></label>
-                                            <label class="agent-harness-form-field-wide"><span>资源地址</span><input id="agent-harness-pack-url" class="form-input" type="url" placeholder="http://10.0.0.20/packs/python.bundle"></label>
-                                            <label class="agent-harness-form-field-wide"><span>校验摘要（SHA256）</span><input id="agent-harness-pack-sha256" class="form-input" spellcheck="false" placeholder="填写 64 位十六进制摘要"></label>
-                                            <label class="agent-harness-form-field-wide"><span>访问来源白名单（每行一个）</span><textarea id="agent-harness-pack-origins" class="form-input" rows="2" placeholder="http://10.0.0.20"></textarea></label>
-                                        </div>
-                                        <div class="agent-harness-form-actions"><button id="agent-harness-pack-sync" class="btn-primary" type="button">同步并校验</button></div>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <!-- 3. 常驻实例 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="residency" aria-labelledby="agent-harness-residency-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-harness-residency-title">常驻实例</strong>
-                                        <span>查看当前账号的上下文复用实例、租约和过期时间。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions"><select id="agent-harness-residency-scope" class="form-input admin-only hidden" aria-label="常驻实例查看范围"><option value="self">当前账号</option><option value="all">全部用户</option></select><button id="agent-harness-residency-sweep" class="btn-secondary" type="button">清理过期实例</button><button id="agent-harness-residency-refresh" class="btn-secondary" type="button">刷新</button></div>
-                                </div>
-                                <div id="agent-harness-residency-list" class="agent-harness-list full-width"></div>
-                            </section>
-
-                            <!-- 4. 个人档案 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="profile" aria-labelledby="agent-profile-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-profile-title">个人 Agent 档案</strong>
-                                        <span>保存长期偏好、工作习惯和沟通方式，作为受限运行上下文。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-profile-refresh" class="btn-secondary" type="button">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="agent-profile-sections">
-                                    <div class="agent-profile-card">
-                                        <div class="agent-harness-subhead">
-                                            <strong>身份与沟通偏好</strong>
-                                            <span>定义智能体称呼、职责定位与响应语气</span>
-                                        </div>
-                                        <div class="agent-harness-form-grid agent-harness-form-grid-4col">
-                                            <label><span>称呼</span><input id="agent-profile-display-name" class="form-input" placeholder="例如：架构专家" maxlength="120"></label>
-                                            <label><span>角色 / 职责</span><input id="agent-profile-role" class="form-input" placeholder="例如：系统架构设计与代码审查" maxlength="160"></label>
-                                            <label><span>沟通语气</span><select id="agent-profile-tone" class="form-input"><option value="professional">专业严谨</option><option value="friendly">亲切友好</option><option value="concise">精简高效</option></select></label>
-                                            <label><span>详略程度</span><select id="agent-profile-verbosity" class="form-input"><option value="concise">精简扼要</option><option value="balanced">平衡适中</option><option value="detailed">详尽全面</option></select></label>
-                                        </div>
-                                    </div>
-                                    <div class="agent-profile-card">
-                                        <div class="agent-harness-subhead">
-                                            <strong>工作习惯与工具偏好</strong>
-                                            <span>按行输入长期积累的执行习惯、常用工具与常见任务</span>
-                                        </div>
-                                        <div class="agent-harness-form-grid agent-harness-form-grid-3col">
-                                            <label><span>工作习惯（每行一项）</span><textarea id="agent-profile-work-habits" class="form-input" rows="5" placeholder="优先使用标准库&#10;输出需附带关键理由"></textarea></label>
-                                            <label><span>常用工具（每行一项）</span><textarea id="agent-profile-tools" class="form-input" rows="5" placeholder="db.run_readonly_query&#10;format.to_markdown_table"></textarea></label>
-                                            <label><span>常见任务（每行一项）</span><textarea id="agent-profile-tasks" class="form-input" rows="5" placeholder="数据库表结构分析&#10;业务指标分组统计"></textarea></label>
-                                        </div>
-                                    </div>
-                                    <div class="agent-profile-card">
-                                        <div class="agent-harness-subhead">
-                                            <strong>扩展配置字典 (JSON)</strong>
-                                            <span>自定义键值偏好（支持多行结构化配置）</span>
-                                        </div>
-                                        <label class="agent-harness-form-field-wide">
-                                            <textarea id="agent-profile-preferences" class="form-input form-input-mono" rows="4" spellcheck="false" placeholder='{"语言":"中文","时区":"Asia/Shanghai"}'></textarea>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="agent-harness-form-actions">
-                                    <button id="agent-profile-save" class="btn-primary" type="button">保存档案</button>
-                                    <button id="agent-profile-wizard" class="btn-secondary" type="button">快速设置</button>
-                                </div>
-                                <div id="agent-profile-wizard-panel" class="agent-profile-wizard-panel hidden" role="dialog" aria-label="Agent 快速设置">
-                                    <div class="agent-harness-subhead"><strong>3 分钟快速设置</strong><span>先设置称呼、语言、详略和常见工作类型，再补充高级档案。</span></div>
-                                    <div class="agent-harness-form-grid agent-harness-form-grid-3col">
-                                        <label><span>称呼</span><input id="agent-wizard-name" class="form-input" maxlength="120"></label>
-                                        <label><span>语言</span><select id="agent-wizard-language" class="form-input"><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
-                                        <label><span>输出详略</span><select id="agent-wizard-verbosity" class="form-input"><option value="concise">精简</option><option value="balanced">平衡</option><option value="detailed">详细</option></select></label>
-                                    </div>
-                                    <div class="agent-harness-form-actions"><button id="agent-wizard-save" class="btn-primary" type="button">完成设置</button></div>
-                                </div>
-                            </section>
-
-                            <!-- 5. 记忆治理 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="governance" aria-labelledby="agent-memory-policy-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-memory-policy-title">记忆治理</strong>
-                                        <span>用户可以查看、修改、删除记忆，并禁止指定类别自动保存。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-memory-policy-refresh" class="btn-secondary" type="button">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="agent-governance-cards">
-                                    <div class="agent-governance-card">
-                                        <div class="agent-governance-card-header">
-                                            <div class="agent-governance-card-title">
-                                                <strong>自动记忆捕获</strong>
-                                                <span>在对话和任务执行过程中，大模型是否自动提炼重要事实与用户偏好。</span>
-                                            </div>
-                                            <label class="agent-harness-switch-label" title="开启/关闭自动记忆">
-                                                <input id="agent-memory-auto-capture" type="checkbox" checked>
-                                                <span class="agent-harness-switch-slider"></span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="agent-governance-card">
-                                        <div class="agent-governance-card-title">
-                                            <strong>禁止自动保存的记忆类别</strong>
-                                            <span>勾选的类别在自主分析和对话沉淀时将直接被拦截，不存入长期记忆库。</span>
-                                        </div>
-                                        <div class="agent-memory-chips-grid">
-                                            <label class="agent-memory-chip">
-                                                <input type="checkbox" value="fact" data-agent-memory-blocked>
-                                                <div class="chip-content">
-                                                    <strong>事实 (Fact)</strong>
-                                                    <span>客观业务数据与事实记录</span>
-                                                </div>
-                                            </label>
-                                            <label class="agent-memory-chip">
-                                                <input type="checkbox" value="preference" data-agent-memory-blocked>
-                                                <div class="chip-content">
-                                                    <strong>偏好 (Preference)</strong>
-                                                    <span>个人交互风格与习惯偏好</span>
-                                                </div>
-                                            </label>
-                                            <label class="agent-memory-chip">
-                                                <input type="checkbox" value="temporary" data-agent-memory-blocked>
-                                                <div class="chip-content">
-                                                    <strong>临时上下文 (Temporary)</strong>
-                                                    <span>单次任务的临时参数与过渡状态</span>
-                                                </div>
-                                            </label>
-                                            <label class="agent-memory-chip is-locked" title="系统强制禁止持久化敏感信息">
-                                                <input type="checkbox" value="sensitive" data-agent-memory-blocked disabled checked>
-                                                <div class="chip-content">
-                                                    <strong>敏感信息 (Sensitive)</strong>
-                                                    <span>密码、密钥与个人隐私（始终禁止）</span>
-                                                </div>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="agent-governance-card">
-                                        <div class="agent-governance-card-title">
-                                            <strong>治理合规与安全保障机制</strong>
-                                            <span>平台在记忆提取、持久化与上下文注入各环节实施多重防护保障</span>
-                                        </div>
-                                        <div class="agent-governance-security-grid">
-                                            <div class="security-feature-item">
-                                                <div class="feature-icon">
-                                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                                </div>
-                                                <div class="feature-text">
-                                                    <strong>自动敏感脱敏</strong>
-                                                    <span>对密码、API Key、Token 及个人敏感标识在向量化前强制清除</span>
-                                                </div>
-                                            </div>
-                                            <div class="security-feature-item">
-                                                <div class="feature-icon">
-                                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                                </div>
-                                                <div class="feature-text">
-                                                    <strong>租户级隔离存储</strong>
-                                                    <span>记忆仅对当前授权账号可见，不同工作区与用户间严格沙箱隔离</span>
-                                                </div>
-                                            </div>
-                                            <div class="security-feature-item">
-                                                <div class="feature-icon">
-                                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                                                </div>
-                                                <div class="feature-text">
-                                                    <strong>Token 预算自适应</strong>
-                                                    <span>按上下文相关度动态裁剪注入记忆条数，保障 Prompt 执行效率</span>
-                                                </div>
-                                            </div>
-                                            <div class="security-feature-item">
-                                                <div class="feature-icon">
-                                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                                </div>
-                                                <div class="feature-text">
-                                                    <strong>生命周期与过期驱逐</strong>
-                                                    <span>临时上下文在会话结束后自动释放，长期记忆支持随时人工修订</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="agent-harness-form-actions">
-                                    <button id="agent-memory-policy-save" class="btn-primary" type="button">保存治理策略</button>
-                                    <button class="btn-secondary" type="button" data-memory-open>打开记忆清单</button>
-                                </div>
-                                <div id="agent-memory-policy-notice" class="agent-harness-notice" role="status" aria-live="polite"></div>
-                            </section>
-
-                            <!-- 6. 结果反馈 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="feedback" aria-labelledby="agent-feedback-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-feedback-title">结果反馈闭环</strong>
-                                        <span>汇总任务成败、评分和工具失败信号，用于提示和工具选择改进。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-feedback-refresh" class="btn-secondary" type="button">刷新</button>
-                                    </div>
-                                </div>
-                                <div id="agent-feedback-summary" class="agent-feedback-summary-container"></div>
-                                <div class="agent-harness-subhead">
-                                    <strong>近期反馈明细</strong>
-                                    <span>按任务展示执行结论与人工修正意见</span>
-                                </div>
-                                <div id="agent-feedback-list" class="agent-harness-list full-width"></div>
-                            </section>
-
-                            <!-- 7. 进化提议 -->
-                            <section class="agent-harness-panel hidden" data-agent-harness-section="evolution" aria-labelledby="agent-evolution-title">
-                                <div class="agent-harness-panel-head">
-                                    <div>
-                                        <strong id="agent-evolution-title">受控能力进化</strong>
-                                        <span>Agent 只能提出建议；确认后才可应用，Skill 和工作流仍需版本化编辑器。</span>
-                                    </div>
-                                    <div class="agent-harness-inline-actions">
-                                        <button id="agent-evolution-refresh" class="btn-secondary" type="button">刷新</button>
-                                    </div>
-                                </div>
-                                <div class="agent-evolution-layout">
-                                    <div class="agent-evolution-form-card">
-                                        <div class="agent-harness-subhead">
-                                            <strong>发起进化提议</strong>
-                                            <span>提交对 Agent 偏好、Skill 或工作流的改进建议</span>
-                                        </div>
-                                        <div class="agent-harness-form-grid">
-                                            <label>
-                                                <span>提议类型</span>
-                                                <select id="agent-evolution-kind" class="form-input">
-                                                    <option value="preference">调整偏好 (Preference)</option>
-                                                    <option value="skill">创建 Skill</option>
-                                                    <option value="workflow">保存工作流 (Workflow)</option>
-                                                </select>
-                                            </label>
-                                            <label>
-                                                <span>提议标题</span>
-                                                <input id="agent-evolution-title-input" class="form-input" placeholder="简要概括进化目标" maxlength="255">
-                                            </label>
-                                            <label class="agent-harness-form-field-wide">
-                                                <span>提议说明</span>
-                                                <textarea id="agent-evolution-description" class="form-input" rows="2" placeholder="详细说明优化的原因与预期效果..."></textarea>
-                                            </label>
-                                            <label class="agent-harness-form-field-wide">
-                                                <span>结构化变更 (JSON)</span>
-                                                <textarea id="agent-evolution-change" class="form-input form-input-mono" rows="4" spellcheck="false" placeholder='{"communicationStyle":{"verbosity":"concise"}}'></textarea>
-                                            </label>
-                                        </div>
-                                        <div class="agent-harness-form-actions">
-                                            <button id="agent-evolution-create" class="btn-primary" type="button">提交提议</button>
-                                        </div>
-                                    </div>
-                                    <div class="agent-evolution-list-card">
-                                        <div class="agent-harness-subhead">
-                                            <strong>提议审批与变更记录</strong>
-                                            <span>查看待确认及已应用的进化提议</span>
-                                        </div>
-                                        <div id="agent-evolution-list" class="agent-harness-list full-width"></div>
-                                    </div>
-                                </div>
-                            </section>
-                        </div>
-                    </details>
-                    <details class="agent-collapse-section agent-collapse-evaluations" data-agent-config-section="evaluations">
-                        <summary>
-                            <span>质量评测</span>
-                            <small>评测集、回归结果、基线变化</small>
-                        </summary>
-                        <div class="agent-collapse-body agent-eval-center">
-                            <div class="agent-eval-toolbar">
-                                <div>
-                                    <strong>评测概览</strong>
-                                    <span id="agent-eval-center-status">尚未运行评测</span>
-                                </div>
-                                <div class="agent-eval-toolbar-actions">
-                                    <button id="agent-eval-refresh-btn" class="btn-secondary" type="button">刷新</button>
-                                    <button id="agent-eval-create-btn" class="btn-primary" type="button">新建评测集</button>
-                                </div>
+                                </label>
+                                <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                    <span>技能补充说明（可选）</span>
+                                    <textarea id="agent-harness-skill-instructions" class="form-input" rows="3"
+                                        placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
+                                </label>
                             </div>
-                            <div id="agent-eval-overview" class="agent-eval-overview"></div>
-                            <div class="agent-eval-layout">
-                                <div id="agent-eval-suite-list" class="agent-eval-suite-list"></div>
-                                <div id="agent-eval-suite-detail" class="agent-eval-suite-detail"></div>
-                            </div>
-                        </div>
-                    </details>
-                    </div>
-                        </div>
-                        <div class="agent-task-editor-footer">
-                            <button class="btn-secondary" type="button" data-agent-save-template>保存为模板</button>
-                            <div>
-                                <button id="task-create-cancel-btn" class="btn-secondary" type="button">取消</button>
-                                <button id="agent-save-plan-btn" class="btn-secondary" type="button">保存为计划</button>
-                                <button id="agent-run-btn" class="btn-primary" type="button">运行任务</button>
+                            <div class="agent-harness-form-actions">
+                                <button id="agent-harness-skill-register" class="btn-primary"
+                                    type="button">注册技能</button>
+                                <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
+                                    <span>导入技能包</span>
+                                    <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>
+                                </label>
                             </div>
                         </div>
                     </div>
-                </div>
-                <!-- 左侧主面板：紧凑任务过滤与选择列表 Master Pane -->
-                <div class="agent-tasks-master-pane">
-                    <div class="agent-history-head">
+                </section>
+
+                <!-- 5. 运行资源包 -->
+                <section class="agent-harness-panel hidden" data-agent-harness-section="packs"
+                    aria-labelledby="agent-harness-packs-title">
+                    <div class="agent-harness-panel-head">
                         <div>
-                            <h3>任务活动</h3>
-                            <p>一次性后台任务、工作流及计划执行状态。</p>
+                            <strong id="agent-harness-packs-title">运行资源包</strong>
+                            <span>浏览器和数据处理资源由系统下载、校验完整性后安装。</span>
                         </div>
-                        <div class="agent-history-head-actions">
-                            <div class="agent-history-tools" aria-label="任务工具">
-                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="templates" title="任务模板">模板</button>
-                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="results" title="能力与结果">能力</button>
-                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="harness" title="运行环境">环境</button>
-                                <button class="btn-secondary btn-xs" type="button" data-agent-config-open="evaluations" title="质量评测">评测</button>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-harness-packs-refresh" class="btn-secondary" type="button"
+                                title="刷新运行资源包">刷新</button>
+                        </div>
+                    </div>
+                    <div class="agent-harness-skill-layout">
+                        <div class="agent-harness-skill-list-wrap">
+                            <div class="agent-harness-subhead"><strong>已安装资源包</strong><span>系统已缓存并校验的运行时包</span></div>
+                            <div id="agent-harness-pack-list" class="agent-harness-list"></div>
+                        </div>
+                        <div class="agent-harness-pack-sync admin-only hidden">
+                            <div class="agent-harness-subhead"><strong>同步运行资源包</strong><span>必须提供资源地址和访问来源白名单。</span>
                             </div>
-                            <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                            <div class="agent-harness-form-grid">
+                                <label><span>资源类型</span><select id="agent-harness-pack-type" class="form-input">
+                                        <option value="data">数据资源</option>
+                                        <option value="browser">浏览器资源</option>
+                                    </select></label>
+                                <label><span>ID</span><input id="agent-harness-pack-id" class="form-input"
+                                        placeholder="python-runtime"></label>
+                                <label><span>版本</span><input id="agent-harness-pack-version" class="form-input"
+                                        placeholder="1.0.0"></label>
+                                <label><span>大小（字节，可选）</span><input id="agent-harness-pack-size" class="form-input"
+                                        type="number" min="0" placeholder="0"></label>
+                                <label class="agent-harness-form-field-wide"><span>资源地址</span><input
+                                        id="agent-harness-pack-url" class="form-input" type="url"
+                                        placeholder="http://10.0.0.20/packs/python.bundle"></label>
+                                <label class="agent-harness-form-field-wide"><span>校验摘要（SHA256）</span><input
+                                        id="agent-harness-pack-sha256" class="form-input" spellcheck="false"
+                                        placeholder="填写 64 位十六进制摘要"></label>
+                                <label class="agent-harness-form-field-wide"><span>访问来源白名单（每行一个）</span><textarea
+                                        id="agent-harness-pack-origins" class="form-input" rows="2"
+                                        placeholder="http://10.0.0.20"></textarea></label>
+                            </div>
+                            <div class="agent-harness-form-actions"><button id="agent-harness-pack-sync"
+                                    class="btn-primary" type="button">同步并校验</button></div>
                         </div>
                     </div>
-                    <div class="agent-history-toolbar">
-                        <div class="agent-history-filters">
-                            <select id="agent-filter-status" class="form-input">
-                                <option value="">全部状态</option>
-                                <option value="queued">排队中</option>
-                                <option value="running">运行中</option>
-                                <option value="approval_required">待审批</option>
-                                <option value="completed">已完成</option>
-                                <option value="completed_with_errors">异常完成</option>
-                                <option value="error">失败</option>
-                                <option value="cancelled">已停止</option>
-                            </select>
-                            <select id="agent-filter-run-type" class="form-input">
-                                <option value="">全部类型</option>
-                                <option value="free">一次性任务</option>
-                                <option value="workflow">工作流任务</option>
-                                <option value="scheduled">计划执行</option>
-                            </select>
-                            <input id="agent-filter-query" class="form-input" placeholder="搜索任务标题或目标">
+                </section>
+
+                <!-- 6. 记忆治理策略 -->
+                <section class="agent-harness-panel hidden" data-agent-harness-section="governance"
+                    aria-labelledby="agent-memory-policy-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-memory-policy-title">记忆治理</strong>
+                            <span>用户可以查看、修改、删除记忆，并禁止指定类别自动保存。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-memory-policy-refresh" class="btn-secondary" type="button">刷新</button>
                         </div>
                     </div>
-                    <div id="agent-runs-list" class="agent-runs-list"></div>
-                    <div id="pagination-agentRuns" class="pagination workspace-pagination agent-runs-pagination"></div>
-                </div>
-
-                <!-- 中部与右侧：任务详情与运行上下文工作台主区 Detail & Context Panes -->
-                <div class="agent-tasks-detail-container" id="agent-tasks-detail-container">
-                    <div class="agent-detail-header-bar">
-                        <div class="agent-detail-breadcrumb" id="agent-detail-breadcrumb">
-                            <button type="button" class="agent-breadcrumb-back" id="agent-breadcrumb-back-btn" title="返回任务列表">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                                <span>返回列表</span>
-                            </button>
-                            <span class="agent-breadcrumb-item">任务</span>
-                            <span class="agent-breadcrumb-sep">/</span>
-                            <span class="agent-breadcrumb-item active" id="agent-breadcrumb-active-title">选择任务查看详情</span>
-                        </div>
-                        <div class="agent-detail-header-actions" id="agent-detail-header-actions"></div>
-                    </div>
-
-                    <!-- 5 大结构化详情 Tab 栏 -->
-                    <div class="agent-run-tabs" role="tablist" aria-label="任务详情分类">
-                        <button class="agent-run-tab active" type="button" data-agent-run-subtab="overview" role="tab" aria-selected="true">
-                            <span>概览</span>
-                        </button>
-                        <button class="agent-run-tab" type="button" data-agent-run-subtab="steps" role="tab" aria-selected="false">
-                            <span>执行步骤</span>
-                            <span class="agent-run-tab-badge" id="agent-run-tab-steps-count">0</span>
-                        </button>
-                        <button class="agent-run-tab" type="button" data-agent-run-subtab="logs" role="tab" aria-selected="false">
-                            <span>实时日志</span>
-                        </button>
-                        <button class="agent-run-tab" type="button" data-agent-run-subtab="artifacts" role="tab" aria-selected="false">
-                            <span>输出物</span>
-                            <span class="agent-run-tab-badge" id="agent-run-tab-artifacts-count">0</span>
-                        </button>
-                        <button class="agent-run-tab" type="button" data-agent-run-subtab="approvals" role="tab" aria-selected="false">
-                            <span>审批与异常</span>
-                            <span class="agent-run-tab-badge agent-run-tab-badge--warning hidden" id="agent-run-tab-approvals-count">0</span>
-                        </button>
-                    </div>
-
-                    <!-- 5 个 Tab 对应的内容面板容器 + 嵌套右侧上下文面板 -->
-                    <div class="agent-tasks-content-and-context">
-                        <div class="agent-run-tab-panes" id="agent-run-tab-panes">
-                            <!-- 空状态提示（未选中任务时） -->
-                            <div id="agent-run-detail-empty" class="agent-run-detail-empty">
-                                <div class="empty-icon-wrap">
-                                    <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                        <line x1="9" y1="9" x2="15" y2="9"></line>
-                                        <line x1="9" y1="13" x2="15" y2="13"></line>
-                                        <line x1="9" y1="17" x2="11" y2="17"></line>
-                                    </svg>
+                    <div class="agent-governance-cards">
+                        <div class="agent-governance-card">
+                            <div class="agent-governance-card-header">
+                                <div class="agent-governance-card-title">
+                                    <strong>自动记忆捕获</strong>
+                                    <span>在对话和任务执行过程中，大模型是否自动提炼重要事实与用户偏好。</span>
                                 </div>
-                                <h4>请选择任务或发起新任务</h4>
-                                <p>从左侧列表中点击任务记录查看执行进度与生成产物，或直接新建一个任务。</p>
-                                <div class="agent-empty-actions" style="margin-top: 14px;">
-                                    <button type="button" class="btn-primary" id="agent-empty-create-btn">+ 新建任务</button>
+                                <label class="agent-harness-switch-label" title="开启/关闭自动记忆">
+                                    <input id="agent-memory-auto-capture" type="checkbox" checked>
+                                    <span class="agent-harness-switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="agent-governance-card">
+                            <div class="agent-governance-card-title">
+                                <strong>禁止自动保存的记忆类别</strong>
+                                <span>勾选的类别在自主分析和对话沉淀时将直接被拦截，不存入长期记忆库。</span>
+                            </div>
+                            <div class="agent-memory-chips-grid">
+                                <label class="agent-memory-chip">
+                                    <input type="checkbox" value="fact" data-agent-memory-blocked>
+                                    <div class="chip-content">
+                                        <strong>事实 (Fact)</strong>
+                                        <span>客观业务数据与事实记录</span>
+                                    </div>
+                                </label>
+                                <label class="agent-memory-chip">
+                                    <input type="checkbox" value="preference" data-agent-memory-blocked>
+                                    <div class="chip-content">
+                                        <strong>偏好 (Preference)</strong>
+                                        <span>个人交互风格与习惯偏好</span>
+                                    </div>
+                                </label>
+                                <label class="agent-memory-chip">
+                                    <input type="checkbox" value="temporary" data-agent-memory-blocked>
+                                    <div class="chip-content">
+                                        <strong>临时上下文 (Temporary)</strong>
+                                        <span>单次任务的临时参数与过渡状态</span>
+                                    </div>
+                                </label>
+                                <label class="agent-memory-chip is-locked" title="系统强制禁止持久化敏感信息">
+                                    <input type="checkbox" value="sensitive" data-agent-memory-blocked disabled checked>
+                                    <div class="chip-content">
+                                        <strong>敏感信息 (Sensitive)</strong>
+                                        <span>密码、密钥与个人隐私（始终禁止）</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="agent-governance-card">
+                            <div class="agent-governance-card-title">
+                                <strong>治理合规与安全保障机制</strong>
+                                <span>平台在记忆提取、持久化与上下文注入各环节实施多重防护保障</span>
+                            </div>
+                            <div class="agent-governance-security-grid">
+                                <div class="security-feature-item">
+                                    <div class="feature-icon">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                        </svg>
+                                    </div>
+                                    <div class="feature-text">
+                                        <strong>自动敏感脱敏</strong>
+                                        <span>对密码、API Key、Token 及个人敏感标识在向量化前强制清除</span>
+                                    </div>
+                                </div>
+                                <div class="security-feature-item">
+                                    <div class="feature-icon">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                        </svg>
+                                    </div>
+                                    <div class="feature-text">
+                                        <strong>租户级隔离存储</strong>
+                                        <span>记忆仅对当前授权账号可见，不同工作区与用户间严格沙箱隔离</span>
+                                    </div>
+                                </div>
+                                <div class="security-feature-item">
+                                    <div class="feature-icon">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                                        </svg>
+                                    </div>
+                                    <div class="feature-text">
+                                        <strong>Token 预算自适应</strong>
+                                        <span>按上下文相关度动态裁剪注入记忆条数，保障 Prompt 执行效率</span>
+                                    </div>
+                                </div>
+                                <div class="security-feature-item">
+                                    <div class="feature-icon">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10" />
+                                            <polyline points="12 6 12 12 16 14" />
+                                        </svg>
+                                    </div>
+                                    <div class="feature-text">
+                                        <strong>生命周期与过期驱逐</strong>
+                                        <span>临时上下文在会话结束后自动释放，长期记忆支持随时人工修订</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="overview" id="agent-pane-overview"></div>
-                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="steps" id="agent-pane-steps"></div>
-                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="logs" id="agent-pane-logs"></div>
-                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="artifacts" id="agent-pane-artifacts"></div>
-                            <div class="agent-run-tab-pane hidden" data-agent-run-pane="approvals" id="agent-pane-approvals"></div>
                         </div>
-
-                        <!-- 右侧可折叠运行上下文 Inspector Pane -->
-                        <aside class="agent-tasks-context-pane" id="agent-tasks-context-pane">
-                            <div class="agent-context-pane-head">
-                                <strong>运行上下文</strong>
-                                <span id="agent-context-status-pill" class="agent-context-status-pill">--</span>
-                            </div>
-                            <div class="agent-context-pane-body" id="agent-context-pane-body">
-                                <div class="agent-context-loading-hint">选择任务后展示运行参数与环境指标</div>
-                            </div>
-                        </aside>
                     </div>
+                    <div class="agent-harness-form-actions">
+                        <button id="agent-memory-policy-save" class="btn-primary" type="button">保存治理策略</button>
+                        <button class="btn-secondary" type="button" data-memory-open>打开记忆清单</button>
+                    </div>
+                    <div id="agent-memory-policy-notice" class="agent-harness-notice" role="status" aria-live="polite">
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+    <div id="agent-task-edit-modal" class="modal-overlay hidden" style="z-index: 1890;" role="dialog" aria-modal="true"
+        aria-labelledby="agent-task-edit-modal-title" aria-hidden="true">
+        <div class="modal agent-task-editor-modal">
+            <div class="agent-config-modal-head">
+                <div>
+                    <h3 id="agent-task-edit-modal-title">修改任务</h3>
+                    <span>修改智能体任务标题与任务目标</span>
                 </div>
             </div>
-            <!-- 视图 2：Agent 工作台 (独立 Tab 页面，模块化清晰布局) -->
-            <div id="agent-control-plane" class="agent-control-plane-view hidden" aria-label="Agent 工作台">
-                <!-- 顶部子导航栏：清晰分类，告别杂乱拥挤 -->
-                <div class="agent-cp-subnav-bar">
-                    <div class="agent-cp-subnav-tabs" role="tablist" aria-label="Agent 工作台导航">
-                        <button class="agent-cp-subnav-tab active" type="button" data-agent-cp-subview="inbox" role="tab" aria-selected="true">
-                            <span>统一收件箱</span>
-                            <span id="agent-cp-inbox-badge" class="agent-cp-subnav-badge">0</span>
-                        </button>
-                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="goals" role="tab" aria-selected="false">
-                            <span>持续目标</span>
-                            <span id="agent-cp-goals-badge" class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
-                        </button>
-                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="channels" role="tab" aria-selected="false">
-                            <span>通知渠道</span>
-                            <span id="agent-cp-channels-badge" class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
-                        </button>
-                        <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="quality" role="tab" aria-selected="false">
-                            <span>质量与可靠性</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 子视图 1：统一收件箱 (宽幅专业表格) -->
-                <div class="agent-cp-subview-pane" data-agent-cp-pane="inbox">
-                    <section class="agent-cp-card" aria-labelledby="agent-inbox-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-inbox-card-title">统一收件箱</h4>
-                                <span>集中接收任务运行结果、人工审批请求与智能体自进化提案</span>
-                            </div>
-                            <div class="agent-cp-card-actions">
-                                <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">刷新收件箱</button>
-                            </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-inbox-panel" class="agent-inbox-panel" aria-live="polite"></div>
-                        </div>
-                    </section>
-                </div>
-
-                <!-- 子视图 2：持续目标 (列表与新建) -->
-                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="goals">
-                    <section class="agent-cp-card" aria-labelledby="agent-goals-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-goals-card-title">持续目标</h4>
-                                <span>配置由定时调度、外部 Webhook 或数据库文件变更自动触发的常驻 Agent 目标</span>
-                            </div>
-                            <div class="agent-cp-card-actions">
-                                <button id="agent-goal-create" class="btn-primary btn-xs" type="button">+ 新建持续目标</button>
-                            </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-goals-panel" class="agent-goals-panel"></div>
-                        </div>
-                    </section>
-                </div>
-
-                <!-- 子视图 3：通知与审批渠道 -->
-                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="channels">
-                    <section class="agent-cp-card" aria-labelledby="agent-channels-card-title">
-                        <div class="agent-cp-card-head">
-                            <div>
-                                <h4 id="agent-channels-card-title">通知与审批渠道</h4>
-                                <span>配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与人工审批</span>
-                            </div>
-                        </div>
-                        <div class="agent-cp-card-body">
-                            <div id="agent-channels-panel" class="agent-channels-panel"></div>
-                        </div>
-                    </section>
-                </div>
-
-                <!-- 子视图 4：质量与可靠性大屏 -->
-                <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
-                    <div class="agent-cp-quality-layout">
-                        <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
-                            <div class="agent-cp-card-head">
-                                <div>
-                                    <h4 id="agent-quality-card-title">运行质量与运维指标</h4>
-                                    <span>近 30 天自主任务完成率、人工审批中位数耗时与渠道投递健康度</span>
-                                </div>
-                            </div>
-                            <div class="agent-cp-card-body">
-                                <div id="agent-quality-panel" class="agent-quality-panel"></div>
-                            </div>
-                        </section>
-
-                        <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
-                            <div class="agent-cp-card-head">
-                                <div>
-                                    <h4 id="agent-reliability-card-title">工具调用可靠性监控</h4>
-                                    <span>各接入工具调用成功率、加权可靠度评分与样本置信度</span>
-                                </div>
-                            </div>
-                            <div class="agent-cp-card-body">
-                                <div id="agent-reliability-panel" class="agent-reliability-panel"></div>
-                            </div>
-                        </section>
-                    </div>
+            <div class="agent-task-editor-body">
+                <input type="hidden" id="agent-task-edit-run-id">
+                <label class="modal-form-field">
+                    <span>任务标题</span>
+                    <input type="text" id="agent-task-edit-title-input" class="form-input" placeholder="输入简短任务标题">
+                </label>
+                <label class="modal-form-field agent-task-goal-field">
+                    <span>任务目标</span>
+                    <textarea id="agent-task-edit-goal-input" class="form-input agent-goal-input" rows="4"
+                        placeholder="输入完整的任务描述与目标"></textarea>
+                </label>
+                <div class="agent-task-editor-foot">
+                    <button id="agent-task-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+                    <button id="agent-task-edit-save-btn" class="btn-primary" type="button">保存修改</button>
                 </div>
             </div>
         </div>
-        <div id="agent-task-edit-modal" class="modal-overlay hidden" style="z-index: 1890;" role="dialog" aria-modal="true" aria-labelledby="agent-task-edit-modal-title" aria-hidden="true">
-            <div class="modal agent-task-editor-modal">
-                <div class="agent-config-modal-head">
-                    <div>
-                        <h3 id="agent-task-edit-modal-title">修改任务</h3>
-                        <span>修改智能体任务标题与任务目标</span>
-                    </div>
-                </div>
-                <div class="agent-task-editor-body">
-                    <input type="hidden" id="agent-task-edit-run-id">
-                    <label class="modal-form-field">
-                        <span>任务标题</span>
-                        <input type="text" id="agent-task-edit-title-input" class="form-input" placeholder="输入简短任务标题">
-                    </label>
-                    <label class="modal-form-field agent-task-goal-field">
-                        <span>任务目标</span>
-                        <textarea id="agent-task-edit-goal-input" class="form-input agent-goal-input" rows="4" placeholder="输入完整的任务描述与目标"></textarea>
-                    </label>
-                    <div class="agent-task-editor-foot">
-                        <button id="agent-task-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
-                        <button id="agent-task-edit-save-btn" class="btn-primary" type="button">保存修改</button>
-                    </div>
-                </div>
+    </div>
+    <div id="agent-run-detail-modal" class="modal-overlay hidden" style="z-index: 2000;" role="dialog" aria-modal="true"
+        aria-labelledby="agent-run-detail-title" aria-hidden="true">
+        <div class="modal agent-run-detail-modal" role="document">
+            <div class="agent-config-modal-head">
+                <h3 id="agent-run-detail-title">任务详情</h3>
+                <button id="agent-run-detail-close" class="btn-secondary" type="button">关闭</button>
             </div>
+            <div id="agent-run-detail" class="agent-run-detail"></div>
         </div>
-        <div id="agent-config-modal" class="modal-overlay hidden" style="z-index: 1900;" role="dialog" aria-modal="true" aria-labelledby="agent-config-modal-title" aria-hidden="true">
-            <div class="modal agent-config-modal" role="document">
-                <div class="agent-config-modal-head">
-                    <h3 id="agent-config-modal-title">高级设置</h3>
-                    <button id="agent-config-modal-close" class="btn-secondary" type="button">关闭</button>
-                </div>
-                <div id="agent-config-modal-body" class="agent-config-modal-body"></div>
-            </div>
-        </div>
-        <div id="agent-run-detail-modal" class="modal-overlay hidden" style="z-index: 2000;" role="dialog" aria-modal="true" aria-labelledby="agent-run-detail-title" aria-hidden="true">
-            <div class="modal agent-run-detail-modal" role="document">
-                <div class="agent-config-modal-head">
-                    <h3 id="agent-run-detail-title">任务详情</h3>
-                    <button id="agent-run-detail-close" class="btn-secondary" type="button">关闭</button>
-                </div>
-                <div id="agent-run-detail" class="agent-run-detail"></div>
-            </div>
-        </div>
-    </section>
+    </div>
+</section>

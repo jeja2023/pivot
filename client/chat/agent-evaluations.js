@@ -482,7 +482,14 @@ function bindAgentEvaluationCenter() {
 
 async function openAgentEvaluationForRun(run) {
     closeAgentRunDetailModal();
-    openAgentConfigSection('evaluations');
+    if (typeof globalThis['openAgentWorkbench'] === 'function') {
+        await globalThis['openAgentWorkbench']({ tab: 'workbench' });
+    }
+    window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
+    bindAgentEvaluationCenter();
+    if (!agentEvalSuitesCache.length) {
+        await loadAgentEvaluationSuites({ silent: true });
+    }
     let payload = null;
     if (activeAgentEvalSuiteId) payload = await loadAgentEvalSuite(activeAgentEvalSuiteId, { silent: true });
     await openAgentEvalEditor(payload, run);
@@ -493,3 +500,6 @@ window.Pivot.exposeModule('agent.evaluations', {
     loadSuites: loadAgentEvaluationSuites,
     openForRun: openAgentEvaluationForRun
 });
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindAgentEvaluationCenter, { once: true });
+else bindAgentEvaluationCenter();

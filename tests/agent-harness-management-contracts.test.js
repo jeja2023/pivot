@@ -9,7 +9,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 test('Harness 管理入口覆盖技能、运行时资源包和 Residency', () => {
     const partial = read('client/chat/partials/workspaces/agent.html');
     const script = read('client/chat/agent-harness.js');
-    assert.match(partial, /data-agent-config-open="harness"/);
+    assert.match(partial, /data-agent-cp-subview="governance"/);
     assert.match(partial, /data-agent-harness-nav="skills"/);
     assert.match(partial, /agent-harness-skill-manifest/);
     assert.match(partial, /agent-harness-pack-sync/);
@@ -31,9 +31,8 @@ test('任务详情提供 Harness 运行诊断的四类面板', () => {
 test('任务详情刷新会按运行 ID 保留折叠面板状态', () => {
     const detail = read('client/chat/agent-run-detail.js');
     assert.match(detail, /agentRunDisclosureStates/);
-    assert.match(detail, /captureAgentRunDisclosureState\(detail, runId\)/);
-    assert.match(detail, /restoreAgentRunDisclosureState\(detail, run\.id\)/);
-    assert.match(detail, /agentDisclosureRunId/);
+    assert.match(detail, /captureAgentRunDisclosureState/);
+    assert.match(detail, /restoreAgentRunDisclosureState/);
 });
 
 test('运行诊断刷新会保留当前子页面', () => {

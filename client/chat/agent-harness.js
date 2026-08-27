@@ -134,6 +134,13 @@
         state.quality = quality.dashboard || null;
         state.channels = Array.isArray(channels.data) ? channels.data : [];
         renderAgentControlPlane();
+        let currentSub = 'inbox';
+        try { currentSub = sessionStorage.getItem('pivot.agent.cp_subview') || 'inbox'; } catch (_) {}
+        if (currentSub === 'quality') {
+            loadFeedback().catch(() => {});
+            window.Pivot?.moduleApi?.('agent.evaluations')?.bind?.();
+            window.Pivot?.moduleApi?.('agent.evaluations')?.loadSuites?.({ silent: true })?.catch(() => {});
+        }
     }
 
     async function saveAgentGoal(event) {
@@ -643,7 +650,7 @@
     }
 
     async function validateProposal(id) {
-        try { await apiJson(`${API_BASE}/agents/evolution/proposals/${encodeURIComponent(id)}/validate`, { method: 'POST' }); setNotice('提议验证通过，可发布新版本。', 'success'); await loadProposals(); } catch (error) { setNotice(error.message || '提议验证失败。', 'error'); await loadProposals().catch(() => {}); }
+        try { await apiJson(`${API_BASE}/agents/evolution/proposals/${encodeURIComponent(id)}/validate`, { method: 'POST' }); setNotice('提议验证通过，可发布新版本。', 'success'); await loadProposals(); } catch (error) { setNotice(error.message || '提议验证失败。', 'error'); await loadProposals().catch(() => { }); }
     }
 
     async function publishProposal(id) {
@@ -857,18 +864,34 @@
         });
     }
 
+    function switchAgentCpSubview(subview = 'inbox') {
+        try { sessionStorage.setItem('pivot.agent.cp_subview', subview); } catch (_) { }
+        document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
+            const active = t.dataset.agentCpSubview === subview;
+            t.classList.toggle('active', active);
+            t.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-agent-cp-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.agentCpPane !== subview));
+        if (subview === 'quality') {
+            loadFeedback().catch(() => {});
+            window.Pivot?.moduleApi?.('agent.evaluations')?.bind?.();
+            window.Pivot?.moduleApi?.('agent.evaluations')?.loadSuites?.({ silent: true })?.catch(() => {});
+        } else if (subview === 'governance') {
+            loadProfile().catch(() => {});
+            loadSkills().catch(() => {});
+            loadPacks().catch(() => {});
+            loadResidents().catch(() => {});
+            loadProposals().catch(() => {});
+            loadMemoryPolicy().catch(() => {});
+        }
+    }
+
     function bindManagement() {
         document.querySelectorAll('[data-agent-harness-nav]').forEach(button => {
             button.addEventListener('click', () => {
                 const target = button.dataset.agentHarnessNav;
-                document.querySelectorAll('[data-agent-harness-nav]').forEach(b => {
-                    const active = b.dataset.agentHarnessNav === target;
-                    b.classList.toggle('active', active);
-                    b.setAttribute('aria-selected', active ? 'true' : 'false');
-                });
-                document.querySelectorAll('[data-agent-harness-section]').forEach(sec => {
-                    sec.classList.toggle('hidden', sec.dataset.agentHarnessSection !== target);
-                });
+                document.querySelectorAll('[data-agent-harness-nav]').forEach(b => { const active = b.dataset.agentHarnessNav === target; b.classList.toggle('active', active); b.setAttribute('aria-selected', active ? 'true' : 'false'); });
+                document.querySelectorAll('[data-agent-harness-section]').forEach(sec => sec.classList.toggle('hidden', sec.dataset.agentHarnessSection !== target));
             });
         });
 
@@ -912,27 +935,14 @@
             const publish = event.target.closest('[data-agent-evolution-publish]');
             if (publish) publishProposal(publish.dataset.agentEvolutionPublish);
         });
-        const switchAgentCpSubview = (subview = 'inbox') => {
-            try { sessionStorage.setItem('pivot.agent.cp_subview', subview); } catch (_) {}
-            document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
-                const active = t.dataset.agentCpSubview === subview;
-                t.classList.toggle('active', active);
-                t.setAttribute('aria-selected', active ? 'true' : 'false');
-            });
-            document.querySelectorAll('[data-agent-cp-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.agentCpPane !== subview));
-        };
         document.querySelectorAll('[data-agent-cp-subview]').forEach(tab => {
             tab.addEventListener('click', () => switchAgentCpSubview(tab.dataset.agentCpSubview));
         });
         let savedSubview = null;
-        try { savedSubview = sessionStorage.getItem('pivot.agent.cp_subview'); } catch (_) {}
+        try { savedSubview = sessionStorage.getItem('pivot.agent.cp_subview'); } catch (_) { }
         if (savedSubview) switchAgentCpSubview(savedSubview);
-        document.querySelectorAll('#agent-inbox-refresh').forEach(btn => {
-            btn.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error')));
-        });
-        document.querySelectorAll('#agent-goal-create, #agent-goal-create-top-btn, [data-agent-goal-create]').forEach(el => {
-            el.addEventListener('click', openGoalModal);
-        });
+        document.querySelectorAll('#agent-inbox-refresh').forEach(btn => btn.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error'))));
+        document.querySelectorAll('#agent-goal-create, #agent-goal-create-top-btn, [data-agent-goal-create]').forEach(el => el.addEventListener('click', openGoalModal));
         document.getElementById('agent-goal-cancel')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal-close')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal')?.addEventListener('click', event => { if (event.target.id === 'agent-goal-modal') closeGoalModal(); });
@@ -947,9 +957,7 @@
             const openRun = event.target.closest('[data-agent-inbox-open-run]');
             if (openRun) {
                 const runId = openRun.dataset.agentInboxOpenRun;
-                if (runId && typeof globalThis['openAgentRun'] === 'function') {
-                    globalThis['openAgentRun'](runId);
-                }
+                if (runId && typeof globalThis['openAgentRun'] === 'function') globalThis['openAgentRun'](runId);
                 return;
             }
             const button = event.target.closest('[data-agent-inbox-read]');
@@ -961,14 +969,8 @@
                     ? `${API_BASE}/agents/inbox/notification/${encodeURIComponent(action.dataset.agentInboxId)}/read`
                     : `${API_BASE}/agents/inbox/${encodeURIComponent(action.dataset.agentInboxType)}/${encodeURIComponent(action.dataset.agentInboxId)}/${encodeURIComponent(action.dataset.agentInboxAction)}`;
                 apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-                    .then(() => {
-                        if (typeof showToast === 'function') showToast('收件箱状态已更新', 'success');
-                        loadControlPlane();
-                    })
-                    .catch(error => {
-                        if (typeof showToast === 'function') showToast(error.message || '操作失败', 'error');
-                        setNotice(error.message, 'error');
-                    });
+                    .then(() => { if (typeof showToast === 'function') showToast('收件箱状态已更新', 'success'); loadControlPlane(); })
+                    .catch(error => { if (typeof showToast === 'function') showToast(error.message || '操作失败', 'error'); setNotice(error.message, 'error'); });
             }
         });
         document.getElementById('agent-goals-panel')?.addEventListener('click', event => {
@@ -981,14 +983,15 @@
             const test = event.target.closest('[data-agent-channel-test]');
             if (test) apiJson(`${API_BASE}/agents/channels/${encodeURIComponent(test.dataset.agentChannelTest)}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Pivot 渠道连通性测试' }) }).then(() => setNotice('渠道测试已提交。', 'success')).catch(error => setNotice(error.message, 'error'));
         });
-        loadControlPlane().catch(() => {});
+        loadControlPlane().catch(() => { });
     }
 
     window.Pivot?.exposeModule?.('agent.harness', {
         loadAgentHarnessManagement: loadHarnessManagement, loadAgentControlPlane: loadControlPlane,
         bindAgentRunHarnessDiagnostics: bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: diagnosticTabMarkup,
-        loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || ''
-    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId']);
+        loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || '',
+        switchAgentCpSubview
+    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId', 'switchAgentCpSubview']);
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindManagement, { once: true });
     else bindManagement();

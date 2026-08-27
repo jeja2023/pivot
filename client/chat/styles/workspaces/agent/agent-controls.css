@@ -102,6 +102,48 @@
     resize: vertical;
 }
 
+.agent-task-composer-templates-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 8px;
+    margin-bottom: 6px;
+}
+
+.agent-task-composer-templates-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.composer-templates-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+.btn-text-action {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--primary, #10a37f);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.btn-text-action:hover {
+    text-decoration: underline;
+}
+
 .agent-template-strip {
     margin: 0 0 10px;
 }

@@ -328,6 +328,29 @@ function closeAgentConfigModal() {
 }
 
 function openAgentConfigSection(sectionKey) {
+    if (sectionKey === 'evaluations') {
+        globalThis['openAgentWorkbench']?.({ tab: 'workbench' });
+        window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
+        const evaluations = agentEvaluationsApi();
+        evaluations.bind?.();
+        evaluations.loadSuites?.().catch(error => showToast(error.message || '评测中心加载失败', 'error'));
+        return;
+    }
+    if (sectionKey === 'harness') {
+        globalThis['openAgentWorkbench']?.({ tab: 'workbench' });
+        window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('governance');
+        window.loadAgentHarnessManagement?.();
+        return;
+    }
+    if (sectionKey === 'templates') {
+        globalThis['openAgentWorkbench']?.({ tab: 'tasks' });
+        window.setTaskComposerOpen(true);
+        return;
+    }
+    if (sectionKey === 'results') {
+        globalThis['openAgentWorkbench']?.({ tab: 'tasks' });
+        return;
+    }
     const section = document.querySelector(`[data-agent-config-section="${CSS.escape(sectionKey)}"]`);
     const modal = document.getElementById('agent-config-modal');
     const body = document.getElementById('agent-config-modal-body');
@@ -341,14 +364,6 @@ function openAgentConfigSection(sectionKey) {
     body.appendChild(section);
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
-    if (sectionKey === 'evaluations') {
-        const evaluations = agentEvaluationsApi();
-        evaluations.bind?.();
-        evaluations.loadSuites?.().catch(error => showToast(error.message || '评测中心加载失败', 'error'));
-    }
-    if (sectionKey === 'harness') {
-        window.loadAgentHarnessManagement?.();
-    }
     if (sectionKey === 'advanced') {
         mountAgentDagEditor();
         setTimeout(() => window.refreshAgentDagEditor?.(), 50);

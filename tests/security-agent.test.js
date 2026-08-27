@@ -566,7 +566,7 @@ test('agent quick task uses a modal editor with complete actions', () => {
     assert.match(agentPartial, /class="agent-task-editor-body"[\s\S]*?id="agent-goal-input"/);
     assert.match(agentPartial, /class="agent-task-editor-footer"[\s\S]*?data-agent-save-template[\s\S]*?id="task-create-cancel-btn"[\s\S]*?id="agent-save-plan-btn"[\s\S]*?id="agent-run-btn"/);
     assert.doesNotMatch(agentPartial, /class="agent-config-launcher"/);
-    assert.match(agentPartial, /class="agent-history-tools"[\s\S]*?data-agent-config-open="templates"[\s\S]*?data-agent-config-open="results"[\s\S]*?data-agent-config-open="evaluations"/);
+    assert.match(agentPartial, /class="agent-task-composer-templates-bar"[\s\S]*?id="agent-template-list"/);
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
     assert.match(source, /modal\.classList\.toggle\('hidden', !isOpen\)/);
     assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?width: min\(760px,[\s\S]*?text-align: left;/);
@@ -802,16 +802,14 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(agentPartial, /data-automation-section="tasks"[\s\S]*?data-automation-section="workflows"[\s\S]*?data-automation-section="workbench"/);
     assert.match(agentPartial, /id="task-create-open-btn"/);
     assert.match(agentPartial, /id="agent-task-editor-modal" class="modal-overlay hidden"/);
-    assert.match(agentPartial, /id="agent-run-panel" class="modal agent-task-editor-modal"/);
-    assert.match(agentPartial, /<h3 id="agent-task-editor-title">新建任务<\/h3>/);
-    assert.match(agentPartial, /class="agent-history-head"[\s\S]*?class="agent-history-tools"/);
+    assert.match(agentPartial, /class="agent-history-head"[\s\S]*?class="agent-history-head-actions"/);
     assert.match(agentPartial, /<h3>任务活动<\/h3>/);
     assert.match(agentPartial, /id="agent-filter-run-type"/);
     assert.match(agentPartial, /<option value="free">一次性任务<\/option>/);
     assert.match(agentPartial, /<option value="workflow">工作流任务<\/option>/);
     assert.match(agentPartial, /<option value="scheduled">计划执行<\/option>/);
     assert.match(agentPartial, /id="agent-save-plan-btn"/);
-    assert.match(agentPartial, /自主任务模板库/);
+    assert.match(agentPartial, /常用模板/);
     assert.doesNotMatch(agentPartial, /id="agent-schedule-list"|id="agent-schedule-frequency"|id="agent-schedule-time"/);
     assert.match(dagPartial, /id="automation-assets-view"/);
     assert.match(dagPartial, /id="automation-workflow-assets-list"/);

@@ -117,8 +117,8 @@ function agentTraceReadableDetail(span = {}) {
                     <section>
                         <h5>${agentEscape(label)}</h5>
                         ${typeof agentResultReadableMarkup === 'function'
-                            ? agentResultReadableMarkup(value, { maxRows: 4, maxItems: 5 })
-                            : `<p>${agentEscape(agentShortText(JSON.stringify(value), 600))}</p>`}
+            ? agentResultReadableMarkup(value, { maxRows: 4, maxItems: 5 })
+            : `<p>${agentEscape(agentShortText(JSON.stringify(value), 600))}</p>`}
                     </section>
                 `).join('')}
             </div>
@@ -147,12 +147,12 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
             </summary>
             <div class="agent-trace-list">
                 ${spans.map(span => {
-                    const start = agentTraceTimestamp(span.started_at) || traceStart;
-                    const duration = Math.max(Number(span.duration_ms || 0), 12);
-                    const left = Math.max(0, Math.min(((start - traceStart) / totalMs) * 100, 96));
-                    const width = Math.max(2, Math.min((duration / totalMs) * 100, 100 - left));
-                    const status = span.status === 'error' ? 'error' : (span.status === 'running' ? 'running' : 'completed');
-                    return `
+        const start = agentTraceTimestamp(span.started_at) || traceStart;
+        const duration = Math.max(Number(span.duration_ms || 0), 12);
+        const left = Math.max(0, Math.min(((start - traceStart) / totalMs) * 100, 96));
+        const width = Math.max(2, Math.min((duration / totalMs) * 100, 100 - left));
+        const status = span.status === 'error' ? 'error' : (span.status === 'running' ? 'running' : 'completed');
+        return `
                         <article class="agent-trace-item ${status}">
                             <div class="agent-trace-item-meta">
                                 <span class="agent-trace-type">${agentEscape(agentTraceTypeLabel(span.span_type))}</span>
@@ -165,7 +165,7 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
                             ${agentTraceReadableDetail(span)}
                         </article>
                     `;
-                }).join('')}
+    }).join('')}
             </div>
         </details>
     `;
@@ -511,7 +511,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     window.bindAgentRunHarnessDiagnostics?.(container, run.id);
 }
 
-window.openAgentRun = async function(runId, options = {}) {
+window.openAgentRun = async function (runId, options = {}) {
     const requestId = ++agentRunDetailRequestId;
     activeAgentRunId = runId;
     bindAgentRunSubtabs();
@@ -519,6 +519,15 @@ window.openAgentRun = async function(runId, options = {}) {
     const detail = document.getElementById('agent-run-detail');
     const workbenchDetailContainer = document.getElementById('agent-tasks-detail-container');
     const activeWorkspace = document.body?.dataset.activeWorkspace || '';
+    const tasksView = document.getElementById('agent-tasks-view');
+    const isTasksViewVisible = Boolean(tasksView && !tasksView.classList.contains('hidden'));
+
+    if (activeWorkspace === 'agent' && workbenchDetailContainer && !options.workflowPreview && !isTasksViewVisible) {
+        if (typeof globalThis['openAgentWorkbench'] === 'function') {
+            await globalThis['openAgentWorkbench']({ tab: 'tasks' });
+        }
+    }
+
     const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');
     const currentContainer = isWorkbenchLayout ? workbenchDetailContainer : detail;
     if (currentContainer) captureAgentRunDisclosureState(currentContainer, runId);
@@ -540,7 +549,10 @@ window.openAgentRun = async function(runId, options = {}) {
     const data = await res.json();
     if (requestId !== agentRunDetailRequestId || activeAgentRunId !== runId) return null;
     if (!res.ok) {
+        if (typeof showToast === 'function') showToast(data.error || '任务详情加载失败', 'error');
         if (detail) PivotSafeHtml.setHtml(detail, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
+        const workbenchOverview = document.getElementById('agent-pane-overview');
+        if (workbenchOverview) PivotSafeHtml.setHtml(workbenchOverview, `<div class="empty-state agent-empty-state">${agentEscape(data.error || '加载失败')}</div>`);
         return null;
     }
     const run = data.run;
@@ -672,8 +684,8 @@ window.openAgentRun = async function(runId, options = {}) {
                     <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
                     <dl class="agent-run-key-metrics">
                         ${String(run.run_mode || '') === 'dag'
-                            ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
-                            : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
+                    ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
+                    : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
                         <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
                         <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
                     </dl>
@@ -839,8 +851,8 @@ window.openAgentRun = async function(runId, options = {}) {
                 <div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div>
                 <dl class="agent-run-key-metrics">
                     ${String(run.run_mode || '') === 'dag'
-                        ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
-                        : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
+                ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>`
+                : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
                     <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
                     <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
                 </dl>
@@ -906,7 +918,7 @@ function startAgentWorkflowPreviewPolling(runId, isPreview = false) {
         try {
             const run = await window.openAgentRun(runId, { workflowPreview: isPreview, silent: true });
             if (run && !isAgentRunActive(run.status)) stopAgentWorkflowPreviewPolling();
-        } catch (e) {} finally {
+        } catch (e) { } finally {
             agentRunDetailRefreshInFlight = false;
         }
     }, 1500);
