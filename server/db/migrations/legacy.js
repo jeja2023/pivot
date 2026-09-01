@@ -886,7 +886,7 @@ function runMigrations() {
         );
         CREATE TABLE IF NOT EXISTS agent_artifacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL,
+            run_id TEXT,
             user_id INTEGER NOT NULL,
             type TEXT DEFAULT 'summary',
             title TEXT NOT NULL,

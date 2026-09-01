@@ -13,7 +13,19 @@ test('channel delivery chunks bounded messages and keeps idempotency stable', ()
 });
 
 test('release rollout is bounded and scoped', () => {
-    assert.deepEqual(normalizeRollout({ scope: 'team', rolloutPercent: 125, targetUserIds: ['1', 1, 0] }), { rolloutScope: 'team', rolloutPercent: 100, targetUserIds: [1], targetUnits: [] });
+    // 落地方案 v1.2 §6.3：target_units 由 user.unit 字符串迁移为 team_id 引用，
+    // 熔断阈值在发布时冻结并随灰度输入一起规范化。
+    const rollout = normalizeRollout({ scope: 'team', rolloutPercent: 125, targetUserIds: ['1', 1, 0], targetTeamIds: ['9', 9, 0, 'x'], teamId: '9' });
+    assert.equal(rollout.rolloutScope, 'team');
+    assert.equal(rollout.rolloutPercent, 100);
+    assert.deepEqual(rollout.targetUserIds, [1]);
+    assert.deepEqual(rollout.targetUnits, [9]);
+    assert.equal(rollout.teamId, 9);
+    assert.equal(rollout.breakerThresholds.minSamples > 0, true);
+    assert.equal(rollout.breakerThresholds.policyDenyRate <= 1, true);
+    // 历史 scope 词汇仍可读入并映射到新枚举。
+    assert.equal(normalizeRollout({ scope: 'global' }).rolloutScope, 'organization');
+    assert.equal(normalizeRollout({}).rolloutScope, 'personal');
 });
 
 test('reliability signals preserve minimum sample confidence', () => {

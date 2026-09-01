@@ -13,9 +13,23 @@ const { createAgentChannel, deleteAgentChannel, listAgentChannels, updateAgentCh
 const { listAgentInbox, markInboxItem } = require('../services/agent-inbox');
 const { listToolReliability } = require('../services/agent-tool-reliability');
 const { deleteAgentPersonalData, exportAgentPersonalData } = require('../services/agent-data');
-const { createSkillVersion, publishSkillVersion, publishWorkflowRelease, rollbackSkillRelease, rollbackWorkflowRelease, validateSkillVersion } = require('../services/agent-releases');
+const {
+    createSkillVersion, listSkillCatalogForUser, listSkillReleasesForUser, listSkillVersionsForUser,
+    pauseSkillRelease, publishSkillVersion, publishWorkflowRelease, resumeSkillRelease,
+    rollbackSkillRelease, rollbackWorkflowRelease, validateSkillVersion
+} = require('../services/agent-releases');
+const {
+    createSkillVersionFromMarkdown, diffSkillVersions, exportSkillVersionMarkdown,
+    listSkillVersionHistory, previewSkillSource
+} = require('../services/agent-skill-authoring');
+const {
+    deleteSkillReleasePermission,
+    listSkillReleasePermissions,
+    upsertSkillReleasePermission
+} = require('../services/agent-skill-access');
 const { getAgentQualityDashboard } = require('../services/agent-quality');
 const { getAgentImprovementSuggestions } = require('../services/agent-improvement-suggestions');
+const { getAgentGovernanceStatus } = require('../services/agent-governance-status');
 
 function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter } = {}) {
     const router = express.Router();
@@ -89,6 +103,12 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) return res.status(403).json({ error: '质量仪表盘仅管理员可访问。', code: 'AGENT_QUALITY_ADMIN_REQUIRED' });
         res.json({ success: true, dashboard: await getAgentQualityDashboard(req.user, { days: req.query.days }) });
     }));
+    router.get('/agents/governance', authMiddleware, asyncHandler(async (req, res) => {
+        if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) {
+            return res.status(403).json({ error: '治理观测仅管理员可访问。', code: 'AGENT_GOVERNANCE_ADMIN_REQUIRED' });
+        }
+        res.json({ success: true, governance: getAgentGovernanceStatus() });
+    }));
 
     router.get('/agents/channels', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentChannels(req.user, { status: req.query.status }) })));
     router.post('/agents/channels', authMiddleware, asyncHandler(async (req, res) => {
@@ -159,17 +179,65 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, ...result });
     }));
     router.get('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = await require('../db/client').query('SELECT id, skill_id, name, version, digest, status, source_run_id, created_at, updated_at FROM agent_skill_versions WHERE created_by = ? ORDER BY updated_at DESC LIMIT ?', [req.user.id, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
-        res.json({ success: true, data: rows });
+        res.json({ success: true, data: await listSkillVersionsForUser(req.user, { limit: req.query.limit }) });
     }));
     router.get('/agents/skills/releases', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = await require('../db/client').query(`SELECT r.*, v.version, v.digest, v.manifest_yaml FROM agent_skill_releases r JOIN agent_skill_versions v ON v.id = r.skill_version_id WHERE r.owner_key = ? OR r.rollout_scope IN ('team', 'organization') ORDER BY r.published_at DESC LIMIT ?`, [`user:${req.user.id}`, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
-        res.json({ success: true, data: rows.map(row => ({ ...row, manifest_yaml: undefined, target_user_ids: typeof row.target_user_ids === 'string' ? JSON.parse(row.target_user_ids || '[]') : row.target_user_ids, target_units: typeof row.target_units === 'string' ? JSON.parse(row.target_units || '[]') : row.target_units })) });
+        const rows = await listSkillReleasesForUser(req.user, { limit: req.query.limit });
+        res.json({
+            success: true,
+            data: rows.map(row => ({
+                ...row,
+                manifest_yaml: undefined,
+                target_user_ids: typeof row.target_user_ids === 'string' ? JSON.parse(row.target_user_ids || '[]') : row.target_user_ids,
+                target_units: typeof row.target_units === 'string' ? JSON.parse(row.target_units || '[]') : row.target_units,
+                breaker_thresholds: typeof row.breaker_thresholds === 'string' ? JSON.parse(row.breaker_thresholds || '{}') : row.breaker_thresholds
+            }))
+        });
+    }));
+    router.get('/agents/skills/releases/:id/permissions', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await listSkillReleasePermissions(req.params.id, req.user);
+        if (!result) return res.status(404).json({ error: 'Skill 发布不存在或无权管理。' });
+        res.json({ success: true, release: result.release, data: result.permissions });
+    }));
+    router.put('/agents/skills/releases/:id/permissions', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const permission = await upsertSkillReleasePermission(req.params.id, req.user, req.body || {});
+        if (!permission) return res.status(404).json({ error: 'Skill 发布不存在或无权管理。' });
+        writeLog(req, '更新 Skill 发布授权', `发布ID: ${req.params.id}，主体: ${permission.subject_type}:${permission.subject_id}，动作: ${permission.action}，效果: ${permission.effect}`);
+        res.status(201).json({ success: true, permission });
+    }));
+    router.delete('/agents/skills/releases/:id/permissions/:permissionId', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const deleted = await deleteSkillReleasePermission(req.params.id, req.params.permissionId, req.user);
+        if (!deleted) return res.status(404).json({ error: 'Skill 授权不存在或无权管理。' });
+        writeLog(req, '删除 Skill 发布授权', `发布ID: ${req.params.id}，授权ID: ${req.params.permissionId}`);
+        res.json({ success: true });
     }));
     router.get('/agents/skills/catalog', authMiddleware, asyncHandler(async (req, res) => {
-        const tenantId = req.user.tenant_id || (await require('../services/enterprise-access').getPrimaryTenantId(req.user.id));
-        const rows = await require('../db/client').query(`SELECT r.id, r.name, r.rollout_scope, r.rollout_percent, r.status, r.published_at, v.version, v.digest, v.title, v.description, v.publisher FROM agent_skill_releases r JOIN agent_skill_versions v ON v.id = r.skill_version_id WHERE r.status = 'published' AND ((r.owner_key = ? AND r.rollout_scope = 'personal') OR (r.tenant_id = ? AND r.rollout_scope IN ('team', 'organization'))) ORDER BY r.published_at DESC LIMIT ?`, [`user:${req.user.id}`, tenantId, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 200, 500))]);
-        res.json({ success: true, data: rows });
+        const rows = await listSkillCatalogForUser(req.user, { limit: req.query.limit });
+        res.json({ success: true, data: rows.map(row => ({ id: row.id, name: row.name, rollout_scope: row.rollout_scope, rollout_percent: row.rollout_percent, status: row.status, published_at: row.published_at, version: row.version, digest: row.digest, content_digest: row.content_digest })) });
+    }));
+    router.post('/agents/skills/source/preview', authMiddleware, asyncHandler(async (req, res) => {
+        // 预览只做解析与严格校验，不落库；错误清单直接回传给编辑器。
+        res.json({ success: true, preview: previewSkillSource(String(req.body?.markdown || '')) });
+    }));
+    router.post('/agents/skills/source', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = await createSkillVersionFromMarkdown(req.user, req.body || {});
+        writeLog(req, '从 SKILL.md 创建技能版本草稿', `技能: ${result.version.name}@${result.version.version}`);
+        res.status(201).json({ success: true, version: result.version, preview: result.preview });
+    }));
+    router.get('/agents/skills/versions/:id/source', authMiddleware, asyncHandler(async (req, res) => {
+        const exported = await exportSkillVersionMarkdown(req.user, req.params.id);
+        if (!exported) return res.status(404).json({ error: 'Skill 版本不存在或无权访问。' });
+        res.json({ success: true, markdown: exported.markdown, version: exported.version });
+    }));
+    router.get('/agents/skills/versions/:id/history', authMiddleware, asyncHandler(async (req, res) => {
+        const history = await listSkillVersionHistory(req.user, req.params.id);
+        if (!history) return res.status(404).json({ error: 'Skill 版本不存在或无权访问。' });
+        res.json({ success: true, ...history });
+    }));
+    router.get('/agents/skills/versions/:id/diff/:targetId', authMiddleware, asyncHandler(async (req, res) => {
+        const diff = await diffSkillVersions(req.user, req.params.id, req.params.targetId);
+        if (!diff) return res.status(404).json({ error: '对比的 Skill 版本不存在或无权访问。' });
+        res.json({ success: true, diff });
     }));
     router.post('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
         const version = await createSkillVersion(req.user, req.body || {});
@@ -185,9 +253,23 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (!release) return res.status(404).json({ error: 'Skill 版本不存在或无权发布。' });
         res.json({ success: true, release });
     }));
-    router.post('/agents/skills/releases/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/agents/skills/releases/:id/rollback', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const release = await rollbackSkillRelease(req.params.id, req.user);
         if (!release) return res.status(404).json({ error: 'Skill 发布不存在或无权回滚。' });
+        writeLog(req, '回滚 Agent Skill 发布', `发布ID: ${req.params.id}`);
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/skills/releases/:id/pause', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const reason = String(req.body?.reason || '').slice(0, 200);
+        const release = await pauseSkillRelease(req.params.id, req.user, reason);
+        if (!release) return res.status(404).json({ error: 'Skill 发布不存在、非发布态或无权暂停。' });
+        writeLog(req, '暂停 Agent Skill 发布', `发布ID: ${req.params.id}，原因: ${reason || '未说明'}`);
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/skills/releases/:id/resume', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const release = await resumeSkillRelease(req.params.id, req.user);
+        if (!release) return res.status(404).json({ error: 'Skill 发布不存在、非暂停态或无权恢复。' });
+        writeLog(req, '恢复 Agent Skill 发布', `发布ID: ${req.params.id}`);
         res.json({ success: true, release });
     }));
     router.post('/agents/workflows/:id/releases', authMiddleware, asyncHandler(async (req, res) => {

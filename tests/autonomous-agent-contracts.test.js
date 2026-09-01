@@ -126,19 +126,95 @@ test('Skill manifest parser and digest validator accept JSON/YAML subset', () =>
     assert.equal(manifest.name, 'demo');
     const checked = validateSkillManifest({ id: 'corp.demo', name: 'demo', version: '1.0.0' });
     assert.equal(checked.valid, true);
-    const context = buildSkillExecutionContext({ id: 'corp.demo', name: 'demo', version: '1.0.0', permissions: ['code.execute'], tools: ['agent.code'] });
+    const context = buildSkillExecutionContext({ id: 'corp.demo', name: 'demo', version: '1.0.0', capabilities: ['code.execute'], tools: ['agent.code'] });
+    assert.deepEqual(context.skillCapabilities, ['code.execute']);
     assert.deepEqual(context.skillPermissions, ['code.execute']);
+    const legacyFieldContext = buildSkillExecutionContext({ id: 'corp.demo', name: 'demo', version: '1.0.0', permissions: ['code.execute'], tools: ['agent.code'] });
+    assert.deepEqual(legacyFieldContext.skillCapabilities, ['code.execute']);
+    const unregistered = validateSkillManifest({ id: 'corp.demo', name: 'demo', version: '1.0.0', capabilities: ['not.registered'] });
+    assert.equal(unregistered.valid, false);
+    assert.match(unregistered.errors.join(' '), /未登记的能力/);
     const nested = parseSkillManifest('id: corp.nested\nname: nested\nversion: 1.0.0\ninputs:\n  file:\n    type: file\n    required: true\noutputs:\n  report:\n    type: file\n');
     assert.equal(nested.inputs.file.required, true);
 });
 
-test('Skill minimum permissions are enforced by the PEP', () => {
-    const allowed = evaluateToolPolicy({ run: { skill_permissions: ['network.request'] }, tool: { name: 'agent.http', network: true, capabilities: ['network.request'] }, input: { url: 'https://example.com' } });
+test('Skill minimum capabilities are enforced by the PEP under default deny', () => {
+    const httpTool = { name: 'agent.http', network: true, capabilities: ['network.request'] };
+    const skillRun = declared => ({ metadata: { skillConstraints: { present: true, reference: 'corp.demo', ...declared } } });
+
+    // 1. 无 Skill 上下文的普通任务不得被误拒。
+    const plain = evaluateToolPolicy({ run: {}, tool: httpTool, input: { url: 'https://example.com' } });
+    assert.notEqual(plain.decision, 'denied');
+
+    // 2. 声明命中时放行；能力与工具必须同时声明。
+    const allowed = evaluateToolPolicy({
+        run: skillRun({ capabilities: ['network.request'], tools: ['agent.http'] }),
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
     assert.notEqual(allowed.decision, 'denied');
-    const denied = evaluateToolPolicy({ run: { skill_permissions: ['filesystem.read_workspace'] }, tool: { name: 'agent.http', network: true, capabilities: ['network.request'] }, input: { url: 'https://example.com' } });
+
+    // 3. 能力未声明即拒绝。
+    const denied = evaluateToolPolicy({
+        run: skillRun({ capabilities: ['filesystem.read_workspace'], tools: ['agent.http'] }),
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
     assert.equal(denied.decision, 'denied');
-    const aliased = evaluateToolPolicy({ run: { skill_permissions: ['code.python_execute'] }, tool: { name: 'agent.code', capabilities: ['code.execute'] }, input: { code: 'return 1' } });
-    assert.notEqual(aliased.decision, 'denied');
+
+    // 4. Skill 上下文存在但声明为空时拒绝全部工具（A1 的修复目标）。
+    const emptyDeclaration = evaluateToolPolicy({
+        run: skillRun({ capabilities: [], tools: [] }),
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
+    assert.equal(emptyDeclaration.decision, 'denied');
+    assert.ok(emptyDeclaration.reasonCodes.includes('skill_capabilities_empty'));
+    assert.ok(emptyDeclaration.reasonCodes.includes('skill_tools_empty'));
+
+    // 5. 别名放大已关闭：声明窄能力不能匹配宽能力的工具（A3）。
+    const amplified = evaluateToolPolicy({
+        run: skillRun({ capabilities: ['code.python_execute'], tools: ['agent.code'] }),
+        tool: { name: 'agent.code', capabilities: ['code.execute'] },
+        input: { code: 'return 1' }
+    });
+    assert.equal(amplified.decision, 'denied');
+    const duckdbAmplified = evaluateToolPolicy({
+        run: skillRun({ capabilities: ['data.duckdb.query'], tools: ['agent.code'] }),
+        tool: { name: 'agent.code', capabilities: ['code.execute'] },
+        input: { code: 'return 1' }
+    });
+    assert.equal(duckdbAmplified.decision, 'denied');
+
+    // 6. 收敛方向仍成立：声明父能力可覆盖子能力。
+    const narrowed = evaluateToolPolicy({
+        run: skillRun({ capabilities: ['code.execute'], tools: ['agent.code'] }),
+        tool: { name: 'agent.code', capabilities: ['code.sandbox_eval'] },
+        input: { code: 'return 1' }
+    });
+    assert.notEqual(narrowed.decision, 'denied');
+
+    // 7. legacy_unrestricted 兜底在有效期内放行，到期后自动恢复默认拒绝。
+    const effective = evaluateToolPolicy({
+        run: skillRun({ capabilities: [], tools: [], legacyUnrestricted: true, legacyUnrestrictedUntil: '2099-01-01 00:00:00' }),
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
+    assert.notEqual(effective.decision, 'denied');
+    const expired = evaluateToolPolicy({
+        run: skillRun({ capabilities: [], tools: [], legacyUnrestricted: true, legacyUnrestrictedUntil: '2000-01-01 00:00:00' }),
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
+    assert.equal(expired.decision, 'denied');
+
+    // 8. 调用方自报的 metadata 顶层键不能关闭 Skill 约束。
+    const spoofed = evaluateToolPolicy({
+        run: { metadata: { skillId: 'corp.demo', skillContextPresent: false, skillLegacyUnrestricted: true } },
+        tool: httpTool,
+        input: { url: 'https://example.com' }
+    });
+    assert.equal(spoofed.decision, 'denied');
 });
 
 test('desktop worker requires main-process approval and denies direct networking', () => {

@@ -27,6 +27,9 @@ async function formatToolList(user, options = {}) {
         input_schema: tool.input_schema,
         source: 'builtin',
         risk: 'low',
+        // 工具契约里显式声明的 capabilities 必须透传，否则 normalizeToolContract 会退回登记表结果，
+        // 使显式声明在目录投影这一层被静默丢弃（落地方案 v1.2 阶段 0.3）。
+        ...(Array.isArray(tool.capabilities) ? { capabilities: tool.capabilities } : {}),
         requiresApproval: Boolean(tool.alwaysRequiresApproval),
         alwaysRequiresApproval: Boolean(tool.alwaysRequiresApproval),
         admin: Boolean(tool.admin)

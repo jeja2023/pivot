@@ -127,6 +127,51 @@ async function createOrUpdateRunArtifact({ runId, user, type = 'summary', title,
     return await getAgentArtifactForUser(artifactId, user);
 }
 
+/**
+ * 创建或更新不依附 Agent run 的用户 Artifact。
+ * 公文工作台等人工创作入口也必须经过 Artifact → Rendition → Delivery 链路，
+ * 不能为了导出而在浏览器或桌面端另起二进制文件通路。
+ */
+async function createStandaloneArtifact(user, body = {}) {
+    if (!user?.id) {
+        const err = new Error('创建独立产物需要有效用户。');
+        err.status = 401;
+        throw err;
+    }
+    const safeType = String(body.type || 'document').trim().slice(0, 40) || 'document';
+    const safeTitle = String(body.title || '未命名文档').trim().slice(0, 120) || '未命名文档';
+    const safeContent = String(body.content || '').trim();
+    const safeNote = String(body.note || '用户文档保存').trim().slice(0, 500);
+    if (!safeContent) {
+        const err = new Error('独立产物内容不能为空。');
+        err.status = 400;
+        throw err;
+    }
+    const artifactId = Number.parseInt(body.artifactId ?? body.artifact_id, 10);
+    if (Number.isSafeInteger(artifactId) && artifactId > 0) {
+        const existing = await getAgentArtifactForUser(artifactId, user);
+        if (!existing || existing.run_id) return null;
+        return await createAgentArtifactVersion(artifactId, user, { content: safeContent, note: safeNote });
+    }
+    const now = getBeijingTimestamp();
+    let createdId = 0;
+    await transaction(async trx => {
+        const row = await trx.queryOne(`
+            INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
+            VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [user.id, safeType, safeTitle, safeContent, safeNote, now, now]);
+        createdId = row?.id;
+        const versionRow = await trx.queryOne(`
+            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
+            VALUES (?, 1, ?, ?, ?, ?)
+            RETURNING id
+        `, [createdId, safeContent, safeNote, user.id, now]);
+        await trx.execute('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?', [versionRow?.id, createdId]);
+    });
+    return await getAgentArtifactForUser(createdId, user);
+}
+
 async function createAgentArtifactVersion(artifactId, user, body = {}) {
     const artifact = await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
@@ -304,6 +349,7 @@ async function exportAgentRun(runId, user, format = 'json') {
 module.exports = {
     configureAgentArtifacts,
     createOrUpdateRunArtifact,
+    createStandaloneArtifact,
     diffAgentArtifactVersions,
     exportAgentRun,
     getAgentArtifactForUser,

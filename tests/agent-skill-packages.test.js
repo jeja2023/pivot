@@ -114,7 +114,16 @@ test('SKILL.zip verifies detached RSA signature, permissions and installs in a j
             installRoot: path.join(root, 'installed')
         });
         assert.equal(fs.readFileSync(path.join(installed.installDir, 'INSTRUCTIONS.md'), 'utf8').startsWith('# Demo'), true);
-        assert.equal(path.dirname(installed.installDir), path.join(root, 'installed', 'corp.demo'));
+        // 安装目录改为内容寻址且不可变：sha256/<contentDigest>，不再由 manifest 推导且不再先删后写。
+        assert.equal(path.dirname(installed.installDir), path.join(root, 'installed', 'sha256'));
+        assert.equal(path.basename(installed.installDir), checked.package.digest);
+        const reinstalled = await installSkillPackage(zipPath, {
+            allowedPermissions: ['filesystem.read_workspace'],
+            requireSignature: true,
+            publicKey: keys.publicKey,
+            installRoot: path.join(root, 'installed')
+        });
+        assert.equal(reinstalled.installDir, installed.installDir);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
@@ -136,6 +145,47 @@ test('SKILL.zip rejects traversal, duplicate entries and unauthorized permission
         const result = await verifySkillPackage(unauthorized, { allowedPermissions: ['filesystem.read_workspace'] });
         assert.equal(result.valid, false);
         assert.match(result.errors.join(' '), /权限/);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('SKILL.zip supply chain scan covers actual entries, not the self-declared manifest list', async () => {
+    const root = tempRoot();
+    try {
+        const sensitive = path.join(root, 'sensitive.zip');
+        writeZip(sensitive, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\n'], ['.env', 'SECRET=1']]);
+        const sensitiveResult = await verifySkillPackage(sensitive);
+        assert.equal(sensitiveResult.valid, false);
+        assert.match(sensitiveResult.errors.join(' '), /敏感文件/);
+
+        const hooked = path.join(root, 'hooked.zip');
+        writeZip(hooked, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\n'], ['package.json', JSON.stringify({ name: 'x', scripts: { preinstall: 'node evil.js' } })]]);
+        const hookedResult = await verifySkillPackage(hooked);
+        assert.equal(hookedResult.valid, false);
+        assert.match(hookedResult.errors.join(' '), /生命周期脚本/);
+
+        const scripted = path.join(root, 'scripted.zip');
+        writeZip(scripted, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\n'], ['scripts/run.sh', 'echo hi']]);
+        const scriptedResult = await verifySkillPackage(scripted);
+        assert.equal(scriptedResult.valid, false);
+        assert.match(scriptedResult.errors.join(' '), /可执行内容/);
+
+        const undeclared = path.join(root, 'undeclared.zip');
+        writeZip(undeclared, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\nfiles:\n  - data/a.txt\n'], ['data/b.txt', 'not declared']]);
+        const undeclaredResult = await verifySkillPackage(undeclared);
+        assert.equal(undeclaredResult.valid, false);
+        assert.match(undeclaredResult.errors.join(' '), /未在 manifest.files 申报|声明的文件在包中不存在/);
+
+        const lockless = path.join(root, 'lockless.zip');
+        writeZip(lockless, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\ndependencies:\n  lodash: 4.17.21\n']]);
+        const locklessResult = await verifySkillPackage(lockless);
+        assert.equal(locklessResult.valid, false);
+        assert.match(locklessResult.errors.join(' '), /锁定文件/);
+
+        const reserved = path.join(root, 'reserved.zip');
+        writeZip(reserved, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\n'], ['CON.txt', 'reserved']]);
+        await assert.rejects(() => readSkillPackage(reserved), /保留名/);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

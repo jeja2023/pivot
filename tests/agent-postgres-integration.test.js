@@ -56,7 +56,19 @@ test('PostgreSQL Skill release path enforces signature, sandbox regression and r
     const id = `integration.skill.${Date.now()}`;
     const name = `integration-skill-${Date.now()}`;
     const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const manifest = { id, name, version: '1.0.0', title: 'Integration Skill', scope: 'user', tests: [{ name: 'smoke', script: 'process.exit(0)' }] };
+    // 落地方案 v1.2 阶段 0.9 与 §5.1：manifest.tests 中的可执行脚本已被禁止，
+    // 作用域不再由 manifest 自填（由发布动作决定），验证改跑平台声明式测试。
+    const manifest = {
+        schemaVersion: 1,
+        id,
+        name,
+        version: '1.0.0',
+        title: 'Integration Skill',
+        capabilities: ['knowledge.search'],
+        tools: ['rag.search'],
+        inputs: {},
+        outputs: {}
+    };
     const signer = crypto.createSign('RSA-SHA256');
     signer.update(canonicalJson(manifest));
     signer.end();
@@ -68,6 +80,8 @@ test('PostgreSQL Skill release path enforces signature, sandbox regression and r
         version = await createSkillVersion(user, { manifest, packageRoot: root, publicKey: publicKey.export({ type: 'pkcs1', format: 'pem' }), requireSignature: true });
         const validation = await validateSkillVersion(version.id, user, { publicKey: publicKey.export({ type: 'pkcs1', format: 'pem' }), testTimeoutMs: 10000 });
         assert.equal(validation.passed, true);
+        assert.equal(validation.declarative.scriptsExecuted, false);
+        assert.equal(validation.supplyChain.scope, 'actual-entries');
         release = await publishSkillVersion(version.id, user, { scope: 'personal' });
         assert.equal(release.status, 'published');
         const resolved = await resolvePublishedSkill(name, user);

@@ -126,38 +126,26 @@ async function registerChatLocalMcpBridgeDirectly() {
 }
 
 async function syncChatLocalMcpBridgeBeforeSend() {
-    try {
-        if (!window.syncMcpLocalExecutionBridge && window.Pivot?.loadScriptOnce) {
-            await window.Pivot.loadScriptOnce('/chat/mcp-workbench-local-auth.js');
-        }
-        const result = await window.syncMcpLocalExecutionBridge?.({ force: true });
-        const payload = normalizeChatLocalMcpBridgePayload(result?.status, result?.device?.deviceId);
-        if (payload) return payload;
-        return await registerChatLocalMcpBridgeDirectly();
-    } catch (error) {
-        console.debug?.('[pivot] 本机工具库同步失败，继续发送消息', error?.message || error);
-        try {
-            return await registerChatLocalMcpBridgeDirectly();
-        } catch (fallbackError) {
-            console.debug?.('[pivot] 本机工具库直接同步失败', fallbackError?.message || fallbackError);
-        }
-    }
+    // v2 桌面连接器在 Electron 主进程独立执行签名心跳与任务轮询；网页不再上报
+    // 自报 deviceId 或授权快照，避免旧内存桥接成为身份旁路。
+    const status = typeof window.pivotDesktop?.getLocalMcpConnectorStatus === 'function'
+        ? await window.pivotDesktop.getLocalMcpConnectorStatus().catch(() => null)
+        : null;
+    updateChatLocalMcpBridgeDebug({
+        status: status?.running ? 'persistent_connector_running' : 'persistent_connector_unavailable',
+        hasDesktopBridge: Boolean(window.pivotDesktop),
+        hasStatusBridge: Boolean(status),
+        hasExecuteBridge: Boolean(status?.running),
+        statusAvailable: Boolean(status),
+        deviceName: status?.identity?.deviceName || '',
+        reason: status?.running ? '桌面连接器已在主进程运行。' : (status?.identity?.reason || '桌面连接器尚未运行。')
+    });
     return null;
 }
 
 function startChatLocalMcpBridgeHeartbeat() {
-    if (chatLocalMcpHeartbeatStarted) return;
+    // 兼容函数保留，心跳由主进程持久化连接器负责。
     chatLocalMcpHeartbeatStarted = true;
-    const bridgeState = inspectChatLocalMcpDesktopBridge();
-    if (!bridgeState.ready) return;
-    const tick = () => {
-        if (!inspectChatLocalMcpDesktopBridge().ready) return;
-        return registerChatLocalMcpBridgeDirectly().catch(error => {
-            console.debug?.('[pivot] 聊天页本机执行器心跳等待中', error?.message || error);
-        });
-    };
-    setTimeout(tick, 2000);
-    setInterval(tick, 60000);
 }
 
 if (document.readyState === 'loading') {

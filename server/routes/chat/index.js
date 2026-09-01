@@ -54,7 +54,6 @@ const { createObservabilityTrace, withObservabilitySpan } = require('../../servi
 const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
 const { assembleChatContext } = require('../../services/chat-context-assembler');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
-const { registerLocalBridgeDevice } = require('../../services/local-device-bridge');
 const { createAgentRun } = require('../../services/agent-runtime');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
 const {
@@ -67,11 +66,6 @@ const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
-function hasAuthorizedLocalBridgeGrant(payload) {
-    const grants = payload && typeof payload.grants === 'object' && payload.grants ? payload.grants : {};
-    return Object.values(grants).some(grant => grant && grant.authorized === true);
-}
-
 function normalizeChatLocalBridgeDebug(payload) {
     if (!payload || typeof payload !== 'object') return null;
     const grants = payload.grants && typeof payload.grants === 'object' ? payload.grants : {};
@@ -95,14 +89,9 @@ function normalizeChatLocalBridgeDebug(payload) {
 
 function registerChatRequestLocalBridge(req) {
     req.localMcpBridgeDebug = normalizeChatLocalBridgeDebug(req.body?.localMcpBridgeDebug);
-    const payload = req.body?.localMcpBridge;
-    if (!payload || typeof payload !== 'object' || !hasAuthorizedLocalBridgeGrant(payload)) return null;
-    try {
-        return registerLocalBridgeDevice(req.user, payload);
-    } catch (error) {
-        req.log?.warn?.({ err: error.message }, '聊天请求携带的本机执行器快照注册失败');
-        return null;
-    }
+    // 本机执行器 v2 由桌面主进程凭设备私钥直接登记；聊天请求中自报的 deviceId/grants
+    // 不再参与设备注册或任务路由，防止网页输入伪造本机授权。
+    return null;
 }
 
 

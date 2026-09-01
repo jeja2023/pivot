@@ -717,6 +717,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/agent-run-loaders.js',
         '/chat/agent-run-detail.js',
         '/chat/agent-harness.js',
+        '/chat/agent-skill-management.js',
         '/chat/agent-run-realtime.js',
         '/chat/agent-run-actions.js',
         '/chat/agent-runs-list.js',

@@ -11,6 +11,7 @@ const {
     recordRagIngest,
     getRagMetricsSnapshot
 } = require('./services/rag-metrics');
+const { getAgentGovernanceMetricsSnapshot } = require('./services/agent-governance-metrics');
 
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10);
@@ -172,6 +173,48 @@ async function getTodayTokenRows() {
     `, [start, nextStart, start, nextStart]);
 }
 
+/**
+ * 技能治理、渲染与交付指标（落地方案 v1.2 §8.2 的必报指标）。
+ * 计数器由 services/agent-governance-metrics.js 在热路径累积，此处只做文本渲染。
+ */
+function appendAgentGovernanceMetrics(lines) {
+    const snapshot = getAgentGovernanceMetricsSnapshot();
+    const counter = (name, help, values, labelName = 'reason') => {
+        lines.push(`# HELP ${name} ${help}`);
+        lines.push(`# TYPE ${name} counter`);
+        const entries = Object.entries(values || {});
+        if (!entries.length) {
+            lines.push(line(name, { [labelName]: 'none' }, 0));
+            return;
+        }
+        entries.forEach(([key, value]) => lines.push(line(name, { [labelName]: key }, value)));
+    };
+    counter('pivot_agent_pep_deny_total', 'Agent tool policy denials by reason code.', snapshot.pep.denyTotal);
+    counter('pivot_agent_pep_shadow_deny_total', 'Denials that the default-deny rollout would add, shadow mode only.', snapshot.pep.shadowDenyTotal);
+    lines.push('# HELP pivot_agent_pep_allow_total Agent tool policy allow decisions.');
+    lines.push('# TYPE pivot_agent_pep_allow_total counter');
+    lines.push(line('pivot_agent_pep_allow_total', {}, snapshot.pep.allowTotal));
+    lines.push('# HELP pivot_agent_pep_legacy_unrestricted_hit_total Legacy unrestricted fallbacks, must converge to zero.');
+    lines.push('# TYPE pivot_agent_pep_legacy_unrestricted_hit_total counter');
+    lines.push(line('pivot_agent_pep_legacy_unrestricted_hit_total', {}, snapshot.pep.legacyUnrestrictedHitTotal));
+    counter('pivot_agent_skill_release_resolve_miss_total', 'Skill release resolution misses by cause.', snapshot.skill.releaseResolveMissTotal, 'cause');
+    counter('pivot_agent_render_total', 'Document renditions produced by format.', snapshot.render.total, 'format');
+    counter('pivot_agent_render_fail_total', 'Document render failures by reason.', snapshot.render.failTotal);
+    counter('pivot_agent_render_duration_ms_sum', 'Total document render duration by format.', snapshot.render.durationMsSum, 'format');
+    counter('pivot_agent_render_duration_ms_max', 'Maximum document render duration by format.', snapshot.render.durationMsMax, 'format');
+    lines.push('# HELP pivot_agent_render_font_selfcheck_failed_total CJK font self-check failures that take PDF rendering offline.');
+    lines.push('# TYPE pivot_agent_render_font_selfcheck_failed_total counter');
+    lines.push(line('pivot_agent_render_font_selfcheck_failed_total', {}, snapshot.render.fontSelfcheckFailed));
+    counter('pivot_agent_delivery_intent_total', 'Delivery intents by channel and state.', snapshot.delivery.intentTotal, 'channel_state');
+    lines.push('# HELP pivot_agent_delivery_digest_mismatch_total Delivery digest mismatches, never retried.');
+    lines.push('# TYPE pivot_agent_delivery_digest_mismatch_total counter');
+    lines.push(line('pivot_agent_delivery_digest_mismatch_total', {}, snapshot.delivery.digestMismatchTotal));
+    lines.push('# HELP pivot_agent_delivery_overwrite_total Explicitly approved overwrite deliveries.');
+    lines.push('# TYPE pivot_agent_delivery_overwrite_total counter');
+    lines.push(line('pivot_agent_delivery_overwrite_total', {}, snapshot.delivery.overwriteTotal));
+    counter('pivot_agent_sandbox_limit_hit_total', 'Sandbox resource limit hits by kind.', snapshot.sandbox.limitHitTotal, 'kind');
+}
+
 async function renderPrometheusMetrics() {
     const lines = [];
     lines.push('# HELP pivot_http_request_duration_seconds HTTP request latency histogram.');
@@ -226,6 +269,7 @@ async function renderPrometheusMetrics() {
     });
 
     const rag = getRagMetricsSnapshot();
+    appendAgentGovernanceMetrics(lines);
     lines.push('# HELP pivot_rag_retrievals_total Total RAG retrieval attempts.');
     lines.push('# TYPE pivot_rag_retrievals_total counter');
     lines.push(line('pivot_rag_retrievals_total', {}, rag.retrievals));

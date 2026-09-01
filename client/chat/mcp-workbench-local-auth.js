@@ -28,12 +28,8 @@ let mcpLocalExecutionLastHeartbeatAt = 0;
 
 
 function mcpLocalExecutionBridge() {
-    const desktop = window.pivotDesktop;
-    if (desktop
-        && typeof desktop.getLocalAuthorizationStatus === 'function'
-        && typeof desktop.executeLocalMcpTool === 'function') {
-        return desktop;
-    }
+    // v2 连接器在 Electron 主进程保存私钥并直接轮询持久化任务；
+    // 网页端不再执行旧 Map 桥接的心跳和任务领取。
     return null;
 }
 

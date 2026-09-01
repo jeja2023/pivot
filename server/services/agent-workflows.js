@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
@@ -270,13 +269,16 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
         }
         const tenantId = user.tenant_id || await getPrimaryTenantId(user.id);
         const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
+        // 灰度分桶复用 agent-skill-rollout 的实现（每候选独立分桶 + 租户级 HMAC），
+        // 避免同一套灰度语义在技能与工作流两处各写一份（落地方案 v1.2 §6.3）。
+        const { computeRolloutBucket } = require('./agent-skill-rollout');
         const userId = Number(user?.id || 0);
         const userUnit = String(user?.unit || '').trim();
         const selectedRelease = releaseRows.find(release => {
             const ids = parseJsonObject(release.target_user_ids) || [];
             const units = parseJsonObject(release.target_units) || [];
-            const hash = crypto.createHash('sha256').update(`${userId}:${release.id}`).digest().readUInt32BE(0) % 100;
-            return (!ids.length || ids.includes(userId)) && (!units.length || units.includes(userUnit)) && hash < Number(release.rollout_percent || 100);
+            const bucket = computeRolloutBucket({ tenantId, releaseId: release.id, userId });
+            return (!ids.length || ids.includes(userId)) && (!units.length || units.includes(userUnit)) && bucket < Number(release.rollout_percent || 100);
         });
         const fallbackVersionId = selectedRelease?.workflow_version_id || releaseRows[1]?.workflow_version_id || workflow.published_version_id;
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, fallbackVersionId);

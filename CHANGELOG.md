@@ -1,3 +1,22 @@
+## [v0.1.60] - 2026-09-01
+
+### Agent 技能、文档交付与桌面连接器安全收口
+
+- **Skill 安全治理与创作入口收敛**：`SKILL.md` 成为前端个人 Skill 草稿的唯一创作入口；补齐 Frontmatter 预览、版本差异、能力/工具扩权提示、Release ACL 管理和管理员治理观测。PEP 支持 `shadow` / `enforce` 两种上线模式，并持续记录默认拒绝影响面与历史兜底命中。
+- **Skill 发布、签名与租户边界加固**：关闭外部 `ownerKey` 与签名验证旁路；签名信封按摘要不可变复用；发布目录、运行时解析与 ACL 判定统一按租户、团队成员、灰度和显式 deny/allow 收口，防止跨租户或投影表旁路。
+- **结构化文档与 Artifact 交付链完成**：上线 Document IR、二进制 CAS、不可变 Rendition、一次性下载令牌、DOCX/XLSX/HTML/Markdown 渲染与 CJK PDF fail-closed 自检；公文工作台自动沉淀独立 Artifact 后走服务端统一渲染。CAS 下载前重算实际摘要，交付端采用原子写入、摘要校验和本地已写清单。
+- **桌面受控交付与本机连接器升级**：桌面端以设备密钥签名完成设备注册、目录授权、领取、下载和回执；旧网页自报授权的内存 MCP 桥接下线，替换为 PostgreSQL 持久化桌面连接器，支持显式设备选择、任务租约、claim token 和服务重启后的结果重查。旧本机 SQLite/报表只读能力保留在新连接器通路中。
+- **Capability Worker 安全框架**：新增默认关闭的 Docker 执行框架，仅接受固定 `image@sha256`、固定入口命令和平台资源限额；容器默认禁网、只读根文件系统、无 GPU、无业务凭据、受 CPU/内存/进程/临时空间/超时约束。未配置已审计内网镜像时明确拒绝执行。
+- **字体与封包配置**：加入 Noto Sans SC CJK 字体资产及摘要校验配置，Docker 运行镜像携带字体；桌面封包规则排除无关构建目录并由 Builder 自动筛选生产依赖。
+
+### 未完成与上线前事项
+
+- **Capability Worker 尚未启用**：执行框架已具备，但仍需由运维登记经过审计的内网 `image@sha256`、固定入口命令和资源配额后，才可将 `PIVOT_CAPABILITY_WORKER_ENABLED=true` 投入使用。
+- **Windows 正式安装包待构建环境排障**：Electron 运行时预检、依赖发现和 `win-unpacked` 初始生成均已通过；本机构建在 `app.asar` 归档阶段长时间无产物，已停止。需在干净构建机或升级后的 Builder 环境复核后再发布安装包。
+- **PEP 上线观察期**：建议先以 `PIVOT_AGENT_PEP_MODE=shadow` 观察 1–2 周，审阅 `shadowDenyTotal` 与 `legacyUnrestrictedHitTotal` 后再稳定切换为 `enforce`。
+
+详细发布记录见 [v0.1.60 发布记录](docs/releases/v0.1.60-Agent技能与文档交付安全收口.md)。
+
 ## [v0.1.59] - 2026-08-27
 
 ### 客户端独占隐身模式与服务端零特征掐断及连接配置中心

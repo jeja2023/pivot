@@ -33,3 +33,5 @@ downloads/SHA256SUMS-*.txt
 
 .venv-paddleocr/
 .paddlex/
+# 本地临时验证脚本与产物目录
+.tmp/

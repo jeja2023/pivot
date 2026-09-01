@@ -3,6 +3,7 @@ const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
 const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
+const { createSkillReleaseBreakerRunner } = require('./services/agent-skill-breaker');
 const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
@@ -63,6 +64,7 @@ function startBackgroundServices({
         startAgentRecoveryRunner,
         startAgentScheduleRunner,
         startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
+        startSkillReleaseBreakerRunner: () => createSkillReleaseBreakerRunner().start(),
         startRuntimeDiagnostics
     }
 }) {
@@ -96,6 +98,12 @@ function startBackgroundServices({
         if (typeof dependencies.startAgentEventOutboxDispatcher === 'function') {
             try { dependencies.startAgentEventOutboxDispatcher(); } catch (err) {
                 logger.warn({ err: err && err.message ? err.message : err }, 'Agent 事件 outbox 投递器启动失败');
+            }
+        }
+        // 技能发布熔断巡检：达到冻结阈值即自动回滚或暂停，避免坏版本长时间留在灰度里。
+        if (typeof dependencies.startSkillReleaseBreakerRunner === 'function') {
+            try { dependencies.startSkillReleaseBreakerRunner(); } catch (err) {
+                logger.warn({ err: err && err.message ? err.message : err }, '技能发布熔断巡检器启动失败');
             }
         }
     });

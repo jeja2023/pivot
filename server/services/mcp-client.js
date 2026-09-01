@@ -12,8 +12,10 @@ const {
     executeDatabaseMcpTool,
     getDatabaseConnectionForServerAsync,
     listDatabaseMcpTools,
+    listDatabaseConnectionMcpTools,
     normalizeDatabaseConnection
 } = require('./database-mcp');
+const { listReportTools } = require('./builtin-mcp-reports');
 const {
     executeBuiltinMcpTool,
     getBuiltinConfigForServerAsync,
@@ -30,9 +32,9 @@ const {
     listLocalDeviceMcpTools
 } = require('./local-device-mcp');
 const {
-    executeBridgeLocalDeviceMcpTool,
-    listBridgeLocalDeviceMcpTools
-} = require('./local-device-bridge');
+    executeConnectorTool,
+    listConnectorDevices
+} = require('./agent-local-connector');
 const { isSuperAdmin } = require('../permissions');
 const {
     canAccessSharedResource,
@@ -55,6 +57,35 @@ const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.sample_collection',
     'db.aggregate'
 ]);
+
+function localConnectorInputSchema(tool) {
+    const base = tool.inputSchema || tool.input_schema || { type: 'object' };
+    const properties = base.properties && typeof base.properties === 'object' ? base.properties : {};
+    return {
+        ...base,
+        type: 'object',
+        properties: {
+            ...properties,
+            deviceId: { type: 'string', description: '必须从本机连接器设备列表中显式选择的设备标识。' }
+        }
+    };
+}
+
+async function listPersistentLocalConnectorTools(user) {
+    const devices = await listConnectorDevices(user);
+    const tools = [];
+    devices.forEach(device => {
+        const owner = { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' };
+        if (device.grants.local_database) {
+            listDatabaseConnectionMcpTools({ database_type: 'sqlite', database_name: 'local-connector://authorized-sqlite', max_rows: 500 })
+                .forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机 SQLite`, serverType: 'database', databaseType: 'sqlite', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
+        }
+        if (device.grants.local_report_dir) {
+            listReportTools().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机报表目录`, serverType: 'reports', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
+        }
+    });
+    return tools;
+}
 
 function headerValue(headers = {}, name) {
     const target = String(name || '').toLowerCase();
@@ -690,7 +721,7 @@ async function refreshMcpTools(server, user = null) {
 async function listCachedMcpTools(serverId = null, user = null) {
     if (isLocalDeviceMcpServerId(serverId)) {
         const directLocalTools = listLocalDeviceMcpTools(user);
-        return directLocalTools.length ? directLocalTools : listBridgeLocalDeviceMcpTools(user);
+        return directLocalTools.length ? directLocalTools : await listPersistentLocalConnectorTools(user);
     }
     if (serverId) {
         const rows = await query(`
@@ -723,7 +754,7 @@ async function listCachedMcpTools(serverId = null, user = null) {
             ORDER BY s.name ASC, t.name ASC
     `);
     const directLocalTools = listLocalDeviceMcpTools(user);
-    const bridgeLocalTools = directLocalTools.length ? [] : listBridgeLocalDeviceMcpTools(user);
+    const bridgeLocalTools = directLocalTools.length ? [] : await listPersistentLocalConnectorTools(user);
     const visibleRows = rows
         .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
         .filter(row => isSharedMcpToolAllowed(row, row.name));
@@ -783,7 +814,7 @@ async function executeMcpTool(fullName, input, user, options = {}) {
             const hasDirectLocalTool = directLocalTools.some(tool => tool.name === toolName);
             const result = hasDirectLocalTool
                 ? await executeLocalDeviceMcpTool(toolName, input || {}, user)
-                : await executeBridgeLocalDeviceMcpTool(toolName, input || {}, user);
+                : await executeConnectorTool(toolName, input || {}, user);
             options.signal?.throwIfAborted?.();
             recordMcpCallLog({
                 user,

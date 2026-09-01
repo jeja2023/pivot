@@ -2,6 +2,7 @@ const express = require('express');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { queryOne } = require('../db/client');
 const { createAgentControlPlaneRouter } = require('./agent-control-plane');
+const { createAgentDeliveryRouter } = require('./agent-delivery');
 const { isSuperAdmin } = require('../permissions');
 const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
@@ -70,6 +71,7 @@ const {
     cancelAgentRun,
     approveAgentTool,
     createAgentArtifactVersion,
+    createStandaloneArtifact,
     createAgentSchedule,
     createAgentTemplate,
     createAgentRun,
@@ -118,6 +120,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
     const residency = createAgentResidencyStore();
     router.use(createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter }));
+    router.use(createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter }));
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
@@ -128,19 +131,12 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     }));
 
     router.post('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
-        const allowedPermissions = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '')
-            .split(',').map(item => item.trim()).filter(Boolean);
-        const version = await createSkillVersion(req.user, {
-            manifest: req.body?.manifest || req.body?.manifestYaml,
-            instructions: req.body?.instructions || '',
-            // The client cannot widen the permission set. An empty server-side
-            // allowlist intentionally rejects manifests that request privileges.
-            allowedPermissions,
-            requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false' || req.body?.requireSignature === true,
-            publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
+        // 配方型技能的唯一创作入口是单文件 SKILL.md；旧 YAML/JSON 直写接口保留路径
+        // 仅用于给旧客户端明确迁移提示，不能再绕开 strictSpec、scope 剥离和 Frontmatter 白名单。
+        res.status(410).json({
+            error: '技能创作入口已迁移至 POST /api/agents/skills/source，请提交严格校验的 SKILL.md。',
+            code: 'AGENT_SKILL_SOURCE_REQUIRED'
         });
-        logAction(req, '创建 Agent Skill 版本草稿', `Skill: ${version.name}@${version.version}`);
-        res.status(201).json({ success: true, version, status: 'draft' });
     }));
 
     router.post('/agents/skills/package', authMiddleware, uploadLimiter || ((_req, _res, next) => next()), ...(skillUpload?.single ? skillUpload.single('file') : []), asyncHandler(async (req, res) => {
@@ -567,6 +563,13 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
 
     router.get('/agents/artifacts', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: await listAgentArtifacts(req.user, normalizeLimit(req.query.limit, 30, 100)) });
+    }));
+
+    router.post('/agents/artifacts', authMiddleware, asyncHandler(async (req, res) => {
+        const artifact = await createStandaloneArtifact(req.user, req.body || {});
+        if (!artifact) return res.status(404).json({ error: '独立文档产物不存在或无权修改。' });
+        logAction(req, '保存独立文档产物', `结果ID: ${artifact.id}，类型: ${artifact.type || 'document'}`);
+        res.status(201).json({ success: true, artifact });
     }));
 
     router.get('/agents/artifacts/:id/versions', authMiddleware, asyncHandler(async (req, res) => {

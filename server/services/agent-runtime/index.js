@@ -62,6 +62,7 @@ const {
 const {
     configureAgentArtifacts,
     createAgentArtifactVersion,
+    createStandaloneArtifact,
     diffAgentArtifactVersions,
     exportAgentRun,
     getAgentArtifactForUser,
@@ -1813,6 +1814,7 @@ configureAgentArtifacts({
 module.exports = {
     createAgentRun,
     createAgentArtifactVersion,
+    createStandaloneArtifact,
     createAgentSchedule,
     createAgentTemplate,
     createAgentWorkflow,

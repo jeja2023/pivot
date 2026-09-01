@@ -52,6 +52,24 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
         }
         return response && response.success === true ? response.result : response;
     },
+    getLocalMcpConnectorStatus() {
+        return ipcRenderer.invoke('pivot-local-connector:status');
+    },
+    getDeliveryStatus() {
+        return ipcRenderer.invoke('pivot-delivery:status');
+    },
+    startDelivery() {
+        return ipcRenderer.invoke('pivot-delivery:start');
+    },
+    stopDelivery() {
+        return ipcRenderer.invoke('pivot-delivery:stop');
+    },
+    authorizeDeliveryDirectory(options = {}) {
+        return ipcRenderer.invoke('pivot-delivery:authorize-directory', options || {});
+    },
+    revokeDeliveryDirectory(grantId) {
+        return ipcRenderer.invoke('pivot-delivery:revoke-directory', String(grantId || ''));
+    },
     requestAgentWorkerApproval(task = {}) {
         return ipcRenderer.invoke('pivot-agent:request-approval', task || {});
     },

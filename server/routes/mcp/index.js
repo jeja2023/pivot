@@ -59,13 +59,7 @@ const {
     buildCapabilityHealth,
     findAccessibleBuiltinService
 } = require('./helpers');
-const {
-    completeLocalBridgeTask,
-    getLocalBridgeStatus,
-    listBridgeLocalDeviceMcpTools,
-    pollLocalBridgeTask,
-    registerLocalBridgeDevice
-} = require('../../services/local-device-bridge');
+const { mountLocalConnectorRoutes } = require('./local-connector');
 
 async function createSystemBuiltinService(serviceType, user) {
     const definition = SYSTEM_MCP_SERVICES[serviceType];
@@ -122,24 +116,22 @@ function sendJsonRpc(res, id, result, error = null) {
 
 function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
+    mountLocalConnectorRoutes(router, authMiddleware);
     router.post('/mcp/local-device/heartbeat', authMiddleware, asyncHandler(async (req, res) => {
-        const device = registerLocalBridgeDevice(req.user, req.body || {});
-        const tools = await filterMcpToolsByCapability(listBridgeLocalDeviceMcpTools(req.user), req.user);
-        res.json({ success: true, device, tools });
+        res.status(410).json({ error: '旧本机 MCP 内存桥接已下线，请升级至桌面连接器 v2。', code: 'LOCAL_CONNECTOR_V2_REQUIRED' });
     }));
 
+
     router.get('/mcp/local-device/status', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, status: getLocalBridgeStatus(req.user) });
+        res.status(410).json({ error: '旧本机 MCP 内存桥接已下线，请使用 /connector/status。', code: 'LOCAL_CONNECTOR_V2_REQUIRED' });
     }));
 
     router.get('/mcp/local-device/tasks/next', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await pollLocalBridgeTask(req.user, req.query.deviceId || req.query.device_id, req.query.waitMs || req.query.wait_ms);
-        res.json({ success: true, ...result });
+        res.status(410).json({ error: '旧本机 MCP 内存任务队列已下线，请使用桌面连接器 v2。', code: 'LOCAL_CONNECTOR_V2_REQUIRED' });
     }));
 
     router.post('/mcp/local-device/tasks/:id/result', authMiddleware, asyncHandler(async (req, res) => {
-        const result = completeLocalBridgeTask(req.user, req.params.id, req.body || {});
-        res.json({ success: true, result });
+        res.status(410).json({ error: '旧本机 MCP 内存任务队列已下线，请使用桌面连接器 v2。', code: 'LOCAL_CONNECTOR_V2_REQUIRED' });
     }));
 
     router.get('/mcp/servers', authMiddleware, asyncHandler(async (req, res) => {

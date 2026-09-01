@@ -23,6 +23,9 @@ const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 const { runDesktopWorker } = require('./agent-runtime');
+const { createDesktopDeliveryController } = require('./delivery/controller');
+const { createLazyLocalMcpController } = require('./local-mcp-controller');
+const { buildApplicationMenu } = require('./application-menu');
 const {
     createWorkerApprovalStore,
     isSecureWorkerRendererUrl,
@@ -37,6 +40,11 @@ let lastLoadError = null;
 let updaterController = null;
 let aboutWindow = null;
 let serverConfigWindow = null;
+let deliveryController = null;
+const getLocalMcpConnector = createLazyLocalMcpController({
+    request: options => getDeliveryController().request(options), getLocalAuthorizationStatus: buildLocalAuthorizationStatus,
+    executeLocalTool: executeLocalMcpTool, logger: console
+});
 const workerApprovals = createWorkerApprovalStore();
 
 function randomSecret() {
@@ -74,10 +82,6 @@ function findAvailablePort() {
         });
     });
 }
-
-
-
-
 function sanitizeErrorMessage(msg) {
     if (!msg) return '无法连接到智枢服务器，请检查您的网络连接或服务器运行状态。';
     const text = String(msg);
@@ -117,8 +121,6 @@ async function loadErrorPage(message) {
         isLoadingErrorPage = false;
     }
 }
-
-
 async function clearDesktopCaches() {
     if (!mainWindow || mainWindow.isDestroyed()) return false;
     const webSession = mainWindow.webContents.session;
@@ -156,8 +158,6 @@ async function clearCacheAndReloadDesktop() {
     await resetRendererPivotCaches();
     return reloadDesktop({ clearCache: true });
 }
-
-
 function desktopModeLabel(mode) {
     if (mode === 'remote') return '远程模式 (remote)';
     if (mode === 'local') return '本地模式 (local)';
@@ -279,41 +279,6 @@ function runWindowAction(action) {
         default:
             return false;
     }
-}
-
-function buildApplicationMenu() {
-    const template = [
-        {
-            label: '页面',
-            submenu: [
-                { label: '刷新页面', accelerator: 'CmdOrCtrl+R', click: () => reloadDesktop() },
-                { label: '清理缓存并刷新', accelerator: 'CmdOrCtrl+Shift+R', click: () => clearCacheAndReloadDesktop() }
-            ]
-        },
-        {
-            label: '显示',
-            submenu: [
-                { label: '实际大小', role: 'resetZoom' },
-                { label: '放大', role: 'zoomIn' },
-                { label: '缩小', role: 'zoomOut' },
-                { type: 'separator' },
-                { label: '切换全屏', accelerator: 'F11', role: 'togglefullscreen' }
-            ]
-        },
-        {
-            label: '客户端',
-            submenu: [
-                { label: '服务器连接配置...', accelerator: 'CmdOrCtrl+,', click: () => showServerConfigDialog() },
-                { type: 'separator' },
-                { label: '检查客户端更新', click: () => updaterController?.checkForUpdates?.(true) },
-                { type: 'separator' },
-                { label: '关于 Pivot', click: () => showAboutDialog() },
-                { type: 'separator' },
-                { label: '退出客户端', click: () => app.quit() }
-            ]
-        }
-    ];
-    return Menu.buildFromTemplate(template);
 }
 
 async function configureLocalEnvironment() {
@@ -557,6 +522,23 @@ async function loadTarget() {
     }
 }
 
+function getDeliveryController() {
+    if (deliveryController) return deliveryController;
+    deliveryController = createDesktopDeliveryController({
+        getTargetUrl: () => currentTargetUrl || runtimeConfig?.remoteUrl || '',
+        getSession: () => mainWindow?.webContents?.session || session.defaultSession,
+        getStealthSecret: targetUrl => resolveStealthSecret(runtimeConfig, targetUrl),
+        showDirectoryPicker: async () => {
+            const result = await showLocalAuthorizationDialog({ title: '选择 Pivot 文档输出目录', properties: ['openDirectory', 'createDirectory'] });
+            return result?.canceled || !result?.filePaths?.[0] ? { canceled: true } : { directory: result.filePaths[0] };
+        },
+        showMessageBox: (parent, config) => dialog.showMessageBox(parent, config),
+        getParentWindow: () => mainWindow || undefined,
+        logger: console
+    });
+    return deliveryController;
+}
+
 const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir']);
 
 function localAuthorizationFilePath() {
@@ -773,6 +755,36 @@ ipcMain.handle('pivot-local-auth:execute-tool', async (event, payload) => {
         return { success: false, error: normalizeLocalMcpExecutionError(error) };
     }
 });
+
+ipcMain.handle('pivot-local-connector:status', async (event) => {
+    assertTrustedIpcSender(event);
+    return getLocalMcpConnector().status();
+});
+
+ipcMain.handle('pivot-delivery:status', async (event) => {
+    assertTrustedIpcSender(event);
+    return getDeliveryController().status();
+});
+
+ipcMain.handle('pivot-delivery:start', async (event) => {
+    assertTrustedIpcSender(event);
+    return getDeliveryController().start();
+});
+
+ipcMain.handle('pivot-delivery:stop', async (event) => {
+    assertTrustedIpcSender(event);
+    return getDeliveryController().stop();
+});
+
+ipcMain.handle('pivot-delivery:authorize-directory', async (event, options = {}) => {
+    assertTrustedIpcSender(event);
+    return getDeliveryController().authorizeDirectory(options || {});
+});
+
+ipcMain.handle('pivot-delivery:revoke-directory', async (event, grantId) => {
+    assertTrustedIpcSender(event);
+    return getDeliveryController().revokeDirectory(grantId);
+});
 ipcMain.handle('pivot-agent:request-approval', async (event, payload = {}) => {
     assertSecureWorkerIpcSender(event);
     configureLocalAuthorizationEnvironment();
@@ -938,7 +950,17 @@ if (!gotLock) {
 
     app.whenReady().then(async () => {
         app.setAppUserModelId('com.pivot.desktop');
-        Menu.setApplicationMenu(buildApplicationMenu());
+        Menu.setApplicationMenu(buildApplicationMenu({
+            Menu,
+            reloadDesktop,
+            clearCacheAndReloadDesktop,
+            showServerConfigDialog,
+            configureDeliveryDirectory: () => getDeliveryController().configureDirectoryFromMenu(),
+            showDeliveryStatus: () => getDeliveryController().showStatusFromMenu(),
+            checkForUpdates: () => updaterController?.checkForUpdates?.(true),
+            showAboutDialog,
+            quit: () => app.quit()
+        }));
         try {
             runtimeConfig = loadDesktopConfig(app);
             if (runtimeConfig.partition) {
@@ -947,6 +969,8 @@ if (!gotLock) {
             attachStealthHeaderInterceptor(session.defaultSession);
             createMainWindow(runtimeConfig);
             await loadTarget();
+            getDeliveryController().start();
+            getLocalMcpConnector().start();
             updaterController = setupAutoUpdater({
                 app,
                 mainWindow,
@@ -960,6 +984,8 @@ if (!gotLock) {
     });
 
     app.on('before-quit', (event) => {
+        try { deliveryController?.stop?.(); } catch (_) {}
+        try { getLocalMcpConnector().stop(); } catch (_) {}
         if (!pivotServer) return;
         event.preventDefault();
         shutdownServer().finally(() => app.exit(0));

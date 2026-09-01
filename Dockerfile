@@ -34,7 +34,7 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
       npm install --no-save --omit=dev --registry=https://registry.npmmirror.com @duckdb/node-bindings-linux-arm64@1.5.4-r.1 ;; \
     *) echo "不支持的 Docker 目标架构：${TARGETARCH:-unknown}" >&2; exit 1 ;; \
   esac) && \
-  node -e "require('@duckdb/node-api'); require('unzipper'); require('sharp'); console.log('[build] 生产运行依赖校验通过')" && \
+  node -e "require('@duckdb/node-api'); require('unzipper'); require('sharp'); require('docx'); require('@pdf-lib/fontkit'); console.log('[build] 生产运行依赖校验通过')" && \
   rm .npmrc && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
@@ -62,11 +62,12 @@ ENV NODE_ENV=production \
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
+COPY --chown=node:node assets ./assets
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
 COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.md ./
 
 # 在最终运行阶段重新加载原生模块和系统工具，避免只验证构建阶段而漏掉 runtime 层缺失。
-RUN node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); console.log('[runtime] 原生模块加载通过')" && \
+RUN node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
   python3 --version && \
   pg_dump --version
 

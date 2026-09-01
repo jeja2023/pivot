@@ -46,6 +46,10 @@ function ensureAgentArtifactModal() {
                 </label>
                 <button type="button" id="agent-artifact-save-version" class="btn-primary">保存新版本</button>
             </div>
+            <div class="agent-artifact-renditions">
+                <strong>已渲染文档</strong>
+                <div id="agent-artifact-rendition-list" class="agent-artifact-version-list"></div>
+            </div>
             <div id="agent-artifact-diff" class="agent-artifact-diff"></div>
             <div id="agent-artifact-version-list" class="agent-artifact-version-list"></div>
         </div>
@@ -57,6 +61,94 @@ function ensureAgentArtifactModal() {
         }
     });
     return modal;
+}
+
+function downloadAgentArtifactBlob(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadAgentArtifactRendition(rendition) {
+    const tokenRes = await apiFetch(`${API_BASE}/agents/renditions/${encodeURIComponent(rendition.id)}/download-token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+    });
+    const tokenData = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenData.token) return showToast(tokenData.error || '获取下载令牌失败', 'error');
+    const fileRes = await apiFetch(`${API_BASE}/agents/renditions/${encodeURIComponent(rendition.id)}/download?token=${encodeURIComponent(tokenData.token)}`);
+    if (!fileRes.ok) return showToast('下载渲染文档失败', 'error');
+    const blob = await fileRes.blob();
+    downloadAgentArtifactBlob(`产物-${rendition.id}.${rendition.format}`, blob);
+}
+
+async function saveAgentArtifactRenditionToDesktop(rendition) {
+    if (!window.pivotDesktop?.getDeliveryStatus) return showToast('请在 Pivot 桌面客户端中使用“保存到本机”。', 'warning');
+    let status = await window.pivotDesktop.getDeliveryStatus();
+    if (!status.available) return showToast(status.reason || '本机交付设备不可用。', 'error');
+    if (!Array.isArray(status.grants) || !status.grants.length) {
+        const configured = await window.pivotDesktop.authorizeDeliveryDirectory();
+        if (configured?.canceled) return;
+        status = await window.pivotDesktop.getDeliveryStatus();
+    }
+    const grants = Array.isArray(status.grants) ? status.grants.filter(grant => grant.grantId) : [];
+    if (!grants.length) return showToast('请先在桌面端授权一个文档交付目录。', 'warning');
+    const choices = grants.map(grant => `${grant.grantId}  (${grant.pathHint || '已授权目录'})`).join('\n');
+    const selected = window.prompt(`请选择本次保存的授权目录：\n${choices}`, grants[0].grantId);
+    if (!selected) return;
+    const grant = grants.find(item => item.grantId === selected.trim());
+    if (!grant) return showToast('未选择有效的目录授权。', 'warning');
+    const intentRes = await apiFetch(`${API_BASE}/agents/deliveries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            renditionId: rendition.id,
+            channel: 'local_device',
+            deviceId: status.deviceId,
+            targetDirGrant: grant.grantId,
+            targetFilename: `产物-${rendition.id}`
+        })
+    });
+    const intentData = await intentRes.json().catch(() => ({}));
+    if (!intentRes.ok) return showToast(intentData.error || '创建本机交付意图失败', 'error');
+    showToast(intentData.reused ? '该文档已在该目录的交付队列中。' : '已加入本机交付队列，桌面端将安全写入授权目录。', 'success');
+}
+
+async function loadAgentArtifactRenditions(modal, artifactId) {
+    const list = modal.querySelector('#agent-artifact-rendition-list');
+    if (!list) return;
+    const res = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/renditions`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        PivotSafeHtml.setHtml(list, '<div class="empty-state compact">渲染文档加载失败</div>');
+        return;
+    }
+    const renditions = Array.isArray(data.data) ? data.data : [];
+    PivotSafeHtml.setHtml(list, renditions.map(item => `
+        <div class="agent-artifact-version">
+            <div><strong>${agentEscape(String(item.format || '').toUpperCase())}</strong><span>${Number(item.byte_size || 0)} 字节 · ${agentEscape(String(item.content_digest || '').slice(0, 12))}…</span></div>
+            <div class="agent-artifact-version-actions">
+                <button type="button" class="btn-secondary" data-artifact-rendition-download="${agentEscape(item.id)}">下载</button>
+                <button type="button" class="btn-secondary" data-artifact-rendition-local="${agentEscape(item.id)}">保存到本机</button>
+            </div>
+        </div>
+    `).join('') || '<div class="empty-state compact">暂无已渲染文档。请由 Agent 使用 artifact.render 生成，或在公文工作台直接导出。</div>');
+    list.querySelectorAll('[data-artifact-rendition-download]').forEach(button => {
+        button.addEventListener('click', () => {
+            const rendition = renditions.find(item => String(item.id) === String(button.dataset.artifactRenditionDownload));
+            if (rendition) void downloadAgentArtifactRendition(rendition);
+        });
+    });
+    list.querySelectorAll('[data-artifact-rendition-local]').forEach(button => {
+        button.addEventListener('click', () => {
+            const rendition = renditions.find(item => String(item.id) === String(button.dataset.artifactRenditionLocal));
+            if (rendition) void saveAgentArtifactRenditionToDesktop(rendition);
+        });
+    });
 }
 
 async function loadAgentArtifactModal(artifactId) {
@@ -71,6 +163,7 @@ async function loadAgentArtifactModal(artifactId) {
     modal.querySelector('#agent-artifact-content').value = artifact.content || '';
     modal.querySelector('#agent-artifact-note').value = '';
     PivotSafeHtml.setHtml(modal.querySelector('#agent-artifact-diff'), '');
+    void loadAgentArtifactRenditions(modal, artifactId);
     modal.querySelector('#agent-artifact-save-version').onclick = async () => {
         const content = modal.querySelector('#agent-artifact-content').value;
         const note = modal.querySelector('#agent-artifact-note').value;

@@ -117,8 +117,51 @@ function activeDevicesForUser(userId) {
         .sort((a, b) => Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0));
 }
 
-function selectDeviceForGrant(userId, grantType) {
+/**
+ * 解析本机工具调用的目标设备。
+ * 落地方案 v1.2 §2.3-C2、阶段 3.3：服务端不再用 find() 隐式取「第一个满足授权的设备」，
+ * 否则用户多设备在线时调用会落到非预期机器，且不可预测、无法审计。
+ * 调用必须显式携带 deviceId；缺失时返回可选设备列表交由用户选择。
+ */
+function resolveDeviceForGrant(userId, grantType, requestedDeviceId = '') {
+    const candidates = activeDevicesForUser(userId).filter(device => grantAuthorized(device, grantType));
+    const requested = String(requestedDeviceId || '').trim();
+    if (requested) {
+        const matched = candidates.find(device => device.deviceId === requested);
+        if (!matched) {
+            const error = bridgeError('指定的本机设备不在线或未授权该本机资源。', 404);
+            error.code = 'AGENT_LOCAL_DEVICE_UNAVAILABLE';
+            error.candidates = candidates.map(publicDeviceChoice);
+            throw error;
+        }
+        return matched;
+    }
+    if (!candidates.length) {
+        throw bridgeError('当前没有在线的桌面端本机执行器，或尚未授权对应本机资源。', 404);
+    }
+    const error = bridgeError('本机工具调用必须显式指定目标设备，请从可选设备中选择一台。', 409);
+    error.code = 'AGENT_LOCAL_DEVICE_SELECTION_REQUIRED';
+    error.candidates = candidates.map(publicDeviceChoice);
+    throw error;
+}
+
+/**
+ * 仅用于「该用户是否有任何设备提供此本机能力」的目录探测，用于列举工具与展示设备名。
+ * 绝不能用于执行路由：执行目标一律由调用方显式指定（C2）。
+ */
+function findAnyAuthorizedDevice(userId, grantType) {
     return activeDevicesForUser(userId).find(device => grantAuthorized(device, grantType)) || null;
+}
+
+/** 供用户选择的设备摘要，不暴露授权真实路径。 */
+function publicDeviceChoice(device) {
+    return {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        provider: device.provider,
+        mode: device.mode,
+        lastSeenAt: device.lastSeenAt
+    };
 }
 
 function grantTypeForTool(toolName) {
@@ -185,8 +228,8 @@ function listBridgeLocalDeviceMcpTools(user = null) {
     const userId = Number.parseInt(user?.id, 10);
     if (!Number.isSafeInteger(userId) || userId <= 0) return [];
     const tools = [];
-    const dbDevice = selectDeviceForGrant(userId, 'local_database');
-    const reportDevice = selectDeviceForGrant(userId, 'local_report_dir');
+    const dbDevice = findAnyAuthorizedDevice(userId, 'local_database');
+    const reportDevice = findAnyAuthorizedDevice(userId, 'local_report_dir');
     if (dbDevice) {
         listDatabaseConnectionMcpTools(buildDatabaseConnectionShape(user)).forEach(tool => {
             tools.push(bridgeToolRow(tool, {
@@ -330,10 +373,7 @@ async function executeBridgeLocalDeviceMcpTool(toolName, input = {}, user = null
     const userId = normalizeUserId(user);
     const grantType = grantTypeForTool(toolName);
     if (!grantType) throw bridgeError('不支持的本机工具。', 400);
-    const device = selectDeviceForGrant(userId, grantType);
-    if (!device) {
-        throw bridgeError('当前没有在线的桌面端本机执行器，或尚未授权对应本机资源。', 404);
-    }
+    const device = resolveDeviceForGrant(userId, grantType, input?.deviceId ?? input?.device_id ?? '');
     const id = crypto.randomUUID();
     const createdAt = Date.now();
     let resolveTask;

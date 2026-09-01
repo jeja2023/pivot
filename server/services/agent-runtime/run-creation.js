@@ -35,6 +35,18 @@ const {
     createRunId
 } = require('./runtime-env');
 const { getAgentSkillExecutionContext } = require('../agent-skills');
+
+/**
+ * 调用方不得自报的 Skill 约束键。
+ * 落地方案 v1.2 §6.4 第 2 条：Skill 约束必须由服务端解析后写入，
+ * 其中 skillConstraints、skillLegacyUnrestricted 与 skillContextPresent 属于会放宽判定的信号，
+ * 若允许请求体携带，等于把 PEP 的默认拒绝语义关掉。
+ */
+const SKILL_METADATA_KEYS = Object.freeze([
+    'skillConstraints', 'skillPermissions', 'skillCapabilities', 'skillTools',
+    'skillContextPresent', 'skillLegacyUnrestricted', 'skillLegacyUnrestrictedUntil',
+    'skillReleaseId', 'skillVersionId', 'skillVersion'
+]);
 const { normalizeTaskBudget } = require('../agent-budget');
 const {
     buildForkHistory,
@@ -139,15 +151,21 @@ function createAgentRunFactory(deps = {}) {
         let resourceReservation = null;
         let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
         const skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
-        delete runMetadata.skillPermissions;
-        delete runMetadata.skillTools;
+        // Skill 约束是 PEP 的判定输入，而 metadata 是调用方可写字段。
+        // 因此先剥离调用方自报的全部 skill 相关键（尤其是 skillConstraints 与 legacy 兜底标记），
+        // 再只由服务端解析结果写回，避免通过请求体关掉默认拒绝语义。
+        SKILL_METADATA_KEYS.forEach(key => { delete runMetadata[key]; });
         if (skillReference) {
             const skillContext = await getAgentSkillExecutionContext(user, skillReference);
             runMetadata.skillId = skillContext.skillId;
             runMetadata.skillName = skillContext.skillName;
             runMetadata.skillVersion = skillContext.skillVersion;
             runMetadata.skillPermissions = skillContext.skillPermissions;
+            runMetadata.skillCapabilities = skillContext.skillCapabilities;
             runMetadata.skillTools = skillContext.skillTools;
+            runMetadata.skillReleaseId = skillContext.releaseId || null;
+            runMetadata.skillVersionId = skillContext.skillVersionId || null;
+            runMetadata.skillConstraints = skillContext.skillConstraints;
         }
         const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'

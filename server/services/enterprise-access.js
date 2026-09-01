@@ -1,8 +1,14 @@
 const { query } = require('../db/client');
 const { logger } = require('../logger');
 
-const RESOURCE_TYPES = new Set(['knowledge_doc', 'knowledge_collection', 'mcp_tool', 'model', 'session', 'agent', 'dataset']);
+const RESOURCE_TYPES = new Set([
+    'knowledge_doc', 'knowledge_collection', 'mcp_tool', 'model', 'session', 'agent', 'dataset',
+    // 落地方案 v1.2 §6.2：技能版本与发布受众复用 resource_permissions，不新建平行受众表。
+    'skill_version', 'skill_release'
+]);
 const SUBJECT_TYPES = new Set(['user', 'team', 'organization', 'role']);
+/** 资源动作枚举。skill_release 使用 use/publish/manage 三级。 */
+const RESOURCE_ACTIONS = new Set(['read', 'write', 'use', 'publish', 'manage', 'admin']);
 
 function normalizeResourceType(value) {
     const type = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
@@ -12,6 +18,11 @@ function normalizeResourceType(value) {
 function normalizeSubjectType(value) {
     const type = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
     return SUBJECT_TYPES.has(type) ? type : 'user';
+}
+
+function normalizeResourceAction(value) {
+    const action = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+    return RESOURCE_ACTIONS.has(action) ? action : 'read';
 }
 
 function parseJson(value, fallback) {
@@ -107,11 +118,52 @@ function isEnterpriseAccessEnabled(env = process.env) {
     return String(env.PIVOT_ENTERPRISE_ACCESS || '').trim().toLowerCase() === 'true';
 }
 
+/**
+ * 按「资源 + 多个主体」批量查询 ACL 行。
+ * 主体形如 [{ type: 'user', id: 3 }, { type: 'team', id: 9 }, { type: 'role', id: 'admin' }]。
+ * 用于 assertSkillReleaseAccess 一次性汇总用户、团队、组织与角色四类主体，避免 N 次查询。
+ */
+async function listResourcePermissionsForResource({ resourceType, resourceId, subjects = [] } = {}) {
+    const type = normalizeResourceType(resourceType);
+    const id = String(resourceId ?? '').trim();
+    const normalizedSubjects = (Array.isArray(subjects) ? subjects : [])
+        .map(item => ({ type: normalizeSubjectType(item?.type), id: String(item?.id ?? '').trim() }))
+        .filter(item => item.id);
+    if (!id || !normalizedSubjects.length) return [];
+    const conditions = normalizedSubjects.map(() => '(subject_type = ? AND subject_id = ?)').join(' OR ');
+    const params = [type, id, ...normalizedSubjects.flatMap(item => [item.type, item.id])];
+    try {
+        const rows = await query(`
+            SELECT subject_type, subject_id, resource_type, resource_id, action, effect, conditions_json
+            FROM resource_permissions
+            WHERE resource_type = ?
+              AND resource_id = ?
+              AND (${conditions})
+            LIMIT 500
+        `, params);
+        return (rows || []).map(row => ({
+            subjectType: row.subject_type,
+            subjectId: row.subject_id,
+            resourceType: normalizeResourceType(row.resource_type),
+            resourceId: row.resource_id,
+            action: normalizeResourceAction(row.action),
+            effect: String(row.effect || 'allow').toLowerCase(),
+            conditions: parseJson(row.conditions_json, {})
+        }));
+    } catch (err) {
+        logger.warn({ err: err.message, resourceType: type, resourceId: id }, '查询资源授权行失败');
+        return [];
+    }
+}
+
 module.exports = {
+    RESOURCE_ACTIONS,
     getUserEnterpriseContext,
     getPrimaryTenantId,
     isEnterpriseAccessEnabled,
     listResourcePermissions,
+    listResourcePermissionsForResource,
+    normalizeResourceAction,
     normalizeResourceType,
     normalizeSubjectType
 };

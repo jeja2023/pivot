@@ -743,29 +743,39 @@
                             <div id="agent-harness-skill-pagination" class="pagination workspace-pagination agent-harness-skill-pagination"></div>
                         </div>
                         <div class="agent-harness-skill-form-wrap">
-                            <div class="agent-harness-subhead"><strong>注册 / 导入技能</strong><span>通过 YAML 清单注册或导入
-                                    .skill.zip 压缩包</span></div>
+                            <div class="agent-harness-subhead"><strong>创建 / 导入技能</strong><span>通过单文件 SKILL.md 创建个人草稿，或导入受控兼容包</span></div>
                             <div class="agent-harness-form-grid">
                                 <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                    <span>技能清单（YAML / JSON）</span>
+                                    <span>SKILL.md（Frontmatter + 工作指引）</span>
                                     <textarea id="agent-harness-skill-manifest" class="form-input" rows="12"
-                                        placeholder="id: project-review
+                                        placeholder="---
+schemaVersion: 1
+id: project-review
 name: project-review
 version: 1.0.0
 title: 项目审查
 description: 检查项目资料并输出风险摘要。
-tools: []
-permissions: []"></textarea>
+tools:
+  - rag.search
+capabilities:
+  - knowledge.search
+inputs: {}
+outputs: {}
+---
+
+# 工作指引
+
+仅基于用户提供的数据进行审查。"></textarea>
                                 </label>
                                 <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                    <span>技能补充说明（可选）</span>
+                                    <span>补充说明（可选，追加到工作指引）</span>
                                     <textarea id="agent-harness-skill-instructions" class="form-input" rows="3"
                                         placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
                                 </label>
                             </div>
                             <div class="agent-harness-form-actions">
                                 <button id="agent-harness-skill-register" class="btn-primary"
-                                    type="button">注册技能</button>
+                                    type="button">创建技能草稿</button>
                                 <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
                                     <span>导入技能包</span>
                                     <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>

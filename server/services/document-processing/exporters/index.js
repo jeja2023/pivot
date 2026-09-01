@@ -15,15 +15,6 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
-function escapeXml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
 function safeParseJson(value, fallback = null) {
     try {
         return value ? JSON.parse(value) : fallback;
@@ -374,72 +365,35 @@ function createZip(entries) {
     return Buffer.concat([...localParts, ...centralParts, end]);
 }
 
-function docxParagraph(text) {
-    const value = String(text ?? '');
-    return '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(value) + '</w:t></w:r></w:p>';
-}
-
-function docxPageBreak() {
-    return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-}
-
-function buildDocx({ file, pages = [], text = '' }) {
+/**
+ * OCR / 文本抽取结果导出 DOCX。
+ *
+ * 落地方案 v1.2 §7.2 与阶段 2.4：原实现是手写最小 OOXML（无样式表、无表格、
+ * 无页眉页脚，且页码行字面写着损坏的 ASCII 问号占位），现已整体迁移为
+ * 「OCR pages → Document IR → 统一渲染器」，使 DOCX 出口在全项目唯一。
+ * 页码文案同时修复为「第 N 页」。
+ */
+async function buildDocx({ file, pages = [], text = '' }) {
+    const { renderDocumentIr } = require('../../document-rendering');
     const title = baseName(file?.original_name || file?.originalName || 'ocr-result');
-    const body = [];
-    body.push(docxParagraph(title));
     const sourcePages = pages.length ? pages : [{ page_number: 1, text }];
+    const blocks = [{ type: 'heading', level: 1, text: title }];
     sourcePages.forEach((page, index) => {
-        if (index > 0) body.push(docxPageBreak());
-        body.push(docxParagraph('? ' + Number(page.page_number || page.pageNumber || index + 1) + ' ?'));
-        String(page.text || '').split(/\r?\n/).forEach(line => body.push(docxParagraph(line)));
+        if (index > 0) blocks.push({ type: 'page_break' });
+        const pageNumber = Number(page.page_number || page.pageNumber || index + 1);
+        blocks.push({ type: 'heading', level: 2, text: `第 ${pageNumber} 页` });
+        String(page.text || '')
+            .split(/\r?\n/)
+            .forEach(paragraph => blocks.push({ type: 'paragraph', runs: [{ text: paragraph }] }));
     });
-    body.push('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>');
-    const documentXml = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">',
-        '<w:body>' + body.join('') + '</w:body>',
-        '</w:document>'
-    ].join('');
-    const contentTypes = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
-        '<Default Extension="xml" ContentType="application/xml"/>',
-        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>',
-        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>',
-        '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>',
-        '</Types>'
-    ].join('');
-    const rootRels = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>',
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>',
-        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>',
-        '</Relationships>'
-    ].join('');
-    const core = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
-        '<dc:title>' + escapeXml(title) + '</dc:title>',
-        '<dc:creator>Pivot \u6587\u5b57\u8bc6\u522b</dc:creator>',
-        '<cp:lastModifiedBy>Pivot \u6587\u5b57\u8bc6\u522b</cp:lastModifiedBy>',
-        '<dcterms:created xsi:type="dcterms:W3CDTF">' + new Date().toISOString() + '</dcterms:created>',
-        '</cp:coreProperties>'
-    ].join('');
-    const app = [
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">',
-        '<Application>Pivot</Application>',
-        '</Properties>'
-    ].join('');
-    return createZip([
-        { name: '[Content_Types].xml', data: contentTypes },
-        { name: '_rels/.rels', data: rootRels },
-        { name: 'docProps/core.xml', data: core },
-        { name: 'docProps/app.xml', data: app },
-        { name: 'word/document.xml', data: documentXml }
-    ]);
+    const rendered = await renderDocumentIr({
+        ir_version: '1',
+        doc_type: 'report',
+        meta: { title, issuer: 'Pivot 文字识别' },
+        blocks,
+        footer: { page_number: true, format: '第 {page} 页' }
+    }, 'docx');
+    return rendered.buffer;
 }
 
 async function createTextOutputs({ userId, file, job, text = '', pages = [], blocks = [], formats = [OUTPUT_TYPES.TEXT, OUTPUT_TYPES.MARKDOWN, OUTPUT_TYPES.JSON] }) {
@@ -453,7 +407,7 @@ async function createTextOutputs({ userId, file, job, text = '', pages = [], blo
         } else if (format === OUTPUT_TYPES.HTML) {
             outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildHtml({ file, pages, blocks, text: finalText }) }));
         } else if (format === OUTPUT_TYPES.DOCX) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildDocx({ file, pages, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildDocx({ file, pages, text: finalText }) }));
         } else {
             outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: OUTPUT_TYPES.TEXT, content: finalText + '\n' }));
         }

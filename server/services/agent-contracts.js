@@ -1,4 +1,6 @@
 const { validateValueAgainstSchema, normalizeJsonSchema } = require('./agent-dag-contracts');
+const { resolveDeclaredToolCapabilities } = require('./agent-capability-registry');
+const { resolveRegisteredToolCapabilities } = require('./agent-tool-capabilities');
 
 const RISK_NAMES = Object.freeze({ low: 1, medium: 3, high: 4, critical: 5 });
 
@@ -16,20 +18,32 @@ function inferRiskLevel(name = '', definition = {}) {
     return 1;
 }
 
+/**
+ * 解析工具能力。
+ * 落地方案 v1.2 阶段 0.3：不再按名称关键字放大能力，改为
+ * 「契约显式声明 → 平台能力登记表 → 最小能力兜底」三层解析。
+ * 契约中未在能力注册表登记的能力标识会被丢弃，从而只能得到更窄而非更宽的结果。
+ */
 function inferCapabilities(name = '', source = 'builtin') {
-    const value = String(name || '').toLowerCase();
-    const capabilities = [];
-    if (value.includes('file') || value.includes('report') || value.includes('document')) capabilities.push('filesystem.read_workspace');
-    if (value.includes('write') || value.includes('export') || value.includes('upload')) capabilities.push('filesystem.write_workspace');
-    if (value.includes('http') || value.includes('web') || source === 'mcp') capabilities.push('network.request');
-    if (value.includes('code') || value.includes('python') || value.includes('duckdb')) capabilities.push('code.execute');
-    return capabilities.length ? capabilities : ['agent.execute'];
+    return resolveRegisteredToolCapabilities(name, source);
 }
 
 function normalizeToolConcurrency(value, sideEffect = false) {
     const requested = String(value || '').trim().toLowerCase();
     if (['read', 'write', 'exclusive'].includes(requested)) return requested;
     return sideEffect ? 'write' : 'read';
+}
+
+/**
+ * 合并工具契约能力：契约显式声明优先，但只保留已登记能力；
+ * 显式声明全部未登记时按登记表解析，避免出现「声明了未登记能力就等于无约束」的旁路。
+ */
+function resolveToolContractCapabilities(definition = {}, toolName = '', source = 'builtin') {
+    if (Array.isArray(definition.capabilities)) {
+        const declared = resolveDeclaredToolCapabilities(definition.capabilities, { toolName });
+        if (declared.length) return declared;
+    }
+    return resolveRegisteredToolCapabilities(toolName, source);
 }
 
 function normalizeToolContract(definition = {}) {
@@ -49,7 +63,7 @@ function normalizeToolContract(definition = {}) {
         title: String(definition.title || definition.name || '').slice(0, 255),
         description: String(definition.description || '').slice(0, 2000),
         source,
-        capabilities: [...new Set((Array.isArray(definition.capabilities) ? definition.capabilities : inferCapabilities(definition.name, source)).map(String).filter(Boolean))],
+        capabilities: resolveToolContractCapabilities(definition, toolName, source),
         risk_level: riskLevel,
         idempotent: definition.idempotent === undefined ? inferredIdempotent : Boolean(definition.idempotent),
         side_effect: sideEffect,

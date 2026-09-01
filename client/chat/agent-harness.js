@@ -11,15 +11,12 @@
         reliability: [], reliabilityPage: 1, reliabilityLimit: 6,
         quality: null, channels: [], residentScope: 'self', diagnostics: new Map()
     };
-
     const escape = value => window.PivotSafeHtml?.escapeHtml
         ? window.PivotSafeHtml.escapeHtml(value)
         : String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
-
     const escapeAttr = value => window.PivotSafeHtml?.escapeAttr
         ? window.PivotSafeHtml.escapeAttr(value)
         : escape(value).replace(/"/g, '&quot;');
-
     const formatDate = value => {
         const text = String(value || '').trim();
         if (!text) return '-';
@@ -289,7 +286,7 @@
         setMarkup(list, pageSkills.map(skill => {
             const own = String(skill.user_id || '') === userId, status = String(skill.status || '').toLowerCase();
             const scopeLabel = ({ user: '个人', shared: '共享', global: '全局' })[skill.scope] || skill.scope || '个人';
-            return `<article class="agent-harness-item ${status === 'disabled' ? 'is-disabled' : ''}"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(skill.title || skill.name)}</strong><span class="agent-harness-badge">${escape(scopeLabel)}</span><span class="agent-harness-status-pill ${status === 'enabled' ? 'is-active' : 'is-inactive'}">${escape(status === 'enabled' ? '已启用' : '已停用')}</span></div><span class="agent-harness-item-id">${escape(skill.name || '')} · v${escape(skill.version || '')}</span><small>${escape(shortText(skill.description || '未填写说明', 180))}${skill.release ? ` · ${escape(skill.release.rollout_scope || 'personal')} ${Number(skill.release.rollout_percent || 100)}%` : ' · 未发布'}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(skill.updated_at))}</span>${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></article>`;
+            return `<article class="agent-harness-item ${status === 'disabled' ? 'is-disabled' : ''}"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(skill.title || skill.name)}</strong><span class="agent-harness-badge">${escape(scopeLabel)}</span><span class="agent-harness-status-pill ${status === 'enabled' ? 'is-active' : 'is-inactive'}">${escape(status === 'enabled' ? '已启用' : '已停用')}</span></div><span class="agent-harness-item-id">${escape(skill.name || '')} · v${escape(skill.version || '')}</span><small>${escape(shortText(skill.description || '未填写说明', 180))}${skill.release ? ` · ${escape(skill.release.rollout_scope || 'personal')} ${Number(skill.release.rollout_percent || 100)}%` : ' · 未发布'}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(skill.updated_at))}</span>${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></article>`;
         }).join(''));
 
         if (paginationContainer) {
@@ -317,7 +314,10 @@
         const published = Array.isArray(data.data) ? data.data : [];
         const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.name) === String(version.name) && String(skill.version) === String(version.version))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'enabled' : 'draft', user_id: getCurrentUser()?.id }));
         const releaseMap = new Map((Array.isArray(releases.data) ? releases.data : []).map(release => [`${release.name}@${release.version}`, release]));
-        state.skills = [...published, ...drafts].map(skill => ({ ...skill, release: releaseMap.get(`${skill.name}@${skill.version}`) || null }));
+        state.skills = [...published, ...drafts].map(skill => {
+            const release = releaseMap.get(`${skill.name}@${skill.version}`) || null;
+            return { ...skill, release, releaseId: release?.id || null, versionId: skill.id || release?.skill_version_id || null };
+        });
         renderSkills();
         populateSkillSelect();
         return state.skills;
@@ -326,12 +326,14 @@
     async function registerSkill() {
         const manifest = document.getElementById('agent-harness-skill-manifest')?.value.trim();
         const instructions = document.getElementById('agent-harness-skill-instructions')?.value || '';
-        if (!manifest) return setNotice('请填写技能清单。', 'error');
+        if (!manifest) return setNotice('请填写 SKILL.md 内容。', 'error');
+        if (!manifest.startsWith('---')) return setNotice('技能创作只接受以 --- Frontmatter 开头的 SKILL.md。', 'error');
+        const markdown = instructions.trim() ? `${manifest}\n\n${instructions.trim()}\n` : manifest;
         const button = document.getElementById('agent-harness-skill-register');
         if (button) button.disabled = true;
         try {
-            await apiJson(`${API_BASE}/agents/skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, instructions }) });
-            setNotice('技能包注册成功。', 'success');
+            await apiJson(`${API_BASE}/agents/skills/source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown }) });
+            setNotice('SKILL.md 已创建为个人草稿。', 'success');
             document.getElementById('agent-harness-skill-manifest').value = '';
             document.getElementById('agent-harness-skill-instructions').value = '';
             await loadSkills();
@@ -885,6 +887,11 @@
             if (validate) validateSkillVersion(validate.dataset.agentSkillValidate);
             const publish = event.target.closest('[data-agent-skill-publish]');
             if (publish) publishSkillVersion(publish.dataset.agentSkillPublish);
+            const manage = event.target.closest('[data-agent-skill-manage]');
+            if (manage) {
+                const skill = state.skills.find(item => String(item.versionId || item.id) === String(manage.dataset.agentSkillManage));
+                if (skill) window.Pivot?.moduleApi?.('agent.skillManagement')?.open?.(skill);
+            }
         });
         document.getElementById('agent-harness-residency-list')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-harness-evict-resident]');

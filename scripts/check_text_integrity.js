@@ -13,7 +13,11 @@ const ignoredDirs = new Set([
     'dist-electron',
     'dist-electron-remote',
     'dist-electron-0.0.138',
-    'build'
+    'build',
+    // 本地临时目录与解包校验副本不属于源码，且会保留历史文件，不参与文本完整性判定。
+    '.tmp',
+    '.codex-tmp',
+    'test-results'
 ]);
 const textExtensions = new Set([
     '.css',
@@ -53,6 +57,50 @@ const suspiciousPatterns = [
     { name: 'common Chinese mojibake', pattern: new RegExp(mojibakeNeedles.join('|')) }
 ];
 
+// 中文上下文中的孤立 ASCII 问号 ------------------------------------------------
+// 落地方案 v1.2 §10.2：原有规则只查 U+FFFD 与特定 mojibake，检不出「中文被替换为半角问号」
+// 这一类损坏（例如页码文案被写成「半角问号 + 空格 + 页码 + 空格 + 半角问号」拼接，本应为「第 N 页」）。
+// 这里对源码字符串字面量做定向检测，并排除属于代码语法而非文案的问号：
+// 模板插值、可选链、空值合并、正则源、SQL 占位符与 URL 查询串。
+const CODE_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.json', '.svg', '.yml', '.toml']);
+const CJK_RANGE = /[\u3400-\u9FFF]/;
+const CJK_NEAR_QMARK = /[\u3400-\u9FFF]\s*\?|\?\s*[\u3400-\u9FFF]/;
+const STANDALONE_QMARK = /^\s+\?\s*$|^\s*\?\s+$/;
+const STRING_LITERAL = /'([^'\n]{0,300})'|"([^"\n]{0,300})"|`([^`\n]{0,300})`/g;
+const REGEX_SOURCE_HINT = /\(\?/;
+const SQL_KEYWORD = /\b(?:select|insert|update|delete|where|values|from|set|join|returning|conflict)\b/i;
+
+/** 剔除属于代码语法而非文案的问号。 */
+function stripCodeSyntaxNoise(value) {
+    return String(value)
+        .replace(/\$\{[^}]*\}/g, '')
+        .replace(/\?\./g, '.')
+        .replace(/\?\?/g, '');
+}
+
+function collectQuestionMarkIssues(text) {
+    const issues = [];
+    text.split(/\r?\n/).forEach((line, index) => {
+        if (line.length > 4000) return;
+        let match;
+        STRING_LITERAL.lastIndex = 0;
+        while ((match = STRING_LITERAL.exec(line))) {
+            const literal = match[1] ?? match[2] ?? match[3] ?? '';
+            if (!literal.includes('?')) continue;
+            if (REGEX_SOURCE_HINT.test(literal) || SQL_KEYWORD.test(literal)) continue;
+            const stripped = stripCodeSyntaxNoise(literal);
+            // 未闭合的 ${ 说明这是跨行模板字面量的片段，问号来自插值表达式。
+            if (stripped.includes('${')) continue;
+            if (CJK_RANGE.test(literal) && CJK_NEAR_QMARK.test(stripped)) {
+                issues.push({ line: index + 1, rule: 'isolated ASCII question mark in Chinese text', sample: literal.slice(0, 60) });
+            } else if (STANDALONE_QMARK.test(stripped)) {
+                issues.push({ line: index + 1, rule: 'suspicious standalone ASCII question mark', sample: JSON.stringify(literal) });
+            }
+        }
+    });
+    return issues;
+}
+
 function isTextFile(filePath) {
     const baseName = path.basename(filePath);
     if (baseName === '.env.example' || baseName === '.gitignore' || baseName === '.dockerignore') return true;
@@ -89,6 +137,9 @@ for (const filePath of collectFiles(rootDir)) {
                 sample: match[0]
             });
         }
+    }
+    if (CODE_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+        collectQuestionMarkIssues(text).forEach(issue => failures.push({ file: relativePath, ...issue }));
     }
 }
 
