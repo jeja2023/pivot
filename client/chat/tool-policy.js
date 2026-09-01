@@ -26,6 +26,11 @@ const TOOL_POLICY_KNOWN_TITLES = {
     'reports.read_file_summary': '读取报表摘要',
     'reports.query_table': '查询表格数据',
     'reports.compare_files': '对比数据文件',
+    // 本机浏览器连接器
+    'browser.open': '打开本机浏览器页面',
+    'browser.inspect': '读取本机网页内容',
+    'browser.click': '点击本机网页元素',
+    'browser.screenshot': '截取本机网页',
     // 可视化与报告编排
     'viz.build_chart': '生成图表',
     'viz.build_table': '表格展示',
@@ -91,6 +96,11 @@ const TOOL_POLICY_KNOWN_DESCRIPTIONS = {
     'reports.read_file_summary': '读取单个报表/数据文件的元数据、工作表列表和样本行。',
     'reports.query_table': '按列筛选并限制行数，查询 CSV/XLS/XLSX 表格数据。',
     'reports.compare_files': '对比两个报表/数据文件的工作表、表头和样本行。',
+    // 本机浏览器连接器
+    'browser.open': '在当前设备已授权的隔离浏览器中打开页面，用户可自行完成登录，不读取日常浏览器凭据。',
+    'browser.inspect': '在当前设备已授权的隔离浏览器中读取标题和受限正文文本。',
+    'browser.click': '在当前设备已授权的隔离浏览器中点击目标元素；桌面端会在执行前请求用户确认。',
+    'browser.screenshot': '在当前设备已授权的隔离浏览器中截取当前页面；桌面端会在回传前请求用户确认。',
     // 可视化与报告编排
     'viz.build_chart': '基于传入的表格行生成可直接渲染的统计图表配置。',
     'viz.build_table': '基于输入表格行生成可直接显示的 Markdown 表格。',

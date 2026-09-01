@@ -1,291 +1,517 @@
                     <section id="tab-content-global-params" class="admin-tab-content admin-only hidden global-params-tab">
+                        <!-- 页面顶部标题与操作栏 -->
                         <div class="settings-page-head">
                             <div>
                                 <h3>全局参数</h3>
-                                <p>运行时调整并发、上下文、采样、上传、图片与检索参数，字段名和说明已统一为中文，无需修改配置文件或重启服务。</p>
+                                <p>运行时集中调整并发队列、上下文预算、生成采样、上传限制与安全隐身策略，全平台即时生效无需重启。</p>
                             </div>
                             <div class="settings-page-actions">
-                                <p class="model-modal-desc runtime-settings-status" data-runtime-status></p>
-                                <button type="button" id="runtime-settings-page-refresh" class="btn-secondary">刷新</button>
-                                <button type="button" id="runtime-settings-page-save" class="btn-primary super-admin-only hidden">保存参数</button>
+                                <span class="model-modal-desc runtime-settings-status" data-runtime-status>就绪</span>
+                                <button type="button" id="runtime-settings-page-refresh" class="btn-secondary" title="从服务器重新拉取最新参数">刷新</button>
+                                <button type="button" id="runtime-settings-page-save" class="btn-primary super-admin-only hidden" title="保存所有已修改的全局参数">保存参数</button>
                             </div>
                         </div>
 
+                        <!-- 参数卡片网格 -->
                         <div class="settings-list global-params-list">
-                            <section class="stat-card global-params-section">
-                                <h4>请求队列</h4>
-                                <p class="global-params-section-desc">控制聊天请求与模型端点的并发、排队和超时，优先保证服务稳定。</p>
+
+                            <!-- 1. 请求队列 -->
+                            <section class="stat-card global-params-section card-theme-emerald">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>请求队列</h4>
+                                        <p class="global-params-section-desc">控制聊天请求与模型端点的并发、排队和超时，优先保证服务稳定。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>AI 并发请求数</label>
-                                            <small class="runtime-key-note">max_concurrent_ai_requests</small>
+                                            <div class="form-item-header">
+                                                <label>AI 并发请求数</label>
+                                                <small class="runtime-key-note" title="max_concurrent_ai_requests">max_concurrent_ai_requests</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_concurrent_ai_requests">
                                         </div>
                                         <div class="form-item">
-                                            <label>AI 队列长度</label>
-                                            <small class="runtime-key-note">max_ai_queue_size</small>
+                                            <div class="form-item-header">
+                                                <label>AI 队列长度</label>
+                                                <small class="runtime-key-note" title="max_ai_queue_size">max_ai_queue_size</small>
+                                            </div>
                                             <input type="number" class="form-input" min="0" step="1" data-runtime-key="max_ai_queue_size">
                                         </div>
                                         <div class="form-item">
-                                            <label>AI 队列超时 (ms)</label>
-                                            <small class="runtime-key-note">ai_queue_timeout_ms</small>
+                                            <div class="form-item-header">
+                                                <label>AI 队列超时 (ms)</label>
+                                                <small class="runtime-key-note" title="ai_queue_timeout_ms">ai_queue_timeout_ms</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="ai_queue_timeout_ms">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>端点默认并发</label>
-                                            <small class="runtime-key-note">model_endpoint_default_concurrency</small>
+                                            <div class="form-item-header">
+                                                <label>端点默认并发</label>
+                                                <small class="runtime-key-note" title="model_endpoint_default_concurrency">model_endpoint_default_concurrency</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="model_endpoint_default_concurrency">
                                         </div>
                                         <div class="form-item">
-                                            <label>端点队列长度</label>
-                                            <small class="runtime-key-note">model_endpoint_queue_size</small>
+                                            <div class="form-item-header">
+                                                <label>端点队列长度</label>
+                                                <small class="runtime-key-note" title="model_endpoint_queue_size">model_endpoint_queue_size</small>
+                                            </div>
                                             <input type="number" class="form-input" min="0" step="1" data-runtime-key="model_endpoint_queue_size">
                                         </div>
                                         <div class="form-item">
-                                            <label>端点队列超时 (ms)</label>
-                                            <small class="runtime-key-note">model_endpoint_queue_timeout_ms</small>
+                                            <div class="form-item-header">
+                                                <label>端点队列超时 (ms)</label>
+                                                <small class="runtime-key-note" title="model_endpoint_queue_timeout_ms">model_endpoint_queue_timeout_ms</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1000" step="1000" data-runtime-key="model_endpoint_queue_timeout_ms">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section">
-                                <h4>上下文预算</h4>
-                                <p class="global-params-section-desc">控制默认上下文窗口、输出预留和附件注入预算，影响所有未单独配置的模型。</p>
+                            <!-- 2. 上下文预算 -->
+                            <section class="stat-card global-params-section card-theme-sky">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>上下文预算</h4>
+                                        <p class="global-params-section-desc">控制默认上下文窗口、输出预留和附件注入预算，影响所有未单独配置的模型。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row global-params-context-row">
                                         <div class="form-item">
-                                            <label>全局上下文窗口 (Token)</label>
-                                            <small class="runtime-key-note">model_context_window_tokens</small>
+                                            <div class="form-item-header">
+                                                <label>全局上下文窗口 (Token)</label>
+                                                <small class="runtime-key-note" title="model_context_window_tokens">model_context_window_tokens</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="0 不设默认，可填 128K" data-runtime-key="model_context_window_tokens">
                                         </div>
                                         <div class="form-item">
-                                            <label>会话记忆压缩阈值 (Token)</label>
-                                            <small class="runtime-key-note">memory_threshold</small>
+                                            <div class="form-item-header">
+                                                <label>会话记忆压缩阈值 (Token)</label>
+                                                <small class="runtime-key-note" title="memory_threshold">memory_threshold</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="默认 12K，如 32K" data-runtime-key="memory_threshold">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row global-params-context-row">
                                         <div class="form-item">
-                                            <label>预留输出 (Token)</label>
-                                            <small class="runtime-key-note">context_reserved_output_tokens</small>
+                                            <div class="form-item-header">
+                                                <label>预留输出 (Token)</label>
+                                                <small class="runtime-key-note" title="context_reserved_output_tokens">context_reserved_output_tokens</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 4K / 8K" data-runtime-key="context_reserved_output_tokens">
                                         </div>
                                         <div class="form-item">
-                                            <label>附件注入字符上限</label>
-                                            <small class="runtime-key-note">attachment_context_max_chars</small>
+                                            <div class="form-item-header">
+                                                <label>附件注入字符上限</label>
+                                                <small class="runtime-key-note" title="attachment_context_max_chars">attachment_context_max_chars</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 80K" data-runtime-key="attachment_context_max_chars">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section global-params-sampling">
-                                <h4>采样参数</h4>
-                                <p class="global-params-section-desc">统一聊天和 OpenAI 兼容接口的默认采样行为，便于整体调参。</p>
+                            <!-- 3. 采样参数 -->
+                            <section class="stat-card global-params-section global-params-sampling card-theme-indigo">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>采样参数</h4>
+                                        <p class="global-params-section-desc">统一聊天和 OpenAI 兼容接口的默认采样行为，便于整体调优生成效果。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row global-params-sampling-row">
                                         <div class="form-item">
-                                            <label>默认温度</label>
-                                            <small class="runtime-key-note">sampling_temperature</small>
+                                            <div class="form-item-header">
+                                                <label>默认温度 (Temperature)</label>
+                                                <small class="runtime-key-note" title="sampling_temperature">sampling_temperature</small>
+                                            </div>
                                             <input type="number" class="form-input" min="0" max="2" step="0.1" data-runtime-key="sampling_temperature">
                                         </div>
                                         <div class="form-item">
-                                            <label>默认采样概率上限</label>
-                                            <small class="runtime-key-note">sampling_top_p</small>
+                                            <div class="form-item-header">
+                                                <label>采样概率上限 (Top P)</label>
+                                                <small class="runtime-key-note" title="sampling_top_p">sampling_top_p</small>
+                                            </div>
                                             <input type="number" class="form-input" min="0" max="1" step="0.01" data-runtime-key="sampling_top_p">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row global-params-sampling-row">
                                         <div class="form-item">
-                                            <label>默认重复惩罚</label>
-                                            <small class="runtime-key-note">sampling_presence_penalty</small>
+                                            <div class="form-item-header">
+                                                <label>默认存在惩罚 (Presence)</label>
+                                                <small class="runtime-key-note" title="sampling_presence_penalty">sampling_presence_penalty</small>
+                                            </div>
                                             <input type="number" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_presence_penalty">
                                         </div>
                                         <div class="form-item">
-                                            <label>默认频率惩罚</label>
-                                            <small class="runtime-key-note">sampling_frequency_penalty</small>
+                                            <div class="form-item-header">
+                                                <label>默认频率惩罚 (Frequency)</label>
+                                                <small class="runtime-key-note" title="sampling_frequency_penalty">sampling_frequency_penalty</small>
+                                            </div>
                                             <input type="number" class="form-input" min="-2" max="2" step="0.1" data-runtime-key="sampling_frequency_penalty">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section">
-                                <h4>上传附件</h4>
-                                <p class="global-params-section-desc">控制聊天附件、知识库文件和图片输入的大小及图片数量，避免单次请求过重。</p>
+                            <!-- 4. 上传附件 -->
+                            <section class="stat-card global-params-section card-theme-amber">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>上传附件</h4>
+                                        <p class="global-params-section-desc">控制聊天附件、知识库文件和图片输入的大小及图片数量，避免请求过载。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>聊天附件上限</label>
-                                            <small class="runtime-key-note">upload_attachment_max_bytes</small>
+                                            <div class="form-item-header">
+                                                <label>聊天附件上限</label>
+                                                <small class="runtime-key-note" title="upload_attachment_max_bytes">upload_attachment_max_bytes</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 64M" data-runtime-key="upload_attachment_max_bytes">
                                         </div>
                                         <div class="form-item">
-                                            <label>知识库文件上限</label>
-                                            <small class="runtime-key-note">knowledge_upload_max_bytes</small>
+                                            <div class="form-item-header">
+                                                <label>知识库文件上限</label>
+                                                <small class="runtime-key-note" title="knowledge_upload_max_bytes">knowledge_upload_max_bytes</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 128M" data-runtime-key="knowledge_upload_max_bytes">
                                         </div>
                                         <div class="form-item">
-                                            <label>图片上传上限</label>
-                                            <small class="runtime-key-note">image_upload_max_bytes</small>
+                                            <div class="form-item-header">
+                                                <label>图片上传上限</label>
+                                                <small class="runtime-key-note" title="image_upload_max_bytes">image_upload_max_bytes</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 32M" data-runtime-key="image_upload_max_bytes">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>图片上下文上限</label>
-                                            <small class="runtime-key-note">image_context_max_bytes</small>
+                                            <div class="form-item-header">
+                                                <label>图片上下文上限</label>
+                                                <small class="runtime-key-note" title="image_context_max_bytes">image_context_max_bytes</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 8M" data-runtime-key="image_context_max_bytes">
                                         </div>
                                         <div class="form-item">
-                                            <label>附件数量上限</label>
-                                            <small class="runtime-key-note">max_attachments_per_message</small>
+                                            <div class="form-item-header">
+                                                <label>附件数量上限</label>
+                                                <small class="runtime-key-note" title="max_attachments_per_message">max_attachments_per_message</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_attachments_per_message">
                                         </div>
                                         <div class="form-item">
-                                            <label>单次图片数量</label>
-                                            <small class="runtime-key-note">max_images_per_message</small>
+                                            <div class="form-item-header">
+                                                <label>单次图片数量</label>
+                                                <small class="runtime-key-note" title="max_images_per_message">max_images_per_message</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="max_images_per_message">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section">
-                                <h4>知识库检索</h4>
-                                <p class="global-params-section-desc">控制 RAG 召回、切片和上下文预算，尽量在信息量和上下文占用之间保持平衡。</p>
+                            <!-- 5. 知识库检索 -->
+                            <section class="stat-card global-params-section card-theme-blue">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>知识库检索</h4>
+                                        <p class="global-params-section-desc">控制 RAG 召回、切片和上下文预算，在丰富度与上下文开销间保持最佳平衡。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>检索引用上限</label>
-                                            <small class="runtime-key-note">rag_top_k_max</small>
+                                            <div class="form-item-header">
+                                                <label>检索引用上限 (Top-K)</label>
+                                                <small class="runtime-key-note" title="rag_top_k_max">rag_top_k_max</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_top_k_max">
                                         </div>
                                         <div class="form-item">
-                                            <label>候选片段上限</label>
-                                            <small class="runtime-key-note">rag_candidate_limit_max</small>
+                                            <div class="form-item-header">
+                                                <label>候选片段上限</label>
+                                                <small class="runtime-key-note" title="rag_candidate_limit_max">rag_candidate_limit_max</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 5K" data-runtime-key="rag_candidate_limit_max">
                                         </div>
                                         <div class="form-item">
-                                            <label>切片字符上限</label>
-                                            <small class="runtime-key-note">rag_chunk_size_max</small>
+                                            <div class="form-item-header">
+                                                <label>切片字符上限</label>
+                                                <small class="runtime-key-note" title="rag_chunk_size_max">rag_chunk_size_max</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 4K" data-runtime-key="rag_chunk_size_max">
                                         </div>
                                     </div>
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>检索预算占比 (%)</label>
-                                            <small class="runtime-key-note">rag_context_budget_percent</small>
+                                            <div class="form-item-header">
+                                                <label>检索预算占比 (%)</label>
+                                                <small class="runtime-key-note" title="rag_context_budget_percent">rag_context_budget_percent</small>
+                                            </div>
                                             <input type="number" class="form-input" min="5" max="70" step="1" data-runtime-key="rag_context_budget_percent">
                                         </div>
                                         <div class="form-item">
-                                            <label>知识库抽取上限</label>
-                                            <small class="runtime-key-note">knowledge_extract_max_chars</small>
+                                            <div class="form-item-header">
+                                                <label>知识库抽取上限</label>
+                                                <small class="runtime-key-note" title="knowledge_extract_max_chars">knowledge_extract_max_chars</small>
+                                            </div>
                                             <input type="text" class="form-input" placeholder="如 600K" data-runtime-key="knowledge_extract_max_chars">
                                         </div>
                                         <div class="form-item">
-                                            <label>知识库索引并发</label>
-                                            <small class="runtime-key-note">rag_index_max_concurrent</small>
+                                            <div class="form-item-header">
+                                                <label>知识库索引并发</label>
+                                                <small class="runtime-key-note" title="rag_index_max_concurrent">rag_index_max_concurrent</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="rag_index_max_concurrent">
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section">
-                                <h4>智能体后台</h4>
-                                <p class="global-params-section-desc">控制智能体任务、工作流和记忆压缩并发，适合按服务器资源做整体调度。</p>
+                            <!-- 6. 智能体后台 -->
+                            <section class="stat-card global-params-section card-theme-purple">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <h4>智能体后台</h4>
+                                        <p class="global-params-section-desc">控制智能体任务、工作流节点和记忆压缩并发，适合按服务器硬件做整体调度。</p>
+                                    </div>
+                                </div>
                                 <div class="model-form global-params-form">
                                     <div class="model-form-row global-params-row">
                                         <div class="form-item">
-                                            <label>智能体任务并发</label>
-                                            <small class="runtime-key-note">agent_max_concurrent_runs</small>
+                                            <div class="form-item-header">
+                                                <label>智能体任务并发</label>
+                                                <small class="runtime-key-note" title="agent_max_concurrent_runs">agent_max_concurrent_runs</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_max_concurrent_runs">
                                         </div>
                                         <div class="form-item">
-                                            <label>工作流节点并发</label>
-                                            <small class="runtime-key-note">agent_dag_node_concurrency</small>
+                                            <div class="form-item-header">
+                                                <label>工作流节点并发</label>
+                                                <small class="runtime-key-note" title="agent_dag_node_concurrency">agent_dag_node_concurrency</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="agent_dag_node_concurrency">
                                         </div>
                                         <div class="form-item">
-                                            <label>记忆压缩并发</label>
-                                            <small class="runtime-key-note">memory_compression_max_concurrent</small>
+                                            <div class="form-item-header">
+                                                <label>记忆压缩并发</label>
+                                                <small class="runtime-key-note" title="memory_compression_max_concurrent">memory_compression_max_concurrent</small>
+                                            </div>
                                             <input type="number" class="form-input" min="1" step="1" data-runtime-key="memory_compression_max_concurrent">
                                         </div>
                                     </div>
-                                    <div class="model-form-row global-params-row">
-                                        <div class="form-item runtime-agent-toggle-item">
-                                            <label for="runtime-setting-chat-auto-agent-enabled">允许聊天使用 Agent 执行模式</label>
-                                            <small class="runtime-key-note">chat_auto_agent_enabled（兼容键）</small>
-                                            <label class="runtime-agent-toggle">
-                                                <input id="runtime-setting-chat-auto-agent-enabled" type="checkbox" data-runtime-key="chat_auto_agent_enabled">
-                                                <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
-                                                <span class="runtime-agent-toggle-label">允许</span>
-                                            </label>
+                                    <div class="global-params-agent-toggle-card">
+                                        <div class="agent-toggle-info">
+                                            <div class="agent-toggle-title-row">
+                                                <label for="runtime-setting-chat-auto-agent-enabled" class="agent-toggle-title">允许聊天使用 Agent 执行模式</label>
+                                                <small class="runtime-key-note">chat_auto_agent_enabled</small>
+                                            </div>
+                                            <p class="agent-toggle-desc">开启后用户可在会话中直接触发智能体自动化多步推理与工具链调度。</p>
                                         </div>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section class="stat-card global-params-section global-params-stealth-section">
-                                <h4>安全与终端隐身</h4>
-                                <p class="global-params-section-desc">开启后服务端将对普通 Web 浏览器和外部扫描完全隐身（直接掐断连接，显示 ERR_EMPTY_RESPONSE），只有官方 Pivot 桌面客户端可连接访问。</p>
-                                <div class="global-params-stealth-grid">
-                                    <div class="form-item runtime-agent-toggle-item">
-                                        <label for="runtime-setting-stealth-mode-enabled">客户端独占隐身模式</label>
-                                        <small class="runtime-key-note">stealth_mode_enabled · 开启后外部访问将直接物理断开连接</small>
                                         <label class="runtime-agent-toggle">
-                                            <input id="runtime-setting-stealth-mode-enabled" type="checkbox">
+                                            <input id="runtime-setting-chat-auto-agent-enabled" type="checkbox" data-runtime-key="chat_auto_agent_enabled">
                                             <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
-                                            <span id="runtime-setting-stealth-mode-status-label" class="runtime-agent-toggle-label">已关闭</span>
+                                            <span class="runtime-agent-toggle-label">允许</span>
                                         </label>
                                     </div>
-                                    <div class="form-item">
-                                        <label for="runtime-setting-stealth-secret">客户端通信密钥 (Stealth Secret)</label>
-                                        <small class="runtime-key-note">远程客户端连接时填入 desktop-config.json 或连接配置窗口中</small>
+                                </div>
+                            </section>
+
+                            <!-- 7. 安全与终端隐身 -->
+                            <section class="stat-card global-params-section global-params-stealth-section card-theme-rose">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                            <path d="m9 12 2 2 4-4"/>
+                                        </svg>
+                                    </div>
+                                    <div class="card-header-content">
+                                        <div class="card-title-flex">
+                                            <h4>安全与终端隐身</h4>
+                                            <span class="stealth-shield-badge">物理断联级隐身防御</span>
+                                        </div>
+                                        <p class="global-params-section-desc">开启后服务端将对普通 Web 浏览器和外部端口扫描完全隐身（直接掐断 TCP 连接显示 ERR_EMPTY_RESPONSE），仅官方 Pivot 桌面客户端可连接访问。</p>
+                                    </div>
+                                </div>
+                                <div class="global-params-stealth-grid">
+                                    <!-- 左侧：开关与状态 -->
+                                    <div class="stealth-control-card">
+                                        <div class="stealth-control-top">
+                                            <div class="stealth-title-wrap">
+                                                <label for="runtime-setting-stealth-mode-enabled" class="stealth-main-label">客户端独占隐身模式</label>
+                                                <small class="runtime-key-note">stealth_mode_enabled</small>
+                                            </div>
+                                            <label class="runtime-agent-toggle">
+                                                <input id="runtime-setting-stealth-mode-enabled" type="checkbox">
+                                                <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
+                                                <span id="runtime-setting-stealth-mode-status-label" class="runtime-agent-toggle-label">已关闭</span>
+                                            </label>
+                                        </div>
+                                        <div class="stealth-warning-box">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                                            </svg>
+                                            <span>开启前请务必确认已在 Pivot 桌面客户端配置了通信密钥，避免丢失 Web 端管理入口。</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- 右侧：通信密钥 -->
+                                    <div class="stealth-secret-card">
+                                        <div class="stealth-secret-header">
+                                            <label for="runtime-setting-stealth-secret">客户端通信密钥 (Stealth Secret)</label>
+                                            <small class="runtime-key-note">远程客户端连接时填入 desktop-config.json 或连接配置窗口中</small>
+                                        </div>
                                         <div class="global-params-stealth-secret-wrap">
-                                            <input id="runtime-setting-stealth-secret" type="password" class="form-input" readonly>
-                                            <button type="button" id="runtime-setting-stealth-secret-toggle" class="btn-secondary btn-xs">显示密钥</button>
-                                            <button type="button" id="runtime-setting-stealth-secret-copy" class="btn-secondary btn-xs">复制密钥</button>
-                                            <button type="button" id="runtime-setting-stealth-secret-refresh" class="btn-secondary btn-xs super-admin-only hidden">重新生成</button>
+                                            <div class="secret-input-container">
+                                                <svg class="secret-lock-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                                </svg>
+                                                <input id="runtime-setting-stealth-secret" type="password" class="form-input stealth-secret-field" readonly placeholder="未生成通信密钥">
+                                            </div>
+                                            <div class="secret-btn-group">
+                                                <button type="button" id="runtime-setting-stealth-secret-toggle" class="btn-secondary btn-param-action" title="切换明文/密文显示">
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                                                    </svg>
+                                                    <span>显示密钥</span>
+                                                </button>
+                                                <button type="button" id="runtime-setting-stealth-secret-copy" class="btn-secondary btn-param-action" title="复制密钥到剪贴板">
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                                    </svg>
+                                                    <span>复制密钥</span>
+                                                </button>
+                                                <button type="button" id="runtime-setting-stealth-secret-refresh" class="btn-secondary btn-param-action super-admin-only hidden" title="重新生成通信密钥">
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                                    </svg>
+                                                    <span>重新生成</span>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="stat-card global-params-section global-params-skill-signing-section">
-                                <h4>组织 Skill 共享签名</h4>
-                                <p class="global-params-section-desc">管理员发布共享 Skill 时使用的服务端签名密钥。私钥仅加密保存在服务器，不会显示、导出或下发到浏览器。</p>
-                                <div class="global-params-skill-signing-grid">
-                                    <div class="form-item">
-                                        <label>签名状态</label>
-                                        <p id="skill-signing-config-status" class="runtime-settings-status">正在读取…</p>
-                                        <small id="skill-signing-config-detail" class="runtime-key-note"></small>
+                            <!-- 8. 组织 Skill 共享签名 -->
+                            <section class="stat-card global-params-section global-params-skill-signing-section card-theme-cyan">
+                                <div class="global-params-card-header">
+                                    <div class="card-icon-box">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 2l-2 2m-1.5 1.5L16 7l-1.5-1.5M19 4.5l-3.5 3.5M10.5 7.5A6 6 0 1 0 19 16l3 3v2h-2v-2l-2-2-1.5 1.5-1.5-1.5L13.5 18a6 6 0 0 0-3-10.5z"/>
+                                        </svg>
                                     </div>
-                                    <div class="form-item super-admin-only hidden">
-                                        <label>密钥管理</label>
-                                        <div class="global-params-skill-signing-actions">
-                                            <button type="button" id="skill-signing-generate" class="btn-primary btn-xs">生成并启用新密钥</button>
-                                            <button type="button" id="skill-signing-disable" class="btn-secondary btn-xs">停用共享签名</button>
-                                        </div>
-                                        <small class="runtime-key-note">生成新密钥会自动轮换；历史公钥会保留，用于验证已发布版本。</small>
+                                    <div class="card-header-content">
+                                        <h4>组织 Skill 共享签名</h4>
+                                        <p class="global-params-section-desc">管理员发布共享 Skill 时使用的服务端私钥签名体系。私钥加密保存在服务器本地安全库中，不经公网回显。</p>
                                     </div>
                                 </div>
-                                <details class="global-params-skill-signing-import super-admin-only hidden">
-                                    <summary>导入已有 RSA 私钥（可选）</summary>
-                                    <div class="global-params-skill-signing-import-grid">
-                                        <label><span>密钥标识（可留空自动生成）</span><input id="skill-signing-import-key-id" class="form-input" maxlength="128" autocomplete="off"></label>
-                                        <label><span>RSA 私钥 PEM</span><textarea id="skill-signing-import-private-key" class="form-input" rows="4" autocomplete="off" spellcheck="false"></textarea></label>
-                                        <button type="button" id="skill-signing-import" class="btn-secondary btn-xs">加密保存并启用</button>
+                                <div class="global-params-skill-signing-grid">
+                                    <!-- 状态展示 -->
+                                    <div class="skill-signing-status-card">
+                                        <div class="skill-status-row">
+                                            <label class="skill-status-title">签名状态</label>
+                                            <p id="skill-signing-config-status" class="runtime-settings-status skill-status-badge">正在读取…</p>
+                                        </div>
+                                        <small id="skill-signing-config-detail" class="runtime-key-note skill-detail-note"></small>
+                                        <div id="skill-signing-config-history" class="global-params-skill-signing-history"></div>
                                     </div>
-                                    <small class="runtime-key-note">仅在迁移既有组织密钥时粘贴。提交后页面立即清空输入框，服务端不会返回私钥。</small>
+
+                                    <!-- 密钥管理操作 -->
+                                    <div class="skill-signing-actions-card super-admin-only hidden">
+                                        <label class="skill-actions-title">密钥管理与轮换</label>
+                                        <div class="global-params-skill-signing-actions">
+                                            <button type="button" id="skill-signing-generate" class="btn-primary btn-param-action">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+                                                </svg>
+                                                <span>生成并启用新密钥</span>
+                                            </button>
+                                            <button type="button" id="skill-signing-disable" class="btn-secondary btn-param-action">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                                                </svg>
+                                                <span>停用共享签名</span>
+                                            </button>
+                                        </div>
+                                        <small class="runtime-key-note skill-actions-note">生成新密钥会自动轮换当前签名；历史公钥仍永久保留用于验签已发布版本。</small>
+                                    </div>
+                                </div>
+
+                                <!-- RSA 导入折叠面板 -->
+                                <details class="global-params-skill-signing-import super-admin-only hidden">
+                                    <summary class="skill-signing-import-summary">
+                                        <div class="import-summary-title">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <polyline points="6 9 12 15 18 9"/>
+                                            </svg>
+                                            <span>导入已有 RSA 私钥（高级迁移）</span>
+                                        </div>
+                                        <span class="import-summary-pill">可选</span>
+                                    </summary>
+                                    <div class="global-params-skill-signing-import-grid">
+                                        <label class="import-field-label">
+                                            <span>密钥标识 (Key ID，可留空自动生成)</span>
+                                            <input id="skill-signing-import-key-id" class="form-input" maxlength="128" autocomplete="off" placeholder="如 org-key-2026">
+                                        </label>
+                                        <label class="import-field-label">
+                                            <span>RSA 私钥 PEM 格式</span>
+                                            <textarea id="skill-signing-import-private-key" class="form-input import-pem-textarea" rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+                                        </label>
+                                        <div class="import-btn-wrap">
+                                            <button type="button" id="skill-signing-import" class="btn-secondary btn-param-action btn-import-save">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                                                    <polyline points="17 21 17 13 7 13 7 21"/>
+                                                    <polyline points="7 3 7 8 15 8"/>
+                                                </svg>
+                                                <span>加密保存并启用</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <small class="runtime-key-note import-footer-note">仅在迁移已有组织签名时填入。保存后立即清空内存输入框，服务端绝不明文回显私钥。</small>
                                 </details>
-                                <div id="skill-signing-config-history" class="global-params-skill-signing-history"></div>
                             </section>
+
                         </div>
                     </section>

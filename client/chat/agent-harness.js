@@ -1,7 +1,6 @@
 (function () {
     const state = {
         skills: [], skillsPage: 1, skillsLimit: 8,
-        packs: [], packsPage: 1, packsLimit: 8,
         residents: [], residentsPage: 1, residentsLimit: 8,
         profile: null, memoryPolicy: null,
         feedback: [], feedbackPage: 1, feedbackLimit: 8, feedbackSummary: null,
@@ -471,62 +470,6 @@
         try { await apiJson(`${API_BASE}/agents/skills/versions/${encodeURIComponent(id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'personal' }) }); setNotice('Skill 已发布。', 'success'); await loadSkills(); } catch (error) { setNotice(error.message || 'Skill 发布失败。', 'error'); }
     }
 
-    function renderPacks() {
-        const list = document.getElementById('agent-harness-pack-list');
-        const paginationContainer = document.getElementById('agent-harness-pack-pagination');
-        if (!list) return;
-        if (!state.packs.length) {
-            if (paginationContainer) paginationContainer.replaceChildren();
-            setMarkup(list, '<div class="agent-harness-empty-card"><strong>暂无已安装运行资源包</strong><span>由系统自动下载、校验完整性后安装</span></div>');
-            return;
-        }
-        const page = Math.max(1, Number(state.packsPage || 1)), limit = Math.max(1, Number(state.packsLimit || 8)), total = state.packs.length;
-        const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
-        state.packsPage = currentPage;
-        const startIndex = (currentPage - 1) * limit, pagePacks = state.packs.slice(startIndex, startIndex + limit);
-        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th>包 ID</th><th style="width:80px" class="tc">类型</th><th style="width:80px" class="tc">版本</th><th style="width:90px" class="tc">大小(字节)</th><th style="width:150px" class="mono">SHA256 摘要</th><th style="width:110px" class="tc">安装时间</th></tr></thead><tbody>${pagePacks.map((pack, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(pack.id || '')}">${escape(pack.id || '运行资源')}</td><td class="tc">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</td><td class="tc mono">v${escape(pack.version || '1.0.0')}</td><td class="tc">${escape(String(pack.size || 0))}</td><td class="mono" title="${escapeAttr(pack.sha256 || pack.digest || '')}">${escape(shortText(pack.sha256 || pack.digest || '—', 20))}</td><td class="tc">${escape(formatDate(pack.installedAt || pack.installed_at))}</td></tr>`).join('')}</tbody></table></div>`);
-        if (paginationContainer) {
-            if (window.renderWorkspacePagination) {
-                window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.packsPage = newPage; renderPacks(); } });
-            } else { paginationContainer.replaceChildren(); }
-        }
-    }
-
-    async function loadPacks() {
-        const data = await apiJson(`${API_BASE}/agents/runtime-packs`, { cache: 'no-store' });
-        state.packs = Array.isArray(data.data) ? data.data : [];
-        renderPacks();
-        return state.packs;
-    }
-
-    async function syncPack() {
-        if (!isAdminUser()) return setNotice('只有管理员可以同步运行资源包。', 'error');
-        const origins = String(document.getElementById('agent-harness-pack-origins')?.value || '').split(/[\n,]/).map(value => value.trim()).filter(Boolean);
-        const manifest = {
-            type: document.getElementById('agent-harness-pack-type')?.value || 'data',
-            id: document.getElementById('agent-harness-pack-id')?.value.trim(),
-            version: document.getElementById('agent-harness-pack-version')?.value.trim(),
-            size: Number(document.getElementById('agent-harness-pack-size')?.value || 0) || 0,
-            url: document.getElementById('agent-harness-pack-url')?.value.trim(),
-            sha256: document.getElementById('agent-harness-pack-sha256')?.value.trim()
-        };
-        if (!manifest.id || !manifest.version || !manifest.url || !manifest.sha256 || !origins.length) return setNotice('资源包 ID、版本、资源地址、校验摘要和访问来源白名单均为必填。', 'error');
-        let allowedPorts = [80, 443, 8080];
-        try {
-            const parsed = new URL(manifest.url);
-            const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
-            allowedPorts = [...new Set([...allowedPorts, port])];
-        } catch (_) { return setNotice('运行资源包地址无效。', 'error'); }
-        const button = document.getElementById('agent-harness-pack-sync');
-        if (button) button.disabled = true;
-        try {
-            await apiJson(`${API_BASE}/agents/runtime-packs/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, networkPolicy: { allowed_origins: origins, allowed_ports: allowedPorts, allow_redirect: false } }) });
-            setNotice('运行资源包同步完成并通过完整性校验。', 'success');
-            await loadPacks();
-        } catch (error) { setNotice(error.message || '运行资源包同步失败。', 'error'); }
-        finally { if (button) button.disabled = false; }
-    }
-
     function renderResidents() {
         const list = document.getElementById('agent-harness-residency-list'), paginationContainer = document.getElementById('agent-harness-residency-pagination');
         if (!list) return;
@@ -768,10 +711,11 @@
     }
 
     async function loadHarnessManagement() {
-        document.querySelectorAll('.agent-harness-pack-sync').forEach(el => el.classList.toggle('hidden', !isAdminUser()));
+        const packs = window.Pivot?.moduleApi?.('agent.runtimePacks');
+        const packsAvailable = await packs?.refreshStatus?.() || false;
         document.querySelectorAll('#agent-harness-residency-scope').forEach(el => el.classList.toggle('hidden', !isSuperAdminUser()));
         try {
-            await Promise.all([loadSkills(), loadPacks(), loadResidents(), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadProposals(), loadControlPlane()]);
+            await Promise.all([loadSkills(), ...(packsAvailable ? [packs?.load?.()] : []), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadControlPlane()]);
         } catch (error) {
             setNotice(error.message || '底座数据加载失败。', 'error');
         }
@@ -958,9 +902,8 @@
         } else if (subview === 'governance') {
             loadProfile().catch(() => {});
             loadSkills().catch(() => {});
-            loadPacks().catch(() => {});
-            loadResidents().catch(() => {});
-            loadProposals().catch(() => {});
+            const packs = window.Pivot?.moduleApi?.('agent.runtimePacks');
+            packs?.refreshStatus?.().then(enabled => { if (enabled) return packs.load(); return null; }).catch(() => {});
             loadMemoryPolicy().catch(() => {});
         }
     }
@@ -969,8 +912,14 @@
         document.querySelectorAll('[data-agent-harness-nav]').forEach(button => {
             button.addEventListener('click', () => {
                 const target = button.dataset.agentHarnessNav;
+                if (target === 'packs' && !window.Pivot?.moduleApi?.('agent.runtimePacks')?.isAvailable?.()) return;
+                if (['residency', 'evolution'].includes(target)) return;
                 document.querySelectorAll('[data-agent-harness-nav]').forEach(b => { const active = b.dataset.agentHarnessNav === target; b.classList.toggle('active', active); b.setAttribute('aria-selected', active ? 'true' : 'false'); });
-                document.querySelectorAll('[data-agent-harness-section]').forEach(sec => sec.classList.toggle('hidden', sec.dataset.agentHarnessSection !== target));
+                document.querySelectorAll('[data-agent-harness-section]').forEach(sec => {
+                    const active = sec.dataset.agentHarnessSection === target || (target === 'profile' && sec.dataset.agentHarnessSection === 'governance');
+                    sec.classList.toggle('hidden', !active);
+                    if (sec.dataset.agentHarnessSection === 'packs') sec.hidden = !active;
+                });
             });
         });
 
@@ -990,12 +939,10 @@
         });
 
         document.getElementById('agent-harness-skills-refresh')?.addEventListener('click', () => loadSkills().catch(error => setNotice(error.message, 'error')));
-        document.getElementById('agent-harness-packs-refresh')?.addEventListener('click', () => loadPacks().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-refresh')?.addEventListener('click', () => loadResidents().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-scope')?.addEventListener('change', () => loadResidents().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-sweep')?.addEventListener('click', () => sweepResidents());
         document.getElementById('agent-harness-skill-register')?.addEventListener('click', registerSkill);
-        document.getElementById('agent-harness-pack-sync')?.addEventListener('click', syncPack);
         document.getElementById('agent-harness-skill-file')?.addEventListener('change', event => uploadSkillPackage(event.target.files?.[0]));
         document.getElementById('agent-harness-skill-list')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-harness-disable-skill]');
@@ -1072,7 +1019,7 @@
                     apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
                 }
                 if (runId && typeof globalThis['openAgentRun'] === 'function') {
-                    globalThis['openAgentRun'](runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '统一收件箱' });
+                    globalThis['openAgentRun'](runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
                 }
                 return;
             }

@@ -15,6 +15,14 @@ const MCP_LOCAL_AUTH_TYPES = [
         grantLabel: '选择目录',
         revokeTitle: '撤销本机目录授权',
         revokeMessage: '确定撤销当前设备上的本机报表目录授权吗？已保存的本机目录会从桌面客户端本机配置中移除。'
+    },
+    {
+        type: 'local_browser',
+        title: '授权本机浏览器自动化',
+        description: '选择一个或多个浏览器，并填写允许自动化访问的站点。系统使用独立 Profile，不读取日常浏览器 Cookie 或密码。',
+        grantLabel: '选择浏览器并授权',
+        revokeTitle: '撤销本机浏览器自动化授权',
+        revokeMessage: '确定撤销当前设备上的本机浏览器授权吗？隔离 Profile 会保留在本机，但后续任务不能再使用它。'
     }
 ];
 
@@ -179,7 +187,8 @@ function mcpLocalAuthFallbackStatus(message = '') {
         supportedTypes: MCP_LOCAL_AUTH_TYPES.map(item => item.type),
         grants: {
             local_database: { type: 'local_database', authorized: false },
-            local_report_dir: { type: 'local_report_dir', authorized: false }
+            local_report_dir: { type: 'local_report_dir', authorized: false },
+            local_browser: { type: 'local_browser', authorized: false, browsers: [], allowedOrigins: [] }
         },
         message: message || '当前网页未检测到桌面客户端或本地助手，本机资源不会被服务器直接读取。'
     };
@@ -193,7 +202,8 @@ function mcpLocalAuthNormalizeStatus(status) {
         ...(status || {}),
         grants: {
             local_database: grants.local_database || fallback.grants.local_database,
-            local_report_dir: grants.local_report_dir || fallback.grants.local_report_dir
+            local_report_dir: grants.local_report_dir || fallback.grants.local_report_dir,
+            local_browser: grants.local_browser || fallback.grants.local_browser
         }
     };
 }
@@ -231,6 +241,7 @@ function mcpLocalAuthCardStatusText(status, type) {
     if (!status?.available) return '使用桌面客户端或安装本地助手后授权';
     if (grant.authorized) return `${grant.label || '已授权资源'} · ${status.deviceName || grant.deviceName || '当前设备'}`;
     if (type === 'local_database') return '打开授权中心选择本机 SQLite 文件';
+    if (type === 'local_browser') return '选择浏览器并填写允许访问的站点';
     return '打开授权中心选择本机报表目录';
 }
 
@@ -273,6 +284,12 @@ function renderMcpLocalAuthGrant(type, status) {
         ? `${grant.label || '已授权资源'}${grant.pathHint ? ` · ${grant.pathHint}` : ''}`
         : '尚未选择本机资源。';
     const timeText = authorized ? mcpLocalAuthFormatTime(grant.updatedAt || grant.grantedAt) : '';
+    const browserDetails = type === 'local_browser' ? `
+        <div class="mcp-local-browser-grant">
+            <label><span>允许访问的站点（每行一个 Origin）</span><textarea class="form-input" rows="3" data-mcp-local-browser-origins placeholder="https://oa.example.internal">${mcpEscape((grant.allowedOrigins || []).join('\n'))}</textarea></label>
+            <small>仅允许精确站点，例如 https://oa.example.internal。可再次选择浏览器来增加 Edge、Firefox、Brave 等。</small>
+            ${authorized && Array.isArray(grant.browsers) ? `<div class="mcp-local-browser-list">${grant.browsers.map(browser => `<span>${mcpEscape(`${browser.label || browser.id} · ${browser.engine || ''}`)}</span>`).join('')}</div>` : ''}
+        </div>` : '';
     return `
         <article class="mcp-local-auth-item ${stateClass}" data-mcp-local-auth-item="${mcpEscape(type)}">
             <header>
@@ -292,6 +309,7 @@ function renderMcpLocalAuthGrant(type, status) {
                 <strong>${mcpEscape(pathText)}</strong>
                 <span>${timeText ? `授权时间：${mcpEscape(timeText)}` : '本机路径只保存在桌面客户端或本地助手，不上传到服务器。'}</span>
             </div>
+            ${browserDetails}
             <footer>
                 <button class="btn-primary" type="button" data-mcp-local-grant="${mcpEscape(type)}" ${available ? '' : 'disabled'}>${mcpEscape(authorized ? '重新授权' : config.grantLabel)}</button>
                 <button class="btn-secondary" type="button" data-mcp-local-revoke="${mcpEscape(type)}" ${available && authorized ? '' : 'disabled'}>撤销</button>
@@ -323,7 +341,7 @@ function renderMcpLocalAuthorizationCenter(status) {
         </div>
         <div class="mcp-local-auth-note">
             <strong>安全边界</strong>
-            <span>本步骤只建立当前设备的授权记录；工具库仍不会让服务器主动访问你的 localhost、本机数据库或本机文件夹，后续查询会通过桌面端或本地助手只读执行。</span>
+            <span>本步骤只建立当前设备的授权记录；服务器不会直接访问你的 localhost、本机文件或日常浏览器 Profile。浏览器任务仅能访问明确授权的站点，点击、截图和登录完成均需在本机确认。</span>
         </div>
     `);
     bindMcpLocalAuthorizationCenter(status);
@@ -339,7 +357,11 @@ function bindMcpLocalAuthorizationCenter(status) {
         });
     });
     body.querySelectorAll('[data-mcp-local-grant]').forEach(button => {
-        button.addEventListener('click', () => requestMcpLocalAuthorization(button.dataset.mcpLocalGrant));
+        button.addEventListener('click', () => {
+            const type = button.dataset.mcpLocalGrant;
+            const origins = body.querySelector('[data-mcp-local-browser-origins]')?.value || '';
+            requestMcpLocalAuthorization(type, type === 'local_browser' ? { allowedOrigins: origins } : {});
+        });
     });
     body.querySelectorAll('[data-mcp-local-revoke]').forEach(button => {
         button.addEventListener('click', () => confirmRevokeMcpLocalAuthorization(button.dataset.mcpLocalRevoke));
@@ -353,11 +375,11 @@ async function refreshMcpLocalAuthorizationCenter(options = {}) {
     await window.loadMcpWorkbench?.();
 }
 
-async function requestMcpLocalAuthorization(type) {
+async function requestMcpLocalAuthorization(type, options = {}) {
     const bridge = mcpLocalAuthBridge();
     if (!bridge) return showToast('请使用桌面客户端打开，或安装本地助手后再授权本机资源。', 'warning');
     try {
-        const result = await bridge.requestLocalAuthorization(type);
+        const result = await bridge.requestLocalAuthorization(type, options || {});
         if (result?.canceled) return showToast('已取消本机授权选择。', 'warning');
         mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(result?.status);
         renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);

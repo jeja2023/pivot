@@ -372,44 +372,44 @@
             <!-- 顶部子导航栏：清晰五大领域分类 -->
             <div class="agent-cp-subnav-bar">
                 <div class="agent-cp-subnav-tabs" role="tablist" aria-label="Agent 控制台导航">
-                    <button class="agent-cp-subnav-tab active" type="button" data-agent-cp-subview="inbox" role="tab"
+                    <button class="agent-cp-subnav-tab active" type="button" data-agent-cp-subview="governance" role="tab"
                         aria-selected="true">
-                        <span>统一收件箱</span>
+                        <span>技能与助手</span>
+                    </button>
+                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="inbox" role="tab"
+                        aria-selected="false">
+                        <span>待办中心</span>
                         <span id="agent-cp-inbox-badge" class="agent-cp-subnav-badge">0</span>
                     </button>
                     <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="goals" role="tab"
                         aria-selected="false">
-                        <span>持续目标</span>
+                        <span>自动目标</span>
                         <span id="agent-cp-goals-badge"
                             class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
                     </button>
                     <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="channels" role="tab"
                         aria-selected="false">
-                        <span>通知渠道</span>
+                        <span>通知设置</span>
                         <span id="agent-cp-channels-badge"
                             class="agent-cp-subnav-badge agent-cp-subnav-badge--muted">0</span>
                     </button>
                     <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="quality" role="tab"
                         aria-selected="false">
-                        <span>质量与可靠性</span>
-                    </button>
-                    <button class="agent-cp-subnav-tab" type="button" data-agent-cp-subview="governance" role="tab"
-                        aria-selected="false">
-                        <span>能力与治理</span>
+                        <span>运行质量</span>
                     </button>
                 </div>
             </div>
 
-            <!-- 子视图 1：统一收件箱 (宽幅专业表格) -->
-            <div class="agent-cp-subview-pane" data-agent-cp-pane="inbox">
+            <!-- 子视图 1：待办中心 -->
+            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="inbox">
                 <section class="agent-cp-card" aria-labelledby="agent-inbox-card-title">
                     <div class="agent-cp-card-head">
                         <div>
-                            <h4 id="agent-inbox-card-title">统一收件箱</h4>
+                            <h4 id="agent-inbox-card-title">待办中心</h4>
                             <span>集中接收任务运行结果、人工审批请求与智能体自进化提案</span>
                         </div>
                         <div class="agent-cp-card-actions">
-                            <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">刷新收件箱</button>
+                            <button id="agent-inbox-refresh" class="btn-secondary btn-xs" type="button">刷新待办</button>
                         </div>
                     </div>
                     <div class="agent-cp-card-body">
@@ -419,16 +419,16 @@
                 </section>
             </div>
 
-            <!-- 子视图 2：持续目标 (列表与新建) -->
+            <!-- 子视图 2：自动目标 -->
             <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="goals">
                 <section class="agent-cp-card" aria-labelledby="agent-goals-card-title">
                     <div class="agent-cp-card-head">
                         <div>
-                            <h4 id="agent-goals-card-title">持续目标</h4>
+                            <h4 id="agent-goals-card-title">自动目标</h4>
                             <span>配置由定时调度、外部 Webhook 或数据库文件变更自动触发的常驻 Agent 目标</span>
                         </div>
                         <div class="agent-cp-card-actions">
-                            <button id="agent-goal-create" class="btn-primary btn-xs" type="button">新建持续目标</button>
+                            <button id="agent-goal-create" class="btn-primary btn-xs" type="button">新建自动目标</button>
                         </div>
                     </div>
                     <div class="agent-cp-card-body">
@@ -438,12 +438,12 @@
                 </section>
             </div>
 
-            <!-- 子视图 3：通知与审批渠道 -->
+            <!-- 子视图 3：通知设置 -->
             <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="channels">
                 <section class="agent-cp-card" aria-labelledby="agent-channels-card-title">
                     <div class="agent-cp-card-head">
                         <div>
-                            <h4 id="agent-channels-card-title">通知与审批渠道</h4>
+                            <h4 id="agent-channels-card-title">通知设置</h4>
                             <span>配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与人工审批</span>
                         </div>
                     </div>
@@ -453,11 +453,11 @@
                 </section>
             </div>
 
-            <!-- 子视图 4：质量与可靠性大屏 (指标看板 + 评测中心 + 工具可靠性 + 闭环反馈) -->
+            <!-- 子视图 4：运行质量 -->
             <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
                 <div class="agent-cp-quality-layout">
                     <!-- 质量页内部 Tab 导航 -->
-                    <div class="agent-cp-quality-tabs" role="tablist" aria-label="质量与可靠性模块">
+                    <div class="agent-cp-quality-tabs" role="tablist" aria-label="运行质量模块">
                         <button class="agent-cp-quality-tab active" type="button" data-quality-tab="metrics" role="tab" aria-selected="true">运行质量</button>
                         <button class="agent-cp-quality-tab" type="button" data-quality-tab="eval" role="tab" aria-selected="false">评测概览</button>
                         <button class="agent-cp-quality-tab" type="button" data-quality-tab="reliability" role="tab" aria-selected="false">工具可靠性</button>
@@ -549,38 +549,48 @@
                 </div>
             </div>
 
-            <!-- 子视图 5：能力与治理大屏 (个人档案 + 常驻实例 + 进化提议 + 技能与资源) -->
-            <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="governance">
-                <div class="agent-harness-nav-tabs" role="tablist" aria-label="能力与治理模块">
+            <!-- 子视图 5：日常入口只保留我的智能助手与技能；运维/实验能力默认隐藏。 -->
+            <div class="agent-cp-subview-pane" data-agent-cp-pane="governance">
+                <div class="agent-harness-nav-tabs" role="tablist" aria-label="技能与助手模块">
                     <button class="agent-harness-nav-tab active" type="button" data-agent-harness-nav="profile"
-                        role="tab" aria-selected="true">个人档案</button>
-                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="residency" role="tab"
-                        aria-selected="false">常驻实例</button>
-                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="evolution" role="tab"
-                        aria-selected="false">进化提议</button>
+                        role="tab" aria-selected="true">我的智能助手</button>
                     <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="skills" role="tab"
-                        aria-selected="false">技能包清单</button>
-                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="packs" role="tab"
-                        aria-selected="false">运行资源包</button>
-                    <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="governance" role="tab"
-                        aria-selected="false">记忆治理策略</button>
+                        aria-selected="false">技能</button>
+                    <button class="agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="residency" role="tab"
+                        aria-selected="false" hidden>常驻实例</button>
+                    <button class="agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="evolution" role="tab"
+                        aria-selected="false" hidden>进化提议</button>
+                    <button class="agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="packs" role="tab"
+                        aria-selected="false" hidden>运行资源包</button>
                 </div>
                 <div id="agent-harness-notice" class="agent-harness-notice" role="status" aria-live="polite"></div>
 
-                <!-- 1. 个人档案 -->
-                <section class="agent-harness-panel" data-agent-harness-section="profile"
+                <!-- 1. 我的智能助手：个人档案与记忆治理合并展示 -->
+                <section class="agent-harness-panel agent-assistant-profile-panel" data-agent-harness-section="profile"
                     aria-labelledby="agent-profile-title">
                     <div class="agent-harness-panel-head">
                         <div>
-                            <strong id="agent-profile-title">个人 Agent 档案</strong>
+                            <strong id="agent-profile-title">我的智能助手</strong>
                             <span>保存长期偏好、工作习惯和沟通方式，作为受限运行上下文。</span>
                         </div>
                         <div class="agent-harness-inline-actions">
                             <button id="agent-profile-refresh" class="btn-secondary" type="button">刷新</button>
                         </div>
                     </div>
+                    <div class="agent-assistant-profile-hero">
+                        <div class="agent-assistant-profile-mark" aria-hidden="true">AI</div>
+                        <div class="agent-assistant-profile-copy">
+                            <span class="agent-assistant-profile-kicker">个性化工作台</span>
+                            <strong>让回答更贴合你的工作方式</strong>
+                            <p>先定义沟通风格，再补充工作习惯与常用工具；所有设置仅用于当前账号的受控上下文。</p>
+                        </div>
+                        <div class="agent-assistant-profile-points" aria-label="设置提示">
+                            <span>可随时修改</span>
+                            <span>仅当前账号</span>
+                        </div>
+                    </div>
                     <div class="agent-profile-sections">
-                        <div class="agent-profile-card">
+                        <div class="agent-profile-card agent-profile-card--identity">
                             <div class="agent-harness-subhead">
                                 <strong>身份与沟通偏好</strong>
                                 <span>定义智能体称呼、职责定位与响应语气</span>
@@ -602,7 +612,7 @@
                                     </select></label>
                             </div>
                         </div>
-                        <div class="agent-profile-card">
+                        <div class="agent-profile-card agent-profile-card--work">
                             <div class="agent-harness-subhead">
                                 <strong>工作习惯与工具偏好</strong>
                                 <span>按行输入长期积累的执行习惯、常用工具与常见任务</span>
@@ -618,18 +628,18 @@
                                         rows="5" placeholder="数据库表结构分析&#10;业务指标分组统计"></textarea></label>
                             </div>
                         </div>
-                        <div class="agent-profile-card">
-                            <div class="agent-harness-subhead">
-                                <strong>扩展配置字典 (JSON)</strong>
-                                <span>自定义键值偏好（支持多行结构化配置）</span>
-                            </div>
+                        <details class="agent-profile-card agent-profile-card--advanced">
+                            <summary>
+                                <span><strong>高级偏好设置</strong><small>JSON 配置适合需要自定义键值偏好的用户</small></span>
+                            </summary>
                             <label class="agent-harness-form-field-wide">
+                                <span>扩展配置字典 (JSON)</span>
                                 <textarea id="agent-profile-preferences" class="form-input form-input-mono" rows="4"
                                     spellcheck="false" placeholder='{"语言":"中文","时区":"Asia/Shanghai"}'></textarea>
                             </label>
-                        </div>
+                        </details>
                     </div>
-                    <div class="agent-harness-form-actions">
+                    <div class="agent-harness-form-actions agent-assistant-profile-actions">
                         <button id="agent-profile-save" class="btn-primary" type="button">保存档案</button>
                         <button id="agent-profile-wizard" class="btn-secondary" type="button">快速设置</button>
                     </div>
@@ -734,13 +744,13 @@
                     </div>
                 </section>
 
-                <!-- 4. 技能包管理 -->
+                <!-- 4. 技能管理 -->
                 <section class="agent-harness-panel hidden" data-agent-harness-section="skills"
                     aria-labelledby="agent-harness-skills-title">
                     <div class="agent-harness-panel-head">
                         <div>
-                            <strong id="agent-harness-skills-title">技能包</strong>
-                            <span>安装后可在自主任务中复用受控指令、工具和权限。</span>
+                            <strong id="agent-harness-skills-title">技能</strong>
+                            <span>创建、验证、发布和管理个人或共享技能。</span>
                         </div>
                         <div class="agent-harness-inline-actions">
                             <button id="agent-harness-skills-refresh" class="btn-secondary" type="button"
@@ -798,7 +808,7 @@ outputs: {}
 
                 <!-- 5. 运行资源包 -->
                 <section class="agent-harness-panel hidden" data-agent-harness-section="packs"
-                    aria-labelledby="agent-harness-packs-title">
+                    aria-labelledby="agent-harness-packs-title" hidden>
                     <div class="agent-harness-panel-head">
                         <div>
                             <strong id="agent-harness-packs-title">运行资源包</strong>
@@ -845,20 +855,20 @@ outputs: {}
                     </div>
                 </section>
 
-                <!-- 6. 记忆治理策略 -->
-                <section class="agent-harness-panel hidden" data-agent-harness-section="governance"
+                <!-- 6. 记忆治理：与“我的智能助手”同屏显示 -->
+                <section class="agent-harness-panel agent-assistant-memory-panel" data-agent-harness-section="governance"
                     aria-labelledby="agent-memory-policy-title">
                     <div class="agent-harness-panel-head">
                         <div>
-                            <strong id="agent-memory-policy-title">记忆治理</strong>
-                            <span>用户可以查看、修改、删除记忆，并禁止指定类别自动保存。</span>
+                            <strong id="agent-memory-policy-title">记忆与隐私</strong>
+                            <span>控制智能助手自动保存和使用长期记忆的边界。</span>
                         </div>
                         <div class="agent-harness-inline-actions">
                             <button id="agent-memory-policy-refresh" class="btn-secondary" type="button">刷新</button>
                         </div>
                     </div>
                     <div class="agent-governance-cards">
-                        <div class="agent-governance-card">
+                        <div class="agent-governance-card agent-governance-card--capture">
                             <div class="agent-governance-card-header">
                                 <div class="agent-governance-card-title">
                                     <strong>自动记忆捕获</strong>
@@ -870,7 +880,7 @@ outputs: {}
                                 </label>
                             </div>
                         </div>
-                        <div class="agent-governance-card">
+                        <div class="agent-governance-card agent-governance-card--categories">
                             <div class="agent-governance-card-title">
                                 <strong>禁止自动保存的记忆类别</strong>
                                 <span>勾选的类别在自主分析和对话沉淀时将直接被拦截，不存入长期记忆库。</span>
@@ -906,7 +916,7 @@ outputs: {}
                                 </label>
                             </div>
                         </div>
-                        <div class="agent-governance-card">
+                        <div class="agent-governance-card agent-governance-card--security">
                             <div class="agent-governance-card-title">
                                 <strong>治理合规与安全保障机制</strong>
                                 <span>平台在记忆提取、持久化与上下文注入各环节实施多重防护保障</span>
@@ -965,7 +975,7 @@ outputs: {}
                             </div>
                         </div>
                     </div>
-                    <div class="agent-harness-form-actions">
+                    <div class="agent-harness-form-actions agent-assistant-memory-actions">
                         <button id="agent-memory-policy-save" class="btn-primary btn-xs" type="button">保存治理策略</button>
                         <button class="btn-secondary btn-xs" type="button" data-memory-open>打开记忆清单</button>
                     </div>

@@ -123,6 +123,10 @@ const agentToolDisplayMap = {
     'code.duckdb_query': { title: 'DuckDB 高性能查询', description: '使用 DuckDB 列式引擎对多格式数据进行快速 SQL 分析。' },
     'browser.navigate': { title: '浏览器访问页面', description: '在受控浏览器沙箱中打开目标页面。' },
     'browser.extract_text': { title: '网页内容提取', description: '提取当前网页的正文结构与关键文本。' },
+    'browser.open': { title: '打开本机浏览器页面', description: '在当前设备已授权的隔离浏览器中打开页面，用户可自行完成登录。' },
+    'browser.inspect': { title: '读取本机网页内容', description: '在当前设备已授权的隔离浏览器中读取标题和受限正文。' },
+    'browser.click': { title: '点击本机网页元素', description: '在当前设备已授权的隔离浏览器中点击目标，须经本机确认。' },
+    'browser.screenshot': { title: '截取本机网页', description: '在当前设备已授权的隔离浏览器中截取页面，须经本机确认。' },
     'filesystem.read_workspace': { title: '读取工作区文件', description: '读取任务受控工作区内的文件内容。' },
     'filesystem.write_workspace': { title: '写入工作区文件', description: '在任务受控工作区内安全保存生成的文件。' }
 };

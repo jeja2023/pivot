@@ -160,6 +160,15 @@ const mcpSourceActionCards = [
         statusText: '默认不用于定时工作流',
         actionLabel: '授权',
         action: 'local-auth'
+    },
+    {
+        type: 'local_browser',
+        title: '授权本机浏览器自动化',
+        badge: '待授权',
+        description: '在当前电脑的独立浏览器 Profile 中自动化内网网页。',
+        statusText: '不读取日常浏览器 Cookie 或密码',
+        actionLabel: '授权',
+        action: 'local-auth'
     }
 ];
 
@@ -170,6 +179,7 @@ const MCP_CARD_METADATA = {
     imported_report: { executionLocation: '服务器导入后处理', ownerScope: '个人', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
     local_database: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
     local_report_dir: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
+    local_browser: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '高风险', workflowAvailability: '仅当前设备在线且需本机确认' },
     external: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '按服务策略' },
     im: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '可用于工作流' },
     visualization: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
@@ -418,6 +428,26 @@ const mcpMongoDatabaseFallbackTools = [
 ];
 
 Object.assign(mcpToolDisplayMap, {
+    'browser.open': {
+        title: '打开本机浏览器页面',
+        description: '在当前设备授权的隔离浏览器中打开允许站点，用户可自行完成登录。',
+        prompt: '请在我的电脑上打开已授权的内网页面，等待我完成登录。'
+    },
+    'browser.inspect': {
+        title: '读取本机网页内容',
+        description: '读取当前设备授权浏览器中的页面标题和受限正文。',
+        prompt: '请读取我电脑上已授权内网页面的主要内容并总结。'
+    },
+    'browser.click': {
+        title: '点击本机网页元素',
+        description: '点击当前设备授权浏览器中的指定元素，执行前会在本机请求确认。',
+        prompt: '请在我确认后点击已授权页面中的指定按钮。'
+    },
+    'browser.screenshot': {
+        title: '截取本机网页',
+        description: '截取当前设备授权浏览器的页面，回传前会在本机请求确认。',
+        prompt: '请在我确认后截取已授权页面当前画面。'
+    },
     'reports.list_files': {
         title: '\u62a5\u8868\u6587\u4ef6',
         description: '扫描配置目录内的报表、表格和数据文件。',
@@ -606,6 +636,9 @@ function mcpLocalAuthorizedFallbackTools(status = null) {
             'reports.query_table',
             'reports.compare_files'
         );
+    }
+    if (grants.local_browser?.authorized) {
+        tools.push('browser.open', 'browser.inspect', 'browser.click', 'browser.screenshot');
     }
     return tools;
 }

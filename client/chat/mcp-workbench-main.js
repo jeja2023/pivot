@@ -270,7 +270,8 @@ async function loadMcpServers() {
     // 将数据库与目录本地授权操作合并为统一的 UI 入口
     const localDatabaseGrant = localAuthorizationStatus?.grants?.local_database?.authorized;
     const localDirectoryGrant = localAuthorizationStatus?.grants?.local_report_dir?.authorized;
-    const isAnyAuthorized = localDatabaseGrant || localDirectoryGrant;
+    const localBrowserGrant = localAuthorizationStatus?.grants?.local_browser?.authorized;
+    const isAnyAuthorized = localDatabaseGrant || localDirectoryGrant || localBrowserGrant;
     const localFallbackTools = mcpLocalAuthorizedFallbackTools(localAuthorizationStatus);
     const localTools = mcpToolsForServer(0, localFallbackTools);
     const localToolCount = localTools.length;
@@ -280,7 +281,7 @@ async function loadMcpServers() {
         title: '管理本机资源授权',
         description: localToolCount
             ? `已接入 ${localToolCount} 个本机只读工具，可查看 mcp.0.* 工具。`
-            : '通过本地助手或桌面客户端只读接入本机 SQLite 数据库与指定报表目录。',
+            : '通过桌面客户端接入本机 SQLite、报表目录或受控浏览器自动化。',
         badge: isAnyAuthorized ? '已授权' : '待授权',
         actionLabel: isAnyAuthorized ? '管理授权' : '授权',
         statusText: localToolCount

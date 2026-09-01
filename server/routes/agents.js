@@ -38,7 +38,7 @@ const { listChatAgentRunsForSession } = require('../services/chat-agent-bridge')
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser } = require('../services/agent-skills');
 const { installSkillPackage, verifySkillPackage } = require('../services/agent-skill-packages');
-const { listRuntimePacks, syncRuntimePack } = require('../services/agent-runtime-packs');
+const { isRuntimePackConsoleEnabled, listRuntimePacks, syncRuntimePack } = require('../services/agent-runtime-packs');
 const { createAgentResidencyStore } = require('../services/agent-residency');
 const {
     createAgentEvalSuite,
@@ -178,12 +178,21 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
         }
     }));
 
+    router.get('/agents/runtime-packs/console', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ available: isSuperAdmin(req.user) && isRuntimePackConsoleEnabled() });
+    }));
+
     router.get('/agents/runtime-packs', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user) || !isRuntimePackConsoleEnabled()) {
+            return res.status(404).json({ error: '运行资源包控制台未启用。', code: 'AGENT_RUNTIME_PACK_CONSOLE_DISABLED' });
+        }
         res.json({ data: await listRuntimePacks({ root: process.env.PIVOT_RUNTIME_PACK_ROOT }) });
     }));
 
     router.post('/agents/runtime-packs/sync', authMiddleware, asyncHandler(async (req, res) => {
-        if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) return res.status(403).json({ error: '只有管理员可以同步运行时资源包。' });
+        if (!isSuperAdmin(req.user) || !isRuntimePackConsoleEnabled()) {
+            return res.status(404).json({ error: '运行资源包控制台未启用。', code: 'AGENT_RUNTIME_PACK_CONSOLE_DISABLED' });
+        }
         const result = await syncRuntimePack(req.body?.manifest || {}, { root: process.env.PIVOT_RUNTIME_PACK_ROOT, networkPolicy: req.body?.networkPolicy || req.body?.network_policy });
         logAction(req, '同步 Agent 运行时资源包', `资源包: ${result.manifest.id}@${result.manifest.version}`);
         res.status(201).json({ success: true, pack: { type: result.manifest.type, id: result.manifest.id, version: result.manifest.version, sha256: result.manifest.sha256, target: result.target } });

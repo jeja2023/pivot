@@ -35,6 +35,7 @@ const {
     executeConnectorTool,
     listConnectorDevices
 } = require('./agent-local-connector');
+const { localBrowserToolDefinitions } = require('./local-browser-connector-tools');
 const { isSuperAdmin } = require('../permissions');
 const {
     canAccessSharedResource,
@@ -58,15 +59,19 @@ const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.aggregate'
 ]);
 
-function localConnectorInputSchema(tool) {
+function localConnectorInputSchema(tool, device = null) {
     const base = tool.inputSchema || tool.input_schema || { type: 'object' };
     const properties = base.properties && typeof base.properties === 'object' ? base.properties : {};
+    const browserIds = Array.isArray(device?.grants?.local_browser?.browsers)
+        ? device.grants.local_browser.browsers.map(item => String(item?.id || '')).filter(Boolean).slice(0, 12)
+        : [];
     return {
         ...base,
         type: 'object',
         properties: {
             ...properties,
-            deviceId: { type: 'string', description: '必须从本机连接器设备列表中显式选择的设备标识。' }
+            deviceId: { type: 'string', description: '必须从本机连接器设备列表中显式选择的设备标识。' },
+            ...(browserIds.length ? { browserId: { ...properties.browserId, type: 'string', enum: browserIds, description: '当前设备已授权的浏览器标识。' } } : {})
         }
     };
 }
@@ -78,10 +83,13 @@ async function listPersistentLocalConnectorTools(user) {
         const owner = { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' };
         if (device.grants.local_database) {
             listDatabaseConnectionMcpTools({ database_type: 'sqlite', database_name: 'local-connector://authorized-sqlite', max_rows: 500 })
-                .forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机 SQLite`, serverType: 'database', databaseType: 'sqlite', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
+                .forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机 SQLite`, serverType: 'database', databaseType: 'sqlite', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool, device), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
         }
         if (device.grants.local_report_dir) {
-            listReportTools().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机报表目录`, serverType: 'reports', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
+            listReportTools().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机报表目录`, serverType: 'reports', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool, device), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
+        }
+        if (device.grants.local_browser) {
+            localBrowserToolDefinitions().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机浏览器`, serverType: 'browser', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool, device), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
         }
     });
     return tools;
@@ -721,7 +729,12 @@ async function refreshMcpTools(server, user = null) {
 async function listCachedMcpTools(serverId = null, user = null) {
     if (isLocalDeviceMcpServerId(serverId)) {
         const directLocalTools = listLocalDeviceMcpTools(user);
-        return directLocalTools.length ? directLocalTools : await listPersistentLocalConnectorTools(user);
+        const persistentTools = await listPersistentLocalConnectorTools(user);
+        // 直接本机 MCP 与持久化桌面连接器可并存。保持已有数据库/目录直连优先，
+        // 同时合并只在连接器中提供的本机浏览器工具，避免任一已授权目录把浏览器能力“遮住”。
+        if (!directLocalTools.length) return persistentTools;
+        const directNames = new Set(directLocalTools.map(tool => String(tool.name || '')));
+        return [...directLocalTools, ...persistentTools.filter(tool => tool.serverType === 'browser' || !directNames.has(String(tool.name || '')))];
     }
     if (serverId) {
         const rows = await query(`

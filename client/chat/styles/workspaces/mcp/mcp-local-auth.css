@@ -222,6 +222,49 @@
     white-space: nowrap;
 }
 
+.mcp-local-browser-grant {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px dashed rgba(59, 130, 246, 0.28);
+    border-radius: 7px;
+    background: #f8fbff;
+}
+
+.mcp-local-browser-grant label {
+    display: grid;
+    gap: 4px;
+    color: var(--text-main);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.mcp-local-browser-grant textarea {
+    min-height: 64px;
+    resize: vertical;
+    font: 0.68rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.mcp-local-browser-grant small {
+    color: var(--text-muted);
+    font-size: 0.63rem;
+    line-height: 1.35;
+}
+
+.mcp-local-browser-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.mcp-local-browser-list span {
+    padding: 2px 6px;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 4px;
+    color: #2563eb;
+    font-size: 0.64rem;
+}
+
 .mcp-local-auth-resource strong {
     color: var(--text-main);
     font-size: 0.72rem;
@@ -312,7 +355,7 @@
 
 .mcp-local-auth-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .mcp-local-auth-tabs .btn-secondary {

@@ -4,7 +4,7 @@
     gap: 14px;
 }
 
-/* 顶部模块切换 Tab（技能包 / 资源包 / 常驻实例 / 个人档案 / 记忆治理 / 结果反馈 / 进化提议） */
+/* 日常入口仅展示“我的智能助手”和“技能”；运维与实验面板默认收起。 */
 .agent-harness-nav-tabs {
     display: inline-flex;
     flex-wrap: wrap;
@@ -1630,6 +1630,76 @@ body.dark-mode .agent-harness-pack-sync,
     }
 }
 
+body.dark-mode .agent-assistant-profile-panel,
+.dark-mode .agent-assistant-profile-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 35, 34, 0.82));
+    border-color: rgba(71, 85, 105, 0.72);
+}
+
+body.dark-mode .agent-assistant-memory-panel,
+.dark-mode .agent-assistant-memory-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(20, 29, 48, 0.82));
+    border-color: rgba(71, 85, 105, 0.72);
+}
+
+body.dark-mode .agent-assistant-profile-hero,
+.dark-mode .agent-assistant-profile-hero {
+    border-color: rgba(52, 211, 153, 0.2);
+    background: linear-gradient(118deg, rgba(6, 78, 59, 0.38), rgba(30, 41, 59, 0.76) 60%, rgba(30, 58, 138, 0.2));
+}
+
+body.dark-mode .agent-assistant-profile-copy strong,
+.dark-mode .agent-assistant-profile-copy strong,
+body.dark-mode .agent-profile-card--advanced > summary strong,
+.dark-mode .agent-profile-card--advanced > summary strong {
+    color: #e2e8f0;
+}
+
+body.dark-mode .agent-assistant-profile-copy p,
+.dark-mode .agent-assistant-profile-copy p,
+body.dark-mode .agent-profile-card--advanced > summary small,
+.dark-mode .agent-profile-card--advanced > summary small {
+    color: #94a3b8;
+}
+
+body.dark-mode .agent-assistant-profile-points span,
+.dark-mode .agent-assistant-profile-points span {
+    border-color: rgba(52, 211, 153, 0.24);
+    color: #6ee7b7;
+    background: rgba(15, 23, 42, 0.46);
+}
+
+body.dark-mode .agent-assistant-profile-panel .agent-profile-card,
+.dark-mode .agent-assistant-profile-panel .agent-profile-card,
+body.dark-mode .agent-assistant-memory-panel .agent-governance-card,
+.dark-mode .agent-assistant-memory-panel .agent-governance-card {
+    border-color: rgba(71, 85, 105, 0.68);
+    background: rgba(15, 23, 42, 0.54);
+}
+
+body.dark-mode .agent-assistant-profile-panel .agent-profile-card--identity,
+.dark-mode .agent-assistant-profile-panel .agent-profile-card--identity,
+body.dark-mode .agent-assistant-memory-panel .agent-governance-card--capture,
+.dark-mode .agent-assistant-memory-panel .agent-governance-card--capture {
+    border-color: rgba(52, 211, 153, 0.22);
+    background: linear-gradient(100deg, rgba(6, 78, 59, 0.28), rgba(15, 23, 42, 0.62));
+}
+
+body.dark-mode .agent-assistant-profile-panel .form-input,
+.dark-mode .agent-assistant-profile-panel .form-input,
+body.dark-mode .agent-profile-card--advanced[open] > summary,
+.dark-mode .agent-profile-card--advanced[open] > summary {
+    color: #e2e8f0;
+    border-color: rgba(71, 85, 105, 0.7);
+    background: rgba(2, 6, 23, 0.36);
+}
+
+body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checked),
+.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checked) {
+    border-color: rgba(52, 211, 153, 0.35);
+    background: rgba(6, 78, 59, 0.22);
+}
+
 @media (max-width: 560px) {
     #agent-config-modal[data-agent-config-section="harness"] .agent-config-modal-body {
         padding: 10px;
@@ -1842,6 +1912,462 @@ body.dark-mode .agent-harness-pack-sync,
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+
+/* ===========================================================================
+   我的智能助手：以个人工作台替代密集大表单
+   ========================================================================== */
+.agent-cp-subview-pane[data-agent-cp-pane="governance"] {
+    gap: 14px;
+    padding-bottom: 18px;
+}
+
+.agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tabs {
+    align-self: flex-start;
+    padding: 4px;
+    margin: 0;
+    border-radius: 10px;
+    background: rgba(241, 245, 249, 0.88);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tab {
+    min-height: 30px;
+    padding: 0 13px;
+    border-radius: 7px;
+    font-size: 0.76rem;
+}
+
+.agent-assistant-profile-panel,
+.agent-assistant-memory-panel {
+    gap: 18px;
+    padding: 20px;
+    border-color: rgba(148, 163, 184, 0.22);
+    box-shadow: 0 10px 26px -22px rgba(15, 23, 42, 0.42);
+}
+
+.agent-assistant-profile-panel {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfefd 100%);
+}
+
+.agent-assistant-memory-panel {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+}
+
+.agent-assistant-profile-panel .agent-harness-panel-head,
+.agent-assistant-memory-panel .agent-harness-panel-head {
+    min-height: 34px;
+}
+
+.agent-assistant-profile-panel .agent-harness-panel-head strong,
+.agent-assistant-memory-panel .agent-harness-panel-head strong {
+    font-size: 0.98rem;
+    letter-spacing: -0.01em;
+}
+
+.agent-assistant-profile-panel .agent-harness-panel-head span,
+.agent-assistant-memory-panel .agent-harness-panel-head span {
+    max-width: 680px;
+    font-size: 0.74rem;
+}
+
+.agent-assistant-profile-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 15px 16px;
+    border: 1px solid rgba(16, 163, 127, 0.15);
+    border-radius: 12px;
+    background: linear-gradient(118deg, rgba(236, 253, 245, 0.94), rgba(248, 250, 252, 0.88) 58%, rgba(239, 246, 255, 0.8));
+}
+
+.agent-assistant-profile-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #0f9f7d, #16b889);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    box-shadow: 0 7px 14px -9px rgba(5, 120, 94, 0.78);
+}
+
+.agent-assistant-profile-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.agent-assistant-profile-kicker {
+    color: #059669;
+    font-size: 0.64rem;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+}
+
+.agent-assistant-profile-copy strong {
+    color: #0f172a;
+    font-size: 0.86rem;
+    font-weight: 780;
+}
+
+.agent-assistant-profile-copy p {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.agent-assistant-profile-points {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.agent-assistant-profile-points span {
+    padding: 4px 7px;
+    border: 1px solid rgba(16, 163, 127, 0.16);
+    border-radius: 999px;
+    color: #047857;
+    background: rgba(255, 255, 255, 0.72);
+    font-size: 0.63rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.agent-assistant-profile-panel .agent-profile-sections {
+    gap: 12px;
+}
+
+.agent-assistant-profile-panel .agent-profile-card {
+    gap: 12px;
+    padding: 15px;
+    border-color: rgba(148, 163, 184, 0.2);
+    border-radius: 11px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.015);
+}
+
+.agent-assistant-profile-panel .agent-profile-card--identity {
+    background: linear-gradient(180deg, #ffffff, #fafffd);
+    border-color: rgba(16, 163, 127, 0.2);
+}
+
+.agent-assistant-profile-panel .agent-profile-card--work {
+    background: #fcfdff;
+}
+
+.agent-assistant-profile-panel .agent-harness-subhead {
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.agent-assistant-profile-panel .agent-harness-subhead strong {
+    font-size: 0.82rem;
+}
+
+.agent-assistant-profile-panel .agent-harness-subhead span {
+    max-width: 620px;
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
+
+.agent-assistant-profile-panel .agent-profile-card--identity .agent-harness-form-grid {
+    grid-template-columns: minmax(150px, 1fr) minmax(260px, 1.65fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr);
+    gap: 12px;
+}
+
+.agent-assistant-profile-panel .agent-profile-card--work .agent-harness-form-grid {
+    gap: 12px;
+}
+
+.agent-assistant-profile-panel .agent-profile-card label {
+    gap: 6px;
+}
+
+.agent-assistant-profile-panel .agent-profile-card label > span {
+    color: #334155;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.agent-assistant-profile-panel .form-input {
+    border-color: rgba(148, 163, 184, 0.3);
+    background: #ffffff;
+    box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.015);
+}
+
+.agent-assistant-profile-panel input.form-input,
+.agent-assistant-profile-panel select.form-input {
+    min-height: 38px;
+}
+
+.agent-assistant-profile-panel .form-input:focus {
+    border-color: rgba(16, 163, 127, 0.68);
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.11);
+}
+
+.agent-assistant-profile-panel #agent-profile-work-habits,
+.agent-assistant-profile-panel #agent-profile-tools,
+.agent-assistant-profile-panel #agent-profile-tasks {
+    height: 94px !important;
+    min-height: 94px !important;
+    max-height: 180px !important;
+    padding: 9px 10px !important;
+    border-radius: 8px !important;
+    font-size: 0.72rem !important;
+    line-height: 1.5 !important;
+    resize: vertical;
+}
+
+.agent-profile-card--advanced {
+    padding: 0 !important;
+    overflow: hidden;
+}
+
+.agent-profile-card--advanced > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 15px;
+    cursor: pointer;
+    list-style: none;
+    color: #334155;
+}
+
+.agent-profile-card--advanced > summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-profile-card--advanced > summary::after {
+    content: '⌄';
+    color: #64748b;
+    font-size: 1rem;
+    line-height: 1;
+    transition: transform 0.16s ease;
+}
+
+.agent-profile-card--advanced[open] > summary {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    background: #f8fafc;
+}
+
+.agent-profile-card--advanced[open] > summary::after {
+    transform: rotate(180deg);
+}
+
+.agent-profile-card--advanced > summary span {
+    display: grid;
+    gap: 2px;
+}
+
+.agent-profile-card--advanced > summary strong {
+    color: #334155;
+    font-size: 0.76rem;
+}
+
+.agent-profile-card--advanced > summary small {
+    color: #64748b;
+    font-size: 0.67rem;
+    font-weight: 400;
+}
+
+.agent-profile-card--advanced > label {
+    display: grid;
+    gap: 6px;
+    padding: 14px 15px 15px;
+}
+
+.agent-assistant-profile-panel #agent-profile-preferences {
+    height: 104px !important;
+    min-height: 104px !important;
+    max-height: 220px !important;
+    padding: 10px !important;
+    border-radius: 8px !important;
+    resize: vertical;
+}
+
+.agent-assistant-profile-actions,
+.agent-assistant-memory-actions {
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 2px;
+}
+
+.agent-assistant-profile-actions .btn-primary,
+.agent-assistant-memory-actions .btn-primary {
+    min-width: 88px;
+}
+
+.agent-assistant-memory-panel .agent-governance-cards {
+    display: grid;
+    grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
+    gap: 12px;
+}
+
+.agent-assistant-memory-panel .agent-governance-card {
+    gap: 12px;
+    padding: 15px;
+    border-color: rgba(148, 163, 184, 0.2);
+    border-radius: 11px;
+    background: #ffffff;
+}
+
+.agent-assistant-memory-panel .agent-governance-card--capture {
+    grid-column: 1 / -1;
+    padding: 14px 16px;
+    border-color: rgba(16, 163, 127, 0.2);
+    background: linear-gradient(100deg, #ecfdf5, #f8fffc 62%, #ffffff);
+}
+
+.agent-assistant-memory-panel .agent-governance-card--categories {
+    background: #fcfdff;
+}
+
+.agent-assistant-memory-panel .agent-governance-card--security {
+    background: #fbfcff;
+}
+
+.agent-assistant-memory-panel .agent-governance-card-title strong {
+    font-size: 0.82rem;
+}
+
+.agent-assistant-memory-panel .agent-governance-card-title span {
+    max-width: 700px;
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.agent-assistant-memory-panel .agent-harness-switch-label {
+    transform: scale(1.06);
+    transform-origin: right center;
+}
+
+.agent-assistant-memory-panel .agent-memory-chips-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 0;
+}
+
+.agent-assistant-memory-panel .agent-memory-chip {
+    align-items: center;
+    gap: 9px;
+    padding: 10px 11px;
+    border-radius: 8px;
+}
+
+.agent-assistant-memory-panel .agent-memory-chip:has(input:checked) {
+    border-color: rgba(16, 163, 127, 0.38);
+    background: #f0fdf8;
+}
+
+.agent-assistant-memory-panel .agent-memory-chip .chip-content {
+    gap: 3px;
+}
+
+.agent-assistant-memory-panel .agent-memory-chip .chip-content strong {
+    font-size: 0.76rem;
+}
+
+.agent-assistant-memory-panel .agent-memory-chip .chip-content span {
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.agent-assistant-memory-panel .agent-governance-security-grid {
+    gap: 8px;
+    margin: 0;
+}
+
+.agent-assistant-memory-panel .security-feature-item {
+    gap: 9px;
+    min-height: 82px;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.agent-assistant-memory-panel .security-feature-item .feature-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+}
+
+.agent-assistant-memory-panel .security-feature-item .feature-text strong {
+    font-size: 0.74rem;
+}
+
+.agent-assistant-memory-panel .security-feature-item .feature-text span {
+    font-size: 0.66rem;
+    line-height: 1.35;
+}
+
+@media (max-width: 1120px) {
+    .agent-assistant-profile-panel .agent-profile-card--identity .agent-harness-form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-assistant-memory-panel .agent-governance-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-assistant-memory-panel .agent-governance-card--capture {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 760px) {
+    .agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tabs {
+        align-self: stretch;
+    }
+
+    .agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tab {
+        flex: 1 1 0;
+    }
+
+    .agent-assistant-profile-panel,
+    .agent-assistant-memory-panel {
+        gap: 14px;
+        padding: 14px;
+    }
+
+    .agent-assistant-profile-hero {
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .agent-assistant-profile-points {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .agent-assistant-profile-panel .agent-profile-card--identity .agent-harness-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-assistant-profile-panel .agent-profile-card--work .agent-harness-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-assistant-memory-panel .agent-governance-security-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-assistant-profile-actions,
+    .agent-assistant-memory-actions {
+        justify-content: stretch;
+    }
+
+    .agent-assistant-profile-actions > *,
+    .agent-assistant-memory-actions > * {
+        flex: 1 1 0;
+    }
 }
 
 .agent-cp-card-head {

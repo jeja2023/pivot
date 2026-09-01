@@ -11,6 +11,7 @@ const { createStandaloneArtifact } = require('../server/services/agent-artifacts
 const { deleteSkillReleasePermission, listSkillReleasePermissions, upsertSkillReleasePermission } = require('../server/services/agent-skill-access');
 const { recordSigningEnvelope } = require('../server/services/agent-skill-signing');
 const { claimConnectorTask, completeConnectorTask, createConnectorTask, heartbeatConnector, waitForConnectorTask } = require('../server/services/agent-local-connector');
+const { listCachedMcpTools } = require('../server/services/mcp-client');
 const { putBuffer, readBuffer, buildCasRef, incrementRefCount, deleteIfUnreferenced, openReadStream } = require('../server/services/agent-artifact-cas');
 const { createRendition, issueDownloadToken, consumeDownloadToken, getRenditionForUser } = require('../server/services/agent-artifact-renditions');
 const {
@@ -604,6 +605,53 @@ test('持久化桌面连接器按显式设备领取只读任务，服务端重�
         assert.equal(claimed.task.input.deviceId, undefined, '设备选择不应回传给本机工具输入');
         await completeConnectorTask(user, taskId, { deviceId, claimToken: claimed.claimToken, success: true, result: { files: ['a.xlsx'] } });
         assert.deepEqual(await waitForConnectorTask(taskId, user, 1000), { files: ['a.xlsx'] });
+    } finally {
+        if (taskId) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = $1', [taskId]);
+        await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+    }
+});
+
+test('本机浏览器连接器要求设备、授权浏览器和精确站点白名单', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-local-browser-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_local_browser_${suffix}`)), tenant_id: tenantId };
+    const deviceId = `device-${suffix}-browser`;
+    let taskId = '';
+    try {
+        await registerTestDevice(user, deviceId);
+        await heartbeatConnector(user, {
+            deviceId,
+            grants: {
+                local_browser: {
+                    authorized: true,
+                    label: '2 个已授权浏览器',
+                    browsers: [
+                        { id: 'edge-local-test', label: 'Microsoft Edge', engine: 'chromium' },
+                        { id: 'firefox-local-test', label: 'Firefox', engine: 'firefox' }
+                    ],
+                    allowedOrigins: ['http://10.12.0.20:8080']
+                }
+            }
+        });
+        await assert.rejects(
+            () => createConnectorTask('browser.inspect', { deviceId, browserId: 'edge-local-test', url: 'http://10.12.0.21:8080/' }, user),
+            error => error.code === 'LOCAL_BROWSER_ORIGIN_FORBIDDEN'
+        );
+        const created = await createConnectorTask('browser.inspect', { deviceId, browserId: 'firefox-local-test', url: 'http://10.12.0.20:8080/portal' }, user);
+        taskId = created.id;
+        const listedTools = await listCachedMcpTools(0, user);
+        const browserTool = listedTools.find(tool => tool.fullName === 'mcp.0.browser.inspect' && tool.localDevice?.deviceId === deviceId);
+        assert.ok(browserTool, '已授权设备必须在工具目录中公开本机浏览器工具');
+        assert.deepEqual(browserTool.input_schema.properties.browserId.enum, ['edge-local-test', 'firefox-local-test']);
+        const claimed = await claimConnectorTask(user, { deviceId });
+        assert.equal(claimed.status, 'claimed');
+        assert.equal(claimed.task.toolName, 'browser.inspect');
+        assert.equal(claimed.task.input.browserId, 'firefox-local-test');
+        assert.equal(claimed.task.input.deviceId, undefined, '设备选择不得下发给本机浏览器执行输入');
+        assert.ok(new Date(claimed.leaseExpiresAt).getTime() - Date.now() > 8 * 60 * 1000, '本机浏览器登录任务需要长租约');
+        await completeConnectorTask(user, taskId, { deviceId, claimToken: claimed.claimToken, success: true, result: { title: '内网门户', text: '已读取' } });
+        assert.equal((await waitForConnectorTask(taskId, user, 1000)).title, '内网门户');
     } finally {
         if (taskId) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = $1', [taskId]);
         await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id = $1', [deviceId]);

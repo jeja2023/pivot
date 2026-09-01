@@ -379,7 +379,8 @@ app.use('/downloads', express.static(path.join(__dirname, '../downloads'), {
 
 const sendChatPage = (req, res) => {
     noCacheHeaders(res);
-    res.type('html').send(applyAppVersionTemplate(chatHtmlTemplate, appVersion));
+    const template = process.env.NODE_ENV === 'production' ? chatHtmlTemplate : loadChatHtmlTemplate();
+    res.type('html').send(applyAppVersionTemplate(template, appVersion));
 };
 
 app.get('/chat', sendChatPage);

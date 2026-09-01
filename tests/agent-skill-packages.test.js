@@ -15,6 +15,7 @@ const {
 } = require('../server/services/agent-skill-packages');
 const {
     installRuntimePack,
+    isRuntimePackConsoleEnabled,
     listRuntimePacks,
     sha256File,
     syncRuntimePack,
@@ -238,6 +239,12 @@ test('LAN runtime pack sync downloads and verifies an allowlisted bundle', async
 test('package digest is independent of detached signature bytes', () => {
     const entries = [{ name: 'SKILL.yaml', data: Buffer.from('id: corp.demo\n') }];
     assert.equal(packageDigest(entries), packageDigest([...entries, { name: 'SKILL.sig', data: Buffer.from('different signature') }]));
+});
+
+test('运行资源包控制台默认收起，只有显式 true 才开放内部入口', () => {
+    assert.equal(isRuntimePackConsoleEnabled({}), false);
+    assert.equal(isRuntimePackConsoleEnabled({ PIVOT_RUNTIME_PACKS_CONSOLE_ENABLED: 'false' }), false);
+    assert.equal(isRuntimePackConsoleEnabled({ PIVOT_RUNTIME_PACKS_CONSOLE_ENABLED: 'true' }), true);
 });
 
 test('skill ZIP upload passes binary magic validation', () => {

@@ -10,6 +10,14 @@ const { assertSafeOutboundHost, createSafeHttpAgents, isLoopbackHost } = require
 const PACK_TYPES = new Set(['data', 'browser']);
 const MAX_PACK_BYTES = 2 * 1024 * 1024 * 1024;
 
+/**
+ * 资源包目前只具备下载与校验，尚未绑定 Chromium/Python/数据引擎的实际启用和回滚。
+ * 因此默认隐藏，避免把尚未形成业务闭环的运维实验入口暴露给日常使用者。
+ */
+function isRuntimePackConsoleEnabled(env = process.env) {
+    return String(env.PIVOT_RUNTIME_PACKS_CONSOLE_ENABLED || '').trim().toLowerCase() === 'true';
+}
+
 function safePart(value, fallback = 'pack') {
     const text = String(value || '').trim().replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
     return text || fallback;
@@ -117,4 +125,4 @@ async function listRuntimePacks(options = {}) {
     return output;
 }
 
-module.exports = { MAX_PACK_BYTES, PACK_TYPES, installRuntimePack, listRuntimePacks, normalizeRuntimePackManifest, sha256File, syncRuntimePack, verifyRuntimePack };
+module.exports = { MAX_PACK_BYTES, PACK_TYPES, installRuntimePack, isRuntimePackConsoleEnabled, listRuntimePacks, normalizeRuntimePackManifest, sha256File, syncRuntimePack, verifyRuntimePack };

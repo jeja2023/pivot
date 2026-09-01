@@ -188,7 +188,7 @@ window.openAgentWorkbench = async function(options = {}) {
         if (controlPlaneView) controlPlaneView.classList.remove('hidden');
         if (newTaskBtn) newTaskBtn.classList.add('hidden');
         if (newGoalTopBtn) newGoalTopBtn.classList.remove('hidden');
-        if (subtitle) subtitle.textContent = '智能体控制面：持续目标、事件收件箱、通知渠道与能力治理。';
+        if (subtitle) subtitle.textContent = '智能体工作台：技能与助手、待办、自动目标、通知设置与运行质量。';
         window.Pivot?.moduleApi?.('agent.harness')?.loadAgentControlPlane?.();
     } else {
         if (tasksView) tasksView.classList.remove('hidden');

@@ -139,7 +139,7 @@ test('任务页面新建任务按钮移动至删除审计左侧，工作流搜�
     assert.match(dagCss, /\.automation-assets-toolbar\s*\{[\s\S]*?justify-content:\s*space-between;/);
 
     // 3. Agent 控制台：持续目标卡片内按钮去除加号
-    assert.match(agent, /id="agent-goal-create"[^>]*>新建持续目标<\/button>/);
+    assert.match(agent, /id="agent-goal-create"[^>]*>新建自动目标<\/button>/);
 });
 
 test('新建任务弹窗中模板区域采用按钮加独立弹窗样式，表单主体不内嵌模板条', () => {
@@ -269,6 +269,7 @@ test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认�
 test('Agent控制台各模块具备分页控件且收件箱点击详情自动标记已读', () => {
     const html = read('client/chat/partials/workspaces/agent.html');
     const js = read('client/chat/agent-harness.js');
+    const runtimePacksJs = read('client/chat/agent-runtime-packs-console.js');
     const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
 
     // 1. HTML 包含所有控制台分页容器
@@ -289,7 +290,7 @@ test('Agent控制台各模块具备分页控件且收件箱点击详情自动标
     assert.match(js, /document\.getElementById\(['"]agent-harness-residency-pagination['"]\)/);
     assert.match(js, /document\.getElementById\(['"]agent-evolution-pagination['"]\)/);
     assert.match(js, /document\.getElementById\(['"]agent-harness-skill-pagination['"]\)/);
-    assert.match(js, /document\.getElementById\(['"]agent-harness-pack-pagination['"]\)/);
+    assert.match(runtimePacksJs, /document\.getElementById\(['"]agent-harness-pack-pagination['"]\)/);
     assert.match(js, /renderWorkspacePagination/);
     assert.match(js, /data-agent-inbox-open-run/);
     assert.match(js, /data-agent-inbox-unread/);

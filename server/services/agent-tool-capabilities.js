@@ -55,6 +55,8 @@ const TOOL_PREFIX_CAPABILITIES = Object.freeze([
     // DuckDB 分析工具族归入数据查询能力，不再匹配 code.execute。
     { prefix: 'duckdb.', capabilities: ['data.duckdb.query'] },
     { prefix: 'dataset.', capabilities: ['data.dataset.read'] },
+    // 统一桌面连接器的本机浏览器工具族，必须显式声明浏览器访问能力。
+    { prefix: 'browser.', capabilities: ['network.browser_visit'] },
     { prefix: 'mcp.', capabilities: ['network.request'] }
 ]);
 

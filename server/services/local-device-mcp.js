@@ -217,6 +217,7 @@ function getLocalDeviceMcpServerTypeForTool(toolName) {
     const name = String(toolName || '');
     if (name.startsWith('db.')) return 'database';
     if (name.startsWith('reports.')) return 'reports';
+    if (name.startsWith('browser.')) return 'browser';
     return '';
 }
 

@@ -34,8 +34,8 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getLocalAuthorizationStatus() {
         return ipcRenderer.invoke('pivot-local-auth:status');
     },
-    requestLocalAuthorization(type) {
-        return ipcRenderer.invoke('pivot-local-auth:grant', type);
+    requestLocalAuthorization(type, options = {}) {
+        return ipcRenderer.invoke('pivot-local-auth:grant', type, options || {});
     },
     revokeLocalAuthorization(type) {
         return ipcRenderer.invoke('pivot-local-auth:revoke', type);

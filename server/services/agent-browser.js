@@ -24,7 +24,7 @@ function assertSafeBrowserEvaluation(expression) {
 
 function buildBrowserContextOptions(options = {}) {
     const result = {
-        userDataDir: createIsolatedProfile(options.profileRoot, options.taskId),
+        userDataDir: options.userDataDir || createIsolatedProfile(options.profileRoot, options.taskId),
         headless: options.headless !== false,
         viewport: options.viewport || { width: 1440, height: 900 },
         acceptDownloads: false,
@@ -46,25 +46,24 @@ function resolveChromiumExecutable(chromium, options = {}) {
     return candidates.find(item => fs.existsSync(item)) || '';
 }
 
-async function createAgentBrowserContext(options = {}) {
-    let chromium;
-    try { ({ chromium } = require('playwright')); } catch (error) {
+function loadPlaywrightBrowser(engine = 'chromium') {
+    let playwright;
+    try { playwright = require('playwright'); } catch (error) {
         const unavailable = new Error('Playwright 未安装，无法创建 Agent Browser Worker。');
         unavailable.code = 'AGENT_BROWSER_UNAVAILABLE';
         unavailable.cause = error;
         throw unavailable;
     }
-    const policy = normalizeNetworkPolicy(options.networkPolicy || {});
-    const executablePath = resolveChromiumExecutable(chromium, options);
-    if (!executablePath) {
-        const unavailable = new Error('未找到可用的 Chromium 浏览器可执行文件，无法创建 Agent Browser Worker。');
-        unavailable.code = 'AGENT_BROWSER_UNAVAILABLE';
+    const browser = playwright[String(engine || 'chromium').toLowerCase()];
+    if (!browser || typeof browser.launchPersistentContext !== 'function') {
+        const unavailable = new Error('当前浏览器内核不受本机自动化支持。');
+        unavailable.code = 'AGENT_BROWSER_ENGINE_UNSUPPORTED';
         throw unavailable;
     }
-    const contextOptions = buildBrowserContextOptions({ ...options, executablePath });
-    const profile = contextOptions.userDataDir;
-    delete contextOptions.userDataDir;
-    const context = await chromium.launchPersistentContext(profile, contextOptions);
+    return browser;
+}
+
+async function attachBrowserNetworkGuards(context, policy) {
     await context.route('**/*', async route => {
         try {
             const request = route.request();
@@ -78,15 +77,13 @@ async function createAgentBrowserContext(options = {}) {
                 isRedirect: !['about:blank', 'about:srcdoc', 'null'].includes(String(fromUrl || '').toLowerCase())
             });
             await route.continue();
-        } catch (error) {
+        } catch (_) {
             await route.abort('blockedbyclient');
         }
     });
-    context.on('page', page => {
+    const attachPageGuard = page => {
         const requestBytes = new Map();
         let cdp = null;
-        // Chromium exposes streamed byte counts before the response body is fully buffered.
-        // Close the page as soon as a chunked response crosses the policy limit.
         context.newCDPSession?.(page).then(async session => {
             cdp = session;
             await session.send('Network.enable');
@@ -94,9 +91,7 @@ async function createAgentBrowserContext(options = {}) {
                 const total = (requestBytes.get(event.requestId) || 0)
                     + Number(event.dataLength || event.encodedDataLength || 0);
                 requestBytes.set(event.requestId, total);
-                if (total > policy.max_download_size_bytes) {
-                    page.close({ runBeforeUnload: false }).catch(() => {});
-                }
+                if (total > policy.max_download_size_bytes) page.close({ runBeforeUnload: false }).catch(() => {});
             });
         }).catch(() => {});
         page.on('response', async response => {
@@ -105,20 +100,38 @@ async function createAgentBrowserContext(options = {}) {
                 try { await page.close({ runBeforeUnload: false }); } catch (_) {}
             }
         });
-        page.on('download', download => {
-            // Downloads are disabled by default; cancel the event explicitly so a
-            // hostile page cannot leave an uncontrolled artifact on disk.
-            download.cancel().catch(() => {});
-        });
+        page.on('download', download => download.cancel().catch(() => {}));
         page.on('close', () => {
             requestBytes.clear();
-            try {
-                const detached = cdp?.detach?.();
-                detached?.catch?.(() => {});
-            } catch (_) {}
+            try { cdp?.detach?.().catch?.(() => {}); } catch (_) {}
         });
-    });
+    };
+    context.pages().forEach(attachPageGuard);
+    context.on('page', attachPageGuard);
+}
+
+async function createManagedBrowserContext(options = {}) {
+    const engine = String(options.engine || 'chromium').toLowerCase();
+    const browser = loadPlaywrightBrowser(engine);
+    const policy = normalizeNetworkPolicy(options.networkPolicy || {});
+    const executablePath = engine === 'chromium'
+        ? resolveChromiumExecutable(browser, options)
+        : String(options.executablePath || (typeof browser.executablePath === 'function' ? browser.executablePath() : '')).trim();
+    if (!executablePath || !fs.existsSync(path.resolve(executablePath))) {
+        const unavailable = new Error(`未找到可用的 ${engine === 'firefox' ? 'Firefox' : 'Chromium'} 浏览器可执行文件，无法创建浏览器自动化会话。`);
+        unavailable.code = 'AGENT_BROWSER_UNAVAILABLE';
+        throw unavailable;
+    }
+    const contextOptions = buildBrowserContextOptions({ ...options, executablePath });
+    const profile = path.resolve(String(contextOptions.userDataDir));
+    delete contextOptions.userDataDir;
+    const context = await browser.launchPersistentContext(profile, contextOptions);
+    await attachBrowserNetworkGuards(context, policy);
     return context;
+}
+
+async function createAgentBrowserContext(options = {}) {
+    return await createManagedBrowserContext({ ...options, engine: 'chromium' });
 }
 
 async function createControlledLoginFlow(options = {}) {
@@ -195,9 +208,11 @@ module.exports = {
     captureAgentScreenshot,
     clickBrowserTarget,
     closeAgentBrowserContext,
+    createManagedBrowserContext,
     createControlledLoginFlow,
     createAgentBrowserContext,
     createIsolatedProfile,
+    attachBrowserNetworkGuards,
     evaluateSafe,
     locateBrowserTarget,
     resolveChromiumExecutable

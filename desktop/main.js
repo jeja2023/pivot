@@ -25,6 +25,8 @@ const { setupAutoUpdater } = require('./updater');
 const { runDesktopWorker } = require('./agent-runtime');
 const { createDesktopDeliveryController } = require('./delivery/controller');
 const { createLazyLocalMcpController } = require('./local-mcp-controller');
+const { chooseLocalBrowserAuthorization, sanitizeLocalBrowserGrant } = require('./local-browser-authorization');
+const { normalizeLocalMcpExecutionError } = require('./local-mcp-execution-error');
 const { buildApplicationMenu } = require('./application-menu');
 const {
     createWorkerApprovalStore,
@@ -539,7 +541,7 @@ function getDeliveryController() {
     return deliveryController;
 }
 
-const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir']);
+const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir', 'local_browser']);
 
 function localAuthorizationFilePath() {
     return path.join(app.getPath('userData'), 'local-authorizations.json');
@@ -584,15 +586,13 @@ function writeLocalAuthorizations(value) {
     writeJson(localAuthorizationFilePath(), normalizeLocalAuthorizationStore(value));
 }
 
-function localPathHint(resourcePath) {
-    const base = path.basename(resourcePath || '');
-    const parent = path.basename(path.dirname(resourcePath || ''));
-    if (!base) return '';
-    return parent ? path.join(parent, base) : base;
-}
+function localPathHint(resourcePath) { const base = path.basename(resourcePath || ''); const parent = path.basename(path.dirname(resourcePath || '')); return !base ? '' : (parent ? path.join(parent, base) : base); }
 
 function sanitizeLocalGrant(type, grant) {
     if (!grant || typeof grant !== 'object') return { type, authorized: false };
+    if (type === 'local_browser') {
+        return sanitizeLocalBrowserGrant(grant, os.hostname());
+    }
     return {
         type,
         authorized: true,
@@ -617,22 +617,25 @@ function buildLocalAuthorizationStatus() {
         supportedTypes: Array.from(LOCAL_AUTH_TYPES),
         grants: {
             local_database: sanitizeLocalGrant('local_database', store.grants.local_database),
-            local_report_dir: sanitizeLocalGrant('local_report_dir', store.grants.local_report_dir)
+            local_report_dir: sanitizeLocalGrant('local_report_dir', store.grants.local_report_dir),
+            local_browser: sanitizeLocalGrant('local_browser', store.grants.local_browser)
         },
         message: '桌面客户端已就绪，本机授权信息仅保存在当前设备。'
     };
 }
 
-function assertLocalAuthorizationType(type) {
-    if (!LOCAL_AUTH_TYPES.has(type)) throw new Error('不支持的本机授权类型。');
-}
+function assertLocalAuthorizationType(type) { if (!LOCAL_AUTH_TYPES.has(type)) throw new Error('不支持的本机授权类型。'); }
+function showLocalAuthorizationDialog(options) { return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options); }
 
-function showLocalAuthorizationDialog(options) {
-    return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options);
-}
-async function chooseLocalAuthorizationTarget(type) {
+async function chooseLocalAuthorizationTarget(type, options = {}) {
     assertLocalAuthorizationType(type);
     const now = new Date().toISOString();
+    if (type === 'local_browser') return await chooseLocalBrowserAuthorization(options, {
+        showDialog: showLocalAuthorizationDialog,
+        readStore: readLocalAuthorizations,
+        platform: process.platform,
+        deviceName: os.hostname()
+    });
     if (type === 'local_database') {
         const result = await showLocalAuthorizationDialog({
             title: '选择本机 SQLite 数据库文件',
@@ -668,8 +671,8 @@ async function chooseLocalAuthorizationTarget(type) {
     };
 }
 
-async function grantLocalAuthorization(type) {
-    const grant = await chooseLocalAuthorizationTarget(type);
+async function grantLocalAuthorization(type, options = {}) {
+    const grant = await chooseLocalAuthorizationTarget(type, options);
     if (!grant) return { canceled: true, status: buildLocalAuthorizationStatus() };
     const store = readLocalAuthorizations();
     store.grants[type] = grant;
@@ -685,35 +688,32 @@ function revokeLocalAuthorization(type) {
     return buildLocalAuthorizationStatus();
 }
 
-function normalizeLocalMcpExecutionError(error) {
-    const message = String(error?.message || error || '本机执行失败。');
-    let friendlyMessage = message;
-    let status = Number(error?.status || error?.statusCode || 0) || 500;
-    const code = String(error?.code || '').trim();
-    if ((code === 'ENOTDIR' || /ENOTDIR/i.test(message)) && /app\.asar/i.test(message)) {
-        friendlyMessage = '桌面端本机执行环境目录初始化失败，请重新打包或重启客户端后再试。';
-        status = 500;
-    } else if (code === 'ENOTDIR' || /ENOTDIR/i.test(message)) {
-        friendlyMessage = '本机报表目录中存在无法按目录读取的路径，或当前授权目标不是有效目录；请重新授权一个真实文件夹后再试。';
-        status = 400;
-    } else if (code === 'ENOENT' || /ENOENT/i.test(message)) {
-        friendlyMessage = '本机授权资源不存在或已移动；请重新授权后再试。';
-        status = 404;
-    } else if (code === 'EACCES' || code === 'EPERM') {
-        friendlyMessage = '当前系统权限不足，无法读取本机授权资源。';
-        status = 403;
-    }
-    return {
-        message: friendlyMessage,
-        status,
-        code,
-        detail: friendlyMessage === message ? '' : message.slice(0, 1000)
-    };
-}
-
 async function executeLocalMcpTool(payload = {}) {
     configureLocalAuthorizationEnvironment();
     const toolName = String(payload.toolName || payload.name || '').trim();
+    if (/^browser\./.test(toolName)) {
+        const { runLocalBrowserTask } = require('./local-browser-automation');
+        const grant = readLocalAuthorizations().grants.local_browser;
+        return await runLocalBrowserTask({
+            toolName,
+            input: payload.input && typeof payload.input === 'object' ? payload.input : {},
+            grant,
+            profileRoot: path.join(app.getPath('userData'), 'browser-automation-profiles'),
+            confirmAction: async details => {
+                const response = await dialog.showMessageBox(mainWindow || undefined, {
+                    type: 'question',
+                    title: String(details.title || '确认本机浏览器操作'),
+                    message: String(details.message || '确认继续？'),
+                    detail: `${details.browser || '浏览器'}\n${details.url || ''}`,
+                    buttons: ['继续', '取消'],
+                    defaultId: 1,
+                    cancelId: 1,
+                    noLink: true
+                });
+                return response.response === 0;
+            }
+        });
+    }
     if (!/^(db|reports)\./.test(toolName)) {
         const err = new Error('不支持的本机 MCP 工具。');
         err.status = 400;
@@ -737,9 +737,9 @@ ipcMain.handle('pivot-local-auth:status', async (event) => {
     return buildLocalAuthorizationStatus();
 });
 
-ipcMain.handle('pivot-local-auth:grant', async (event, type) => {
+ipcMain.handle('pivot-local-auth:grant', async (event, type, options = {}) => {
     assertTrustedIpcSender(event);
-    return grantLocalAuthorization(String(type || ''));
+    return grantLocalAuthorization(String(type || ''), options || {});
 });
 
 ipcMain.handle('pivot-local-auth:revoke', async (event, type) => {

@@ -53,4 +53,18 @@ const migration = {
     }
 };
 
-module.exports = [migration];
+const localBrowserConnectorMigration = {
+    id: '202609010004_agent_local_browser_connector',
+    description: 'Add metadata for local browser grants in the persistent desktop connector.',
+    async upPg(client) {
+        await client.query(`
+            ALTER TABLE agent_local_connector_grants
+            ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+        `);
+    },
+    async downPg(client) {
+        await client.query('ALTER TABLE agent_local_connector_grants DROP COLUMN IF EXISTS metadata_json;');
+    }
+};
+
+module.exports = [migration, localBrowserConnectorMigration];
