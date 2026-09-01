@@ -14,7 +14,7 @@ const { listAgentInbox, markInboxItem } = require('../services/agent-inbox');
 const { listToolReliability } = require('../services/agent-tool-reliability');
 const { deleteAgentPersonalData, exportAgentPersonalData } = require('../services/agent-data');
 const {
-    createSkillVersion, listSkillCatalogForUser, listSkillReleasesForUser, listSkillVersionsForUser,
+    approveSkillVersionForSharing, createSkillVersion, listSkillCatalogForUser, listSkillReleasesForUser, listSkillVersionsForUser,
     pauseSkillRelease, publishSkillVersion, publishWorkflowRelease, resumeSkillRelease,
     rollbackSkillRelease, rollbackWorkflowRelease, validateSkillVersion
 } = require('../services/agent-releases');
@@ -30,6 +30,11 @@ const {
 const { getAgentQualityDashboard } = require('../services/agent-quality');
 const { getAgentImprovementSuggestions } = require('../services/agent-improvement-suggestions');
 const { getAgentGovernanceStatus } = require('../services/agent-governance-status');
+
+function allowedSkillPermissions() {
+    const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
+    return values.length ? values : undefined;
+}
 
 function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter } = {}) {
     const router = express.Router();
@@ -244,13 +249,24 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.status(201).json({ success: true, version });
     }));
     router.post('/agents/skills/versions/:id/validate', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await validateSkillVersion(req.params.id, req.user, { ...(req.body || {}), publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || req.body?.publicKey || '', allowedPermissions: String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean) });
+        const result = await validateSkillVersion(req.params.id, req.user, { ...(req.body || {}), requireSignature: false, publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || '', allowedPermissions: allowedSkillPermissions() });
         if (!result) return res.status(404).json({ error: 'Skill 版本不存在或无权访问。' });
         res.status(result.passed ? 200 : 422).json({ success: result.passed, ...result });
+    }));
+    router.post('/agents/skills/versions/:id/approve-shared', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = await approveSkillVersionForSharing(req.params.id, req.user, req.body || {});
+        if (!result) return res.status(404).json({ error: 'Skill 版本不存在或无权批准。' });
+        writeLog(req, '批准并组织签名共享 Skill', `技能: ${result.version.name}@${result.version.version}，签名密钥: ${result.envelope.keyId}`);
+        res.json({ success: true, ...result });
     }));
     router.post('/agents/skills/versions/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
         const release = await publishSkillVersion(req.params.id, req.user, req.body || {});
         if (!release) return res.status(404).json({ error: 'Skill 版本不存在或无权发布。' });
+        const action = release.autoApproved ? '自动批准、组织签名并发布共享 Skill' : '发布 Agent Skill';
+        const detail = release.autoApproved
+            ? `发布ID: ${release.id}，组织签名密钥: ${release.organizationSigningKeyId || 'organization-default'}`
+            : `发布ID: ${release.id}`;
+        writeLog(req, action, detail);
         res.json({ success: true, release });
     }));
     router.post('/agents/skills/releases/:id/rollback', authMiddleware, automationGuard, asyncHandler(async (req, res) => {

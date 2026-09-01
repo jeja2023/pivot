@@ -510,14 +510,79 @@
     grid-column: 1 / -1;
     margin-top: 2px;
 }
+.global-params-tab .global-params-skill-signing-section {
+    grid-column: 1 / -1;
+    margin-top: 2px;
+}
 .global-params-tab .global-params-stealth-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px 24px;
     align-items: start;
 }
+.global-params-tab .global-params-skill-signing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 24px;
+    align-items: start;
+}
+.global-params-tab .global-params-skill-signing-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+.global-params-tab .global-params-skill-signing-import {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+}
+.global-params-tab .global-params-skill-signing-import > summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--text-secondary, #475569);
+}
+.global-params-tab .global-params-skill-signing-import-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, .6fr) minmax(280px, 1.4fr) auto;
+    gap: 8px;
+    align-items: end;
+    margin-top: 8px;
+}
+.global-params-tab .global-params-skill-signing-import-grid label {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    font-size: 0.72rem;
+    color: var(--text-secondary, #475569);
+}
+.global-params-tab .global-params-skill-signing-import-grid textarea {
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.global-params-tab .global-params-skill-signing-history {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+.global-params-tab .skill-signing-key-chip {
+    padding: 3px 7px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 5px;
+    color: var(--text-secondary, #475569);
+    font: 0.68rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.global-params-tab .skill-signing-key-chip.is-active {
+    border-color: var(--color-success, #10b981);
+    color: var(--color-success, #059669);
+}
 @media (max-width: 900px) {
     .global-params-tab .global-params-stealth-grid {
+        grid-template-columns: 1fr;
+    }
+    .global-params-tab .global-params-skill-signing-grid,
+    .global-params-tab .global-params-skill-signing-import-grid {
         grid-template-columns: 1fr;
     }
 }

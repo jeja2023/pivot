@@ -193,6 +193,10 @@ function createSafeLookup(options = {}) {
     };
 }
 
+function hasSecretEncryptionKey() {
+    return Boolean(String(process.env.DATA_ENCRYPTION_KEY || process.env.JWT_SECRET || '').trim());
+}
+
 function deriveEncryptionKey(source) {
     return crypto.createHash('sha256').update(String(source || '')).digest();
 }
@@ -523,6 +527,7 @@ function redactSecrets(value, depth = 0) {
 
 module.exports = {
     encryptSecret,
+    hasSecretEncryptionKey,
     encryptSecretWithKey,
     decryptSecret,
     decryptSecretWithKey,

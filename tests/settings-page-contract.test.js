@@ -67,8 +67,15 @@ test('后台调度轮询具备防重入保护', () => {
 test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {
     const route = read('server/routes/settings.js');
     assert.match(route, /SENSITIVE_SETTING_KEY_RE/);
+    assert.match(route, /private\|signing\|keyring/);
     assert.match(route, /settings: getPublicSettings\(\)/);
     assert.match(route, /redacted: true/);
+    assert.match(route, /\/settings\/skill-signing/);
+    assert.match(route, /isSuperAdmin\(req\.user\)/);
+    const signingConfig = read('server/services/agent-skill-signing-configuration.js');
+    assert.match(signingConfig, /encryptSecret\(serializeKeyring/);
+    assert.match(signingConfig, /getOrganizationSigningPublicKey/);
+    assert.doesNotMatch(signingConfig, /res\.json\([^\n]*privateKey/);
 });
 
 test('审计日志读取不会等待整个异步写入队列', () => {
@@ -98,4 +105,3 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.match(css, /\.memory-modal-header[\s\S]*?display:\s*flex;/);
     assert.match(css, /\.memory-source-close[\s\S]*?margin-left:\s*auto;/);
 });
-

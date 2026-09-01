@@ -115,6 +115,11 @@ const {
     updateWorkflowTrigger
 } = require('../services/agent-runtime');
 
+function allowedSkillPermissions() {
+    const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
+    return values.length ? values : undefined;
+}
+
 function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
@@ -142,8 +147,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
     router.post('/agents/skills/package', authMiddleware, uploadLimiter || ((_req, _res, next) => next()), ...(skillUpload?.single ? skillUpload.single('file') : []), asyncHandler(async (req, res) => {
         if (!req.file?.path) return res.status(400).json({ error: '请选择 .skill.zip 文件。' });
         try {
-            const allowedPermissions = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '')
-                .split(',').map(item => item.trim()).filter(Boolean);
+            const allowedPermissions = allowedSkillPermissions();
             const verified = await verifySkillPackage(req.file.path, {
                 allowedPermissions,
                 requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false',
@@ -161,7 +165,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uplo
                 packageRoot: installed.installDir,
                 allowedPermissions,
                 requireSignature: process.env.AGENT_SKILL_REQUIRE_SIGNATURE !== 'false',
-                signatureVerified: Boolean(verified.signatureValid),
+                // 分离式签名必须随版本信封持久化，后续验证才能复建同一包摘要载荷。
+                packageSignature: verified.signatureForm === 'detached' ? verified.package.signature : '',
+                packageDigest: verified.package.digest,
+                keyId: verified.manifest.manifest.keyId || 'default',
                 publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || ''
             });
             logAction(req, '导入 Agent Skill 包草稿', `Skill: ${version.name}@${version.version}，包摘要: ${installed.package.digest}`);

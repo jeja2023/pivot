@@ -13,6 +13,11 @@ const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { canonicalJson } = require('./agent-skills');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
+const {
+    getOrganizationSigningKey,
+    getOrganizationSigningPublicKey,
+    normalizePem: normalizeConfiguredPem
+} = require('./agent-skill-signing-configuration');
 
 const SIGNATURE_FORMS = Object.freeze(['detached', 'embedded']);
 const DEFAULT_ALGORITHM = 'RSA-SHA256';
@@ -35,8 +40,26 @@ function normalizeDigest(value) {
     return String(value || '').replace(/^sha256:/i, '').trim().toLowerCase();
 }
 
-function resolveTrustedPublicKey(options = {}, env = process.env) {
-    return String(options.publicKey || env.AGENT_SKILL_PUBLIC_KEY || '').trim();
+function resolveTrustedPublicKey(options = {}, env = process.env, keyId = '') {
+    const explicit = normalizePem(options.publicKey);
+    if (explicit) return explicit;
+    // 组织签名按信封 keyId 从密钥环精确选择公钥，轮换后仍可复验历史版本。
+    const organizationPublicKey = getOrganizationSigningPublicKey(keyId, env);
+    return organizationPublicKey || normalizePem(env.AGENT_SKILL_PUBLIC_KEY);
+}
+
+/** 将环境变量中的 PEM 规范化；支持安全注入时常见的字面 \n 形式。 */
+function normalizePem(value) {
+    return normalizeConfiguredPem(value);
+}
+
+/** 组织签名私钥仅由服务端管理员审批流程读取，绝不返回到网页或 Skill 文件。 */
+function resolveOrganizationSigningPrivateKey(_options = {}, env = process.env) {
+    return getOrganizationSigningKey(env)?.privateKey || '';
+}
+
+function resolveOrganizationSigningKeyId(_options = {}, env = process.env) {
+    return getOrganizationSigningKey(env)?.keyId || String(env.AGENT_SKILL_ORGANIZATION_KEY_ID || 'organization-default').trim().slice(0, 128) || 'organization-default';
 }
 
 function isSignatureRequired(options = {}, env = process.env) {
@@ -67,10 +90,16 @@ function buildSignaturePayload(form, { manifest = null, contentDigest = '' } = {
  * embedded 形态必须传入 manifest，否则无法重建被签名载荷，判定为无法验证。
  */
 function verifyEnvelopeSignature(envelope = {}, options = {}) {
-    const publicKey = resolveTrustedPublicKey(options);
     const digest = normalizeDigest(envelope.contentDigest ?? envelope.content_digest);
     const signature = String(envelope.signature || '').trim();
     const form = normalizeSignatureForm(envelope.signatureForm ?? envelope.signature_form);
+    const keyId = String(envelope.keyId ?? envelope.key_id ?? '').trim();
+    let publicKey;
+    try {
+        publicKey = resolveTrustedPublicKey(options, process.env, keyId);
+    } catch (_) {
+        return { verified: false, reason: 'organization_keyring_unavailable', signatureForm: form };
+    }
     if (!digest) return { verified: false, reason: 'missing_digest' };
     if (!signature) return { verified: false, reason: 'unsigned' };
     if (!publicKey) return { verified: false, reason: 'no_trusted_key' };
@@ -89,6 +118,46 @@ function verifyEnvelopeSignature(envelope = {}, options = {}) {
     } catch (error) {
         return { verified: false, reason: String(error.message || 'verify_failed'), signatureForm: form };
     }
+}
+
+/**
+ * 管理员批准共享版本时调用：对规范化 Manifest 产生 embedded 签名并写入不可变信封。
+ * 私钥不落库、不写入 manifest，也不会传给浏览器；受信公钥未配置或与私钥不匹配时 fail-closed。
+ */
+async function signOrganizationEnvelope({ manifest, contentDigest, expiresAt = null } = {}, options = {}) {
+    const privateKey = resolveOrganizationSigningPrivateKey(options);
+    if (!privateKey) {
+        throw signingError('组织共享发布尚未配置签名私钥，请联系系统管理员。', 'SKILL_ORGANIZATION_SIGNING_NOT_CONFIGURED', 409);
+    }
+    const keyId = resolveOrganizationSigningKeyId(options);
+    const trustedPublicKey = resolveTrustedPublicKey(options, process.env, keyId);
+    if (!trustedPublicKey) {
+        throw signingError('组织共享发布尚未配置受信公钥，不能验证组织签名。', 'SKILL_ORGANIZATION_PUBLIC_KEY_NOT_CONFIGURED', 409);
+    }
+    const payload = buildSignaturePayload('embedded', { manifest, contentDigest });
+    if (!payload) throw signingError('组织签名缺少规范化 Skill Manifest。', 'SKILL_ORGANIZATION_SIGNING_PAYLOAD_INVALID');
+    let signature;
+    try {
+        const signer = crypto.createSign(DEFAULT_ALGORITHM);
+        signer.update(payload);
+        signer.end();
+        signature = signer.sign(privateKey).toString('base64');
+    } catch (_) {
+        throw signingError('组织签名私钥无效或算法不受支持。', 'SKILL_ORGANIZATION_PRIVATE_KEY_INVALID', 409);
+    }
+    const envelope = {
+        contentDigest: normalizeDigest(contentDigest),
+        keyId,
+        algorithm: DEFAULT_ALGORITHM,
+        signature,
+        signatureForm: 'embedded',
+        expiresAt
+    };
+    const verified = verifyEnvelopeSignature(envelope, { ...options, publicKey: trustedPublicKey, manifest });
+    if (!verified.verified) {
+        throw signingError('组织签名与受信公钥不匹配，请检查密钥配置。', 'SKILL_ORGANIZATION_SIGNING_KEY_MISMATCH', 409);
+    }
+    return await recordSigningEnvelope(envelope);
 }
 
 /** 落库并返回签名信封 id。同一 (digest, keyId, form) 幂等。 */
@@ -183,10 +252,14 @@ module.exports = {
     buildSignaturePayload,
     getSigningEnvelopeById,
     isSignatureRequired,
+    normalizePem,
     normalizeSignatureForm,
     recordSigningEnvelope,
     registerVerifiedEnvelope,
     revokeSigningEnvelope,
+    resolveOrganizationSigningKeyId,
+    resolveOrganizationSigningPrivateKey,
+    signOrganizationEnvelope,
     signingError,
     verifyEnvelopeForVersion,
     verifyEnvelopeSignature

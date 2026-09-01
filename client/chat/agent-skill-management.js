@@ -12,6 +12,7 @@
             <div class="modal rag-detail-modal agent-artifact-modal">
                 <div class="rag-detail-header"><div><h3 id="agent-skill-management-title">Skill 配方治理</h3><p class="model-modal-desc" id="agent-skill-management-desc"></p></div><button type="button" class="btn-danger-outline" data-skill-management-close>关闭</button></div>
                 <div class="agent-artifact-editor"><label><span>SKILL.md</span><textarea id="agent-skill-management-source" class="form-input agent-artifact-content" spellcheck="false"></textarea></label><div class="agent-harness-form-actions"><button type="button" class="btn-secondary" data-skill-management-preview>预览校验</button><button type="button" class="btn-primary" data-skill-management-save>创建新草稿版本</button></div><pre id="agent-skill-management-preview" class="agent-artifact-diff"></pre></div>
+                <div class="agent-artifact-editor"><strong>共享发布（管理员）</strong><p class="model-modal-desc">个人发布无需签名；管理员发布到团队或组织时，系统会自动批准、组织签名并完成发布。</p><div class="agent-harness-form-actions"><select id="agent-skill-shared-scope" class="form-input"><option value="organization">发布到组织</option><option value="team">发布到团队</option></select><input id="agent-skill-shared-team" class="form-input" placeholder="团队 ID（仅团队发布）"><button type="button" class="btn-primary" data-skill-management-publish-shared>发布共享版本</button></div></div>
                 <div><strong>版本差异</strong><div id="agent-skill-management-history" class="agent-artifact-version-list"></div><pre id="agent-skill-management-diff" class="agent-artifact-diff"></pre></div>
                 <div id="agent-skill-management-acl-wrap"><strong>Release 授权（ACL）</strong><div id="agent-skill-management-acl" class="agent-artifact-version-list"></div><div class="agent-harness-form-grid"><label><span>主体类型</span><select id="agent-skill-acl-type" class="form-input"><option value="user">用户</option><option value="team">团队</option><option value="organization">组织</option><option value="role">角色</option></select></label><label><span>主体 ID</span><input id="agent-skill-acl-id" class="form-input"></label><label><span>动作</span><select id="agent-skill-acl-action" class="form-input"><option value="use">use</option><option value="publish">publish</option><option value="manage">manage</option></select></label><label><span>效果</span><select id="agent-skill-acl-effect" class="form-input"><option value="allow">allow</option><option value="deny">deny</option></select></label></div><button type="button" class="btn-secondary" data-skill-acl-save>保存授权</button></div>
             </div>`);
@@ -75,6 +76,19 @@
             try {
                 await readJson(`${API_BASE}/agents/skills/source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: modal.querySelector('#agent-skill-management-source').value }) });
                 showToast('已创建新的 Skill 草稿版本。', 'success');
+                window.Pivot?.moduleApi?.('agent.harness')?.loadAgentHarnessSkills?.();
+            } catch (error) { showToast(error.message, 'error'); }
+        };
+        modal.querySelector('[data-skill-management-publish-shared]').onclick = async () => {
+            try {
+                const scope = modal.querySelector('#agent-skill-shared-scope').value;
+                const teamId = modal.querySelector('#agent-skill-shared-team').value.trim();
+                const body = { scope };
+                if (scope === 'team') body.teamId = teamId;
+                const data = await readJson(`${API_BASE}/agents/skills/versions/${encodeURIComponent(versionId)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                const target = data.release?.rollout_scope === 'team' ? '团队' : '组织';
+                const prefix = data.release?.autoApproved ? '已自动批准、组织签名并' : '已';
+                showToast(`${prefix}发布到${target}。`, 'success');
                 window.Pivot?.moduleApi?.('agent.harness')?.loadAgentHarnessSkills?.();
             } catch (error) { showToast(error.message, 'error'); }
         };

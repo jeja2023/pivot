@@ -207,6 +207,7 @@ const adminFeatureScripts = [
     '/chat/stats-monitor.js',
     '/chat/admin-settings.js',
     '/chat/admin-stealth.js',
+    '/chat/admin-skill-signing.js',
     '/chat/memory-usage.js',
     '/chat/admin-memory-ui.js',
     '/chat/announcements-admin.js',
@@ -415,7 +416,10 @@ async function loadTabDataInternal(tab, page = 1) {
             if (tab === 'details' && window.loadDetails) await loadDetails(page);
             if (tab === 'apiCallLogs' && window.loadApiCallLogs) await loadApiCallLogs(page);
             if (tab === 'userRecords' && window.loadUserRecordMessages) await loadUserRecordMessages(page);
-            if (tab === 'global-params' && window.loadSettings) await window.loadSettings();
+            if (tab === 'global-params' && window.loadSettings) {
+                await window.loadSettings();
+                await window.Pivot?.moduleApi?.('settings.skillSigning')?.load?.();
+            }
             if (tab === 'keys' && window.loadApiKeys) {
                 await loadApiKeys();
                 const displayEl = document.getElementById('api-base-url-display');

@@ -44,7 +44,11 @@ async function resolveAccessSubjects(user) {
     const userId = Number.parseInt(user?.id, 10) || 0;
     const context = await getUserEnterpriseContext(userId);
     const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
-    const organizationIds = (context.organizations || []).map(item => Number.parseInt(item.id, 10)).filter(Boolean);
+    const directTenantId = normalizeTenantId(user?.tenant_id ?? user?.tenantId);
+    const organizationIds = [...new Set([
+        ...(context.organizations || []).map(item => Number.parseInt(item.id, 10)).filter(Boolean),
+        ...(directTenantId ? [directTenantId] : [])
+    ])];
     const teamRoles = new Map((context.teams || []).map(team => [Number.parseInt(team.id, 10), String(team.role || 'member').toLowerCase()]));
     const subjects = [
         { type: 'user', id: userId },

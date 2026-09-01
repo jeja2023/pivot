@@ -192,6 +192,7 @@ const ROUTE_NAME_MAP = {
     '/chat/admin.js': '管理后台逻辑脚本',
     '/chat/admin-settings.js': '管理员设置脚本',
     '/chat/admin-stealth.js': '客户端独占隐身模式设置脚本',
+    '/chat/admin-skill-signing.js': '组织 Skill 签名密钥设置脚本',
     '/chat/admin-memory-ui.js': '长期记忆界面交互与浮层提示脚本',
     '/stats.js': '统计分析核心脚本',
     '/chat/render.js': '消息渲染逻辑脚本',

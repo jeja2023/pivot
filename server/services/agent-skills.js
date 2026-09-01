@@ -128,6 +128,10 @@ async function projectSkillReadModel({ version, release, ownerKey = '', tenantId
     const scope = toLegacyScope(release?.rollout_scope || 'personal');
     const effectiveOwnerKey = String(ownerKey || release?.owner_key || version.owner_key || '').trim();
     if (!effectiveOwnerKey) throw new Error('Skill 投影缺少权威 ownerKey。');
+    // 一个个人版本可在后续被批准发布到组织/团队；投影表按 ownerKey 分行，
+    // 因此不能继续复用 source skill_id 作为全局主键，否则个人与共享投影互相冲突。
+    const sourceSkillId = String(version.skill_id || manifest.id || version.name);
+    const projectionId = `skill:${sha256(`${sourceSkillId}:${effectiveOwnerKey}`).slice(0, 56)}`;
     await execute(`
         INSERT INTO agent_skills (id, name, version, title, description, publisher, digest, manifest_yaml, instructions_md, scope, user_id, owner_key, tenant_id, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -137,7 +141,7 @@ async function projectSkillReadModel({ version, release, ownerKey = '', tenantId
             instructions_md = excluded.instructions_md, scope = excluded.scope, tenant_id = excluded.tenant_id,
             status = excluded.status, updated_at = excluded.updated_at
     `, [
-        String(version.skill_id || manifest.id || version.name),
+        projectionId,
         String(version.name).slice(0, 128),
         String(version.version),
         String(manifest.title || version.name).slice(0, 255),

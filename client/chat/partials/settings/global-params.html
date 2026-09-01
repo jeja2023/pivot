@@ -257,5 +257,35 @@
                                     </div>
                                 </div>
                             </section>
+
+                            <section class="stat-card global-params-section global-params-skill-signing-section">
+                                <h4>组织 Skill 共享签名</h4>
+                                <p class="global-params-section-desc">管理员发布共享 Skill 时使用的服务端签名密钥。私钥仅加密保存在服务器，不会显示、导出或下发到浏览器。</p>
+                                <div class="global-params-skill-signing-grid">
+                                    <div class="form-item">
+                                        <label>签名状态</label>
+                                        <p id="skill-signing-config-status" class="runtime-settings-status">正在读取…</p>
+                                        <small id="skill-signing-config-detail" class="runtime-key-note"></small>
+                                    </div>
+                                    <div class="form-item super-admin-only hidden">
+                                        <label>密钥管理</label>
+                                        <div class="global-params-skill-signing-actions">
+                                            <button type="button" id="skill-signing-generate" class="btn-primary btn-xs">生成并启用新密钥</button>
+                                            <button type="button" id="skill-signing-disable" class="btn-secondary btn-xs">停用共享签名</button>
+                                        </div>
+                                        <small class="runtime-key-note">生成新密钥会自动轮换；历史公钥会保留，用于验证已发布版本。</small>
+                                    </div>
+                                </div>
+                                <details class="global-params-skill-signing-import super-admin-only hidden">
+                                    <summary>导入已有 RSA 私钥（可选）</summary>
+                                    <div class="global-params-skill-signing-import-grid">
+                                        <label><span>密钥标识（可留空自动生成）</span><input id="skill-signing-import-key-id" class="form-input" maxlength="128" autocomplete="off"></label>
+                                        <label><span>RSA 私钥 PEM</span><textarea id="skill-signing-import-private-key" class="form-input" rows="4" autocomplete="off" spellcheck="false"></textarea></label>
+                                        <button type="button" id="skill-signing-import" class="btn-secondary btn-xs">加密保存并启用</button>
+                                    </div>
+                                    <small class="runtime-key-note">仅在迁移既有组织密钥时粘贴。提交后页面立即清空输入框，服务端不会返回私钥。</small>
+                                </details>
+                                <div id="skill-signing-config-history" class="global-params-skill-signing-history"></div>
+                            </section>
                         </div>
                     </section>

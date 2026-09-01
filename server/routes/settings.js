@@ -7,6 +7,7 @@ const { clearAllRagCache } = require('../services/rag-cache');
 const {
     getAppSettingsMap,
     getAppSettingValue,
+    refreshAppSettingsCache,
     setAppSettingAsync
 } = require('../services/app-settings');
 const { assertSafeOutboundUrl } = require('../security');
@@ -45,6 +46,13 @@ const { getPermissionCapabilities, isAdmin, isSuperAdmin } = require('../permiss
 const { safeJsonGet } = require('../services/safe-http-client');
 const { invalidateMonitorSummaryCache } = require('./admin-stats');
 const { getStealthConfig, setStealthConfigAsync } = require('../services/stealth-service');
+const {
+    activateManagedOrganizationSigningKey,
+    disableManagedOrganizationSigning,
+    generateManagedOrganizationSigningKey,
+    getOrganizationSigningConfigStatus,
+    importManagedOrganizationSigningKey
+} = require('../services/agent-skill-signing-configuration');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -124,7 +132,7 @@ function getSettings() {
 // The settings page only needs configuration metadata. Never send stored
 // credentials or opaque tokens back to a browser, even when the caller is an
 // administrator. The write endpoints still use the private settings map.
-const SENSITIVE_SETTING_KEY_RE = /(?:api[_-]?key|secret|password|token|credential|webhook)/i;
+const SENSITIVE_SETTING_KEY_RE = /(?:api[_-]?key|secret|password|token|credential|webhook|private|signing|keyring)/i;
 
 function getPublicSettings() {
     const settings = getSettings();
@@ -435,6 +443,47 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             regenerateSecret: Boolean(regenerateSecret)
         });
         res.json({ success: true, ...updated });
+    }));
+
+    // 组织签名密钥只允许系统最高管理员管理。状态接口不返回私钥，普通管理员可据此判断共享发布是否可用。
+    router.get('/settings/skill-signing', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isAdmin(req.user)) return res.status(403).json({ error: '需要管理员权限' });
+        await refreshAppSettingsCache();
+        res.json({ success: true, ...getOrganizationSigningConfigStatus() });
+    }));
+
+    router.post('/settings/skill-signing/generate', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有系统最高管理员可以生成组织签名密钥。' });
+        const status = await generateManagedOrganizationSigningKey({ keyId: req.body?.keyId, userId: req.user.id });
+        logAction(req, '生成并启用组织 Skill 签名密钥', `密钥标识: ${status.activeKeyId}；指纹: ${status.fingerprint.slice(0, 16)}`);
+        res.status(201).json({ success: true, ...status });
+    }));
+
+    router.post('/settings/skill-signing/import', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有系统最高管理员可以导入组织签名密钥。' });
+        const status = await importManagedOrganizationSigningKey({
+            privateKey: req.body?.privateKey,
+            publicKey: req.body?.publicKey,
+            keyId: req.body?.keyId,
+            activate: req.body?.activate !== false,
+            userId: req.user.id
+        });
+        logAction(req, '导入组织 Skill 签名密钥', `密钥标识: ${status.activeKeyId || '仅历史复验'}；未记录私钥内容。`);
+        res.status(201).json({ success: true, ...status });
+    }));
+
+    router.post('/settings/skill-signing/activate', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有系统最高管理员可以切换组织签名密钥。' });
+        const status = await activateManagedOrganizationSigningKey({ keyId: req.body?.keyId, userId: req.user.id });
+        logAction(req, '启用组织 Skill 签名密钥', `密钥标识: ${status.activeKeyId}`);
+        res.json({ success: true, ...status });
+    }));
+
+    router.post('/settings/skill-signing/disable', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有系统最高管理员可以停用组织签名。' });
+        const status = await disableManagedOrganizationSigning({ userId: req.user.id });
+        logAction(req, '停用组织 Skill 共享签名', '保留历史公钥用于复验，后续团队/组织共享发布将被拒绝。');
+        res.json({ success: true, ...status });
     }));
 
     return router;

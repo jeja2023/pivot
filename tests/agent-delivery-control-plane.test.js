@@ -5,7 +5,7 @@ const test = require('node:test');
 const skipWithoutDatabase = { skip: !process.env.DATABASE_URL };
 const suffix = crypto.randomBytes(4).toString('hex');
 
-const { createSkillVersion, publishSkillVersion, resolvePublishedSkill, validateSkillVersion } = require('../server/services/agent-releases');
+const { approveSkillVersionForSharing, createSkillVersion, publishSkillVersion, resolvePublishedSkill, validateSkillVersion } = require('../server/services/agent-releases');
 const { listAgentSkillsForUser } = require('../server/services/agent-skills');
 const { createStandaloneArtifact } = require('../server/services/agent-artifacts');
 const { deleteSkillReleasePermission, listSkillReleasePermissions, upsertSkillReleasePermission } = require('../server/services/agent-skill-access');
@@ -118,11 +118,47 @@ function signedManifest(name, privateKey, overrides = {}) {
     return manifest;
 }
 
+function unsignedManifest(name, overrides = {}) {
+    return {
+        schemaVersion: 1,
+        id: `integration.${name}`,
+        name,
+        version: '1.0.0',
+        title: '集成测试技能',
+        capabilities: ['knowledge.search'],
+        tools: ['rag.search'],
+        inputs: {},
+        outputs: {},
+        ...overrides
+    };
+}
+
 async function cleanupSkill(name) {
     await pool().query('DELETE FROM agent_skill_releases WHERE name = $1', [name]);
     await pool().query('DELETE FROM agent_skill_validations WHERE skill_version_id IN (SELECT id FROM agent_skill_versions WHERE name = $1)', [name]);
     await pool().query('DELETE FROM agent_skills WHERE name = $1', [name]);
     await pool().query('DELETE FROM agent_skill_versions WHERE name = $1', [name]);
+}
+
+async function approveSharedVersion(versionId, user) {
+    const previous = {
+        publicKey: process.env.AGENT_SKILL_PUBLIC_KEY,
+        privateKey: process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64,
+        keyId: process.env.AGENT_SKILL_ORGANIZATION_KEY_ID
+    };
+    const keys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    process.env.AGENT_SKILL_PUBLIC_KEY = keys.publicKey.export({ type: 'spki', format: 'pem' });
+    process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64 = Buffer.from(keys.privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64');
+    process.env.AGENT_SKILL_ORGANIZATION_KEY_ID = `org-test-${suffix}`;
+    const result = await approveSkillVersionForSharing(versionId, user);
+    return {
+        result,
+        restore() {
+            if (previous.publicKey === undefined) delete process.env.AGENT_SKILL_PUBLIC_KEY; else process.env.AGENT_SKILL_PUBLIC_KEY = previous.publicKey;
+            if (previous.privateKey === undefined) delete process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64; else process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64 = previous.privateKey;
+            if (previous.keyId === undefined) delete process.env.AGENT_SKILL_ORGANIZATION_KEY_ID; else process.env.AGENT_SKILL_ORGANIZATION_KEY_ID = previous.keyId;
+        }
+    };
 }
 
 test('createSkillVersion 拒绝外部 ownerKey 并且关闭签名旁路', skipWithoutDatabase, async () => {
@@ -160,6 +196,63 @@ test('createSkillVersion 拒绝外部 ownerKey 并且关闭签名旁路', skipWi
     }
 });
 
+test('个人 SKILL 草稿与个人发布无需组织签名，管理员共享发布自动批准并组织签名', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-personal-skill-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_personal_skill_${suffix}`, 'admin')), tenant_id: tenantId };
+    const name = `personal-skill-${suffix}`;
+    const manifest = {
+        schemaVersion: 1, id: `integration.${name}`, name, version: '1.0.0',
+        title: '个人技能', capabilities: ['knowledge.search'], tools: ['rag.search'], inputs: {}, outputs: {}
+    };
+    const previousPublic = process.env.AGENT_SKILL_PUBLIC_KEY;
+    const previousPrivate = process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64;
+    const previousKeyId = process.env.AGENT_SKILL_ORGANIZATION_KEY_ID;
+    let envelopeId = 0;
+    try {
+        delete process.env.AGENT_SKILL_PUBLIC_KEY;
+        delete process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64;
+        const version = await createSkillVersion(user, { manifest, strictSpec: true, requireSignature: false });
+        const personalValidation = await validateSkillVersion(version.id, user, { strictSpec: true, requireSignature: false });
+        assert.equal(personalValidation.passed, true, '个人草稿验证不应被组织签名配置阻断');
+        const personalRelease = await publishSkillVersion(version.id, user, { scope: 'personal' });
+        assert.equal(personalRelease.rollout_scope, 'personal');
+
+        const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+        process.env.AGENT_SKILL_PUBLIC_KEY = publicKey.export({ type: 'spki', format: 'pem' });
+        process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64 = Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64');
+        process.env.AGENT_SKILL_ORGANIZATION_KEY_ID = `org-test-${suffix}`;
+        const organizationRelease = await publishSkillVersion(version.id, user, { scope: 'organization' });
+        assert.equal(organizationRelease.rollout_scope, 'organization');
+        assert.equal(organizationRelease.autoApproved, true, '管理员共享发布应自动完成批准');
+        assert.match(String(organizationRelease.organizationSigningKeyId || ''), /^org-test-/);
+        const signedVersion = await pool().query('SELECT signing_envelope_id FROM agent_skill_versions WHERE id = $1', [version.id]);
+        envelopeId = Number(signedVersion.rows[0]?.signing_envelope_id || 0);
+        assert.ok(envelopeId, '自动共享发布必须写入组织签名信封');
+    } finally {
+        if (previousPublic === undefined) delete process.env.AGENT_SKILL_PUBLIC_KEY; else process.env.AGENT_SKILL_PUBLIC_KEY = previousPublic;
+        if (previousPrivate === undefined) delete process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64; else process.env.AGENT_SKILL_ORGANIZATION_PRIVATE_KEY_BASE64 = previousPrivate;
+        if (previousKeyId === undefined) delete process.env.AGENT_SKILL_ORGANIZATION_KEY_ID; else process.env.AGENT_SKILL_ORGANIZATION_KEY_ID = previousKeyId;
+        await cleanupSkill(name);
+        if (envelopeId) await pool().query('DELETE FROM agent_skill_signing_envelopes WHERE id = $1', [envelopeId]);
+    }
+});
+
+test('普通用户不能借共享发布路径自动批准或自签名', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-no-auto-approval-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_no_auto_approval_${suffix}`, 'user')), tenant_id: tenantId };
+    const name = `no-auto-approval-${suffix}`;
+    try {
+        const version = await createSkillVersion(user, { manifest: unsignedManifest(name), strictSpec: true, requireSignature: false });
+        assert.equal((await validateSkillVersion(version.id, user, { strictSpec: true, requireSignature: false })).passed, true);
+        await assert.rejects(
+            () => publishSkillVersion(version.id, user, { scope: 'organization' }),
+            error => Number(error.status) === 409 && error.code === 'SKILL_SHARED_SIGNATURE_REQUIRED'
+        );
+    } finally {
+        await cleanupSkill(name);
+    }
+});
+
 test('签名信封按内容寻址复用且不允许原地覆盖', skipWithoutDatabase, async () => {
     const digest = crypto.randomBytes(32).toString('hex');
     const keyId = `test-key-${suffix}`;
@@ -172,6 +265,38 @@ test('签名信封按内容寻址复用且不允许原地覆盖', skipWithoutDat
         assert.equal(second.signature, 'first-signature', '已登记信封不得被后续调用原地覆盖');
     } finally {
         if (envelopeId) await pool().query('DELETE FROM agent_skill_signing_envelopes WHERE id = $1', [envelopeId]);
+    }
+});
+
+test('分离式兼容包签名会随版本持久化，并在后续验证时复用包摘要', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-detached-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_detached_${suffix}`)), tenant_id: tenantId };
+    const name = `detached-skill-${suffix}`;
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const packageDigest = crypto.randomBytes(32).toString('hex');
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(packageDigest);
+    signer.end();
+    const packageSignature = signer.sign(privateKey).toString('base64');
+    try {
+        const version = await createSkillVersion(user, {
+            manifest: unsignedManifest(name),
+            packageSignature,
+            packageDigest,
+            requireSignature: true,
+            strictSpec: true,
+            publicKey: publicKey.export({ type: 'spki', format: 'pem' })
+        });
+        assert.equal(String(version.digest), `sha256:${packageDigest}`);
+        const validation = await validateSkillVersion(version.id, user, {
+            requireSignature: true,
+            strictSpec: true,
+            publicKey: publicKey.export({ type: 'spki', format: 'pem' })
+        });
+        assert.equal(validation.passed, true, `分离式签名应能复验，实际错误：${validation.error_message || ''}`);
+        assert.equal(validation.signature.signatureForm, 'detached');
+    } finally {
+        await cleanupSkill(name);
     }
 });
 
@@ -205,12 +330,13 @@ test('技能目录与发布解析都以租户为首个访问条件，跨租户�
     const outsider = { ...(await ensureUser(`pivot_out_${suffix}`, 'user')), tenant_id: tenantB };
     await joinTeam(teamA, publisher.id, 'admin');
     const name = `integration-tenant-${suffix}`;
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
+    let signing = null;
     try {
-        const version = await createSkillVersion(publisher, { manifest: signedManifest(name, privateKey), requireSignature: true, publicKey: publicKeyPem });
-        const validated = await validateSkillVersion(version.id, publisher, { publicKey: publicKeyPem });
+        const version = await createSkillVersion(publisher, { manifest: unsignedManifest(name), strictSpec: true, requireSignature: false });
+        const validated = await validateSkillVersion(version.id, publisher, { requireSignature: false });
         assert.equal(validated.passed, true);
+        signing = await approveSharedVersion(version.id, publisher);
+        assert.equal(signing.result.validation.passed, true);
         const release = await publishSkillVersion(version.id, publisher, { scope: 'organization' });
         assert.equal(release.status, 'published');
         assert.equal(release.owner_key, `org:${tenantA}`);
@@ -227,6 +353,8 @@ test('技能目录与发布解析都以租户为首个访问条件，跨租户�
         assert.equal(catalogForOutsider.some(item => item.name === name), false, '技能目录不得跨租户可见');
     } finally {
         await cleanupSkill(name);
+        if (signing?.result?.envelope?.id) await pool().query('DELETE FROM agent_skill_signing_envelopes WHERE id = $1', [signing.result.envelope.id]);
+        signing?.restore();
     }
 });
 
@@ -238,13 +366,14 @@ test('技能 release ACL 的显式 deny 同时拦截运行时解析与目录投�
     await joinTeam(teamId, publisher.id, 'admin');
     await joinTeam(teamId, consumer.id, 'member');
     const name = `integration-acl-${suffix}`;
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
     let releaseId = 0;
     let permissionId = 0;
+    let signing = null;
     try {
-        const version = await createSkillVersion(publisher, { manifest: signedManifest(name, privateKey), requireSignature: true, publicKey: publicKeyPem });
-        assert.equal((await validateSkillVersion(version.id, publisher, { publicKey: publicKeyPem })).passed, true);
+        const version = await createSkillVersion(publisher, { manifest: unsignedManifest(name), strictSpec: true, requireSignature: false });
+        assert.equal((await validateSkillVersion(version.id, publisher, { requireSignature: false })).passed, true);
+        signing = await approveSharedVersion(version.id, publisher);
+        assert.equal(signing.result.validation.passed, true);
         const release = await publishSkillVersion(version.id, publisher, { scope: 'organization' });
         releaseId = Number(release.id);
         assert.ok(await resolvePublishedSkill(name, consumer), '同租户组织成员默认可使用发布');
@@ -260,6 +389,8 @@ test('技能 release ACL 的显式 deny 同时拦截运行时解析与目录投�
     } finally {
         if (releaseId && permissionId) await deleteSkillReleasePermission(releaseId, permissionId, publisher);
         await cleanupSkill(name);
+        if (signing?.result?.envelope?.id) await pool().query('DELETE FROM agent_skill_signing_envelopes WHERE id = $1', [signing.result.envelope.id]);
+        signing?.restore();
     }
 });
 

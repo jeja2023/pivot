@@ -80,9 +80,10 @@ async function createSkillVersionFromMarkdown(user, input = {}) {
         manifest: preview.manifest,
         instructions: preview.instructions,
         strictSpec: true,
+        // 个人配方草稿可直接创建；组织签名只在管理员批准共享时生成。
+        requireSignature: false,
         allowedPermissions: input.allowedPermissions ?? allowedPermissionsFromEnv(),
         allowedTools: input.allowedTools,
-        requireSignature: input.requireSignature,
         packageSignature: input.packageSignature,
         packageDigest: input.packageDigest,
         keyId: input.keyId,

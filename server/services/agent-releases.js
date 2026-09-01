@@ -21,8 +21,8 @@ const {
     normalizeBreakerThresholds
 } = require('./agent-skill-rollout');
 const {
-    isSignatureRequired,
     registerVerifiedEnvelope,
+    signOrganizationEnvelope,
     verifyEnvelopeForVersion
 } = require('./agent-skill-signing');
 const { scanSkillPackageEntries } = require('./agent-skill-supply-chain');
@@ -46,6 +46,11 @@ function invalid(message, status = 400, code = 'AGENT_RELEASE_INVALID') {
 function parseJson(value, fallback = {}) {
     if (value && typeof value === 'object') return value;
     try { return JSON.parse(String(value || '')); } catch (_) { return fallback; }
+}
+
+function allowedSkillPermissionsFromEnv(env = process.env) {
+    const permissions = String(env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
+    return permissions.length ? permissions : undefined;
 }
 
 /** 对数据库候选执行统一 Release ACL/成员/角色判定，避免仅靠 SQL scope 造成 ACL 旁路。 */
@@ -231,18 +236,26 @@ async function createSkillVersion(user, input = {}) {
     // 签名信封：detached 优先（包签名），否则使用 manifest 内嵌签名。两者都走同一校验实现。
     const detachedSignature = String(input.packageSignature || input.package_signature || '').trim();
     const signatureForm = detachedSignature ? 'detached' : 'embedded';
+    const signedPackageDigest = detachedSignature
+        ? String(input.packageDigest || manifest.package_digest || checked.computedDigest).replace(/^sha256:/i, '')
+        : '';
+    // 个人 SKILL.md 草稿可以无签名创建；签名门禁只适用于兼容包导入和后续共享发布。
+    // 即便用户自带 signature，也只在有受信公钥时记录为可验证信封，绝不信任“已验证”入参。
     const registered = await registerVerifiedEnvelope({
         contentDigest: detachedSignature
-            ? String(input.packageDigest || manifest.package_digest || checked.computedDigest).replace(/^sha256:/i, '')
+            ? signedPackageDigest
             : checked.computedDigest,
         signature: detachedSignature || String(manifest.signature || ''),
         signatureForm,
         keyId: input.keyId || manifest.keyId || 'default',
         algorithm: input.algorithm,
         expiresAt: input.signatureExpiresAt || null
-    }, { ...input, manifest: checked.manifest });
+    }, { ...input, requireSignature: input.requireSignature === true, manifest: checked.manifest });
     const ownerKey = deriveOwnerKey({ scope: 'personal', userId: user.id, tenantId: tenant.tenantId });
-    const digest = manifest.package_digest ? String(manifest.package_digest) : `sha256:${checked.computedDigest}`;
+    // 分离式签名覆盖整个包摘要；将其写入版本 digest，确保后续验证能将信封与版本权威摘要关联。
+    const digest = detachedSignature
+        ? `sha256:${signedPackageDigest}`
+        : (manifest.package_digest ? String(manifest.package_digest) : `sha256:${checked.computedDigest}`);
     const now = getBeijingTimestamp();
     const row = await queryOne(`
         INSERT INTO agent_skill_versions
@@ -290,7 +303,9 @@ async function validateSkillVersion(id, user, options = {}) {
         lockFiles: supplyChain.lockFiles || [],
         errors: supplyChain.errors
     };
-    const signatureAccepted = signature.verified || !isSignatureRequired(options);
+    // 普通个人验证不要求签名；共享批准流程和 .skill.zip 导入会显式传 requireSignature=true。
+    const signatureRequired = options.requireSignature === true || Boolean(String(version.package_path || '').trim());
+    const signatureAccepted = signature.verified || !signatureRequired;
     const declarative = runDeclarativeSkillChecks(checked);
     let sandbox = { passed: false, mode: 'not-run', sideEffects: true, packageScriptsExecuted: false };
     if (checked.valid && signatureAccepted && supplyChain.passed) {
@@ -326,7 +341,7 @@ async function validateSkillVersion(id, user, options = {}) {
             ...checked.errors,
             ...supplyChain.errors,
             ...declarative.errors,
-            signature.verified ? '' : `签名校验未通过（${signature.reason || '未签名'}）`,
+            signatureRequired && !signature.verified ? `签名校验未通过（${signature.reason || '未签名'}）` : '',
             sandbox.result?.stderr || '',
             evaluationResult.passed ? '' : '固定评测集未通过'
         ].filter(Boolean).join('；').slice(0, 4000),
@@ -367,15 +382,33 @@ async function resolveReleaseTeam(user, tenantId, teamId) {
 }
 
 async function publishSkillVersion(id, user, input = {}) {
-    const version = await getSkillVersion(id, user, { action: 'write' });
+    let version = await getSkillVersion(id, user, { action: 'write' });
     if (!version) return null;
     const validation = await queryOne('SELECT status FROM agent_skill_validations WHERE skill_version_id = ? ORDER BY version DESC, created_at DESC LIMIT 1', [version.id]);
-    if (version.status !== 'validated' || validation?.status !== 'passed') throw invalid('Skill 必须通过完整验证后才能发布。', 409, 'SKILL_RELEASE_GATE_FAILED');
+    // 同一版本可以先发布给个人、再由管理员共享；个人发布会将版本状态标为 published，
+    // 但不能因此丢失已通过的验证资格。仍以最近一次验证通过作为硬门禁。
+    if (!['validated', 'published'].includes(String(version.status || '')) || validation?.status !== 'passed') {
+        throw invalid('Skill 必须通过完整验证后才能发布。', 409, 'SKILL_RELEASE_GATE_FAILED');
+    }
     const rollout = normalizeRollout(input);
     const tenant = await assertTenantContext(user);
     const teamId = rollout.rolloutScope === 'team' ? await resolveReleaseTeam(user, tenant.tenantId, rollout.teamId) : null;
     const ownerKey = deriveOwnerKey({ scope: rollout.rolloutScope, userId: user.id, tenantId: tenant.tenantId, teamId });
+    let automaticApproval = null;
     if (rollout.rolloutScope !== 'personal') {
+        // 管理员可在共享发布操作中一并完成批准和组织签名；个人发布不需要组织签名。
+        // 普通用户仍不能借此路径自签名，必须使用已获管理员批准的版本。
+        const manifest = parseJson(version.manifest_json || version.manifest_yaml, {});
+        const signature = await verifyEnvelopeForVersion(version, { manifest, requireSignature: true });
+        if (!signature.verified) {
+            if (!isTenantAdmin(user)) {
+                throw invalid('团队或组织共享前必须由管理员批准并完成组织签名。', 409, 'SKILL_SHARED_SIGNATURE_REQUIRED');
+            }
+            automaticApproval = await approveSkillVersionForSharing(version.id, user);
+            if (!automaticApproval) return null;
+            version = await getSkillVersion(version.id, user, { action: 'write' });
+            if (!version) return null;
+        }
         const decision = await evaluateSkillReleaseAccess({
             user,
             release: { id: 0, tenant_id: tenant.tenantId, team_id: teamId, rollout_scope: rollout.rolloutScope, owner_key: ownerKey },
@@ -412,7 +445,44 @@ async function publishSkillVersion(id, user, input = {}) {
     } catch (_) {
         // 收件箱不可用不影响发布结果，发布事件仍在审计与 release 表中。
     }
+    // 这是 API 返回元数据，不会写入 release 表；用于审计与界面提示一次操作完成了批准、签名和发布。
+    release.autoApproved = Boolean(automaticApproval);
+    release.organizationSigningKeyId = automaticApproval?.envelope?.keyId || null;
     return release;
+}
+
+/**
+ * 管理员批准个人草稿进入共享候选池：服务器用组织私钥写入不可变信封，并重新跑签名门禁验证。
+ * 用户只提交配方，不接触私钥；批准者与验证记录均保留审计。
+ */
+async function approveSkillVersionForSharing(id, user, _input = {}) {
+    const version = await getSkillVersion(id, user, { action: 'manage' });
+    if (!version) return null;
+    if (!isTenantAdmin(user)) throw invalid('只有管理员可以批准并签名共享 Skill。', 403, 'SKILL_SHARED_APPROVAL_ADMIN_REQUIRED');
+    const tenant = await assertTenantContext(user);
+    if (Number(version.tenant_id) !== Number(tenant.tenantId)) {
+        throw invalid('不能用当前组织的签名批准其他租户的 Skill。', 403, 'SKILL_TENANT_MISMATCH');
+    }
+    const manifest = parseJson(version.manifest_json || version.manifest_yaml, {});
+    const checked = validateSkillManifest(manifest, { strictSpec: true });
+    if (!checked.valid) throw invalid(`Skill Manifest 校验失败：${checked.errors.join('；')}`, 422, 'SKILL_MANIFEST_INVALID');
+    const envelope = await signOrganizationEnvelope({
+        manifest: checked.manifest,
+        contentDigest: version.content_digest || checked.computedDigest
+    });
+    const now = getBeijingTimestamp();
+    await execute('UPDATE agent_skill_versions SET signing_envelope_id = ?, updated_at = ? WHERE id = ?', [envelope.id, now, version.id]);
+    const validation = await validateSkillVersion(version.id, user, {
+        requireSignature: true,
+        allowedPermissions: allowedSkillPermissionsFromEnv(),
+        strictSpec: true
+    });
+    if (!validation?.passed) {
+        const reason = validation?.signature?.reason || validation?.manifest?.errors?.[0] || validation?.declarative?.errors?.[0] || validation?.supplyChain?.errors?.[0]
+            || validation?.sandbox?.result?.stderr || (validation ? '策略或评测未通过' : '签名后版本访问被拒绝');
+        throw invalid(`组织签名已写入，但共享前验证未通过：${reason}`, 422, 'SKILL_SHARED_APPROVAL_VALIDATION_FAILED');
+    }
+    return { version: validation.version, envelope: { id: envelope.id, keyId: envelope.key_id, algorithm: envelope.algorithm, expiresAt: envelope.expires_at || null }, validation };
 }
 
 /** 读取 release 并做访问判定。无权访问返回 null，保持 404 语义。 */
@@ -725,6 +795,7 @@ async function notifyBreakerAction(release, eventType, title, reason) {
 module.exports = {
     RELEASE_SCOPES,
     createSkillVersion,
+    approveSkillVersionForSharing,
     getSkillReleaseForUser,
     getSkillVersion,
     listSkillCatalogForUser,
