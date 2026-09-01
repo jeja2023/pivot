@@ -12,7 +12,7 @@
 ### 未完成与上线前事项
 
 - **Capability Worker 尚未启用**：执行框架已具备，但仍需由运维登记经过审计的内网 `image@sha256`、固定入口命令和资源配额后，才可将 `PIVOT_CAPABILITY_WORKER_ENABLED=true` 投入使用。
-- **Windows 正式安装包待构建环境排障**：Electron 运行时预检、依赖发现和 `win-unpacked` 初始生成均已通过；本机构建在 `app.asar` 归档阶段长时间无产物，已停止。需在干净构建机或升级后的 Builder 环境复核后再发布安装包。
+- **Windows 安装包构建与校验完成**：`npm run dist:win` 已成功生成 `Pivot Setup 0.1.60.exe`、blockmap、`latest.yml` 和 Windows x64 SHA-256 清单；安装包 SHA-256 为 `e440bc7a2499fe5f7d22f4b3e27be3fcde0dc36ac1255b4f3bed0c74b8a1b093`。
 - **PEP 上线观察期**：建议先以 `PIVOT_AGENT_PEP_MODE=shadow` 观察 1–2 周，审阅 `shadowDenyTotal` 与 `legacyUnrestrictedHitTotal` 后再稳定切换为 `enforce`。
 
 详细发布记录见 [v0.1.60 发布记录](docs/releases/v0.1.60-Agent技能与文档交付安全收口.md)。
