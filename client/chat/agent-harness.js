@@ -342,10 +342,16 @@
     const getCurrentUser = () => (typeof currentUser !== 'undefined' ? currentUser : window.currentUser || null);
 
     function setNotice(message = '', tone = '') {
+        if (!message) return;
+        if (typeof showToast === 'function') {
+            const toastType = tone === 'error' ? 'error' : (tone === 'warn' ? 'warning' : 'success');
+            showToast(message, toastType);
+        }
         const notice = document.getElementById('agent-harness-notice');
-        if (!notice) return;
-        notice.textContent = message;
-        notice.className = `agent-harness-notice${tone ? ` is-${tone}` : ''}`;
+        if (notice) {
+            notice.textContent = message;
+            notice.className = `agent-harness-notice${tone ? ` is-${tone}` : ''}`;
+        }
     }
 
     function setMarkup(element, markup) {
@@ -602,11 +608,9 @@
         try {
             const data = await apiJson(`${API_BASE}/memories/policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoCapture: document.getElementById('agent-memory-auto-capture')?.checked !== false, blockedCategories }) });
             state.memoryPolicy = data.policy;
-            const notice = document.getElementById('agent-memory-policy-notice');
-            if (notice) { notice.textContent = '记忆治理策略已保存。敏感信息始终不会持久化。'; notice.className = 'agent-harness-notice is-success'; }
+            setNotice('记忆治理策略已保存。敏感信息始终不会持久化。', 'success');
         } catch (error) {
-            const notice = document.getElementById('agent-memory-policy-notice');
-            if (notice) { notice.textContent = error.message || '记忆治理策略保存失败。'; notice.className = 'agent-harness-notice is-error'; }
+            setNotice(error.message || '记忆治理策略保存失败。', 'error');
         }
     }
 

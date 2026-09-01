@@ -6,14 +6,15 @@
 
 /* 日常入口仅展示“我的智能助手”和“技能”；运维与实验面板默认收起。 */
 .agent-harness-nav-tabs {
+    align-self: flex-start;
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
-    padding: 2px;
-    background: var(--bg-secondary, #f1f5f9);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: 6px;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(241, 245, 249, 0.88);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 8px;
     margin-bottom: 6px;
     width: auto;
     max-width: 100%;
@@ -24,13 +25,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 22px;
-    padding: 1px 10px;
+    min-height: 26px;
+    padding: 0 12px;
     border: 0;
-    border-radius: 4px;
+    border-radius: 6px;
     background: transparent;
     color: var(--text-muted, #64748b);
-    font-size: 0.7rem;
+    font-size: 0.74rem;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -46,7 +47,7 @@
     background: var(--bg-main, #fff);
     color: var(--primary, #10a37f);
     font-weight: 700;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 /* 个人档案卡片化布局 */
@@ -422,33 +423,7 @@
 }
 
 .agent-harness-notice {
-    min-height: 0;
-    color: var(--text-muted, #64748b);
-    font-size: 0.78rem;
-    font-weight: 500;
-}
-
-.agent-harness-notice:not(:empty) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 8px;
-    background: rgba(248, 250, 252, 0.95);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-.agent-harness-notice.is-success {
-    color: #047857;
-    border-color: rgba(16, 185, 129, 0.35);
-    background: rgba(236, 253, 245, 0.95);
-}
-
-.agent-harness-notice.is-error {
-    color: #b91c1c;
-    border-color: rgba(239, 68, 68, 0.35);
-    background: rgba(254, 242, 242, 0.95);
+    display: none !important;
 }
 
 .agent-harness-panel {
@@ -584,8 +559,8 @@
 
 .agent-harness-skill-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
+    gap: 12px;
     align-items: stretch;
 }
 
@@ -943,38 +918,160 @@ body.dark-mode .aht tbody tr:hover,
     outline: none;
 }
 
-#agent-harness-skill-manifest {
-    min-height: 240px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-size: 0.74rem;
-    line-height: 1.5;
-    padding: 10px 12px;
-    border-radius: 7px;
-    background: var(--bg-main, #fff);
+.agent-harness-panel[data-agent-harness-section="skills"] {
+    gap: 8px;
+    padding: 10px 14px;
+    border-color: rgba(148, 163, 184, 0.22);
+    box-shadow: 0 2px 8px -4px rgba(15, 23, 42, 0.08);
+    border-radius: 9px;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfefd 100%);
+    box-sizing: border-box;
 }
 
-#agent-harness-skill-instructions {
-    min-height: 60px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-size: 0.74rem;
-    line-height: 1.5;
-    padding: 8px 12px;
-    border-radius: 7px;
-    background: var(--bg-main, #fff);
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-panel-head {
+    min-height: 26px;
+    margin-bottom: 0;
+}
+
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-panel-head strong {
+    font-size: 0.88rem;
+    letter-spacing: -0.01em;
+}
+
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-panel-head span {
+    font-size: 0.68rem;
+    color: #64748b;
+}
+
+.agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-skill-layout {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
+    gap: 10px;
+    align-items: stretch;
 }
 
 .agent-harness-skill-list-wrap,
 .agent-harness-skill-form-wrap {
-    min-height: 440px;
+    min-height: 560px;
+    padding: 8px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-subhead,
+.agent-harness-skill-list-wrap .agent-harness-subhead {
+    gap: 2px;
+    margin-bottom: 1px;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-subhead strong,
+.agent-harness-skill-list-wrap .agent-harness-subhead strong {
+    font-size: 0.76rem;
+    color: #1e293b;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-subhead span,
+.agent-harness-skill-list-wrap .agent-harness-subhead span {
+    font-size: 0.65rem;
+    color: #64748b;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100% !important;
+    min-width: 0 !important;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-field > span {
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-field > textarea.form-input,
+#agent-harness-skill-manifest,
+#agent-harness-skill-instructions {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    box-sizing: border-box !important;
+    display: block;
+}
+
+#agent-harness-skill-manifest {
+    height: 410px !important;
+    min-height: 320px !important;
+    max-height: 520px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.73rem !important;
+    line-height: 1.45 !important;
+    padding: 8px 10px !important;
+    border-radius: 6px !important;
+    background: #fcfdff !important;
+    border: 1px solid rgba(148, 163, 184, 0.3) !important;
+    resize: vertical;
+}
+
+#agent-harness-skill-instructions {
+    height: 56px !important;
+    min-height: 48px !important;
+    max-height: 100px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.72rem !important;
+    line-height: 1.35 !important;
+    padding: 5px 8px !important;
+    border-radius: 6px !important;
+    background: #fcfdff !important;
+    border: 1px solid rgba(148, 163, 184, 0.3) !important;
+    resize: vertical;
 }
 
 .agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-list {
-    max-height: 480px;
-    min-height: 360px;
+    max-height: 540px;
+    min-height: 470px;
 }
 
 .agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-empty-card {
-    min-height: 360px;
+    min-height: 470px;
+    padding: 24px 16px;
+    border-radius: 8px;
+    border-color: rgba(148, 163, 184, 0.3);
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: 6px;
+    margin-top: 2px;
+    padding-top: 0;
+}
+
+.agent-harness-skill-form-wrap .agent-harness-form-actions .btn-primary,
+.agent-harness-skill-form-wrap .agent-harness-form-actions .btn-secondary,
+.agent-harness-skill-form-wrap .agent-harness-form-actions .agent-harness-file-button {
+    height: 28px !important;
+    line-height: 26px !important;
+    padding: 0 12px !important;
+    font-size: 0.74rem !important;
+    border-radius: 6px !important;
+    min-width: 72px;
 }
 
 .agent-harness-form-actions {
@@ -1835,14 +1932,15 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 /* 质量页面内部 Tab 导航 */
 .agent-cp-quality-tabs {
+    align-self: flex-start;
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
-    padding: 2px;
-    background: var(--bg-secondary, #f1f5f9);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: 6px;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(241, 245, 249, 0.88);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 8px;
     margin-bottom: 8px;
     width: auto;
     max-width: 100%;
@@ -1853,13 +1951,13 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 22px;
-    padding: 1px 10px;
+    min-height: 26px;
+    padding: 0 12px;
     border: 0;
-    border-radius: 4px;
+    border-radius: 6px;
     background: transparent;
     color: var(--text-muted, #64748b);
-    font-size: 0.7rem;
+    font-size: 0.74rem;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -1875,7 +1973,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     background: var(--bg-main, #fff);
     color: var(--primary, #10a37f);
     font-weight: 700;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .agent-cp-quality-panel {
@@ -1915,35 +2013,53 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 }
 
 /* ===========================================================================
-   我的智能助手：以个人工作台替代密集大表单
+   我的智能助手：紧凑型双栏并排工作台 (Profile 左栏 + Memory 右栏)
    ========================================================================== */
 .agent-cp-subview-pane[data-agent-cp-pane="governance"] {
-    gap: 14px;
-    padding-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 16px;
 }
 
 .agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tabs {
     align-self: flex-start;
-    padding: 4px;
-    margin: 0;
-    border-radius: 10px;
+    padding: 3px;
+    margin: 0 0 6px 0;
+    border-radius: 8px;
     background: rgba(241, 245, 249, 0.88);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(226, 232, 240, 0.9);
 }
 
 .agent-cp-subview-pane[data-agent-cp-pane="governance"] .agent-harness-nav-tab {
-    min-height: 30px;
-    padding: 0 13px;
-    border-radius: 7px;
-    font-size: 0.76rem;
+    min-height: 26px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+}
+
+.agent-assistant-workbench-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 10px;
+    align-items: start;
+    width: 100%;
+    margin-top: 0;
+}
+
+.agent-assistant-workbench-grid.hidden {
+    display: none !important;
 }
 
 .agent-assistant-profile-panel,
 .agent-assistant-memory-panel {
-    gap: 18px;
-    padding: 20px;
+    gap: 10px;
+    padding: 12px 14px;
     border-color: rgba(148, 163, 184, 0.22);
-    box-shadow: 0 10px 26px -22px rgba(15, 23, 42, 0.42);
+    box-shadow: 0 2px 8px -4px rgba(15, 23, 42, 0.08);
+    border-radius: 9px;
+    display: flex;
+    flex-direction: column;
 }
 
 .agent-assistant-profile-panel {
@@ -1956,29 +2072,31 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 .agent-assistant-profile-panel .agent-harness-panel-head,
 .agent-assistant-memory-panel .agent-harness-panel-head {
-    min-height: 34px;
+    min-height: 28px;
+    margin-bottom: 2px;
 }
 
 .agent-assistant-profile-panel .agent-harness-panel-head strong,
 .agent-assistant-memory-panel .agent-harness-panel-head strong {
-    font-size: 0.98rem;
+    font-size: 0.88rem;
     letter-spacing: -0.01em;
 }
 
 .agent-assistant-profile-panel .agent-harness-panel-head span,
 .agent-assistant-memory-panel .agent-harness-panel-head span {
     max-width: 680px;
-    font-size: 0.74rem;
+    font-size: 0.68rem;
+    color: #64748b;
 }
 
 .agent-assistant-profile-hero {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 14px;
-    padding: 15px 16px;
+    gap: 8px;
+    padding: 7px 11px;
     border: 1px solid rgba(16, 163, 127, 0.15);
-    border-radius: 12px;
+    border-radius: 8px;
     background: linear-gradient(118deg, rgba(236, 253, 245, 0.94), rgba(248, 250, 252, 0.88) 58%, rgba(239, 246, 255, 0.8));
 }
 
@@ -1986,70 +2104,72 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
     background: linear-gradient(135deg, #0f9f7d, #16b889);
     color: #ffffff;
-    font-size: 0.72rem;
+    font-size: 0.62rem;
     font-weight: 800;
     letter-spacing: 0.04em;
-    box-shadow: 0 7px 14px -9px rgba(5, 120, 94, 0.78);
+    box-shadow: 0 4px 10px -4px rgba(5, 120, 94, 0.6);
 }
 
 .agent-assistant-profile-copy {
     display: grid;
-    gap: 2px;
+    gap: 1px;
     min-width: 0;
 }
 
 .agent-assistant-profile-kicker {
     color: #059669;
-    font-size: 0.64rem;
+    font-size: 0.58rem;
     font-weight: 750;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
 }
 
 .agent-assistant-profile-copy strong {
     color: #0f172a;
-    font-size: 0.86rem;
+    font-size: 0.76rem;
     font-weight: 780;
 }
 
 .agent-assistant-profile-copy p {
     margin: 0;
     color: #64748b;
-    font-size: 0.7rem;
-    line-height: 1.45;
+    font-size: 0.65rem;
+    line-height: 1.3;
 }
 
 .agent-assistant-profile-points {
     display: flex;
     justify-content: flex-end;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 4px;
 }
 
 .agent-assistant-profile-points span {
-    padding: 4px 7px;
+    padding: 2px 6px;
     border: 1px solid rgba(16, 163, 127, 0.16);
     border-radius: 999px;
     color: #047857;
     background: rgba(255, 255, 255, 0.72);
-    font-size: 0.63rem;
+    font-size: 0.58rem;
     font-weight: 650;
     white-space: nowrap;
 }
 
 .agent-assistant-profile-panel .agent-profile-sections {
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .agent-assistant-profile-panel .agent-profile-card {
-    gap: 12px;
-    padding: 15px;
-    border-color: rgba(148, 163, 184, 0.2);
-    border-radius: 11px;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
     background: #ffffff;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.015);
 }
@@ -2065,36 +2185,48 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 .agent-assistant-profile-panel .agent-harness-subhead {
     align-items: flex-start;
-    gap: 8px;
+    gap: 3px;
+    margin-bottom: 2px;
 }
 
 .agent-assistant-profile-panel .agent-harness-subhead strong {
-    font-size: 0.82rem;
+    font-size: 0.76rem;
+    color: #1e293b;
 }
 
 .agent-assistant-profile-panel .agent-harness-subhead span {
     max-width: 620px;
-    font-size: 0.7rem;
-    line-height: 1.4;
+    font-size: 0.65rem;
+    line-height: 1.35;
+    color: #64748b;
 }
 
+/* 身份偏好：左右 2 列布局 */
 .agent-assistant-profile-panel .agent-profile-card--identity .agent-harness-form-grid {
-    grid-template-columns: minmax(150px, 1fr) minmax(260px, 1.65fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr);
-    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 8px;
 }
 
+/* 工作习惯：三列并排 */
 .agent-assistant-profile-panel .agent-profile-card--work .agent-harness-form-grid {
-    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
 }
 
 .agent-assistant-profile-panel .agent-profile-card label {
-    gap: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
 }
 
 .agent-assistant-profile-panel .agent-profile-card label > span {
     color: #334155;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-assistant-profile-panel .form-input {
@@ -2105,24 +2237,28 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 .agent-assistant-profile-panel input.form-input,
 .agent-assistant-profile-panel select.form-input {
-    min-height: 38px;
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 0 8px !important;
+    font-size: 0.74rem !important;
+    border-radius: 5px !important;
 }
 
 .agent-assistant-profile-panel .form-input:focus {
     border-color: rgba(16, 163, 127, 0.68);
-    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.11);
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
 }
 
 .agent-assistant-profile-panel #agent-profile-work-habits,
 .agent-assistant-profile-panel #agent-profile-tools,
 .agent-assistant-profile-panel #agent-profile-tasks {
-    height: 94px !important;
-    min-height: 94px !important;
-    max-height: 180px !important;
-    padding: 9px 10px !important;
-    border-radius: 8px !important;
-    font-size: 0.72rem !important;
-    line-height: 1.5 !important;
+    height: 52px !important;
+    min-height: 52px !important;
+    max-height: 120px !important;
+    padding: 5px 7px !important;
+    border-radius: 5px !important;
+    font-size: 0.7rem !important;
+    line-height: 1.35 !important;
     resize: vertical;
 }
 
@@ -2135,8 +2271,8 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 12px 15px;
+    gap: 10px;
+    padding: 7px 10px;
     cursor: pointer;
     list-style: none;
     color: #334155;
@@ -2149,7 +2285,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 .agent-profile-card--advanced > summary::after {
     content: '⌄';
     color: #64748b;
-    font-size: 1rem;
+    font-size: 0.9rem;
     line-height: 1;
     transition: transform 0.16s ease;
 }
@@ -2165,64 +2301,73 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 .agent-profile-card--advanced > summary span {
     display: grid;
-    gap: 2px;
+    gap: 1px;
 }
 
 .agent-profile-card--advanced > summary strong {
     color: #334155;
-    font-size: 0.76rem;
+    font-size: 0.72rem;
 }
 
 .agent-profile-card--advanced > summary small {
     color: #64748b;
-    font-size: 0.67rem;
+    font-size: 0.64rem;
     font-weight: 400;
 }
 
 .agent-profile-card--advanced > label {
     display: grid;
-    gap: 6px;
-    padding: 14px 15px 15px;
+    gap: 4px;
+    padding: 8px 10px 10px;
 }
 
 .agent-assistant-profile-panel #agent-profile-preferences {
-    height: 104px !important;
-    min-height: 104px !important;
-    max-height: 220px !important;
-    padding: 10px !important;
-    border-radius: 8px !important;
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 140px !important;
+    padding: 6px 8px !important;
+    font-size: 0.7rem !important;
+    border-radius: 5px !important;
     resize: vertical;
 }
 
 .agent-assistant-profile-actions,
 .agent-assistant-memory-actions {
+    display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    padding-top: 2px;
+    gap: 6px;
+    padding-top: 0;
+    margin-top: auto;
 }
 
 .agent-assistant-profile-actions .btn-primary,
-.agent-assistant-memory-actions .btn-primary {
-    min-width: 88px;
+.agent-assistant-profile-actions .btn-secondary,
+.agent-assistant-memory-actions .btn-primary,
+.agent-assistant-memory-actions .btn-secondary {
+    height: 28px !important;
+    padding: 0 12px !important;
+    font-size: 0.74rem !important;
+    border-radius: 6px !important;
+    min-width: 72px;
 }
 
+/* 右栏：记忆与隐私卡片网格 */
 .agent-assistant-memory-panel .agent-governance-cards {
-    display: grid;
-    grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .agent-assistant-memory-panel .agent-governance-card {
-    gap: 12px;
-    padding: 15px;
-    border-color: rgba(148, 163, 184, 0.2);
-    border-radius: 11px;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
     background: #ffffff;
 }
 
 .agent-assistant-memory-panel .agent-governance-card--capture {
-    grid-column: 1 / -1;
-    padding: 14px 16px;
+    padding: 7px 11px;
     border-color: rgba(16, 163, 127, 0.2);
     background: linear-gradient(100deg, #ecfdf5, #f8fffc 62%, #ffffff);
 }
@@ -2236,31 +2381,36 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 }
 
 .agent-assistant-memory-panel .agent-governance-card-title strong {
-    font-size: 0.82rem;
+    font-size: 0.76rem;
+    color: #1e293b;
 }
 
 .agent-assistant-memory-panel .agent-governance-card-title span {
     max-width: 700px;
-    font-size: 0.7rem;
-    line-height: 1.45;
+    font-size: 0.65rem;
+    line-height: 1.3;
+    color: #64748b;
 }
 
 .agent-assistant-memory-panel .agent-harness-switch-label {
-    transform: scale(1.06);
+    transform: scale(0.92);
     transform-origin: right center;
 }
 
+/* 禁止自动保存分类：2x2 紧凑网格 */
 .agent-assistant-memory-panel .agent-memory-chips-grid {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
     margin: 0;
 }
 
 .agent-assistant-memory-panel .agent-memory-chip {
     align-items: center;
-    gap: 9px;
-    padding: 10px 11px;
-    border-radius: 8px;
+    gap: 7px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
 }
 
 .agent-assistant-memory-panel .agent-memory-chip:has(input:checked) {
@@ -2269,56 +2419,95 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 }
 
 .agent-assistant-memory-panel .agent-memory-chip .chip-content {
-    gap: 3px;
+    gap: 1px;
 }
 
 .agent-assistant-memory-panel .agent-memory-chip .chip-content strong {
-    font-size: 0.76rem;
+    font-size: 0.72rem;
 }
 
 .agent-assistant-memory-panel .agent-memory-chip .chip-content span {
-    font-size: 0.68rem;
-    line-height: 1.35;
+    font-size: 0.62rem;
+    line-height: 1.2;
 }
 
+/* 治理安全机制：2x2 紧凑网格 */
 .agent-assistant-memory-panel .agent-governance-security-grid {
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
     margin: 0;
 }
 
 .agent-assistant-memory-panel .security-feature-item {
-    gap: 9px;
-    min-height: 82px;
-    padding: 10px;
-    border-radius: 8px;
+    gap: 6px;
+    min-height: auto;
+    padding: 6px 8px;
+    border-radius: 6px;
 }
 
 .agent-assistant-memory-panel .security-feature-item .feature-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    flex: 0 0 22px;
+}
+
+.agent-assistant-memory-panel .security-feature-item .feature-icon svg {
+    width: 13px;
+    height: 13px;
 }
 
 .agent-assistant-memory-panel .security-feature-item .feature-text strong {
-    font-size: 0.74rem;
+    font-size: 0.7rem;
 }
 
 .agent-assistant-memory-panel .security-feature-item .feature-text span {
-    font-size: 0.66rem;
-    line-height: 1.35;
+    font-size: 0.62rem;
+    line-height: 1.2;
 }
 
-@media (max-width: 1120px) {
-    .agent-assistant-profile-panel .agent-profile-card--identity .agent-harness-form-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+.agent-profile-wizard-panel {
+    margin-top: 6px;
+    padding: 10px 12px;
+    gap: 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(16, 163, 127, 0.25);
+    background: #f0fdf8;
+}
+.agent-profile-wizard-panel .agent-harness-subhead strong {
+    font-size: 0.76rem;
+}
+.agent-profile-wizard-panel .agent-harness-subhead span {
+    font-size: 0.65rem;
+}
+.agent-profile-wizard-panel input.form-input,
+.agent-profile-wizard-panel select.form-input {
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 0 8px !important;
+    font-size: 0.74rem !important;
+}
+.agent-profile-wizard-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+}
+.agent-profile-wizard-foot .btn-primary,
+.agent-profile-wizard-foot .btn-secondary {
+    height: 28px !important;
+    padding: 0 10px !important;
+    font-size: 0.74rem !important;
+}
 
-    .agent-assistant-memory-panel .agent-governance-cards {
+@media (max-width: 1100px) {
+    .agent-assistant-workbench-grid {
         grid-template-columns: 1fr;
     }
 
-    .agent-assistant-memory-panel .agent-governance-card--capture {
-        grid-column: auto;
+    .agent-assistant-profile-panel .agent-profile-card--work .agent-harness-form-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2333,13 +2522,13 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
     .agent-assistant-profile-panel,
     .agent-assistant-memory-panel {
-        gap: 14px;
-        padding: 14px;
+        gap: 8px;
+        padding: 10px;
     }
 
     .agent-assistant-profile-hero {
         grid-template-columns: auto minmax(0, 1fr);
-        gap: 10px;
+        gap: 8px;
     }
 
     .agent-assistant-profile-points {
@@ -2351,7 +2540,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
         grid-template-columns: 1fr;
     }
 
-    .agent-assistant-profile-panel .agent-profile-card--work .agent-harness-form-grid {
+    .agent-assistant-memory-panel .agent-memory-chips-grid {
         grid-template-columns: 1fr;
     }
 
