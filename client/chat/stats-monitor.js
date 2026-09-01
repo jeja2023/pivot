@@ -17,7 +17,9 @@ window.loadOpsSummary = function(options = {}) {
         }
         const summary = await summaryRes.json().catch(() => ({}));
         const trend = trendRes?.ok ? (await trendRes.json().catch(() => [])) : [];
-        renderMonitorEndpointLists(summary.modelEndpoints || {});
+        const endpointCard = document.getElementById('ops-endpoint-list')?.closest('.stat-card');
+        if (endpointCard) endpointCard.classList.toggle('hidden', !!summary.isPersonal);
+        if (!summary.isPersonal) renderMonitorEndpointLists(summary.modelEndpoints || {});
         const formatSize = (bytes) => {
             const v = Number(bytes) || 0;
             if (v > 1024**3) return `${(v / 1024**3).toFixed(1)} GB`;

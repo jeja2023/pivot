@@ -57,19 +57,68 @@
         return '手动触发';
     };
 
-    function openGoalModal() {
+    function openGoalModal(goal = null) {
         const modal = document.getElementById('agent-goal-modal');
         if (!modal) return;
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
         const notice = document.getElementById('agent-goal-token-notice');
         if (notice) { notice.textContent = ''; notice.classList.add('hidden'); }
+
+        const titleEl = document.getElementById('agent-goal-modal-title');
+        const descEl = document.getElementById('agent-goal-modal-desc');
+        const editIdInput = document.getElementById('agent-goal-edit-id');
+        const submitBtn = document.getElementById('agent-goal-submit');
+
+        if (goal) {
+            if (titleEl) titleEl.textContent = '编辑持续目标';
+            if (descEl) descEl.textContent = '修改自主 Agent 持续目标的目标描述与触发参数';
+            if (editIdInput) editIdInput.value = goal.id;
+            if (submitBtn) submitBtn.textContent = '保存修改';
+
+            const titleInput = document.getElementById('agent-goal-title');
+            const goalInput = document.getElementById('agent-goal-goal');
+            const triggerSelect = document.getElementById('agent-goal-trigger');
+            if (titleInput) titleInput.value = goal.title || '';
+            if (goalInput) goalInput.value = goal.goal || '';
+            const spec = goal.triggerSpec || {};
+            const type = spec.type || spec.trigger_type || 'timer';
+            if (triggerSelect) {
+                triggerSelect.value = type;
+                triggerSelect.dispatchEvent(new Event('change'));
+            }
+            if (type === 'timer') {
+                const timeInput = document.getElementById('agent-goal-time');
+                if (timeInput) timeInput.value = spec.timeOfDay || spec.time || '09:00';
+            } else if (type === 'file') {
+                const dirInput = document.getElementById('agent-goal-directory');
+                if (dirInput) dirInput.value = spec.directory || '';
+            } else if (type === 'database') {
+                const queryInput = document.getElementById('agent-goal-query');
+                if (queryInput) queryInput.value = spec.query || '';
+            }
+        } else {
+            if (titleEl) titleEl.textContent = '新建持续目标';
+            if (descEl) descEl.textContent = '配置由定时调度或外部事件源自动触发的自主 Agent 持续目标';
+            if (editIdInput) editIdInput.value = '';
+            if (submitBtn) submitBtn.textContent = '保存持续目标';
+            document.getElementById('agent-goal-editor')?.reset();
+            const triggerSelect = document.getElementById('agent-goal-trigger');
+            if (triggerSelect) {
+                triggerSelect.value = 'timer';
+                triggerSelect.dispatchEvent(new Event('change'));
+            }
+        }
+
         setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
     }
 
     function closeGoalModal() {
         const modal = document.getElementById('agent-goal-modal');
         if (modal) { modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
+        const editIdInput = document.getElementById('agent-goal-edit-id');
+        if (editIdInput) editIdInput.value = '';
+        document.getElementById('agent-goal-editor')?.reset();
     }
 
     function renderAgentControlPlane() {
@@ -100,7 +149,15 @@
             const startIndex = (currentPage - 1) * limit;
             const pageGoals = state.goals.slice(startIndex, startIndex + limit);
 
-            setMarkup(goalsPanel, state.goals.length ? `<div class="agent-goal-list">${pageGoals.map(goal => `<article class="agent-goal-card-item ${goal.status === 'active' ? 'is-active' : 'is-paused'}"><div class="agent-goal-card-main"><div class="agent-goal-card-head"><span class="agent-harness-status-pill ${goal.status === 'active' ? 'is-active' : 'is-inactive'}">${goal.status === 'active' ? '● 运行中' : goal.status === 'paused' ? '○ 已暂停' : goal.status}</span><strong class="agent-goal-card-title">${escape(goal.title)}</strong><span class="agent-goal-trigger-badge">${escape(formatGoalTrigger(goal.triggerSpec))}</span></div><p class="agent-goal-card-body">${escape(shortText(goal.goal, 160))}</p></div><div class="agent-goal-card-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
+            const goalStatusBadge = (status) => {
+                if (status === 'active') return `<span class="agent-inbox-type-badge badge-run">● 运行中</span>`;
+                if (status === 'paused') return `<span class="agent-inbox-type-badge badge-event">○ 已暂停</span>`;
+                return `<span class="agent-inbox-type-badge badge-event">${escape(status)}</span>`;
+            };
+            setMarkup(goalsPanel, state.goals.length
+                ? `<div class="agent-goal-table-wrap"><table class="agent-goal-table"><thead><tr><th style="width:52px" class="text-center">序号</th><th style="width:90px" class="text-center">状态</th><th style="width:170px">目标名称</th><th style="width:120px">触发方式</th><th>目标内容</th><th style="width:170px" class="text-center">操作</th></tr></thead><tbody>${pageGoals.map((goal, index) => `<tr><td class="text-center">${startIndex + index + 1}</td><td class="text-center">${goalStatusBadge(goal.status)}</td><td title="${escapeAttr(goal.title)}">${escape(shortText(goal.title, 24))}</td><td>${escape(formatGoalTrigger(goal.triggerSpec))}</td><td title="${escapeAttr(goal.goal || '')}">${escape(shortText(goal.goal || '-', 80))}</td><td class="text-center"><div class="agent-goal-table-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="edit" data-agent-goal-id="${escapeAttr(goal.id)}">编辑</button><button type="button" class="btn-danger btn-xs" data-agent-goal-action="delete" data-agent-goal-id="${escapeAttr(goal.id)}">删除</button></div></td></tr>`).join('')}</tbody></table></div>`
+                : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
+
 
             const paginationContainer = document.getElementById('agent-goals-pagination');
             if (paginationContainer) {
@@ -152,7 +209,11 @@
             }
         }
         if (channelsPanel) {
-            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">Webhook</option><option value="im">企业 IM (企微/钉钉/飞书)</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="目标地址 / 接收人"></label></div><div class="agent-channel-form-row"><label class="modal-form-field"><span>凭据引用 (可选)</span><input id="agent-channel-credential" class="form-input" placeholder="例如 secret_key"></label><label class="modal-form-field"><span>受控 endpoint (可选)</span><input id="agent-channel-endpoint" class="form-input" placeholder="网关 endpoint"></label></div><div class="agent-channel-form-actions"><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${state.channels.length ? `<div class="agent-channel-list">${state.channels.map(channel => `<article class="agent-control-item"><div><strong>${escape(channel.channelType)} · ${escape(channel.channelKey)}</strong><small>${escape(channel.credentialRef || '未绑定外部凭据')} · ${escape(channel.status)}</small></div><div class="agent-control-item-meta"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(channel.id)}">测试</button></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card">暂无活跃外部通知渠道</div>'}`);
+            const chStatusBadge = (s) => s === 'active' ? `<span class="agent-inbox-type-badge badge-run">● 活跃</span>` : s === 'error' ? `<span class="agent-inbox-type-badge badge-approval">✕ 异常</span>` : `<span class="agent-inbox-type-badge badge-event">○ 停用</span>`;
+            const chListHtml = state.channels.length
+                ? `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:100px">渠道类型</th><th>目标地址 / 用户标识</th><th style="width:130px">凭据引用</th><th style="width:80px" class="tc">状态</th><th style="width:60px" class="tc">操作</th></tr></thead><tbody>${state.channels.map((ch, i) => `<tr><td class="tc">${i + 1}</td><td>${escape(ch.channelType)}</td><td title="${escapeAttr(ch.channelKey)}">${escape(ch.channelKey)}</td><td class="mono">${escape(ch.credentialRef || '—')}</td><td class="tc">${chStatusBadge(ch.status)}</td><td class="tc"><div class="aht-actions"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(ch.id)}">测试</button></div></td></tr>`).join('')}</tbody></table></div>`
+                : '<div class="agent-harness-empty-card">暂无活跃外部通知渠道</div>';
+            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">Webhook</option><option value="im">企业 IM (企微/钉钉/飞书)</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="Webhook URL 或接收人标识"></label><label class="modal-form-field"><span>凭据引用 (可选)</span><input id="agent-channel-credential" class="form-input" placeholder="secret_key 等凭据别名"></label><label class="modal-form-field"><span>网关 Endpoint (可选)</span><input id="agent-channel-endpoint" class="form-input" placeholder="自定义 endpoint"></label></div><div class="agent-channel-form-actions"><span class="agent-channel-form-hint">填写类型与目标地址后点击添加</span><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${chListHtml}`);
         }
         if (reliabilityPanel) {
             const page = Math.max(1, Number(state.reliabilityPage || 1));
@@ -164,7 +225,9 @@
             const startIndex = (currentPage - 1) * limit;
             const pageSignals = state.reliability.slice(startIndex, startIndex + limit);
 
-            setMarkup(reliabilityPanel, state.reliability.length ? `<div class="agent-reliability-list">${pageSignals.map(signal => `<article class="agent-control-item"><div><strong>${escape(signal.toolName)}</strong><small>${escape(`${signal.sampleCount} 个执行样本 · ${Math.round(signal.score * 100)} 分`)}</small></div><div class="agent-control-item-meta"><span class="agent-harness-status-pill ${signal.confidence > 0 ? 'is-active' : 'is-idle'}">${signal.confidence > 0 ? '置信度高' : '样本积累中'}</span></div></article>`).join('')}</div>` : '<div class="agent-harness-empty-card"><strong>暂无工具可靠性样本</strong><span>随智能体任务执行自动记录各工具调用稳定性</span></div>');
+            setMarkup(reliabilityPanel, state.reliability.length
+                ? `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th>工具名称</th><th style="width:90px" class="tc">样本数</th><th style="width:90px" class="tc">可靠性分</th><th style="width:100px" class="tc">置信度</th></tr></thead><tbody>${pageSignals.map((sig, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(sig.toolName)}">${escape(sig.toolName)}</td><td class="tc">${escape(sig.sampleCount)}</td><td class="tc">${Math.round(sig.score * 100)}</td><td class="tc">${sig.confidence > 0 ? `<span class="agent-inbox-type-badge badge-run">置信度高</span>` : `<span class="agent-inbox-type-badge badge-event">积累中</span>`}</td></tr>`).join('')}</tbody></table></div>`
+                : '<div class="agent-harness-empty-card"><strong>暂无工具可靠性样本</strong><span>随智能体任务执行自动记录各工具调用稳定性</span></div>');
 
             const paginationContainer = document.getElementById('agent-reliability-pagination');
             if (paginationContainer) {
@@ -214,26 +277,62 @@
 
     async function saveAgentGoal(event) {
         event.preventDefault();
+        const editId = document.getElementById('agent-goal-edit-id')?.value;
         const triggerType = document.getElementById('agent-goal-trigger')?.value || 'timer';
         const triggerSpec = triggerType === 'timer' ? { type: 'timer', frequency: 'daily', timeOfDay: document.getElementById('agent-goal-time')?.value || '09:00' } : triggerType === 'file' ? { type: 'file', directory: document.getElementById('agent-goal-directory')?.value || '' } : triggerType === 'database' ? { type: 'database', query: document.getElementById('agent-goal-query')?.value || '' } : { type: triggerType };
+        const payload = {
+            title: document.getElementById('agent-goal-title')?.value,
+            goal: document.getElementById('agent-goal-goal')?.value,
+            triggerSpec
+        };
+
         try {
-            const response = await apiJson(`${API_BASE}/agents/goals`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, triggerSpec })
-            });
-            const tokenNotice = document.getElementById('agent-goal-token-notice');
-            if (tokenNotice && response.token) {
-                tokenNotice.textContent = `Webhook 令牌（仅展示一次，请妥善保存）：${response.token}`;
-                tokenNotice.classList.remove('hidden');
-            } else { closeGoalModal(); document.getElementById('agent-goal-editor')?.reset(); }
-            if (typeof showToast === 'function') showToast('持续目标已成功创建', 'success');
-            setNotice('持续目标已创建。', 'success');
+            if (editId) {
+                await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(editId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                closeGoalModal();
+                if (typeof showToast === 'function') showToast('持续目标已成功修改', 'success');
+                setNotice('持续目标已修改。', 'success');
+            } else {
+                const response = await apiJson(`${API_BASE}/agents/goals`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const tokenNotice = document.getElementById('agent-goal-token-notice');
+                if (tokenNotice && response.token) {
+                    tokenNotice.textContent = `Webhook 令牌（仅展示一次，请妥善保存）：${response.token}`;
+                    tokenNotice.classList.remove('hidden');
+                } else {
+                    closeGoalModal();
+                }
+                if (typeof showToast === 'function') showToast('持续目标已成功创建', 'success');
+                setNotice('持续目标已创建。', 'success');
+            }
             await loadControlPlane();
         } catch (error) {
-            if (typeof showToast === 'function') showToast(error.message || '持续目标创建失败', 'error');
-            setNotice(error.message || '持续目标创建失败。', 'error');
+            const actionName = editId ? '修改' : '创建';
+            if (typeof showToast === 'function') showToast(error.message || `持续目标${actionName}失败`, 'error');
+            setNotice(error.message || `持续目标${actionName}失败。`, 'error');
         }
     }
+
+    async function deleteAgentGoal(id) {
+        if (!confirm('确定要删除该持续目标吗？删除后将终止相关的自动化触发')) return;
+        try {
+            await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            if (typeof showToast === 'function') showToast('持续目标已成功删除', 'success');
+            setNotice('持续目标已删除。', 'success');
+            await loadControlPlane();
+        } catch (error) {
+            if (typeof showToast === 'function') showToast(error.message || '删除持续目标失败', 'error');
+            setNotice(error.message || '删除持续目标失败。', 'error');
+        }
+    }
+
 
     async function changeAgentGoal(id, action) {
         try { await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(id)}/${action}`, { method: 'POST' }); await loadControlPlane(); } catch (error) { setNotice(error.message || '持续目标操作失败。', 'error'); }
@@ -283,11 +382,12 @@
         state.skillsPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageSkills = state.skills.slice(startIndex, startIndex + limit);
         const userId = String(getCurrentUser()?.id || '');
-        setMarkup(list, pageSkills.map(skill => {
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:140px">技能名称</th><th style="width:56px" class="tc">范围</th><th style="width:70px" class="tc">状态</th><th style="width:120px" class="mono">包名 · 版本</th><th>说明</th><th style="width:90px" class="tc">更新时间</th><th style="width:100px" class="tc">操作</th></tr></thead><tbody>${pageSkills.map((skill, i) => {
             const own = String(skill.user_id || '') === userId, status = String(skill.status || '').toLowerCase();
             const scopeLabel = ({ user: '个人', shared: '共享', global: '全局' })[skill.scope] || skill.scope || '个人';
-            return `<article class="agent-harness-item ${status === 'disabled' ? 'is-disabled' : ''}"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(skill.title || skill.name)}</strong><span class="agent-harness-badge">${escape(scopeLabel)}</span><span class="agent-harness-status-pill ${status === 'enabled' ? 'is-active' : 'is-inactive'}">${escape(status === 'enabled' ? '已启用' : '已停用')}</span></div><span class="agent-harness-item-id">${escape(skill.name || '')} · v${escape(skill.version || '')}</span><small>${escape(shortText(skill.description || '未填写说明', 180))}${skill.release ? ` · ${escape(skill.release.rollout_scope || 'personal')} ${Number(skill.release.rollout_percent || 100)}%` : ' · 未发布'}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(skill.updated_at))}</span>${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></article>`;
-        }).join(''));
+            const statusBadge = status === 'enabled' ? `<span class="agent-inbox-type-badge badge-run">已启用</span>` : `<span class="agent-inbox-type-badge badge-event">已停用</span>`;
+            return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(skill.description || '')}">${escape(shortText(skill.description || '未填写说明', 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
+        }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
@@ -384,7 +484,7 @@
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.packsPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pagePacks = state.packs.slice(startIndex, startIndex + limit);
-        setMarkup(list, pagePacks.map(pack => `<article class="agent-harness-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(pack.id || '运行资源')}</strong><span class="agent-harness-badge">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</span></div><span class="agent-harness-item-id">版本 v${escape(pack.version || '1.0.0')} · ${escape(String(pack.size || 0))} 字节</span><small>完整性摘要 ${escape(shortText(pack.sha256 || pack.digest || '-', 28))}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(pack.installedAt || pack.installed_at))}</span></div></article>`).join(''));
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th>包 ID</th><th style="width:80px" class="tc">类型</th><th style="width:80px" class="tc">版本</th><th style="width:90px" class="tc">大小(字节)</th><th style="width:150px" class="mono">SHA256 摘要</th><th style="width:110px" class="tc">安装时间</th></tr></thead><tbody>${pagePacks.map((pack, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(pack.id || '')}">${escape(pack.id || '运行资源')}</td><td class="tc">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</td><td class="tc mono">v${escape(pack.version || '1.0.0')}</td><td class="tc">${escape(String(pack.size || 0))}</td><td class="mono" title="${escapeAttr(pack.sha256 || pack.digest || '')}">${escape(shortText(pack.sha256 || pack.digest || '—', 20))}</td><td class="tc">${escape(formatDate(pack.installedAt || pack.installed_at))}</td></tr>`).join('')}</tbody></table></div>`);
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.packsPage = newPage; renderPacks(); } });
@@ -432,18 +532,18 @@
         if (!list) return;
         if (!state.residents.length) {
             if (paginationContainer) paginationContainer.replaceChildren();
-            setMarkup(list, '<div class="agent-harness-empty-card agent-harness-empty-card--wide"><strong>当前暂无活跃的常驻实例</strong><span>自主任务或复杂会话启用环境复用后，常驻实例将在此处展示运行租约、命中次数与生命周期状态。</span></div>');
+            setMarkup(list, '<div class="agent-harness-empty-card agent-harness-empty-card--wide"><svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg><strong>当前暂无活跃的常驻实例</strong><span>自主任务或复杂会话启用环境复用后，常驻实例将在此处展示运行租约、命中次数与生命周期状态。</span></div>');
             return;
         }
         const page = Math.max(1, Number(state.residentsPage || 1)), limit = Math.max(1, Number(state.residentsLimit || 8)), total = state.residents.length;
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.residentsPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageResidents = state.residents.slice(startIndex, startIndex + limit);
-        setMarkup(list, pageResidents.map(item => {
+        const residentStatusBadge = (s) => s === 'active' ? `<span class="agent-inbox-type-badge badge-run">活跃中</span>` : s === 'evicted' ? `<span class="agent-inbox-type-badge badge-approval">已驱逐</span>` : `<span class="agent-inbox-type-badge badge-event">${({ idle: '空闲中', stopped: '已停止' })[s] || s || '空闲中'}</span>`;
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:48px" class="tc">序号</th><th>实例 Key</th><th style="width:80px" class="tc">状态</th><th style="width:70px" class="tc">命中数</th><th style="width:140px" class="mono">关联运行 ID</th><th style="width:125px" class="tc">最近访问</th><th style="width:125px" class="tc">过期时间</th><th style="width:70px" class="tc">操作</th></tr></thead><tbody>${pageResidents.map((item, i) => {
             const status = String(item.status || '').toLowerCase();
-            const statusLabel = ({ active: '活跃中', idle: '空闲中', evicted: '已驱逐', stopped: '已停止' })[status] || status || '空闲中';
-            return `<article class="agent-harness-item agent-harness-item--resident"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(item.resident_key || item.resident_id)}</strong><span class="agent-harness-status-pill ${status === 'active' ? 'is-active' : 'is-idle'}">${escape(statusLabel)}</span><span class="agent-harness-badge">命中 ${escape(item.hit_count || 0)} 次</span></div><span class="agent-harness-item-id">关联运行 ${escape(item.run_id || '-')} · 上下文摘要 ${escape(shortText(item.context_hash || '-', 18))}</span></div><div class="agent-harness-item-meta"><span>最近访问 ${escape(formatDate(item.last_accessed_at))}</span><span>过期时间 ${escape(formatDate(item.expires_at))}</span><button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button></div></article>`;
-        }).join(''));
+            return `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(item.resident_key || item.resident_id)}">${escape(shortText(item.resident_key || item.resident_id, 24))}</td><td class="tc">${residentStatusBadge(status)}</td><td class="tc">${escape(item.hit_count || 0)}</td><td class="mono" title="${escapeAttr(item.run_id || '')}">${escape(shortText(item.run_id || '—', 12))}</td><td class="tc">${escape(formatDate(item.last_accessed_at))}</td><td class="tc">${escape(formatDate(item.expires_at))}</td><td class="tc"><div class="aht-actions"><button type="button" class="btn-secondary btn-xs" data-agent-harness-evict-resident="${escapeAttr(item.resident_id)}">驱逐</button></div></td></tr>`;
+        }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
@@ -592,7 +692,8 @@
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.feedbackPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageFeedback = state.feedback.slice(startIndex, startIndex + limit);
-        setMarkup(list, pageFeedback.map(item => `<article class="agent-harness-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>任务 #${escape(item.runId)}</strong><span class="agent-harness-badge ${item.outcome === 'success' ? 'badge-success' : item.outcome === 'failure' ? 'badge-error' : 'badge-neutral'}">${escape(item.outcome === 'success' ? '成功' : item.outcome === 'failure' ? '失败' : item.outcome || '反馈')}</span>${item.rating ? `<span class="agent-harness-status-pill is-active">评分: ${escape(`${item.rating}/5`)}</span>` : ''}</div><small>${escape(shortText(item.correction || item.modifiedAnswer || '未填写修正意见', 180))}</small></div><div class="agent-harness-item-meta"><span>${escape(formatDate(item.updatedAt))}</span></div></article>`).join(''));
+        const fbOutcomeBadge = (o) => o === 'success' ? `<span class="agent-inbox-type-badge badge-run">成功</span>` : o === 'failure' ? `<span class="agent-inbox-type-badge badge-approval">失败</span>` : `<span class="agent-inbox-type-badge badge-event">${escape(o || '反馈')}</span>`;
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:110px" class="tc">运行 ID</th><th style="width:80px" class="tc">结论</th><th style="width:70px" class="tc">评分</th><th>修正意见</th><th style="width:110px" class="tc">时间</th></tr></thead><tbody>${pageFeedback.map((item, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td class="tc mono" title="${escapeAttr(item.runId)}">${escape(shortText(item.runId, 10))}</td><td class="tc">${fbOutcomeBadge(item.outcome)}</td><td class="tc">${item.rating ? `${item.rating}/5` : '—'}</td><td title="${escapeAttr(item.correction || item.modifiedAnswer || '')}">${escape(shortText(item.correction || item.modifiedAnswer || '—', 80))}</td><td class="tc">${escape(formatDate(item.updatedAt))}</td></tr>`).join('')}</tbody></table></div>`);
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.feedbackPage = newPage; renderFeedback(); } });
@@ -624,7 +725,8 @@
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.proposalsPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageProposals = state.proposals.slice(startIndex, startIndex + limit);
-        setMarkup(list, pageProposals.map(item => `<article class="agent-harness-item agent-evolution-item"><div class="agent-harness-item-main"><div class="agent-harness-item-title-row"><strong>${escape(item.title || '未命名提议')}</strong><span class="agent-harness-badge">${escape(kindLabels[item.kind] || item.kind || '提议')}</span><span class="agent-harness-status-pill ${item.status === 'approved' ? 'is-active' : item.status === 'pending' ? 'is-idle' : 'is-inactive'}">${escape(statusLabels[item.status] || item.status)}</span></div><small>${escape(shortText(item.description || '无详细说明', 180))}</small><code class="agent-evolution-code-preview">${escape(shortText(jsonText(item.proposedChange), 220))}</code></div><div class="agent-harness-item-meta">${item.status === 'pending' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用此偏好</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></article>`).join(''));
+        const propStatusBadge = (s) => s === 'approved' || s === 'applied' || s === 'published' ? `<span class="agent-inbox-type-badge badge-run">${escape(statusLabels[s] || s)}</span>` : s === 'pending' || s === 'pending_review' ? `<span class="agent-inbox-type-badge badge-approval">${escape(statusLabels[s] || s)}</span>` : `<span class="agent-inbox-type-badge badge-event">${escape(statusLabels[s] || s)}</span>`;
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:160px">提议标题</th><th style="width:90px" class="tc">类型</th><th style="width:90px" class="tc">状态</th><th>说明</th><th style="width:130px" class="tc">操作</th></tr></thead><tbody>${pageProposals.map((item, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(item.title || '')}">${escape(shortText(item.title || '未命名提议', 22))}</td><td class="tc">${escape(kindLabels[item.kind] || item.kind || '提议')}</td><td class="tc">${propStatusBadge(item.status)}</td><td title="${escapeAttr(item.description || '')}">${escape(shortText(item.description || '无详细说明', 60))}</td><td class="tc"><div class="aht-actions">${item.status === 'pending' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
@@ -872,6 +974,21 @@
             });
         });
 
+        // 质量与可靠性页面内部 Tab 切换
+        document.querySelectorAll('[data-quality-tab]').forEach(button => {
+            button.addEventListener('click', () => {
+                const target = button.dataset.qualityTab;
+                document.querySelectorAll('[data-quality-tab]').forEach(b => {
+                    const active = b.dataset.qualityTab === target;
+                    b.classList.toggle('active', active);
+                    b.setAttribute('aria-selected', active ? 'true' : 'false');
+                });
+                document.querySelectorAll('[data-quality-panel]').forEach(panel => {
+                    panel.classList.toggle('hidden', panel.dataset.qualityPanel !== target);
+                });
+            });
+        });
+
         document.getElementById('agent-harness-skills-refresh')?.addEventListener('click', () => loadSkills().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-packs-refresh')?.addEventListener('click', () => loadPacks().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-refresh')?.addEventListener('click', () => loadResidents().catch(error => setNotice(error.message, 'error')));
@@ -974,7 +1091,17 @@
         });
         document.getElementById('agent-goals-panel')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-goal-action]');
-            if (button) changeAgentGoal(button.dataset.agentGoalId, button.dataset.agentGoalAction);
+            if (!button) return;
+            const action = button.dataset.agentGoalAction;
+            const id = button.dataset.agentGoalId;
+            if (action === 'edit') {
+                const goal = state.goals.find(g => String(g.id) === String(id));
+                if (goal) openGoalModal(goal);
+            } else if (action === 'delete') {
+                deleteAgentGoal(id);
+            } else {
+                changeAgentGoal(id, action);
+            }
         });
         document.getElementById('agent-channels-panel')?.addEventListener('click', event => {
             const create = event.target.closest('[data-agent-channel-create]');

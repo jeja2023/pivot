@@ -215,7 +215,12 @@ async function listAgentGoals(user, options = {}) {
     const params = [user.id, tenantId];
     const where = ['user_id = ?', '(tenant_id IS NULL OR tenant_id = ?)'];
     const status = String(options.status || '').trim();
-    if (GOAL_STATUSES.includes(status)) { where.push('status = ?'); params.push(status); }
+    if (GOAL_STATUSES.includes(status)) {
+        where.push('status = ?');
+        params.push(status);
+    } else if (options.includeDeleted !== true && status !== 'all' && status !== 'deleted') {
+        where.push("status != 'deleted'");
+    }
     const rows = await query(`SELECT * FROM agent_goals WHERE ${where.join(' AND ')} ORDER BY status, priority DESC, updated_at DESC LIMIT ?`, [...params, Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 100, 200))]);
     return rows.map(parseRow);
 }
@@ -232,7 +237,7 @@ async function createAgentGoal(user, body = {}, options = {}) {
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
     await execute(`
         INSERT INTO agent_goals (id, user_id, tenant_id, title, goal, priority, status, trigger_spec, authorization_spec, budget_spec, cooldown_seconds, max_failures, next_run_at, version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, 1, ?::timestamptz, ?::timestamptz)
     `, [id, user.id, tenantId, data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, now, now]);
     return { goal: parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [id])), token };
 }
@@ -249,7 +254,7 @@ async function updateAgentGoal(id, user, body = {}) {
     });
     const now = getBeijingTimestamp();
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
-    await execute(`UPDATE agent_goals SET title = ?, goal = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ? ELSE NULL END, updated_at = ? WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
+    await execute(`UPDATE agent_goals SET title = ?, goal = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?::timestamptz, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ?::timestamptz ELSE NULL END, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
     return parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [current.id]));
 }
 
@@ -259,7 +264,7 @@ async function setAgentGoalStatus(id, user, status) {
     if (!current) return null;
     const now = getBeijingTimestamp();
     const next = status === 'active' ? computeNextGoalRun(parseJson(current.trigger_spec, {}), now) : null;
-    await execute('UPDATE agent_goals SET status = ?, next_run_at = ?, paused_at = CASE WHEN ? = \'paused\' THEN ? ELSE paused_at END, ended_at = CASE WHEN ? IN (\'completed\', \'deleted\') THEN ? ELSE ended_at END, updated_at = ?, version = version + 1 WHERE id = ? AND user_id = ?', [status, next, status, now, status, now, now, current.id, user.id]);
+    await execute('UPDATE agent_goals SET status = ?, next_run_at = ?::timestamptz, paused_at = CASE WHEN ? = \'paused\' THEN ?::timestamptz ELSE paused_at END, ended_at = CASE WHEN ? IN (\'completed\', \'deleted\') THEN ?::timestamptz ELSE ended_at END, updated_at = ?::timestamptz, version = version + 1 WHERE id = ? AND user_id = ?', [status, next, status, now, status, now, now, current.id, user.id]);
     return parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [current.id]));
 }
 
@@ -315,7 +320,7 @@ async function runAgentGoalNow(goal, user, options = {}) {
         contextConfig: options.metadata && typeof options.metadata === 'object' ? { goalTriggerInputs: options.metadata } : undefined
     });
     const now = getBeijingTimestamp();
-    await execute('UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id]);
+    await execute('UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?', [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id]);
     try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
     return created;
 }
@@ -357,7 +362,7 @@ async function pollDatabaseGoal(row, user) {
     const run = await runAgentGoalNow(row, user, { triggerType: 'database', triggerKey: key, metadata: { [trigger.inputName || 'rows']: rows, watermark: nextWatermark, rowCount: rows.length } });
     if (!run?.deduped) {
         trigger.watermark = nextWatermark;
-        await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ? WHERE id = ?', [JSON.stringify(trigger), getBeijingTimestamp(), row.id]);
+        await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ?::timestamptz WHERE id = ?', [JSON.stringify(trigger), getBeijingTimestamp(), row.id]);
         return [run];
     }
     return [];
@@ -380,21 +385,21 @@ async function runDueAgentGoals(limit = 20) {
             const triggerType = trigger.type || 'timer';
             if (triggerType === 'file') {
                 created.push(...await pollFileGoal(row, user));
-                await execute('UPDATE agent_goals SET next_run_at = ?, updated_at = ? WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
+                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
                 continue;
             }
             if (triggerType === 'database') {
                 created.push(...await pollDatabaseGoal(row, user));
-                await execute('UPDATE agent_goals SET next_run_at = ?, updated_at = ? WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
+                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
                 continue;
             }
             const run = await runAgentGoalNow(row, user, { triggerType: 'timer', scheduledFor, triggerKey: `goal:${row.id}:${scheduledFor}`, nextRunAt: computeNextGoalRun(trigger, getBeijingTimestamp()) });
-            await execute('UPDATE agent_goals SET next_run_at = ?, failure_count = 0, last_error = \'\', updated_at = ? WHERE id = ?', [computeNextGoalRun(trigger, getBeijingTimestamp()), getBeijingTimestamp(), row.id]);
+            await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, failure_count = 0, last_error = \'\', updated_at = ?::timestamptz WHERE id = ?', [computeNextGoalRun(trigger, getBeijingTimestamp()), getBeijingTimestamp(), row.id]);
             created.push(run);
         } catch (error) {
             const failureCount = Number(row.failure_count || 0) + 1;
             const paused = failureCount >= Number(row.max_failures || 5);
-            await execute('UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN \'paused\' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = ?, updated_at = ? WHERE id = ?', [failureCount, paused, paused, String(error.message || '目标调度失败').slice(0, 1000), getBeijingTimestamp(), row.id]);
+            await execute('UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN \'paused\' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = ?, updated_at = ?::timestamptz WHERE id = ?', [failureCount, paused, paused, String(error.message || '目标调度失败').slice(0, 1000), getBeijingTimestamp(), row.id]);
             try { await createAgentNotificationCallback(row.user_id, null, paused ? 'error' : 'warning', paused ? '持续目标已熔断' : '持续目标调度失败', `${row.title}: ${error.message}`); } catch (_) {}
         }
     }
@@ -440,7 +445,7 @@ async function recordAgentGoalRunOutcome(runId, outcome) {
     const success = String(outcome || '') === 'success';
     const failures = success ? 0 : Number(goal.failure_count || 0) + 1;
     const paused = !success && failures >= Number(goal.max_failures || 5);
-    await execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ? WHERE id = ?", [failures, paused, paused, success, getBeijingTimestamp(), goal.id]);
+    await execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ?::timestamptz WHERE id = ?", [failures, paused, paused, success, getBeijingTimestamp(), goal.id]);
     return { goalId: goal.id, failureCount: failures, paused };
 }
 

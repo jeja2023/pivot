@@ -15,6 +15,7 @@
     "server/services/document-processing/jobs.js": 1167,
     "server/services/agent-approval-requests.js": 1156,
     "client/chat/agent-run-step-renderers.js": 1152,
+    "client/chat/agent-harness.js": 1125,
     "server/services/knowledge-graph.js": 1054,
     "server/routes/admin-stats.js": 1087,
     "server/services/long-term-memory/index.js": 1029

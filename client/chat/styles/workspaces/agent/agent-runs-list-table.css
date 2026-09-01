@@ -24,9 +24,25 @@
     min-width: 0;
 }
 
-.agent-history-head-actions > button {
-    flex: 0 0 auto;
-    white-space: nowrap;
+.agent-history-head-actions > button,
+.agent-history-head-actions .btn-primary,
+.agent-history-head-actions .btn-secondary,
+.agent-history-head-actions .btn-xs {
+    height: 28px !important;
+    line-height: 26px !important;
+    padding: 0 12px !important;
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+    border-radius: 6px !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: all 0.15s ease;
 }
 
 .agent-history-tools {
@@ -104,15 +120,16 @@
 .agent-runs-table td {
     height: 36px;
     min-height: 36px;
-    padding: 4px 8px;
-    border: 1px solid rgba(148, 163, 184, 0.13);
-    color: var(--text-secondary);
-    font-size: 0.78rem;
-    line-height: 1.25;
+    padding: 6px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    color: var(--text-secondary, #334155);
+    font-size: 0.74rem;
+    line-height: 1.3;
     box-sizing: border-box;
     vertical-align: middle;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .agent-runs-table th {
@@ -121,11 +138,11 @@
     z-index: 1;
     background: #f8fafc;
     color: #475569;
-    font-size: 0.68rem;
-    font-weight: 800;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-align: left;
-    text-transform: uppercase;
-    letter-spacing: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+    letter-spacing: 0.01em;
     white-space: nowrap;
 }
 
@@ -195,7 +212,9 @@
 .agent-runs-table th:nth-child(15),
 .agent-runs-table td:nth-child(15) {
     width: 140px;
-    text-align: left;
+    text-align: center;
+    padding-left: 2px;
+    padding-right: 2px;
 }
 
 .agent-runs-table tbody tr {
@@ -310,18 +329,32 @@
 .agent-run-table-actions {
     display: inline-flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 6px;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
     width: 100%;
 }
 
 .agent-run-table-actions .btn-secondary,
-.agent-run-table-actions .btn-danger-outline {
-    height: 22px;
-    padding: 0 8px;
-    border-radius: 6px;
-    font-size: 0.7rem;
+.agent-run-table-actions .btn-danger-outline,
+.agent-run-table-actions .btn-primary,
+.agent-run-table-actions .btn-xs,
+.agent-run-table-actions button {
+    height: 24px;
+    line-height: 22px;
+    padding: 0 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border-radius: 4px;
     white-space: nowrap;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: all 0.15s ease;
 }
 
 .agent-run-item {

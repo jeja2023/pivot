@@ -358,7 +358,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                         <th>总用量</th>
                         <th>创建时间</th>
                         <th>状态</th>
-                        <th>操作</th>
+                        <th class="text-center">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -402,7 +402,7 @@ async function loadAgentRuns(page = agentRunsPage) {
                 <td>
                     <span class="agent-run-status ${agentEscape(run.status)}">${agentStatusLabel(run.status)}</span>
                 </td>
-                <td>
+                <td class="text-center">
                     <div class="agent-run-table-actions">
                         <button class="btn-secondary agent-run-detail-btn" type="button" data-agent-run-detail="${agentEscape(run.id)}">详情</button>
                         <button class="btn-secondary agent-run-edit-btn" type="button" data-agent-run-edit="${agentEscape(run.id)}">编辑</button>

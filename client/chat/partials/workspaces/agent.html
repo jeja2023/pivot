@@ -19,17 +19,18 @@
             <button class="automation-primary-tab" type="button" data-automation-section="workbench" role="tab"
                 aria-controls="agent-control-plane" aria-selected="false" tabindex="-1">Agent 控制台</button>
         </div>
-        <!-- Agent 持续目标创建模态弹窗 -->
         <div id="agent-goal-modal" class="modal-overlay hidden" style="z-index: 1860;" role="dialog" aria-modal="true"
             aria-labelledby="agent-goal-modal-title" aria-hidden="true">
             <div class="modal agent-task-editor-modal agent-goal-modal-dialog">
                 <div class="agent-config-modal-head">
                     <div>
                         <h3 id="agent-goal-modal-title">新建持续目标</h3>
-                        <span>配置由定时调度或外部事件源自动触发的自主 Agent 持续目标</span>
+                        <span id="agent-goal-modal-desc">配置由定时调度或外部事件源自动触发的自主 Agent 持续目标</span>
                     </div>
                 </div>
                 <form id="agent-goal-editor" class="agent-task-editor-body agent-goal-modal-form">
+                    <!-- 编辑模式隐藏字段 -->
+                    <input type="hidden" id="agent-goal-edit-id" value="">
                     <label class="modal-form-field">
                         <span>目标名称</span>
                         <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160"
@@ -70,7 +71,7 @@
                         <span class="agent-goal-hint">后台自动监听并生成独立审计记录</span>
                         <div>
                             <button type="button" id="agent-goal-cancel" class="btn-secondary">取消</button>
-                            <button type="submit" class="btn-primary">保存持续目标</button>
+                            <button type="submit" id="agent-goal-submit" class="btn-primary">保存持续目标</button>
                         </div>
                     </div>
                 </form>
@@ -246,9 +247,9 @@
                         <p>一次性后台任务、工作流及计划执行状态。</p>
                     </div>
                     <div class="agent-history-head-actions">
-                        <button id="task-create-open-btn" class="btn-primary" type="button" aria-haspopup="dialog"
+                        <button id="task-create-open-btn" class="btn-primary btn-xs" type="button" aria-haspopup="dialog"
                             aria-controls="agent-task-editor-modal" aria-expanded="false">新建任务</button>
-                        <button id="agent-audit-btn" class="btn-secondary admin-root-only hidden">删除审计</button>
+                        <button id="agent-audit-btn" class="btn-secondary btn-xs admin-root-only hidden">删除审计</button>
                     </div>
                 </div>
                 <div class="agent-history-toolbar">
@@ -455,9 +456,16 @@
             <!-- 子视图 4：质量与可靠性大屏 (指标看板 + 评测中心 + 工具可靠性 + 闭环反馈) -->
             <div class="agent-cp-subview-pane hidden" data-agent-cp-pane="quality">
                 <div class="agent-cp-quality-layout">
-                    <!-- 左栏：运行质量与质量评测中心 -->
-                    <div class="agent-cp-quality-col agent-cp-quality-col--left">
-                        <!-- 1. 运行质量与运维指标 -->
+                    <!-- 质量页内部 Tab 导航 -->
+                    <div class="agent-cp-quality-tabs" role="tablist" aria-label="质量与可靠性模块">
+                        <button class="agent-cp-quality-tab active" type="button" data-quality-tab="metrics" role="tab" aria-selected="true">运行质量</button>
+                        <button class="agent-cp-quality-tab" type="button" data-quality-tab="eval" role="tab" aria-selected="false">评测概览</button>
+                        <button class="agent-cp-quality-tab" type="button" data-quality-tab="reliability" role="tab" aria-selected="false">工具可靠性</button>
+                        <button class="agent-cp-quality-tab" type="button" data-quality-tab="feedback" role="tab" aria-selected="false">反馈闭环</button>
+                    </div>
+
+                    <!-- Panel 1：运行质量与运维指标 -->
+                    <div class="agent-cp-quality-panel" data-quality-panel="metrics">
                         <section class="agent-cp-card" aria-labelledby="agent-quality-card-title">
                             <div class="agent-cp-card-head">
                                 <div>
@@ -469,8 +477,10 @@
                                 <div id="agent-quality-panel" class="agent-quality-panel"></div>
                             </div>
                         </section>
+                    </div>
 
-                        <!-- 2. 质量评测中心 -->
+                    <!-- Panel 2：质量评测概览 -->
+                    <div class="agent-cp-quality-panel hidden" data-quality-panel="eval">
                         <section class="agent-cp-card" aria-labelledby="agent-eval-card-title">
                             <div class="agent-cp-card-head">
                                 <div>
@@ -496,9 +506,8 @@
                         </section>
                     </div>
 
-                    <!-- 右栏：工具可靠性与结果反馈闭环 -->
-                    <div class="agent-cp-quality-col agent-cp-quality-col--right">
-                        <!-- 3. 工具调用可靠性监控 -->
+                    <!-- Panel 3：工具调用可靠性监控 -->
+                    <div class="agent-cp-quality-panel hidden" data-quality-panel="reliability">
                         <section class="agent-cp-card" aria-labelledby="agent-reliability-card-title">
                             <div class="agent-cp-card-head">
                                 <div>
@@ -511,8 +520,10 @@
                                 <div id="agent-reliability-pagination" class="pagination workspace-pagination agent-reliability-pagination"></div>
                             </div>
                         </section>
+                    </div>
 
-                        <!-- 4. 结果反馈闭环 -->
+                    <!-- Panel 4：结果反馈闭环 -->
+                    <div class="agent-cp-quality-panel hidden" data-quality-panel="feedback">
                         <section class="agent-cp-card" aria-labelledby="agent-feedback-card-title">
                             <div class="agent-cp-card-head">
                                 <div>
@@ -955,8 +966,8 @@ outputs: {}
                         </div>
                     </div>
                     <div class="agent-harness-form-actions">
-                        <button id="agent-memory-policy-save" class="btn-primary" type="button">保存治理策略</button>
-                        <button class="btn-secondary" type="button" data-memory-open>打开记忆清单</button>
+                        <button id="agent-memory-policy-save" class="btn-primary btn-xs" type="button">保存治理策略</button>
+                        <button class="btn-secondary btn-xs" type="button" data-memory-open>打开记忆清单</button>
                     </div>
                     <div id="agent-memory-policy-notice" class="agent-harness-notice" role="status" aria-live="polite">
                     </div>

@@ -97,18 +97,21 @@ test('新建评测集弹窗右上角不展示关闭按钮，由底部取消按�
     assert.match(evaluations, /agent-eval-editor-footer[\s\S]*?data-agent-eval-editor-close[\s\S]*?取消/);
 });
 
-test('质量与可靠性大屏采用左右双栏布局与紧凑指标卡片', () => {
+test('质量与可靠性大屏采用 Tab 切换布局与紧凑指标卡片', () => {
     const agent = read('client/chat/partials/workspaces/agent.html');
     const harnessCss = read('client/chat/styles/workspaces/agent/agent-harness.css');
     const evalCss = read('client/chat/styles/workspaces/agent/agent-evaluations.css');
 
-    // HTML 左右双栏结构
-    assert.match(agent, /class="agent-cp-quality-col agent-cp-quality-col--left"[\s\S]*?agent-quality-panel[\s\S]*?agent-eval-overview/);
-    assert.match(agent, /class="agent-cp-quality-col agent-cp-quality-col--right"[\s\S]*?agent-reliability-panel[\s\S]*?agent-feedback-summary/);
+    // HTML Tab 切换结构
+    assert.match(agent, /class="agent-cp-quality-tabs"[\s\S]*?data-quality-tab="metrics"[\s\S]*?data-quality-tab="eval"[\s\S]*?data-quality-tab="reliability"[\s\S]*?data-quality-tab="feedback"/);
+    assert.match(agent, /data-quality-panel="metrics"[\s\S]*?agent-quality-panel/);
+    assert.match(agent, /data-quality-panel="eval"[\s\S]*?agent-eval-overview/);
+    assert.match(agent, /data-quality-panel="reliability"[\s\S]*?agent-reliability-panel/);
+    assert.match(agent, /data-quality-panel="feedback"[\s\S]*?agent-feedback-summary/);
 
-    // CSS 双栏与紧凑网格
-    assert.match(harnessCss, /\.agent-cp-quality-layout\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
-    assert.match(harnessCss, /\.agent-cp-quality-col\s*\{[\s\S]*?flex-direction:\s*column;/);
+    // CSS Tab 导航与紧凑网格
+    assert.match(harnessCss, /\.agent-cp-quality-tabs\s*\{[\s\S]*?display:\s*inline-flex;/);
+    assert.match(harnessCss, /\.agent-cp-quality-tab\.active\s*\{[\s\S]*?color:\s*var\(--primary/);
     assert.match(harnessCss, /\.agent-quality-metrics-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
     assert.match(harnessCss, /\.agent-feedback-metrics\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
     assert.match(evalCss, /\.agent-eval-overview\s*\{[\s\S]*?grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/);
