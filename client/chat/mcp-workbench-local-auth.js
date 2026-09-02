@@ -10,11 +10,11 @@ const MCP_LOCAL_AUTH_TYPES = [
     },
     {
         type: 'local_report_dir',
-        title: '授权本机报表目录',
-        description: '选择一个本机目录，只读扫描授权范围内的报表文件。',
+        title: '授权本机文件目录',
+        description: '选择一个本机目录，只读扫描授权范围内的文件。',
         grantLabel: '选择目录',
         revokeTitle: '撤销本机目录授权',
-        revokeMessage: '确定撤销当前设备上的本机报表目录授权吗？已保存的本机目录会从桌面客户端本机配置中移除。'
+        revokeMessage: '确定撤销当前设备上的本机文件目录授权吗？已保存的本机目录会从桌面客户端本机配置中移除。'
     },
     {
         type: 'local_browser',
@@ -242,7 +242,7 @@ function mcpLocalAuthCardStatusText(status, type) {
     if (grant.authorized) return `${grant.label || '已授权资源'} · ${status.deviceName || grant.deviceName || '当前设备'}`;
     if (type === 'local_database') return '打开授权中心选择本机 SQLite 文件';
     if (type === 'local_browser') return '选择浏览器并填写允许访问的站点';
-    return '打开授权中心选择本机报表目录';
+    return '打开授权中心选择本机文件目录';
 }
 
 function mcpLocalAuthorizationDescription(status) {

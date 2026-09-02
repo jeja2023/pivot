@@ -281,7 +281,7 @@ async function loadMcpServers() {
         title: '管理本机资源授权',
         description: localToolCount
             ? `已接入 ${localToolCount} 个本机只读工具，可查看 mcp.0.* 工具。`
-            : '通过桌面客户端接入本机 SQLite、报表目录或受控浏览器自动化。',
+            : '通过桌面客户端接入本机 SQLite、文件目录或受控浏览器自动化。',
         badge: isAnyAuthorized ? '已授权' : '待授权',
         actionLabel: isAnyAuthorized ? '管理授权' : '授权',
         statusText: localToolCount

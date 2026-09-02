@@ -154,7 +154,7 @@ const mcpSourceActionCards = [
     },
     {
         type: 'local_report_dir',
-        title: '授权本机报表目录',
+        title: '授权本机文件目录',
         badge: '待授权',
         description: '只读扫描授权目录，不把本机路径当服务器路径。',
         statusText: '默认不用于定时工作流',

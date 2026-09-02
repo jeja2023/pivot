@@ -60,10 +60,10 @@ function renderMcpCredentialsSection(credentials = []) {
                     <span>${credentials.length} 个可用凭据</span>
                 </div>
                 <div class="mcp-credential-manage-actions">
-                    <button class="btn-primary" type="button" data-mcp-credential-create>
+                    <button class="btn-primary btn-xs" type="button" data-mcp-credential-create>
                         <span>新建安全凭据</span>
                     </button>
-                    <button class="btn-secondary" type="button" data-mcp-credential-open-drawer>
+                    <button class="btn-secondary btn-xs" type="button" data-mcp-credential-open-drawer>
                         <span>管理凭据抽屉</span>
                     </button>
                 </div>

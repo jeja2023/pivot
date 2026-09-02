@@ -417,21 +417,21 @@ function localBridgeReportMissingReason(tools = [], user = null, userPrompt = ''
             return reason || '当前桌面客户端缺少本机只读执行接口；请重新打包或安装包含本机执行器的新版本。';
         }
         if (debug?.status === 'authorization_unavailable') {
-            return reason || '聊天页已检测到桌面端，但没有读到可用的本机授权；请重新授权本机报表目录后再发送。';
+            return reason || '聊天页已检测到桌面端，但没有读到可用的本机授权；请重新授权本机文件目录后再发送。';
         }
         if (debug?.status === 'heartbeat_failed') {
             return `聊天页已检测到桌面端本机执行器，但心跳注册失败：${reason || '请检查登录状态和服务端接口。'}`;
         }
         if (debug?.statusAvailable === true && debug?.grants?.local_report_dir !== true) {
-            return '聊天页已读取桌面端本机授权状态，但没有报表目录授权；请在“我的电脑/管理本机资源授权”里授权报表目录。';
+            return '聊天页已读取桌面端本机授权状态，但没有文件目录授权；请在“我的电脑/管理本机资源授权”里授权文件目录。';
         }
         return '没有收到桌面端本机执行器心跳；请确认使用桌面客户端打开、工具库已开启，并重新发送消息。';
     }
     const hasReportGrant = devices.some(device => device?.grants?.local_report_dir?.authorized === true);
     if (!hasReportGrant) {
-        return '桌面端本机执行器在线，但本轮没有收到本机报表目录授权；请在“我的电脑/管理本机资源授权”里授权报表目录。';
+        return '桌面端本机执行器在线，但本轮没有收到本机文件目录授权；请在“我的电脑/管理本机资源授权”里授权文件目录。';
     }
-    return '已收到本机报表目录授权，但 mcp.0.reports.list_files 没有进入治理后的工具列表，请检查该工具是否被禁用。';
+    return '已收到本机文件目录授权，但 mcp.0.reports.list_files 没有进入治理后的工具列表，请检查该工具是否被禁用。';
 }
 
 function filterMcpToolsForChatIntent(tools, userPrompt = '') {
