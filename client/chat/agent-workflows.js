@@ -219,7 +219,7 @@ function showAutomationAssetCenter(options = {}) {
     closeAgentDagNodeDrawer();
     document.getElementById('automation-assets-view')?.classList.remove('hidden');
     document.getElementById('automation-editor-view')?.classList.add('hidden');
-    document.getElementById('automation-new-workflow-btn')?.classList.remove('hidden');
+    document.getElementById('automation-new-workflow-btn')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
     document.getElementById('automation-new-schedule-btn')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
     document.getElementById('automation-refresh-btn')?.classList.remove('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.add('hidden');
