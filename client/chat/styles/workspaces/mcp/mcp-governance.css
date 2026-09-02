@@ -517,6 +517,18 @@
     font-size: 0.72rem;
 }
 
+#mcp-tool-test-input,
+.mcp-code-editor {
+    font-family: var(--font-mono, Consolas, 'SFMono-Regular', 'Roboto Mono', Menlo, Monaco, monospace) !important;
+    font-size: 0.78rem !important;
+    line-height: 1.45 !important;
+    padding: 8px 10px !important;
+    border-radius: 6px !important;
+    tab-size: 2;
+    -moz-tab-size: 2;
+    resize: vertical;
+}
+
 .mcp-tool-test-schema-hint {
     color: var(--text-muted);
     font-size: 0.72rem;
