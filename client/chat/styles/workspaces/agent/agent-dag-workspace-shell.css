@@ -161,13 +161,17 @@
     border-radius: 6px !important;
     white-space: nowrap !important;
     box-sizing: border-box !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 4px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
     cursor: pointer;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     transition: all 0.15s ease;
+}
+
+.automation-assets-actions > button.hidden {
+    display: none !important;
 }
 
 .automation-assets-tabs {
