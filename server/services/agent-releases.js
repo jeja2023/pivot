@@ -7,7 +7,7 @@ const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
 const { publishAgentWorkflowVersion, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { getAgentEvalRun } = require('./agent-evaluations');
 const { createAgentInboxEvent } = require('./agent-inbox');
-const { getUserEnterpriseContext } = require('./enterprise-access');
+const { getPrimaryTenantId, getUserEnterpriseContext } = require('./enterprise-access');
 const { assertTenantContext, resolveTenantContext } = require('./agent-tenant-context');
 const { RELEASE_SCOPES, deriveOwnerKey, normalizeReleaseScope } = require('./agent-skill-scope');
 const {
@@ -392,6 +392,12 @@ async function publishSkillVersion(id, user, input = {}) {
     }
     const rollout = normalizeRollout(input);
     const tenant = await assertTenantContext(user);
+    if (rollout.rolloutScope !== 'personal') {
+        const candidate = await queryOne("SELECT status FROM agent_evolution_proposals WHERE artifact_version_id = ? AND tenant_id = ? AND scope = 'organization_candidate' ORDER BY created_at DESC LIMIT 1", [String(version.id), tenant.tenantId]);
+        if (candidate && candidate.status !== 'versioned_draft') {
+            throw invalid('该 Skill 是组织共享候选，必须先在候选治理流程中完成审批与验证。', 409, 'EVOLUTION_CANDIDATE_GATE_REQUIRED');
+        }
+    }
     const teamId = rollout.rolloutScope === 'team' ? await resolveReleaseTeam(user, tenant.tenantId, rollout.teamId) : null;
     const ownerKey = deriveOwnerKey({ scope: rollout.rolloutScope, userId: user.id, tenantId: tenant.tenantId, teamId });
     let automaticApproval = null;
@@ -620,7 +626,10 @@ async function resolvePublishedSkill(name, user) {
 }
 
 async function publishWorkflowRelease(workflowId, user, input = {}) {
-    const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current');
+    const tenantForAdmin = input.allowTenantAdmin === true && isTenantAdmin(user)
+        ? (input.tenantId || await getPrimaryTenantId(user.id))
+        : null;
+    const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current', { allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     if (!resolved) return null;
     let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
     if (!evaluation) {
@@ -631,11 +640,17 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
     const rollout = normalizeRollout(input);
     if (rollout.rolloutScope !== 'personal' && !isTenantAdmin(user)) throw invalid('团队或组织工作流发布需要管理员权限。', 403, 'WORKFLOW_ROLLOUT_SCOPE_FORBIDDEN');
     const tenant = await assertTenantContext(user);
-    await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', { skipRelease: true, skipEvaluationGate: input.fixedEvaluationRequired === false });
+    if (rollout.rolloutScope !== 'personal') {
+        const candidate = await queryOne("SELECT status FROM agent_evolution_proposals WHERE artifact_id = ? AND tenant_id = ? AND scope = 'organization_candidate' ORDER BY created_at DESC LIMIT 1", [String(resolved.workflow.id), tenant.tenantId]);
+        if (candidate && candidate.status !== 'versioned_draft') {
+            throw invalid('该工作流是组织共享候选，必须先在候选治理流程中完成审批与验证。', 409, 'EVOLUTION_CANDIDATE_GATE_REQUIRED');
+        }
+    }
+    await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', { skipRelease: true, skipEvaluationGate: input.fixedEvaluationRequired === false, allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     const previous = await queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1", [resolved.workflow.id]);
     const now = getBeijingTimestamp();
     const release = await queryOne(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET tenant_id = excluded.tenant_id, rollout_scope = excluded.rollout_scope, rollout_percent = excluded.rollout_percent, target_user_ids = excluded.target_user_ids, target_units = excluded.target_units, status = 'published', published_by = excluded.published_by, published_at = excluded.published_at RETURNING *`, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now]);
-    await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [resolved.version_id, now, now, resolved.workflow.id, user.id]);
+    await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [resolved.version_id, now, now, resolved.workflow.id, resolved.workflow.user_id]);
     try { await createAgentInboxEvent(user, { eventKey: `workflow.release:${release.id}`, eventType: 'release.published', sourceId: String(release.id), title: '工作流版本已发布', body: `工作流 ${resolved.workflow.name} 已进入 ${rollout.rolloutScope} 灰度。`, risk: 'medium', payload: { releaseId: release.id, workflowId: resolved.workflow.id, version: resolved.version } }); } catch (_) {}
     return release;
 }
@@ -688,7 +703,7 @@ async function listSkillReleasesForUser(user, options = {}) {
     const personalOwnerKey = `user:${Number.parseInt(user.id, 10) || 0}`;
     if (!tenant.resolvable) {
         return await withControlPlaneFallback(() => query(`
-            SELECT r.*, v.version, v.digest, v.content_digest
+            SELECT r.*, v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
             FROM agent_skill_releases r
             JOIN agent_skill_versions v ON v.id = r.skill_version_id
             WHERE r.owner_key = ? AND r.rollout_scope = 'personal'
@@ -697,7 +712,7 @@ async function listSkillReleasesForUser(user, options = {}) {
     }
     const params = [personalOwnerKey, tenant.tenantId, limit];
     const rows = await withControlPlaneFallback(() => query(`
-        SELECT r.*, v.version, v.digest, v.content_digest
+        SELECT r.*, v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
         FROM agent_skill_releases r
         JOIN agent_skill_versions v ON v.id = r.skill_version_id
         WHERE (

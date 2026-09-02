@@ -178,6 +178,8 @@ async function getAgentSkillExecutionContext(user, reference) {
             ...context,
             skillName: release.name,
             skillVersion: release.version,
+            skillTitle: release.title || context.skillId,
+            skillInstructions: String(release.instructions_md || '').slice(0, 16000),
             skillScope: release.rollout_scope,
             releaseId: release.id,
             skillVersionId: release.skill_version_id,
@@ -235,6 +237,27 @@ async function listAgentSkillsForUser(user, options = {}) {
     return rows.filter(Boolean).slice(0, 500);
 }
 
+/** Select the user's best learned personal Skill for a goal without widening permissions. */
+async function findBestPersonalSkill(user, goal, options = {}) {
+    const text = String(goal || '').trim().toLowerCase();
+    if (!text || !user?.id) return null;
+    const { listSkillReleasesForUser } = require('./agent-releases');
+    const releases = await listSkillReleasesForUser(user, { limit: 200 });
+    const ownerKey = `user:${Number(user.id)}`;
+    const terms = text.split(/[^a-z0-9\u4e00-\u9fa5]+/i).filter(item => item.length > 1).slice(0, 40);
+    const chineseBigrams = [...text.replace(/[^\u4e00-\u9fa5]/g, '')].flatMap((character, index, chars) => index < chars.length - 1 ? [`${character}${chars[index + 1]}`] : []).slice(0, 60);
+    const candidates = (releases || []).filter(release => release.owner_key === ownerKey && release.rollout_scope === 'personal' && release.status === 'published').map(release => {
+        let manifest = {};
+        try { manifest = parseSkillManifest(release.manifest_json || release.manifest_yaml || '{}'); } catch (_) {}
+        const haystack = [release.name, manifest.title, manifest.description, ...(Array.isArray(manifest.tags) ? manifest.tags : [])].join(' ').toLowerCase();
+        const matched = terms.filter(term => haystack.includes(term));
+        const bigramHits = [...new Set(chineseBigrams.filter(term => haystack.includes(term)))];
+        const score = matched.length * 2 + Math.min(bigramHits.length, 6) + (manifest.tags || []).filter(tag => text.includes(String(tag).toLowerCase())).length;
+        return { release, manifest, matched, score };
+    }).filter(item => item.score >= Number(options.minScore || 2)).sort((a, b) => b.score - a.score || String(b.release.published_at || '').localeCompare(String(a.release.published_at || '')));
+    return candidates[0]?.release || null;
+}
+
 async function disableAgentSkill(name, user) {
     // agent_skills 已降级为 release 投影，停用必须通过权威 release 状态变更，
     // 禁止直接写投影造成“目录已停用、运行时仍可解析”的双表分叉。
@@ -256,6 +279,7 @@ module.exports = {
     canonicalJson,
     buildSkillExecutionContext,
     disableAgentSkill,
+    findBestPersonalSkill,
     listAgentSkillsForUser,
     getAgentSkillExecutionContext,
     parseSkillManifest,

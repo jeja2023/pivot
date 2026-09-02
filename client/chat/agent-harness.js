@@ -1,4 +1,18 @@
 (function () {
+    let learningModulePromise = null;
+    function loadLearningModule() {
+        const current = window.Pivot?.moduleApi?.('agent.learning');
+        if (current?.load) return Promise.resolve(current);
+        if (learningModulePromise) return learningModulePromise;
+        learningModulePromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = '/chat/agent-learning.js';
+            script.onload = () => resolve(window.Pivot?.moduleApi?.('agent.learning'));
+            script.onerror = () => reject(new Error('个人学习模块加载失败。'));
+            document.head.append(script);
+        }).catch(error => { learningModulePromise = null; throw error; });
+        return learningModulePromise;
+    }
     const state = {
         skills: [], skillsPage: 1, skillsLimit: 8,
         residents: [], residentsPage: 1, residentsLimit: 8,
@@ -8,7 +22,7 @@
         inbox: [], inboxPage: 1, inboxLimit: 15,
         goals: [], goalsPage: 1, goalsLimit: 8,
         reliability: [], reliabilityPage: 1, reliabilityLimit: 6,
-        quality: null, channels: [], residentScope: 'self', diagnostics: new Map()
+        quality: null, channels: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
     };
     const escape = value => window.PivotSafeHtml?.escapeHtml
         ? window.PivotSafeHtml.escapeHtml(value)
@@ -28,6 +42,7 @@
         const text = String(value ?? '').trim();
         return text.length > max ? `${text.slice(0, max)}...` : text;
     };
+    const canReviewOrganizationExperience = () => Boolean(isAdminUser?.() || currentUser?.role === 'root' || isSuperAdminUser?.());
 
     const getInboxTypeMeta = t => ({
         approval: { label: '待审批', badgeClass: 'badge-approval' },
@@ -389,9 +404,11 @@
         const userId = String(getCurrentUser()?.id || '');
         setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:140px">技能名称</th><th style="width:56px" class="tc">范围</th><th style="width:70px" class="tc">状态</th><th style="width:120px" class="mono">包名 · 版本</th><th>说明</th><th style="width:90px" class="tc">更新时间</th><th style="width:100px" class="tc">操作</th></tr></thead><tbody>${pageSkills.map((skill, i) => {
             const own = String(skill.user_id || '') === userId, status = String(skill.status || '').toLowerCase();
+            const organizationCandidate = state.organizationCandidateByVersion.get(String(skill.versionId || skill.release?.skill_version_id || skill.id || ''));
             const scopeLabel = ({ user: '个人', shared: '共享', global: '全局' })[skill.scope] || skill.scope || '个人';
-            const statusBadge = status === 'enabled' ? `<span class="agent-inbox-type-badge badge-run">已启用</span>` : `<span class="agent-inbox-type-badge badge-event">已停用</span>`;
-            return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(skill.description || '')}">${escape(shortText(skill.description || '未填写说明', 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
+            const statusBadge = organizationCandidate ? `<span class="agent-inbox-type-badge badge-approval">组织候选</span>` : status === 'enabled' ? `<span class="agent-inbox-type-badge badge-run">已启用</span>` : `<span class="agent-inbox-type-badge badge-event">已停用</span>`;
+            const description = organizationCandidate ? `来自个人经验 · ${organizationCandidate.status === 'pending_review' ? '待管理员审批' : organizationCandidate.status === 'approved' ? '已审批，待验证' : '验证/发布中'} · ${skill.description || '脱敏受控候选'}` : skill.description || '未填写说明';
+            return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(description)}">${escape(shortText(description, 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
         }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
@@ -411,11 +428,15 @@
     }
 
     async function loadSkills() {
-        const [data, versions, releases] = await Promise.all([
+        const [data, versions, releases, candidates] = await Promise.all([
             apiJson(`${API_BASE}/agents/skills?includeDisabled=true`, { cache: 'no-store' }),
             apiJson(`${API_BASE}/agents/skills/versions?limit=100`, { cache: 'no-store' }).catch(() => ({ data: [] })),
-            apiJson(`${API_BASE}/agents/skills/releases?limit=100`, { cache: 'no-store' }).catch(() => ({ data: [] }))
+            apiJson(`${API_BASE}/agents/skills/releases?limit=100`, { cache: 'no-store' }).catch(() => ({ data: [] })),
+            canReviewOrganizationExperience() ? apiJson(`${API_BASE}/agents/evolution/proposals?limit=100`, { cache: 'no-store' }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
         ]);
+        state.organizationCandidateByVersion = new Map((Array.isArray(candidates.data) ? candidates.data : [])
+            .filter(item => item.scope === 'organization_candidate' && item.artifactType === 'skill')
+            .map(item => [String(item.artifactVersionId || ''), item]));
         const published = Array.isArray(data.data) ? data.data : [];
         const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.name) === String(version.name) && String(skill.version) === String(version.version))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'enabled' : 'draft', user_id: getCurrentUser()?.id }));
         const releaseMap = new Map((Array.isArray(releases.data) ? releases.data : []).map(release => [`${release.name}@${release.version}`, release]));
@@ -667,13 +688,16 @@
             return;
         }
         const kindLabels = { preference: '偏好调整', skill: '创建 Skill', workflow: '保存工作流' };
-        const statusLabels = { draft: '草稿', approved: '已批准', pending_review: '待验证', versioned_draft: '已验证待发布', published: '已发布', validation_failed: '验证失败', rolled_back: '已回滚', rejected: '已拒绝', pending: '待确认', applied: '已应用' };
+        const statusLabels = { draft: '草稿', approved: '已批准', pending_review: '待管理员审批', versioned_draft: '已验证待发布', published: '已发布', validation_failed: '验证失败', rolled_back: '已回滚', rejected: '已拒绝', pending: '待确认', candidate_created: '待确认', waiting_user_review: '待确认', personal_active: '个人已启用', paused: '已暂停', archived: '已归档', applied: '已应用' };
         const page = Math.max(1, Number(state.proposalsPage || 1)), limit = Math.max(1, Number(state.proposalsLimit || 8)), total = state.proposals.length;
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.proposalsPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageProposals = state.proposals.slice(startIndex, startIndex + limit);
         const propStatusBadge = (s) => s === 'approved' || s === 'applied' || s === 'published' ? `<span class="agent-inbox-type-badge badge-run">${escape(statusLabels[s] || s)}</span>` : s === 'pending' || s === 'pending_review' ? `<span class="agent-inbox-type-badge badge-approval">${escape(statusLabels[s] || s)}</span>` : `<span class="agent-inbox-type-badge badge-event">${escape(statusLabels[s] || s)}</span>`;
-        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:160px">提议标题</th><th style="width:90px" class="tc">类型</th><th style="width:90px" class="tc">状态</th><th>说明</th><th style="width:130px" class="tc">操作</th></tr></thead><tbody>${pageProposals.map((item, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(item.title || '')}">${escape(shortText(item.title || '未命名提议', 22))}</td><td class="tc">${escape(kindLabels[item.kind] || item.kind || '提议')}</td><td class="tc">${propStatusBadge(item.status)}</td><td title="${escapeAttr(item.description || '')}">${escape(shortText(item.description || '无详细说明', 60))}</td><td class="tc"><div class="aht-actions">${item.status === 'pending' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
+        const proposalDescription = item => item.scope === 'organization_candidate'
+            ? `${item.description || '组织共享候选'} · 脱敏证据：${shortText(JSON.stringify(item.evidenceSummary || {}), 80)} · 权限差异：${shortText(JSON.stringify(item.permissionDiff || {}), 50)}`
+            : item.description || '无详细说明';
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:160px">提议标题</th><th style="width:90px" class="tc">类型</th><th style="width:90px" class="tc">状态</th><th>说明</th><th style="width:130px" class="tc">操作</th></tr></thead><tbody>${pageProposals.map((item, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(item.title || '')}">${escape(shortText(item.title || '未命名提议', 22))}</td><td class="tc">${escape(kindLabels[item.kind] || item.kind || '提议')}</td><td class="tc">${propStatusBadge(item.status)}</td><td title="${escapeAttr(proposalDescription(item))}">${escape(shortText(proposalDescription(item), 100))}</td><td class="tc"><div class="aht-actions">${item.status === 'pending' || item.scope === 'organization_candidate' && item.status === 'pending_review' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
@@ -718,8 +742,10 @@
         const packs = window.Pivot?.moduleApi?.('agent.runtimePacks');
         const packsAvailable = await packs?.refreshStatus?.() || false;
         document.querySelectorAll('#agent-harness-residency-scope').forEach(el => el.classList.toggle('hidden', !isSuperAdminUser()));
+        document.querySelectorAll('[data-agent-harness-nav="evolution"]').forEach(el => { el.classList.toggle('hidden', !canReviewOrganizationExperience()); el.hidden = !canReviewOrganizationExperience(); });
         try {
-            await Promise.all([loadSkills(), ...(packsAvailable ? [packs?.load?.()] : []), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadControlPlane()]);
+            const learning = await loadLearningModule().catch(() => null);
+            await Promise.all([loadSkills(), ...(packsAvailable ? [packs?.load?.()] : []), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadControlPlane(), learning?.load?.()]);
         } catch (error) {
             setNotice(error.message || '底座数据加载失败。', 'error');
         }
@@ -906,6 +932,7 @@
         } else if (subview === 'governance') {
             loadProfile().catch(() => {});
             loadSkills().catch(() => {});
+            loadLearningModule().then(learning => learning?.load?.()).catch(() => {});
             const packs = window.Pivot?.moduleApi?.('agent.runtimePacks');
             packs?.refreshStatus?.().then(enabled => { if (enabled) return packs.load(); return null; }).catch(() => {});
             loadMemoryPolicy().catch(() => {});
@@ -917,13 +944,22 @@
             button.addEventListener('click', () => {
                 const target = button.dataset.agentHarnessNav;
                 if (target === 'packs' && !window.Pivot?.moduleApi?.('agent.runtimePacks')?.isAvailable?.()) return;
-                if (['residency', 'evolution'].includes(target)) return;
-                document.querySelectorAll('[data-agent-harness-nav]').forEach(b => { const active = b.dataset.agentHarnessNav === target; b.classList.toggle('active', active); b.setAttribute('aria-selected', active ? 'true' : 'false'); });
+                const hiddenByDefaultNavs = ['residency'];
+                if (hiddenByDefaultNavs.includes(target) && target === 'residency') return;
+                document.querySelectorAll('[data-agent-harness-nav]').forEach(b => {
+                    const active = b.dataset.agentHarnessNav === target;
+                    b.classList.toggle('active', active);
+                    b.setAttribute('aria-selected', active ? 'true' : 'false');
+                });
                 document.querySelectorAll('[data-agent-harness-section]').forEach(sec => {
-                    const active = sec.dataset.agentHarnessSection === target || (target === 'profile' && sec.dataset.agentHarnessSection === 'governance');
+                    const active = sec.dataset.agentHarnessSection === target;
                     sec.classList.toggle('hidden', !active);
                     if (sec.dataset.agentHarnessSection === 'packs') sec.hidden = !active;
                 });
+                if (target === 'learning') loadLearningModule().then(l => l?.load?.()).catch(() => {});
+                if (target === 'skills') loadSkills().catch(() => {});
+                if (target === 'memory') { loadMemoryPolicy().catch(() => {}); loadLearningModule().then(l => l?.loadMemories?.()).catch(() => {}); }
+                if (target === 'profile') loadProfile().catch(() => {});
             });
         });
 
@@ -969,9 +1005,8 @@
         document.getElementById('agent-profile-save')?.addEventListener('click', saveProfile);
         document.getElementById('agent-profile-wizard')?.addEventListener('click', openProfileWizard);
         document.getElementById('agent-wizard-save')?.addEventListener('click', saveProfileWizard);
-        document.getElementById('agent-memory-policy-refresh')?.addEventListener('click', () => loadMemoryPolicy().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-memory-policy-refresh')?.addEventListener('click', () => { loadMemoryPolicy().catch(error => setNotice(error.message, 'error')); loadLearningModule().then(l => l?.loadMemories?.()).catch(error => setNotice(error.message, 'error')); });
         document.getElementById('agent-memory-policy-save')?.addEventListener('click', saveMemoryPolicy);
-        document.querySelector('[data-memory-open]')?.addEventListener('click', event => { event.preventDefault(); window.showMainWorkspace?.('settings'); window.switchTab?.('memories'); });
         document.getElementById('agent-feedback-refresh')?.addEventListener('click', () => loadFeedback().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-evolution-refresh')?.addEventListener('click', () => loadProposals().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-evolution-create')?.addEventListener('click', createProposal);

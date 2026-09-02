@@ -18,6 +18,7 @@ const {
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
 const { getPrimaryTenantId } = require('./enterprise-access');
+const { isTenantAdmin } = require('./agent-skill-access');
 
 /**
  * 工作流访问判定：所有者可读写，共享工作流按部门范围只读可运行。
@@ -241,11 +242,13 @@ async function listAgentWorkflowShareOptions(user) {
     return await listShareTargets(user);
 }
 
-async function resolveAgentWorkflowVersion(workflowId, user, version = 'current') {
+async function resolveAgentWorkflowVersion(workflowId, user, version = 'current', options = {}) {
     const normalizedWorkflowId = Number.parseInt(workflowId, 10);
     if (!normalizedWorkflowId) return null;
     const workflow = await workflowRepository.getWorkflowVersionContext(normalizedWorkflowId);
-    if (!assertWorkflowAccess(workflow, user, false)) return null;
+    const tenantOverride = options.allowTenantAdmin === true && isTenantAdmin(user)
+        && options.tenantId && Number(options.tenantId) === Number(await getPrimaryTenantId(workflow.user_id));
+    if (!assertWorkflowAccess(workflow, user, false) && !tenantOverride) return null;
     const isOwner = Number(workflow.user_id) === Number(user.id);
     let requested = String(version || 'current').trim().toLowerCase();
     // 共享使用者只能运行发布版：默认的 current 自动落到 published，
@@ -410,8 +413,12 @@ async function updateAgentWorkflowSharing(workflowId, user, body = {}) {
 }
 
 async function publishAgentWorkflowVersion(workflowId, user, version = 'current', options = {}) {
-    if (!await findOwnedWorkflowRow(workflowId, user)) return null;
-    const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current');
+    const sourceWorkflow = await findWorkflowRow(workflowId);
+    const ownerAllowed = sourceWorkflow && assertWorkflowAccess(sourceWorkflow, user, true);
+    const tenantOverride = options.allowTenantAdmin === true && isTenantAdmin(user)
+        && options.tenantId && Number(options.tenantId) === Number(await getPrimaryTenantId(sourceWorkflow?.user_id));
+    if (!ownerAllowed && !tenantOverride) return null;
+    const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current', { allowTenantAdmin: tenantOverride, tenantId: options.tenantId });
     if (!resolved) return null;
     const topology = inspectDagTopology(resolved.dagSpec);
     if (topology.blockers.length) {
@@ -455,14 +462,14 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
         UPDATE agent_workflows
         SET published_version_id = ?, published_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [resolved.version_id, now, now, resolved.workflow.id, user.id]);
+    `, [resolved.version_id, now, now, resolved.workflow.id, resolved.workflow.user_id]);
     if (options.skipRelease !== true) try {
         await execute(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, published_by, published_at) VALUES (?, ?, 'personal', 100, '[]'::jsonb, '[]'::jsonb, 'published', ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET status = 'published', rollout_percent = 100, published_by = excluded.published_by, published_at = excluded.published_at`, [resolved.workflow.id, resolved.version_id, user.id, now]);
     } catch (releaseError) {
         releaseError.code = releaseError.code || 'WORKFLOW_RELEASE_RECORD_FAILED';
         throw releaseError;
     }
-    return await getAgentWorkflowForUser(resolved.workflow.id, user);
+    return await getAgentWorkflowForUser(resolved.workflow.id, user) || { ...resolved.workflow, published_version_id: resolved.version_id, published_version: resolved.version };
 }
 
 async function listAgentWorkflowVersions(workflowId, user) {

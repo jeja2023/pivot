@@ -29,6 +29,7 @@ async function deleteAgentPersonalData(user, _options = {}) {
         result.memories = memory;
         for (const [name, sql] of Object.entries({
             feedback: 'DELETE FROM agent_feedback WHERE user_id = ?',
+            learningJobs: 'DELETE FROM agent_learning_jobs WHERE user_id = ?',
             proposals: 'DELETE FROM agent_evolution_proposals WHERE user_id = ?',
             goals: "UPDATE agent_goals SET status = 'deleted', ended_at = ?, updated_at = ? WHERE user_id = ? AND status != 'deleted'",
             channels: "UPDATE agent_channel_bindings SET status = 'deleted', credential_ref = '', config = '{}'::jsonb, updated_at = ? WHERE user_id = ? AND status != 'deleted'",

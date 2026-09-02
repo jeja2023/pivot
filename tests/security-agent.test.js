@@ -829,7 +829,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.doesNotMatch(agentPartial, /id="agent-open-dag-btn"/);
     assert.match(dagPartial, /返回资产中心/);
     assert.match(source, /window\.createWorkflowDraftFromAgentRun/);
-    assert.match(source, /workflow-draft/);
+    assert.match(source, /kind: 'workflow'/);
     assert.match(source, /data-agent-create-workflow-draft/);
     assert.match(source, /pendingAgentWorkflowDraft/);
     assert.match(source, /自主任务已转为工作流草稿/);
@@ -2128,5 +2128,4 @@ test('listRuns enriches model_name for standard, DAG node models, and pure tool 
     assert.ok(run3);
     assert.equal(run3.model_name, '无需模型 (纯工具)');
 });
-
 

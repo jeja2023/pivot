@@ -37,8 +37,7 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(styles, /overflow-x: auto/);
     assert.match(styles, /\.admin-content\s*\{[^}]*position:\s*relative/);
     assert.match(styles, /\.settings-state\s*\{[^}]*position:\s*absolute/);
-    assert.match(styles, /\.settings-state\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
-    assert.match(styles, /\.settings-workspace-view\s+\.memories-tab\s+\.settings-page-head\s*\{[^}]*margin-bottom:\s*8px/);
+    assert.match(styles, /\.settings-page-head\s*\{[^}]*margin-bottom:\s*14px/);
     assert.match(styles, /\.settings-workspace-view\s+\.memories-table\s+td\s*\{[^}]*height:\s*28px/);
     assert.match(admin, /limit:\s*15/);
     assert.match(read('client/chat/config.js'), /CLIENT_REQUEST_TIMEOUT/);

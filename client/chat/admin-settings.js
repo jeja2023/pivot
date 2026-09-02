@@ -151,6 +151,7 @@ async function updateMemoryStatus(memoryId, status) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '记忆状态更新失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
     return data;
 }
 
@@ -158,6 +159,7 @@ async function deleteMemory(memoryId) {
     const res = await apiFetch(`${API_BASE}/memories/${memoryId}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '记忆删除失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
     return data;
 }
 
@@ -233,6 +235,7 @@ async function saveMemory(memoryId, payload) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '记忆保存失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
     return data;
 }
 

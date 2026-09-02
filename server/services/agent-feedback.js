@@ -57,7 +57,7 @@ function serializeFeedback(row) {
 }
 
 async function getOwnedRun(userId, runId) {
-    return queryOne('SELECT id, user_id, status, final_answer, error_message FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [String(runId || ''), userId]);
+    return queryOne('SELECT id, user_id, status, final_answer, error_message, retry_count FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [String(runId || ''), userId]);
 }
 
 async function recordAgentFeedback(user, runId, input = {}, options = {}) {
@@ -94,7 +94,20 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
             updated_at = excluded.updated_at
         RETURNING *
     `, [userId, tenantId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
-    return serializeFeedback(row);
+    const serialized = serializeFeedback(row);
+    try {
+        const { enqueueAgentLearningJob } = require('./agent-learning');
+        const shouldLearn = feedback.source === 'runtime'
+            ? ['success', 'partial'].includes(feedback.outcome)
+            : Boolean(feedback.correction || feedback.modifiedAnswer);
+        const trigger = feedback.source === 'runtime'
+            ? (Number(run.retry_count || 0) > 0 ? 'recovery' : 'success')
+            : 'correction';
+        if (shouldLearn) await enqueueAgentLearningJob(user, normalizedRunId, trigger, { kind: feedback.source === 'runtime' ? '' : 'skill' });
+    } catch (_) {
+        // 学习是后台增强能力，不能阻断任务结果或用户反馈写入。
+    }
+    return serialized;
 }
 
 async function recordAgentRunOutcome(runId, status, options = {}) {

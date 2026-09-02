@@ -3,9 +3,10 @@ const { asyncHandler } = require('../http');
 const { queryOne } = require('../db/client');
 const { getAgentProfile, listAgentProfileVersions, restoreAgentProfileVersion, updateAgentProfile } = require('../services/agent-profile');
 const {
-    applyEvolutionProposal, createEvolutionProposal, decideEvolutionProposal,
+    activatePersonalEvolutionProposal, applyEvolutionProposal, createEvolutionProposal, decideEvolutionProposal,
     listEvolutionProposals, listEvolutionValidations, publishEvolutionProposal,
-    rollbackEvolutionProposal, validateEvolutionProposal
+    rollbackEvolutionProposal, validateEvolutionProposal, pauseEvolutionProposal,
+    restoreEvolutionProposal, revokePersonalEvolutionProposal, createEvolutionShareRequest
 } = require('../services/agent-evolution');
 const { getAgentFeedbackSummary, listAgentFeedback } = require('../services/agent-feedback');
 const { createAgentGoal, listAgentGoals, runAgentGoalNow, setAgentGoalStatus, updateAgentGoal } = require('../services/agent-goals');
@@ -30,6 +31,10 @@ const {
 const { getAgentQualityDashboard } = require('../services/agent-quality');
 const { getAgentImprovementSuggestions } = require('../services/agent-improvement-suggestions');
 const { getAgentGovernanceStatus } = require('../services/agent-governance-status');
+const {
+    getAgentLearningOverview, getAgentLearningSettings, learnAgentRun,
+    listAgentLearningJobs, updateAgentLearningSettings
+} = require('../services/agent-learning');
 
 function allowedSkillPermissions() {
     const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -60,6 +65,21 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         const result = await deleteAgentPersonalData(req.user, { reason: req.body?.reason || 'user_request' });
         writeLog(req, '删除个人 Agent 数据', result);
         res.json({ success: true, result });
+    }));
+
+    router.get('/agents/learning/overview', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, ...(await getAgentLearningOverview(req.user)) });
+    }));
+    router.get('/agents/learning/jobs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, data: await listAgentLearningJobs(req.user, { limit: req.query.limit }) });
+    }));
+    router.get('/agents/learning/settings', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, settings: await getAgentLearningSettings(req.user.id) });
+    }));
+    router.put('/agents/learning/settings', authMiddleware, asyncHandler(async (req, res) => {
+        const settings = await updateAgentLearningSettings(req.user.id, req.body || {});
+        writeLog(req, '更新 Agent 个人学习设置', JSON.stringify(settings));
+        res.json({ success: true, settings });
     }));
 
     router.get('/agents/goals', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentGoals(req.user, { status: req.query.status, limit: req.query.limit }) })));
@@ -160,10 +180,16 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (result.applied) writeLog(req, '应用 Agent 进化提议', `提议ID: ${req.params.id}`);
         res.json({ success: true, ...result });
     }));
+    router.post('/agents/evolution/proposals/:id/activate', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await activatePersonalEvolutionProposal(req.user, req.params.id);
+        if (!result) return res.status(404).json({ error: '个人经验不存在或无权启用。' });
+        if (result.activated) writeLog(req, '启用 Agent 个人经验', `提议ID: ${req.params.id}，发布ID: ${result.release?.id || '-'}`);
+        res.json({ success: true, ...result });
+    }));
     router.get('/agents/evolution/proposals/:id/validations', authMiddleware, asyncHandler(async (req, res) => {
-        const proposal = await queryOne('SELECT id FROM agent_evolution_proposals WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-        if (!proposal) return res.status(404).json({ error: '进化提议不存在或无权访问。' });
-        res.json({ success: true, data: await listEvolutionValidations(req.user, req.params.id) });
+        const data = await listEvolutionValidations(req.user, req.params.id);
+        if (!data.length) return res.status(404).json({ error: '进化提议不存在或无权访问。' });
+        res.json({ success: true, data });
     }));
     router.post('/agents/evolution/proposals/:id/validate', authMiddleware, asyncHandler(async (req, res) => {
         const result = await validateEvolutionProposal(req.user, req.params.id, req.body || {});
@@ -182,6 +208,30 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (!result) return res.status(404).json({ error: '进化提议不存在或无权回滚。' });
         writeLog(req, '回滚 Agent 进化版本', `提议ID: ${req.params.id}，回滚目标: ${result.rollbackTargetId || '无'}`);
         res.json({ success: true, ...result });
+    }));
+    router.post('/agents/evolution/proposals/:id/pause', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await pauseEvolutionProposal(req.user, req.params.id);
+        if (!proposal) return res.status(404).json({ error: '个人经验不存在、未启用或无权暂停。' });
+        writeLog(req, '暂停 Agent 个人经验', `提议ID: ${proposal.id}`);
+        res.json({ success: true, proposal });
+    }));
+    router.post('/agents/evolution/proposals/:id/restore', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await restoreEvolutionProposal(req.user, req.params.id);
+        if (!proposal) return res.status(404).json({ error: '个人经验不存在、未暂停或无权恢复。' });
+        writeLog(req, '恢复 Agent 个人经验', `提议ID: ${proposal.id}`);
+        res.json({ success: true, proposal });
+    }));
+    router.post('/agents/evolution/proposals/:id/revoke', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await revokePersonalEvolutionProposal(req.user, req.params.id);
+        if (!proposal) return res.status(404).json({ error: '个人经验不存在、未启用或无权撤销。' });
+        writeLog(req, '撤销 Agent 个人经验', `提议ID: ${proposal.id}`);
+        res.json({ success: true, proposal });
+    }));
+    router.post('/agents/evolution/proposals/:id/share-request', authMiddleware, asyncHandler(async (req, res) => {
+        const proposal = await createEvolutionShareRequest(req.user, req.params.id);
+        if (!proposal) return res.status(404).json({ error: '个人经验不存在、未启用或无权共享。' });
+        writeLog(req, '申请共享 Agent 个人经验', `提议ID: ${proposal.id}`);
+        res.status(201).json({ success: true, proposal });
     }));
     router.get('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, data: await listSkillVersionsForUser(req.user, { limit: req.query.limit }) });
@@ -306,6 +356,12 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         const proposal = await createEvolutionProposal(req.user, { ...(req.body || {}), sourceRunId: req.params.id });
         writeLog(req, '从 Agent 任务创建进化提议', `任务ID: ${req.params.id}，提议ID: ${proposal.id}`);
         res.status(201).json({ success: true, proposal });
+    }));
+    router.post('/agents/runs/:id/learn', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await learnAgentRun(req.user, req.params.id, { kind: req.body?.kind, title: req.body?.title, runNow: req.body?.runNow !== false });
+        if (!result.scheduled && result.reason === 'run_not_found') return res.status(404).json({ error: '任务不存在或无权学习。' });
+        writeLog(req, '从 Agent 任务学习个人经验', `任务ID: ${req.params.id}，学习任务: ${result.job?.id || result.job?.id || '-'}`);
+        res.status(202).json({ success: true, ...result });
     }));
     return router;
 }

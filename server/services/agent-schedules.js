@@ -36,14 +36,16 @@ let pollingTriggerRunner = null;
 let approvalTimeoutRunner = null;
 let proactiveGoalRunner = null;
 let channelDeliveryRunner = null;
+let learningJobRunner = null;
 
-function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts, runProactiveGoals, runChannelDeliveries } = {}) {
+function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts, runProactiveGoals, runChannelDeliveries, runLearningJobs } = {}) {
     if (typeof createAgentRun === 'function') createAgentRunCallback = createAgentRun;
     if (typeof createAgentNotification === 'function') createAgentNotificationCallback = createAgentNotification;
     if (typeof runPollingTriggers === 'function') pollingTriggerRunner = runPollingTriggers;
     if (typeof runApprovalTimeouts === 'function') approvalTimeoutRunner = runApprovalTimeouts;
     if (typeof runProactiveGoals === 'function') proactiveGoalRunner = runProactiveGoals;
     if (typeof runChannelDeliveries === 'function') channelDeliveryRunner = runChannelDeliveries;
+    if (typeof runLearningJobs === 'function') learningJobRunner = runLearningJobs;
 }
 
 function parseBeijingDate(value) {
@@ -442,6 +444,7 @@ function startAgentScheduleRunner() {
                 ['审批超时处理执行失败', () => approvalTimeoutRunner?.()],
                 ['持续目标调度执行失败', () => proactiveGoalRunner?.()],
                 ['渠道投递执行失败', () => channelDeliveryRunner?.()]
+                ,['个人学习任务执行失败', () => learningJobRunner?.()]
             ];
             const results = await Promise.allSettled(jobs.map(([, job]) => Promise.resolve().then(job)));
             results.forEach((result, index) => {

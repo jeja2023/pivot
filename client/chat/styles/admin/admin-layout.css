@@ -536,32 +536,27 @@
 .settings-workspace-view #tab-content-ops .trend-card canvas {
     min-height: 260px;
 }
-.settings-workspace-view .memories-tab .settings-page-head {
-    margin-bottom: 8px !important;
-}
-.settings-workspace-view .memories-tab .settings-page-head h3 {
-    font-size: 1.02rem;
-    margin-bottom: 2px !important;
-}
-.settings-workspace-view .memories-tab .settings-page-head p {
-    font-size: 0.74rem;
-    line-height: 1.3;
-}
 .settings-workspace-view .memories-tab .memory-toolbar {
-    gap: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 .settings-workspace-view .memories-tab .memory-toggle {
-    height: 28px;
-    padding: 0 8px;
-    font-size: 0.76rem;
-    border-radius: 6px;
+    height: 34px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
 }
 .settings-workspace-view .memories-tab .memory-toolbar .btn-secondary {
-    height: 28px;
-    min-height: 28px;
-    padding: 0 10px;
-    font-size: 0.76rem;
-    border-radius: 6px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0 14px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border-radius: 7px;
 }
 .settings-workspace-view .memory-governance-shell {
     display: flex;

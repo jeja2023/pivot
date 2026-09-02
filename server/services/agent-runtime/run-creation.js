@@ -34,7 +34,8 @@ const {
     AGENT_TOOL_TIMEOUT_MS,
     createRunId
 } = require('./runtime-env');
-const { getAgentSkillExecutionContext } = require('../agent-skills');
+const { getAgentSkillExecutionContext, findBestPersonalSkill } = require('../agent-skills');
+const { getAgentLearningSettings } = require('../agent-learning');
 
 /**
  * 调用方不得自报的 Skill 约束键。
@@ -45,7 +46,7 @@ const { getAgentSkillExecutionContext } = require('../agent-skills');
 const SKILL_METADATA_KEYS = Object.freeze([
     'skillConstraints', 'skillPermissions', 'skillCapabilities', 'skillTools',
     'skillContextPresent', 'skillLegacyUnrestricted', 'skillLegacyUnrestrictedUntil',
-    'skillReleaseId', 'skillVersionId', 'skillVersion'
+    'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto'
 ]);
 const { normalizeTaskBudget } = require('../agent-budget');
 const {
@@ -150,11 +151,19 @@ function createAgentRunFactory(deps = {}) {
         const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
         let resourceReservation = null;
         let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
-        const skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
+        let skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
         // Skill 约束是 PEP 的判定输入，而 metadata 是调用方可写字段。
         // 因此先剥离调用方自报的全部 skill 相关键（尤其是 skillConstraints 与 legacy 兜底标记），
         // 再只由服务端解析结果写回，避免通过请求体关掉默认拒绝语义。
         SKILL_METADATA_KEYS.forEach(key => { delete runMetadata[key]; });
+        const learningSettings = await getAgentLearningSettings(user.id).catch(() => ({ autoLearning: true }));
+        if (!skillReference && learningSettings.autoLearning !== false && runMetadata.autoPersonalSkill !== false && runMode !== 'dag') {
+            const learned = await findBestPersonalSkill(user, goal, { minScore: 2 });
+            if (learned?.name) {
+                skillReference = learned.name;
+                runMetadata.learnedSkillAuto = true;
+            }
+        }
         if (skillReference) {
             const skillContext = await getAgentSkillExecutionContext(user, skillReference);
             runMetadata.skillId = skillContext.skillId;
@@ -166,6 +175,8 @@ function createAgentRunFactory(deps = {}) {
             runMetadata.skillReleaseId = skillContext.releaseId || null;
             runMetadata.skillVersionId = skillContext.skillVersionId || null;
             runMetadata.skillConstraints = skillContext.skillConstraints;
+            runMetadata.skillTitle = skillContext.skillTitle || skillContext.skillName;
+            runMetadata.skillInstructions = skillContext.skillInstructions || '';
         }
         const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'

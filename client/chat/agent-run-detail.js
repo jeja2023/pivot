@@ -201,6 +201,7 @@ function agentRunActionMarkup(run = {}, options = {}) {
         secondary.push(`<button type="button" class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">${Number(checkpoints.total || 0) ? '从检查点继续' : '从断点继续'}</button>`);
     }
     if (canCreateWorkflowDraft) secondary.push(`<button type="button" class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
+    if (!isPreview && !isActive && (run.final_answer || run.error_message)) secondary.push(`<button type="button" class="btn-secondary" data-agent-learn-from-run="${agentEscape(run.id)}">记住这个方法</button>`);
     if (!isPreview && !isActive) secondary.push(`<button type="button" class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
     return `${actions.join('')}${secondary.length ? `<details class="agent-run-more-actions"><summary class="btn-secondary">更多操作</summary><div>${secondary.join('')}</div></details>` : ''}`;
 }
@@ -493,6 +494,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.rerunAgentRun(run.id));
     container.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.resumeAgentRun(run.id));
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.createWorkflowDraftFromAgentRun(run.id));
+    container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
     container.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
         btn.addEventListener('click', () => window.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });

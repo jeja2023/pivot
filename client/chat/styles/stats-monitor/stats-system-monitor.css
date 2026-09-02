@@ -13,7 +13,6 @@
 }
 .settings-workspace-view .admin-content.is-monitor-tab-active {
     overflow-y: hidden;
-    padding: 18px;
 }
 .settings-workspace-view .admin-content.is-monitor-tab-active .settings-scale-canvas {
     height: var(--settings-canvas-height, auto);
@@ -24,16 +23,6 @@
     justify-content: flex-end;
     gap: 8px;
     flex-wrap: wrap;
-}
-.settings-workspace-view #tab-content-monitor .settings-page-head {
-    margin-bottom: 0 !important;
-}
-.settings-workspace-view #tab-content-monitor .settings-page-head h3 {
-    font-size: 1rem;
-}
-.settings-workspace-view #tab-content-monitor .settings-page-head p {
-    font-size: 0.72rem;
-    line-height: 1.35;
 }
 .monitor-updated-at {
     margin: 0;
@@ -444,9 +433,6 @@
 }
 #tab-content-monitor .table-container { max-height: 380px; }
 @media (max-height: 900px) and (min-width: 1181px) {
-    .settings-workspace-view .admin-content.is-monitor-tab-active {
-        padding: 14px;
-    }
     #tab-content-monitor {
         gap: 7px;
     }

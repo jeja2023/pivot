@@ -141,6 +141,7 @@ const {
     setAgentGoalStatus,
     updateAgentGoal
 } = require('../agent-goals');
+const { maybeArchiveStalePersonalExperiences, processAgentLearningJobs } = require('../agent-learning');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { createAgentNotificationFactory } = require('./notifications');
@@ -194,6 +195,14 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
     if (entries.length === 0) return 0;
     const statusEntry = entries.find(([key]) => key === 'status');
     const targetStatus = statusEntry ? statusEntry[1] : null;
+    const finalAnswerEntry = entries.find(([key]) => key === 'final_answer');
+    if (finalAnswerEntry && typeof finalAnswerEntry[1] === 'string' && !finalAnswerEntry[1].startsWith('已使用个人经验：')) {
+        const metadataRow = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId]);
+        const metadata = getRunMetadata(metadataRow || {});
+        if (metadata.learnedSkillAuto === true && String(metadata.skillTitle || '').trim()) {
+            finalAnswerEntry[1] = `已使用个人经验：${String(metadata.skillTitle).trim().slice(0, 120)}\n\n${finalAnswerEntry[1]}`;
+        }
+    }
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         let currentStatus = '';
@@ -946,8 +955,8 @@ async function runAgent(runId, user) {
         }
         const chatBridge = runtimeMetadata.chatBridge;
         const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null }
-            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null };
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '' }
+            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '' };
         if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
             const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
             toolList = toolList.map(tool => {
@@ -1087,6 +1096,8 @@ async function runAgent(runId, user) {
                 ...(parseJsonObject(run.context_config) || {}),
                 agentProfileContext: getRunMetadata(run).agentProfileContext || '',
                 feedbackSignals: getRunMetadata(run).feedbackSignals || null,
+                skillTitle: getRunMetadata(run).skillTitle || '',
+                skillInstructions: getRunMetadata(run).skillInstructions || '',
                 chatHistory: plannerChatHistory,
                 chatAgent: runtimeMetadata.chatBridge
                     ? { ...runtimeMetadata.chatBridge, currentMessage: plannerCurrentMessage }
@@ -1779,7 +1790,12 @@ configureAgentSchedules({
     }),
     runApprovalTimeouts,
     runProactiveGoals: () => runDueAgentGoals(),
-    runChannelDeliveries: () => dispatchChannelDeliveries(50, { onDeadLetter: delivery => createAgentInboxEvent({ id: delivery.user_id }, { eventKey: `channel.dead_letter:${delivery.id}`, eventType: 'channel.dead_letter', sourceId: String(delivery.id), title: '渠道消息进入死信', body: delivery.last_error || '渠道投递失败次数超过上限。', risk: 'high', payload: { deliveryId: delivery.id, attempts: delivery.attempts } }) })
+    runChannelDeliveries: () => dispatchChannelDeliveries(50, { onDeadLetter: delivery => createAgentInboxEvent({ id: delivery.user_id }, { eventKey: `channel.dead_letter:${delivery.id}`, eventType: 'channel.dead_letter', sourceId: String(delivery.id), title: '渠道消息进入死信', body: delivery.last_error || '渠道投递失败次数超过上限。', risk: 'high', payload: { deliveryId: delivery.id, attempts: delivery.attempts } }) }),
+    runLearningJobs: async () => {
+        const jobs = await processAgentLearningJobs({ limit: 2 });
+        await maybeArchiveStalePersonalExperiences();
+        return jobs;
+    }
 });
 
 configureAgentGoals({

@@ -194,17 +194,39 @@ window.resumeAgentRun = async function(runId) {
 
 window.createWorkflowDraftFromAgentRun = async function(runId) {
     try {
-        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/workflow-draft`, { method: 'POST' });
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/learn`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'workflow', runNow: true })
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '生成工作流草稿失败');
-        pendingAgentWorkflowDraft = data.draft || null;
-        showToast('已转为工作流草稿，请检查节点后保存或发布。', 'success');
+        const result = data.job?.resultSummary || {};
+        if (!result.workflowId) throw new Error('本次任务没有足够的安全步骤可生成工作流草稿。');
+        showToast('已生成受控工作流草稿，请预览、评测后再发布。', 'success');
         closeAgentRunDetailModal();
-        await window.openAgentDagWorkbench?.({ draft: pendingAgentWorkflowDraft });
+        await window.openAgentDagWorkbench?.({ workflowId: result.workflowId, editor: true });
     } catch (e) {
         showToast(e.message || '生成工作流草稿失败', 'error');
     }
 };
+
+async function learnFromAgentRun(runId) {
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/learn`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runNow: true })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '学习任务创建失败');
+        const result = data.job?.resultSummary || {};
+        showToast(result.autoActivated ? '已学习并启用个人经验。' : result.proposalId ? '已生成个人经验，可在“我的智能助手”中确认。' : '已记录本次经验。', 'success');
+        window.Pivot?.moduleApi?.('agent.harness')?.loadAgentHarnessManagement?.().catch(() => {});
+        return data;
+    } catch (error) {
+        showToast(error.message || '学习任务创建失败', 'error');
+        return null;
+    }
+}
+
+window.Pivot?.exposeModule?.('agent.runActions', { learnFromAgentRun }, ['learnFromAgentRun']);
 
 window.rerunAgentDagNode = async function(runId, nodeId = '') {
     await runAgentActionOnce(`dag-rerun:${runId}:${nodeId}`, runId, '[data-agent-dag-rerun-node]', async () => {
