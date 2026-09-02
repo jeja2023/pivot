@@ -69,8 +69,13 @@ function normalizeToolContract(definition = {}) {
         side_effect: sideEffect,
         concurrency: normalizeToolConcurrency(definition.concurrency ?? definition.concurrency_mode, sideEffect),
         cancellable: definition.cancellable === undefined ? !sideEffect : Boolean(definition.cancellable),
-        network: Boolean(definition.network || /(?:http|web|browser|network)/i.test(String(definition.name || '')) || source === 'mcp' && definition.network !== false),
+        // 本机浏览器连接器由桌面端按已授权 Origin 执行网络校验；服务端本身不出网，
+        // 因而允许可信调用方显式声明 network:false，避免错误套用任务级服务器网络白名单。
+        network: definition.network === false
+            ? false
+            : Boolean(definition.network || /(?:http|web|browser|network)/i.test(String(definition.name || '')) || source === 'mcp'),
         approval_required: Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.alwaysRequiresApproval) || riskLevel >= 5),
+        localBrowserConnector: definition.localBrowserConnector === true,
         timeout: {
             default_seconds: Math.max(Number(timeout.default_seconds ?? timeout.defaultSeconds ?? definition.timeoutSeconds ?? 30) || 30, 1),
             max_seconds: Math.max(Number(timeout.max_seconds ?? timeout.maxSeconds ?? 120) || 120, 1)

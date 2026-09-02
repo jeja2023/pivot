@@ -115,6 +115,10 @@ async function runLocalBrowserTask({ toolName, input, grant, profileRoot, confir
             }
             return { ...base, action: 'screenshot', screenshot: { mimeType: 'image/png', sha256: crypto.createHash('sha256').update(screenshot).digest('hex'), dataBase64: screenshot.toString('base64') } };
         }
+        await confirmLocalBrowserAction(confirmAction, {
+            kind: 'inspect', title: '确认读取本机网页内容', url: page.url(), browser: browser.label,
+            message: '页面正文将作为本次任务结果回传。请确认当前页面不含不应分享的内容。'
+        });
         return { ...base, action: 'inspected', text: String(await page.locator('body').innerText()).slice(0, MAX_TEXT_CHARS) };
     } finally {
         await closeAgentBrowserContext(context);

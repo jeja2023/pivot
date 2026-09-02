@@ -761,6 +761,8 @@ ipcMain.handle('pivot-local-connector:status', async (event) => {
     return getLocalMcpConnector().status();
 });
 
+ipcMain.handle('pivot-local-connector:sync', async event => { assertTrustedIpcSender(event); return getLocalMcpConnector().sync(); });
+
 ipcMain.handle('pivot-delivery:status', async (event) => {
     assertTrustedIpcSender(event);
     return getDeliveryController().status();

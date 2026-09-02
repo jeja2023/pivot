@@ -101,10 +101,39 @@ async function getConnectorGrant(user, deviceId, grantType) {
     `, [deviceId, tenant.tenantId, user.id, grantType]);
 }
 
+async function resolveConnectorDeviceId(user, requestedDeviceId, grantType) {
+    const rawDeviceId = String(requestedDeviceId || '').trim();
+    const explicit = rawDeviceId ? normalizeDeviceId(rawDeviceId) : '';
+    if (explicit) return explicit;
+    const candidates = (await listConnectorDevices(user))
+        .filter(device => device?.grants?.[grantType]?.authorized === true)
+        .map(device => String(device.deviceId || ''))
+        .filter(Boolean);
+    if (candidates.length === 1) return candidates[0];
+    if (!candidates.length) throw connectorError('当前没有在线且已授权的本机设备。', 'LOCAL_CONNECTOR_GRANT_REQUIRED', 403);
+    throw connectorError('存在多个本机设备，请在工具调用中明确选择 deviceId。', 'LOCAL_CONNECTOR_DEVICE_REQUIRED', 409);
+}
+
+async function resolveConnectorDeviceForTool(user, toolName, input = {}, grantType) {
+    if (grantType !== 'local_browser') return resolveConnectorDeviceId(user, input.deviceId || input.device_id, grantType);
+    const rawDeviceId = String(input.deviceId || input.device_id || '').trim();
+    const explicit = rawDeviceId ? normalizeDeviceId(rawDeviceId) : '';
+    if (explicit) return explicit;
+    const browserId = String(input.browserId || input.browser_id || '').trim();
+    if (browserId) {
+        const candidates = (await listConnectorDevices(user))
+            .filter(device => device?.grants?.local_browser?.authorized === true)
+            .filter(device => (device.grants.local_browser?.browsers || []).some(browser => String(browser?.id || '') === browserId));
+        if (candidates.length === 1) return String(candidates[0].deviceId);
+        if (candidates.length > 1) throw connectorError('该浏览器标识对应多个本机设备，请明确选择 deviceId。', 'LOCAL_CONNECTOR_DEVICE_REQUIRED', 409);
+    }
+    return resolveConnectorDeviceId(user, '', grantType);
+}
+
 async function createConnectorTask(toolName, input = {}, user) {
     const grantType = grantTypeForTool(toolName);
     if (!grantType) throw connectorError('不支持的本机连接器工具。', 'LOCAL_CONNECTOR_TOOL_INVALID');
-    const deviceId = normalizeDeviceId(input.deviceId || input.device_id);
+    const deviceId = await resolveConnectorDeviceForTool(user, toolName, input, grantType);
     await loadActiveDevice(user.id, deviceId);
     const grant = await getConnectorGrant(user, deviceId, grantType);
     if (!grant) throw connectorError('指定设备未授权该本机只读资源。', 'LOCAL_CONNECTOR_GRANT_REQUIRED', 403);
@@ -195,4 +224,4 @@ async function executeConnectorTool(toolName, input, user) {
     return await waitForConnectorTask(task.id, user);
 }
 
-module.exports = { claimConnectorTask, completeConnectorTask, connectorClaimPayload, connectorHeartbeatPayload, connectorResultPayload, createConnectorTask, executeConnectorTool, heartbeatConnector, listConnectorDevices, reclaimConnectorTasks, waitForConnectorTask };
+module.exports = { claimConnectorTask, completeConnectorTask, connectorClaimPayload, connectorHeartbeatPayload, connectorResultPayload, createConnectorTask, executeConnectorTool, heartbeatConnector, listConnectorDevices, reclaimConnectorTasks, resolveConnectorDeviceForTool, resolveConnectorDeviceId, waitForConnectorTask };

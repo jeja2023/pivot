@@ -630,20 +630,24 @@ test('本机浏览器连接器要求设备、授权浏览器和精确站点白�
                         { id: 'edge-local-test', label: 'Microsoft Edge', engine: 'chromium' },
                         { id: 'firefox-local-test', label: 'Firefox', engine: 'firefox' }
                     ],
-                    allowedOrigins: ['http://10.12.0.20:8080']
+                    allowedOrigins: ['http://10.12.0.20:3000']
                 }
             }
         });
         await assert.rejects(
-            () => createConnectorTask('browser.inspect', { deviceId, browserId: 'edge-local-test', url: 'http://10.12.0.21:8080/' }, user),
+            () => createConnectorTask('browser.inspect', { deviceId, browserId: 'edge-local-test', url: 'http://10.12.0.21:3000/' }, user),
             error => error.code === 'LOCAL_BROWSER_ORIGIN_FORBIDDEN'
         );
-        const created = await createConnectorTask('browser.inspect', { deviceId, browserId: 'firefox-local-test', url: 'http://10.12.0.20:8080/portal' }, user);
+        const created = await createConnectorTask('browser.inspect', { browserId: 'firefox-local-test', url: 'http://10.12.0.20:3000/portal' }, user);
         taskId = created.id;
         const listedTools = await listCachedMcpTools(0, user);
-        const browserTool = listedTools.find(tool => tool.fullName === 'mcp.0.browser.inspect' && tool.localDevice?.deviceId === deviceId);
+        const browserTool = listedTools.find(tool => tool.fullName === 'mcp.0.browser.inspect' && tool.localDevice?.devices?.some(device => device.deviceId === deviceId));
         assert.ok(browserTool, '已授权设备必须在工具目录中公开本机浏览器工具');
         assert.deepEqual(browserTool.input_schema.properties.browserId.enum, ['edge-local-test', 'firefox-local-test']);
+        assert.deepEqual(browserTool.input_schema.properties.deviceId.enum, [deviceId]);
+        const chatCatalogTool = (await listCachedMcpTools(null, user)).find(tool => tool.fullName === 'mcp.0.browser.inspect');
+        assert.ok(chatCatalogTool, '聊天与 Agent 工具目录也必须公开已授权本机浏览器工具');
+        assert.deepEqual(chatCatalogTool.input_schema.properties.deviceId.enum, [deviceId]);
         const claimed = await claimConnectorTask(user, { deviceId });
         assert.equal(claimed.status, 'claimed');
         assert.equal(claimed.task.toolName, 'browser.inspect');

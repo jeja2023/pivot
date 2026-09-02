@@ -63,9 +63,16 @@ function normalizeLocalBrowserGrant(value = {}) {
 
 function browserNetworkPolicy(grant = {}) {
     const normalized = normalizeLocalBrowserGrant(grant);
+    const allowedPorts = new Set([80, 443, 8080]);
+    normalized.allowedOrigins.forEach(origin => {
+        try {
+            const parsed = new URL(origin);
+            allowedPorts.add(Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80)));
+        } catch (_) {}
+    });
     return normalizeNetworkPolicy({
         allowed_origins: normalized.allowedOrigins,
-        allowed_ports: [80, 443, 8080],
+        allowed_ports: [...allowedPorts],
         allow_redirect: false,
         allowed_redirect_origins: [],
         block_private_ranges: true,
@@ -98,7 +105,8 @@ async function normalizeLocalBrowserTask(toolName, input = {}, grant = {}) {
     if (!normalizedGrant.allowedOrigins.length) {
         throw localBrowserError('本机浏览器授权未配置允许访问的站点。', 'LOCAL_BROWSER_ORIGIN_REQUIRED', 409);
     }
-    const browserId = normalizeBrowserId(input.browserId || input.browser_id);
+    let browserId = normalizeBrowserId(input.browserId || input.browser_id);
+    if (!browserId && normalizedGrant.browsers.length === 1) browserId = normalizedGrant.browsers[0].id;
     const browser = normalizedGrant.browsers.find(item => item.id === browserId);
     if (!browser) throw localBrowserError('所选浏览器不在当前设备的授权列表中。', 'LOCAL_BROWSER_NOT_AUTHORIZED', 403);
     const url = String(input.url || '').trim();
@@ -133,12 +141,12 @@ function localBrowserToolDefinitions() {
             url: { type: 'string', description: '必须位于该设备授权站点白名单中的 HTTP/HTTPS 页面。' },
             timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000, default: 30000 }
         },
-        required: ['browserId', 'url']
+        required: ['url']
     };
     return [
         { name: 'browser.open', description: '在当前设备授权的隔离浏览器中打开页面，用户可在本机完成登录；不读取日常浏览器凭据。', inputSchema: common },
         { name: 'browser.inspect', description: '在当前设备授权的隔离浏览器中读取页面标题和受限正文文本。', inputSchema: common },
-        { name: 'browser.click', description: '在当前设备授权的隔离浏览器中点击页面目标；桌面端会要求用户确认。', inputSchema: { ...common, properties: { ...common.properties, target: { type: 'object', description: '目标元素，支持 selector、role/name 或 text。' } }, required: ['browserId', 'url', 'target'] } },
+        { name: 'browser.click', description: '在当前设备授权的隔离浏览器中点击页面目标；桌面端会要求用户确认。', inputSchema: { ...common, properties: { ...common.properties, target: { type: 'object', description: '目标元素，支持 selector、role/name 或 text。' } }, required: ['url', 'target'] } },
         { name: 'browser.screenshot', description: '截取当前设备授权浏览器中的页面截图；桌面端会要求用户确认。', inputSchema: common }
     ];
 }

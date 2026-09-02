@@ -64,7 +64,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
     if (policy.decision === 'denied') return plan;
 
     const url = extractNetworkUrl(normalizedInput);
-    if (tool.network || url) {
+    if (tool.network || (url && tool.localBrowserConnector !== true)) {
         plan.network.required = true;
         plan.network.url = url;
         if (!url) {

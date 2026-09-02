@@ -53,11 +53,14 @@ async function formatToolList(user, options = {}) {
             description: `[${tool.serverName}] ${tool.description || tool.name}`,
             input_schema: tool.input_schema,
             source: 'mcp',
-            risk: tool.governance?.riskLevel || 'high',
-            requiresApproval: Boolean(tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
+            risk: tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high'),
+            requiresApproval: Boolean(tool.localBrowserConnector === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
             governance: tool.governance || {},
             serverName: tool.serverName,
-            owner: tool.owner || null
+            owner: tool.owner || null,
+            localDevice: tool.localDevice || null,
+            localBrowserConnector: tool.localBrowserConnector === true,
+            ...(tool.localBrowserConnector === true ? { network: false } : {})
         }))
         .filter(tool => isAllowed(tool.name, 'mcp'));
     return [...builtIns, ...databaseTools, ...mcpTools].map(tool => {

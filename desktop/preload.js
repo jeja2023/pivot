@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getLocalMcpConnectorStatus() {
         return ipcRenderer.invoke('pivot-local-connector:status');
     },
+    syncLocalMcpConnector() {
+        return ipcRenderer.invoke('pivot-local-connector:sync');
+    },
     getDeliveryStatus() {
         return ipcRenderer.invoke('pivot-delivery:status');
     },

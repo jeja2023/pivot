@@ -17,11 +17,11 @@
         skills: [], skillsPage: 1, skillsLimit: 8,
         residents: [], residentsPage: 1, residentsLimit: 8,
         profile: null, memoryPolicy: null,
-        feedback: [], feedbackPage: 1, feedbackLimit: 8, feedbackSummary: null,
+        feedback: [], feedbackPage: 1, feedbackLimit: 15, feedbackSummary: null,
         proposals: [], proposalsPage: 1, proposalsLimit: 8,
         inbox: [], inboxPage: 1, inboxLimit: 15,
         goals: [], goalsPage: 1, goalsLimit: 8,
-        reliability: [], reliabilityPage: 1, reliabilityLimit: 6,
+        reliability: [], reliabilityPage: 1, reliabilityLimit: 15,
         quality: null, channels: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
     };
     const escape = value => window.PivotSafeHtml?.escapeHtml
@@ -231,7 +231,7 @@
         }
         if (reliabilityPanel) {
             const page = Math.max(1, Number(state.reliabilityPage || 1));
-            const limit = Math.max(1, Number(state.reliabilityLimit || 10));
+            const limit = Math.max(1, Number(state.reliabilityLimit || 15));
             const total = state.reliability.length;
             const totalPages = Math.max(1, Math.ceil(total / limit));
             const currentPage = Math.min(page, totalPages);
@@ -656,12 +656,12 @@
             setMarkup(list, '<div class="agent-harness-empty-card"><strong>暂无结果反馈</strong><span>任务完成后可在任务详情提交成功、失败或修正意见。</span></div>');
             return;
         }
-        const page = Math.max(1, Number(state.feedbackPage || 1)), limit = Math.max(1, Number(state.feedbackLimit || 10)), total = state.feedback.length;
+        const page = Math.max(1, Number(state.feedbackPage || 1)), limit = Math.max(1, Number(state.feedbackLimit || 15)), total = state.feedback.length;
         const totalPages = Math.max(1, Math.ceil(total / limit)), currentPage = Math.min(page, totalPages);
         state.feedbackPage = currentPage;
         const startIndex = (currentPage - 1) * limit, pageFeedback = state.feedback.slice(startIndex, startIndex + limit);
         const fbOutcomeBadge = (o) => o === 'success' ? `<span class="agent-inbox-type-badge badge-run">成功</span>` : o === 'failure' ? `<span class="agent-inbox-type-badge badge-approval">失败</span>` : `<span class="agent-inbox-type-badge badge-event">${escape(o || '反馈')}</span>`;
-        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:160px" class="tc">运行 ID</th><th style="width:80px" class="tc">结论</th><th style="width:70px" class="tc">评分</th><th>修正意见</th><th style="width:160px" class="tc">时间</th></tr></thead><tbody>${pageFeedback.map((item, i) => `<tr><td class="tc font-mono">${startIndex + i + 1}</td><td class="tc mono" title="${escapeAttr(item.runId)}">${escape(shortText(item.runId, 16))}</td><td class="tc">${fbOutcomeBadge(item.outcome)}</td><td class="tc">${item.rating ? `${item.rating}/5` : '—'}</td><td title="${escapeAttr(item.correction || item.modifiedAnswer || '')}">${escape(shortText(item.correction || item.modifiedAnswer || '—', 80))}</td><td class="tc">${escape(formatDate(item.updatedAt))}</td></tr>`).join('')}</tbody></table></div>`);
+        setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:320px" class="tc">运行 ID</th><th style="width:80px" class="tc">结论</th><th style="width:70px" class="tc">评分</th><th>修正意见</th><th style="width:160px" class="tc">时间</th></tr></thead><tbody>${pageFeedback.map((item, i) => `<tr><td class="tc font-mono">${startIndex + i + 1}</td><td class="tc mono" title="${escapeAttr(item.runId)}">${escape(shortText(item.runId, 36))}</td><td class="tc">${fbOutcomeBadge(item.outcome)}</td><td class="tc">${item.rating ? `${item.rating}/5` : '—'}</td><td title="${escapeAttr(item.correction || item.modifiedAnswer || '')}">${escape(shortText(item.correction || item.modifiedAnswer || '—', 80))}</td><td class="tc">${escape(formatDate(item.updatedAt))}</td></tr>`).join('')}</tbody></table></div>`);
         if (paginationContainer) {
             if (window.renderWorkspacePagination) {
                 window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.feedbackPage = newPage; renderFeedback(); } });

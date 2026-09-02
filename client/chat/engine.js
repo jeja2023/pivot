@@ -35,7 +35,9 @@ function normalizeChatLocalMcpBridgePayload(status, deviceId = '') {
 function summarizeChatLocalMcpGrants(grants = {}) {
     return {
         local_database: grants.local_database?.authorized === true,
-        local_report_dir: grants.local_report_dir?.authorized === true
+        local_report_dir: grants.local_report_dir?.authorized === true,
+        local_browser: grants.local_browser?.authorized === true,
+        local_browser_origin_count: Array.isArray(grants.local_browser?.allowedOrigins) ? grants.local_browser.allowedOrigins.length : 0
     };
 }
 
@@ -128,17 +130,33 @@ async function registerChatLocalMcpBridgeDirectly() {
 async function syncChatLocalMcpBridgeBeforeSend() {
     // v2 桌面连接器在 Electron 主进程独立执行签名心跳与任务轮询；网页不再上报
     // 自报 deviceId 或授权快照，避免旧内存桥接成为身份旁路。
-    const status = typeof window.pivotDesktop?.getLocalMcpConnectorStatus === 'function'
+    const desktop = window.pivotDesktop;
+    const authorization = typeof desktop?.getLocalAuthorizationStatus === 'function'
+        ? await desktop.getLocalAuthorizationStatus().catch(() => null)
+        : null;
+    const grants = summarizeChatLocalMcpGrants(authorization?.grants || {});
+    let sync = null;
+    if (typeof desktop?.syncLocalMcpConnector === 'function') {
+        try { sync = await desktop.syncLocalMcpConnector(); }
+        catch (error) {
+            updateChatLocalMcpBridgeDebug({ status: 'persistent_connector_sync_failed', hasDesktopBridge: Boolean(desktop), hasStatusBridge: Boolean(authorization), hasExecuteBridge: false, statusAvailable: Boolean(authorization), grants, reason: String(error.message || '桌面连接器同步失败。').slice(0, 300) });
+            return null;
+        }
+    }
+    const status = typeof desktop?.getLocalMcpConnectorStatus === 'function'
         ? await window.pivotDesktop.getLocalMcpConnectorStatus().catch(() => null)
         : null;
     updateChatLocalMcpBridgeDebug({
-        status: status?.running ? 'persistent_connector_running' : 'persistent_connector_unavailable',
-        hasDesktopBridge: Boolean(window.pivotDesktop),
-        hasStatusBridge: Boolean(status),
+        status: status?.running ? 'persistent_connector_synced' : 'persistent_connector_unavailable',
+        hasDesktopBridge: Boolean(desktop),
+        hasStatusBridge: Boolean(authorization),
         hasExecuteBridge: Boolean(status?.running),
-        statusAvailable: Boolean(status),
+        statusAvailable: Boolean(authorization),
         deviceName: status?.identity?.deviceName || '',
-        reason: status?.running ? '桌面连接器已在主进程运行。' : (status?.identity?.reason || '桌面连接器尚未运行。')
+        grants,
+        originCount: grants.local_browser_origin_count,
+        syncStatus: sync?.status || '',
+        reason: status?.running ? '桌面连接器已同步当前授权。' : (status?.identity?.reason || '桌面连接器尚未运行。')
     });
     return null;
 }

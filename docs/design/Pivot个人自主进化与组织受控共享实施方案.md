@@ -1,14 +1,16 @@
 # Pivot 个人自主进化与组织受控共享实施方案
 
-> 文档状态：实施方案
+> 文档状态：已实施
 >
-> 版本：v1.0
+> 版本：v1.1
 >
-> 更新日期：2026-09-01
+> 更新日期：2026-09-02
 >
 > 适用范围：Pivot Agent、Skill、工作流、长期记忆、自动化与组织共享
 
 ## 1. 结论与目标
+
+> 实施完成说明：本方案对应的学习队列、真实制品关联、个人 Skill 自动闭环、运行时复用、工作流草稿、组织候选、审批/签名/灰度、归档恢复、控制台入口和安全回归已经落地。发布说明见 [v0.1.74](../releases/v0.1.74-个人自主进化与本机浏览器会话访问闭环.md)。
 
 Pivot 应建设为“一套学习引擎、两个生效域”的 Agent：
 
@@ -451,4 +453,3 @@ queued -> analyzing -> candidate_created -> validating ->
 - Skill 资产、签名与发布：`server/services/agent-skill-*.js`、`server/services/agent-releases.js`
 - 工作流与评测：`server/services/agent-workflows.js`、`server/services/agent-evaluations.js`、`server/services/agent-trace-compiler.js`
 - 统一收件箱与渠道：`server/services/agent-inbox.js`、`server/services/agent-channel-*.js`
-

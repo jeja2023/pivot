@@ -63,6 +63,13 @@ function mcpLocalExecutionHasGrant(status) {
 }
 
 async function registerMcpLocalExecutionBridge(options = {}) {
+    const desktop = window.pivotDesktop;
+    if (typeof desktop?.syncLocalMcpConnector === 'function') {
+        const status = options.status || await getMcpLocalAuthorizationStatus({ refresh: true, silent: true });
+        const result = await desktop.syncLocalMcpConnector();
+        document.dispatchEvent(new globalThis.Event('pivot:local-connector-changed'));
+        return { ...result, status, active: mcpLocalExecutionHasGrant(status) };
+    }
     const bridge = mcpLocalExecutionBridge();
     if (!bridge) return null;
     const now = Date.now();
@@ -378,14 +385,24 @@ async function refreshMcpLocalAuthorizationCenter(options = {}) {
 async function requestMcpLocalAuthorization(type, options = {}) {
     const bridge = mcpLocalAuthBridge();
     if (!bridge) return showToast('请使用桌面客户端打开，或安装本地助手后再授权本机资源。', 'warning');
+    if (type === 'local_browser' && typeof window.pivotDesktop?.syncLocalMcpConnector !== 'function') {
+        return showToast('当前桌面客户端缺少浏览器连接器同步能力，请升级桌面客户端后再授权。', 'warning');
+    }
     try {
         const result = await bridge.requestLocalAuthorization(type, options || {});
         if (result?.canceled) return showToast('已取消本机授权选择。', 'warning');
         mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(result?.status);
+        const browserGrant = type === 'local_browser' ? mcpLocalGrant(mcpLocalAuthorizationStatusCache, 'local_browser') : null;
+        if (browserGrant && (!Array.isArray(browserGrant.allowedOrigins) || browserGrant.allowedOrigins.length === 0)) {
+            throw new Error('浏览器授权未保存允许访问的站点，请填写精确 Origin 后重新授权。');
+        }
         renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);
-        await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true }).catch(() => null);
+        const synced = await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true });
+        if (typeof window.pivotDesktop?.syncLocalMcpConnector === 'function' && !synced?.active) {
+            throw new Error('本机授权已保存，但桌面连接器尚未同步到服务器；请保持桌面客户端在线后重试。');
+        }
         await window.loadMcpWorkbench?.();
-        showToast('本机授权已更新。', 'success');
+        showToast(type === 'local_browser' ? '浏览器授权与站点白名单已同步。' : '本机授权已更新。', 'success');
     } catch (e) {
         showToast(e.message || '本机授权失败。', 'error');
     }
@@ -400,7 +417,7 @@ function confirmRevokeMcpLocalAuthorization(type) {
             const status = await bridge.revokeLocalAuthorization(type);
             mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(status);
             renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);
-            await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true }).catch(() => null);
+            await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true });
             await window.loadMcpWorkbench?.();
             showToast('本机授权已撤销。', 'success');
         } catch (e) {

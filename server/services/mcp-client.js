@@ -59,26 +59,43 @@ const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.aggregate'
 ]);
 
-function localConnectorInputSchema(tool, device = null) {
+function localConnectorInputSchema(tool, device = null, options = {}) {
     const base = tool.inputSchema || tool.input_schema || { type: 'object' };
     const properties = base.properties && typeof base.properties === 'object' ? base.properties : {};
-    const browserIds = Array.isArray(device?.grants?.local_browser?.browsers)
-        ? device.grants.local_browser.browsers.map(item => String(item?.id || '')).filter(Boolean).slice(0, 12)
-        : [];
+    const devices = Array.isArray(options.devices) && options.devices.length ? options.devices : (device ? [device] : []);
+    const deviceIds = [...new Set(devices.map(item => String(item?.deviceId || '')).filter(Boolean))].slice(0, 12);
+    const browserIds = [...new Set(devices
+        .flatMap(item => Array.isArray(item?.grants?.local_browser?.browsers)
+            ? item.grants.local_browser.browsers.map(browser => String(browser?.id || '')) : [])
+        .filter(Boolean))].slice(0, 12);
+    const browserCatalog = devices.map(item => ({
+        deviceId: String(item?.deviceId || ''),
+        deviceName: String(item?.deviceName || '我的电脑'),
+        browsers: Array.isArray(item?.grants?.local_browser?.browsers)
+            ? item.grants.local_browser.browsers.map(browser => ({ id: String(browser?.id || ''), label: String(browser?.label || ''), engine: String(browser?.engine || '') })).filter(browser => browser.id)
+            : []
+    })).filter(item => item.deviceId && item.browsers.length);
     return {
         ...base,
         type: 'object',
         properties: {
             ...properties,
-            deviceId: { type: 'string', description: '必须从本机连接器设备列表中显式选择的设备标识。' },
-            ...(browserIds.length ? { browserId: { ...properties.browserId, type: 'string', enum: browserIds, description: '当前设备已授权的浏览器标识。' } } : {})
+            deviceId: {
+                type: 'string',
+                ...(deviceIds.length ? { enum: deviceIds } : {}),
+                ...(deviceIds.length === 1 ? { default: deviceIds[0] } : {}),
+                description: deviceIds.length === 1 ? '当前已授权的本机连接器设备；省略时由服务端自动选择。' : '从当前已授权的本机连接器设备中选择。'
+            },
+            ...(browserIds.length ? { browserId: { ...properties.browserId, type: 'string', enum: browserIds, ...(browserIds.length === 1 ? { default: browserIds[0] } : {}), description: '从当前设备已授权的浏览器中选择；只有一个时可省略。' } } : {})
         }
+        ,localBrowserDevices: browserCatalog
     };
 }
 
 async function listPersistentLocalConnectorTools(user) {
     const devices = await listConnectorDevices(user);
     const tools = [];
+    const browserDevices = devices.filter(device => device.grants.local_browser?.authorized === true);
     devices.forEach(device => {
         const owner = { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' };
         if (device.grants.local_database) {
@@ -88,11 +105,41 @@ async function listPersistentLocalConnectorTools(user) {
         if (device.grants.local_report_dir) {
             listReportTools().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机报表目录`, serverType: 'reports', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool, device), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
         }
-        if (device.grants.local_browser) {
-            localBrowserToolDefinitions().forEach(tool => tools.push({ serverId: LOCAL_MCP_SERVER_ID, serverName: `${device.deviceName || '我的电脑'}：本机浏览器`, serverType: 'browser', databaseType: '', owner, name: tool.name, fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`, description: tool.description || '', input_schema: localConnectorInputSchema(tool, device), localDevice: { online: true, deviceId: device.deviceId, deviceName: device.deviceName, grants: device.grants } }));
-        }
+    });
+    // 浏览器工具按「工具名」聚合：模型能在同一份 Schema 中看到可用设备和浏览器，
+    // 避免同名 mcp.0.browser.* 被首个设备遮蔽或选错设备。
+    localBrowserToolDefinitions().forEach(tool => {
+        if (!browserDevices.length) return;
+        const catalog = browserDevices.map(device => ({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            browsers: (device.grants.local_browser?.browsers || []).map(browser => `${browser.label || browser.id} (${browser.id})`).join('、')
+        })).map(item => `${item.deviceName} [${item.deviceId}]：${item.browsers}`).join('；');
+        tools.push({
+            serverId: LOCAL_MCP_SERVER_ID,
+            serverName: '我的电脑：本机浏览器',
+            serverType: 'browser',
+            databaseType: '',
+            owner: { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' },
+            name: tool.name,
+            fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`,
+            description: `${tool.description || ''} 可用设备与浏览器：${catalog}`.slice(0, 3000),
+            input_schema: localConnectorInputSchema(tool, null, { devices: browserDevices }),
+            // 本机浏览器网络访问由桌面连接器按已同步 Origin 单独校验；服务端不直连该站点。
+            network: false,
+            localBrowserConnector: true,
+            localDevice: { online: true, devices: browserDevices.map(device => ({ deviceId: device.deviceId, deviceName: device.deviceName, grants: { local_browser: device.grants.local_browser } })) }
+        });
     });
     return tools;
+}
+
+function mergeLocalMcpTools(directTools = [], connectorTools = []) {
+    const direct = Array.isArray(directTools) ? directTools : [];
+    const persistent = Array.isArray(connectorTools) ? connectorTools : [];
+    if (!direct.length) return persistent;
+    const directNames = new Set(direct.map(tool => String(tool.name || '')));
+    return [...direct, ...persistent.filter(tool => tool.serverType === 'browser' || !directNames.has(String(tool.name || '')))];
 }
 
 function headerValue(headers = {}, name) {
@@ -732,9 +779,7 @@ async function listCachedMcpTools(serverId = null, user = null) {
         const persistentTools = await listPersistentLocalConnectorTools(user);
         // 直接本机 MCP 与持久化桌面连接器可并存。保持已有数据库/目录直连优先，
         // 同时合并只在连接器中提供的本机浏览器工具，避免任一已授权目录把浏览器能力“遮住”。
-        if (!directLocalTools.length) return persistentTools;
-        const directNames = new Set(directLocalTools.map(tool => String(tool.name || '')));
-        return [...directLocalTools, ...persistentTools.filter(tool => tool.serverType === 'browser' || !directNames.has(String(tool.name || '')))];
+        return mergeLocalMcpTools(directLocalTools, persistentTools);
     }
     if (serverId) {
         const rows = await query(`
@@ -767,14 +812,13 @@ async function listCachedMcpTools(serverId = null, user = null) {
             ORDER BY s.name ASC, t.name ASC
     `);
     const directLocalTools = listLocalDeviceMcpTools(user);
-    const bridgeLocalTools = directLocalTools.length ? [] : await listPersistentLocalConnectorTools(user);
+    const bridgeLocalTools = await listPersistentLocalConnectorTools(user);
     const visibleRows = rows
         .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
         .filter(row => isSharedMcpToolAllowed(row, row.name));
     const formattedRows = await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
     return [
-        ...directLocalTools,
-        ...bridgeLocalTools,
+        ...mergeLocalMcpTools(directLocalTools, bridgeLocalTools),
         ...formattedRows
     ];
 }
@@ -926,12 +970,15 @@ module.exports = {
     clearMcpSessions() { externalMcpSessions.clear(); },
     executeMcpTool,
     getAccessibleMcpServer,
+    localConnectorInputSchema,
     listCachedMcpTools,
+    listPersistentLocalConnectorTools,
     listMcpServers,
     getMcpServerShareOptions,
     updateMcpServerSharing,
     normalizeServerRow,
     normalizeServerRowAsync,
+    mergeLocalMcpTools,
     recordMcpCallLog,
     refreshMcpTools
 };

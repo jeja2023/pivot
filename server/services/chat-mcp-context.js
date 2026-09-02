@@ -51,7 +51,11 @@ const MCP_CHAT_TOOL_TITLES = {
     'im.list_allowed_targets': '查看通知目标',
     'im.send_user_message': '发送用户消息',
     'im.send_group_message': '发送群组消息',
-    'im.send_markdown': '发送 Markdown 消息'
+    'im.send_markdown': '发送 Markdown 消息',
+    'browser.open': '打开本机浏览器',
+    'browser.inspect': '读取本机网页',
+    'browser.click': '点击本机网页元素',
+    'browser.screenshot': '截取本机网页'
 };
 
 function compactText(value, maxLength = 12000) {
@@ -72,6 +76,33 @@ function getMcpActionName(tool) {
     return MCP_CHAT_TOOL_TITLES[shortName] || cleanCapabilityDisplayName(tool?.title || '') || readableName || '工具';
 }
 
+function isLocalBrowserMcpTool(tool = {}) {
+    const name = String(tool?.fullName || tool?.name || '');
+    return tool?.localBrowserConnector === true || /^mcp\.0\.browser\.(?:open|inspect|click|screenshot)$/.test(name);
+}
+
+function detectBrowserVisitIntent(userPrompt = '') {
+    const prompt = String(userPrompt || '');
+    const hasUrl = /https?:\/\/[^\s，。；！？]+/i.test(prompt);
+    const asksBrowser = /(?:打开|访问|进入|浏览)\s*https?:\/\/|(?:打开|访问|进入|浏览|查看|检查|登录|点击|截图).{0,24}(?:网页|网站|浏览器|页面|门户|后台)|(?:网页|网站|浏览器|页面|门户|后台).{0,24}(?:打开|访问|进入|浏览|查看|检查|登录|点击|截图)|\b(?:open|visit|browse|inspect|click|screenshot)\b/i.test(prompt);
+    return hasUrl && asksBrowser;
+}
+
+function extractBrowserUrl(userPrompt = '') {
+    const match = String(userPrompt || '').match(/https?:\/\/[^\s，。；！？)\]}>"']+/i);
+    return match ? String(match[0] || '').trim() : '';
+}
+
+function buildDeterministicBrowserFallback(userPrompt = '', tools = []) {
+    if (!detectBrowserVisitIntent(userPrompt)) return null;
+    const url = extractBrowserUrl(userPrompt);
+    if (!url) return null;
+    const prompt = String(userPrompt || '').toLowerCase();
+    const action = /截图|screenshot/i.test(prompt) ? 'browser.screenshot' : /读取|检查|查看.*内容|inspect/i.test(prompt) ? 'browser.inspect' : 'browser.open';
+    const tool = tools.find(item => normalizeMcpToolShortName(item) === action);
+    return tool ? { tool, input: { url }, reason: '用户明确要求在已授权本机浏览器访问其提供的网址' } : null;
+}
+
 function buildMcpTracePayload(tool) {
     const toolName = normalizeMcpToolShortName(tool);
     return {
@@ -89,6 +120,8 @@ function buildMcpTraceMessage(actionName, serverName, fallback = '工具服务',
 }
 
 async function executeChatMcpTool(tool, input, user, options = {}) {
+    const executableTool = isLocalBrowserMcpTool(tool) ? { ...tool, source: 'mcp' } : tool;
+    const allowLocalBrowser = options.allowLocalBrowser === true && isLocalBrowserMcpTool(executableTool);
     const plan = await buildToolExecutionPlan({
         run: {
             id: `chat:${user?.id || 'anonymous'}`,
@@ -98,10 +131,12 @@ async function executeChatMcpTool(tool, input, user, options = {}) {
             approval_policy: 'safe_mcp_auto',
             network_policy: options.networkPolicy || {}
         },
-        tool,
+        tool: executableTool,
         input,
         user,
-        context: { autonomous: false, sandboxAvailable: options.sandboxAvailable !== false }
+        // 用户明确请求访问允许站点后，桌面端仍对打开/点击/截图执行本机确认；
+        // 这里仅免除普通会话没有交互容器的服务端审批死锁。
+        context: { autonomous: false, sandboxAvailable: options.sandboxAvailable !== false, allowApproval: allowLocalBrowser }
     });
     if (plan.policy.decision === 'denied') {
         const error = new Error(plan.policy.reasons.join('；') || '聊天工具调用被策略拒绝。');
@@ -121,7 +156,7 @@ async function executeChatMcpTool(tool, input, user, options = {}) {
         error.plan = summarizeToolExecutionPlan(plan);
         throw error;
     }
-    const result = await executeMcpTool(tool.fullName || tool.name, plan.input, user, {
+    const result = await executeMcpTool(executableTool.fullName || executableTool.name, plan.input, user, {
         ...(options || {}),
         executionPlan: plan,
         source: options.source || 'chat'
@@ -208,6 +243,7 @@ function detectExplicitMcpCapabilityIntent(userPrompt = '') {
         || wantsChartOutput
         || wantsReportOutput
         || wantsDataOperation
+        || detectBrowserVisitIntent(userPrompt)
         || /工具库|能力库|mcp|工具调用|调用工具/.test(prompt);
 }
 
@@ -435,12 +471,14 @@ function localBridgeReportMissingReason(tools = [], user = null, userPrompt = ''
 }
 
 function filterMcpToolsForChatIntent(tools, userPrompt = '') {
+    const browserIntent = detectBrowserVisitIntent(userPrompt);
     if (detectReportFileInventoryIntent(userPrompt)) {
         return filterReportFileInventoryTools(tools, userPrompt);
     }
     const intent = getMcpToolIntent(userPrompt);
     return tools.filter(tool => {
         const name = String(tool.name || tool.fullName || '');
+        if (isLocalBrowserMcpTool(tool)) return browserIntent;
         if (name.startsWith('viz.')) return intent.wantsChart || intent.wantsReport;
         if (name.startsWith('report.')) return intent.wantsReport;
         return true;
@@ -567,6 +605,7 @@ function buildChatMcpPlannerMessages(history, userPrompt, tools) {
                 '只有用户明确要求图表、画图、可视化、趋势图、柱状图、折线图、饼图等展示时，才可以选择 viz.* 工具。',
                 '当用户同时要求查询数据库/报表并生成图表时，优先选择数据查询工具；系统会在查询结果返回后自动调用图表生成能力。',
                 '只有用户明确要求生成报告、报表、周报、月报或固定格式文档时，才可以选择 report.* 工具。',
+                'mcp.0.browser.* 仅可在用户明确要求打开或访问其消息中给出的 http/https 网站时选择。必须使用 Schema 提供的 deviceId、browserId；不得猜测、扩展或替换 URL。',
                 '一轮最多选择一个工具。数据库查询必须保持只读，只生成 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN 等读取类输入。',
                 '仅当用户问题与任何可用工具都完全无关时（如闲聊、写作建议、纯知识问答），才返回 {"action":"none","reason":"不需要工具库"}。',
                 '可用工具库工具:',
@@ -700,7 +739,7 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
         message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具库工具')
     }));
     try {
-        const execution = await executeChatMcpTool(selectedTool, fallbackInput, user, { source: 'chat_fallback' });
+        const execution = await executeChatMcpTool(selectedTool, fallbackInput, user, { source: 'chat_fallback', allowLocalBrowser: isLocalBrowserMcpTool(selectedTool) && detectBrowserVisitIntent(userPrompt) });
         const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected: selectedTool, result, intentTools, userPrompt, user, writeSse });
@@ -802,6 +841,22 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 : buildMcpToolsHint(intentTools, '工具过滤后无匹配');
         }
         mcpStage = 'planning';
+        const earlyBrowserFallback = buildDeterministicBrowserFallback(userPrompt, plannerTools);
+        if (earlyBrowserFallback) {
+            mcpStage = 'execution';
+            const context = await executeDeterministicMcpFallback({
+                fallback: earlyBrowserFallback,
+                intentTools,
+                userPrompt,
+                user,
+                writeSse,
+                log,
+                logLabel: '本机浏览器访问失败',
+                requireResult: true
+            });
+            if (context) return context;
+            mcpStage = 'planning';
+        }
         const earlyReportFallback = buildDeterministicReportFallback(userPrompt, plannerTools);
         if (earlyReportFallback) {
             mcpStage = 'execution';
@@ -870,7 +925,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             message: buildMcpTraceMessage(trace.actionName, trace.serverName)
         }));
         mcpStage = 'execution';
-        const execution = await executeChatMcpTool(selected, plan.input || {}, user, { source: 'chat' });
+        const execution = await executeChatMcpTool(selected, plan.input || {}, user, { source: 'chat', allowLocalBrowser: isLocalBrowserMcpTool(selected) && detectBrowserVisitIntent(userPrompt) });
         const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
         const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
@@ -906,9 +961,12 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
 module.exports = {
     MCP_CHAT_TOOL_TITLES,
     buildFallbackDataQueryInput,
+    buildDeterministicBrowserFallback,
+    detectBrowserVisitIntent,
     detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
+    isLocalBrowserMcpTool,
     localBridgeReportMissingReason,
     filterMcpToolsForPlanner,
     maybeBuildMcpChatContext

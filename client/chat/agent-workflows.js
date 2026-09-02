@@ -67,6 +67,7 @@ function setAutomationTab(tab = 'workflows') {
     workflowsPanel?.setAttribute('aria-hidden', activeAutomationTab === 'workflows' ? 'false' : 'true');
     schedulesPanel?.setAttribute('aria-hidden', activeAutomationTab === 'schedules' ? 'false' : 'true');
     document.getElementById('automation-new-workflow-btn')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
+    document.getElementById('automation-new-schedule-btn')?.classList.toggle('hidden', activeAutomationTab !== 'schedules');
     const input = document.getElementById('automation-assets-search-input');
     if (input) input.placeholder = activeAutomationTab === 'workflows' ? '搜索工作流' : '搜索计划任务';
     const description = document.getElementById('automation-workspace-description');
@@ -358,6 +359,11 @@ window.bindAgentDagWorkbench = function() {
     if (newWorkflowBtn && newWorkflowBtn.dataset.boundAutomationNew !== '1') {
         newWorkflowBtn.dataset.boundAutomationNew = '1';
         newWorkflowBtn.addEventListener('click', () => showAutomationWorkflowEditor());
+    }
+    const newScheduleBtn = document.getElementById('automation-new-schedule-btn');
+    if (newScheduleBtn && newScheduleBtn.dataset.boundAutomationNewSchedule !== '1') {
+        newScheduleBtn.dataset.boundAutomationNewSchedule = '1';
+        newScheduleBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.schedules').openEditor?.());
     }
     const refreshAutomationBtn = document.getElementById('automation-refresh-btn');
     if (refreshAutomationBtn && refreshAutomationBtn.dataset.boundAutomationRefresh !== '1') {

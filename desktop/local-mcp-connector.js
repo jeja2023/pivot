@@ -72,6 +72,11 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
             return { status: 'failed', taskId: claimed.task.id };
         }
     }
+    /** Immediately publish current grants after a user changes local authorization. */
+    async function sync() {
+        const registration = await heartbeat();
+        return { ...registration, status: 'synced' };
+    }
     async function tick() {
         if (!running) return;
         try { await runOnce(); } catch (error) { logger.debug?.('[Pivot 本机连接器] 等待中：', error?.message || error); }
@@ -80,7 +85,7 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     function start() { if (!running) { running = true; void tick(); } return status(); }
     function stop() { running = false; if (timer) clearTimeout(timer); timer = null; return status(); }
     function status() { return { running, deviceId: identity.getIdentityStatus().deviceId || '', identity: identity.getIdentityStatus() }; }
-    return { runOnce, start, status, stop };
+    return { runOnce, start, status, stop, sync };
 }
 
 module.exports = { createLocalMcpConnector };
