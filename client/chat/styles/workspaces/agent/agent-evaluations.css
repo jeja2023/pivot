@@ -158,8 +158,8 @@
 .agent-eval-layout {
     display: flex;
     flex: 1;
-    min-height: 220px;
-    max-height: 380px;
+    min-height: 460px;
+    max-height: 640px;
     overflow: hidden;
     border-top: 1px solid rgba(226, 232, 240, 0.9);
 }
@@ -169,7 +169,7 @@
     flex: 1;
     align-items: center;
     justify-content: center;
-    min-height: 200px;
+    min-height: 420px;
     width: 100%;
     border-top: 1px solid rgba(226, 232, 240, 0.9);
 }

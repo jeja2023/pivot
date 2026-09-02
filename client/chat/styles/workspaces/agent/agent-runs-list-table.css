@@ -163,7 +163,7 @@
 
 .agent-runs-table th:nth-child(3),
 .agent-runs-table td:nth-child(3) {
-    width: 22%;
+    width: calc(22% - 36px);
 }
 
 .agent-runs-table th:nth-child(4),
@@ -206,7 +206,7 @@
 
 .agent-runs-table th:nth-child(14),
 .agent-runs-table td:nth-child(14) {
-    width: 80px;
+    width: 116px;
 }
 
 .agent-runs-table th:nth-child(15),

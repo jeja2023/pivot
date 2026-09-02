@@ -1923,6 +1923,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 /* 子视图容器 */
 .agent-cp-subview-pane {
     flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -1932,6 +1933,9 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 .agent-cp-quality-layout {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
     gap: 0;
 }
 
@@ -1984,8 +1988,15 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 .agent-cp-quality-panel {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
     gap: 10px;
     min-width: 0;
+}
+
+.agent-cp-quality-panel.hidden {
+    display: none !important;
 }
 
 .agent-cp-quality-col {
@@ -2008,13 +2019,87 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04);
 }
 
-/* 让收件箱、持续目标等单卡片视图自适应撑满可用高度，彻底消除底部大块空白 */
-.agent-cp-subview-pane:not([data-agent-cp-pane="quality"]) > .agent-cp-card {
+/* 让各视图单卡片及运行质量面板自适应撑满可用高度，彻底消除底部大块空白 */
+.agent-cp-subview-pane > .agent-cp-card,
+.agent-cp-quality-panel > .agent-cp-card {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 560px;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-cp-subview-pane[data-agent-cp-pane="quality"] {
     flex: 1 1 auto;
     height: 100%;
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+
+.agent-reliability-panel,
+#agent-reliability-panel {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-reliability-panel .aht-wrap,
+#agent-reliability-panel .aht-wrap,
+.agent-reliability-panel .agent-harness-empty-card,
+#agent-reliability-panel .agent-harness-empty-card {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 460px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.agent-reliability-panel .aht-wrap,
+#agent-reliability-panel .aht-wrap {
+    justify-content: flex-start;
+    align-items: stretch;
+}
+
+#agent-feedback-list,
+.agent-feedback-list,
+.agent-feedback-list-panel {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 480px;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+}
+
+#agent-feedback-list .aht-wrap,
+#agent-feedback-list .agent-harness-empty-card,
+.agent-feedback-list-panel .aht-wrap,
+.agent-feedback-list-panel .agent-harness-empty-card {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 440px;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+#agent-feedback-list .aht-wrap,
+.agent-feedback-list-panel .aht-wrap {
+    justify-content: flex-start;
+    align-items: stretch;
+}
+
+.agent-channels-panel .aht-wrap {
+    flex: 1 1 auto;
+    min-height: 420px;
+    height: 100%;
 }
 
 /* ===========================================================================
@@ -2630,9 +2715,11 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 }
 
 .agent-goals-panel .agent-harness-empty-card,
-.agent-inbox-panel .agent-harness-empty-card {
+.agent-inbox-panel .agent-harness-empty-card,
+.agent-channels-panel .agent-harness-empty-card {
     flex: 1 1 auto;
-    min-height: 240px;
+    height: 100%;
+    min-height: 380px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2714,6 +2801,12 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     padding: 4px 2px;
     text-overflow: clip;
     overflow: visible;
+}
+
+.agent-inbox-table th:nth-child(3),
+.agent-inbox-table td:nth-child(3) {
+    width: 200px;
+    min-width: 180px;
 }
 
 .agent-inbox-table tbody tr {
