@@ -314,7 +314,7 @@ function createChatRouter({
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult } = await persistAssistantTurn({
+            const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
                 sessionId,
                 userId,
                 userMessageId,
@@ -329,7 +329,7 @@ function createChatRouter({
             writeSse(JSON.stringify({
                 unsupportedCapability: 'vision_input',
                 content: assistantContent,
-                messageId: assistantMessageResult.lastInsertRowid
+                messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid
             }));
             writeSse('[DONE]');
             return res.end();
@@ -339,7 +339,7 @@ function createChatRouter({
         if (unsupportedCapability) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult } = persistAssistantTurn({
+            const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
                 sessionId,
                 userId,
                 userMessageId,
@@ -354,7 +354,7 @@ function createChatRouter({
             writeSse(JSON.stringify({
                 unsupportedCapability: unsupportedCapability.code,
                 content: assistantContent,
-                messageId: assistantMessageResult.lastInsertRowid
+                messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid
             }));
             writeSse('[DONE]');
             return res.end();
@@ -694,7 +694,7 @@ function createChatRouter({
                     const assistantTokens = stats.assistantTokens;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
-                    const { assistantMessageResult } = await persistAssistantTurn({
+                    const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
                         sessionId,
                         userId,
                         userMessageId,
@@ -726,7 +726,7 @@ function createChatRouter({
                     writeSse(JSON.stringify({
                         type: 'message_saved',
                         role: 'assistant',
-                        messageId: assistantMessageResult.lastInsertRowid,
+                        messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid,
                         modelName: modelCfg.name || modelCfg.model_name || '',
                         tokenCount: assistantTokens,
                         costTime,

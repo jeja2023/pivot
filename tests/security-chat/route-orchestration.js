@@ -653,3 +653,61 @@ test('聊天路由在上游流式中断时持久化助手错误消息', async ()
         fixture.cleanup();
     }
 });
+
+test('聊天路由在用户触发不支持的能力时返回友好提示并持久化助手消息', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_unsupported_cap' });
+    const routeServer = await startChatRouteServer({ fixture });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '画一张可爱的猫咪图片',
+            modelId: fixture.modelId
+        });
+
+        const unsupportedEvent = result.findEvent(e => e.unsupportedCapability === 'image_generation');
+        assert.ok(unsupportedEvent, '应下发能力不支持事件');
+        assert.ok(unsupportedEvent.messageId, '应包含持久化后的 messageId');
+        assert.match(unsupportedEvent.content, /图片生成/);
+        assert.ok(result.rawPayloads.includes('[DONE]'), '应正确下发 [DONE]');
+
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1, '用户消息应保留');
+        const assistant = messages.find(row => row.role === 'assistant');
+        assert.ok(assistant, '助手消息应落库');
+        assert.match(assistant.content, /图片生成/);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+test('聊天路由在多模态输入遇到不支持视觉的模型时返回友好提示并持久化助手消息', async () => {
+    const fixture = createChatFixture({ prefix: 'chat_unsupported_vis' });
+    const routeServer = await startChatRouteServer({ fixture });
+
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '请看这张图：![示例图片](/uploads/chat/sample.png)',
+            modelId: fixture.modelId
+        });
+
+        const unsupportedEvent = result.findEvent(e => e.unsupportedCapability === 'vision_input');
+        assert.ok(unsupportedEvent, '应下发视觉不支持事件');
+        assert.ok(unsupportedEvent.messageId, '应包含持久化后的 messageId');
+        assert.match(unsupportedEvent.content, /未配置视觉输入能力/);
+        assert.ok(result.rawPayloads.includes('[DONE]'), '应正确下发 [DONE]');
+
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 1, '用户消息应保留');
+        const assistant = messages.find(row => row.role === 'assistant');
+        assert.ok(assistant, '助手消息应落库');
+        assert.match(assistant.content, /未配置视觉输入能力/);
+    } finally {
+        await routeServer.close();
+        fixture.cleanup();
+    }
+});
+
+

@@ -1,3 +1,13 @@
+## [v0.1.77] - 2026-09-04
+
+### 修复对话能力拦截与视觉输入分支异步缺失异常
+
+- **修复不支持能力拦截分支 500 异常**：在 `server/routes/chat/index.js` 中，修复由于 `persistAssistantTurn` 异步调用未加 `await` 导致从 Promise 解构 `assistantMessageResult` 为 `undefined`，进而访问 `.lastInsertRowid` 抛出 `TypeError: Cannot read properties of undefined (reading 'lastInsertRowid')` 的核心缺陷。
+- **修复非视觉模型多模态输入拦截分支异步缺失**：同步修复视觉能力拦截分支中的相同未等待异步 Promise 缺陷，全面对齐稳健的 `assistantMessageId || assistantMessageResult?.lastInsertRowid` 持久化 ID 安全提取。
+- **对话路由编排回归测试完善**：在 `tests/security-chat/route-orchestration.js` 中补齐针对未支持外部多模态能力与非视觉模型拦截的专用断言用例，确保助手提示正常持久化、数据结构合规且流式链路正常以 `[DONE]` 收尾。
+
+详细发布记录见 [v0.1.77 发布记录](docs/releases/v0.1.77-修复对话能力拦截与视觉输入分支异步缺失异常.md)。
+
 ## [v0.1.76] - 2026-09-04
 
 ### 可用工具弹窗加宽与桌面端连接器限流降噪优化
