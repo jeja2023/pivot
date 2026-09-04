@@ -111,6 +111,12 @@ async function normalizeLocalBrowserTask(toolName, input = {}, grant = {}) {
     if (!browser) throw localBrowserError('所选浏览器不在当前设备的授权列表中。', 'LOCAL_BROWSER_NOT_AUTHORIZED', 403);
     const url = String(input.url || '').trim();
     if (!url || url.length > 2048) throw localBrowserError('本机浏览器任务缺少有效页面地址。', 'LOCAL_BROWSER_URL_INVALID');
+    try {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+    } catch (_) {
+        throw localBrowserError('浏览器页面地址必须是完整的 HTTP/HTTPS URL，例如 https://oa.example.internal/。', 'LOCAL_BROWSER_URL_INVALID');
+    }
     const policy = browserNetworkPolicy(normalizedGrant);
     try {
         // 服务端只做 URL/Origin/端口契约校验；DNS 与地址安全必须由实际执行浏览器的桌面端

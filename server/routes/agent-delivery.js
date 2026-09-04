@@ -55,9 +55,10 @@ function contentDisposition(filename) {
     return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter } = {}) {
+function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter } = {}) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (_req, _res, next) => next();
+    const challengeGuard = typeof deviceChallengeLimiter === 'function' ? deviceChallengeLimiter : (_req, _res, next) => next();
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
 
     // ── 渲染器状态 ──────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
     }));
 
     // ── 本机设备身份 ────────────────────────────────────────────────────────
-    router.post('/agents/local-devices/challenge', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+    router.post('/agents/local-devices/challenge', authMiddleware, challengeGuard, asyncHandler(async (req, res) => {
         const challenge = await issueDeviceChallenge(req.user, { purpose: req.body?.purpose, deviceId: req.body?.deviceId });
         res.status(201).json({ success: true, ...challenge });
     }));

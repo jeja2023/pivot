@@ -197,6 +197,17 @@ const automationLimiter = rateLimit({
     message: { error: '自动化操作过于频繁，请稍后再试' }
 });
 
+const deviceChallengeLimiter = rateLimit({
+    store: limiterStore('device_challenge'),
+    windowMs: 60 * 1000,
+    max: 180,
+    keyGenerator: (req) => {
+        if (req.body?.deviceId) return `device_${req.body.deviceId}`;
+        return req.user ? `user_${req.user.id}` : getClientIp(req);
+    },
+    message: { error: '设备挑战过于频繁，请稍后再试' }
+});
+
 const probeLimiter = rateLimit({
     store: limiterStore('probe'),
     windowMs: 60 * 1000,
@@ -234,6 +245,7 @@ app.locals.chatLimiter = chatLimiter;
 app.locals.probeLimiter = probeLimiter;
 app.locals.embeddingLimiter = embeddingLimiter;
 app.locals.automationLimiter = automationLimiter;
+app.locals.deviceChallengeLimiter = deviceChallengeLimiter;
 app.locals.triggerLimiter = triggerLimiter;
 
 const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
@@ -568,6 +580,7 @@ app.use('/api', createAgentsRouter({
     authMiddleware,
     logAction,
     automationLimiter: app.locals.automationLimiter,
+    deviceChallengeLimiter: app.locals.deviceChallengeLimiter,
     uploadLimiter,
     skillUpload: {
         single(field) { return [skillUpload.single(field), uploadSecurityMiddleware]; }

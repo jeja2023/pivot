@@ -73,6 +73,11 @@ function localConnectorInputSchema(tool, device = null, options = {}) {
         deviceName: String(item?.deviceName || '我的电脑'),
         browsers: Array.isArray(item?.grants?.local_browser?.browsers)
             ? item.grants.local_browser.browsers.map(browser => ({ id: String(browser?.id || ''), label: String(browser?.label || ''), engine: String(browser?.engine || '') })).filter(browser => browser.id)
+            : [],
+        // Origin 不包含浏览器 Cookie 或本机路径，且本来就是用户在授权界面中显式录入的
+        // 白名单。随工具 Schema 返回，使单步测试能够生成一个可实际访问的安全样例。
+        allowedOrigins: Array.isArray(item?.grants?.local_browser?.allowedOrigins)
+            ? item.grants.local_browser.allowedOrigins.map(origin => String(origin || '')).filter(Boolean).slice(0, 32)
             : []
     })).filter(item => item.deviceId && item.browsers.length);
     return {

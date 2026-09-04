@@ -120,12 +120,12 @@ function allowedSkillPermissions() {
     return values.length ? values : undefined;
 }
 
-function createAgentsRouter({ authMiddleware, logAction, automationLimiter, uploadLimiter, skillUpload }) {
+function createAgentsRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
     const residency = createAgentResidencyStore();
     router.use(createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter }));
-    router.use(createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter }));
+    router.use(createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter }));
 
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });

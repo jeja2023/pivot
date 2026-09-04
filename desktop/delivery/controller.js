@@ -32,7 +32,13 @@ function createDesktopDeliveryController(options = {}) {
         try {
             const activeSession = getSession();
             const cookies = activeSession ? await activeSession.cookies.get({ url: target.origin }) : [];
-            if (cookies.length) headers.Cookie = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+            if (cookies.length) {
+                headers.Cookie = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+                // 主进程 fetch 不会像渲染器请求一样自动从 Cookie 同步 CSRF
+                // header；服务端对所有 Cookie 鉴权的非安全方法要求两者匹配。
+                const csrfCookie = cookies.find(cookie => cookie.name === 'pivot_csrf_token');
+                if (csrfCookie?.value) headers['X-CSRF-Token'] = csrfCookie.value;
+            }
         } catch (_) {}
         const secret = String(getStealthSecret(url.toString()) || '').trim();
         if (secret) {

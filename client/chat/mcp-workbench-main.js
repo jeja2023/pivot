@@ -625,21 +625,27 @@ function generateDefaultSampleInput(schema) {
     const props = schema?.properties || {};
     const sample = {};
     Object.entries(props).forEach(([key, spec]) => {
-        if (spec.default !== undefined) {
-            sample[key] = spec.default;
-        } else if (spec.type === 'string') {
-            sample[key] = spec.enum ? spec.enum[0] : 'test';
-        } else if (spec.type === 'number' || spec.type === 'integer') {
-            sample[key] = spec.minimum !== undefined ? spec.minimum : 1;
-        } else if (spec.type === 'boolean') {
-            sample[key] = true;
-        } else if (spec.type === 'array') {
-            sample[key] = [];
-        } else if (spec.type === 'object') {
-            sample[key] = {};
-        }
+        if (spec.default !== undefined) sample[key] = spec.default;
+        else if (spec.type === 'string') sample[key] = spec.enum ? spec.enum[0] : 'test';
+        else if (spec.type === 'number' || spec.type === 'integer') sample[key] = spec.minimum !== undefined ? spec.minimum : 1;
+        else if (spec.type === 'boolean') sample[key] = true;
+        else if (spec.type === 'array') sample[key] = [];
+        else if (spec.type === 'object') sample[key] = {};
     });
     return sample;
+}
+
+function buildLocalBrowserSampleInput(toolName, schema = {}) {
+    if (!/^browser\.(?:open|inspect|screenshot)$/.test(String(toolName || ''))) return null;
+    const devices = Array.isArray(schema?.localBrowserDevices) ? schema.localBrowserDevices : [];
+    const device = devices.find(item => item?.browsers?.length && item?.allowedOrigins?.length);
+    const browser = device?.browsers?.find(item => String(item?.id || '').trim());
+    const allowedOrigin = device?.allowedOrigins?.find(origin => {
+        try { const parsed = new URL(String(origin || '')); return parsed.protocol === 'http:' || parsed.protocol === 'https:'; } catch (_) { return false; }
+    });
+    if (!device?.deviceId || !browser?.id || !allowedOrigin) return null;
+    const timeout = Number(schema?.properties?.timeoutMs?.default);
+    return { browserId: String(browser.id), url: new URL('/', String(allowedOrigin)).toString(), timeoutMs: Number.isInteger(timeout) && timeout > 0 ? timeout : 30000, deviceId: String(device.deviceId) };
 }
 
 function fillMcpToolSampleInput(toolFullName, schema) {
@@ -647,6 +653,7 @@ function fillMcpToolSampleInput(toolFullName, schema) {
     if (!inputEl) return;
     const shortName = String(toolFullName || '').replace(/^mcp\.\d+\./, '');
     let sample = MCP_TOOL_SAMPLE_INPUTS[shortName] || MCP_TOOL_SAMPLE_INPUTS[toolFullName];
+    if (!sample) sample = buildLocalBrowserSampleInput(shortName, schema);
     if (!sample) {
         let parsedSchema = schema;
         if (!parsedSchema) {

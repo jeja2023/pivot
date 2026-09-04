@@ -34,6 +34,10 @@ test('本机浏览器工具只接受已授权浏览器和精确 Origin', async (
         error => error.code === 'LOCAL_BROWSER_ORIGIN_FORBIDDEN'
     );
     await assert.rejects(
+        () => normalizeLocalBrowserTask('browser.open', { browserId: 'edge-local', url: 'test' }, normalized),
+        error => error.code === 'LOCAL_BROWSER_URL_INVALID' && error.status === 400 && /完整的 HTTP\/HTTPS URL/.test(error.message)
+    );
+    await assert.rejects(
         () => normalizeLocalBrowserTask('browser.click', { browserId: 'edge-local', url: 'https://oa.example.internal' }, normalized),
         error => error.code === 'LOCAL_BROWSER_TARGET_REQUIRED'
     );
@@ -62,6 +66,12 @@ test('唯一授权浏览器可省略 browserId，多个设备的会话 Schema �
     assert.deepEqual(schema.properties.deviceId.enum, ['device-a']);
     assert.equal(schema.properties.deviceId.default, 'device-a');
     assert.deepEqual(schema.properties.browserId.enum, ['edge-local']);
+    assert.deepEqual(schema.localBrowserDevices, [{
+        deviceId: 'device-a',
+        deviceName: 'A',
+        browsers: [{ id: 'edge-local', label: 'Microsoft Edge', engine: 'chromium' }],
+        allowedOrigins: ['https://oa.example.internal']
+    }]);
 });
 
 test('持久化本机浏览器工具不会被旧式本机数据库或目录工具遮蔽', () => {
