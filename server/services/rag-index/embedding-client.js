@@ -4,6 +4,7 @@ const { getOrCreateEmbeddingUsageModel, recordModelTokenUsage } = require('../mo
 const { estimateEmbeddingTokens } = require('../token-accounting');
 const { estimateTokens } = require('../../llm');
 const { logger } = require('../../logger');
+const { redactSecrets } = require('../../security');
 
 const DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS = 120000;
@@ -303,6 +304,17 @@ function normalizeEmbeddingVectors(data) {
         if (vectors.length > 0) return vectors;
     }
 
+    // DashScope 原生 embeddings 接口将向量置于 output.embeddings，而非
+    // OpenAI 兼容接口的 data[].embedding。两种格式都不应被误判为无向量。
+    if (Array.isArray(data?.output?.embeddings)) {
+        const vectors = data.output.embeddings
+            .slice()
+            .sort((a, b) => (a?.text_index ?? a?.index ?? 0) - (b?.text_index ?? b?.index ?? 0))
+            .map(item => normalizeVectorValues(item?.embedding))
+            .filter(Boolean);
+        if (vectors.length > 0) return vectors;
+    }
+
     const vector = data?.data?.[0]?.embedding
         || data?.embedding
         || data?.response?.embedding;
@@ -310,6 +322,30 @@ function normalizeEmbeddingVectors(data) {
     if (normalized) return [normalized];
 
     throw new Error('Embedding 服务响应中未找到有效向量');
+}
+
+function embeddingResponseError(response = {}) {
+    const status = Number(response?.status || 0) || 0;
+    const data = response?.data && typeof response.data === 'object' ? response.data : {};
+    const upstreamError = data.error && typeof data.error === 'object' ? data.error : data;
+    const upstreamCode = String(upstreamError.code || data.code || '').trim();
+    const rawMessage = String(upstreamError.message || data.message || '').trim();
+    const message = String(redactSecrets(rawMessage)).replace(/\s+/g, ' ').slice(0, 500);
+    const suffix = [
+        upstreamCode ? `错误码 ${upstreamCode}` : '',
+        message
+    ].filter(Boolean).join('：');
+    const error = new Error(`Embedding 服务请求失败（HTTP ${status || '未知'}）${suffix ? `：${suffix}` : ''}`);
+    error.code = upstreamCode ? `EMBEDDING_UPSTREAM_${upstreamCode}` : 'EMBEDDING_HTTP_ERROR';
+    error.status = status || 502;
+    error.statusCode = error.status;
+    return error;
+}
+
+function assertEmbeddingResponseOk(response) {
+    const status = Number(response?.status || 0) || 0;
+    if (status >= 200 && status < 300) return response;
+    throw embeddingResponseError(response);
 }
 
 function normalizeEmbeddingVector(data) {
@@ -375,7 +411,7 @@ async function requestEmbedding(text, httpConfig, options = {}) {
             timeout: timeoutMs,
             signal: options.signal || null
         }));
-        return normalizeEmbeddingVector(res.data);
+        return normalizeEmbeddingVector(assertEmbeddingResponseOk(res).data);
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);
     }
@@ -402,7 +438,7 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
                 timeout: timeoutMs,
                 signal: options.signal || null
             }));
-            return normalizeEmbeddingVector(res.data);
+            return normalizeEmbeddingVector(assertEmbeddingResponseOk(res).data);
         } catch (e) {
             throw wrapEmbeddingRequestError(e, timeoutMs);
         }
@@ -430,7 +466,7 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     } catch (e) {
         throw wrapEmbeddingRequestError(e, timeoutMs);
     }
-    const vectors = normalizeEmbeddingVectors(res.data);
+    const vectors = normalizeEmbeddingVectors(assertEmbeddingResponseOk(res).data);
     if (vectors.length !== safeInputs.length) {
         throw new Error(`Embedding 服务返回向量数量不匹配: expected ${safeInputs.length}, got ${vectors.length}`);
     }
@@ -559,6 +595,8 @@ module.exports = {
     normalizeVectorValues,
     normalizeEmbeddingVectors,
     normalizeEmbeddingVector,
+    embeddingResponseError,
+    assertEmbeddingResponseOk,
     resolveEmbeddingUrl,
     buildEmbeddingPayload,
     usesUserEmbeddingConfig,

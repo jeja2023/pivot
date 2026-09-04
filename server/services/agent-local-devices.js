@@ -158,12 +158,32 @@ async function registerLocalDevice(user, input = {}) {
             WHERE device_id = ?
         `, [tenant.tenantId, deviceName, provider, publicKeyPem, fingerprint, keyVersion, now, now, now, deviceId]);
     } else {
-        await execute(`
+        // 注册请求可能由启动时心跳和用户手动同步同时触发。不能使用
+        // "先查后插" 作为并发互斥：两者都可能看到不存在并竞争同一主键。
+        const inserted = await execute(`
             INSERT INTO agent_local_devices
                 (device_id, tenant_id, user_id, device_name, provider, public_key_pem, key_fingerprint,
                  key_version, status, last_attested_at, last_seen_at, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?, ?, ?)
+            ON CONFLICT (device_id) DO NOTHING
         `, [deviceId, tenant.tenantId, user.id, deviceName, provider, publicKeyPem, fingerprint, now, now, now, now]);
+        if (!inserted) {
+            const concurrent = await queryOne('SELECT * FROM agent_local_devices WHERE device_id = ?', [deviceId]);
+            if (!concurrent || Number(concurrent.user_id) !== Number(user.id)) {
+                throw deviceError('该设备标识已被其他用户注册。', 'AGENT_DEVICE_CONFLICT', 409);
+            }
+            // 仅接纳同一把公钥的并发重复注册。公钥不同仍必须走下一轮
+            // 使用旧私钥证明的密钥轮换，不能借并发窗口替换设备身份。
+            if (String(concurrent.key_fingerprint || '') !== fingerprint) {
+                throw deviceError('设备密钥轮换必须由原设备私钥签名证明。', 'AGENT_DEVICE_ATTESTATION_FAILED');
+            }
+            await execute(`
+                UPDATE agent_local_devices
+                SET tenant_id = ?, device_name = ?, provider = ?, status = 'active', revoked_at = NULL,
+                    last_attested_at = ?, last_seen_at = ?, updated_at = ?
+                WHERE device_id = ? AND user_id = ? AND key_fingerprint = ?
+            `, [tenant.tenantId, deviceName, provider, now, now, now, deviceId, user.id, fingerprint]);
+        }
     }
     return await getLocalDeviceForUser(user, deviceId);
 }

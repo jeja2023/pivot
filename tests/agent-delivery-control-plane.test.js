@@ -589,6 +589,32 @@ test('设备身份必须由私钥签名证明，冒用已注册 deviceId 的客�
     }
 });
 
+test('同一设备的并发首次注册以同一公钥幂等收敛为一条记录', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-device-race-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_device_race_${suffix}`)), tenant_id: tenantId };
+    const deviceId = `device-${suffix}-race`;
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const publicKeyPem = keys.publicKey.export({ type: 'spki', format: 'pem' });
+    const sign = payload => crypto.sign(null, Buffer.from(payload, 'utf8'), keys.privateKey).toString('base64');
+    try {
+        const [first, second] = await Promise.all([
+            issueDeviceChallenge(user, { purpose: 'register', deviceId }),
+            issueDeviceChallenge(user, { purpose: 'register', deviceId })
+        ]);
+        const registrations = await Promise.all([
+            registerLocalDevice(user, { deviceId, deviceName: '并发测试设备', publicKeyPem, nonce: first.nonce, signature: sign(`register:${first.nonce}:${deviceId}`) }),
+            registerLocalDevice(user, { deviceId, deviceName: '并发测试设备', publicKeyPem, nonce: second.nonce, signature: sign(`register:${second.nonce}:${deviceId}`) })
+        ]);
+        assert.equal(registrations[0].device_id, deviceId);
+        assert.equal(registrations[1].device_id, deviceId);
+        const rows = await pool().query('SELECT device_id FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+        assert.equal(rows.rowCount, 1);
+    } finally {
+        await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+    }
+});
+
 test('持久化桌面连接器按显式设备领取只读任务，服务端重查结果而非依赖内存 Promise', skipWithoutDatabase, async () => {
     const tenantId = await ensureTenant(`pivot-tenant-connector-${suffix}`);
     const user = { ...(await ensureUser(`pivot_connector_${suffix}`)), tenant_id: tenantId };
