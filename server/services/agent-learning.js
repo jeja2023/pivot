@@ -323,7 +323,7 @@ async function archiveStalePersonalExperiences(options = {}) {
     const days = Math.max(30, Math.min(Number.parseInt(options.days, 10) || ARCHIVE_AFTER_DAYS, 3650));
     const cutoff = getBeijingTimestamp(new Date(Date.now() - days * 86400000));
     const rows = await query(`
-        SELECT p.*, r.id AS skill_release_id, r.owner_key, r.name, r.tenant_id AS release_tenant_id,
+            SELECT p.*, r.id AS skill_release_id, r.owner_key, r.name, r.tenant_id AS release_tenant_id,
                r.published_by, r.previous_release_id, r.status AS release_status
         FROM agent_evolution_proposals p
         JOIN agent_skill_releases r ON r.id::text = p.release_id
@@ -332,7 +332,7 @@ async function archiveStalePersonalExperiences(options = {}) {
           AND NOT EXISTS (
               SELECT 1 FROM agent_runs ar
               WHERE ar.user_id = p.user_id AND ar.deleted_at IS NULL
-                AND ar.metadata->>'skillReleaseId' = r.id::text
+                AND pivot_json_extract(ar.metadata::text, ARRAY['skillReleaseId']) = r.id::text
                 AND ar.created_at >= ?
           )
         ORDER BY p.updated_at ASC LIMIT ?
@@ -393,7 +393,7 @@ async function getAgentLearningOverview(user) {
     const metricsByRelease = {};
     if (releaseIds.length) {
         const rows = await query(`
-            SELECT r.metadata->>'skillReleaseId' AS release_id,
+            SELECT pivot_json_extract(r.metadata::text, ARRAY['skillReleaseId']) AS release_id,
                 COUNT(*) AS uses,
                 COALESCE(SUM(CASE WHEN f.outcome = 'success' THEN 1 ELSE 0 END), 0) AS successes,
                 COALESCE(SUM(CASE WHEN f.outcome IN ('failure', 'partial') THEN 1 ELSE 0 END), 0) AS failures,
@@ -401,8 +401,8 @@ async function getAgentLearningOverview(user) {
             FROM agent_runs r
             LEFT JOIN agent_feedback f ON f.run_id = r.id AND f.user_id = r.user_id
             WHERE r.user_id = ? AND r.deleted_at IS NULL
-              AND r.metadata->>'skillReleaseId' IN (${releaseIds.map(() => '?').join(',')})
-            GROUP BY r.metadata->>'skillReleaseId'
+              AND pivot_json_extract(r.metadata::text, ARRAY['skillReleaseId']) IN (${releaseIds.map(() => '?').join(',')})
+            GROUP BY pivot_json_extract(r.metadata::text, ARRAY['skillReleaseId'])
         `, [user.id, ...releaseIds]);
         rows.forEach(item => {
             const uses = Number(item.uses || 0);
