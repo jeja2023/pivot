@@ -7,8 +7,14 @@ const {
     normalizeLocalBrowserTask
 } = require('../server/services/local-browser-connector-tools');
 const { localConnectorInputSchema, mergeLocalMcpTools } = require('../server/services/mcp-client');
-const { buildDeterministicBrowserFallback, detectBrowserVisitIntent, filterMcpToolsForChatIntent } = require('../server/services/chat-mcp-context');
+const {
+    buildDeterministicBrowserFallback,
+    detectBrowserVisitIntent,
+    filterMcpToolsForChatIntent,
+    shouldDeferRealtimeCapabilityGuard
+} = require('../server/services/chat-mcp-context');
 const { buildToolExecutionPlan } = require('../server/services/agent-tool-execution-plan');
+const { detectUnsupportedCapability } = require('../server/capabilities');
 
 const grant = {
     browsers: [
@@ -90,6 +96,15 @@ test('普通会话只在用户明确要求访问 URL 时向模型暴露本机浏
     assert.deepEqual(filterMcpToolsForChatIntent([browser, report], '打开 https://oa.example.internal'), [browser, report]);
     assert.deepEqual(filterMcpToolsForChatIntent([browser, report], '帮我分析今天的待办'), [report]);
     assert.deepEqual(buildDeterministicBrowserFallback('打开 https://oa.example.internal', [browser]), { tool: browser, input: { url: 'https://oa.example.internal' }, reason: '用户明确要求在已授权本机浏览器访问其提供的网址' });
+});
+
+test('已开启工具库的明确本机浏览器访问不会被实时联网能力拦截抢先拒绝', () => {
+    const prompt = '使用工具库中的浏览器打开 https://www.baidu.com，查询最新的新闻';
+    const capability = detectUnsupportedCapability(prompt);
+    assert.equal(capability?.code, 'realtime_web');
+    assert.equal(shouldDeferRealtimeCapabilityGuard(capability, { mcpEnabled: true, userPrompt: prompt }), true);
+    assert.equal(shouldDeferRealtimeCapabilityGuard(capability, { mcpEnabled: false, userPrompt: prompt }), false);
+    assert.equal(shouldDeferRealtimeCapabilityGuard(capability, { mcpEnabled: true, userPrompt: '查询最新新闻' }), false);
 });
 
 test('普通会话对明确本机浏览器访问不再卡在服务端审批，但 Agent 仍可保持审批', async () => {

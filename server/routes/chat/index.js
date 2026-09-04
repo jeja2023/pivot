@@ -47,6 +47,7 @@ const {
 const {
     buildFallbackDataQueryInput,
     detectStrongDataQueryIntent,
+    shouldDeferRealtimeCapabilityGuard,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner
 } = require('../../services/chat-mcp-context');
@@ -336,7 +337,11 @@ function createChatRouter({
         }
 
         const unsupportedCapability = detectUnsupportedCapability(modelContent);
-        if (unsupportedCapability) {
+        const deferRealtimeCapabilityGuard = shouldDeferRealtimeCapabilityGuard(unsupportedCapability, {
+            mcpEnabled,
+            userPrompt: modelContent
+        });
+        if (unsupportedCapability && !deferRealtimeCapabilityGuard) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
             const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
@@ -358,6 +363,9 @@ function createChatRouter({
             }));
             writeSse('[DONE]');
             return res.end();
+        }
+        if (deferRealtimeCapabilityGuard) {
+            req.log.info({ capability: unsupportedCapability.code }, '已将明确本机浏览器访问请求交由工具库处理');
         }
 
         // The user explicitly chooses Agent mode. Ordinary chat never creates

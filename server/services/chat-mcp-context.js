@@ -88,6 +88,21 @@ function detectBrowserVisitIntent(userPrompt = '') {
     return hasUrl && asksBrowser;
 }
 
+/**
+ * The generic "realtime web is unavailable" guard runs before normal chat
+ * context assembly. An explicitly requested, authorized local-browser visit
+ * is a different capability: Pivot does not search the web itself; it queues
+ * a page-open task for the user's local, isolated browser. Let that task be
+ * evaluated by the MCP connector instead of rejecting it as web search.
+ */
+function shouldDeferRealtimeCapabilityGuard(capability, { mcpEnabled = false, userPrompt = '' } = {}) {
+    return Boolean(
+        mcpEnabled
+        && capability?.code === 'realtime_web'
+        && detectBrowserVisitIntent(userPrompt)
+    );
+}
+
 function extractBrowserUrl(userPrompt = '') {
     const match = String(userPrompt || '').match(/https?:\/\/[^\s，。；！？)\]}>"']+/i);
     return match ? String(match[0] || '').trim() : '';
@@ -969,5 +984,6 @@ module.exports = {
     isLocalBrowserMcpTool,
     localBridgeReportMissingReason,
     filterMcpToolsForPlanner,
+    shouldDeferRealtimeCapabilityGuard,
     maybeBuildMcpChatContext
 };
