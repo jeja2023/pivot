@@ -17,6 +17,7 @@ const analysisRoot = process.env.PIVOT_ANALYSIS_DIR
 const datasetRoot = path.join(analysisRoot, 'datasets');
 const exportRoot = path.join(analysisRoot, 'exports');
 const tempRoot = path.join(analysisRoot, 'tmp');
+const EXTERNAL_ANALYSIS_PATH_PREFIX = '@analysis/';
 
 const MAX_PREVIEW_ROWS = 100;
 const MAX_PROFILE_DISTINCT = 20;
@@ -67,12 +68,26 @@ function resolveInside(parent, ...parts) {
 }
 
 function toProjectRelative(targetPath) {
-    const relative = path.relative(projectRoot, path.resolve(targetPath)).replace(/\\/g, '/');
-    return relative && !relative.startsWith('..') ? relative : '';
+    const resolved = path.resolve(targetPath);
+    const projectRelative = path.relative(projectRoot, resolved).replace(/\\/g, '/');
+    if (projectRelative && !projectRelative.startsWith('..') && !path.isAbsolute(projectRelative)) {
+        return projectRelative;
+    }
+    // PIVOT_ANALYSIS_DIR 可配置到独立的数据盘。不能把绝对路径直接写入数据库，
+    // 使用受控前缀保存相对 analysisRoot 的位置，并在读取时再次验证边界。
+    const analysisRelative = path.relative(analysisRoot, resolved).replace(/\\/g, '/');
+    if (analysisRelative && !analysisRelative.startsWith('..') && !path.isAbsolute(analysisRelative)) {
+        return `${EXTERNAL_ANALYSIS_PATH_PREFIX}${analysisRelative}`;
+    }
+    return '';
 }
 
 function fromProjectRelative(relativePath) {
-    const target = path.resolve(projectRoot, String(relativePath || ''));
+    const stored = String(relativePath || '');
+    if (stored.startsWith(EXTERNAL_ANALYSIS_PATH_PREFIX)) {
+        return resolveInside(analysisRoot, stored.slice(EXTERNAL_ANALYSIS_PATH_PREFIX.length));
+    }
+    const target = path.resolve(projectRoot, stored);
     if (!isPathInside(projectRoot, target)) {
         const err = new Error('不安全的数据分析存储路径。');
         err.status = 400;
@@ -222,7 +237,9 @@ function serializeDataset(row) {
         columns: jsonParse(row.columns_json, []),
         profile: jsonParse(row.profile_json, []),
         previewRows: jsonParse(row.preview_json, []),
-        sheetName: row.sheet_name || ''
+        sheetName: row.sheet_name || '',
+        derivedFromDatasetId: row.derived_from_dataset_id || '',
+        cleaningRunId: row.cleaning_run_id || ''
     };
 }
 

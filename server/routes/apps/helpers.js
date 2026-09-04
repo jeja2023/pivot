@@ -39,6 +39,16 @@ function clampText(value, max = 4000) {
     return text.length > max ? `${text.slice(0, max)}…（已截断）` : text;
 }
 
+function buildModelSecretErrorPayload(modelCfg) {
+    return {
+        error: {
+            message: `${modelCfg.secret_error}，请在模型管理中重新保存该模型的 API Key，或恢复原 DATA_ENCRYPTION_KEY/JWT_SECRET 后重启服务。`,
+            type: 'invalid_request_error',
+            code: 'api_key_decrypt_failed'
+        }
+    };
+}
+
 // 判断是否应为该模型关闭“思考”模式：公文起草/润色/审校属工具型任务，无需思维链。
 // 依据管理员设置的 supports_reasoning，或常见推理型模型名（Qwen3 / QwQ / DeepSeek-R1）兜底识别。
 function shouldDisableThinking(modelCfg) {
@@ -83,6 +93,7 @@ module.exports = {
     extractCompletionContent,
     parseJsonObject,
     clampText,
+    buildModelSecretErrorPayload,
     shouldDisableThinking,
     applyNoThinkSoftSwitch,
     buildThinkingControlPayload,

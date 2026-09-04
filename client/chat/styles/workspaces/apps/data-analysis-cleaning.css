@@ -1,0 +1,2015 @@
+/* ==========================================================================
+   Pivot Data Analysis - Data Cleaning Workspace (Compact High-Density Design)
+   紧凑高密度数据清洗工作台设计系统：
+   1. 统一 28-30px 控件规范（按钮、输入框、下拉框、Tab栏）
+   2. 紧凑间距与内边距（6-10px 间距，8-10px 卡片内边距）
+   3. 字体层级高密度排版（标题 0.80-0.88rem，正文 0.70-0.74rem，辅助 0.66-0.68rem）
+   4. 与透视视图、数据查询视图保持一致的紧凑卡片、粘性表头和高对比度色彩
+   ========================================================================== */
+
+#data-analysis-cleaning-panel {
+    padding: 6px 12px 8px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+.data-cleaning-header,
+.data-cleaning-header-left,
+.data-cleaning-header-actions,
+.data-cleaning-title-row,
+.data-cleaning-section-heading,
+.data-cleaning-section-title-wrap,
+.data-cleaning-actions,
+.data-cleaning-preview-head,
+.data-cleaning-preview-title-row,
+.data-cleaning-preview-kpis,
+.data-cleaning-run,
+.data-cleaning-run-header,
+.data-cleaning-run-title-row,
+.data-cleaning-run-stat-row,
+.data-cleaning-run-actions,
+.data-cleaning-quality-bar,
+.data-cleaning-quality-title {
+    display: flex;
+    align-items: center;
+}
+
+/* ==========================================================================
+   1. Header Banner (Compact Top Bar)
+   ========================================================================== */
+.data-cleaning-header {
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    padding: 6px 12px;
+    border: 1px solid rgba(20, 184, 166, 0.25);
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.08) 0%, rgba(37, 99, 235, 0.05) 50%, rgba(139, 92, 246, 0.03) 100%);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.data-cleaning-header-left {
+    gap: 8px;
+    min-width: 0;
+}
+
+.data-cleaning-header-icon-badge {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(13, 148, 136, 0.24);
+    flex-shrink: 0;
+}
+
+.data-cleaning-header-icon-badge svg {
+    width: 15px;
+    height: 15px;
+}
+
+.data-cleaning-header-intro {
+    min-width: 0;
+}
+
+.data-cleaning-title-row {
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.data-cleaning-header h5 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+}
+
+.data-cleaning-badge-safe {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #059669;
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+
+.data-cleaning-badge-safe svg {
+    width: 11px;
+    height: 11px;
+}
+
+.data-cleaning-header p {
+    margin: 1px 0 0;
+    color: var(--text-muted);
+    font-size: 0.70rem;
+    line-height: 1.25;
+}
+
+.data-cleaning-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+.data-cleaning-dataset-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 8px;
+    background: var(--bg-card, #fff);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 6px;
+    color: var(--text-main);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    white-space: nowrap !important;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.data-cleaning-dataset-picker:hover {
+    border-color: rgba(13, 148, 136, 0.45);
+    background: #fff;
+}
+
+.data-cleaning-dataset-picker:focus-within {
+    border-color: #0d9488;
+    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.12);
+    background: #fff;
+}
+
+.data-cleaning-dataset-picker svg {
+    color: #0d9488;
+    flex-shrink: 0;
+    width: 13px;
+    height: 13px;
+}
+
+.data-cleaning-picker-label,
+.data-cleaning-dataset-picker span {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-main, #1e293b);
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    display: inline-block;
+    user-select: none;
+    line-height: 1;
+}
+
+.data-cleaning-dataset-picker select,
+.data-cleaning-dataset-picker select.form-input,
+.data-cleaning-picker-select {
+    min-width: 140px;
+    height: 26px;
+    line-height: 26px;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 4px !important;
+    margin: 0 !important;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--text-main, #0f172a);
+    cursor: pointer;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+#data-cleaning-refresh.btn-secondary,
+#data-cleaning-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: var(--bg-card, #fff);
+    color: var(--text-main);
+    white-space: nowrap !important;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+#data-cleaning-refresh svg {
+    width: 12px;
+    height: 12px;
+}
+
+#data-cleaning-refresh.btn-secondary:hover,
+#data-cleaning-refresh:hover {
+    border-color: rgba(13, 148, 136, 0.45);
+    color: #0d9488;
+    background: rgba(13, 148, 136, 0.05);
+}
+
+/* ==========================================================================
+   2. Tabs Navigation (Compact Segmented Control)
+   ========================================================================== */
+.data-cleaning-tabs-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 3px;
+    margin-bottom: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    background: var(--bg-card, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.data-cleaning-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    height: 30px;
+    min-height: 30px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+    position: relative;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+.data-cleaning-tab-btn:hover {
+    background: rgba(148, 163, 184, 0.08);
+    color: var(--text-main);
+}
+
+.data-cleaning-tab-btn.active {
+    background: linear-gradient(135deg, rgba(13, 148, 136, 0.09) 0%, rgba(37, 99, 235, 0.06) 100%);
+    border-color: rgba(13, 148, 136, 0.35);
+    color: var(--text-main);
+    box-shadow: 0 1px 4px rgba(13, 148, 136, 0.1);
+}
+
+.data-cleaning-tab-step {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(148, 163, 184, 0.16);
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    font-weight: 800;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-tab-btn.active .data-cleaning-tab-step {
+    background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(13, 148, 136, 0.3);
+}
+
+.data-cleaning-tab-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    justify-content: center;
+}
+
+.data-cleaning-tab-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.data-cleaning-tab-sub {
+    display: none;
+}
+
+.data-cleaning-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--text-muted);
+    font-size: 0.64rem;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-tab-badge.has-items,
+.data-cleaning-tab-btn.active .data-cleaning-tab-badge {
+    background: rgba(13, 148, 136, 0.16);
+    color: #0d9488;
+    font-weight: 700;
+}
+
+/* Tab Panes */
+.data-cleaning-tab-pane {
+    display: none;
+}
+
+.data-cleaning-tab-pane.active {
+    display: block;
+    animation: dataCleaningPaneFadeIn 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes dataCleaningPaneFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ==========================================================================
+   3. Quick Health Ribbon in Tab 1
+   ========================================================================== */
+.data-cleaning-quick-health-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border: 1px solid rgba(20, 184, 166, 0.2);
+    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.06) 0%, rgba(59, 130, 246, 0.04) 100%);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    min-height: 28px;
+    box-sizing: border-box;
+}
+
+.data-cleaning-quick-health-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.data-cleaning-quick-stats {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.70rem;
+    color: var(--text-muted);
+}
+
+.data-cleaning-quick-stats strong {
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.data-cleaning-quick-stat-sep {
+    color: rgba(148, 163, 184, 0.5);
+}
+
+.data-cleaning-quick-rec-hint strong {
+    color: #0d9488;
+}
+
+.data-cleaning-quick-health-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 8px;
+    height: 22px;
+    border: 1px solid rgba(20, 184, 166, 0.3);
+    border-radius: 4px;
+    background: var(--bg-card, #fff);
+    color: #0d9488;
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-quick-health-link:hover {
+    background: rgba(20, 184, 166, 0.1);
+    border-color: #0d9488;
+}
+
+/* ==========================================================================
+   4. Pane Bottom CTA (High Contrast, Compact)
+   ========================================================================== */
+.data-cleaning-pane-bottom-cta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-top: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: var(--bg-card, #fff);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.data-cleaning-pane-cta-desc {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-right: auto;
+}
+
+.data-cleaning-pane-bottom-cta button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    border-radius: 5px;
+    white-space: nowrap !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-pane-bottom-cta .btn-primary,
+.data-cleaning-pane-bottom-cta button.btn-primary {
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%) !important;
+    color: #ffffff !important;
+    border: none !important;
+    box-shadow: 0 1px 4px rgba(13, 148, 136, 0.35);
+}
+
+.data-cleaning-pane-bottom-cta .btn-primary:hover,
+.data-cleaning-pane-bottom-cta button.btn-primary:hover {
+    background: linear-gradient(135deg, #0f766e 0%, #047857 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(13, 148, 136, 0.45);
+}
+
+.data-cleaning-pane-bottom-cta .btn-primary span,
+.data-cleaning-pane-bottom-cta button.btn-primary span {
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    margin-right: 0 !important;
+}
+
+.data-cleaning-pane-bottom-cta .btn-primary svg,
+.data-cleaning-pane-bottom-cta button.btn-primary svg {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+    width: 12px;
+    height: 12px;
+}
+
+.data-cleaning-pane-bottom-cta .btn-secondary,
+.data-cleaning-pane-bottom-cta button.btn-secondary {
+    background: var(--bg-card, #fff);
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    color: var(--text-main, #1e293b) !important;
+}
+
+.data-cleaning-pane-bottom-cta .btn-secondary:hover,
+.data-cleaning-pane-bottom-cta button.btn-secondary:hover {
+    border-color: rgba(13, 148, 136, 0.5);
+    background: rgba(13, 148, 136, 0.05);
+    color: #0d9488 !important;
+}
+
+.data-cleaning-pane-bottom-cta .btn-secondary span,
+.data-cleaning-pane-bottom-cta button.btn-secondary span {
+    color: inherit !important;
+    margin-right: 0 !important;
+}
+
+.data-cleaning-pane-bottom-cta .btn-secondary svg,
+.data-cleaning-pane-bottom-cta button.btn-secondary svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* ==========================================================================
+   5. Empty Hero & Empty Cards (Compact)
+   ========================================================================== */
+.data-cleaning-empty-hero {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border: 1px dashed rgba(20, 184, 166, 0.35);
+    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.04) 0%, rgba(37, 99, 235, 0.02) 100%);
+}
+
+.data-cleaning-empty-icon-wrap {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(20, 184, 166, 0.12);
+    color: #0d9488;
+    flex-shrink: 0;
+}
+
+.data-cleaning-empty-icon-wrap svg {
+    width: 16px;
+    height: 16px;
+}
+
+.data-cleaning-empty-content {
+    min-width: 0;
+}
+
+.data-cleaning-empty-content h6 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.80rem;
+    font-weight: 700;
+}
+
+.data-cleaning-empty-content p {
+    margin: 2px 0 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.data-cleaning-feature-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.data-cleaning-feature-chips span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--bg-card, #fff);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    color: var(--text-main);
+    font-size: 0.66rem;
+    font-weight: 500;
+}
+
+.data-cleaning-feature-chips span svg {
+    width: 10px;
+    height: 10px;
+}
+
+/* Loading & Empty Cards */
+.data-cleaning-loading-card,
+.data-cleaning-empty-card {
+    display: grid;
+    place-items: center;
+    padding: 14px 12px;
+    border-radius: 6px;
+    border: 1px dashed rgba(148, 163, 184, 0.22);
+    background: rgba(248, 250, 252, 0.5);
+    text-align: center;
+    min-height: 70px;
+}
+
+.data-cleaning-empty-card-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    max-width: 480px;
+    color: var(--text-muted);
+}
+
+.data-cleaning-empty-card-inner svg {
+    width: 22px;
+    height: 22px;
+    color: rgba(148, 163, 184, 0.7);
+    margin-bottom: 2px;
+}
+
+.data-cleaning-empty-card-inner p,
+.data-cleaning-rules-empty,
+.data-cleaning-preview-empty-text {
+    margin: 0;
+    font-size: 0.74rem;
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.data-cleaning-empty-sub {
+    font-size: 0.66rem;
+    color: var(--text-muted);
+}
+
+.data-cleaning-spinner {
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(13, 148, 136, 0.2);
+    border-top-color: #0d9488;
+    border-radius: 50%;
+    animation: dc-spin 0.8s linear infinite;
+    margin-bottom: 6px;
+}
+
+@keyframes dc-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   6. Quality Report Area (Tab 2)
+   ========================================================================== */
+.data-cleaning-quality-bar {
+    justify-content: space-between;
+    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.data-cleaning-quality-title {
+    gap: 6px;
+    color: var(--text-main);
+    font-size: 0.80rem;
+}
+
+.data-cleaning-quality-title svg {
+    color: var(--primary, #0f766e);
+    width: 15px;
+    height: 15px;
+}
+
+.data-cleaning-health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
+    height: 22px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.data-cleaning-health-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.data-cleaning-health-badge.health-good {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.data-cleaning-health-badge.health-fair {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.data-cleaning-health-badge.health-warning {
+    background: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.data-cleaning-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.data-cleaning-kpi-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: var(--bg-card, #fff);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.data-cleaning-kpi-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.data-cleaning-kpi-icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.data-cleaning-kpi-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.kpi-rows .data-cleaning-kpi-icon {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+}
+
+.kpi-columns .data-cleaning-kpi-icon {
+    background: rgba(20, 184, 166, 0.12);
+    color: #0d9488;
+}
+
+.kpi-missing .data-cleaning-kpi-icon {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+}
+
+.kpi-duplicates .data-cleaning-kpi-icon {
+    background: rgba(139, 92, 246, 0.12);
+    color: #7c3aed;
+}
+
+.data-cleaning-kpi-meta span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    font-weight: 500;
+    line-height: 1.1;
+}
+
+.data-cleaning-kpi-meta strong {
+    display: block;
+    margin-top: 1px;
+    color: var(--text-main);
+    font-size: 0.90rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+/* Field Quality Table */
+.data-cleaning-field-quality-wrap,
+.data-cleaning-preview-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: var(--bg-card, #fff);
+    max-height: calc(100vh - 280px);
+}
+
+.data-cleaning-field-quality {
+    min-width: 720px;
+    margin: 0;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-cleaning-field-quality th {
+    padding: 5px 8px;
+    height: 30px;
+    min-height: 30px;
+    background: rgba(248, 250, 252, 0.95);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-sizing: border-box;
+}
+
+.data-cleaning-field-quality td {
+    padding: 4px 8px;
+    height: 28px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+    box-sizing: border-box;
+}
+
+.data-cleaning-field-quality tbody tr:hover {
+    background: #f8fafc;
+}
+
+.data-cleaning-fill-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 110px;
+}
+
+.data-cleaning-fill-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.2);
+    overflow: hidden;
+}
+
+.data-cleaning-fill-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+}
+
+.data-cleaning-fill-bar.rate-high span {
+    background: linear-gradient(90deg, #10b981, #059669);
+}
+
+.data-cleaning-fill-bar.rate-med span {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.data-cleaning-fill-bar.rate-low span {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+.data-cleaning-fill-text {
+    font-size: 0.66rem;
+    font-weight: 700;
+    min-width: 30px;
+}
+
+.data-cleaning-sample-cell {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+}
+
+.data-cleaning-type {
+    display: inline-flex;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.11);
+    color: #0f766e;
+    font-size: 0.64rem;
+    font-weight: 700;
+}
+
+.data-cleaning-type.type-number,
+.data-cleaning-type.type-integer,
+.data-cleaning-type.type-float {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+}
+
+.data-cleaning-type.type-date,
+.data-cleaning-type.type-timestamp {
+    background: rgba(139, 92, 246, 0.12);
+    color: #7c3aed;
+}
+
+/* ==========================================================================
+   7. Middle Layout & Rules Studio (Tab 1)
+   ========================================================================== */
+.data-cleaning-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.data-cleaning-recommendations,
+.data-cleaning-rules-panel,
+.data-cleaning-preview,
+.data-cleaning-runs-panel {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: var(--bg-card, #fff);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.data-cleaning-recommendations,
+.data-cleaning-rules-panel,
+.data-cleaning-runs-panel {
+    padding: 8px 10px;
+}
+
+.data-cleaning-section-heading {
+    justify-content: space-between;
+    margin-bottom: 6px;
+    gap: 6px;
+}
+
+.data-cleaning-section-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.data-cleaning-section-title-wrap svg {
+    color: var(--primary, #0f766e);
+    width: 14px;
+    height: 14px;
+}
+
+.data-cleaning-section-heading h6 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.80rem;
+    font-weight: 700;
+}
+
+.data-cleaning-section-heading span,
+.data-cleaning-section-tip {
+    margin-top: 1px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.data-cleaning-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+.data-cleaning-add-btn svg {
+    width: 11px;
+    height: 11px;
+}
+
+/* Quick Templates Bar */
+.data-cleaning-templates-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+    padding: 3px 6px;
+    background: rgba(148, 163, 184, 0.07);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 5px;
+    min-height: 26px;
+}
+
+.data-cleaning-templates-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-right: 2px;
+}
+
+.data-cleaning-template-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: var(--bg-card, #fff);
+    color: var(--text-main);
+    font-size: 0.68rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-template-btn svg {
+    width: 10px;
+    height: 10px;
+}
+
+.data-cleaning-template-btn:hover {
+    background: var(--primary, #0f766e);
+    color: #fff;
+    border-color: var(--primary, #0f766e);
+}
+
+/* ==========================================================================
+   8. Recommendations & Rules (Tab 1)
+   ========================================================================== */
+.data-cleaning-recommendations-list,
+.data-cleaning-rules {
+    display: grid;
+    gap: 6px;
+}
+
+.data-cleaning-recommendation {
+    display: grid;
+    gap: 3px;
+    padding: 6px 8px;
+    border: 1px solid rgba(20, 184, 166, 0.2);
+    border-radius: 5px;
+    background: rgba(15, 118, 110, 0.04);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.data-cleaning-recommendation:hover {
+    border-color: rgba(20, 184, 166, 0.4);
+    transform: translateY(-1px);
+}
+
+.data-cleaning-rec-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.data-cleaning-rec-badge {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.12);
+    color: #0f766e;
+    font-size: 0.64rem;
+    font-weight: 700;
+}
+
+.data-cleaning-adopt-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+    padding: 0 5px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    border-radius: 3px;
+    color: var(--primary, #0f766e);
+}
+
+.data-cleaning-adopt-btn svg {
+    width: 10px;
+    height: 10px;
+}
+
+.data-cleaning-recommendation strong {
+    color: var(--text-main);
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+.data-cleaning-recommendation span {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.3;
+}
+
+.data-cleaning-recommendations-empty-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.06);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.data-cleaning-good-icon {
+    color: #059669;
+    flex-shrink: 0;
+}
+
+.data-cleaning-good-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.data-cleaning-recommendations-empty-card strong {
+    font-size: 0.74rem;
+    color: #059669;
+    display: block;
+}
+
+.data-cleaning-recommendations-empty {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    line-height: 1.35;
+}
+
+/* Rule Card */
+.data-cleaning-rule {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: start;
+    padding: 6px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    background: rgba(248, 250, 252, 0.75);
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-rule:hover {
+    border-color: rgba(20, 184, 166, 0.35);
+    background: rgba(248, 250, 252, 1);
+}
+
+.data-cleaning-rule-step-badge {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary, #0f766e);
+    color: #fff;
+    font-size: 0.66rem;
+    font-weight: 800;
+}
+
+.data-cleaning-rule-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
+    gap: 4px 6px;
+}
+
+.data-cleaning-rule-fields label {
+    display: grid;
+    gap: 2px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.data-cleaning-rule-fields .form-input {
+    min-width: 0;
+    height: 26px;
+    line-height: 26px;
+    font-size: 0.72rem;
+    padding: 0 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    background: #ffffff;
+    box-sizing: border-box;
+}
+
+.data-cleaning-rule-fields select.form-input {
+    cursor: pointer;
+}
+
+.data-cleaning-rule-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.data-cleaning-rule-actions .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 5px;
+    font-size: 0.68rem;
+    border-radius: 4px;
+}
+
+.data-cleaning-rule-actions .btn-secondary svg {
+    width: 10px;
+    height: 10px;
+}
+
+.data-cleaning-rule-delete {
+    color: var(--danger, #dc2626);
+    gap: 2px;
+}
+
+.data-cleaning-rule-delete:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.data-cleaning-dedup-fields {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 3px;
+    padding: 4px 6px;
+    background: rgba(148, 163, 184, 0.08);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.data-cleaning-dedup-fields > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+}
+
+.data-cleaning-dedup-fields label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-weight: 500;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.68rem;
+}
+
+.data-cleaning-check {
+    width: max-content;
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500 !important;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.68rem;
+}
+
+/* ==========================================================================
+   9. Actions Footer Bar (Tab 1 Bottom)
+   ========================================================================== */
+.data-cleaning-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(248, 250, 252, 0.9) 0%, rgba(241, 245, 249, 0.75) 100%);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.data-cleaning-name-label {
+    display: inline-flex;
+    align-items: center;
+    flex: 1;
+    min-width: 220px;
+    max-width: 400px;
+    height: 28px;
+    background: var(--bg-card, #fff);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 5px;
+    padding: 0 3px 0 8px;
+    gap: 6px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    transition: all 0.15s ease;
+    cursor: text;
+    margin: 0;
+}
+
+.data-cleaning-name-label:hover {
+    border-color: rgba(13, 148, 136, 0.45);
+}
+
+.data-cleaning-name-label:focus-within {
+    border-color: #0d9488;
+    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.12);
+}
+
+.data-cleaning-name-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.70rem;
+    font-weight: 700;
+    color: var(--text-muted, #64748b);
+    white-space: nowrap !important;
+    flex-shrink: 0;
+    padding-right: 6px;
+    border-right: 1px solid rgba(148, 163, 184, 0.25);
+    user-select: none;
+    line-height: 1;
+}
+
+.data-cleaning-name-tag svg {
+    color: #0d9488;
+    flex-shrink: 0;
+    width: 11px;
+    height: 11px;
+}
+
+.data-cleaning-name-label input#data-cleaning-name,
+.data-cleaning-name-label input.data-cleaning-name-input {
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    line-height: 24px;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 4px !important;
+    margin: 0 !important;
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-main, #0f172a);
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.data-cleaning-name-label input#data-cleaning-name::placeholder {
+    color: var(--text-muted, #94a3b8);
+    font-size: 0.72rem;
+}
+
+.data-cleaning-action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.data-cleaning-action-buttons button,
+.data-cleaning-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    border-radius: 5px;
+    white-space: nowrap !important;
+    transition: all 0.15s ease;
+}
+
+.data-cleaning-actions button svg {
+    width: 11px;
+    height: 11px;
+}
+
+#data-cleaning-preview-run.btn-secondary {
+    background: var(--bg-card, #fff);
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    color: var(--text-main);
+}
+
+#data-cleaning-preview-run.btn-secondary:hover {
+    border-color: rgba(13, 148, 136, 0.5);
+    background: rgba(13, 148, 136, 0.05);
+    color: #0d9488;
+}
+
+#data-cleaning-apply.btn-primary {
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+    color: #fff;
+    border: none;
+    box-shadow: 0 1px 4px rgba(13, 148, 136, 0.28);
+}
+
+#data-cleaning-apply.btn-primary:hover {
+    box-shadow: 0 2px 8px rgba(13, 148, 136, 0.38);
+    transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   10. Preview Area (Tab 3)
+   ========================================================================== */
+.data-cleaning-preview {
+    margin-top: 0;
+    overflow: hidden;
+}
+
+.data-cleaning-preview-head {
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    background: rgba(248, 250, 252, 0.6);
+}
+
+.data-cleaning-preview-title-row {
+    gap: 6px;
+}
+
+.data-cleaning-preview-title-row svg {
+    color: var(--primary, #0f766e);
+    width: 14px;
+    height: 14px;
+}
+
+.data-cleaning-preview-head h6 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.80rem;
+    font-weight: 700;
+}
+
+.data-cleaning-preview-tag {
+    display: inline-block;
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 3px;
+    background: rgba(13, 148, 136, 0.1);
+    color: #0f766e;
+    font-size: 0.64rem;
+    font-weight: 600;
+}
+
+.data-cleaning-preview-head span {
+    margin: 1px 0 0;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.data-cleaning-preview-kpis {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.kpi-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    height: 22px;
+    border-radius: 4px;
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+
+.kpi-pill svg {
+    width: 10px;
+    height: 10px;
+}
+
+.kpi-in {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.kpi-out {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.kpi-removed {
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.kpi-changed {
+    background: rgba(245, 158, 11, 0.1);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.data-cleaning-changed-fields {
+    padding: 4px 10px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.data-cleaning-changed-label {
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.data-cleaning-changed-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.09);
+    border: 1px solid rgba(20, 184, 166, 0.2);
+    color: #0f766e;
+    font-weight: 600;
+}
+
+.data-cleaning-preview-table-wrap {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+}
+
+.data-cleaning-preview-table-wrap .data-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.data-cleaning-preview-table-wrap .data-table th {
+    padding: 5px 8px;
+    height: 30px;
+    min-height: 30px;
+    background: rgba(248, 250, 252, 0.95);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-sizing: border-box;
+}
+
+.data-cleaning-preview-table-wrap .data-table td {
+    padding: 4px 8px;
+    height: 28px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+    box-sizing: border-box;
+}
+
+.data-cleaning-preview-table-wrap .data-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+/* ==========================================================================
+   11. History Runs Area (Tab 4) - Data Table Form
+   ========================================================================== */
+.data-cleaning-runs-panel {
+    margin-top: 0;
+}
+
+.data-cleaning-runs-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: var(--bg-card, #fff);
+    max-height: calc(100vh - 280px);
+}
+
+.data-cleaning-runs-table {
+    width: 100%;
+    min-width: 820px;
+    border-collapse: collapse;
+}
+
+.data-cleaning-runs-table th {
+    padding: 5px 8px;
+    height: 30px;
+    min-height: 30px;
+    background: rgba(248, 250, 252, 0.95);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-sizing: border-box;
+}
+
+.data-cleaning-runs-table td {
+    padding: 4px 8px;
+    height: 32px;
+    font-size: 0.72rem;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+    box-sizing: border-box;
+}
+
+.data-cleaning-runs-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.data-cleaning-runs-table .col-index {
+    width: 48px;
+    text-align: center;
+}
+
+.data-cleaning-row-index {
+    color: #64748b;
+    font-size: 0.70rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-cleaning-runs-table .col-version {
+    width: 55px;
+    text-align: center;
+}
+
+.data-cleaning-runs-table .col-name {
+    min-width: 160px;
+    max-width: 260px;
+}
+
+.data-cleaning-runs-table .col-rows {
+    width: 130px;
+    white-space: nowrap;
+}
+
+.data-cleaning-runs-table .col-cols {
+    width: 110px;
+    white-space: nowrap;
+}
+
+.data-cleaning-runs-table .col-rules {
+    width: 90px;
+    text-align: center;
+}
+
+.data-cleaning-runs-table .col-created {
+    width: 150px;
+    white-space: nowrap;
+}
+
+.data-cleaning-runs-table .col-actions {
+    min-width: 230px;
+    text-align: right;
+}
+
+.data-cleaning-run-vbadge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.12);
+    color: #0f766e;
+    font-size: 0.64rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.data-cleaning-run-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-main);
+    font-weight: 700;
+}
+
+.data-cleaning-flow-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.70rem;
+    color: #334155;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-cleaning-flow-arrow {
+    color: #0d9488;
+    font-weight: 700;
+}
+
+.data-cleaning-muted-cell {
+    color: #64748b;
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-cleaning-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    min-width: 0;
+    height: 24px;
+}
+
+.data-cleaning-table-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 7px;
+    border-radius: 4px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: #fff;
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.data-cleaning-table-btn:hover {
+    border-color: rgba(13, 148, 136, 0.5);
+    background: rgba(13, 148, 136, 0.05);
+    color: #0d9488;
+}
+
+.data-cleaning-table-btn svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+}
+
+#data-cleaning-refresh-runs.btn-secondary {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+}
+
+/* ==========================================================================
+   12. Dark Mode Support
+   ========================================================================== */
+body.dark-mode .data-cleaning-header,
+.dark-mode .data-cleaning-header {
+    background: linear-gradient(135deg, rgba(13, 148, 136, 0.18) 0%, rgba(30, 58, 138, 0.16) 100%);
+    border-color: rgba(94, 234, 212, 0.25);
+}
+
+body.dark-mode .data-cleaning-workflow-stepper,
+body.dark-mode .data-cleaning-kpi-card,
+body.dark-mode .data-cleaning-recommendations,
+body.dark-mode .data-cleaning-rules-panel,
+body.dark-mode .data-cleaning-preview,
+body.dark-mode .data-cleaning-runs-panel,
+body.dark-mode .data-cleaning-field-quality-wrap,
+body.dark-mode .data-cleaning-preview-table-wrap,
+.dark-mode .data-cleaning-workflow-stepper,
+.dark-mode .data-cleaning-kpi-card,
+.dark-mode .data-cleaning-recommendations,
+.dark-mode .data-cleaning-rules-panel,
+.dark-mode .data-cleaning-preview,
+.dark-mode .data-cleaning-runs-panel,
+.dark-mode .data-cleaning-field-quality-wrap,
+.dark-mode .data-cleaning-preview-table-wrap {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .data-cleaning-rule,
+body.dark-mode .data-cleaning-run,
+body.dark-mode .data-cleaning-loading-card,
+body.dark-mode .data-cleaning-empty-card,
+body.dark-mode .data-cleaning-templates-bar,
+.dark-mode .data-cleaning-rule,
+.dark-mode .data-cleaning-run,
+.dark-mode .data-cleaning-loading-card,
+.dark-mode .data-cleaning-empty-card,
+.dark-mode .data-cleaning-templates-bar {
+    background: #172033;
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .data-cleaning-field-quality th,
+body.dark-mode .data-cleaning-preview-head,
+body.dark-mode .data-cleaning-preview-table-wrap .data-table th,
+body.dark-mode .data-cleaning-runs-table th,
+.dark-mode .data-cleaning-field-quality th,
+.dark-mode .data-cleaning-preview-head,
+.dark-mode .data-cleaning-preview-table-wrap .data-table th,
+.dark-mode .data-cleaning-runs-table th {
+    background: rgba(15, 23, 42, 0.95);
+    border-color: rgba(148, 163, 184, 0.18);
+    color: #94a3b8;
+}
+
+body.dark-mode .data-cleaning-field-quality td,
+body.dark-mode .data-cleaning-preview-table-wrap .data-table td,
+body.dark-mode .data-cleaning-runs-table td,
+.dark-mode .data-cleaning-field-quality td,
+.dark-mode .data-cleaning-preview-table-wrap .data-table td,
+.dark-mode .data-cleaning-runs-table td {
+    border-color: rgba(148, 163, 184, 0.1);
+    color: #e2e8f0;
+}
+
+body.dark-mode .data-cleaning-runs-table tbody tr:hover,
+.dark-mode .data-cleaning-runs-table tbody tr:hover {
+    background: #172033;
+}
+
+body.dark-mode .data-cleaning-flow-stat,
+.dark-mode .data-cleaning-flow-stat {
+    color: #cbd5e1;
+}
+
+body.dark-mode .data-cleaning-row-index,
+.dark-mode .data-cleaning-row-index {
+    color: #94a3b8;
+}
+
+body.dark-mode .data-cleaning-table-btn,
+.dark-mode .data-cleaning-table-btn {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #cbd5e1;
+}
+
+body.dark-mode .data-cleaning-table-btn:hover,
+.dark-mode .data-cleaning-table-btn:hover {
+    border-color: rgba(20, 184, 166, 0.5);
+    background: rgba(20, 184, 166, 0.1);
+    color: #2dd4bf;
+}
+
+body.dark-mode .data-cleaning-template-btn,
+body.dark-mode .data-cleaning-dataset-picker,
+body.dark-mode .data-cleaning-feature-chips span,
+.dark-mode .data-cleaning-template-btn,
+.dark-mode .data-cleaning-dataset-picker,
+.dark-mode .data-cleaning-feature-chips span {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.22);
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-header h5,
+body.dark-mode .data-cleaning-section-heading h6,
+body.dark-mode .data-cleaning-preview-head h6,
+body.dark-mode .data-cleaning-kpi-meta strong,
+body.dark-mode .data-cleaning-recommendation strong,
+body.dark-mode .data-cleaning-run-title-row strong,
+body.dark-mode .data-cleaning-empty-content h6,
+body.dark-mode .data-cleaning-empty-card-inner p,
+.dark-mode .data-cleaning-header h5,
+.dark-mode .data-cleaning-section-heading h6,
+.dark-mode .data-cleaning-preview-head h6,
+.dark-mode .data-cleaning-kpi-meta strong,
+.dark-mode .data-cleaning-recommendation strong,
+.dark-mode .data-cleaning-run-title-row strong,
+.dark-mode .data-cleaning-empty-content h6,
+.dark-mode .data-cleaning-empty-card-inner p {
+    color: #f8fafc;
+}
+
+body.dark-mode .data-cleaning-recommendation,
+.dark-mode .data-cleaning-recommendation {
+    background: rgba(13, 148, 136, 0.12);
+    border-color: rgba(13, 148, 136, 0.3);
+}
+
+body.dark-mode .data-cleaning-tabs-nav,
+.dark-mode .data-cleaning-tabs-nav,
+body.dark-mode .data-cleaning-pane-bottom-cta,
+.dark-mode .data-cleaning-pane-bottom-cta {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .data-cleaning-tab-btn.active,
+.dark-mode .data-cleaning-tab-btn.active {
+    background: rgba(13, 148, 136, 0.18);
+    border-color: rgba(13, 148, 136, 0.45);
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-tab-title,
+.dark-mode .data-cleaning-tab-title {
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-quick-health-banner,
+.dark-mode .data-cleaning-quick-health-banner {
+    background: rgba(20, 184, 166, 0.09);
+    border-color: rgba(20, 184, 166, 0.28);
+}
+
+body.dark-mode .data-cleaning-quick-health-link,
+.dark-mode .data-cleaning-quick-health-link {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(20, 184, 166, 0.4);
+    color: #2dd4bf;
+}
+
+body.dark-mode .data-cleaning-actions,
+.dark-mode .data-cleaning-actions {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border-color: rgba(148, 163, 184, 0.16);
+}
+
+body.dark-mode .data-cleaning-name-label,
+.dark-mode .data-cleaning-name-label {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+body.dark-mode .data-cleaning-name-tag,
+.dark-mode .data-cleaning-name-tag {
+    color: #94a3b8;
+    border-right-color: rgba(148, 163, 184, 0.2);
+}
+
+body.dark-mode .data-cleaning-name-label input#data-cleaning-name,
+.dark-mode .data-cleaning-name-label input#data-cleaning-name {
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-rule-fields .form-input,
+.dark-mode .data-cleaning-rule-fields .form-input {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-rule-actions .btn-secondary,
+.dark-mode .data-cleaning-rule-actions .btn-secondary,
+body.dark-mode .data-cleaning-add-btn,
+.dark-mode .data-cleaning-add-btn,
+body.dark-mode #data-cleaning-refresh.btn-secondary,
+.dark-mode #data-cleaning-refresh.btn-secondary,
+body.dark-mode #data-cleaning-refresh-runs.btn-secondary,
+.dark-mode #data-cleaning-refresh-runs.btn-secondary,
+body.dark-mode .data-cleaning-run-actions .btn-secondary,
+.dark-mode .data-cleaning-run-actions .btn-secondary {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #cbd5e1;
+}
+
+body.dark-mode #data-cleaning-preview-run.btn-secondary,
+.dark-mode #data-cleaning-preview-run.btn-secondary {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #f1f5f9;
+}
+
+body.dark-mode .data-cleaning-pane-bottom-cta .btn-secondary,
+.dark-mode .data-cleaning-pane-bottom-cta .btn-secondary {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #f1f5f9 !important;
+}
+
+/* ==========================================================================
+   13. Responsive Adaptations
+   ========================================================================== */
+@media (max-width: 980px) {
+    .data-cleaning-header,
+    .data-cleaning-preview-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .data-cleaning-header-actions,
+    .data-cleaning-preview-kpis {
+        justify-content: flex-start;
+        width: 100%;
+    }
+    .data-cleaning-tabs-nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .data-cleaning-layout {
+        grid-template-columns: 1fr;
+    }
+    .data-cleaning-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .data-cleaning-rule-fields {
+        grid-template-columns: repeat(2, minmax(110px, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .data-cleaning-tabs-nav {
+        grid-template-columns: 1fr;
+    }
+    .data-cleaning-pane-bottom-cta {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .data-cleaning-pane-cta-desc {
+        margin-right: 0;
+        margin-bottom: 6px;
+        text-align: center;
+    }
+    .data-cleaning-kpis,
+    .data-cleaning-rule-fields {
+        grid-template-columns: 1fr;
+    }
+    .data-cleaning-rule {
+        grid-template-columns: 20px minmax(0, 1fr);
+    }
+    .data-cleaning-rule-actions {
+        grid-column: 2;
+    }
+    .data-cleaning-actions {
+        justify-content: stretch;
+    }
+    .data-cleaning-name-label {
+        width: 100%;
+    }
+}

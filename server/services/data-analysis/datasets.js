@@ -407,9 +407,11 @@ async function importDataset({ user, file, name }) {
 
 async function listDatasets(userId) {
     const rows = await query(`
-        SELECT * FROM analysis_datasets
-        WHERE user_id = ? AND deleted_at IS NULL
-        ORDER BY updated_at DESC, created_at DESC
+        SELECT datasets.*, cleaning.source_dataset_id AS derived_from_dataset_id, cleaning.id AS cleaning_run_id
+        FROM analysis_datasets datasets
+        LEFT JOIN analysis_cleaning_runs cleaning ON cleaning.output_dataset_id = datasets.id
+        WHERE datasets.user_id = ? AND datasets.deleted_at IS NULL
+        ORDER BY datasets.updated_at DESC, datasets.created_at DESC
     `, [userId]);
     return rows.map(serializeDataset);
 }
@@ -426,11 +428,34 @@ async function getDatasetSummary(userId) {
     };
 }
 
-async function getDatasetDetail(userId, datasetId) {
+async function getDatasetDetail(userId, datasetId, options = {}) {
     const row = await getDatasetForUser(userId, datasetId);
     const dataset = serializeDataset(row);
+    const lineage = await queryOne(`
+        SELECT source_dataset_id, id AS cleaning_run_id
+        FROM analysis_cleaning_runs
+        WHERE user_id = ? AND output_dataset_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    `, [userId, datasetId]);
+    if (lineage) {
+        dataset.derivedFromDatasetId = lineage.source_dataset_id || '';
+        dataset.cleaningRunId = lineage.cleaning_run_id || '';
+    }
     const { parquetPath } = getDatasetPaths(row);
-    dataset.previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS }));
+    const page = Math.max(Number(options.page) || 1, 1);
+    const pageSize = options.pageSize !== undefined
+        ? Math.min(Math.max(Number(options.pageSize) || 25, 1), 100)
+        : (options.limit !== undefined ? Math.min(Math.max(Number(options.limit) || 100, 1), 100) : MAX_PREVIEW_ROWS);
+    const offset = options.offset !== undefined
+        ? Math.max(Number(options.offset) || 0, 0)
+        : (page - 1) * pageSize;
+
+    dataset.previewPage = page;
+    dataset.previewPageSize = pageSize;
+    dataset.previewTotal = dataset.rowCount || 0;
+    dataset.previewTotalPages = Math.max(Math.ceil((dataset.rowCount || 0) / pageSize), 1);
+    dataset.previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: pageSize, offset }));
     return dataset;
 }
 
@@ -487,6 +512,32 @@ async function softDeleteDataset(userId, datasetId) {
     return serializeDataset(row);
 }
 
+async function updateDataset(userId, datasetId, updates = {}) {
+    const row = await getDatasetForUser(userId, datasetId);
+    let newName = row.name;
+    if (typeof updates.name === 'string') {
+        newName = normalizeDatasetName(updates.name);
+        if (!newName) {
+            const err = new Error('数据集名称不能为空。');
+            err.status = 400;
+            throw err;
+        }
+    }
+    const originalName = typeof updates.originalName === 'string'
+        ? updates.originalName.trim().slice(0, 255)
+        : (typeof updates.original_name === 'string' ? updates.original_name.trim().slice(0, 255) : row.original_name);
+
+    const now = getBeijingTimestamp();
+    await execute(`
+        UPDATE analysis_datasets
+        SET name = ?, original_name = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+    `, [newName, originalName, now, datasetId, userId]);
+
+    const updatedRow = await getDatasetForUser(userId, datasetId);
+    return serializeDataset(updatedRow);
+}
+
 function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmpRetentionMs = TMP_RETENTION_MS } = {}) {
     const now = Date.now();
     let removed = 0;
@@ -537,6 +588,7 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
     return rows.map(row => {
         const item = {
             id: row.id,
+            datasetId,
             type: row.type,
             title: row.title,
             createdAt: row.created_at,
@@ -544,8 +596,9 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
             hasFile: !!row.file_path
         };
         if (row.type === 'chart') item.chart = jsonParse(row.content, null);
-        if (row.type === 'ai_analysis') item.analysis = jsonParse(row.content, null);
+        if (row.type === 'ai_analysis') item.analysis = jsonParse(row.content, null) || (row.content ? { answer: row.content, prompt: row.title } : null);
         if (row.type === 'ai_full_text_analysis') item.semantic = jsonParse(row.content, null);
+        if (row.type === 'cleaning') item.cleaning = jsonParse(row.content, null);
         return item;
     });
 }
@@ -677,6 +730,7 @@ module.exports = {
     getDatasetDetail,
     purgeDatasetArtifacts,
     softDeleteDataset,
+    updateDataset,
     cleanupAnalysisWorkspace,
     listDatasetArtifacts,
     createDatasetFromRows

@@ -1,118 +1,240 @@
+/* =========================================================
+   数据透视视图布局与样式深度优化
+   1. 消除页面外层纵向滚动条，内容高度 100% 弹性填充
+   2. 双排宽敞高质感控制中枢（维度/度量核心排 + 筛选/参数/操作集成排）
+   3. 排序与占比下拉框充足宽度，彻底杜绝文本截断与水平滚动条
+   4. 透视表格自适应撑满，零值柔和短横线虚化，行表头单行排版，极值排行折叠化
+   5. 粘性表头吸顶、首列吸左、合计行吸底与多向阴影层级
+   ========================================================= */
 
-
-/* 数据透视布局优化：控制区同排对齐、摘要收紧、导出入口前置 */
-.data-analysis-pivot-workspace {
-    min-height: 0;
+/* 数据透视选项卡面板：根容器禁止溢出，自适应 100% 撑满 */
+#data-analysis-pivot-panel {
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 12px 8px;
+    box-sizing: border-box;
 }
 
+/* 工作空间与透视结果区：无滚动条、纯纵向弹性布局 */
+.data-analysis-pivot-workspace {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+.data-analysis-pivot-result {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* 顶部配置中枢：宽敞舒适的双排卡片布局 */
 .data-analysis-pivot-config {
-    margin-bottom: 10px;
-    padding: 10px 12px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    flex-shrink: 0;
+    margin-bottom: 6px;
+    padding: 8px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
     border-radius: 8px;
     background: #f8fafc;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
-.data-analysis-pivot-config-main,
-.data-analysis-pivot-config-sub {
+/* 第一排：5 个维度与度量核心下拉框，宽敞均匀栅格排布 */
+.data-analysis-pivot-config-main {
     display: grid;
-    gap: 8px;
-    align-items: end;
+    grid-template-columns: 1.3fr 1fr 1.1fr 1fr 0.85fr;
+    gap: 12px;
+    align-items: flex-end;
 }
 
-.data-analysis-pivot-config-main,
-.data-analysis-pivot-config-sub {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.data-analysis-pivot-config-sub {
-    margin-top: 8px;
-}
-
-.data-analysis-pivot-config label {
+/* 字段项通用包装 */
+.data-analysis-pivot-field-item {
     min-width: 0;
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 4px;
-    color: #334155;
-    font-size: 0.74rem;
-    font-weight: 800;
+    margin: 0;
 }
 
+.data-analysis-pivot-field-title {
+    color: #475569;
+    font-size: 0.73rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 控件外观精修：高度 30px，清爽边框与细腻焦点 */
 .data-analysis-pivot-config .form-input {
     width: 100%;
-    height: 32px;
+    height: 30px;
     min-width: 0;
     margin: 0;
-    border-radius: 7px;
-    font-size: 0.8rem;
+    padding: 0 8px;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    border-radius: 6px;
+    background: #ffffff;
+    color: #1e293b;
+    font-size: 0.78rem;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.data-analysis-pivot-config select.form-input {
+    padding-right: 22px;
+    cursor: pointer;
+}
+
+.data-analysis-pivot-config .form-input:hover {
+    border-color: #0d9488;
+    background: #fcfdfe;
+}
+
+.data-analysis-pivot-config .form-input:focus {
+    outline: none;
+    border-color: #0d9488;
+    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+}
+
+/* 第二排：筛选参数 + 动作按钮一体化（左侧参数，右侧操作） */
+.data-analysis-pivot-config-sub {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.data-analysis-pivot-config-sub-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* 排序下拉框：给足宽度，完整显示「按指标值降序」等文案不截断 */
+.pivot-field-sort {
+    flex: 0 0 160px;
+    min-width: 160px;
+}
+
+/* 占比下拉框：给足宽度，完整显示「不显示占比」等文案不截断 */
+.pivot-field-percent {
+    flex: 0 0 145px;
+    min-width: 145px;
+}
+
+.pivot-field-limit {
+    flex: 0 0 65px;
+}
+
+.pivot-field-limit input {
+    text-align: center;
+    padding: 0 4px;
+}
+
+.pivot-field-empty {
+    flex: 0 0 75px;
+}
+
+/* 右侧操作工具栏 */
 .data-analysis-pivot-toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 10px;
-    padding-top: 9px;
-    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    gap: 8px;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+.data-analysis-pivot-hint {
+    display: none;
 }
 
 .data-analysis-pivot-toolbar-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 8px;
     flex-shrink: 0;
 }
 
 .data-analysis-pivot-toolbar button {
-    height: 32px;
+    height: 30px;
     padding: 0 12px;
-    border-radius: 7px;
-    font-size: 0.78rem;
-    white-space: nowrap;
-}
-
-.data-analysis-pivot-toolbar .data-analysis-pivot-hint {
-    min-width: 0;
-    flex: 1;
-    margin: 0;
-    color: #64748b;
+    border-radius: 6px;
     font-size: 0.76rem;
-    line-height: 1.4;
+    font-weight: 600;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
 }
 
+.data-analysis-pivot-toolbar .btn-primary {
+    background: linear-gradient(135deg, #0d9488, #059669);
+    border: 1px solid transparent;
+    color: #ffffff;
+    padding: 0 15px;
+    box-shadow: 0 1px 2px rgba(13, 148, 136, 0.22);
+}
+
+.data-analysis-pivot-toolbar .btn-primary:hover {
+    background: linear-gradient(135deg, #0f766e, #047857);
+    box-shadow: 0 2px 4px rgba(13, 148, 136, 0.32);
+}
+
+/* 透视结果统计与元信息行：紧凑徽章栏 */
 .data-analysis-pivot-result-head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    display: flex;
     align-items: center;
-    margin-bottom: 8px;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
 }
 
 .data-analysis-pivot-summary {
-    display: grid;
-    grid-template-columns: minmax(160px, 1.4fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(120px, 0.8fr);
+    display: flex;
+    align-items: center;
     gap: 6px;
     margin: 0;
+    flex-wrap: nowrap;
 }
 
 .data-analysis-pivot-stat {
     min-width: 0;
-    display: flex;
-    align-items: baseline;
-    gap: 7px;
-    padding: 6px 9px;
+    height: 24px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
     border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 7px;
-    background: #fff;
+    border-radius: 5px;
+    background: #ffffff;
 }
 
 .data-analysis-pivot-stat span {
     margin: 0;
     color: #64748b;
     font-size: 0.68rem;
-    font-weight: 800;
+    font-weight: 700;
     white-space: nowrap;
 }
 
@@ -120,49 +242,88 @@
     min-width: 0;
     overflow: hidden;
     color: #0f172a;
-    font-size: 0.83rem;
-    font-weight: 800;
+    font-size: 0.76rem;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .data-analysis-pivot-stat-total {
     background: rgba(20, 184, 166, 0.08);
-    border-color: rgba(20, 184, 166, 0.18);
+    border-color: rgba(20, 184, 166, 0.24);
+}
+
+.data-analysis-pivot-stat-total strong {
+    color: #0f766e;
 }
 
 .data-analysis-pivot-meta {
-    max-width: 430px;
+    max-width: 420px;
     margin: 0;
     color: #64748b;
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 折叠式极值排行栏：消除大量 tag 堆叠造成的杂乱感 */
+.data-analysis-pivot-insights-details {
+    flex-shrink: 0;
+    margin-bottom: 4px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.data-analysis-pivot-insights-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-size: 0.71rem;
+    font-weight: 700;
+    color: #64748b;
+    user-select: none;
+    transition: color 0.15s ease;
+}
+
+.data-analysis-pivot-insights-summary:hover {
+    color: #0f766e;
+}
+
+.data-analysis-pivot-insights-details[open] .data-analysis-pivot-insights-summary svg {
+    transform: rotate(180deg);
 }
 
 .data-analysis-pivot-insights {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 6px;
+    padding: 4px 8px 6px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .data-analysis-pivot-insights > div {
     min-width: 0;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 8px;
+    height: 24px;
+    box-sizing: border-box;
+    display: flex;
     align-items: center;
-    padding: 7px 9px;
+    gap: 6px;
+    padding: 0 6px;
     border: 1px solid rgba(148, 163, 184, 0.14);
-    border-radius: 7px;
-    background: #f8fafc;
+    border-radius: 5px;
+    background: #ffffff;
 }
 
 .data-analysis-pivot-insights > div > span {
     margin: 0;
     color: #475569;
-    font-size: 0.72rem;
-    font-weight: 800;
+    font-size: 0.68rem;
+    font-weight: 700;
     white-space: nowrap;
 }
 
@@ -170,24 +331,27 @@
     min-width: 0;
     display: flex;
     flex-wrap: nowrap;
-    gap: 5px;
+    align-items: center;
+    gap: 4px;
     margin: 0;
     overflow: hidden;
 }
 
 .data-analysis-pivot-rank-item {
     min-width: 0;
-    max-width: 150px;
+    max-width: 140px;
+    height: 18px;
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 7px;
+    gap: 3px;
+    padding: 0 5px;
     border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 999px;
-    background: #fff;
+    border-radius: 3px;
+    background: #f8fafc;
     color: #334155;
-    font-size: 0.72rem;
-    line-height: 1.35;
+    font-size: 0.67rem;
+    line-height: 1;
 }
 
 .data-analysis-pivot-rank-item b {
@@ -205,75 +369,151 @@
 .data-analysis-pivot-rank-item em {
     color: #0f172a;
     font-style: normal;
-    font-weight: 800;
+    font-weight: 700;
     white-space: nowrap;
 }
 
 .data-analysis-pivot-rank-item small {
     color: #64748b;
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     white-space: nowrap;
 }
 
+/* 透视数据表格区域：自适应纵向弹性撑满，内部滚动条始终留在视口内 */
 .data-analysis-pivot-table {
-    margin-bottom: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    margin-bottom: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable both-edges;
+    border: 1px solid rgba(148, 163, 184, 0.18);
     border-radius: 8px;
+    background: #ffffff;
+    box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.015);
 }
 
+/* 透视表格自身宽度与排版：使用 auto 布局避免列过多挤压行维度时间/长文本 */
+.data-analysis-pivot-table .data-analysis-result-table {
+    table-layout: auto !important;
+    width: max-content !important;
+    min-width: 100% !important;
+}
+
+.data-analysis-pivot-table .data-analysis-result-table th,
+.data-analysis-pivot-table .data-analysis-result-table td {
+    max-width: none !important;
+    white-space: nowrap !important;
+    text-overflow: clip !important;
+}
+
+/* 行表头自适应内容宽度：取消固定的 170px 宽，按实际内容收放自如。
+   width: 1% 配合 white-space: nowrap 会精确锁定为内容最小宽度（min-content），
+   既保证长日期/时间完整展示不被截断，又让学生编号/简短文本紧凑规整，杜绝右侧留出大片空隙 */
+.pivot-th-corner {
+    width: 1% !important;
+    min-width: 48px !important;
+    max-width: 300px !important;
+    white-space: nowrap !important;
+    text-overflow: clip !important;
+    text-align: left !important;
+    background: #f1f5f9 !important;
+    color: #334155;
+    font-weight: 700;
+    padding: 6px 10px !important;
+}
+
+.pivot-row-th {
+    width: 1% !important;
+    min-width: 48px !important;
+    max-width: 300px !important;
+    white-space: nowrap !important;
+    text-overflow: clip !important;
+    text-align: left !important;
+    padding: 5px 10px !important;
+    overflow: visible !important;
+}
+
+.pivot-row-text {
+    display: inline-block;
+    max-width: none !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 0.76rem;
+}
+
+/* 单元格零值虚化：稀疏矩阵中大量 0 弱化为柔和短横线，突出有值的数据项 */
+.data-analysis-pivot-cell-zero {
+    color: #cbd5e1 !important;
+}
+
+.data-analysis-pivot-cell-zero .data-analysis-pivot-cell-value,
+.data-analysis-pivot-zero {
+    color: #cbd5e1 !important;
+    font-weight: 400 !important;
+}
+
+/* 单元格百分比标签 */
+.data-analysis-pivot-percent {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 0.68rem;
+    color: #0d9488;
+    font-weight: 600;
+}
+
+/* 空状态占位自适应居中 */
+.data-analysis-pivot-empty {
+    flex: 1 1 auto;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-size: 0.85rem;
+    border: 1px dashed rgba(148, 163, 184, 0.3);
+    border-radius: 8px;
+    background: #f8fafc;
+    margin: 8px 0;
+    padding: 24px;
+    text-align: center;
+}
+
+/* 透视底部状态注脚 */
 .data-analysis-pivot-actions {
+    flex-shrink: 0;
+    height: 18px;
+    line-height: 18px;
+    margin-top: 3px;
+    padding: 0 2px;
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 10px;
     color: #64748b;
-    font-size: 0.74rem;
+    font-size: 0.68rem;
 }
 
+/* 响应式断点适配：小屏幕时允许配置区优雅折行 */
 @media (max-width: 1280px) {
-    .data-analysis-pivot-config-main,
-    .data-analysis-pivot-config-sub {
+    .data-analysis-pivot-config-main {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    .data-analysis-pivot-result-head {
-        grid-template-columns: 1fr;
-    }
-
-    .data-analysis-pivot-meta {
-        max-width: none;
-        text-align: left;
+    .data-analysis-pivot-config-sub {
+        flex-wrap: wrap;
     }
 }
 
-@media (max-width: 900px) {
-    .data-analysis-pivot-config-main,
-    .data-analysis-pivot-config-sub,
-    .data-analysis-pivot-summary,
-    .data-analysis-pivot-insights {
+@media (max-width: 768px) {
+    .data-analysis-pivot-config-main {
         grid-template-columns: 1fr 1fr;
     }
 
-    .data-analysis-pivot-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .data-analysis-pivot-toolbar-actions {
-        justify-content: flex-start;
+    .data-analysis-pivot-config-sub-filters {
         flex-wrap: wrap;
-    }
-
-    .data-analysis-pivot-insights > div {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 560px) {
-    .data-analysis-pivot-config-main,
-    .data-analysis-pivot-config-sub,
-    .data-analysis-pivot-summary,
-    .data-analysis-pivot-insights {
-        grid-template-columns: 1fr;
     }
 }

@@ -6,6 +6,7 @@ const queryPivot = require('./data-analysis/query-pivot');
 const exportsService = require('./data-analysis/export');
 const databaseImport = require('./data-analysis/database-import');
 const semanticAnalysis = require('./data-analysis/semantic-analysis');
+const cleaning = require('./data-analysis/cleaning');
 
 module.exports = {
     MAX_PREVIEW_ROWS: shared.MAX_PREVIEW_ROWS,
@@ -21,5 +22,6 @@ module.exports = {
     ...queryPivot,
     ...exportsService,
     ...databaseImport,
-    ...semanticAnalysis
+    ...semanticAnalysis,
+    ...cleaning
 };

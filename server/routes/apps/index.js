@@ -47,21 +47,13 @@ const {
     getDatasetDetail,
     getDatasetForUser,
     getDatasetSummary,
-    importDataset,
-    importFromDatabase,
-    listDatasetArtifacts,
-    listDatasets,
-    recordArtifact,
-    redactAnalysisRows,
-    runPivot,
-    runSummary,
-    runUserQuery,
-    softDeleteDataset,
-    createSemanticAnalysisJob,
-    getSemanticJobDetail,
-    listSemanticAnalysisJobs,
-    retrySemanticAnalysisJob,
-    cancelSemanticAnalysisJob
+    importDataset, importFromDatabase, listDatasetArtifacts, listDatasets,
+    recordArtifact, redactAnalysisRows, runPivot, runSummary, runUserQuery,
+    softDeleteDataset, updateDataset,
+    createSemanticAnalysisJob, getSemanticJobDetail, listSemanticAnalysisJobs,
+    retrySemanticAnalysisJob, cancelSemanticAnalysisJob,
+    getCleaningQuality, previewCleaning, applyCleaning,
+    listCleaningRuns, getCleaningRun, replayCleaningRun
 } = require('../../services/data-analysis');
 
 // 剥离推理型模型可能内联在正文里的思考块（<think>…</think>）。
@@ -71,22 +63,13 @@ const {
     extractCompletionContent,
     parseJsonObject,
     clampText,
+    buildModelSecretErrorPayload,
     shouldDisableThinking,
     applyNoThinkSoftSwitch,
     buildThinkingControlPayload,
     resolveOfficialWritingModel,
     resolveAppsModel
 } = require('./helpers');
-
-function buildModelSecretErrorPayload(modelCfg) {
-    return {
-        error: {
-            message: `${modelCfg.secret_error}，请在模型管理中重新保存该模型的 API Key，或恢复原 DATA_ENCRYPTION_KEY/JWT_SECRET 后重启服务。`,
-            type: 'invalid_request_error',
-            code: 'api_key_decrypt_failed'
-        }
-    };
-}
 
 async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null, onComplete = null }) {
     const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
@@ -484,7 +467,7 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
                 datasetId,
                 type: 'ai_analysis',
                 title: userPrompt.slice(0, 120),
-                content: JSON.stringify({ prompt: userPrompt, answer: finalAnswer, steps, evidence, charts: charts.map(chart => ({ title: chart.title, chartType: chart.chartType })) }),
+                content: JSON.stringify({ prompt: userPrompt, answer: finalAnswer, steps, evidence, charts }),
                 metadata: { mode: 'agent', model: modelCfg.model_name, modelCallCount, hasQueryEvidence }
             });
         } catch (artifactErr) {
@@ -530,28 +513,17 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         upload
     }));
 
-    router.use('/apps/pdf-tools', createPdfToolsRouter({
-        authMiddleware,
-        logAction,
-        uploadLimiter,
-        upload
-    }));
+    router.use('/apps/pdf-tools', createPdfToolsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ datasets: await listDatasets(req.user.id) });
     }));
-
     router.get('/apps/data-analysis/datasets/summary', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ summary: await getDatasetSummary(req.user.id) });
     }));
-
     router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
         try {
-            const dataset = await importDataset({
-                user: req.user,
-                file: req.file,
-                name: req.body?.name
-            });
+            const dataset = await importDataset({ user: req.user, file: req.file, name: req.body?.name });
             logAction(req, '数据分析-上传数据集', `数据集: ${dataset.name} (${dataset.rowCount} 行)`);
             res.json({ dataset });
         } catch (e) {
@@ -563,7 +535,15 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.get('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ dataset: await getDatasetDetail(req.user.id, req.params.id) });
+        const page = req.query.page !== undefined ? Math.max(parseInt(req.query.page, 10) || 1, 1) : undefined;
+        const pageSize = req.query.pageSize !== undefined ? Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100) : undefined;
+        res.json({ dataset: await getDatasetDetail(req.user.id, req.params.id, { ...(page !== undefined ? { page } : {}), ...(pageSize !== undefined ? { pageSize } : {}) }) });
+    }));
+
+    router.patch('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const dataset = await updateDataset(req.user.id, req.params.id, req.body || {});
+        logAction(req, '数据分析-修改数据集', `数据集: ${dataset.name}`);
+        res.json({ success: true, dataset });
     }));
 
     router.delete('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -571,23 +551,19 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         logAction(req, '数据分析-删除数据集', `数据集: ${dataset.name}`);
         res.json({ success: true });
     }));
-
     router.post('/apps/data-analysis/datasets/:id/summary', authMiddleware, asyncHandler(async (req, res) => {
         res.json(await runSummary(req.user.id, req.params.id));
     }));
-
     router.post('/apps/data-analysis/datasets/:id/chart', authMiddleware, asyncHandler(async (req, res) => {
         const result = await buildChart(req.user.id, req.params.id, req.body || {});
         logAction(req, '数据分析-生成图表', `数据集: ${req.params.id}`);
         res.json(result);
     }));
-
     router.post('/apps/data-analysis/compare', authMiddleware, asyncHandler(async (req, res) => {
         const result = await compareDatasets(req.user.id, req.body || {});
         logAction(req, '数据分析-数据比对', `左侧: ${req.body?.leftDatasetId || ''}, 右侧: ${req.body?.rightDatasetId || ''}`);
         res.json(result);
     }));
-
     router.post('/apps/data-analysis/compare/export', authMiddleware, asyncHandler(async (req, res) => {
         const { exportCompareExcel } = require('../../services/data-analysis');
         const buffer = exportCompareExcel(req.body || {});
@@ -595,24 +571,45 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         res.setHeader('Content-Disposition', 'attachment; filename="data_compare.xlsx"');
         res.send(buffer);
     }));
-
     router.post('/apps/data-analysis/datasets/:id/query', authMiddleware, asyncHandler(async (req, res) => {
         const result = await runUserQuery(req.user.id, req.params.id, req.body || {});
         logAction(req, '数据分析-SQL 查询', `数据集: ${req.params.id}`);
         res.json(result);
     }));
-
     router.post('/apps/data-analysis/datasets/:id/pivot', authMiddleware, asyncHandler(async (req, res) => {
         const result = await runPivot(req.user.id, req.params.id, req.body || {});
         logAction(req, '数据分析-透视表', `数据集: ${req.params.id}`);
         res.json(result);
+    }));
+    router.get('/apps/data-analysis/datasets/:id/cleaning/quality', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(await getCleaningQuality(req.user.id, req.params.id));
+    }));
+    router.post('/apps/data-analysis/datasets/:id/cleaning/preview', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await previewCleaning(req.user.id, req.params.id, req.body?.rules);
+        logAction(req, '数据分析-预览数据清洗', `数据集: ${req.params.id}，规则数: ${preview.rules.length}`);
+        res.json(preview);
+    }));
+    router.post('/apps/data-analysis/datasets/:id/cleaning/apply', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await applyCleaning({ user: req.user, datasetId: req.params.id, rules: req.body?.rules, name: req.body?.name });
+        logAction(req, '数据分析-应用数据清洗', `源数据集: ${req.params.id}，新数据集: ${result.dataset.name}，规则数: ${result.run.rules.length}`);
+        res.status(201).json(result);
+    }));
+    router.get('/apps/data-analysis/datasets/:id/cleaning/runs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ runs: await listCleaningRuns(req.user.id, req.params.id, { limit: req.query.limit }) });
+    }));
+    router.get('/apps/data-analysis/cleaning/runs/:runId', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ run: await getCleaningRun(req.user.id, req.params.runId) });
+    }));
+    router.post('/apps/data-analysis/cleaning/runs/:runId/replay', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await replayCleaningRun({ user: req.user, runId: req.params.runId, name: req.body?.name });
+        logAction(req, '数据分析-重新应用清洗规则', `规则记录: ${req.params.runId}，新数据集: ${result.dataset.name}`);
+        res.status(201).json(result);
     }));
 
     router.get('/apps/data-analysis/datasets/:id/artifacts', authMiddleware, asyncHandler(async (req, res) => {
         const limit = normalizeLimit(req.query.limit, 30, 100);
         res.json({ artifacts: await listDatasetArtifacts(req.user.id, req.params.id, { limit }) });
     }));
-
     router.post('/apps/data-analysis/datasets/:id/semantic-analysis', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
         const job = await createSemanticAnalysisJob({
@@ -628,38 +625,30 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         logAction(req, '数据分析-创建全量语义分析任务', `数据集: ${req.params.id}，任务: ${job.id}`);
         res.status(202).json({ success: true, job });
     }));
-
     router.get('/apps/data-analysis/datasets/:id/semantic-analysis/jobs', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ jobs: await listSemanticAnalysisJobs(req.user.id, req.params.id, { limit: req.query.limit }) });
     }));
-
     router.get('/apps/data-analysis/semantic-analysis/jobs/:jobId', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ job: await getSemanticJobDetail(req.user.id, req.params.jobId, { includeBatches: req.query.includeBatches === 'true' }) });
     }));
-
     router.get('/apps/data-analysis/semantic-analysis/jobs/:jobId/results', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ job: await getSemanticJobDetail(req.user.id, req.params.jobId, { includeBatches: true }) });
     }));
-
     router.post('/apps/data-analysis/semantic-analysis/jobs/:jobId/retry', authMiddleware, asyncHandler(async (req, res) => {
         const job = await retrySemanticAnalysisJob(req.user.id, req.params.jobId);
         logAction(req, '数据分析-重试全量语义分析任务', `任务: ${req.params.jobId}`);
         res.status(202).json({ success: true, job });
     }));
-
     router.post('/apps/data-analysis/semantic-analysis/jobs/:jobId/cancel', authMiddleware, asyncHandler(async (req, res) => {
         const job = await cancelSemanticAnalysisJob(req.user.id, req.params.jobId);
         logAction(req, '数据分析-取消全量语义分析任务', `任务: ${req.params.jobId}`);
         res.json({ success: true, job });
     }));
-
     router.get('/apps/data-analysis/datasets/:id/export.csv', authMiddleware, asyncHandler(async (req, res) => {
         const exported = await exportDataset(req.user.id, req.params.id, 'csv');
         logAction(req, '数据分析-导出 CSV', `数据集: ${req.params.id}`);
         res.download(exported.filePath, exported.fileName);
     }));
-
-    // 多格式导出：format 取 csv|xlsx|parquet，默认 csv。
     router.get('/apps/data-analysis/datasets/:id/export', authMiddleware, asyncHandler(async (req, res) => {
         const format = String(req.query.format || 'csv').toLowerCase();
         const exported = await exportDataset(req.user.id, req.params.id, format);

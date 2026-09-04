@@ -439,6 +439,48 @@ const migrations = [
         }
     },
     {
+        id: '202609040001_analysis_cleaning_workflow',
+        description: 'Add auditable data cleaning runs and derived dataset lineage.',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS analysis_cleaning_runs (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    source_dataset_id TEXT NOT NULL,
+                    output_dataset_id TEXT DEFAULT '',
+                    name TEXT NOT NULL,
+                    rules_json TEXT DEFAULT '[]',
+                    summary_json TEXT DEFAULT '{}',
+                    status TEXT DEFAULT 'applied',
+                    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_analysis_cleaning_runs_source
+                    ON analysis_cleaning_runs(user_id, source_dataset_id, created_at);
+            `);
+        },
+        async upPg(client) {
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS analysis_cleaning_runs (
+                    id TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    source_dataset_id TEXT NOT NULL,
+                    output_dataset_id TEXT DEFAULT '',
+                    name TEXT NOT NULL,
+                    rules_json TEXT DEFAULT '[]',
+                    summary_json TEXT DEFAULT '{}',
+                    status TEXT DEFAULT 'applied',
+                    created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    updated_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_analysis_cleaning_runs_source
+                    ON analysis_cleaning_runs(user_id, source_dataset_id, created_at);
+            `);
+        }
+    },
+    {
         id: '202608210001_autonomous_agent_runtime_contracts',
         description: 'Add autonomous Agent budget, tool governance audit, and Skill registry contracts.',
         async upPg(client) {

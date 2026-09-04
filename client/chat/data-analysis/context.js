@@ -2,6 +2,44 @@
 (function () {
     if (window.PivotDataAnalysis?.state) return;
     const API = '/api/apps/data-analysis';
+    const ACTIVE_TAB_STORAGE_KEY = 'pivot_data_analysis_active_tab';
+    const VALID_TABS = new Set(['overview', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'history']);
+
+    function normalizeTab(tab) {
+        const normalized = String(tab || '').trim();
+        return VALID_TABS.has(normalized) ? normalized : 'overview';
+    }
+
+    function getStoredActiveTab() {
+        try {
+            return normalizeTab(window.sessionStorage?.getItem(ACTIVE_TAB_STORAGE_KEY));
+        } catch (_error) {
+            return 'overview';
+        }
+    }
+
+    function persistActiveTab(tab) {
+        const normalized = normalizeTab(tab);
+        try {
+            window.sessionStorage?.setItem(ACTIVE_TAB_STORAGE_KEY, normalized);
+        } catch (_error) {
+            // sessionStorage 不可用时保留当前运行时页签即可。
+        }
+        return normalized;
+    }
+
+    function createVisualQuery() {
+        return {
+            logicalOperator: 'AND',
+            filters: [
+                { field: '', operator: 'eq', value: '' }
+            ],
+            sortField: '',
+            sortOrder: 'ASC',
+            limit: 100
+        };
+    }
+
     const state = {
         datasets: [],
         activeId: '',
@@ -13,25 +51,33 @@
         query: null,
         pivot: null,
         artifacts: [],
+        cleaningQuality: null,
+        cleaningRules: [],
+        cleaningPreview: null,
+        cleaningRuns: [],
+        cleaningDatasetId: '',
+        cleaningRunName: '',
+        cleaningLoadVersion: 0,
         semanticDatasetId: '',
         semanticJobs: [],
         semanticJob: null,
+        semanticSelectedJobId: '',
+        semanticLoadVersion: 0,
         semanticPollTimer: null,
         overviewPage: 1,
         overviewPageSize: 10,
+        queryPage: 1,
+        queryPageSize: 10,
+        previewDatasetId: '',
+        previewPage: 1,
+        previewPageSize: 25,
+        historyPage: 1,
+        historyPageSize: 10,
         aiBusy: false,
         aiAbortController: null,
         aiWorkspaceEpoch: 0,
         queryMode: 'visual',
-        visualQuery: {
-            logicalOperator: 'AND',
-            filters: [
-                { field: '', operator: 'eq', value: '' }
-            ],
-            sortField: '',
-            sortOrder: 'ASC',
-            limit: 100
-        }
+        visualQuery: createVisualQuery()
     };
 
     const html = window.PivotSafeHtml || {
@@ -71,6 +117,10 @@
         html,
         esc,
         fmtNumber,
-        activeDataset
+        activeDataset,
+        normalizeTab,
+        getStoredActiveTab,
+        persistActiveTab,
+        createVisualQuery
     };
 })();

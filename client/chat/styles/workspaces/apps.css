@@ -1,6 +1,7 @@
 /* 应用中心工作区兼容入口。原 apps.css 已按功能拆分至 ./apps/ 子目录，保持导入顺序稳定以维持级联效果不变。 */
 @import url("./apps/apps-shell.css");
 @import url("./apps/data-analysis-overview.css");
+@import url("./apps/data-analysis-cleaning.css");
 @import url("./apps/data-analysis-results.css");
 @import url("./apps/apps-grid.css");
 @import url("./apps/official-writing.css");

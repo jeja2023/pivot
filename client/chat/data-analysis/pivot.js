@@ -222,9 +222,13 @@
     }
 
     function buildPivotCell(cellValue, row, col, result, percentMode) {
+        const num = Number(cellValue) || 0;
+        const isZero = num === 0;
         const pct = pivotPercent(cellValue, row, col, result, percentMode);
         const pctHtml = pct === null ? '' : `<span class="data-analysis-pivot-percent">${formatPercent(pct)}</span>`;
-        return `<td${cellHeatStyle(cellValue, result)}><span class="data-analysis-pivot-cell-value">${formatMetric(cellValue, result.aggregation)}</span>${pctHtml}</td>`;
+        const zeroClass = isZero ? ' class="data-analysis-pivot-cell-zero"' : '';
+        const displayVal = isZero ? '<span class="data-analysis-pivot-zero">-</span>' : formatMetric(cellValue, result.aggregation);
+        return `<td${cellHeatStyle(cellValue, result)}${zeroClass}><span class="data-analysis-pivot-cell-value">${displayVal}</span>${pctHtml}</td>`;
     }
 
     function buildTopList(items = [], aggregation = 'sum', emptyText = '暂无数据') {
@@ -260,10 +264,10 @@
         const totalLabel = result.totalLabel || (isAdditiveAggregation(result) ? '合计' : (result.aggregationLabel || '结果'));
         const valueName = result.aggregation === 'count' ? '记录数' : (result.valueField?.name || '数值');
         const showShare = isAdditiveAggregation(result);
-        const head = `<tr><th>${esc(result.rowField?.name || '行')}</th>${cols.map(col => `<th>${esc(col)}</th>`).join('')}<th>${esc(totalLabel)}</th>${showShare ? '<th>占比</th>' : ''}</tr>`;
+        const head = `<tr><th class="pivot-th-corner">${esc(result.rowField?.name || '行')}${result.colField ? ` / ${esc(result.colField.name)}` : ''}</th>${cols.map(col => `<th>${esc(col)}</th>`).join('')}<th>${esc(totalLabel)}</th>${showShare ? '<th>占比</th>' : ''}</tr>`;
         const body = rows.map(row => `
             <tr>
-                <th><span>${esc(row.label)}</span><small>#${esc(row.rank || '')}</small></th>
+                <th class="pivot-row-th" title="${esc(row.label)}"><span class="pivot-row-text" title="${esc(row.label)}">${esc(row.label)}</span></th>
                 ${cols.map(col => buildPivotCell(row.values?.[col] || 0, row, col, result, percentMode)).join('')}
                 <td class="data-analysis-pivot-total">${formatMetric(row.total || 0, result.aggregation)}</td>
                 ${showShare ? `<td class="data-analysis-pivot-share">${formatPercent(row.share)}</td>` : ''}
@@ -271,15 +275,15 @@
         `).join('');
         const footer = `
             <tr class="data-analysis-pivot-total-row">
-                <th>${esc(totalLabel)}</th>
+                <th class="pivot-row-th"><span class="pivot-row-text">${esc(totalLabel)}</span></th>
                 ${cols.map(col => `<td>${formatMetric(result.colTotals?.[col] || 0, result.aggregation)}</td>`).join('')}
                 <td class="data-analysis-pivot-total">${formatMetric(result.grandTotal || 0, result.aggregation)}</td>
                 ${showShare ? '<td>100%</td>' : ''}
             </tr>
         `;
         const truncateText = result.truncated
-            ? `当前展示 ${fmtNumber(result.displayedRowCount || rows.length)} / ${fmtNumber(result.totalRowCount || rows.length)} 个行项、${fmtNumber(result.displayedColumnCount || cols.length)} / ${fmtNumber(result.totalColumnCount || cols.length)} 个列项；${esc(totalLabel)}仍按全量数据计算。`
-            : `已展示全部 ${fmtNumber(rows.length)} 个行项${result.colField ? `、${fmtNumber(cols.length)} 个列项` : ''}。`;
+            ? `展示 ${fmtNumber(result.displayedRowCount || rows.length)}/${fmtNumber(result.totalRowCount || rows.length)} 行、${fmtNumber(result.displayedColumnCount || cols.length)}/${fmtNumber(result.totalColumnCount || cols.length)} 列（${esc(totalLabel)}按全量计算）`
+            : `共 ${fmtNumber(rows.length)} 个行项${result.colField ? `、${fmtNumber(cols.length)} 个列项` : ''}`;
         PivotSafeHtml.setHtml(box, `
             <div class="data-analysis-pivot-result-head">
                 <div class="data-analysis-pivot-summary">
@@ -290,10 +294,16 @@
                 </div>
                 <div class="data-analysis-query-meta data-analysis-pivot-meta">${truncateText}</div>
             </div>
-            <div class="data-analysis-pivot-insights">
-                <div><span>Top 行项</span><div class="data-analysis-pivot-rank-list">${buildTopList(result.topRows || [], result.aggregation)}</div></div>
-                <div><span>Top 列项</span><div class="data-analysis-pivot-rank-list">${buildTopList(result.topColumns || [], result.aggregation, result.colField ? '暂无列项' : '未设置列维度')}</div></div>
-            </div>
+            <details class="data-analysis-pivot-insights-details">
+                <summary class="data-analysis-pivot-insights-summary">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    <span>极值排行速览 (Top 5 行项与列项)</span>
+                </summary>
+                <div class="data-analysis-pivot-insights">
+                    <div><span>Top 行项</span><div class="data-analysis-pivot-rank-list">${buildTopList(result.topRows || [], result.aggregation)}</div></div>
+                    <div><span>Top 列项</span><div class="data-analysis-pivot-rank-list">${buildTopList(result.topColumns || [], result.aggregation, result.colField ? '暂无列项' : '未设置列维度')}</div></div>
+                </div>
+            </details>
             <div class="data-analysis-pivot-table">
                 <table class="data-table compact-table data-analysis-result-table">
                     <thead>${head}</thead>

@@ -13,6 +13,8 @@
     const renderSemanticControls = (...args) => app.renderSemanticControls?.(...args);
     const resetAiWorkspace = (...args) => app.resetAiWorkspace?.(...args);
     const resumeAiWorkspace = (...args) => app.resumeAiWorkspace?.(...args);
+    const normalizeTab = (...args) => app.normalizeTab(...args);
+    const getStoredActiveTab = (...args) => app.getStoredActiveTab(...args);
 
     async function fetchJson(url, options = {}) {
         const res = await apiFetch(url, options);
@@ -42,8 +44,15 @@
             state.summary = null;
             state.chart = null;
             state.query = null;
+            state.queryPage = 1;
             state.pivot = null;
             state.artifacts = [];
+            state.cleaningQuality = null;
+            state.cleaningRules = [];
+            state.cleaningPreview = null;
+            state.cleaningRuns = [];
+            state.cleaningDatasetId = '';
+            state.cleaningRunName = '';
             state.semanticJobs = [];
             state.semanticJob = null;
             state.visualQuery = {
@@ -65,12 +74,16 @@
         state.summary = null;
         state.chart = null;
         state.query = null;
+        state.queryPage = 1;
         state.pivot = null;
         state.artifacts = [];
-        if (!state.semanticDatasetId) {
-            state.semanticJobs = [];
-            state.semanticJob = null;
-        }
+        state.cleaningQuality = null;
+        state.cleaningRules = [];
+        state.cleaningPreview = null;
+        state.cleaningRuns = [];
+        state.cleaningDatasetId = id;
+        state.cleaningRunName = '';
+        state.semanticDatasetId = id;
         state.visualQuery = {
             logicalOperator: 'AND',
             filters: [
@@ -159,7 +172,8 @@
         const view = app.ensureView();
         if (!view) return;
         const requestedDatasetId = String(options?.datasetId || '').trim();
-        const requestedTab = String(options?.tab || options?.view || 'overview').trim() || 'overview';
+        const explicitTab = String(options?.tab || options?.view || '').trim();
+        const requestedTab = normalizeTab(explicitTab || getStoredActiveTab());
         resetAiWorkspace();
         if (requestedDatasetId) state.activeId = requestedDatasetId;
         window.setAppsSessionValue?.('pivot_apps_active_app', 'data-analysis');
@@ -174,6 +188,9 @@
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
+        if (requestedTab === 'cleaning') {
+            await app.loadCleaningWorkspace?.(state.cleaningDatasetId || state.activeId, { resetPreview: true });
+        }
         resumeAiWorkspace();
     };
 

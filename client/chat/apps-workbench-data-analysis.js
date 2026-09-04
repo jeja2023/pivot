@@ -7,6 +7,7 @@
         '/chat/data-analysis/pivot.js',
         '/chat/data-analysis/chart.js',
         '/chat/data-analysis/compare-history.js',
+        '/chat/data-analysis/cleaning.js',
         '/chat/data-analysis/ai.js',
         '/chat/data-analysis/database-import.js',
         '/chat/data-analysis/events.js'

@@ -21,7 +21,8 @@ const {
     getDatasetDetail,
     getDatasetSummary,
     listDatasetArtifacts,
-    sanitizeRows
+    sanitizeRows,
+    updateDataset
 } = require('../server/services/data-analysis/datasets');
 const { redactAnalysisRows, recordArtifact } = require('../server/services/data-analysis/shared');
 const { validateUserSql } = require('../server/services/data-analysis/query-pivot');
@@ -145,6 +146,52 @@ test('数据分析历史可回放 AI 结果且百分比画像保持比例口径'
         });
         const artifacts = await listDatasetArtifacts(userId, dataset.id);
         assert.deepEqual(artifacts[0].analysis, { answer: '已完成', scope: 'profile' });
+    } finally {
+        cleanupAnalysisRows(userId);
+        try { removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 1, retryDelay: 20 }); } catch (_err) {}
+    }
+});
+
+test('数据分析数据总览支持编辑修改数据集名称与原始文件名/备注', async () => {
+    const suffix = Date.now().toString(36);
+    const username = `analysis_edit_${suffix}`;
+    const userInfo = createAnalysisUser(username, 'Data Analysis Edit Test');
+    const userId = userInfo.lastInsertRowid;
+    let dataset = null;
+    try {
+        dataset = await require('../server/services/data-analysis/datasets').createDatasetFromRows({
+            user: { id: userId, username },
+            name: '原始数据集名称',
+            rows: [{ item: 'A', val: 10 }, { item: 'B', val: 20 }],
+            sourceType: 'database'
+        });
+        assert.equal(dataset.name, '原始数据集名称');
+
+        // 测试更新名称与原始文件名
+        const updated = await updateDataset(userId, dataset.id, {
+            name: '修改后的数据集名称',
+            originalName: 'custom_source.xlsx'
+        });
+        assert.equal(updated.name, '修改后的数据集名称');
+        assert.equal(updated.originalName, 'custom_source.xlsx');
+
+        // 验证持久化详情
+        const detail = await getDatasetDetail(userId, dataset.id);
+        assert.equal(detail.name, '修改后的数据集名称');
+        assert.equal(detail.originalName, 'custom_source.xlsx');
+
+        // 验证前端契约包含编辑按钮与编辑弹窗，且右上角不包含多余关闭按钮
+        const viewCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'data-analysis', 'view.js'), 'utf8');
+        assert.match(viewCode, /data-data-analysis-action-edit/);
+        assert.match(viewCode, /id="data-analysis-edit-dataset-modal"/);
+        assert.match(viewCode, /id="data-analysis-edit-dataset-form"/);
+        assert.match(viewCode, /id="data-analysis-edit-dataset-cancel"/);
+        assert.ok(!viewCode.includes('id="data-analysis-edit-dataset-close"'));
+
+        const eventsCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'data-analysis', 'events.js'), 'utf8');
+        assert.match(eventsCode, /data-data-analysis-action-edit/);
+        assert.match(eventsCode, /openEditDatasetModal/);
+        assert.match(eventsCode, /submitEditDataset/);
     } finally {
         cleanupAnalysisRows(userId);
         try { removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 1, retryDelay: 20 }); } catch (_err) {}

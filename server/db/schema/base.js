@@ -1224,6 +1224,19 @@ function baseTablesSql() {
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS analysis_cleaning_runs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            source_dataset_id TEXT NOT NULL,
+            output_dataset_id TEXT DEFAULT '',
+            name TEXT NOT NULL,
+            rules_json TEXT DEFAULT '[]',
+            summary_json TEXT DEFAULT '{}',
+            status TEXT DEFAULT 'applied',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
 
         CREATE TABLE IF NOT EXISTS rate_limit_counters (
             key TEXT PRIMARY KEY,
@@ -1403,6 +1416,7 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_mcp_builtin_configs_user ON mcp_builtin_configs(user_id, service_type, status);
         CREATE INDEX IF NOT EXISTS idx_analysis_datasets_user ON analysis_datasets(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_artifacts_user ON analysis_artifacts(user_id, dataset_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_analysis_cleaning_runs_source ON analysis_cleaning_runs(user_id, source_dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_user_status ON analysis_semantic_jobs(user_id, status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_dataset ON analysis_semantic_jobs(dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_due ON analysis_semantic_jobs(status, next_run_at, updated_at);

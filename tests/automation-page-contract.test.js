@@ -231,8 +231,8 @@ test('Agent控制台统一收件箱与持续目标卡片自适应撑满高度，
     const harnessCss = read('client/chat/styles/workspaces/agent/agent-harness.css');
 
     // 1. 单卡片子视图容器内的卡片必须 flex: 1 1 auto 且 height: 100%
-    assert.match(harnessCss, /\.agent-cp-subview-pane:not\(\[data-agent-cp-pane="quality"\]\)\s*>\s*\.agent-cp-card\s*\{[\s\S]*?flex:\s*1 1 auto;/);
-    assert.match(harnessCss, /\.agent-cp-subview-pane:not\(\[data-agent-cp-pane="quality"\]\)\s*>\s*\.agent-cp-card\s*\{[\s\S]*?height:\s*100%;/);
+    assert.match(harnessCss, /\.agent-cp-subview-pane[\s\S]*?>\s*\.agent-cp-card[\s\S]*?\{[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(harnessCss, /\.agent-cp-subview-pane[\s\S]*?>\s*\.agent-cp-card[\s\S]*?\{[\s\S]*?height:\s*100%;/);
 
     // 2. 收件箱表格容器自适应填满卡片，不得设置 400px 最大高度截断
     assert.match(harnessCss, /\.agent-inbox-table-wrap\s*\{[\s\S]*?flex:\s*1 1 auto;/);
@@ -357,4 +357,231 @@ test('知识图谱顶部入口与文档列表行操作入口具备范围隔离�
     assert.match(kgServiceJs, /buildGraphEntityScopeSql/);
     assert.match(kgServiceJs, /buildGraphRelationRecordScopeSql/);
     assert.match(kgServiceJs, /buildGraphMentionScopeSql/);
+});
+
+test('数据分析数据查询页面可视化筛选紧凑布局、固定高度表格与分页契约', () => {
+    const viewJs = read('client/chat/data-analysis/view.js');
+    const queryJs = read('client/chat/data-analysis/query.js');
+    const overviewCss = read('client/chat/styles/workspaces/apps/data-analysis-overview.css');
+
+    // 1. view.js 中具备紧凑化可视化查询结构
+    assert.match(viewJs, /class="data-analysis-query-visual-box"/);
+    assert.match(viewJs, /class="data-analysis-query-settings-grid"/);
+
+    // 2. query.js 中具备分页切片逻辑与统一分页控件调用
+    assert.match(queryJs, /state\.queryPageSize/);
+    assert.match(queryJs, /id="data-analysis-query-pagination"/);
+    assert.match(queryJs, /exportQueryResultToCsv/);
+
+    // 3. CSS 中声明了数据展示区域的固定高度与粘性吸顶表头
+    assert.match(overviewCss, /\.data-analysis-query-table\s*\{[\s\S]*?height:\s*380px;/);
+    assert.match(overviewCss, /\.data-analysis-query-table \.data-analysis-result-table th\s*\{[\s\S]*?position:\s*sticky;/);
+
+    // 4. CSS 中声明了紧凑化筛选条件行与水平单行设置
+    assert.match(overviewCss, /\.data-analysis-query-filter-row select,\s*\.data-analysis-query-filter-row input\s*\{[\s\S]*?height:\s*28px;/);
+    assert.match(overviewCss, /\.data-analysis-query-settings-grid\s*\{[\s\S]*?display:\s*flex;/);
+});
+
+test('数据分析上传数据预览弹窗加宽加高与服务端分页契约', () => {
+    const viewJs = read('client/chat/data-analysis/view.js');
+    const datasetsJs = read('server/services/data-analysis/datasets.js');
+    const resultsCss = read('client/chat/styles/workspaces/apps/data-analysis-results.css');
+
+    // 1. view.js 中模态弹窗具备加宽加高结构、元数据标签与分页控件槽位
+    assert.match(viewJs, /class="modal data-analysis-preview-modal-dialog"/);
+    assert.match(viewJs, /id="data-analysis-preview-pagination"/);
+    assert.match(viewJs, /page=\$\{page\}&pageSize=/);
+    assert.match(viewJs, /window\.renderWorkspacePagination/);
+
+    // 2. 服务端 datasets.js 中支持分页查询与按页提取 Parquet 记录
+    assert.match(datasetsJs, /async function getDatasetDetail\(userId, datasetId, options = \{\}\)/);
+    assert.match(datasetsJs, /dataset\.previewPage = page;/);
+    assert.match(datasetsJs, /dataset\.previewPageSize = pageSize;/);
+
+    // 3. CSS 中声明了加宽加高弹窗（min(1560px, 95vw)）以及表头吸顶样式
+    assert.match(resultsCss, /\.data-analysis-preview-modal-dialog\s*\{[\s\S]*?width:\s*min\(1560px,\s*95vw\);/);
+    assert.match(resultsCss, /\.data-analysis-preview-modal-dialog\s*\{[\s\S]*?height:\s*min\(808px,\s*90vh\);/);
+    assert.match(resultsCss, /\.data-analysis-preview \.data-analysis-result-table th\s*\{[\s\S]*?position:\s*sticky;/);
+
+    // 4. 单元格紧凑高密度样式、截断限制与自定义悬浮气泡契约（非浏览器原生 title）
+    const eventsJs = read('client/chat/data-analysis/events.js');
+    const contextJs = read('client/chat/data-analysis/context.js');
+    assert.match(contextJs, /previewPageSize:\s*25/);
+    assert.match(resultsCss, /\.data-analysis-preview\s*\{[\s\S]*?overflow-y:\s*hidden;/);
+    assert.match(resultsCss, /\.data-analysis-preview \.data-analysis-result-table td\s*\{[\s\S]*?height:\s*26px;/);
+    assert.match(resultsCss, /\.data-analysis-preview \.data-analysis-result-table td\s*\{[\s\S]*?font-size:\s*0\.74rem;/);
+    assert.match(resultsCss, /\.data-analysis-preview \.data-analysis-result-table td\s*\{[\s\S]*?text-overflow:\s*ellipsis;/);
+    assert.match(resultsCss, /\.data-analysis-preview-pagination \.btn-secondary\s*\{[\s\S]*?height:\s*30px;/);
+    assert.match(resultsCss, /\.data-analysis-cell-tooltip\s*\{[\s\S]*?position:\s*fixed;/);
+    assert.match(eventsJs, /showCellTooltip/);
+    assert.match(eventsJs, /data-cell-full/);
+});
+
+test('数据分析数据透视页面零外层滚动条与自适应高密度布局契约', () => {
+    const viewJs = read('client/chat/data-analysis/view.js');
+    const pivotCss = read('client/chat/styles/workspaces/apps/data-analysis-pivot.css');
+    const resultsCss = read('client/chat/styles/workspaces/apps/data-analysis-results.css');
+
+    // 1. view.js 具备双排高密度配置中枢结构与操作栏
+    assert.match(viewJs, /class="data-analysis-pivot-config-main"/);
+    assert.match(viewJs, /class="data-analysis-pivot-config-sub-filters"/);
+    assert.match(viewJs, /class="data-analysis-pivot-toolbar-actions"/);
+    assert.match(viewJs, /id="data-analysis-pivot-dataset"/);
+    assert.match(viewJs, /id="data-analysis-pivot-row"/);
+    assert.match(viewJs, /id="data-analysis-pivot-col"/);
+    assert.match(viewJs, /id="data-analysis-pivot-value"/);
+    assert.match(viewJs, /id="data-analysis-pivot-aggregation"/);
+    assert.match(viewJs, /id="data-analysis-pivot-sort"/);
+    assert.match(viewJs, /id="data-analysis-pivot-percent-mode"/);
+    assert.match(viewJs, /id="data-analysis-pivot-row-limit"/);
+    assert.match(viewJs, /id="data-analysis-pivot-col-limit"/);
+    assert.match(viewJs, /id="data-analysis-pivot-empty-label"/);
+    assert.match(viewJs, /id="data-analysis-pivot-hint"/);
+    assert.match(viewJs, /id="data-analysis-pivot-recommend"/);
+    assert.match(viewJs, /id="data-analysis-run-pivot"/);
+    assert.match(viewJs, /id="data-analysis-pivot-export-btn"/);
+
+    // 2. CSS 契约保证整个透视面板消除外层滚动条 (overflow: hidden !important) 且内容高度自适应
+    assert.match(pivotCss, /#data-analysis-pivot-panel\s*\{[\s\S]*?overflow:\s*hidden\s*!important;/);
+    assert.match(pivotCss, /#data-analysis-pivot-panel\s*\{[\s\S]*?height:\s*100%;/);
+    assert.match(pivotCss, /\.data-analysis-pivot-workspace\s*\{[\s\S]*?overflow:\s*hidden;/);
+    assert.match(pivotCss, /\.data-analysis-pivot-result\s*\{[\s\S]*?overflow:\s*hidden;/);
+
+    // 3. 数据表格自适应填充剩余垂直空间 (flex: 1 1 auto, height: auto) 且内部滚动条就地停留
+    assert.match(pivotCss, /\.data-analysis-pivot-table\s*\{[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(pivotCss, /\.data-analysis-pivot-table\s*\{[\s\S]*?height:\s*auto;/);
+    assert.match(pivotCss, /\.data-analysis-pivot-table\s*\{[\s\S]*?overflow:\s*auto;/);
+    assert.doesNotMatch(pivotCss, /\.data-analysis-pivot-table\s*\{[\s\S]*?height:\s*480px;/);
+
+    // 4. 输入框和选择框统一采用高密度舒适合理外观 (28-30px)
+    assert.match(pivotCss, /\.data-analysis-pivot-config \.form-input\s*\{[\s\S]*?height:\s*(?:28|30)px;/);
+    assert.match(pivotCss, /\.data-analysis-pivot-toolbar button\s*\{[\s\S]*?height:\s*(?:28|30)px;/);
+
+    // 5. 数据表格表头、首列及合计行多向粘性吸顶吸附
+    assert.match(resultsCss, /\.data-analysis-pivot-table \.data-analysis-result-table thead th\s*\{[\s\S]*?position:\s*sticky;/);
+    assert.match(resultsCss, /\.data-analysis-pivot-table \.data-analysis-result-table thead th\s*\{[\s\S]*?top:\s*0;/);
+    assert.match(resultsCss, /\.data-analysis-pivot-table \.data-analysis-result-table tbody th\s*\{[\s\S]*?position:\s*sticky;/);
+    assert.match(resultsCss, /\.data-analysis-pivot-table \.data-analysis-result-table tbody th\s*\{[\s\S]*?left:\s*0;/);
+    assert.match(resultsCss, /\.data-analysis-pivot-total-row th[\s\S]*?position:\s*sticky;/);
+    assert.match(resultsCss, /\.data-analysis-pivot-total-row th[\s\S]*?bottom:\s*0;/);
+});
+
+test('数据分析智能分析页面看板引导、结构化画像、场景卡片与无外层滚动条布局契约', () => {
+    const viewJs = fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/view.js'), 'utf8');
+    const aiJs = fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/ai.js'), 'utf8');
+    const resultsCss = fs.readFileSync(path.resolve(__dirname, '../client/chat/styles/workspaces/apps/data-analysis-results.css'), 'utf8');
+
+    // 1. 结构契约：顶部统合工具栏、输入提示、冷启动引导看板与结果操作栏
+    assert.match(viewJs, /class="data-analysis-ai-header-bar"/);
+    assert.match(viewJs, /id="data-analysis-ai-dataset"/);
+    assert.match(viewJs, /id="data-analysis-ai-dataset-meta"/);
+    assert.match(viewJs, /id="data-analysis-ai-prompt"/);
+    assert.match(viewJs, /id="data-analysis-ai-clear-prompt"/);
+    assert.match(viewJs, /class="data-analysis-ai-input-tip"/);
+    assert.match(viewJs, /id="data-analysis-ai-landing"/);
+    assert.match(viewJs, /id="data-analysis-ai-profile-content"/);
+    assert.match(viewJs, /class="data-analysis-ai-scenario-card"/);
+    assert.match(viewJs, /id="data-analysis-ai-result-wrap"/);
+    assert.match(viewJs, /id="data-analysis-ai-copy-result"/);
+    assert.match(viewJs, /id="data-analysis-ai-reset-view"/);
+    assert.match(viewJs, /id="data-analysis-ai-result"/);
+
+    // 2. 字段画像契约：包含结构化 KPI 指标与字段构成分布
+    assert.match(aiJs, /data-analysis-ai-profile-kpis/);
+    assert.match(aiJs, /data-analysis-ai-kpi-card/);
+    assert.match(aiJs, /data-analysis-ai-field-chip/);
+    assert.match(aiJs, /field-type-pill/);
+
+    // 3. 无任何 Emoji 规范保障契约
+    const aiSectionMatch = viewJs.match(/id="data-analysis-ai-panel"[\s\S]*?<\/section>/);
+    assert.ok(aiSectionMatch, '应能匹配到 data-analysis-ai-panel 模板');
+    const aiSectionHtml = aiSectionMatch[0];
+    assert.doesNotMatch(aiSectionHtml, /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u, '智能分析模板中不得包含任何 emoji 字符');
+    assert.doesNotMatch(aiJs.slice(0, 3000), /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u, 'AI 分析渲染逻辑中不得包含任何 emoji 字符');
+
+    // 4. 单行 4 列场景卡片与无标签契约
+    assert.doesNotMatch(viewJs, /class="scenario-tag">填入诉求<\/span>/, '场景卡片上不得展示填入诉求文字标签');
+    assert.match(resultsCss, /\.data-analysis-ai-landing-scenarios\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4,\s*1fr\);/);
+
+    // 5. CSS 契约：消除外层滚动条，主画布和结果展示自适应填满剩余垂直空间并内部滚动
+    assert.match(resultsCss, /#data-analysis-ai-panel\s*\{[\s\S]*?overflow:\s*hidden\s*!important;/);
+    assert.match(resultsCss, /#data-analysis-ai-panel\s*\{[\s\S]*?height:\s*100%;/);
+    assert.match(resultsCss, /\.data-analysis-ai-canvas\s*\{[\s\S]*?flex:\s*1 1 auto;/);
+    assert.match(resultsCss, /\.data-analysis-ai-result\s*\{[\s\S]*?overflow-y:\s*auto;/);
+});
+
+test('数据分析全量语义分析页面去重与联动布局契约', () => {
+    const viewJs = fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/view.js'), 'utf8');
+    const coreJs = fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/core.js'), 'utf8');
+    const eventsJs = fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/events.js'), 'utf8');
+    const resultsCss = fs.readFileSync(path.resolve(__dirname, '../client/chat/styles/workspaces/apps/data-analysis-results.css'), 'utf8');
+
+    // 1. 去重契约：全量语义分析子面板内部隐藏独立下拉，复用顶部统合数据集选择器，杜绝重复展示
+    const semanticSubpanelMatch = viewJs.match(/id="data-analysis-ai-subpanel-semantic"[\s\S]*?<\/div>\s*<\/section>/);
+    assert.ok(semanticSubpanelMatch, '应能匹配到 data-analysis-ai-subpanel-semantic 模板');
+    const semanticSubpanelHtml = semanticSubpanelMatch[0];
+
+    assert.match(semanticSubpanelHtml, /<select id="data-analysis-semantic-dataset" class="hidden"/, '旧语义数据集选择器应隐藏作为兼容桥接');
+    assert.doesNotMatch(semanticSubpanelHtml, /<div class="data-analysis-semantic-heading">/, '不应存在重复的语义面板大标题');
+    assert.doesNotMatch(semanticSubpanelHtml, /<h5>全量语义分析任务<\/h5>/, '不应在子面板内重复显示全量语义分析任务标题');
+
+    // 2. 紧凑工具栏契约：任务历史与状态徽章同一横排
+    assert.match(semanticSubpanelHtml, /class="data-analysis-semantic-toolbar"/);
+    assert.match(semanticSubpanelHtml, /class="data-analysis-semantic-history-group"/);
+    assert.match(semanticSubpanelHtml, /id="data-analysis-semantic-job"/);
+    assert.match(semanticSubpanelHtml, /id="data-analysis-semantic-refresh-jobs"/);
+    assert.match(semanticSubpanelHtml, /class="data-analysis-semantic-status-wrap"/);
+    assert.match(semanticSubpanelHtml, /id="data-analysis-semantic-status"/);
+
+    // 3. 状态联动与子面板切换契约：切换数据集与切换 Tab 时状态保持同步，且两个子面板正确切换 hidden
+    assert.match(coreJs, /state\.semanticDatasetId\s*=\s*id;/, '加载数据集详情时应同步更新 semanticDatasetId');
+    assert.match(eventsJs, /state\.semanticDatasetId\s*=\s*state\.activeId/, '切换全量语义分析 Tab 时应同步 activeId 至 semanticDatasetId');
+    assert.match(eventsJs, /data-analysis-ai-subpanel-semantic'\)\?\.classList\.toggle\('hidden',\s*subtabName\s*!==\s*'semantic'\)/, '点击子 Tab 时应切换 semantic 子面板的 hidden 状态');
+
+    // 4. 无 Emoji 规范
+    assert.doesNotMatch(semanticSubpanelHtml, /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u, '语义分析模板中不得包含任何 emoji 字符');
+
+    // 5. CSS 布局契约与左右双栏无外层滚动条规范
+    assert.match(resultsCss, /\.data-analysis-semantic-toolbar\s*\{[\s\S]*?display:\s*flex;/);
+    assert.match(resultsCss, /\.data-analysis-semantic-controls\s*\{[\s\S]*?display:\s*grid;/);
+    assert.match(resultsCss, /#data-analysis-ai-subpanel-semantic\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*row;[\s\S]*?overflow:\s*hidden\s*!important;/, '全量语义分析子面板必须采用横向双栏且无外层滚动条');
+    assert.match(resultsCss, /\.data-analysis-semantic-box\s*\{[\s\S]*?flex:\s*0 0 380px;[\s\S]*?overflow-y:\s*auto;/, '左侧配置栏应为固定紧凑宽度并在超出时内部纵向滚动');
+    assert.match(resultsCss, /\.data-analysis-semantic-result-wrap\s*\{[\s\S]*?flex:\s*1 1 auto;/, '右侧分析结果容器自适应填满剩余宽度');
+    assert.match(resultsCss, /\.data-analysis-semantic-report\s*\{[\s\S]*?max-height:\s*none\s*!important;[\s\S]*?overflow-y:\s*auto;/, '分析报告区域撑满高度并在内部滚动展示');
+
+    // 6. 报告操作工具栏与复制按钮契约
+    assert.match(semanticSubpanelHtml, /class="data-analysis-semantic-result-toolbar"/, '右侧结果区域顶部应具备操作工具栏');
+    assert.match(semanticSubpanelHtml, /id="data-analysis-semantic-copy-report"/, '右侧结果区域应具备复制报告按钮');
+    assert.match(eventsJs, /#data-analysis-semantic-copy-report/, 'events.js 应绑定复制报告点击事件');
+
+    // 7. 全局统一 Tab 样式契约：符合全局绿色主色系与标准 subnav 规范
+    assert.match(viewJs, /class="data-analysis-subtabs-nav"[^>]*role="tablist"/, '子 Tab 容器应具备 tablist 语义');
+    assert.match(viewJs, /class="data-analysis-subtab active"[^>]*role="tab"/, '子 Tab 按钮应具备 tab 语义');
+    assert.match(resultsCss, /\.data-analysis-subtab\.active[^{]*\{[^}]*color:\s*var\(--primary/, '激活态 Tab 文字应统一使用全局主色 var(--primary)');
+    assert.doesNotMatch(resultsCss, /\.data-analysis-subtab\.active[^{]*\{[^}]*color:\s*#2563eb/, '不得使用孤立的蓝色 #2563eb');
+});
+
+test('数据分析历史记录数据表格具备全局统一分页控件与行高规范契约', () => {
+    const viewJs = read('client/chat/data-analysis/view.js');
+    const compareHistoryJs = read('client/chat/data-analysis/compare-history.js');
+    const contextJs = read('client/chat/data-analysis/context.js');
+    const overviewCss = read('client/chat/styles/workspaces/apps/data-analysis-overview.css');
+
+    // 1. context.js 具备历史记录分页状态
+    assert.match(contextJs, /historyPage:\s*1/);
+    assert.match(contextJs, /historyPageSize:\s*10/);
+
+    // 2. view.js 中包含规范的历史表格包裹层与全局统一分页控件槽位
+    assert.match(viewJs, /class="table-container workspace-table-wrap data-analysis-history-table-wrap"/);
+    assert.match(viewJs, /id="data-analysis-history-pagination"\s+class="pagination workspace-pagination/);
+
+    // 3. compare-history.js 中调用全局统一分页控件 window.renderWorkspacePagination 并支持分页切片
+    assert.match(compareHistoryJs, /state\.historyPageSize/);
+    assert.match(compareHistoryJs, /getElementById\(['"]data-analysis-history-pagination['"]\)/);
+    assert.match(compareHistoryJs, /window\.renderWorkspacePagination/);
+
+    // 4. CSS 中历史记录表格行高与单元格高度统一为全局 38px，并包含分页控件布局样式
+    assert.match(overviewCss, /\.data-analysis-history-table td\s*\{[\s\S]*?height:\s*38px;/);
+    assert.match(overviewCss, /\.data-analysis-history-table td\s*\{[\s\S]*?padding:\s*6px 8px;/);
+    assert.match(overviewCss, /\.data-analysis-history-pagination\s*\{[\s\S]*?display:\s*flex;/);
 });

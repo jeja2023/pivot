@@ -16,6 +16,7 @@
         failed: '失败',
         cancelled: '已取消'
     };
+    const ACTIVE_SEMANTIC_STATUSES = new Set(['queued', 'running']);
 
     function clearSemanticPoll() {
         if (state.semanticPollTimer) {
@@ -25,7 +26,91 @@
     }
 
     function isActiveSemanticJob(job) {
-        return Boolean(job && ['queued', 'running'].includes(job.status));
+        return Boolean(job && ACTIVE_SEMANTIC_STATUSES.has(job.status));
+    }
+
+    function semanticJobFieldName(job = {}) {
+        return String(job?.options?.textFieldName || job?.textField || '未命名字段').trim() || '未命名字段';
+    }
+
+    function semanticJobCreatedLabel(job = {}) {
+        const value = String(job?.createdAt || job?.startedAt || job?.updatedAt || '').trim();
+        return value ? value.replace('T', ' ').slice(0, 16) : '时间未知';
+    }
+
+    function semanticJobOptionLabel(job = {}) {
+        const status = semanticStatusLabels[job.status] || job.status || '未知状态';
+        return `${status} · ${semanticJobFieldName(job)} · ${semanticJobCreatedLabel(job)}`;
+    }
+
+    function findSemanticJob(jobId) {
+        const normalizedId = String(jobId || '').trim();
+        if (!normalizedId) return null;
+        return state.semanticJobs.find(item => String(item?.id || '') === normalizedId) || null;
+    }
+
+    function upsertSemanticJob(job) {
+        if (!job?.id) return;
+        const index = state.semanticJobs.findIndex(item => String(item?.id || '') === String(job.id));
+        if (index >= 0) state.semanticJobs[index] = { ...state.semanticJobs[index], ...job };
+        else state.semanticJobs = [job, ...state.semanticJobs];
+    }
+
+    function renderSemanticJobSelector(dataset) {
+        const selector = document.getElementById('data-analysis-semantic-job');
+        if (!selector) return;
+        if (!dataset) {
+            setSelectOptions('data-analysis-semantic-job', '<option value="">请先选择数据集</option>', '');
+            return;
+        }
+        const jobs = Array.isArray(state.semanticJobs) ? state.semanticJobs : [];
+        const selectedId = state.semanticSelectedJobId || state.semanticJob?.id || '';
+        const options = [
+            '<option value="">新建任务（不查看历史）</option>',
+            ...jobs.map(job => `<option value="${esc(job.id)}">${esc(semanticJobOptionLabel(job))}</option>`)
+        ].join('');
+        setSelectOptions('data-analysis-semantic-job', options, selectedId);
+        const currentJob = jobs.find(j => String(j.id) === String(selectedId));
+        selector.title = currentJob ? semanticJobOptionLabel(currentJob) : (selectedId ? '' : '新建任务（不查看历史）');
+    }
+
+    function restoreSemanticJobInputs(job) {
+        if (!job) return;
+        const textField = document.getElementById('data-analysis-semantic-field');
+        const idField = document.getElementById('data-analysis-semantic-id-field');
+        const instruction = document.getElementById('data-analysis-semantic-instruction');
+        const batchTokens = document.getElementById('data-analysis-semantic-batch-tokens');
+        if (textField && Array.from(textField.options).some(option => option.value === String(job.textField || ''))) {
+            textField.value = String(job.textField || '');
+        }
+        if (idField) {
+            const value = String(job.idField || '');
+            idField.value = Array.from(idField.options).some(option => option.value === value) ? value : '';
+        }
+        if (instruction) instruction.value = String(job.instruction || '');
+        const budget = Number(job?.options?.batchTokens);
+        if (batchTokens && Number.isFinite(budget) && budget > 0) batchTokens.value = String(budget);
+    }
+
+    async function ensureSemanticDatasetDetail(datasetId) {
+        const normalizedId = String(datasetId || '').trim();
+        if (!normalizedId) return null;
+        let dataset = state.datasets.find(item => String(item?.id || '') === normalizedId) || null;
+        if (dataset && Array.isArray(dataset.columns) && dataset.columns.length) return dataset;
+        const data = await fetchJson(`${API}/datasets/${encodeURIComponent(normalizedId)}`);
+        if (!data?.dataset) throw new Error('未找到全量语义分析数据集。');
+        const index = state.datasets.findIndex(item => String(item?.id || '') === normalizedId);
+        if (index >= 0) state.datasets[index] = data.dataset;
+        else state.datasets.push(data.dataset);
+        return data.dataset;
+    }
+
+    function syncSemanticDatasetSelector(datasetId) {
+        const selector = document.getElementById('data-analysis-semantic-dataset');
+        if (!selector) return;
+        if (Array.from(selector.options).some(option => option.value === String(datasetId || ''))) {
+            selector.value = String(datasetId || '');
+        }
     }
 
     function setAiRunning(running) {
@@ -57,8 +142,106 @@
         toast('已停止生成建议', 'info');
     }
 
-    // 智能分析结果只属于当前页面会话。离开页面时清理临时展示内容；
-    // 已结束的全量任务回到历史记录中，只有仍在运行的任务保留进度入口。
+    // 渲染数据集特征画像概览与顶部微型徽章
+    function renderAiDatasetProfile() {
+        const dataset = activeDataset();
+        const metaEl = document.getElementById('data-analysis-ai-dataset-meta');
+        const profileEl = document.getElementById('data-analysis-ai-profile-content');
+        if (!dataset) {
+            if (metaEl) PivotSafeHtml.setHtml(metaEl, '');
+            if (profileEl) {
+                PivotSafeHtml.setHtml(profileEl, '<div class="data-analysis-ai-profile-empty">请选择分析数据集以查看字段画像与推荐探索方向。</div>');
+            }
+            return;
+        }
+
+        if (metaEl) {
+            const rowCountStr = fmtNumber(dataset.rowCount || dataset.sourceRowCount || 0);
+            const colsCount = (dataset.columns || []).length;
+            PivotSafeHtml.setHtml(metaEl, `
+                <span class="data-analysis-pill" title="数据集总行数">${rowCountStr} 行</span>
+                <span class="data-analysis-pill" title="数据集字段总数">${colsCount} 个字段</span>
+            `);
+        }
+
+        if (profileEl) {
+            const columns = Array.isArray(dataset.columns) ? dataset.columns : [];
+            const summary = state.summary;
+            const numericKeys = new Set((summary?.numericColumns || []).map(c => c.key || c.name));
+            const numCols = columns.filter(c => {
+                const typeStr = String(c.type || '').toLowerCase();
+                return numericKeys.has(c.key || c.name) || ['integer', 'double', 'float', 'number', 'int', 'decimal', 'numeric'].some(t => typeStr.includes(t));
+            });
+            const dateCols = columns.filter(c => {
+                const typeStr = String(c.type || '').toLowerCase();
+                return ['date', 'time', 'timestamp'].some(t => typeStr.includes(t));
+            });
+            const textCols = columns.filter(c => !numCols.includes(c) && !dateCols.includes(c));
+
+            const totalRows = fmtNumber(dataset.rowCount || dataset.sourceRowCount || 0);
+            const totalCols = columns.length;
+
+            const nameEl = document.getElementById('data-analysis-ai-profile-name');
+            if (nameEl) nameEl.textContent = dataset.name ? `当前：${dataset.name}` : '';
+
+            const kpisHtml = `
+                <div class="data-analysis-ai-profile-kpis">
+                    <div class="data-analysis-ai-kpi-card">
+                        <span class="data-analysis-ai-kpi-lbl">数据规模</span>
+                        <div class="data-analysis-ai-kpi-val">${totalRows} <span class="kpi-unit">行</span></div>
+                    </div>
+                    <div class="data-analysis-ai-kpi-card">
+                        <span class="data-analysis-ai-kpi-lbl">字段总数</span>
+                        <div class="data-analysis-ai-kpi-val">${totalCols} <span class="kpi-unit">列</span></div>
+                    </div>
+                    <div class="data-analysis-ai-kpi-card">
+                        <span class="data-analysis-ai-kpi-lbl">数值指标</span>
+                        <div class="data-analysis-ai-kpi-val">${numCols.length} <span class="kpi-unit">项</span></div>
+                    </div>
+                    <div class="data-analysis-ai-kpi-card">
+                        <span class="data-analysis-ai-kpi-lbl">文本与维度</span>
+                        <div class="data-analysis-ai-kpi-val">${textCols.length + dateCols.length} <span class="kpi-unit">项</span></div>
+                    </div>
+                </div>
+            `;
+
+            const colsPreview = columns.map(col => {
+                const isNum = numCols.includes(col);
+                const isDate = dateCols.includes(col);
+                const typeLabel = isNum ? '数值' : (isDate ? '时间' : '文本');
+                const badgeClass = isNum ? 'field-badge-num' : (isDate ? 'field-badge-date' : 'field-badge-text');
+                const iconSvg = isNum
+                    ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>'
+                    : (isDate
+                        ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>'
+                        : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>');
+
+                return `
+                    <div class="data-analysis-ai-field-chip" title="${esc(col.name)} (${esc(col.type || '未指定')})">
+                        <span class="field-icon">${iconSvg}</span>
+                        <span class="field-name">${esc(col.name)}</span>
+                        <span class="field-type-pill ${badgeClass}">${typeLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            PivotSafeHtml.setHtml(profileEl, `
+                ${kpisHtml}
+                <div class="data-analysis-ai-profile-fields-section">
+                    <div class="data-analysis-ai-profile-section-header">
+                        <span>字段构成与类型分布</span>
+                        <span class="section-count">${columns.length} 个可用字段</span>
+                    </div>
+                    <div class="data-analysis-ai-profile-fields-wrap">
+                        ${colsPreview || '<span class="empty-hint">暂无字段信息</span>'}
+                    </div>
+                </div>
+            `);
+        }
+    }
+
+    // 即时 AI 探索结果只属于当前页面会话；全量语义任务是持久化任务，
+    // 切换页面时保留已选任务及其报告，避免历史回放再次被清空。
     function resetAiWorkspace() {
         clearSemanticPoll();
         if (state.aiAbortController) {
@@ -69,16 +252,15 @@
         setAiRunning(false);
         const result = document.getElementById('data-analysis-ai-result');
         if (result) PivotSafeHtml.setHtml(result, '');
+        document.getElementById('data-analysis-ai-result-wrap')?.classList.add('hidden');
+        document.getElementById('data-analysis-ai-landing')?.classList.remove('hidden');
         const prompt = document.getElementById('data-analysis-ai-prompt');
         if (prompt) prompt.value = '';
+        document.getElementById('data-analysis-ai-clear-prompt')?.classList.add('hidden');
         const deep = document.getElementById('data-analysis-ai-deep');
         if (deep) deep.checked = false;
-        const instruction = document.getElementById('data-analysis-semantic-instruction');
-        if (instruction && !isActiveSemanticJob(state.semanticJob)) instruction.value = '';
-        if (!isActiveSemanticJob(state.semanticJob)) {
-            state.semanticJob = null;
-            renderSemanticControls();
-        }
+        renderAiDatasetProfile();
+        renderSemanticControls();
     }
 
     function resumeAiWorkspace() {
@@ -87,9 +269,9 @@
     }
 
     function semanticDataset() {
-        const datasetId = state.semanticDatasetId || document.getElementById('data-analysis-semantic-dataset')?.value;
+        const datasetId = state.semanticDatasetId || state.activeId || document.getElementById('data-analysis-semantic-dataset')?.value;
         if (!datasetId) return null;
-        return state.datasets?.find(item => item.id === datasetId) || null;
+        return state.datasets?.find(item => String(item?.id || '') === String(datasetId)) || null;
     }
 
     function renderSemanticControls() {
@@ -100,11 +282,13 @@
         const status = document.getElementById('data-analysis-semantic-status');
         const progress = document.getElementById('data-analysis-semantic-progress');
         const report = document.getElementById('data-analysis-semantic-report');
+        const copyBtn = document.getElementById('data-analysis-semantic-copy-report');
         const run = document.getElementById('data-analysis-semantic-run');
         const cancel = document.getElementById('data-analysis-semantic-cancel');
         const retry = document.getElementById('data-analysis-semantic-retry');
 
         if (!dataset) {
+            renderSemanticJobSelector(null);
             setSelectOptions('data-analysis-semantic-field', '<option value="">请先选择全量分析数据集</option>', '');
             setSelectOptions('data-analysis-semantic-id-field', '<option value="">请先选择全量分析数据集</option>', '');
             if (status) {
@@ -112,7 +296,16 @@
                 delete status.dataset.status;
             }
             if (progress) PivotSafeHtml.setHtml(progress, '');
-            if (report) PivotSafeHtml.setHtml(report, '');
+            if (report) {
+                PivotSafeHtml.setHtml(report, `
+                    <div class="data-analysis-semantic-empty-state">
+                        <svg class="data-analysis-semantic-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        <div class="data-analysis-semantic-empty-title">未选择分析数据集</div>
+                        <div class="data-analysis-semantic-empty-desc">请先在顶部下拉框中选择要分析的数据集。</div>
+                    </div>
+                `);
+            }
+            if (copyBtn) copyBtn.disabled = true;
             cancel?.classList.add('hidden');
             retry?.classList.add('hidden');
             if (run) run.disabled = true;
@@ -124,15 +317,25 @@
         const textOptions = buildOptions(textColumns.length ? textColumns : columns, { includeEmpty: true, emptyLabel: '请选择文本字段' });
         setSelectOptions('data-analysis-semantic-field', textOptions, document.getElementById('data-analysis-semantic-field')?.value || textColumns[0]?.key || columns[0]?.key || '');
         setSelectOptions('data-analysis-semantic-id-field', buildOptions(columns, { includeEmpty: true, emptyLabel: '按行号标识' }));
+        renderSemanticJobSelector(dataset);
 
         const job = state.semanticJob;
         if (!job) {
             if (status) {
-                status.textContent = '未创建任务';
+                status.textContent = state.semanticJobs.length ? '请选择历史任务或新建任务' : '未创建任务';
                 delete status.dataset.status;
             }
             if (progress) PivotSafeHtml.setHtml(progress, '');
-            if (report) PivotSafeHtml.setHtml(report, '');
+            if (report) {
+                PivotSafeHtml.setHtml(report, `
+                    <div class="data-analysis-semantic-empty-state">
+                        <svg class="data-analysis-semantic-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        <div class="data-analysis-semantic-empty-title">暂无分析报告</div>
+                        <div class="data-analysis-semantic-empty-desc">在左侧配置分析字段并启动全量任务，或在任务记录中选择历史任务查看分析报告。</div>
+                    </div>
+                `);
+            }
+            if (copyBtn) copyBtn.disabled = true;
             cancel?.classList.add('hidden');
             retry?.classList.add('hidden');
             if (run) run.disabled = false;
@@ -154,31 +357,110 @@
         }
         if (report) {
             const text = String(job.report || job.result?.report || '');
-            PivotSafeHtml.setHtml(report, text ? `<div class="data-analysis-semantic-report-title">全量汇总报告</div>${renderMarkdown(text)}` : '');
+            const error = String(job.lastError || '').trim();
+            const empty = error
+                ? `<p class="data-analysis-semantic-error-hint">${esc(error)}</p>`
+                : `
+                    <div class="data-analysis-semantic-empty-state">
+                        <svg class="data-analysis-semantic-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        <div class="data-analysis-semantic-empty-title">${isActiveSemanticJob(job) ? '全量分析执行中…' : '任务无汇总报告内容'}</div>
+                        <div class="data-analysis-semantic-empty-desc">${isActiveSemanticJob(job) ? '正在逐批进行大模型语义处理，处理完毕后将在此处实时呈现分析报告。' : '当前任务未生成有效分析文本。'}</div>
+                    </div>
+                `;
+            PivotSafeHtml.setHtml(report, text ? renderMarkdown(text) : empty);
+            if (copyBtn) copyBtn.disabled = !text;
         }
-        const active = ['queued', 'running'].includes(job.status);
+        const active = isActiveSemanticJob(job);
         run && (run.disabled = active);
         cancel?.classList.toggle('hidden', !active);
         retry?.classList.toggle('hidden', job.status !== 'failed' && job.status !== 'cancelled');
     }
 
-    async function loadSemanticJobs(datasetId = state.semanticDatasetId) {
+    async function selectSemanticJob(jobId, options = {}) {
+        const normalizedId = String(jobId || '').trim();
+        const expectedDatasetId = String(options.datasetId || state.semanticDatasetId || '').trim();
+        if (!normalizedId) {
+            clearSemanticPoll();
+            state.semanticSelectedJobId = '';
+            state.semanticJob = null;
+            renderSemanticControls();
+            return null;
+        }
+
+        let job = options.job || findSemanticJob(normalizedId);
+        let detailError = null;
+        try {
+            const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(normalizedId)}`);
+            if (data?.job) job = data.job;
+        } catch (error) {
+            detailError = error;
+        }
+
+        if (options.loadVersion !== undefined && options.loadVersion !== state.semanticLoadVersion) return null;
+        if (expectedDatasetId && String(state.semanticDatasetId || '') !== expectedDatasetId) return null;
+        if (!job) throw detailError || new Error('未找到全量语义分析任务记录。');
+        if (expectedDatasetId && job.datasetId && String(job.datasetId) !== expectedDatasetId) {
+            throw new Error('该任务不属于当前选择的数据集。');
+        }
+
+        clearSemanticPoll();
+        state.semanticSelectedJobId = String(job.id);
+        state.semanticJob = job;
+        upsertSemanticJob(job);
+        renderSemanticControls();
+        restoreSemanticJobInputs(job);
+        if (isActiveSemanticJob(job)) startSemanticPoll(job.id);
+        return job;
+    }
+
+    async function loadSemanticJobs(datasetId = state.semanticDatasetId, options = {}) {
+        const normalizedDatasetId = String(datasetId || state.semanticDatasetId || state.activeId || '').trim();
+        state.semanticDatasetId = normalizedDatasetId;
+        const loadVersion = Number(state.semanticLoadVersion || 0) + 1;
+        state.semanticLoadVersion = loadVersion;
         clearSemanticPoll();
         state.semanticJobs = [];
         state.semanticJob = null;
-        if (!datasetId) {
+        state.semanticSelectedJobId = '';
+        if (!normalizedDatasetId) {
             renderSemanticControls();
-            return;
+            return null;
         }
         try {
-            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}/semantic-analysis/jobs?limit=20`);
+            const data = await fetchJson(`${API}/datasets/${encodeURIComponent(normalizedDatasetId)}/semantic-analysis/jobs?limit=100`);
+            if (loadVersion !== state.semanticLoadVersion || String(state.semanticDatasetId || '') !== normalizedDatasetId) return null;
             state.semanticJobs = Array.isArray(data.jobs) ? data.jobs : [];
-            state.semanticJob = state.semanticJobs.find(isActiveSemanticJob) || null;
-            renderSemanticControls();
-            if (state.semanticJob && ['queued', 'running'].includes(state.semanticJob.status)) startSemanticPoll(state.semanticJob.id);
+            const preferredId = String(options.preferredJobId || '').trim();
+            let selected = findSemanticJob(preferredId)
+                || state.semanticJobs.find(isActiveSemanticJob)
+                || state.semanticJobs[0]
+                || null;
+            if (!selected && options.fallbackJob?.id) {
+                selected = options.fallbackJob;
+                upsertSemanticJob(selected);
+            }
+            if (!selected) {
+                renderSemanticControls();
+                return null;
+            }
+            return await selectSemanticJob(selected.id, {
+                job: selected,
+                datasetId: normalizedDatasetId,
+                loadVersion
+            });
         } catch (e) {
+            if (loadVersion !== state.semanticLoadVersion) return null;
             console.warn('[data-analysis] 加载全量语义分析任务失败', e);
+            if (options.fallbackJob?.id) {
+                state.semanticJobs = [options.fallbackJob];
+                return await selectSemanticJob(options.fallbackJob.id, {
+                    job: options.fallbackJob,
+                    datasetId: normalizedDatasetId,
+                    loadVersion
+                });
+            }
             renderSemanticControls();
+            throw e;
         }
     }
 
@@ -186,10 +468,11 @@
         const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(jobId)}`);
         if (state.semanticJob?.id !== jobId) return;
         state.semanticJob = data.job || state.semanticJob;
+        state.semanticSelectedJobId = state.semanticJob?.id || state.semanticSelectedJobId;
         const index = state.semanticJobs.findIndex(item => item.id === jobId);
         if (index >= 0) state.semanticJobs[index] = { ...state.semanticJobs[index], ...state.semanticJob, batches: undefined };
         renderSemanticControls();
-        if (!['queued', 'running'].includes(state.semanticJob.status)) clearSemanticPoll();
+        if (!isActiveSemanticJob(state.semanticJob)) clearSemanticPoll();
     }
 
     function startSemanticPoll(jobId) {
@@ -222,6 +505,7 @@
                 })
             });
             state.semanticJob = data.job;
+            state.semanticSelectedJobId = data.job?.id || '';
             state.semanticJobs = [data.job, ...state.semanticJobs.filter(item => item.id !== data.job.id)];
             renderSemanticControls();
             startSemanticPoll(data.job.id);
@@ -235,6 +519,7 @@
         await guardButton('data-analysis-semantic-cancel', '取消中…', async () => {
             const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
             state.semanticJob = data.job;
+            state.semanticSelectedJobId = data.job?.id || state.semanticSelectedJobId;
             clearSemanticPoll();
             renderSemanticControls();
             toast('全量语义分析任务已取消');
@@ -247,10 +532,113 @@
         await guardButton('data-analysis-semantic-retry', '重试中…', async () => {
             const data = await fetchJson(`${API}/semantic-analysis/jobs/${encodeURIComponent(job.id)}/retry`, { method: 'POST' });
             state.semanticJob = data.job;
+            state.semanticSelectedJobId = data.job?.id || state.semanticSelectedJobId;
             renderSemanticControls();
             startSemanticPoll(job.id);
             toast('失败批次已重新排队');
         });
+    }
+
+    async function openSemanticHistoryRecord(item, datasetId = state.activeId) {
+        const semantic = item?.semantic || {};
+        const jobId = String(semantic.jobId || item?.metadata?.jobId || '').trim();
+        const normalizedDatasetId = String(datasetId || '').trim();
+        if (!jobId) throw new Error('该历史记录缺少任务标识，无法恢复。');
+        if (!normalizedDatasetId) throw new Error('该历史记录缺少所属数据集，无法恢复。');
+
+        state.semanticDatasetId = normalizedDatasetId;
+        await ensureSemanticDatasetDetail(normalizedDatasetId);
+        syncSemanticDatasetSelector(normalizedDatasetId);
+        const fallbackJob = {
+            id: jobId,
+            datasetId: normalizedDatasetId,
+            status: 'succeeded',
+            textField: semantic.textField || semantic.options?.textFieldName || '',
+            idField: semantic.idField || '',
+            totalRows: semantic.coverage?.totalRows || 0,
+            analyzedRows: semantic.coverage?.analyzedRows || 0,
+            totalChars: semantic.coverage?.totalChars || 0,
+            totalBatches: semantic.coverage?.totalBatches || 0,
+            completedBatches: semantic.coverage?.completedBatches || 0,
+            progress: 100,
+            report: semantic.report || '',
+            instruction: semantic.instruction || '',
+            result: semantic
+        };
+        return await loadSemanticJobs(normalizedDatasetId, { preferredJobId: jobId, fallbackJob });
+    }
+
+    async function openAiAnalysisHistoryRecord(item, datasetId = state.activeId) {
+        if (!item) throw new Error('未找到分析历史记录。');
+        const targetDatasetId = String(item.datasetId || datasetId || state.activeId || '').trim();
+        if (!targetDatasetId) throw new Error('该历史记录缺少所属数据集，无法恢复。');
+
+        if (targetDatasetId !== String(state.activeId || '')) {
+            await ensureSemanticDatasetDetail(targetDatasetId);
+            state.activeId = targetDatasetId;
+            const selector = document.getElementById('data-analysis-ai-dataset');
+            if (selector && Array.from(selector.options).some(opt => opt.value === targetDatasetId)) {
+                selector.value = targetDatasetId;
+            }
+            renderAiDatasetProfile();
+        }
+
+        document.querySelectorAll('.data-analysis-subtab').forEach(btn => {
+            const isActive = btn.dataset.aiSubtab === 'chat';
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        document.getElementById('data-analysis-ai-subpanel-chat')?.classList.remove('hidden');
+        document.getElementById('data-analysis-ai-subpanel-semantic')?.classList.add('hidden');
+
+        document.getElementById('data-analysis-ai-landing')?.classList.add('hidden');
+        const resultWrap = document.getElementById('data-analysis-ai-result-wrap');
+        resultWrap?.classList.remove('hidden');
+
+        let analysis = item.analysis;
+        if (typeof analysis === 'string') {
+            try {
+                analysis = JSON.parse(analysis);
+            } catch (_e) {
+                analysis = { answer: analysis };
+            }
+        }
+        analysis = analysis && typeof analysis === 'object' ? analysis : {};
+        const promptText = String(analysis.prompt || item.title || '').trim();
+        const answerText = String(analysis.answer || analysis.content || '');
+        const isAgent = item.metadata?.mode === 'agent' || Boolean(analysis.steps?.length) || Boolean(analysis.evidence?.length);
+
+        const promptInput = document.getElementById('data-analysis-ai-prompt');
+        if (promptInput) {
+            promptInput.value = promptText;
+            promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const clearBtn = document.getElementById('data-analysis-ai-clear-prompt');
+        clearBtn?.classList.toggle('hidden', !promptText);
+
+        const deepToggle = document.getElementById('data-analysis-ai-deep');
+        if (deepToggle) {
+            deepToggle.checked = isAgent;
+        }
+
+        const timeEl = document.getElementById('data-analysis-ai-result-time');
+        if (timeEl) {
+            const timeStr = item.createdAt ? String(item.createdAt).replace('T', ' ').slice(0, 19) : '';
+            const modeName = isAgent ? '深度分析' : '即时探索';
+            timeEl.textContent = `${modeName}历史记录${timeStr ? ` · ${timeStr}` : ''}`;
+        }
+
+        const resultBox = document.getElementById('data-analysis-ai-result');
+        if (resultBox) {
+            renderAgentResult(resultBox, {
+                ...analysis,
+                prompt: promptText,
+                answer: answerText || 'AI 未返回有效内容',
+                isAgent
+            });
+        }
+
+        resultWrap?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     }
 
     // 打字机回放：把已完成的文本分块增量渲染，模拟流式逐字输出（仅前端，不改后端）。
@@ -297,6 +685,14 @@
         const controller = new AbortController();
         state.aiAbortController = controller;
         setAiRunning(true);
+        document.getElementById('data-analysis-ai-landing')?.classList.add('hidden');
+        document.getElementById('data-analysis-ai-result-wrap')?.classList.remove('hidden');
+        const timeEl = document.getElementById('data-analysis-ai-result-time');
+        if (timeEl) {
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            timeEl.textContent = `深度分析生成于 ${timeStr}`;
+        }
         if (result) PivotSafeHtml.setHtml(result, '<div class="data-analysis-ai-thinking">AI 正在查询数据并深度分析…</div>');
         try {
             const data = await fetchJson(`${API}/ai`, {
@@ -347,15 +743,16 @@
             </details>
         ` : '';
         const evidence = Array.isArray(data.evidence) ? data.evidence : [];
-        const scopeNotice = data.scope === 'profile'
+        const scopeNotice = (data.scope === 'profile' || data.analysisScope === 'profile')
             ? '<div class="data-analysis-ai-scope-notice">本回答基于数据集字段画像与统计摘要，未执行逐行查询，不应视为精确全量结论。</div>'
             : '';
+        const isAgent = Boolean(data.isAgent || (data.steps && data.steps.length > 0) || (data.evidence && data.evidence.length > 0));
         const evidenceHtml = evidence.length ? `
             <details class="data-analysis-ai-evidence">
                 <summary>数据依据（${evidence.length} 次查询）</summary>
                 ${evidence.map(item => `<div class="data-analysis-ai-evidence-item"><code>${esc(item.sql || '')}</code><span>返回 ${esc(item.rowCount)} 行${item.truncated ? '，结果已截断' : ''}</span></div>`).join('')}
             </details>
-        ` : (data.scope === 'profile' ? '' : '<div class="data-analysis-ai-no-evidence">本次回答未获得可验证的 SQL 查询依据。</div>');
+        ` : (isAgent ? '<div class="data-analysis-ai-no-evidence">本次回答未获得可验证的 SQL 查询依据。</div>' : '');
         const chartsHtml = charts.length ? `<div class="data-analysis-ai-charts">${charts.map(chart => `
             <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(chart))}">
                 <div class="pivot-echart-title">${esc(chart.title || '图表')}</div>
@@ -364,9 +761,21 @@
                 <pre class="pivot-echart-error-text"></pre>
             </div>
         `).join('')}</div>` : '';
+        const promptHtml = data.prompt ? `
+            <div class="data-analysis-ai-question-card">
+                <div class="data-analysis-ai-question-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </div>
+                <div class="data-analysis-ai-question-content">
+                    <span class="data-analysis-ai-question-label">分析诉求</span>
+                    <p class="data-analysis-ai-question-text">${esc(data.prompt)}</p>
+                </div>
+            </div>
+        ` : '';
         PivotSafeHtml.setHtml(box, `
+            ${promptHtml}
             ${scopeNotice}
-            <div class="data-analysis-ai-answer">${renderMarkdown(data.answer || 'AI 未返回有效内容')}</div>
+            <div class="data-analysis-ai-answer">${renderMarkdown(data.answer || data.content || 'AI 未返回有效内容')}</div>
             ${chartsHtml}
             ${evidenceHtml}
             ${stepsHtml}
@@ -399,6 +808,14 @@
         const controller = new AbortController();
         state.aiAbortController = controller;
         setAiRunning(true);
+        document.getElementById('data-analysis-ai-landing')?.classList.add('hidden');
+        document.getElementById('data-analysis-ai-result-wrap')?.classList.remove('hidden');
+        const timeEl = document.getElementById('data-analysis-ai-result-time');
+        if (timeEl) {
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            timeEl.textContent = `分析建议生成于 ${timeStr}`;
+        }
         if (result) PivotSafeHtml.setHtml(result, '<div class="data-analysis-ai-thinking">AI 正在分析...</div>');
         try {
             if (!useStream) {
@@ -474,8 +891,12 @@
         stopAi,
         resetAiWorkspace,
         resumeAiWorkspace,
+        renderAiDatasetProfile,
         renderSemanticControls,
         loadSemanticJobs,
+        selectSemanticJob,
+        openSemanticHistoryRecord,
+        openAiAnalysisHistoryRecord,
         runSemanticAnalysis,
         cancelSemanticAnalysis,
         retrySemanticAnalysis

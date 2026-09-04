@@ -787,7 +787,7 @@ async function processSemanticAnalysisJob(job) {
             datasetId: job.dataset_id,
             type: 'ai_full_text_analysis',
             title: `全量语义分析：${options.textFieldName || job.text_field}`,
-            content: JSON.stringify({ jobId: job.id, instruction: job.instruction, ...result }),
+            content: JSON.stringify({ jobId: job.id, instruction: job.instruction, report, textField: job.text_field, idField: job.id_field, ...result }),
             metadata: { jobId: job.id, totalBatches: batches.length, analyzedRows: rows.length }
         });
     } finally {

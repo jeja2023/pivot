@@ -41,7 +41,12 @@
         const filters = state.visualQuery.filters;
         
         if (filters.length === 0) {
-            PivotSafeHtml.setHtml(container, `<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 10px; border: 1px dashed rgba(148, 163, 184, 0.16); border-radius: 6px;">无筛选条件，将查询全部数据</div>`);
+            PivotSafeHtml.setHtml(container, `
+                <div class="data-analysis-query-filter-empty">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    <span>当前未设置筛选条件，将查询全部数据。点击上方「+ 添加条件」即可新增过滤规则。</span>
+                </div>
+            `);
             return;
         }
         
@@ -65,14 +70,18 @@
             
             return `
                 <div class="data-analysis-query-filter-row" data-filter-index="${index}">
+                    <span class="data-analysis-query-filter-index">${index + 1}</span>
                     <select class="form-input data-analysis-query-filter-field">
                         ${fieldOptionsHtml}
                     </select>
                     <select class="form-input data-analysis-query-filter-operator">
                         ${operatorOptionsHtml}
                     </select>
-                    <input type="text" class="form-input data-analysis-query-filter-value" style="${showValueInput ? '' : 'visibility: hidden;'}" value="${esc(filter.value)}" placeholder="请输入筛选值">
-                    <button type="button" class="btn-secondary data-analysis-query-filter-remove">删除</button>
+                    <input type="text" class="form-input data-analysis-query-filter-value" style="${showValueInput ? '' : 'display: none;'}" value="${esc(filter.value)}" placeholder="请输入筛选值">
+                    <button type="button" class="data-analysis-query-filter-remove" title="删除条件">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        <span>删除</span>
+                    </button>
                 </div>
             `;
         }).join(''));
@@ -94,7 +103,11 @@
                 <thead><tr>${columns.map(column => `<th>${esc(column.name)}</th>`).join('')}</tr></thead>
                 <tbody>
                     ${rows.slice(0, 80).map(row => `
-                        <tr>${columns.map(column => `<td>${esc(row[column.key] ?? '')}</td>`).join('')}</tr>
+                        <tr>${columns.map(column => {
+                            const val = row[column.key] ?? '';
+                            const strVal = String(val);
+                            return `<td data-cell-full="${esc(strVal)}">${esc(strVal)}</td>`;
+                        }).join('')}</tr>
                     `).join('')}
                 </tbody>
             </table>
@@ -102,14 +115,26 @@
     }
 
     // 通用表渲染：columns 为列名字符串数组，rows 为按列名取值的对象数组。
-    function buildTableFromRows(columns = [], rows = []) {
+    function buildTableFromRows(columns = [], rows = [], startIndex = 0) {
         if (!columns.length) return '<div class="data-analysis-empty">无结果</div>';
         return `
             <table class="data-table compact-table data-analysis-result-table">
-                <thead><tr>${columns.map(name => `<th>${esc(name)}</th>`).join('')}</tr></thead>
+                <thead>
+                    <tr>
+                        <th style="width: 54px; min-width: 54px; text-align: center;">#</th>
+                        ${columns.map(name => `<th>${esc(name)}</th>`).join('')}
+                    </tr>
+                </thead>
                 <tbody>
-                    ${rows.slice(0, 5000).map(row => `
-                        <tr>${columns.map(name => `<td>${esc(row[name] ?? '')}</td>`).join('')}</tr>
+                    ${rows.length === 0 ? `<tr><td colspan="${columns.length + 1}" class="text-center data-analysis-empty-cell">暂无数据</td></tr>` : rows.map((row, idx) => `
+                        <tr>
+                            <td class="text-center data-analysis-row-index">${startIndex + idx + 1}</td>
+                            ${columns.map(name => {
+                                const val = row[name] ?? '';
+                                const strVal = String(val);
+                                return `<td data-cell-full="${esc(strVal)}">${esc(strVal)}</td>`;
+                            }).join('')}
+                        </tr>
                     `).join('')}
                 </tbody>
             </table>
@@ -146,6 +171,7 @@
                 body: JSON.stringify({ sql })
             });
             state.query = data;
+            state.queryPage = 1;
             renderQuery();
         });
     }
@@ -154,17 +180,72 @@
         const box = document.getElementById('data-analysis-query-result');
         if (!box) return;
         if (!state.query) {
-            PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">编写并运行查询后在此查看结果</div>');
+            PivotSafeHtml.setHtml(box, '<div class="data-analysis-query-empty"><div class="data-analysis-empty">编写并运行查询后在此查看结果</div></div>');
             return;
         }
         const result = state.query;
+        const allRows = result.rows || [];
+        const total = allRows.length;
+        const pageSize = Math.max(Number(state.queryPageSize) || 10, 1);
+        const pageCount = Math.max(Math.ceil(total / pageSize), 1);
+        state.queryPage = Math.min(Math.max(Number(state.queryPage) || 1, 1), pageCount);
+
+        const startIndex = (state.queryPage - 1) * pageSize;
+        const pageRows = allRows.slice(startIndex, startIndex + pageSize);
+
         PivotSafeHtml.setHtml(box, `
-            <div class="data-analysis-query-meta">返回 ${fmtNumber(result.rowCount)} 行${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</div>
-            <div class="data-analysis-query-table" style="margin-bottom: 12px;">${buildTableFromRows(result.columns || [], result.rows || [])}</div>
-            <div style="display: flex; justify-content: flex-end;">
-                <button id="data-analysis-query-export-btn" class="btn-secondary" type="button" style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer;">导出查询结果 (CSV)</button>
+            <div class="data-analysis-query-result-card">
+                <div class="data-analysis-query-meta-bar">
+                    <div class="data-analysis-query-meta-info">
+                        <span class="data-analysis-query-meta-count">共 <strong>${fmtNumber(total)}</strong> 条结果${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</span>
+                        <span class="data-analysis-query-meta-page">第 ${state.queryPage} / ${pageCount} 页（每页 ${pageSize} 条）</span>
+                    </div>
+                    <button id="data-analysis-query-export-btn" class="btn-secondary data-analysis-query-export-btn" type="button">导出查询结果 (CSV)</button>
+                </div>
+                <div class="data-analysis-query-table">${buildTableFromRows(result.columns || [], pageRows, startIndex)}</div>
+                <div id="data-analysis-query-pagination" class="pagination workspace-pagination data-analysis-query-pagination"></div>
             </div>
         `);
+
+        const pager = document.getElementById('data-analysis-query-pagination');
+        if (pager && window.renderWorkspacePagination) {
+            window.renderWorkspacePagination(pager, {
+                total,
+                page: state.queryPage,
+                limit: pageSize,
+                onPageChange: targetPage => {
+                    state.queryPage = targetPage;
+                    renderQuery();
+                }
+            });
+        }
+    }
+
+    function exportQueryResultToCsv() {
+        if (!state.query || !state.query.columns || !state.query.rows) {
+            toast('暂无查询结果可导出', 'warning');
+            return;
+        }
+        const columns = state.query.columns || [];
+        const rows = state.query.rows || [];
+
+        const headerLine = columns.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',');
+        const dataLines = rows.map(row => {
+            return columns.map(col => {
+                const val = row[col] ?? '';
+                return `"${String(val).replace(/"/g, '""')}"`;
+            }).join(',');
+        });
+        const csvContent = '\uFEFF' + [headerLine, ...dataLines].join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', '数据查询结果.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     function buildSqlFromVisual() {
@@ -263,6 +344,7 @@
                 body: JSON.stringify({ sql })
             });
             state.query = data;
+            state.queryPage = 1;
             renderQuery();
         });
     }
@@ -276,6 +358,7 @@
         runQuery,
         renderQuery,
         buildSqlFromVisual,
-        runQueryVisual
+        runQueryVisual,
+        exportQueryResultToCsv
     });
 })();

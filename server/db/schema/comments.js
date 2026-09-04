@@ -85,7 +85,8 @@ const TABLE_COMMENTS = {
     "document_outputs": "文档处理最终结构化产物输出表（Markdown/JSON）",
     "document_reviews": "文档结构化内容人工校对与审核修正表",
     "analysis_datasets": "数据分析看板导入的数据集主表",
-    "analysis_artifacts": "数据分析生成的图表视图与统计分析结果表"
+    "analysis_artifacts": "数据分析生成的图表视图与统计分析结果表",
+    "analysis_cleaning_runs": "数据清洗规则、影响统计和派生数据集的可追溯记录表"
 };
 
 const COLUMN_COMMENTS = {
@@ -1070,15 +1071,13 @@ const COLUMN_COMMENTS = {
         "updated_at": "最后更新时间（东八区）"
     },
     "analysis_artifacts": {
-        "id": "主键自增 ID / 唯一主键",
-        "user_id": "所属用户 ID（关联 users.id）",
-        "dataset_id": "关联的数据集 ID（关联 analysis_datasets.id）",
-        "type": "类型标识",
-        "title": "标题",
-        "content": "正文内容",
-        "file_path": "文件磁盘存储物理相对路径",
-        "metadata_json": "扩展元数据结构体（JSON）",
-        "created_at": "记录创建时间（东八区）"
+        "id": "主键自增 ID / 唯一主键", "user_id": "所属用户 ID（关联 users.id）", "dataset_id": "关联的数据集 ID（关联 analysis_datasets.id）",
+        "type": "类型标识", "title": "标题", "content": "正文内容", "file_path": "文件磁盘存储物理相对路径", "metadata_json": "扩展元数据结构体（JSON）", "created_at": "记录创建时间（东八区）"
+    },
+    "analysis_cleaning_runs": {
+        "id": "数据清洗运行唯一标识", "user_id": "所属用户 ID", "source_dataset_id": "清洗前源数据集 ID", "output_dataset_id": "清洗后派生数据集 ID",
+        "name": "清洗运行及派生数据集名称", "rules_json": "按顺序执行的清洗规则 JSON", "summary_json": "输入输出行列、变更和删除统计 JSON",
+        "status": "运行状态", "created_at": "记录创建时间（东八区）", "updated_at": "最后更新时间（东八区）"
     },
     "capability_packages": {
         "id": "主键自增 ID / 唯一主键",
