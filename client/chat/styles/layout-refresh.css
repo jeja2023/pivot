@@ -67,8 +67,12 @@
 }
 
 .sidebar-tools {
-    gap: 3px;
+    gap: 4px;
     padding: 2px 0 0;
+}
+
+.sidebar-tools-collapsed {
+    display: none !important;
 }
 
 .sidebar-tool-btn {
@@ -77,6 +81,8 @@
     border-radius: 8px;
     color: #334155;
     font-size: 0.82rem;
+    font-weight: 500;
+    transition: all 0.15s ease;
 }
 
 .sidebar-tool-btn:hover,
@@ -95,6 +101,17 @@
     height: 16px;
 }
 
+.sidebar-search-trigger {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.sidebar-search-trigger span {
+    flex: 1;
+    text-align: left;
+}
+
 .sidebar-session-section-label {
     padding: 16px 16px 7px;
     color: #94a3b8;
@@ -104,7 +121,9 @@
 
 .session-list {
     gap: 2px;
-    padding: 4px 10px 10px;
+    padding: 4px 10px 16px;
+    flex: 1;
+    min-height: 0;
 }
 
 .session-date-group {
@@ -128,9 +147,7 @@
 }
 
 .sidebar-footer {
-    padding: 10px 12px 11px;
-    border-top-color: var(--ui-line);
-    background: var(--ui-sidebar);
+    display: none !important;
 }
 
 .footer-row {

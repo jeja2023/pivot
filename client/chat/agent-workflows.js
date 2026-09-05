@@ -311,7 +311,7 @@ window.Pivot.legacy.closeAgentDagWorkbench = async function() {
     if (!confirmed) return;
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
     window.Pivot.legacy.updateAgentAutoRefresh?.();
 };
 

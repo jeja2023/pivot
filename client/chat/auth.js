@@ -81,10 +81,10 @@ window.Pivot.legacy.showApp = (options = {}) => {
     if (restoreWorkspace && window.Pivot.legacy.restoreMainWorkspaceAfterLogin) {
         Promise.resolve(window.Pivot.legacy.restoreMainWorkspaceAfterLogin()).catch(err => {
             console.error('恢复主工作区失败:', err);
-            window.Pivot.legacy.showMainWorkspace?.('chat');
+            window.Pivot.legacy.showMainWorkspace?.('personal');
         });
     } else if (window.Pivot.legacy.showMainWorkspace) {
-        window.Pivot.legacy.showMainWorkspace('chat');
+        window.Pivot.legacy.showMainWorkspace('personal');
     }
 
     // 更新用户信息显示

@@ -305,7 +305,7 @@ window.Pivot.legacy.closeModal = () => {
     window.Pivot.legacy.cancelMonitorSummaryLoad?.();
     window.Pivot.legacy.clearMonitorRefreshTimer?.();
     document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
-    return window.Pivot.legacy.showMainWorkspace?.('chat');
+    return (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
 };
 
 window.Pivot.legacy.switchTab = async (tab, options = {}) => {

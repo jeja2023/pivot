@@ -671,85 +671,40 @@ window.Pivot.legacy.updateChatToolReadiness = updateChatToolReadiness;
 updateChatToolReadiness({ silent: true });
 
 const MAIN_WORKSPACE_STORAGE_KEY = 'pivot_active_workspace';
+const RETURN_WORKSPACE_STORAGE_KEY = 'pivot_return_workspace';
 const SETTINGS_TAB_STORAGE_KEY = 'pivot_settings_tab';
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'pivot_active_chat_session';
 const PRINT_WORKSPACE_SESSION_KEY = 'pivot_print_session';
-const RESTORABLE_WORKSPACES = new Set(['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
+const RESTORABLE_WORKSPACES = new Set(['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'settings', 'print']);
 
 const WORKSPACE_SCRIPT_GROUPS = {
     apps: [
-        '/chat/apps-model-selector.js',
-        '/chat/apps-workbench-core.js',
-        '/chat/apps-workbench-editor.js',
-        '/chat/apps-workbench-proofread.js',
-        '/chat/apps-workbench-ai.js',
-        '/chat/apps-workbench-rewrite.js',
-        '/chat/apps-workbench-export.js',
-        '/chat/apps-workbench-rag.js',
-        '/chat/apps-workbench-regulations.js',
-        '/chat/apps-workbench-ocr.js',
-        '/chat/apps-workbench-pdf-tools.js'
+        '/chat/apps-model-selector.js', '/chat/apps-workbench-core.js', '/chat/apps-workbench-editor.js',
+        '/chat/apps-workbench-proofread.js', '/chat/apps-workbench-ai.js', '/chat/apps-workbench-rewrite.js',
+        '/chat/apps-workbench-export.js', '/chat/apps-workbench-rag.js', '/chat/apps-workbench-regulations.js',
+        '/chat/apps-workbench-ocr.js', '/chat/apps-workbench-pdf-tools.js'
     ],
     agent: [
-        '/chat/dag-core.js',
-        '/chat/dag-render.js',
-        '/chat/dag-node-presets.js',
-        '/chat/dag-interaction.js',
-        '/chat/dag-toolbar-tools.js',
-        '/chat/dag-toolbar-db.js',
-        '/chat/dag-toolbar.js',
-        '/chat/dag-toolbar-field-overrides.js',
-        '/chat/dag-toolbar-fields.js',
-        '/chat/dag-wizard-db.js',
-        '/chat/dag-query-builder.js',
-        '/chat/dag-wizard-input.js',
-        '/chat/dag-wizard-fields.js',
-        '/chat/dag-wizard-stats.js',
-        '/chat/dag-wizard.js',
-        '/chat/dag-inspector.js',
-        '/chat/agent-dag-node-library.js',
-        '/chat/agents-dag-editor.js',
-        '/chat/agents.js',
-        '/chat/agent-run-renderers.js',
-        '/chat/agent-run-utils.js',
-        '/chat/agent-run-tool-labels.js',
-        '/chat/agent-run-step-renderers.js',
-        '/chat/agent-run-visuals.js',
-        '/chat/agent-run-loaders.js',
-        '/chat/agent-run-detail.js',
-        '/chat/agent-runtime-packs-console.js',
-        '/chat/agent-harness.js',
-        '/chat/agent-skill-management.js',
-        '/chat/agent-run-realtime.js',
-        '/chat/agent-run-actions.js',
-        '/chat/agent-runs-list.js',
-        '/chat/agent-workflow-library.js',
-        '/chat/agent-automation-resources.js',
-        '/chat/agent-workflow-versions.js',
-        '/chat/agent-workflow-editor.js',
-        '/chat/agent-workflow-core.js',
-        '/chat/agent-workflow-runners.js',
-        '/chat/agent-workflows.js',
-        '/chat/agent-templates.js',
-        '/chat/agent-schedules.js',
-        '/chat/agent-workflow-schedules.js',
-        '/chat/agent-artifacts.js',
+        '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
+        '/chat/dag-toolbar-tools.js', '/chat/dag-toolbar-db.js', '/chat/dag-toolbar.js', '/chat/dag-toolbar-field-overrides.js',
+        '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
+        '/chat/dag-wizard-fields.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-inspector.js',
+        '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
+        '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
+        '/chat/agent-run-loaders.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-harness.js',
+        '/chat/agent-skill-management.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
+        '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
+        '/chat/agent-workflow-editor.js', '/chat/agent-workflow-core.js', '/chat/agent-workflow-runners.js', '/chat/agent-workflows.js',
+        '/chat/agent-templates.js', '/chat/agent-schedules.js', '/chat/agent-workflow-schedules.js', '/chat/agent-artifacts.js',
         '/chat/agent-evaluations.js'
     ],
     knowledge: [
-        '/chat/rag-graph-layout.js',
-        '/chat/rag-graph-render.js',
-        '/chat/rag-graph-ui.js',
-        '/chat/rag.js',
-        '/chat/rag-graph-controller.js'
+        '/chat/rag-graph-layout.js', '/chat/rag-graph-render.js', '/chat/rag-graph-ui.js',
+        '/chat/rag.js', '/chat/rag-graph-controller.js'
     ],
     mcp: [
-        '/chat/tool-policy.js',
-        '/chat/mcp-workbench-common.js',
-        '/chat/mcp-workbench-local-auth.js',
-        '/chat/mcp-workbench-credentials.js',
-        '/chat/mcp-workbench-form.js',
-        '/chat/mcp-workbench-main.js'
+        '/chat/tool-policy.js', '/chat/mcp-workbench-common.js', '/chat/mcp-workbench-local-auth.js',
+        '/chat/mcp-workbench-credentials.js', '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-main.js'
     ]
 };
 
@@ -789,7 +744,17 @@ function removeStoredSessionValue(key) {
 
 window.Pivot.legacy.getStoredMainWorkspace = function() {
     const view = getStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY);
-    return RESTORABLE_WORKSPACES.has(view) ? view : 'chat';
+    return RESTORABLE_WORKSPACES.has(view) ? view : 'personal';
+};
+
+window.Pivot.legacy.getReturnWorkspace = function() {
+    const stored = getStoredSessionValue(RETURN_WORKSPACE_STORAGE_KEY);
+    return ['personal', 'chat'].includes(stored) ? stored : 'personal';
+};
+
+window.Pivot.legacy.returnFromWorkspace = function(fallback = 'personal') {
+    const target = window.Pivot.legacy.getReturnWorkspace?.() || fallback;
+    return window.Pivot.legacy.showMainWorkspace?.(target);
 };
 
 window.Pivot.legacy.persistSettingsTab = function(tab) {
@@ -818,23 +783,23 @@ window.Pivot.legacy.getStoredPrintWorkspaceSession = function() {
     return getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 };
 
-window.Pivot.legacy.showMainWorkspace = function(view = 'chat') {
-    const target = ['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
+window.Pivot.legacy.showMainWorkspace = function(view = 'personal') {
+    const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
+    const current = document.body?.dataset.activeWorkspace;
+    if (['personal', 'chat'].includes(target)) {
+        setStoredSessionValue(RETURN_WORKSPACE_STORAGE_KEY, target);
+    } else if (current && ['personal', 'chat'].includes(current)) {
+        setStoredSessionValue(RETURN_WORKSPACE_STORAGE_KEY, current);
+    }
     if (document.body?.dataset.activeWorkspace === 'apps' && target !== 'apps') {
         window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     }
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
     const viewMap = {
-        chat: 'chat-workspace-view',
-        apps: 'apps-workbench-modal',
-        agent: 'agent-workbench-modal',
-        'agent-dag': 'agent-dag-workbench-modal',
-        knowledge: 'knowledge-workbench-modal',
-        mcp: 'mcp-workbench-modal',
-        manual: 'manual-workbench-modal',
-        print: 'print-workbench-modal',
-        settings: 'admin-container'
+        personal: 'personal-workbench-modal', chat: 'chat-workspace-view', apps: 'apps-workbench-modal',
+        agent: 'agent-workbench-modal', 'agent-dag': 'agent-dag-workbench-modal', knowledge: 'knowledge-workbench-modal',
+        mcp: 'mcp-workbench-modal', manual: 'manual-workbench-modal', print: 'print-workbench-modal', settings: 'admin-container'
     };
     if (isFullWorkspace && chatContainer) {
         const targetPanel = document.getElementById(viewMap[target]);
@@ -860,6 +825,7 @@ window.Pivot.legacy.showMainWorkspace = function(view = 'chat') {
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
     if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
     if (target === 'manual') window.Pivot.legacy.ensureManualFrameLoaded?.();
+    if (target === 'personal') window.Pivot.legacy.loadPersonalWorkbench?.({ silent: true });
     if (target !== 'agent' && target !== 'agent-dag') window.Pivot.legacy.updateAgentAutoRefresh?.();
     if (target === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     return target;
@@ -951,19 +917,16 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     openAppsWorkbench: openAppsWorkbenchEntrypoint
 });
 
-window.Pivot.legacy.closeAgentWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'agent') window.Pivot.legacy.showMainWorkspace?.('chat'); };
-window.Pivot.legacy.closeKnowledgeWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'knowledge') window.Pivot.legacy.showMainWorkspace?.('chat'); };
-window.Pivot.legacy.closeMcpWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'mcp') window.Pivot.legacy.showMainWorkspace?.('chat'); };
+const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) window.Pivot.legacy.returnFromWorkspace?.(); };
+window.Pivot.legacy.closeAgentWorkbench = closeWs('agent');
+window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');
+window.Pivot.legacy.closeMcpWorkbench = closeWs('mcp');
+window.Pivot.legacy.closePersonalWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');
 
 window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
-    const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'chat';
-    if (view === 'settings' && window.Pivot.legacy.openAdminPanel) return window.Pivot.legacy.openAdminPanel({ restore: true });
-    if (view === 'apps' && window.Pivot.legacy.openAppsWorkbench) return window.Pivot.legacy.openAppsWorkbench();
-    if (view === 'knowledge' && window.Pivot.legacy.openKnowledgeWorkbench) return window.Pivot.legacy.openKnowledgeWorkbench();
-    if (view === 'mcp' && window.Pivot.legacy.openMcpWorkbench) return window.Pivot.legacy.openMcpWorkbench();
-    if (view === 'agent-dag' && window.Pivot.legacy.openAgentDagWorkbench) return window.Pivot.legacy.openAgentDagWorkbench();
-    if (view === 'agent' && window.Pivot.legacy.openAgentWorkbench) return window.Pivot.legacy.openAgentWorkbench();
-    if (view === 'manual') return window.Pivot.legacy.showMainWorkspace?.('manual');
+    const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'personal';
+    const openers = { settings: () => window.Pivot.legacy.openAdminPanel?.({ restore: true }), personal: () => window.Pivot.legacy.openPersonalWorkbench?.(), apps: () => window.Pivot.legacy.openAppsWorkbench?.(), knowledge: () => window.Pivot.legacy.openKnowledgeWorkbench?.(), mcp: () => window.Pivot.legacy.openMcpWorkbench?.(), 'agent-dag': () => window.Pivot.legacy.openAgentDagWorkbench?.(), agent: () => window.Pivot.legacy.openAgentWorkbench?.(), manual: () => window.Pivot.legacy.showMainWorkspace?.('manual') };
+    if (openers[view]) return openers[view]();
     if (view === 'print' && window.Pivot.legacy.openPrintWorkbench) {
         const sessionId = window.Pivot.legacy.getStoredPrintWorkspaceSession?.() || window.Pivot.legacy.getStoredActiveChatSession?.();
         if (sessionId) return window.Pivot.legacy.openPrintWorkbench(sessionId);
@@ -971,8 +934,9 @@ window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
     if (view === 'chat') {
         const sessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
         if (sessionId && window.Pivot.legacy.selectSession) return window.Pivot.legacy.selectSession(sessionId, undefined, { restore: true });
+        return window.Pivot.legacy.showMainWorkspace?.('chat');
     }
-    return window.Pivot.legacy.showMainWorkspace?.('chat');
+    return window.Pivot.legacy.openPersonalWorkbench ? window.Pivot.legacy.openPersonalWorkbench() : window.Pivot.legacy.showMainWorkspace?.('personal');
 };
 
 window.Pivot.legacy.ensureManualFrameLoaded = () => {
@@ -982,7 +946,7 @@ window.Pivot.legacy.ensureManualFrameLoaded = () => {
 };
 
 window.Pivot.legacy.openManualWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('manual');
-window.Pivot.legacy.closeManualWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');
+window.Pivot.legacy.closeManualWorkbench = () => window.Pivot.legacy.returnFromWorkspace?.();
 
 // 会话打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图
 window.Pivot.legacy.openPrintWorkbench = (sessionId) => {
@@ -995,4 +959,4 @@ window.Pivot.legacy.openPrintWorkbench = (sessionId) => {
     }
     window.Pivot.legacy.showMainWorkspace?.('print');
 };
-window.Pivot.legacy.closePrintWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');
+window.Pivot.legacy.closePrintWorkbench = () => window.Pivot.legacy.returnFromWorkspace?.();

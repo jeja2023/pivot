@@ -19,6 +19,7 @@ body.is-main-workspace-full .chat-container {
     background: var(--bg-main);
 }
 .chat-container[data-active-workspace="agent"],
+.chat-container[data-active-workspace="personal"],
 .chat-container[data-active-workspace="agent-dag"],
 .chat-container[data-active-workspace="apps"],
 .chat-container[data-active-workspace="knowledge"],

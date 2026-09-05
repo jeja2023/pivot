@@ -381,7 +381,28 @@ const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     setTimeout(() => document.addEventListener('click', close), 0);
 };
 
-const toggleSidebar = () => document.querySelector('.sidebar').classList.toggle('collapsed');
+const CHAT_SIDEBAR_DRAWER_STORAGE_KEY = 'pivot_chat_sidebar_drawer_open';
+
+function readChatSidebarDrawerState() {
+    try { return localStorage.getItem(CHAT_SIDEBAR_DRAWER_STORAGE_KEY) === 'true'; } catch (_) { return false; }
+}
+
+function setChatSidebarDrawerOpen(open, { persist = true } = {}) {
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return false;
+    const shouldOpen = Boolean(open) && !window.matchMedia('(max-width: 720px)').matches;
+    sidebar.classList.toggle('collapsed', !shouldOpen);
+    document.body?.classList.toggle('is-chat-sidebar-drawer-open', shouldOpen);
+    if (persist) {
+        try { localStorage.setItem(CHAT_SIDEBAR_DRAWER_STORAGE_KEY, shouldOpen ? 'true' : 'false'); } catch (_) {}
+    }
+    return shouldOpen;
+}
+
+const toggleSidebar = () => {
+    const sidebar = document.querySelector('.sidebar');
+    return setChatSidebarDrawerOpen(sidebar?.classList.contains('collapsed'));
+};
 const setArchiveFilter = (archived) => {
     sidebarState.archived = archived;
     document.getElementById('session-active-filter')?.classList.toggle('active', !archived);
@@ -414,6 +435,7 @@ window.Pivot.exposeModule('chat.sidebar', {
     loadSessions,
     toggleSessionMenu,
     toggleSidebar,
+    setChatSidebarDrawerOpen,
     setArchiveFilter,
     togglePinSession,
     toggleArchiveSession
@@ -422,6 +444,7 @@ window.Pivot.exposeModule('chat.sidebar', {
     'loadSessions',
     'toggleSessionMenu',
     'toggleSidebar',
+    'setChatSidebarDrawerOpen',
     'setArchiveFilter',
     'togglePinSession',
     'toggleArchiveSession'

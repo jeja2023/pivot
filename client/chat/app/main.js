@@ -168,7 +168,14 @@ const bind = (id, fn, event = 'click') => document.getElementById(id)?.addEventL
 
 const sidebarViewportMedia = window.matchMedia('(max-width: 720px)');
 const syncSidebarForViewport = (media = sidebarViewportMedia) => {
-    document.querySelector('.sidebar')?.classList.toggle('collapsed', media.matches);
+    const storedOpen = !media.matches && (() => {
+        try { return localStorage.getItem('pivot_chat_sidebar_drawer_open') === 'true'; } catch (_) { return false; }
+    })();
+    if (window.Pivot.legacy.setChatSidebarDrawerOpen) {
+        window.Pivot.legacy.setChatSidebarDrawerOpen(storedOpen, { persist: false });
+        return;
+    }
+    document.querySelector('.sidebar')?.classList.toggle('collapsed', !storedOpen || media.matches);
 };
 syncSidebarForViewport();
 sidebarViewportMedia.addEventListener?.('change', syncSidebarForViewport);
@@ -234,6 +241,7 @@ document.querySelectorAll('[data-usage-subtab]').forEach(button => {
 });
 bind('admin-modal-close', () => window.Pivot.legacy.closeModal());
 bind('apps-workbench-btn', () => window.Pivot.legacy.openAppsWorkbench?.());
+bind('personal-workbench-btn', () => window.Pivot.legacy.openPersonalWorkbench?.());
 bind('admin-panel-btn', () => window.Pivot.legacy.openAdminPanel());
 bind('automation-workbench-btn', () => window.Pivot.legacy.openAgentWorkbench?.());
 bind('agent-modal-close', () => window.Pivot.legacy.closeAgentWorkbench?.());

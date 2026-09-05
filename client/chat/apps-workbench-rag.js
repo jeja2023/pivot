@@ -604,7 +604,7 @@ window.Pivot.legacy.closeAppsWorkbench = function() {
     setStoredAppsActiveApp('');
     showAppsHome();
     window.Pivot.legacy.setAppsWorkbenchVisibility?.(false);
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
 };
 
 window.Pivot.legacy.PIVOT_APP_REGISTRY = PIVOT_APP_REGISTRY;

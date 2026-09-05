@@ -374,7 +374,7 @@ window.Pivot.legacy.openMcpWorkbench = async function(options = {}) {
 };
 
 window.Pivot.legacy.closeMcpWorkbench = function() {
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
 };
 
 window.Pivot.legacy.closeMcpEditModal = function() {

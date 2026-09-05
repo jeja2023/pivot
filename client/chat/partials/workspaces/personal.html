@@ -1,0 +1,125 @@
+<!-- 个人工作台：首页聚合当前账号的待办、自动化、继续工作与常用入口。 -->
+<section id="personal-workbench-modal" class="main-workspace-view personal-workspace-view hidden" role="region" aria-labelledby="personal-workbench-title">
+    <div class="personal-workbench-shell">
+        <aside class="personal-rail" aria-label="工作台导航">
+            <div class="personal-rail-brand" aria-label="Pivot 智枢"><img src="/common/logo.png" alt="Pivot 智枢"></div>
+            <nav class="personal-rail-nav" aria-label="主要功能">
+                <button class="btn-secondary personal-rail-item active" type="button" data-personal-action="refresh" aria-label="个人工作台">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <small>工作台</small>
+                </button>
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-shortcut="chat" aria-label="对话">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                    <small>对话</small>
+                </button>
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-shortcut="official-writing" aria-label="应用">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/></svg>
+                    <small>应用</small>
+                </button>
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-shortcut="workflows" aria-label="自动化">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7 17 17 7"/><polyline points="7 7 17 7 17 17"/></svg>
+                    <small>自动化</small>
+                </button>
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-shortcut="knowledge" aria-label="知识库">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+                    <small>知识库</small>
+                </button>
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-action="open-tools" aria-label="工具库">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                    <small>工具库</small>
+                </button>
+            </nav>
+            <div class="personal-rail-bottom">
+                <button class="btn-secondary personal-rail-item" type="button" data-personal-action="open-settings" aria-label="设置" title="系统设置">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <small>设置</small>
+                </button>
+                <button class="btn-secondary personal-rail-item personal-rail-logout" type="button" data-personal-action="logout" aria-label="退出登录" title="退出登录">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    <small>退出</small>
+                </button>
+                <button class="btn-secondary personal-rail-avatar" type="button" data-personal-action="open-settings" aria-label="个人设置" title="个人信息与设置">
+                    <span id="personal-rail-user-initial">我</span>
+                </button>
+            </div>
+        </aside>
+        <div class="personal-workbench-content">
+            <header class="personal-workbench-header">
+                <div class="personal-workbench-heading">
+                    <h1 id="personal-workbench-title">个人工作台</h1>
+                    <span id="personal-workbench-date">今天</span>
+                </div>
+                <div class="personal-workbench-header-actions">
+                    <button class="btn-secondary personal-top-search" type="button" data-personal-action="open-search" aria-label="搜索会话、任务和资料">
+                        <svg class="personal-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        <span>搜索会话、任务和资料</span>
+                        <kbd>⌘ K</kbd>
+                    </button>
+                </div>
+            </header>
+            <div id="personal-workbench-state" class="personal-workbench-state" role="status" aria-live="polite"></div>
+            <div class="personal-workbench-scroll">
+                <section class="personal-hero" aria-label="快捷开始">
+                    <div class="personal-hero-copy">
+                        <h2 id="personal-hero-title">今天想先处理什么？</h2>
+                        <span id="personal-workbench-greeting">把分散的对话、任务、资料和自动化，收拢成一条清晰的工作流。</span>
+                    </div>
+                </section>
+                <section id="personal-workbench-stats" class="personal-stats" aria-label="工作概览"></section>
+                <div class="personal-workbench-grid">
+                    <section class="personal-card personal-card-attention" aria-labelledby="personal-attention-title">
+                        <header class="personal-card-header">
+                            <div>
+                                <h3 id="personal-attention-title">需要我处理</h3>
+                                <p>按紧急程度聚合 Agent、审批和提醒</p>
+                            </div>
+                            <button class="btn-secondary personal-card-link" type="button" data-personal-action="open-inbox">查看全部 <span class="link-arrow">→</span></button>
+                        </header>
+                        <div id="personal-attention-list" class="personal-list"></div>
+                    </section>
+                    <section class="personal-card personal-card-goals" aria-labelledby="personal-goals-title">
+                        <header class="personal-card-header">
+                            <div>
+                                <h3 id="personal-goals-title">我的自动化</h3>
+                                <p>持续运行的工作</p>
+                            </div>
+                            <button class="btn-secondary personal-card-link" type="button" data-personal-action="open-goals">管理 <span class="link-arrow">→</span></button>
+                        </header>
+                        <div id="personal-goals-list" class="personal-list"></div>
+                    </section>
+                    <section class="personal-card personal-card-recent" aria-labelledby="personal-recent-title">
+                        <header class="personal-card-header">
+                            <div>
+                                <h3 id="personal-recent-title">继续工作</h3>
+                                <p>从上次离开的地方继续</p>
+                            </div>
+                            <button class="btn-secondary personal-card-link" type="button" data-personal-action="open-history">打开历史 <span class="link-arrow">→</span></button>
+                        </header>
+                        <div id="personal-recent-list" class="personal-list"></div>
+                    </section>
+                    <section class="personal-card personal-card-shortcuts" aria-labelledby="personal-shortcuts-title">
+                        <header class="personal-card-header">
+                            <div>
+                                <h3 id="personal-shortcuts-title">常用入口</h3>
+                                <p>一键进入你的高频工作</p>
+                            </div>
+                            <button class="btn-secondary personal-card-link" type="button" data-personal-action="edit-shortcuts">自定义</button>
+                        </header>
+                        <div id="personal-shortcuts-list" class="personal-shortcuts"></div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="personal-shortcuts-modal" class="modal-overlay personal-shortcuts-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-shortcuts-modal-title">
+        <div class="modal personal-shortcuts-dialog">
+            <h3 id="personal-shortcuts-modal-title">自定义常用入口</h3>
+            <p>选择需要显示在个人工作台的能力。入口会按此处选择的顺序展示。</p>
+            <div id="personal-shortcuts-options" class="personal-shortcuts-options"></div>
+            <div class="personal-shortcuts-dialog-actions">
+                <button id="personal-shortcuts-cancel" class="btn-secondary" type="button">取消</button>
+                <button id="personal-shortcuts-save" class="btn-primary" type="button">保存</button>
+            </div>
+        </div>
+    </div>
+</section>

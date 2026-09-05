@@ -839,7 +839,7 @@ window.Pivot.legacy.openKnowledgeWorkbench = async function () {
 window.Pivot.legacy.closeKnowledgeWorkbench = function () {
     closeKnowledgeGraphModal();
     document.getElementById('knowledge-workbench-modal')?.setAttribute('aria-hidden', 'true');
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
 };
 
 function ensureKnowledgeUploadModal() {

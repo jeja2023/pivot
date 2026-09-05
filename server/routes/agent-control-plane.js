@@ -12,6 +12,7 @@ const { getAgentFeedbackSummary, listAgentFeedback } = require('../services/agen
 const { createAgentGoal, listAgentGoals, runAgentGoalNow, setAgentGoalStatus, updateAgentGoal } = require('../services/agent-goals');
 const { createAgentChannel, deleteAgentChannel, listAgentChannels, updateAgentChannel } = require('../services/agent-channels');
 const { listAgentInbox, markInboxItem } = require('../services/agent-inbox');
+const { getPersonalWorkbench, updatePersonalWorkbenchShortcuts } = require('../services/personal-workbench');
 const { listToolReliability } = require('../services/agent-tool-reliability');
 const { deleteAgentPersonalData, exportAgentPersonalData } = require('../services/agent-data');
 const {
@@ -121,6 +122,16 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         const result = await markInboxItem(req.user, req.params.sourceType, req.params.sourceId, req.params.action, req.body || {});
         if (!result) return res.status(404).json({ error: '收件箱条目不存在或无权操作。' });
         res.json({ success: true, item: result });
+    }));
+    const sendWorkbenchSummary = async (req, res) => {
+        res.json({ success: true, dashboard: await getPersonalWorkbench(req.user) });
+    };
+    router.get('/user/workbench-summary', authMiddleware, asyncHandler(sendWorkbenchSummary));
+    // 兼容已接入的旧工作台路径，后续前端统一使用 user/workbench-summary。
+    router.get('/agents/workbench', authMiddleware, asyncHandler(sendWorkbenchSummary));
+    router.put('/agents/workbench/shortcuts', authMiddleware, asyncHandler(async (req, res) => {
+        const shortcuts = await updatePersonalWorkbenchShortcuts(req.user, req.body?.shortcuts);
+        res.json({ success: true, shortcuts });
     }));
     router.get('/agents/tools/reliability', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await listToolReliability(req.user, { days: req.query.days, scope: req.query.scope === 'tenant' && ['admin', 'root'].includes(String(req.user?.role || '').toLowerCase()) ? 'tenant' : 'user', persist: req.query.persist !== 'false' })) })));
     router.get('/agents/improvements', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await getAgentImprovementSuggestions(req.user, { days: req.query.days })) })));

@@ -226,7 +226,7 @@ window.Pivot.legacy.closeAgentWorkbench = function() {
     closeAgentConfigModal();
     window.Pivot.legacy.closeAgentRunDetailModal();
     window.Pivot.legacy.setTaskComposerOpen(false);
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
     updateAgentAutoRefresh();
 };
 
