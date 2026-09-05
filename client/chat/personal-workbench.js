@@ -441,6 +441,7 @@
             if (session) await sessions.selectSession?.(session.id, session.title, { refreshSidebar: true });
             return;
         }
+        if (key === 'apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
         if (key === 'knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
         if (key === 'workflows') return window.Pivot.legacy.openAgentDagWorkbench?.({ tab: 'workflows' });
         await window.Pivot.legacy.openAppsWorkbench?.();
@@ -514,6 +515,7 @@
                 return document.getElementById('official-writing-create-doc-btn')?.click();
             }
             if (action === 'open-search') return document.getElementById('session-search-open')?.click();
+            if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
             if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
             if (action === 'logout') return window.Pivot.legacy.logout?.();

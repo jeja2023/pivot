@@ -577,10 +577,14 @@ function bindAppsWorkbenchEvents() {
     });
 }
 
-window.Pivot.legacy.openAppsWorkbench = function() {
+window.Pivot.legacy.openAppsWorkbench = function(options = {}) {
     window.Pivot.legacy.showMainWorkspace?.('apps');
     window.Pivot.legacy.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
+    if (options?.home) {
+        showAppsHome();
+        return;
+    }
     if (getStoredAppsActiveApp() === 'official-writing') {
         showOfficialWritingApp().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'data-analysis') {
