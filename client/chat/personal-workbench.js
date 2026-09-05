@@ -561,7 +561,7 @@
         if (unitEl) unitEl.textContent = user?.unit || '默认单位';
 
         const idEl = document.getElementById('personal-user-id');
-        if (idEl) idEl.textContent = user?.id ? `#${user.id}` : '#-';
+        if (idEl) idEl.textContent = user?.id !== undefined && user?.id !== null ? String(user.id) : '-';
 
         const createdEl = document.getElementById('personal-user-created-at');
         if (createdEl) {
