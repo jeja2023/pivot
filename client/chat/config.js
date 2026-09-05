@@ -257,6 +257,10 @@ function handleUnauthorized() {
     currentUser = null;
     currentSessionId = null;
     localStorage.removeItem('pivot_token');
+    try {
+        localStorage.removeItem('pivot_official_writing_state_v1');
+        localStorage.removeItem('pivot_official_writing_library_v2');
+    } catch (_) {}
     setCsrfToken('');
     if (window.closeAgentRealtime) window.closeAgentRealtime();
     if (window.stopAnnouncements) window.stopAnnouncements();

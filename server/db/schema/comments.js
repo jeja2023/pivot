@@ -1,6 +1,6 @@
 /**
  * server/db/schema/comments.js
- * 数据库表级与字段级中文元数据注释字典（全量 79 张业务表与全字段 100% 完整覆盖）
+ * 数据库表级与字段级中文元数据注释字典（全量 80 张业务表与全字段 100% 完整覆盖）
  *
  * 用于在 PostgreSQL 中执行 COMMENT ON TABLE / COMMENT ON COLUMN，
  * 方便 DBA 运维、Navicat / DBeaver / DataGrip 等数据库客户端直观查阅数据字典。
@@ -58,6 +58,7 @@ const TABLE_COMMENTS = {
     "agent_schedules": "智能体定时自动化调度任务表（Cron 触发器）",
     "agent_artifacts": "智能体执行生成的产物元数据表（文件、报告、图表）",
     "agent_artifact_versions": "智能体产物历史迭代版本表",
+    "official_writing_documents": "用户专属公文写作文档库（正文、素材、批注与版本快照）",
     "agent_dag_nodes": "智能体 DAG 编排节点执行状态与上下文表",
     "agent_approval_requests": "智能体高危工具人工审批请求表（Human-in-the-loop）",
     "agent_notifications": "智能体执行完成与告警系统通知表",
@@ -898,6 +899,18 @@ const COLUMN_COMMENTS = {
         "note": "版本备注说明",
         "created_by": "创建人用户 ID（关联 users.id）",
         "created_at": "记录创建时间（东八区）"
+    },
+    "official_writing_documents": {
+        "id": "主键自增 ID / 唯一主键",
+        "user_id": "所属用户 ID（关联 users.id，服务端访问边界）",
+        "client_id": "浏览器生成的文档稳定标识（同一用户内唯一）",
+        "title": "公文标题",
+        "manual_title": "是否由用户手动命名（1:是，0:否）",
+        "state": "公文编辑状态 JSON（正文、素材、批注、建议和历史版本）",
+        "version": "服务端持久化版本号",
+        "created_at": "记录创建时间（东八区）",
+        "updated_at": "最后更新时间（东八区）",
+        "deleted_at": "软删除时间（为空表示正常有效）"
     },
     "agent_dag_nodes": {
         "id": "主键自增 ID / 唯一主键",

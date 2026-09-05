@@ -1,3 +1,4 @@
+/* global createEmptyOfficialWritingDoc, deleteOfficialWritingDocumentFromServer, scheduleOfficialWritingDocumentSave */
 // ===== 多文档库管理 =====
 
 function getOfficialWritingDocSummary(doc) {
@@ -284,6 +285,7 @@ function switchOfficialWritingDoc(docId, options = {}) {
     if (!target) return;
     // 切换前先把当前编辑器内容写回当前活动文档。
     syncOfficialWritingStateFromInputs();
+    saveOfficialWritingState({ immediate: true });
     officialWritingLibrary.activeId = docId;
     officialWritingState = target.state;
     officialWritingUndoStack.length = 0;
@@ -291,7 +293,6 @@ function switchOfficialWritingDoc(docId, options = {}) {
     officialWritingUiState.lastSelection = null;
     updateOfficialWritingUndoRedoButtons();
     hydrateOfficialWritingForm();
-    saveOfficialWritingState();
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
     if (openEditor) setOfficialWritingScreen('editor');
@@ -304,10 +305,8 @@ function createOfficialWritingDoc(options = {}) {
     const rawTitle = String(options.title ?? '').trim();
     const title = compactTextPreview(rawTitle || `${docType}草稿`, 40);
     const doc = {
-        id: generateOfficialWritingDocId(),
-        title,
-        manualTitle: Boolean(rawTitle),
-        updatedAt: new Date().toISOString(),
+        id: generateOfficialWritingDocId(), title, manualTitle: Boolean(rawTitle),
+        updatedAt: new Date().toISOString(), version: 0,
         state: createOfficialWritingState({ docType, standard })
     };
     officialWritingLibrary.docs.unshift(doc);
@@ -319,7 +318,7 @@ function createOfficialWritingDoc(options = {}) {
     officialWritingUiState.lastSelection = null;
     updateOfficialWritingUndoRedoButtons();
     hydrateOfficialWritingForm();
-    saveOfficialWritingState();
+    scheduleOfficialWritingDocumentSave(doc, { immediate: true });
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
     setOfficialWritingScreen('editor');
@@ -344,7 +343,7 @@ async function renameOfficialWritingDoc(docId) {
     doc.title = compactTextPreview(trimmed, 40);
     doc.manualTitle = true;
     doc.updatedAt = new Date().toISOString();
-    saveOfficialWritingState();
+    scheduleOfficialWritingDocumentSave(doc, { immediate: true });
     renderOfficialWritingDocList();
 }
 
@@ -358,16 +357,16 @@ async function deleteOfficialWritingDoc(docId) {
             ?? Promise.resolve(window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)));
         if (!confirmed) return;
     }
+    try {
+        await deleteOfficialWritingDocumentFromServer(docId);
+    } catch (error) {
+        showToast?.(error?.message || '删除公文失败，请稍后重试', 'error');
+        return;
+    }
     const wasActive = officialWritingLibrary.activeId === docId;
     officialWritingLibrary.docs.splice(index, 1);
     if (!officialWritingLibrary.docs.length) {
-        const fresh = {
-            id: generateOfficialWritingDocId(),
-            title: '新公文',
-            manualTitle: false,
-            updatedAt: new Date().toISOString(),
-            state: createOfficialWritingState()
-        };
+        const fresh = createEmptyOfficialWritingDoc();
         officialWritingLibrary.docs.push(fresh);
         officialWritingLibrary.activeId = fresh.id;
     } else if (wasActive) {
@@ -378,7 +377,7 @@ async function deleteOfficialWritingDoc(docId) {
     officialWritingRedoStack.length = 0;
     updateOfficialWritingUndoRedoButtons();
     hydrateOfficialWritingForm();
-    saveOfficialWritingState();
+    saveOfficialWritingState({ immediate: true });
     renderOfficialWritingWorkspace();
     renderOfficialWritingDocList();
     if (wasActive) setOfficialWritingScreen('library');

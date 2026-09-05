@@ -2,6 +2,16 @@
 let isLogin = true;
 let allowPublicRegistration = false;
 window.allowPublicRegistration = false;
+
+function clearLegacyOfficialWritingStorage() {
+    // 公文库已迁移到按用户归属的服务端存储。仅清理旧版不含用户标识的
+    // 浏览器缓存，避免账号切换后被下一位登录用户读取。
+    try {
+        localStorage.removeItem('pivot_official_writing_state_v1');
+        localStorage.removeItem('pivot_official_writing_library_v2');
+    } catch (_) {}
+}
+
 function syncAuthModeClass() {
     const authContainer = document.getElementById('auth-container');
     if (!authContainer) return;
@@ -199,6 +209,7 @@ window.logout = async () => {
         });
     } catch (_) {}
     localStorage.removeItem('pivot_token');
+    clearLegacyOfficialWritingStorage();
     sessionStorage.clear();
     setCsrfToken('');
     currentUser = null;

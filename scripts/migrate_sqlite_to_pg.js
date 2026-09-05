@@ -78,6 +78,7 @@ const TABLE_TOPOLOGY = [
     { name: 'agent_approval_requests' },
     { name: 'agent_artifacts' },
     { name: 'agent_artifact_versions' },
+    { name: 'official_writing_documents' },
     { name: 'agent_eval_suites' },
     { name: 'agent_eval_cases' },
     { name: 'agent_eval_runs' },

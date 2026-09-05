@@ -125,11 +125,14 @@ test('新建评测集弹窗主体使用自适应滚动且无多余预留槽', ()
 
 test('任务页面新建任务按钮移动至删除审计左侧，工作流搜索栏居左且新建按钮居右，控制台持续目标按钮去重去加号', () => {
     const agent = read('client/chat/partials/workspaces/agent.html');
+    const agentRunsCss = read('client/chat/styles/workspaces/agent/agent-runs-list-table.css');
     const dag = read('client/chat/partials/workspaces/agent-dag.html');
     const dagCss = read('client/chat/styles/workspaces/agent/agent-dag-workspace-shell.css');
 
     // 1. 任务页面：新建任务按钮在删除审计左侧，顶栏不再放置新建任务
     assert.match(agent, /class="agent-history-head-actions"[\s\S]*?id="task-create-open-btn"[\s\S]*?id="agent-audit-btn"/);
+    assert.match(agent, /id="agent-audit-btn"[^>]*\badmin-root-only\b[^>]*\bhidden\b/);
+    assert.match(agentRunsCss, /\.agent-history-head-actions > button\.hidden\s*\{[\s\S]*?display:\s*none !important;/);
     const topActions = agent.match(/<div class="agent-modal-header-actions">([\s\S]*?)<\/div>/)?.[1] || '';
     assert.doesNotMatch(topActions, /id="task-create-open-btn"/);
     assert.doesNotMatch(topActions, /id="agent-goal-create-top-btn"/);

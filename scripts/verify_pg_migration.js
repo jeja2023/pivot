@@ -16,7 +16,7 @@ const pool = new Pool({
     options: `-c timezone=${process.env.SQLITE_TIMEZONE || 'Asia/Shanghai'}`
 });
 
-// 需要核验的业务表 (全量 79 张表)
+// 需要核验的业务表 (全量 80 张表)
 const VERIFY_TABLES = [
     'users', 'app_meta', 'app_settings', 'user_settings', 'models',
     'sessions', 'messages', 'memories', 'memory_extraction_jobs',
@@ -32,6 +32,7 @@ const VERIFY_TABLES = [
     'agent_runs', 'agent_steps', 'agent_traces', 'agent_trace_spans',
     'agent_run_checkpoints', 'agent_notifications', 'agent_dag_nodes',
     'agent_approval_requests', 'agent_artifacts', 'agent_artifact_versions',
+    'official_writing_documents',
     'agent_eval_suites', 'agent_eval_cases', 'agent_eval_runs', 'agent_eval_results',
     'agent_templates', 'agent_schedules', 'agent_workflows', 'agent_workflow_versions',
     'agent_workflow_triggers', 'agent_workflow_dependency_bindings',

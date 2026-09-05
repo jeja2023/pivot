@@ -581,7 +581,7 @@ window.openAppsWorkbench = function() {
     window.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
     if (getStoredAppsActiveApp() === 'official-writing') {
-        showOfficialWritingApp();
+        showOfficialWritingApp().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'regulations') {

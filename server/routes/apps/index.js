@@ -40,6 +40,11 @@ const {
     OFFICIAL_WRITING_STREAMABLE_MODES
 } = require('../../services/official-writing');
 const {
+    deleteOfficialWritingDocument,
+    listOfficialWritingDocuments,
+    saveOfficialWritingDocument
+} = require('../../services/official-writing-documents');
+const {
     buildAiContext,
     buildChart,
     compareDatasets,
@@ -68,197 +73,9 @@ const {
     applyNoThinkSoftSwitch,
     buildThinkingControlPayload,
     resolveOfficialWritingModel,
-    resolveAppsModel
+    resolveAppsModel,
+    runAppsAiCompletion
 } = require('./helpers');
-
-async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null, onComplete = null }) {
-    const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
-    if (!modelCfg) {
-        return res.status(404).json({
-            error: {
-                message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。',
-                type: 'invalid_request_error',
-                code: 'model_not_found'
-            }
-        });
-    }
-    if (modelCfg.secret_error) {
-        return res.status(400).json(buildModelSecretErrorPayload(modelCfg));
-    }
-
-    const userId = req.user.id;
-    let upstreamMessages = messages;
-    const outputTokens = Math.max(maxTokens, Number(modelCfg.max_tokens) || 0);
-    try {
-        const budgetResult = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: outputTokens });
-        upstreamMessages = budgetResult.messages;
-    } catch (e) {
-        if (e instanceof ContextLengthExceededError || e.code === 'CONTEXT_LENGTH_EXCEEDED') {
-            return res.status(400).json({
-                error: {
-                    message: e.message,
-                    type: 'invalid_request_error',
-                    code: 'context_length_exceeded',
-                    context_budget: e.metadata || {}
-                }
-            });
-        }
-        throw e;
-    }
-
-    if (modelCfg.daily_token_limit > 0) {
-        const usedToday = await getModelDailyUsageAsync(userId, modelCfg.id);
-        if (usedToday >= modelCfg.daily_token_limit) {
-            return res.status(429).json({ error: { message: '今日模型调用额度已用尽。', type: 'insufficient_quota' } });
-        }
-    }
-
-    logAction(req, auditAction, `模型: ${modelCfg.name}`);
-
-    try {
-        await aiSemaphore.acquire();
-    } catch (e) {
-        return res.status(e.statusCode || 503).json({
-            error: { message: e.message || 'Model service is busy. Please retry later.', type: 'server_overloaded', code: e.code || 'AI_OVERLOADED' }
-        });
-    }
-    let endpointRelease = null;
-    let released = false;
-    const abortController = new AbortController();
-    const releaseSlots = () => {
-        if (released) return;
-        released = true;
-        if (endpointRelease) endpointRelease();
-        aiSemaphore.release();
-    };
-    const onClientDisconnect = () => {
-        try { abortController.abort(); } catch (_e) {}
-        releaseSlots();
-    };
-    if (typeof req.once === 'function') req.once('aborted', onClientDisconnect);
-    if (typeof res.once === 'function') res.once('close', onClientDisconnect);
-    const requestStartedAt = Date.now();
-    const upstreamPayloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(upstreamMessages) : upstreamMessages;
-    try {
-        endpointRelease = await acquireModelSlot(modelCfg);
-        const response = await forwardChatCompletion({
-            modelCfg,
-            user: req.user,
-            url: buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: true }),
-            data: {
-                model: modelCfg.model_name,
-                messages: upstreamPayloadMessages,
-                stream,
-                temperature,
-                max_tokens: outputTokens,
-                ...buildThinkingControlPayload(modelCfg)
-            },
-            headers: buildModelHeaders(modelCfg),
-            stream,
-            signal: abortController.signal
-        });
-
-        if (stream) {
-            const sse = createSseResponseWriter(res);
-            const accumulator = createStreamAccumulator();
-            const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
-            // 上游发完响应头再静默挂住时 axios 的 timeout 已失效（只覆盖到响应头），
-            // 没有看门狗则 aiSemaphore 与端点许可会被永久持有，只能重启进程释放。
-            let streamIdleAborted = false;
-            const streamIdleWatchdog = createStreamIdleWatchdog({
-                onIdle: (idleMs) => {
-                    streamIdleAborted = true;
-                    const idleError = new Error(`上游流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
-                    idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
-                    logger.error({ model: modelCfg.name, source, idleMs }, '应用中心 AI 流式上游长时间无数据，已主动中止');
-                    recordModelFailure(modelCfg, idleError);
-                    try { response.data?.destroy?.(); } catch (_) {}
-                    try { abortController.abort(); } catch (_) {}
-                    if (!res.writableEnded) {
-                        sse.writeData({ error: { message: idleError.message, code: idleError.code, type: 'upstream_timeout' } });
-                        res.end();
-                    }
-                    releaseSlots();
-                }
-            });
-            response.data.on('data', chunk => {
-                streamIdleWatchdog.touch();
-                sse.writeRaw(chunk);
-                parser.write(chunk);
-            });
-            response.data.on('end', () => {
-                streamIdleWatchdog.stop();
-                parser.end();
-                accumulator.finish();
-                const totalContent = accumulator.getContent();
-                const apiUsage = accumulator.getUsage();
-                const usage = normalizeTokenUsage({
-                    inputTokens: apiUsage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
-                    outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
-                    totalTokens: apiUsage?.total_tokens
-                });
-                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
-                recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
-                if (typeof onComplete === 'function') {
-                    Promise.resolve(onComplete(totalContent, { model: modelCfg.model_name, usage })).catch(err => logger.warn({ err: err.message, source }, '保存应用中心 AI 结果失败'));
-                }
-                if (!res.writableEnded) res.end();
-                releaseSlots();
-            });
-            response.data.on('error', err => {
-                streamIdleWatchdog.stop();
-                // 空闲看门狗已经中止上游并回过错误帧，这里不再重复处理
-                if (streamIdleAborted) {
-                    releaseSlots();
-                    return;
-                }
-                logger.error({ err: err.message, model: modelCfg.name, source }, '应用中心 AI 流式转发中断');
-                recordModelFailure(modelCfg, err);
-                if (!res.writableEnded) res.end();
-                releaseSlots();
-            });
-            req.on('close', () => {
-                streamIdleWatchdog.stop();
-                if (response.data && typeof response.data.destroy === 'function') response.data.destroy();
-                onClientDisconnect();
-            });
-            return undefined;
-        }
-
-        const content = extractCompletionContent(response.data);
-        const usage = normalizeTokenUsage({
-            inputTokens: response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(upstreamMessages)),
-            outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
-            totalTokens: response.data?.usage?.total_tokens
-        });
-        recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
-        recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
-        releaseSlots();
-        if (typeof onComplete === 'function') {
-            try { await onComplete(content, { model: modelCfg.model_name, usage }); } catch (err) {
-                logger.warn({ err: err.message, source }, '保存应用中心 AI 结果失败');
-            }
-        }
-        // extraPayload 用于让具体应用附带额外字段（如法规问答的引用来源），不影响其它调用方
-        return res.json({ content, model: modelCfg.model_name, ...(extraPayload && typeof extraPayload === 'object' ? extraPayload : {}) });
-    } catch (e) {
-        releaseSlots();
-        if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
-            if (!res.headersSent && !res.writableEnded) {
-                return res.status(499).json({ error: { message: '客户端请求已取消。', type: 'client_closed_request' } });
-            }
-            return undefined;
-        }
-        const errorMsg = e.response?.data?.error?.message || e.message;
-        logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
-        recordModelFailure(modelCfg, e);
-        if (!res.headersSent) {
-            return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
-        }
-        if (!res.writableEnded) res.end();
-        return undefined;
-    }
-}
 
 // 单次非流式模型调用，返回正文文本（供 AI 工具调用循环多轮使用）。
 // 自带配额/上下文预算/并发与用量统计，调用方负责循环与工具执行。
@@ -717,6 +534,23 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
                 metadata: { mode: 'summary', model: info.model }
             })
         });
+    }));
+
+    router.get('/apps/official-writing/documents', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listOfficialWritingDocuments(req.user) });
+    }));
+
+    router.put('/apps/official-writing/documents/:clientId', authMiddleware, asyncHandler(async (req, res) => {
+        const document = await saveOfficialWritingDocument(req.user, req.params.clientId, req.body || {});
+        logAction(req, '保存公文写作草稿', `公文标识: ${document.id}`);
+        res.json({ success: true, document });
+    }));
+
+    router.delete('/apps/official-writing/documents/:clientId', authMiddleware, asyncHandler(async (req, res) => {
+        const deleted = await deleteOfficialWritingDocument(req.user, req.params.clientId);
+        if (!deleted) return res.status(404).json({ error: '公文不存在或无权访问。' });
+        logAction(req, '删除公文写作草稿', `公文标识: ${req.params.clientId}`);
+        return res.json({ success: true });
     }));
 
     router.post('/apps/official-writing/ai', authMiddleware, asyncHandler(async (req, res) => {

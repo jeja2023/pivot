@@ -45,6 +45,13 @@
     transition: all 0.15s ease;
 }
 
+/* Keep permission-gated actions out of the layout.  The compact button rule
+ * above uses an important display value, so the global .hidden utility alone
+ * cannot override it. */
+.agent-history-head-actions > button.hidden {
+    display: none !important;
+}
+
 .agent-history-tools {
     display: flex;
     align-items: center;

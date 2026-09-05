@@ -1,3 +1,16 @@
+## [v0.1.79] - 2026-09-05
+
+### 公文写作用户数据隔离与服务端文档库升级
+
+- **公文数据全面服务端化与多用户隔离**：彻底废除公文写作工作台依赖客户端 `localStorage` 存储公文草稿与多文档库的做法，在 SQLite 和 PostgreSQL 双栈架构中新增 `official_writing_documents` 业务表（业务表扩充至 80 张），所有公文正文、素材、批注、建议与历史版本均绑定至 `user_id` 服务端持久化，从根源消除多用户共享终端或切换账号时的公文数据泄露与互相污染风险。
+- **服务端用户专属文档数据服务与 RESTful 路由**：新增 `server/services/official-writing-documents.js` 与 `/api/apps/official-writing/documents` 路由集合（GET / PUT / DELETE），全面接入身份鉴权中间件与审计日志，强约束所有 SQL 查询以当前登录 `user_id` 为边界，杜绝越权访问。
+- **客户端防抖保存与即时持久化同步**：公文编辑输入采用 450ms 防抖保存，文档切换、新建、重命名、删除或退出时触发立即同步，保障编辑体验丝滑且数据零丢失。
+- **旧版本地缓存自动擦除与安全登出闭环**：工作台启动时主动清理历史 `localStorage` 缓存残留；在用户登出与 401 鉴权失效拦截中执行公文本地状态安全擦除，确保换登环境干净隔离。
+- **架构治理与大文件防膨胀**：抽离通用 AI 辅助函数 `runAppsAiCompletion` 至 `server/routes/apps/helpers.js`，将 `server/routes/apps/index.js` 控制在 ~820 行，严格满足项目大文件 $\le 1000$ 行的架构治理红线。
+- **全套契约回归测试保障**：新增 `tests/official-writing-isolation-contract.test.js`，覆盖数据表迁移、无跨账号 localStorage 读写、服务端隔离边界与防越权查询等 4 项自动化测试，`npm run check` 全套系统检查 100% 通过。
+
+详细发布记录见 [v0.1.79 发布记录](docs/releases/v0.1.79-公文写作用户数据隔离与服务端文档库升级.md)。
+
 ## [v0.1.78] - 2026-09-04
 
 ### 解除本机浏览器访问与实时联网能力拦截冲突

@@ -117,6 +117,7 @@ const OFFICIAL_WRITING_TYPE_TO_TEMPLATE_KEY = {
 };
 const OFFICIAL_WRITING_STORAGE_KEY = 'pivot_official_writing_state_v1';
 const OFFICIAL_WRITING_LIBRARY_KEY = 'pivot_official_writing_library_v2';
+const OFFICIAL_WRITING_DOCUMENTS_API = `${API_BASE}/apps/official-writing/documents`;
 const APPS_ACTIVE_APP_STORAGE_KEY = 'pivot_apps_active_app';
 let appsWorkbenchFocus = null;
 let appsWorkbenchRetryApp = '';
@@ -236,6 +237,10 @@ function createOfficialWritingState(overrides = {}) {
 // 多文档库：每篇公文为一条记录，包含独立的正文、原文、版本、批注、建议、发文要素等。
 // 文档库结构：{ activeId, docs: [{ id, title, updatedAt, state }] }
 let officialWritingLibrary = { activeId: '', docs: [] };
+const officialWritingSaveTimers = new Map();
+const officialWritingDeletedDocumentIds = new Set();
+let officialWritingLoadSequence = 0;
+let officialWritingLegacyStoragePurged = false;
 
 function normalizeOfficialWritingMeta(meta) {
     const safe = meta && typeof meta === 'object' ? meta : {};
@@ -514,7 +519,7 @@ function showAppsHome() {
     renderAppsGrid();
 }
 
-function showOfficialWritingApp() {
+async function showOfficialWritingApp() {
     setStoredAppsActiveApp('official-writing');
     window.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.add('hidden');
@@ -525,7 +530,7 @@ function showOfficialWritingApp() {
     document.getElementById('pdf-tools-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
-    loadOfficialWritingState();
+    await loadOfficialWritingState();
     if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
     hydrateOfficialWritingForm();
     setOfficialWritingMaterialSource(officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource);
@@ -586,8 +591,11 @@ function openRegisteredApp(appId) {
         setAppsWorkbenchState('error', app.name + '暂时无法打开，请检查网络或稍后重试。', { retryApp: app.id });
     };
     if (app.id === 'official-writing') {
-        showOfficialWritingApp();
-        setAppsWorkbenchState();
+        showOfficialWritingApp()
+            .then(() => setAppsWorkbenchState())
+            .catch(() => {
+                handleFailure();
+            });
     }
     if (app.id === 'data-analysis') {
         showDataAnalysisAppFromRegistry()
@@ -634,49 +642,43 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     { globalName: 'showRegulationsAppFromRegistry', exportName: 'showRegulationsAppFromRegistry' }
 ]);
 
-function loadOfficialWritingLibrary() {
-    // 优先读取多文档库；不存在时从旧版单文档 key 迁移为库中第一篇。
+function createEmptyOfficialWritingDoc() {
+    return {
+        id: generateOfficialWritingDocId(),
+        title: '新公文',
+        manualTitle: false,
+        updatedAt: new Date().toISOString(),
+        version: 0,
+        state: createOfficialWritingState()
+    };
+}
+
+function purgeLegacyOfficialWritingStorage() {
+    if (officialWritingLegacyStoragePurged) return;
+    officialWritingLegacyStoragePurged = true;
+    // 旧版本用固定键保存所有账号的正文，无法可靠判断原归属。安全升级不能
+    // 把这份无归属缓存导入当前登录用户，否则仍会造成跨账号数据泄露。
     try {
-        const rawLib = localStorage.getItem(OFFICIAL_WRITING_LIBRARY_KEY);
-        if (rawLib) {
-            const parsed = JSON.parse(rawLib);
-            const docs = Array.isArray(parsed?.docs) ? parsed.docs : [];
-            officialWritingLibrary = {
-                activeId: String(parsed?.activeId || ''),
-                docs: docs.map(doc => ({
-                    id: String(doc?.id || generateOfficialWritingDocId()),
-                    title: String(doc?.title || '未命名公文'),
-                    manualTitle: Boolean(doc?.manualTitle),
-                    updatedAt: String(doc?.updatedAt || new Date().toISOString()),
-                    state: sanitizeOfficialWritingState(doc?.state)
-                }))
-            };
-        } else {
-            officialWritingLibrary = { activeId: '', docs: [] };
-            const rawOld = localStorage.getItem(OFFICIAL_WRITING_STORAGE_KEY);
-            if (rawOld) {
-                const migrated = sanitizeOfficialWritingState(JSON.parse(rawOld));
-                officialWritingLibrary.docs.push({
-                    id: generateOfficialWritingDocId(),
-                    title: deriveOfficialWritingDocTitle(migrated),
-                    manualTitle: false,
-                    updatedAt: new Date().toISOString(),
-                    state: migrated
-                });
-            }
-        }
-    } catch (e) {
-        officialWritingLibrary = { activeId: '', docs: [] };
-    }
-    if (!officialWritingLibrary.docs.length) {
-        officialWritingLibrary.docs.push({
-            id: generateOfficialWritingDocId(),
-            title: '新公文',
-            manualTitle: false,
-            updatedAt: new Date().toISOString(),
-            state: createOfficialWritingState()
-        });
-    }
+        localStorage.removeItem(OFFICIAL_WRITING_LIBRARY_KEY);
+        localStorage.removeItem(OFFICIAL_WRITING_STORAGE_KEY);
+    } catch (_) {}
+}
+
+function normalizeOfficialWritingServerDocument(doc) {
+    const id = String(doc?.id || '').trim();
+    if (!id) return null;
+    return {
+        id,
+        title: String(doc?.title || '未命名公文'),
+        manualTitle: Boolean(doc?.manualTitle),
+        updatedAt: String(doc?.updatedAt || new Date().toISOString()),
+        version: Number(doc?.version || 1),
+        state: sanitizeOfficialWritingState(doc?.state)
+    };
+}
+
+function ensureOfficialWritingActiveDocument() {
+    if (!officialWritingLibrary.docs.length) officialWritingLibrary.docs.push(createEmptyOfficialWritingDoc());
     const hasActive = officialWritingLibrary.docs.some(doc => doc.id === officialWritingLibrary.activeId);
     if (!hasActive) officialWritingLibrary.activeId = officialWritingLibrary.docs[0].id;
 }
@@ -685,31 +687,30 @@ function getActiveOfficialWritingDoc() {
     return officialWritingLibrary.docs.find(doc => doc.id === officialWritingLibrary.activeId) || officialWritingLibrary.docs[0];
 }
 
-function loadOfficialWritingState() {
-    loadOfficialWritingLibrary();
+async function loadOfficialWritingState() {
+    const requestId = ++officialWritingLoadSequence;
+    purgeLegacyOfficialWritingStorage();
+    try {
+        const res = await apiFetch(OFFICIAL_WRITING_DOCUMENTS_API);
+        if (!res.ok) throw new Error(`加载公文库失败（${res.status}）`);
+        const data = await res.json();
+        if (requestId !== officialWritingLoadSequence) return false;
+        officialWritingLibrary = {
+            activeId: '',
+            docs: (Array.isArray(data?.data) ? data.data : [])
+                .map(normalizeOfficialWritingServerDocument)
+                .filter(Boolean)
+        };
+    } catch (_) {
+        if (requestId !== officialWritingLoadSequence) return false;
+        officialWritingLibrary = { activeId: '', docs: [] };
+        showToast?.('公文库加载失败，未展示任何本地残留数据。请检查网络后重试。', 'error');
+    }
+    ensureOfficialWritingActiveDocument();
     const activeDoc = getActiveOfficialWritingDoc();
     officialWritingState = activeDoc ? activeDoc.state : createOfficialWritingState();
-}
-
-function estimateStorageBytes(value) {
-    // localStorage 以 UTF-16 存储，按每字符约 2 字节估算，再叠加键名占用。
-    return (String(value).length + OFFICIAL_WRITING_LIBRARY_KEY.length) * 2;
-}
-
-function trimOfficialWritingStateForStorage() {
-    // 超限时优先丢弃可重建的体积大户：自动草稿 → 历史版本，保留正文、原文、批注和建议。
-    let trimmed = false;
-    if ((officialWritingState.autoSaves || []).length > 2) {
-        officialWritingState.autoSaves = officialWritingState.autoSaves.slice(0, 2);
-        trimmed = true;
-    } else if ((officialWritingState.autoSaves || []).length > 0) {
-        officialWritingState.autoSaves = [];
-        trimmed = true;
-    } else if ((officialWritingState.versions || []).length > 3) {
-        officialWritingState.versions = officialWritingState.versions.slice(0, 3);
-        trimmed = true;
-    }
-    return trimmed;
+    if (!activeDoc?.version) scheduleOfficialWritingDocumentSave(activeDoc, { immediate: true });
+    return true;
 }
 
 function syncActiveOfficialWritingDoc() {
@@ -721,45 +722,80 @@ function syncActiveOfficialWritingDoc() {
     activeDoc.updatedAt = new Date().toISOString();
 }
 
-function saveOfficialWritingState() {
-    // 写入前预估体积，超过软上限（约 3.5MB）先提示并支持导出备份。整库持久化。
-    const SOFT_LIMIT_BYTES = 3.5 * 1024 * 1024;
-    syncActiveOfficialWritingDoc();
-    let attempts = 0;
-    while (attempts < 4) {
-        attempts += 1;
-        let serialized;
-        try {
-            serialized = JSON.stringify(officialWritingLibrary);
-        } catch (e) {
-            return;
-        }
-        if (estimateStorageBytes(serialized) > SOFT_LIMIT_BYTES && trimOfficialWritingStateForStorage()) {
-            if (typeof showToast === 'function') {
-                showToast('内容较多，已自动精简自动草稿与历史版本以保证保存', 'warning');
-            }
-            continue;
-        }
-        try {
-            localStorage.setItem(OFFICIAL_WRITING_LIBRARY_KEY, serialized);
-            // 迁移完成后清理旧版单文档 key，避免占用空间。
-            try { localStorage.removeItem(OFFICIAL_WRITING_STORAGE_KEY); } catch (cleanupError) { /* 忽略清理失败 */ }
-            return;
-        } catch (e) {
-            // QuotaExceededError：逐步精简后重试，无法精简则提示并保留内存内状态。
-            const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
-            if (isQuota && trimOfficialWritingStateForStorage()) {
-                if (typeof showToast === 'function') {
-                    showToast('本地存储空间不足，已精简历史数据后重试保存', 'warning');
-                }
-                continue;
-            }
-            if (typeof showToast === 'function') {
-                showToast('本地存储空间不足，建议导出备份后清理工作区', 'error');
-            }
-            return;
-        }
+function officialWritingDocumentPayload(doc) {
+    return {
+        title: String(doc?.title || '未命名公文'),
+        manualTitle: doc?.manualTitle === true,
+        state: sanitizeOfficialWritingState(doc?.state)
+    };
+}
+
+async function persistOfficialWritingDocument(doc) {
+    if (!doc?.id || typeof apiFetch !== 'function') return;
+    const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}/${encodeURIComponent(doc.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(officialWritingDocumentPayload(doc))
+    });
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(String(data?.error || '公文保存失败'));
     }
+    const data = await res.json().catch(() => ({}));
+    const saved = normalizeOfficialWritingServerDocument(data?.document);
+    const current = saved && officialWritingLibrary.docs.find(item => item.id === saved.id);
+    if (current) {
+        current.version = saved.version;
+        current.updatedAt = saved.updatedAt;
+    }
+}
+
+function scheduleOfficialWritingDocumentSave(doc, { immediate = false } = {}) {
+    if (!doc?.id || officialWritingDeletedDocumentIds.has(doc.id)) return;
+    const previous = officialWritingSaveTimers.get(doc.id);
+    if (previous) clearTimeout(previous);
+    const save = async () => {
+        officialWritingSaveTimers.delete(doc.id);
+        try {
+            await persistOfficialWritingDocument(doc);
+        } catch (error) {
+            if (!officialWritingDeletedDocumentIds.has(doc.id)) {
+                showToast?.(error?.message || '公文保存失败，请稍后重试', 'error');
+            }
+        }
+    };
+    if (immediate) {
+        void save();
+        return;
+    }
+    officialWritingSaveTimers.set(doc.id, setTimeout(() => { void save(); }, 450));
+}
+
+async function deleteOfficialWritingDocumentFromServer(docId) {
+    officialWritingDeletedDocumentIds.add(docId);
+    const timer = officialWritingSaveTimers.get(docId);
+    if (timer) {
+        clearTimeout(timer);
+        officialWritingSaveTimers.delete(docId);
+    }
+    try {
+        if (typeof apiFetch !== 'function') return;
+        const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+        // 新建后立即删除的文档可能尚未发送保存请求；404 可安全视为删除完成。
+        if (res.status === 404) return;
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(String(data?.error || '删除公文失败'));
+        }
+    } catch (error) {
+        officialWritingDeletedDocumentIds.delete(docId);
+        throw error;
+    }
+}
+
+function saveOfficialWritingState(options = {}) {
+    syncActiveOfficialWritingDoc();
+    scheduleOfficialWritingDocumentSave(getActiveOfficialWritingDoc(), options);
 }
 
 function exportOfficialWritingBackup() {
