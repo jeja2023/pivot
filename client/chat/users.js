@@ -12,7 +12,7 @@ function setPublicRegistrationToggle(enabled) {
 }
 
 function userPasswordError(password, label = '密码') {
-    return window.getPasswordValidationMessage?.(password, label) || '';
+    return window.Pivot.legacy.getPasswordValidationMessage?.(password, label) || '';
 }
 
 function renderUserActionButton(action, label, userOrId, className = 'btn-secondary') {
@@ -21,7 +21,7 @@ function renderUserActionButton(action, label, userOrId, className = 'btn-second
     return `<button type="button" class="${className}" style="padding: 1px 5px; font-size: 0.68rem;" data-user-action="${action}" data-user-id="${escapeHtml(userId)}">${label}</button>`;
 }
 
-window.loadUsers = async function(page = 1) {
+window.Pivot.legacy.loadUsers = async function(page = 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
     pageState.users = requestedPage;
@@ -30,7 +30,7 @@ window.loadUsers = async function(page = 1) {
     const { data = [], total = 0, isSuperAdmin, allowPublicRegistration } = await res.json();
     const totalCount = Number(total) || 0;
     const lastPage = Math.max(Math.ceil(totalCount / limit), 1);
-    if (requestedPage > lastPage && totalCount > 0) return window.loadUsers(lastPage);
+    if (requestedPage > lastPage && totalCount > 0) return window.Pivot.legacy.loadUsers(lastPage);
     if (!res.ok) {
         renderTableMessage(document.getElementById('user-list-body'), 9, '用户加载失败');
         renderPagination('users', 0, 1);
@@ -64,7 +64,7 @@ window.loadUsers = async function(page = 1) {
     `;
     }).join(''));
     renderPagination('users', totalCount, requestedPage);
-    window.scheduleSettingsWorkspaceScale?.();
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
 };
 
 document.getElementById('user-list-body')?.addEventListener('click', (event) => {
@@ -73,13 +73,13 @@ document.getElementById('user-list-body')?.addEventListener('click', (event) => 
     const userId = button.dataset.userId;
     const action = button.dataset.userAction;
     const user = userActionCache.get(String(userId));
-    if (action === 'records' && user) return window.openUserRecords(user);
-    if (action === 'edit' && user) return window.prepareEditUser(user);
-    if (action === 'reset-password') return window.resetUserPassword(userId);
-    if (action === 'delete') return window.deleteUser(userId);
+    if (action === 'records' && user) return window.Pivot.legacy.openUserRecords(user);
+    if (action === 'edit' && user) return window.Pivot.legacy.prepareEditUser(user);
+    if (action === 'reset-password') return window.Pivot.legacy.resetUserPassword(userId);
+    if (action === 'delete') return window.Pivot.legacy.deleteUser(userId);
 });
 
-window.downloadUserTemplate = () => {
+window.Pivot.legacy.downloadUserTemplate = () => {
     const headers = ['用户名', '密码', '显示名', '单位', '角色'];
     const rows = [
         ['testuser1', 'P@ssw0rd123', '测试用户1', '智枢科技', 'user'],
@@ -95,16 +95,16 @@ window.downloadUserTemplate = () => {
     URL.revokeObjectURL(url);
 };
 
-window.openUserModal = () => {
-    resetUserForm();
+window.Pivot.legacy.openUserModal = () => {
+    window.Pivot.legacy.resetUserForm();
     document.getElementById('user-modal-title').innerText = '添加用户';
     document.getElementById('u-password-wrap').classList.remove('hidden');
     document.getElementById('user-modal-container').classList.remove('hidden');
 };
 
-window.closeUserModal = () => document.getElementById('user-modal-container').classList.add('hidden');
+window.Pivot.legacy.closeUserModal = () => document.getElementById('user-modal-container').classList.add('hidden');
 
-window.resetUserForm = () => {
+window.Pivot.legacy.resetUserForm = () => {
     document.getElementById('u-id').value = '';
     document.getElementById('u-username').value = '';
     document.getElementById('u-username').disabled = false;
@@ -117,7 +117,7 @@ window.resetUserForm = () => {
     document.getElementById('u-status').disabled = false;
 };
 
-window.prepareEditUser = (user) => {
+window.Pivot.legacy.prepareEditUser = (user) => {
     document.getElementById('u-id').value = user.id;
     document.getElementById('u-username').value = user.username;
     document.getElementById('u-username').disabled = true;
@@ -133,7 +133,7 @@ window.prepareEditUser = (user) => {
     document.getElementById('user-modal-container').classList.remove('hidden');
 };
 
-window.saveUser = async () => {
+window.Pivot.legacy.saveUser = async () => {
     const id = document.getElementById('u-id').value;
     const payload = {
         username: document.getElementById('u-username').value,
@@ -154,15 +154,15 @@ window.saveUser = async () => {
     });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || '保存失败', 'error');
-    closeUserModal();
-    loadUsers(pageState.users);
+    window.Pivot.legacy.closeUserModal();
+    window.Pivot.legacy.loadUsers(pageState.users);
     showToast('用户已保存');
 };
 
-window.resetUserPassword = async (id) => {
-    const password = await window.showInputPrompt({
+window.Pivot.legacy.resetUserPassword = async (id) => {
+    const password = await window.Pivot.legacy.showInputPrompt({
         title: '重置密码',
-        message: `请输入新密码，${window.PASSWORD_RULE_DESCRIPTION || '至少 8 位，并同时包含字母和数字'}。`,
+        message: `请输入新密码，${window.Pivot.legacy.PASSWORD_RULE_DESCRIPTION || '至少 8 位，并同时包含字母和数字'}。`,
         type: 'password',
         placeholder: '新密码',
         autocomplete: 'new-password'
@@ -180,7 +180,7 @@ window.resetUserPassword = async (id) => {
     showToast('密码已重置');
 };
 
-window.updatePublicRegistrationSetting = async () => {
+window.Pivot.legacy.updatePublicRegistrationSetting = async () => {
     const toggle = document.getElementById('public-registration-toggle');
     if (!toggle || !isSuperAdminUser()) return;
     const previous = !toggle.checked;
@@ -194,9 +194,9 @@ window.updatePublicRegistrationSetting = async () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '开放注册设置保存失败');
         setPublicRegistrationToggle(data.allowPublicRegistration === true);
-        window.allowPublicRegistration = data.allowPublicRegistration === true;
-        window.setPublicRegistrationState?.(window.allowPublicRegistration);
-        document.getElementById('auth-toggle')?.classList.toggle('hidden', !window.allowPublicRegistration);
+        window.Pivot.legacy.allowPublicRegistration = data.allowPublicRegistration === true;
+        window.Pivot.legacy.setPublicRegistrationState?.(window.Pivot.legacy.allowPublicRegistration);
+        document.getElementById('auth-toggle')?.classList.toggle('hidden', !window.Pivot.legacy.allowPublicRegistration);
         showToast(data.allowPublicRegistration ? '开放注册已开启' : '开放注册已关闭');
     } catch (e) {
         setPublicRegistrationToggle(previous);
@@ -206,7 +206,7 @@ window.updatePublicRegistrationSetting = async () => {
     }
 };
 
-window.exportUsers = () => downloadFileByFetch(`${API_BASE}/admin/users/export`, 'users.csv');
+window.Pivot.legacy.exportUsers = () => downloadFileByFetch(`${API_BASE}/admin/users/export`, 'users.csv');
 
 let userRecordsTarget = null;
 let userRecordsEventsBound = false;
@@ -226,20 +226,20 @@ function bindUserRecordsEvents() {
     userRecordsEventsBound = true;
     document.getElementById('user-record-session-select')?.addEventListener('change', () => {
         pageState.userRecords = 1;
-        window.loadUserRecordMessages(1);
+        window.Pivot.legacy.loadUserRecordMessages(1);
     });
     document.getElementById('user-record-include-deleted')?.addEventListener('change', async () => {
-        await window.loadUserRecordSessions();
+        await window.Pivot.legacy.loadUserRecordSessions();
         pageState.userRecords = 1;
-        await window.loadUserRecordMessages(1);
+        await window.Pivot.legacy.loadUserRecordMessages(1);
     });
     document.getElementById('user-record-refresh-btn')?.addEventListener('click', async () => {
-        await window.loadUserRecordSessions();
-        await window.loadUserRecordMessages(pageState.userRecords || 1);
+        await window.Pivot.legacy.loadUserRecordSessions();
+        await window.Pivot.legacy.loadUserRecordMessages(pageState.userRecords || 1);
     });
 }
 
-window.openUserRecords = async (user) => {
+window.Pivot.legacy.openUserRecords = async (user) => {
     if (!isSuperAdminUser()) return showToast('仅 admin 权限层级可查看用户详细记录', 'error');
     userRecordsTarget = user;
     bindUserRecordsEvents();
@@ -248,18 +248,18 @@ window.openUserRecords = async (user) => {
     if (includeDeleted) includeDeleted.checked = true;
     document.getElementById('user-records-modal').classList.remove('hidden');
     pageState.userRecords = 1;
-    await window.loadUserRecordSessions();
-    await window.loadUserRecordMessages(1);
+    await window.Pivot.legacy.loadUserRecordSessions();
+    await window.Pivot.legacy.loadUserRecordMessages(1);
 };
 
-window.closeUserRecordsModal = () => {
+window.Pivot.legacy.closeUserRecordsModal = () => {
     document.getElementById('user-records-modal')?.classList.add('hidden');
     const pagination = document.getElementById('pagination-userRecords');
     if (pagination) PivotSafeHtml.setHtml(pagination, '');
     userRecordsTarget = null;
 };
 
-window.loadUserRecordSessions = async () => {
+window.Pivot.legacy.loadUserRecordSessions = async () => {
     if (!userRecordsTarget) return;
     const select = document.getElementById('user-record-session-select');
     const includeDeleted = document.getElementById('user-record-include-deleted')?.checked === true;
@@ -276,7 +276,7 @@ window.loadUserRecordSessions = async () => {
     if (previous && data.some(s => String(s.id) === previous)) select.value = previous;
 };
 
-window.loadUserRecordMessages = async (page = 1) => {
+window.Pivot.legacy.loadUserRecordMessages = async (page = 1) => {
     if (!userRecordsTarget) return;
     pageState.userRecords = page;
     const body = document.getElementById('user-records-body');
@@ -323,7 +323,7 @@ window.loadUserRecordMessages = async (page = 1) => {
     if (sessionId) scrollUserRecordsToBottom();
 };
 
-window.importUsers = async () => {
+window.Pivot.legacy.importUsers = async () => {
     const fileInput = document.getElementById('user-import-input');
     const file = fileInput.files[0];
     if (!file) return;
@@ -338,7 +338,7 @@ window.importUsers = async () => {
         const data = await res.json();
         if (data.success) {
             showToast(`成功导入 ${data.count} 名用户`);
-            loadUsers();
+            window.Pivot.legacy.loadUsers();
         } else if (data.error) {
             showToast(data.error, 'error');
         }
@@ -346,9 +346,9 @@ window.importUsers = async () => {
     fileInput.value = '';
 };
 
-window.deleteUser = (id) => {
-    showConfirm('删除用户', '确定删除该用户吗？账号将被禁用，历史对话、附件、审计和用量数据会保留，仅 admin 权限层级可追溯查看。', async () => {
+window.Pivot.legacy.deleteUser = (id) => {
+    window.Pivot.legacy.showConfirm('删除用户', '确定删除该用户吗？账号将被禁用，历史对话、附件、审计和用量数据会保留，仅 admin 权限层级可追溯查看。', async () => {
         const res = await apiFetch(API_BASE + `/admin/users/${id}`, { method: 'DELETE', headers: authHeaders() });
-        if (res.ok) { showToast('用户已删除'); loadUsers(pageState.users); }
+        if (res.ok) { showToast('用户已删除'); window.Pivot.legacy.loadUsers(pageState.users); }
     });
 };

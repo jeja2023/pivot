@@ -10,8 +10,8 @@ let agentAutomationResourceModalOpener = null;
 let agentAutomationResourceWorkflowId = '';
 let agentAutomationShareOptions = null;
 const agentAutomationResourceActionLocks = new Set();
-const agentEscape = (value) => window.PivotSafeHtml?.escapeHtml ? window.PivotSafeHtml.escapeHtml(value) : (typeof escapeHtml === 'function' ? escapeHtml(value) : String(value ?? ''));
-const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr ? window.PivotSafeHtml.escapeAttr(value) : agentEscape(value).replace(/"/g, '&quot;');
+const agentEscape = (value) => window.Pivot.legacy.PivotSafeHtml?.escapeHtml ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value) : (typeof escapeHtml === 'function' ? escapeHtml(value) : String(value ?? ''));
+const agentEscapeAttr = (value) => window.Pivot.legacy.PivotSafeHtml?.escapeAttr ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value) : agentEscape(value).replace(/"/g, '&quot;');
 
 function agentAutomationResourceModal() {
     return document.getElementById('agent-automation-resources-modal');
@@ -557,7 +557,7 @@ async function runAgentAutomationResourceAction(key, button, task) {
 }
 
 async function confirmAgentAutomationResource(title, message) {
-    if (typeof showConfirm === 'function') return await showConfirm(title, message);
+    if (typeof window.Pivot.legacy.showConfirm === 'function') return await window.Pivot.legacy.showConfirm(title, message);
     return window.confirm(message);
 }
 

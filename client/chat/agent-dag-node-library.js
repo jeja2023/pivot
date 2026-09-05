@@ -9,7 +9,7 @@
  */
 /* global createDagIcon */
 (function () {
-if (window.PivotDagNodeLibrary) return;
+if (window.Pivot.legacy.PivotDagNodeLibrary) return;
 
 const NODE_PRESETS = window.Pivot.moduleApi('agent.dagNodePresets').groups || [];
 
@@ -176,5 +176,9 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
     return { destroy };
 }
 
-window.PivotDagNodeLibrary = { mount, NODE_PRESETS };
+window.Pivot?.exposeModule?.('agent.dagNodeLibrary', {
+    mount,
+    NODE_PRESETS,
+    legacyApi: { mount, NODE_PRESETS }
+}, { PivotDagNodeLibrary: 'legacyApi' });
 })();

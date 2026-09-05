@@ -42,10 +42,9 @@ const CHART_COLORS = CHART_PALETTES.teal;
 const EXPORT_RETENTION_MS = Math.max(60 * 60 * 1000, Number.parseInt(process.env.DATA_ANALYSIS_EXPORT_RETENTION_MS || '', 10) || 7 * 24 * 60 * 60 * 1000);
 const TMP_RETENTION_MS = Math.max(60 * 60 * 1000, Number.parseInt(process.env.DATA_ANALYSIS_TMP_RETENTION_MS || '', 10) || 24 * 60 * 60 * 1000);
 
-function ensureAnalysisDirs() {
-    [analysisRoot, datasetRoot, exportRoot, tempRoot].forEach(dir => {
-        fs.mkdirSync(dir, { recursive: true });
-    });
+async function ensureAnalysisDirs() {
+    await Promise.all([analysisRoot, datasetRoot, exportRoot, tempRoot]
+        .map(dir => fs.promises.mkdir(dir, { recursive: true })));
 }
 
 function analysisId(prefix) {
@@ -193,26 +192,24 @@ function isMetricNumericColumn(column) {
 
 function bestEffortRemove(targetPath, { recursive = false } = {}) {
     if (!targetPath) return;
-    try {
-        fs.rmSync(targetPath, { force: true, recursive, maxRetries: 4, retryDelay: 100 });
-        return;
-    } catch (err) {
-        const timer = setTimeout(() => {
-            fs.promises.rm(targetPath, { force: true, recursive, maxRetries: 4, retryDelay: 150 })
-                .catch(cleanupErr => logger.warn({ err: cleanupErr.message, targetPath }, '数据分析临时文件清理失败'));
-        }, 250);
-        if (typeof timer.unref === 'function') timer.unref();
-        logger.warn({ err: err.message, targetPath }, '数据分析临时文件清理已推迟');
-    }
+    return fs.promises.rm(targetPath, { force: true, recursive, maxRetries: 4, retryDelay: 100 })
+        .catch(err => {
+            const timer = setTimeout(() => {
+                fs.promises.rm(targetPath, { force: true, recursive, maxRetries: 4, retryDelay: 150 })
+                    .catch(cleanupErr => logger.warn({ err: cleanupErr.message, targetPath }, '数据分析临时文件清理失败'));
+            }, 250);
+            if (typeof timer.unref === 'function') timer.unref();
+            logger.warn({ err: err.message, targetPath }, '数据分析临时文件清理已推迟');
+        });
 }
 
-function moveUploadedFile(sourcePath, targetPath) {
+async function moveUploadedFile(sourcePath, targetPath) {
     try {
-        fs.renameSync(sourcePath, targetPath);
+        await fs.promises.rename(sourcePath, targetPath);
     } catch (err) {
         if (!['EXDEV', 'EPERM', 'EACCES'].includes(err?.code)) throw err;
-        fs.copyFileSync(sourcePath, targetPath);
-        bestEffortRemove(sourcePath);
+        await fs.promises.copyFile(sourcePath, targetPath);
+        await fs.promises.rm(sourcePath, { force: true, maxRetries: 4, retryDelay: 80 });
     }
 }
 

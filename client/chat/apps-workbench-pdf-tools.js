@@ -1,5 +1,5 @@
 (function () {
-    if (window.PivotPdfTools?.ready) return;
+    if (window.Pivot.legacy.PivotPdfTools?.ready) return;
 
     const API = '/api/apps/pdf-tools';
     const state = {
@@ -25,7 +25,7 @@
         searchable_pdf: { label: '\u53ef\u641c\u7d22 PDF', pages: false, order: false, rotate: false, image: false }
     };
 
-    const html = window.PivotSafeHtml || {
+    const html = window.Pivot.legacy.PivotSafeHtml || {
         escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -290,11 +290,11 @@
     function renderJobPagination() {
         const pager = document.getElementById('pdf-job-pagination');
         if (!pager) return;
-        if (typeof window.renderWorkspacePagination !== 'function') {
+        if (typeof window.Pivot.legacy.renderWorkspacePagination !== 'function') {
             pager.replaceChildren();
             return;
         }
-        window.renderWorkspacePagination(pager, {
+        window.Pivot.legacy.renderWorkspacePagination(pager, {
             total: state.total,
             page: state.page,
             limit: state.limit,
@@ -584,7 +584,7 @@
     function startPolling() {
         if (state.timer) return;
         state.timer = window.setInterval(() => {
-            if (window.getAppsSessionValue?.('pivot_apps_active_app') !== 'pdf-tools') return;
+            if (window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'pdf-tools') return;
             const active = state.jobs.some(job => job.status === 'pending' || job.status === 'processing');
             if (active) loadJobs({ keepActive: true }).catch(() => {});
         }, 4000);
@@ -592,8 +592,8 @@
 
     async function showPdfToolsApp() {
         const view = ensureView();
-        window.PivotDataAnalysis?.resetAiWorkspace?.();
-        window.setAppsSessionValue?.('pivot_apps_active_app', 'pdf-tools');
+        window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
+        window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'pdf-tools');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -607,12 +607,12 @@
         await loadJobs({ keepActive: true });
     }
 
-    window.PivotPdfTools = {
+    window.Pivot.legacy.PivotPdfTools = {
         ready: true,
         state,
         showPdfToolsApp,
         loadJobs,
         loadDetail
     };
-    window.showPdfToolsApp = showPdfToolsApp;
+    window.Pivot.legacy.showPdfToolsApp = showPdfToolsApp;
 })();

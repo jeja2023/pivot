@@ -186,8 +186,7 @@ function isBackendRouteFile(file) {
 
 function isSkippableGeneratedFile(file) {
     return file.includes('/vendor/') ||
-        file.endsWith('package-lock.json') ||
-        file.endsWith('window_globals_baseline.json');
+        file.endsWith('package-lock.json');
 }
 
 function hasClass(line, className) {

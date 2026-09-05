@@ -56,8 +56,8 @@ let agentRunTitleTooltipTarget = null;
 
 const agentEscape = (value) => escapeHtml(value === undefined || value === null ? '' : String(value));
 
-const agentEscapeAttr = (value) => window.PivotSafeHtml?.escapeAttr
-    ? window.PivotSafeHtml.escapeAttr(value)
+const agentEscapeAttr = (value) => window.Pivot.legacy.PivotSafeHtml?.escapeAttr
+    ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value)
     : agentEscape(value).replace(/"/g, '&quot;');
 
 const agentEvaluationsApi = () => window.Pivot.moduleApi('agent.evaluations');
@@ -85,7 +85,7 @@ function agentPreviewDisplayTitle(value) {
     return text || '预览运行';
 }
 
-window.loadAgentWorkbench = async function() {
+window.Pivot.legacy.loadAgentWorkbench = async function() {
     try {
         await loadAgentModels();
         await Promise.all([
@@ -98,7 +98,7 @@ window.loadAgentWorkbench = async function() {
             loadAgentSchedules(),
             loadAgentNotifications(),
             loadAgentArtifacts(),
-            window.loadAgentHarnessSkills?.(),
+            window.Pivot.legacy.loadAgentHarnessSkills?.(),
             agentEvaluationsApi().loadSuites?.()
         ]);
     } catch (e) {
@@ -106,7 +106,7 @@ window.loadAgentWorkbench = async function() {
     }
 };
 
-window.setTaskComposerOpen = function(isOpen = true) {
+window.Pivot.legacy.setTaskComposerOpen = function(isOpen = true) {
     const modal = document.getElementById('agent-task-editor-modal');
     const openButton = document.getElementById('task-create-open-btn');
     if (!modal) return;
@@ -121,7 +121,7 @@ window.setTaskComposerOpen = function(isOpen = true) {
     else if (wasOpen && modal.contains(document.activeElement)) openButton?.focus();
 };
 
-window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
+window.Pivot.legacy.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
     if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-section]').forEach(button => {
         const isActive = button.dataset.automationSection === activeSection;
@@ -131,7 +131,7 @@ window.syncAutomationPrimaryTabs = function(activeSection = 'tasks') {
     });
 };
 
-window.bindUnifiedAutomationTabs = function() {
+window.Pivot.legacy.bindUnifiedAutomationTabs = function() {
     if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-section]').forEach(button => {
         if (button.dataset.boundAutomationSection === '1') return;
@@ -146,9 +146,9 @@ window.bindUnifiedAutomationTabs = function() {
                     const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
                     if (!confirmed) return;
                 }
-                if (section === 'tasks') return window.openAgentWorkbench?.({ tab: 'tasks' });
-                if (section === 'workbench') return window.openAgentWorkbench?.({ tab: 'workbench' });
-                return window.openAgentDagWorkbench?.({ tab: section });
+                if (section === 'tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+                if (section === 'workbench') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+                return window.Pivot.legacy.openAgentDagWorkbench?.({ tab: section });
             } catch (error) {
                 showToast(error.message || '自动化页面加载失败', 'error');
             }
@@ -156,24 +156,24 @@ window.bindUnifiedAutomationTabs = function() {
     });
 };
 
-window.bindAgentWorkbenchShortcuts = function() {
+window.Pivot.legacy.bindAgentWorkbenchShortcuts = function() {
     if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-automation-jump="workbench"]').forEach(btn => {
         if (btn.dataset.boundAutomationJump === '1') return;
         btn.dataset.boundAutomationJump = '1';
         btn.addEventListener('click', () => {
-            window.openAgentWorkbench?.({ tab: 'workbench' });
+            window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
         });
     });
 };
 
-window.openAgentWorkbench = async function(options = {}) {
-    window.showMainWorkspace?.('agent');
+window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
+    window.Pivot.legacy.showMainWorkspace?.('agent');
     let savedTab = null;
     try { savedTab = sessionStorage.getItem('pivot.agent.active_tab'); } catch (_) {}
     const tab = (options.tab || savedTab) === 'workbench' ? 'workbench' : 'tasks';
     try { sessionStorage.setItem('pivot.agent.active_tab', tab); } catch (_) {}
-    window.syncAutomationPrimaryTabs(tab);
+    window.Pivot.legacy.syncAutomationPrimaryTabs(tab);
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;
 
@@ -206,31 +206,31 @@ window.openAgentWorkbench = async function(options = {}) {
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    window.setTaskComposerOpen(Boolean(options.create));
+    window.Pivot.legacy.setTaskComposerOpen(Boolean(options.create));
     // 智能体工作区脚本按需加载，在数据请求前优先绑定交互与选项卡切换事件
-    window.bindAgentGoalTemplates?.();
-    window.bindAgentFilters?.();
-    window.bindAgentEnterpriseControls?.();
-    window.bindAgentConfigModal?.();
-    window.bindUnifiedAutomationTabs?.();
-    window.bindAgentWorkbenchShortcuts?.();
+    window.Pivot.legacy.bindAgentGoalTemplates?.();
+    window.Pivot.legacy.bindAgentFilters?.();
+    window.Pivot.legacy.bindAgentEnterpriseControls?.();
+    window.Pivot.legacy.bindAgentConfigModal?.();
+    window.Pivot.legacy.bindUnifiedAutomationTabs?.();
+    window.Pivot.legacy.bindAgentWorkbenchShortcuts?.();
     // 智能体脚本按需加载；登录时如果尚未进入工作区，实时脚本不会参与初始化。
     // 在脚本就绪后补建 SSE，确保新任务的状态和执行步骤无需手动刷新即可显示。
-    window.initAgentRealtime?.();
+    window.Pivot.legacy.initAgentRealtime?.();
     if (tab === 'tasks') {
-        await window.loadAgentWorkbench();
+        await window.Pivot.legacy.loadAgentWorkbench();
     }
 };
 
-window.closeAgentWorkbench = function() {
+window.Pivot.legacy.closeAgentWorkbench = function() {
     closeAgentConfigModal();
-    closeAgentRunDetailModal();
-    window.setTaskComposerOpen(false);
-    window.showMainWorkspace?.('chat');
+    window.Pivot.legacy.closeAgentRunDetailModal();
+    window.Pivot.legacy.setTaskComposerOpen(false);
+    window.Pivot.legacy.showMainWorkspace?.('chat');
     updateAgentAutoRefresh();
 };
 
-window.bindAgentGoalTemplates = function() {
+window.Pivot.legacy.bindAgentGoalTemplates = function() {
     document.querySelectorAll('[data-agent-goal-template]').forEach(btn => {
         if (btn.dataset.boundAgentTemplate === '1') return;
         btn.dataset.boundAgentTemplate = '1';
@@ -243,7 +243,7 @@ window.bindAgentGoalTemplates = function() {
             if (btn.dataset.agentRunMode) {
                 const mode = document.getElementById('agent-run-mode');
                 if (mode) mode.value = btn.dataset.agentRunMode;
-                window.syncAgentRunModeStepLimit?.();
+                window.Pivot.legacy.syncAgentRunModeStepLimit?.();
             }
             if (btn.dataset.agentMcp) {
                 const allowMcp = document.getElementById('agent-allow-mcp');
@@ -254,7 +254,7 @@ window.bindAgentGoalTemplates = function() {
     });
 };
 
-window.bindAgentFilters = function() {
+window.Pivot.legacy.bindAgentFilters = function() {
     ['agent-filter-status', 'agent-filter-run-type', 'agent-filter-query'].forEach(id => {
         const el = document.getElementById(id);
         if (!el || el.dataset.boundAgentFilter === '1') return;
@@ -274,7 +274,7 @@ window.bindAgentFilters = function() {
     });
 };
 
-window.syncAgentRunModeStepLimit = function() {
+window.Pivot.legacy.syncAgentRunModeStepLimit = function() {
     const mode = document.getElementById('agent-run-mode')?.value || 'standard';
     const input = document.getElementById('agent-max-steps');
     const limits = { standard: 30, deep: 50, audit: 60 };
@@ -285,7 +285,7 @@ window.syncAgentRunModeStepLimit = function() {
     if (value > limit) input.value = String(limit);
 };
 
-window.bindAgentEnterpriseControls = function() {
+window.Pivot.legacy.bindAgentEnterpriseControls = function() {
     if (typeof bindAgentTemplateModal === 'function') bindAgentTemplateModal();
     document.querySelectorAll('[data-agent-save-template]').forEach(saveTemplateBtn => {
         if (saveTemplateBtn.dataset.boundAgentTemplateSave === '1') return;
@@ -300,9 +300,9 @@ window.bindAgentEnterpriseControls = function() {
     const runMode = document.getElementById('agent-run-mode');
     if (runMode && runMode.dataset.boundAgentStepLimit !== '1') {
         runMode.dataset.boundAgentStepLimit = '1';
-        runMode.addEventListener('change', window.syncAgentRunModeStepLimit);
+        runMode.addEventListener('change', window.Pivot.legacy.syncAgentRunModeStepLimit);
     }
-    window.syncAgentRunModeStepLimit();
+    window.Pivot.legacy.syncAgentRunModeStepLimit();
 };
 
 const agentConfigSectionTitles = {
@@ -340,12 +340,12 @@ function openAgentConfigSection(sectionKey) {
     if (sectionKey === 'harness') {
         globalThis['openAgentWorkbench']?.({ tab: 'workbench' });
         window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('governance');
-        window.loadAgentHarnessManagement?.();
+        window.Pivot.legacy.loadAgentHarnessManagement?.();
         return;
     }
     if (sectionKey === 'templates') {
         globalThis['openAgentWorkbench']?.({ tab: 'tasks' });
-        window.setTaskComposerOpen(true);
+        window.Pivot.legacy.setTaskComposerOpen(true);
         return;
     }
     if (sectionKey === 'results') {
@@ -367,15 +367,15 @@ function openAgentConfigSection(sectionKey) {
     modal.setAttribute('aria-hidden', 'false');
     if (sectionKey === 'advanced') {
         mountAgentDagEditor();
-        setTimeout(() => window.refreshAgentDagEditor?.(), 50);
+        setTimeout(() => window.Pivot.legacy.refreshAgentDagEditor?.(), 50);
     }
 }
 
-window.closeAgentConfigModal = closeAgentConfigModal;
+window.Pivot.legacy.closeAgentConfigModal = closeAgentConfigModal;
 
-window.openAgentConfigSection = openAgentConfigSection;
+window.Pivot.legacy.openAgentConfigSection = openAgentConfigSection;
 
-window.bindAgentConfigModal = function() {
+window.Pivot.legacy.bindAgentConfigModal = function() {
     if (typeof document?.querySelectorAll !== 'function') return;
     document.querySelectorAll('[data-agent-config-open]').forEach(btn => {
         if (btn.dataset.boundAgentConfigOpen === '1') return;
@@ -394,7 +394,7 @@ window.bindAgentConfigModal = function() {
     const runDetailClose = document.getElementById('agent-run-detail-close');
     if (runDetailClose && runDetailClose.dataset.boundAgentRunDetailClose !== '1') {
         runDetailClose.dataset.boundAgentRunDetailClose = '1';
-        runDetailClose.addEventListener('click', closeAgentRunDetailModal);
+        runDetailClose.addEventListener('click', window.Pivot.legacy.closeAgentRunDetailModal);
     }
     const runDetailModal = document.getElementById('agent-run-detail-modal');
     if (runDetailModal && runDetailModal.dataset.boundAgentRunDetailOverlay !== '1') {
@@ -402,5 +402,5 @@ window.bindAgentConfigModal = function() {
     }
 };
 
-window.bindUnifiedAutomationTabs?.();
-window.bindAgentWorkbenchShortcuts?.();
+window.Pivot.legacy.bindUnifiedAutomationTabs?.();
+window.Pivot.legacy.bindAgentWorkbenchShortcuts?.();

@@ -59,7 +59,7 @@ function selectAutomationWorkflow(workflowId) {
 
 function setAutomationTab(tab = 'workflows') {
     activeAutomationTab = tab === 'schedules' ? 'schedules' : 'workflows';
-    window.syncAutomationPrimaryTabs?.(activeAutomationTab);
+    window.Pivot.legacy.syncAutomationPrimaryTabs?.(activeAutomationTab);
     const workflowsPanel = document.getElementById('automation-workflows-panel');
     const schedulesPanel = document.getElementById('automation-schedules-panel');
     workflowsPanel?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
@@ -179,8 +179,8 @@ function renderAutomationAssetCenter() {
             if (button.dataset.automationWorkflowEdit) return showAutomationWorkflowEditor(workflowId);
             if (button.dataset.automationWorkflowView) return showAutomationWorkflowEditor(workflowId, { readOnly: true });
             if (button.dataset.automationWorkflowDependencies) return window.Pivot.moduleApi('agent.automation').openWorkflowDependencies?.(workflowId);
-            if (button.dataset.automationWorkflowRun) return window.runAgentWorkflowPublished?.();
-            if (button.dataset.automationWorkflowVersions) return openAgentWorkflowVersions();
+            if (button.dataset.automationWorkflowRun) return window.Pivot.legacy.runAgentWorkflowPublished?.();
+            if (button.dataset.automationWorkflowVersions) return window.Pivot.legacy.openAgentWorkflowVersions();
             if (button.dataset.automationWorkflowTriggers) return window.Pivot.moduleApi('agent.automationResources').open?.({ tab: 'triggers', workflowId });
             if (button.dataset.automationWorkflowSchedule) return openAgentWorkflowSchedules();
             if (button.dataset.automationWorkflowShare) return window.Pivot.moduleApi('agent.automation').openWorkflowShare?.(workflowId);
@@ -237,7 +237,7 @@ function showAutomationAssetCenter(options = {}) {
 
 function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     agentWorkflowReadOnly = Boolean(options.readOnly && workflowId);
-    window.syncAutomationPrimaryTabs?.('workflows');
+    window.Pivot.legacy.syncAutomationPrimaryTabs?.('workflows');
     document.getElementById('automation-assets-view')?.classList.add('hidden');
     document.getElementById('automation-editor-view')?.classList.remove('hidden');
     document.getElementById('automation-new-workflow-btn')?.classList.add('hidden');
@@ -259,17 +259,17 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     if (workflowId) selectAutomationWorkflow(workflowId);
     else if (!options.keepDraft) newAgentWorkflow({ showToast: false, clearSnapshots: true, remount: false });
     mountAgentDagEditor();
-    window.refreshAgentDagEditor?.();
+    window.Pivot.legacy.refreshAgentDagEditor?.();
     updateAgentWorkflowRunUi();
 }
 
-window.openAgentDagWorkbench = async function(options = {}) {
-    closeAgentConfigModal();
-    window.showMainWorkspace?.('agent-dag');
-    window.initAgentRealtime?.();
+window.Pivot.legacy.openAgentDagWorkbench = async function(options = {}) {
+    window.Pivot.legacy.closeAgentConfigModal();
+    window.Pivot.legacy.showMainWorkspace?.('agent-dag');
+    window.Pivot.legacy.initAgentRealtime?.();
     const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
-    window.bindUnifiedAutomationTabs?.();
+    window.Pivot.legacy.bindUnifiedAutomationTabs?.();
     try {
         await Promise.all([
             loadAgentModels(),
@@ -302,20 +302,20 @@ window.openAgentDagWorkbench = async function(options = {}) {
             window.Pivot.moduleApi('agent.schedules').openEditor?.('', { draft: options.scheduleDraft });
         }
     }
-    window.bindAgentDagWorkbench?.();
-    window.updateAgentAutoRefresh?.();
+    window.Pivot.legacy.bindAgentDagWorkbench?.();
+    window.Pivot.legacy.updateAgentAutoRefresh?.();
 };
 
-window.closeAgentDagWorkbench = async function() {
+window.Pivot.legacy.closeAgentDagWorkbench = async function() {
     const confirmed = await confirmAgentWorkflowDiscard('关闭工作流编排会放弃当前画布中尚未保存的修改，确定继续吗？');
     if (!confirmed) return;
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
-    window.showMainWorkspace?.('chat');
-    window.updateAgentAutoRefresh?.();
+    window.Pivot.legacy.showMainWorkspace?.('chat');
+    window.Pivot.legacy.updateAgentAutoRefresh?.();
 };
 
-window.bindAgentDagWorkbench = function() {
+window.Pivot.legacy.bindAgentDagWorkbench = function() {
     const newBtn = document.getElementById('agent-workflow-new-btn');
     if (newBtn && newBtn.dataset.boundAgentWorkflowNew !== '1') {
         newBtn.dataset.boundAgentWorkflowNew = '1';
@@ -327,12 +327,12 @@ window.bindAgentDagWorkbench = function() {
     const saveBtn = document.getElementById('agent-dag-save-btn');
     if (saveBtn && saveBtn.dataset.boundAgentDagSave !== '1') {
         saveBtn.dataset.boundAgentDagSave = '1';
-        saveBtn.addEventListener('click', () => window.saveAgentWorkflow?.());
+        saveBtn.addEventListener('click', () => window.Pivot.legacy.saveAgentWorkflow?.());
     }
     const readonlyRunBtn = document.getElementById('agent-workflow-readonly-run-btn');
     if (readonlyRunBtn && readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun !== '1') {
         readonlyRunBtn.dataset.boundAgentWorkflowReadonlyRun = '1';
-        readonlyRunBtn.addEventListener('click', () => window.runAgentWorkflowPublished?.());
+        readonlyRunBtn.addEventListener('click', () => window.Pivot.legacy.runAgentWorkflowPublished?.());
     }
     const dependencyBtn = document.getElementById('agent-workflow-dependency-btn');
     if (dependencyBtn && dependencyBtn.dataset.boundAgentWorkflowDependency !== '1') {
@@ -386,7 +386,7 @@ window.bindAgentDagWorkbench = function() {
     const closeAutomationBtn = document.getElementById('automation-close-btn');
     if (closeAutomationBtn && closeAutomationBtn.dataset.boundAutomationClose !== '1') {
         closeAutomationBtn.dataset.boundAutomationClose = '1';
-        closeAutomationBtn.addEventListener('click', () => window.closeAgentDagWorkbench?.());
+        closeAutomationBtn.addEventListener('click', () => window.Pivot.legacy.closeAgentDagWorkbench?.());
     }
     const automationSearch = document.getElementById('automation-assets-search-input');
     if (automationSearch && automationSearch.dataset.boundAutomationSearch !== '1') {
@@ -500,7 +500,7 @@ window.bindAgentDagWorkbench = function() {
     const versionsBtn = document.getElementById('agent-workflow-versions-btn');
     if (versionsBtn && versionsBtn.dataset.boundAgentWorkflowVersions !== '1') {
         versionsBtn.dataset.boundAgentWorkflowVersions = '1';
-        versionsBtn.addEventListener('click', openAgentWorkflowVersions);
+        versionsBtn.addEventListener('click', window.Pivot.legacy.openAgentWorkflowVersions);
     }
     const scheduleBtn = document.getElementById('agent-workflow-schedule-btn');
     if (scheduleBtn && scheduleBtn.dataset.boundAgentWorkflowSchedule !== '1') {

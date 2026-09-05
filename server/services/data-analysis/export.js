@@ -94,7 +94,7 @@ async function duckWriteXlsx(parquetPath, columns, targetPath, displayName) {
     const sheet = XLSX.utils.aoa_to_sheet(aoa);
     const sheetName = String(displayName || 'Sheet1').replace(/[\\/?*[\]:]/g, '_').slice(0, 31) || 'Sheet1';
     XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
-    XLSX.writeFile(workbook, targetPath, { bookType: 'xlsx' });
+    await fs.promises.writeFile(targetPath, XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
     return aoa.length - (columns.length ? 1 : 0);
 }
 
@@ -105,7 +105,7 @@ const EXPORT_FORMATS = {
 };
 
 async function exportDataset(userId, datasetId, format = 'csv') {
-    ensureAnalysisDirs();
+    await ensureAnalysisDirs();
     const fmt = String(format || 'csv').toLowerCase();
     if (!EXPORT_FORMATS[fmt]) {
         const err = new Error('仅支持导出 CSV、XLSX 或 Parquet 格式。');
@@ -116,7 +116,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
     const columns = jsonParse(row.columns_json, []);
     const { parquetPath } = getDatasetPaths(row);
     const exportDir = resolveInside(exportRoot, String(userId));
-    fs.mkdirSync(exportDir, { recursive: true });
+    await fs.promises.mkdir(exportDir, { recursive: true });
     const baseName = row.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
     const ext = EXPORT_FORMATS[fmt].ext;
     const fileName = `${baseName}-${Date.now()}.${ext}`;

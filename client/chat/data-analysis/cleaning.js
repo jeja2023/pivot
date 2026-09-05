@@ -1,5 +1,5 @@
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, esc, fmtNumber } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
@@ -679,8 +679,8 @@
             toast('请至少添加一条清洗规则', 'warning');
             return;
         }
-        const confirmed = typeof showConfirm === 'function'
-            ? await showConfirm('生成清洗后数据集', '将按当前规则生成一个新的派生数据集。原始数据集不会被修改。')
+        const confirmed = typeof window.Pivot.legacy.showConfirm === 'function'
+            ? await window.Pivot.legacy.showConfirm('生成清洗后数据集', '将按当前规则生成一个新的派生数据集。原始数据集不会被修改。')
             : true;
         if (!confirmed) return;
         await guardButton('data-cleaning-apply', '正在生成…', async () => {

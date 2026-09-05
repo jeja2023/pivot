@@ -10,7 +10,7 @@ test('可写性探针使用固定文件名，不再随调用次数堆积残留�
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-probe-'));
     try {
         for (let i = 0; i < 20; i += 1) {
-            assert.equal(checkWritableDirectory('data', dir).status, 'ok');
+            assert.equal((await checkWritableDirectory('data', dir)).status, 'ok');
         }
         assert.deepEqual(fs.readdirSync(dir), []);
     } finally {
@@ -24,7 +24,7 @@ test('历史遗留的 pid-时间戳 探针文件会被异步清理，业务文�
         fs.writeFileSync(path.join(dir, '.pivot-health-18232-1780893927962.tmp'), 'ok');
         fs.writeFileSync(path.join(dir, '.pivot-health-25876-1781077307281.tmp'), 'ok');
         fs.writeFileSync(path.join(dir, 'chat.db'), 'data');
-        assert.equal(checkWritableDirectory('data', dir).status, 'ok');
+        assert.equal((await checkWritableDirectory('data', dir)).status, 'ok');
         const deadline = Date.now() + 2000;
         while (Date.now() < deadline) {
             if (fs.readdirSync(dir).length === 1) break;
@@ -189,4 +189,3 @@ test('请求正常结束会清掉兜底定时器，不会误报 503', async () =
         else process.env.API_REQUEST_WATCHDOG_MS = previous;
     }
 });
-

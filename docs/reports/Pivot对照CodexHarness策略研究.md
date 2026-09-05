@@ -4,6 +4,8 @@
 > 对照对象：[`codex-harness-strategy-report.md`](../../codex-harness-strategy-report.md)  
 > 审计范围：`server/`、`desktop/agent-runtime/`、`client/`、PostgreSQL schema/migrations、`tests/`、项目设计与验收文档。  
 > 判定原则：以当前仓库代码、路由、数据库结构和测试证据为准；仅在 README 或设计文档中声明、但没有可验证实现的能力，不判为“已实现”。
+>
+> **状态校正（2026-09-05）**：本文较早章节中标为“跨入口仍需收敛”的 `AgentStepContext`、审计字段、Desktop 窗口快照和流式 delta 留存问题，已由统一序列化协议、Desktop 持久化快照和双轨采样器完成闭环，并有回归覆盖。有关 ExecPolicy、Docker Capability Worker、多节点部署、更多 Provider 专有事件和更大规模生产压测的描述，属于明确暂缓的功能/目标环境事项，而不是当前工程缺陷。
 
 ## 一、结论摘要
 
@@ -21,12 +23,12 @@ Pivot 已经实现了一个面向业务自动化的 Agent 控制面与执行面�
 
 1. Pivot 已新增每次模型/工具步骤统一生成的不可变 `AgentStepContext`，并把 context/world-state hash 写入步骤、Trace、工具审计和事件。
 2. Pivot 已新增结构化 `WorldState` 编译和 planner 注入边界；PostgreSQL 已持久化 context window/snapshot 版本链，Streaming 支持 full/reference/diff，JSON planner 因每轮独立请求强制 full，并按模型/权限/工作区/压缩等变化强制刷新。
-3. Pivot 已新增 `ToolOrchestrator` 和 `ToolExecutionPlan`，统一 policy、approval、network preflight、sandbox 选择、operation key、checkpoint、执行、失败收敛和事件记录；跨 Chat/desktop 入口的最终统一仍需继续。
+3. Pivot 已新增 `ToolOrchestrator` 和 `ToolExecutionPlan`，统一 policy、approval、network preflight、sandbox 选择、operation key、checkpoint、执行、失败收敛和事件记录；Chat、Agent 与 desktop 的 StepContext/审计序列化已使用同一契约。
 4. Pivot 已新增 PostgreSQL append-only `agent_events`、可重试 `agent_event_outbox` 和按 seq replay API，并覆盖 model requested/delta/completed、context captured、approval/run/tool 关键事件。
 5. Pivot 已落地 PostgreSQL-only `AgentControl` mailbox、`agent_run_resources` 资源账本和 `agent_residencies` 常驻实例表，支持父子消息、预算预留/消耗回收、子并发上限、fork history（none/all/turns）、父取消传播、租约保护和 per-user LRU。
 6. Pivot 已补齐 Provider envelope、WorldState/编排/控制器契约测试，并新增本地 mock SSE 的真实工具回传闭环、App Server JSON-RPC 最小控制面、官方 MCP conformance 客户端场景和 Provider 事件状态机；真实长连接与 conformance 已在本版本完成验证。
 
-综合判定：**Pivot 已具备生产级 Agent 治理底座；v0.1.24 已把“统一采样上下文 + 持久化 WorldState 窗口 + 跨 Chat/desktop 的 ToolExecutionPlan + PostgreSQL 事件日志/outbox + AgentControl 资源账本 + Provider envelope + App Server/MCP 官方协议验证 + 常驻 Agent residency/LRU + usage 校准 + 非幂等故障矩阵 + 多进程压力验证”推进为可运行骨架。后续仅需持续积累生产样本和扩展评测规模，而不是复制 Codex 的 Prompt 文本或 Rust 文件结构。**
+综合判定：**Pivot 已具备生产级 Agent 治理底座；统一采样上下文、持久化 WorldState 窗口、跨入口 ToolExecutionPlan、PostgreSQL 事件日志/outbox、AgentControl 资源账本、Provider envelope、App Server/MCP 官方协议验证、residency/LRU、usage 校准、非幂等故障矩阵、多进程压力验证和跨入口审计序列化均已形成可运行闭环。后续仅是生产样本积累和规模化评测，不是当前工程待修项。**
 
 ## 二、判定等级
 

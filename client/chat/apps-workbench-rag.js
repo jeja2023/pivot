@@ -7,10 +7,10 @@ let officialWritingRagCollectionsLoaded = false;
 
 async function ensureOfficialWritingRagCollections() {
     if (officialWritingRagCollectionsLoaded) return;
-    if (typeof window.loadKnowledgeCollections !== 'function') return;
+    if (typeof window.Pivot.legacy.loadKnowledgeCollections !== 'function') return;
     let collections = [];
     try {
-        collections = await window.loadKnowledgeCollections();
+        collections = await window.Pivot.legacy.loadKnowledgeCollections();
     } catch (e) {
         // 加载失败时保持标记为 false，便于后续调用重试。
         return;
@@ -246,7 +246,7 @@ function bindAppsWorkbenchEvents() {
     if (!panel || panel.dataset.appsBound === '1') return;
     panel.dataset.appsBound = '1';
     document.getElementById('apps-back-btn')?.addEventListener('click', showAppsHome);
-    document.getElementById('apps-modal-close')?.addEventListener('click', () => window.closeAppsWorkbench?.());
+    document.getElementById('apps-modal-close')?.addEventListener('click', () => window.Pivot.legacy.closeAppsWorkbench?.());
     document.getElementById('official-writing-toggle-left-btn')?.addEventListener('click', () => {
         toggleOfficialWritingLeftRail();
         closeOfficialWritingCommandMenu();
@@ -577,17 +577,17 @@ function bindAppsWorkbenchEvents() {
     });
 }
 
-window.openAppsWorkbench = function() {
-    window.showMainWorkspace?.('apps');
-    window.setAppsWorkbenchVisibility?.(true);
+window.Pivot.legacy.openAppsWorkbench = function() {
+    window.Pivot.legacy.showMainWorkspace?.('apps');
+    window.Pivot.legacy.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
     if (getStoredAppsActiveApp() === 'official-writing') {
         showOfficialWritingApp().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
     } else if (getStoredAppsActiveApp() === 'regulations') {
-        if (typeof window.showRegulationsAppFromRegistry === 'function') {
-            window.showRegulationsAppFromRegistry().catch(() => showAppsHome());
+        if (typeof window.Pivot.legacy.showRegulationsAppFromRegistry === 'function') {
+            window.Pivot.legacy.showRegulationsAppFromRegistry().catch(() => showAppsHome());
         } else {
             showAppsHome();
         }
@@ -600,11 +600,11 @@ window.openAppsWorkbench = function() {
     }
 };
 
-window.closeAppsWorkbench = function() {
+window.Pivot.legacy.closeAppsWorkbench = function() {
     setStoredAppsActiveApp('');
     showAppsHome();
-    window.setAppsWorkbenchVisibility?.(false);
-    window.showMainWorkspace?.('chat');
+    window.Pivot.legacy.setAppsWorkbenchVisibility?.(false);
+    window.Pivot.legacy.showMainWorkspace?.('chat');
 };
 
-window.PIVOT_APP_REGISTRY = PIVOT_APP_REGISTRY;
+window.Pivot.legacy.PIVOT_APP_REGISTRY = PIVOT_APP_REGISTRY;

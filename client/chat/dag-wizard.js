@@ -321,7 +321,7 @@ function createDagWizardController(ctx) {
                 if (queryBuilder) {
                     const built = queryBuilder.collect();
                     if (built.error) {
-                        window.showToast?.(built.error, 'error');
+                        window.Pivot.legacy.showToast?.(built.error, 'error');
                         return null;
                     }
                     nextInput.sql = built.sql;
@@ -332,7 +332,7 @@ function createDagWizardController(ctx) {
                     const first = fieldsByName.get(missing[0]);
                     const missingLabels = missing.map(name => friendlyFieldLabel(name, properties[name], tool));
                     first?.focus?.({ preventScroll: true });
-                    window.showToast?.(`请先填写：${missingLabels.join('、')}`, 'error');
+                    window.Pivot.legacy.showToast?.(`请先填写：${missingLabels.join('、')}`, 'error');
                     return null;
                 }
                 // 保留高级 JSON 里已有但向导没覆盖的字段。
@@ -386,7 +386,7 @@ function createDagWizardController(ctx) {
                     renderError = renderError || error;
                     console.error('DAG 节点参数应用后同步 JSON 失败', error);
                 }
-                window.showToast?.(
+                window.Pivot.legacy.showToast?.(
                     renderError
                         ? '节点参数已写入，但画布刷新失败，请点击顶部“保存”后重试'
                         : '节点参数已应用到画布，请点击顶部“保存”完成保存',

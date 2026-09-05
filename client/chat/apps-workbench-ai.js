@@ -13,7 +13,7 @@ function getOfficialWritingTaskModelId(task = 'selection') {
         selection: ['official-writing-selection', 'official-writing-selection-model']
     };
     const [scope, selectorId] = selectorByTask[task] || selectorByTask.selection;
-    return window.PivotAppModels?.getSelectedModel?.(scope, selectorId)
+    return window.Pivot.legacy.PivotAppModels?.getSelectedModel?.(scope, selectorId)
         || document.getElementById(selectorId)?.value
         || '';
 }
@@ -357,7 +357,7 @@ const OFFICIAL_WRITING_SELECTION_ACTION_LABELS = {
 
 // 弹窗收集自定义指令后再发起“按指令改写”。
 async function promptOfficialWritingSelectionCustom(selection) {
-    const instruction = await window.showInputPrompt?.({
+    const instruction = await window.Pivot.legacy.showInputPrompt?.({
         title: '按指令改写选区',
         message: '请输入修改指令，让 AI 按此改写选中片段：',
         placeholder: '例如：改得更简洁、去掉口语化表述',

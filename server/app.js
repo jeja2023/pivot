@@ -267,8 +267,8 @@ app.get('/api/health', healthLimiter, (req, res) => {
     });
 });
 
-app.get('/api/health/details', healthLimiter, authMiddleware, (req, res) => {
-    const health = getSystemHealthSnapshot();
+app.get('/api/health/details', healthLimiter, authMiddleware, asyncHandler(async (req, res) => {
+    const health = await getSystemHealthSnapshot();
     // runtime 探针是排查「全站一起卡住」的关键现场：事件循环延迟、连接池水位、
     // 在途请求与堆占用，四项同时给出才能区分「PG 慢」「线程池饿死」「GC 抖动」。
     const runtime = getRuntimeDiagnostics();
@@ -283,7 +283,7 @@ app.get('/api/health/details', healthLimiter, authMiddleware, (req, res) => {
         status,
         checks
     });
-});
+}));
 
 app.get('/api/metrics', metricsAuthMiddleware, asyncHandler(async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');

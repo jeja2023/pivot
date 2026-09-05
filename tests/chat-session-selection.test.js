@@ -27,13 +27,13 @@ function createSessionClientHarness() {
             aliases.forEach(alias => {
                 const exportName = typeof alias === 'string' ? alias : alias.exportName;
                 const globalName = typeof alias === 'string' ? alias : alias.globalName;
-                if (exportName && globalName) this.window[globalName] = this.modules[name][exportName];
+                if (exportName && globalName) this.legacy[globalName] = this.modules[name][exportName];
             });
         },
         moduleApi(name) {
             return this.modules[name] || {};
         },
-        window: null
+        legacy: Object.create(null)
     };
     const window = {
         Pivot: pivot,
@@ -51,7 +51,15 @@ function createSessionClientHarness() {
             unregisteredRuns.push(runId);
         }
     };
-    pivot.window = window;
+    Object.assign(pivot.legacy, {
+        showMainWorkspace: window.showMainWorkspace,
+        persistActiveChatSession: window.persistActiveChatSession,
+        markActiveSessionInList: window.markActiveSessionInList,
+        updateContextUsage: window.updateContextUsage,
+        attachChatAgentControls: window.attachChatAgentControls,
+        registerChatAgentStreamingTarget: window.registerChatAgentStreamingTarget,
+        unregisterChatAgentStreamingTarget: window.unregisterChatAgentStreamingTarget
+    });
 
     const sandbox = {
         window,
@@ -115,7 +123,7 @@ function createSessionClientHarness() {
         controls,
         streamingTargets,
         unregisteredRuns,
-        selectSession: window.selectSession
+        selectSession: window.Pivot.legacy.selectSession
     };
 }
 
@@ -208,4 +216,3 @@ test('长会话虚拟滚动具备防闪烁保护：增量DOM复用、程序滚�
     assert.ok(renderWindowMatch);
     assert.doesNotMatch(renderWindowMatch[0], /PivotSafeHtml\.setHtml\(state\.container/);
 });
-

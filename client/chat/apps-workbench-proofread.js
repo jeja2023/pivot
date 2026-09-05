@@ -282,7 +282,7 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     renderOfficialWritingProofread();
     if (tab === 'elements') hydrateOfficialWritingMetaForm();
     if (tab === 'suggestions') {
-        void window.PivotAppModels?.refresh?.('official-writing-review', 'official-writing-review-model');
+        void window.Pivot.legacy.PivotAppModels?.refresh?.('official-writing-review', 'official-writing-review-model');
     }
     resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
@@ -595,11 +595,11 @@ async function copyOfficialWritingPrompt() {
 
 function sendOfficialWritingToChat() {
     const prompt = buildOfficialWritingPrompt();
-    window.showMainWorkspace?.('chat');
+    window.Pivot.legacy.showMainWorkspace?.('chat');
     const input = document.getElementById('user-input');
     if (!input) return;
     input.value = prompt;
-    window.resizeUserInput?.();
+    window.Pivot.legacy.resizeUserInput?.();
     input.focus();
     showToast('已带入聊天，请确认后发送');
 }

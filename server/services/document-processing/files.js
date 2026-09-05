@@ -60,13 +60,13 @@ async function sha256File(filePath) {
     return hash.digest('hex');
 }
 
-function moveUploadedFile(sourcePath, targetPath) {
+async function moveUploadedFile(sourcePath, targetPath) {
     try {
-        fs.renameSync(sourcePath, targetPath);
+        await fs.promises.rename(sourcePath, targetPath);
     } catch (err) {
         if (!['EXDEV', 'EPERM', 'EACCES'].includes(err?.code)) throw err;
-        fs.copyFileSync(sourcePath, targetPath);
-        fs.rmSync(sourcePath, { force: true, maxRetries: 4, retryDelay: 80 });
+        await fs.promises.copyFile(sourcePath, targetPath);
+        await fs.promises.rm(sourcePath, { force: true, maxRetries: 4, retryDelay: 80 });
     }
 }
 
@@ -110,10 +110,15 @@ async function getDocumentFileForUser(fileId, userId) {
     `, [fileId, userId]) || null;
 }
 
-function getDocumentFilePath(row) {
+async function getDocumentFilePathAsync(row) {
     const target = resolveStoredDocumentPath(row?.file_path);
-    if (!target || !fs.existsSync(target)) return null;
-    return target;
+    if (!target) return null;
+    try {
+        await fs.promises.access(target, fs.constants.R_OK);
+        return target;
+    } catch (_err) {
+        return null;
+    }
 }
 
 async function updateDocumentFileMetadata({ fileId, userId, pageCount = null, metadata = null }) {
@@ -146,7 +151,7 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
     const originalName = normalizeOriginalName(file.originalname || file.filename || 'upload');
     const ext = safeExtension(originalName);
     const kind = detectDocumentKind({ ext, mimeType: file.mimetype });
-    const initialSize = Number(file.size || 0) || fs.statSync(file.path).size;
+    const initialSize = Number(file.size || 0) || (await fs.promises.stat(file.path)).size;
     const row = await queryOne(`
         INSERT INTO document_files (
             user_id, original_name, file_type, file_ext, file_size, source_module, source_ref, metadata_json, created_at, updated_at
@@ -156,10 +161,10 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
 
     const fileId = row.id;
     const storedName = `${fileId}-${crypto.randomUUID()}${ext}`;
-    const targetPath = buildManagedPath(originalsRoot, userId, storedName);
+    const targetPath = await buildManagedPath(originalsRoot, userId, storedName);
     try {
-        moveUploadedFile(file.path, targetPath);
-        const stat = fs.statSync(targetPath);
+        await moveUploadedFile(file.path, targetPath);
+        const stat = await fs.promises.stat(targetPath);
         const digest = await sha256File(targetPath);
         const imageMetadata = kind === 'image' ? await readImageMetadata(targetPath) : {};
         const nextMetadata = { ...metadata, mimeType: file.mimetype || '', ...imageMetadata };
@@ -180,7 +185,7 @@ async function registerUploadedFile({ user, file, sourceModule = 'document_proce
 module.exports = {
     detectDocumentKind,
     getDocumentFileForUser,
-    getDocumentFilePath,
+    getDocumentFilePathAsync,
     parseJson,
     readImageMetadata,
     registerUploadedFile,

@@ -7,8 +7,8 @@
         if (!toggle) return;
 
         try {
-            const apiBase = window.API_BASE || '/api';
-            const apiFetchFn = window.apiFetch || fetch;
+            const apiBase = window.Pivot.legacy.API_BASE || '/api';
+            const apiFetchFn = window.Pivot.legacy.apiFetch || fetch;
             const res = await apiFetchFn(`${apiBase}/settings/stealth`);
             if (!res.ok) return;
             const data = await res.json();
@@ -51,8 +51,8 @@
         }
 
         try {
-            const apiBase = window.API_BASE || '/api';
-            const apiFetchFn = window.apiFetch || fetch;
+            const apiBase = window.Pivot.legacy.API_BASE || '/api';
+            const apiFetchFn = window.Pivot.legacy.apiFetch || fetch;
             const res = await apiFetchFn(`${apiBase}/settings/stealth`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -84,8 +84,8 @@
         if (!confirmed) return;
 
         try {
-            const apiBase = window.API_BASE || '/api';
-            const apiFetchFn = window.apiFetch || fetch;
+            const apiBase = window.Pivot.legacy.API_BASE || '/api';
+            const apiFetchFn = window.Pivot.legacy.apiFetch || fetch;
             const res = await apiFetchFn(`${apiBase}/settings/stealth`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },

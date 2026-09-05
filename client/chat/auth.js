@@ -1,7 +1,7 @@
 // --- 认证逻辑 ---
 let isLogin = true;
 let allowPublicRegistration = false;
-window.allowPublicRegistration = false;
+window.Pivot.legacy.allowPublicRegistration = false;
 
 function clearLegacyOfficialWritingStorage() {
     // 公文库已迁移到按用户归属的服务端存储。仅清理旧版不含用户标识的
@@ -18,23 +18,23 @@ function syncAuthModeClass() {
     authContainer.classList.toggle('is-login-mode', isLogin);
     authContainer.classList.toggle('is-register-mode', !isLogin);
 }
-window.setPublicRegistrationState = (enabled) => {
+window.Pivot.legacy.setPublicRegistrationState = (enabled) => {
     allowPublicRegistration = enabled === true;
-    window.allowPublicRegistration = allowPublicRegistration;
+    window.Pivot.legacy.allowPublicRegistration = allowPublicRegistration;
     document.getElementById('auth-toggle')?.classList.toggle('hidden', !allowPublicRegistration);
 };
-window.PASSWORD_RULE_DESCRIPTION = '至少 8 位，并同时包含字母和数字';
-window.getPasswordValidationMessage = (password, label = '密码') => {
+window.Pivot.legacy.PASSWORD_RULE_DESCRIPTION = '至少 8 位，并同时包含字母和数字';
+window.Pivot.legacy.getPasswordValidationMessage = (password, label = '密码') => {
     const value = String(password || '');
     const missing = [];
-    if (!value) return `请输入${label}。${label}要求：${window.PASSWORD_RULE_DESCRIPTION}。`;
+    if (!value) return `请输入${label}。${label}要求：${window.Pivot.legacy.PASSWORD_RULE_DESCRIPTION}。`;
     if (value.length < 8) missing.push('至少 8 位');
     if (!/[A-Za-z]/.test(value)) missing.push('包含字母');
     if (!/[0-9]/.test(value)) missing.push('包含数字');
-    return missing.length ? `${label}不符合要求：请确保${missing.join('、')}。完整规则：${window.PASSWORD_RULE_DESCRIPTION}。` : '';
+    return missing.length ? `${label}不符合要求：请确保${missing.join('、')}。完整规则：${window.Pivot.legacy.PASSWORD_RULE_DESCRIPTION}。` : '';
 };
 
-window.toggleAuthPassword = (inputId, iconId) => {
+window.Pivot.legacy.toggleAuthPassword = (inputId, iconId) => {
     const input = document.getElementById(inputId);
     const icon = document.getElementById(iconId);
     if (!input || !icon) return;
@@ -51,15 +51,15 @@ async function loadAuthConfig() {
     try {
         const res = await apiFetch(API_BASE + '/auth/config');
         const data = await res.json();
-        window.setPublicRegistrationState(data.allowPublicRegistration === true);
-        window.publicUrl = data.publicUrl || '';
+        window.Pivot.legacy.setPublicRegistrationState(data.allowPublicRegistration === true);
+        window.Pivot.legacy.publicUrl = data.publicUrl || '';
     } catch (e) {
-        window.setPublicRegistrationState(false);
+        window.Pivot.legacy.setPublicRegistrationState(false);
     }
 }
 
 // 显式定义界面显示控制逻辑
-window.showAuth = () => {
+window.Pivot.legacy.showAuth = () => {
     const authContainer = document.getElementById('auth-container');
     authContainer?.classList.remove('hidden');
     syncAuthModeClass();
@@ -68,23 +68,23 @@ window.showAuth = () => {
     document.body?.classList.remove('is-main-workspace-full');
     document.body?.setAttribute('data-active-workspace', 'auth');
     document.querySelector('.chat-container')?.setAttribute('data-active-workspace', 'chat');
-    if (window.updateContextUsage) window.updateContextUsage(null);
-    window.loadLoginAnnouncements?.();
+    if (window.Pivot.legacy.updateContextUsage) window.Pivot.legacy.updateContextUsage(null);
+    window.Pivot.legacy.loadLoginAnnouncements?.();
 };
 
-window.showApp = (options = {}) => {
+window.Pivot.legacy.showApp = (options = {}) => {
     if (!currentUser) return;
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     document.body?.classList.remove('auth-active');
     const restoreWorkspace = options.restoreWorkspace !== false;
-    if (restoreWorkspace && window.restoreMainWorkspaceAfterLogin) {
-        Promise.resolve(window.restoreMainWorkspaceAfterLogin()).catch(err => {
+    if (restoreWorkspace && window.Pivot.legacy.restoreMainWorkspaceAfterLogin) {
+        Promise.resolve(window.Pivot.legacy.restoreMainWorkspaceAfterLogin()).catch(err => {
             console.error('恢复主工作区失败:', err);
-            window.showMainWorkspace?.('chat');
+            window.Pivot.legacy.showMainWorkspace?.('chat');
         });
-    } else if (window.showMainWorkspace) {
-        window.showMainWorkspace('chat');
+    } else if (window.Pivot.legacy.showMainWorkspace) {
+        window.Pivot.legacy.showMainWorkspace('chat');
     }
 
     // 更新用户信息显示
@@ -120,13 +120,13 @@ window.showApp = (options = {}) => {
     }
 
     // 登录成功后加载必要数据
-    if (window.loadSessions) window.loadSessions();
-    if (window.loadSettings) window.loadSettings();
-    if (window.refreshModelSelector) window.refreshModelSelector();
-    if (window.initAgentRealtime) window.initAgentRealtime();
-    if (window.initAnnouncements) window.initAnnouncements();
-    if (window.loadKnowledgeCollections) window.loadKnowledgeCollections();
-    if (window.refreshRagTagControlsForSelectedCollections) window.refreshRagTagControlsForSelectedCollections();
+    if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
+    if (window.Pivot.legacy.loadSettings) window.Pivot.legacy.loadSettings();
+    if (window.Pivot.legacy.refreshModelSelector) window.Pivot.legacy.refreshModelSelector();
+    if (window.Pivot.legacy.initAgentRealtime) window.Pivot.legacy.initAgentRealtime();
+    if (window.Pivot.legacy.initAnnouncements) window.Pivot.legacy.initAnnouncements();
+    if (window.Pivot.legacy.loadKnowledgeCollections) window.Pivot.legacy.loadKnowledgeCollections();
+    if (window.Pivot.legacy.refreshRagTagControlsForSelectedCollections) window.Pivot.legacy.refreshRagTagControlsForSelectedCollections();
 };
 
 document.getElementById('auth-toggle')?.addEventListener('click', () => {
@@ -168,7 +168,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     
     if (!isLogin) {
         if (password !== confirmPw) return showToast('两次输入的密码不一致', 'error');
-        const passwordError = window.getPasswordValidationMessage(password);
+        const passwordError = window.Pivot.legacy.getPasswordValidationMessage(password);
         if (passwordError) return showToast(passwordError, 'error');
         if (!nickname) return showToast('请输入显示名称', 'error');
         if (!/^[\u4e00-\u9fa5]+$/.test(nickname)) return showToast('显示名称必须是中文姓名', 'error');
@@ -192,7 +192,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
             setCsrfToken(data.csrfToken || '');
             currentUser = data.user;
             localStorage.removeItem('pivot_token');
-            showApp({ restoreWorkspace: false });
+            window.Pivot.legacy.showApp({ restoreWorkspace: false });
         } else {
             showToast('注册成功，请登录');
             document.getElementById('auth-toggle').click();
@@ -200,9 +200,9 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     } catch (e) { showToast(e.message, 'error'); }
 });
 
-window.logout = async () => {
-    if (window.closeAgentRealtime) window.closeAgentRealtime();
-    if (window.stopAnnouncements) window.stopAnnouncements();
+window.Pivot.legacy.logout = async () => {
+    if (window.Pivot.legacy.closeAgentRealtime) window.Pivot.legacy.closeAgentRealtime();
+    if (window.Pivot.legacy.stopAnnouncements) window.Pivot.legacy.stopAnnouncements();
     try {
         await apiFetch(API_BASE + '/auth/logout', {
             method: 'POST'
@@ -235,7 +235,7 @@ loadAuthConfig();
 
 // --- 账户安全与 API Key 管理 ---
 
-window.loadApiKeys = async function() {
+window.Pivot.legacy.loadApiKeys = async function() {
     try {
         document.querySelectorAll('.super-admin-only').forEach(el => {
             el.classList.toggle('hidden', !isSuperAdminUser());
@@ -244,7 +244,7 @@ window.loadApiKeys = async function() {
         if (!res.ok) throw new Error('加载 API Key 失败');
         const data = await res.json();
         const keys = Array.isArray(data) ? data : (data.keys || []);
-        window.updateApiAccessState?.(data.apiAccessEnabled === true);
+        window.Pivot.legacy.updateApiAccessState?.(data.apiAccessEnabled === true);
         const body = document.getElementById('api-keys-body');
         if (keys.length === 0) {
             renderTableMessage(body, 9, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
@@ -266,7 +266,7 @@ window.loadApiKeys = async function() {
             `).join(''));
         }
         // 同步加载可用模型信息
-        window.loadAvailableModels();
+        window.Pivot.legacy.loadAvailableModels();
     } catch (e) {
         showToast(e.message, 'error');
     }
@@ -275,25 +275,25 @@ window.loadApiKeys = async function() {
 document.getElementById('api-keys-body')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-api-key-action="delete"]');
     if (!button) return;
-    window.deleteApiKey(button.dataset.apiKeyId);
+    window.Pivot.legacy.deleteApiKey(button.dataset.apiKeyId);
 });
 
-window.openApiCallLogsModal = function() {
+window.Pivot.legacy.openApiCallLogsModal = function() {
     if (!isSuperAdminUser()) return;
     const modal = document.getElementById('api-call-logs-modal');
     modal?.classList.remove('hidden');
     modal?.setAttribute('aria-hidden', 'false');
     document.getElementById('api-call-log-search')?.focus();
-    window.loadApiCallLogs?.(1);
+    window.Pivot.legacy.loadApiCallLogs?.(1);
 }
 
-window.closeApiCallLogsModal = function() {
+window.Pivot.legacy.closeApiCallLogsModal = function() {
     const modal = document.getElementById('api-call-logs-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
 }
 
-window.loadApiCallLogs = async function(page = 1) {
+window.Pivot.legacy.loadApiCallLogs = async function(page = 1) {
     if (!isSuperAdminUser()) return;
     pageState.apiCallLogs = page;
     const body = document.getElementById('api-call-logs-body');
@@ -336,10 +336,10 @@ window.loadApiCallLogs = async function(page = 1) {
     }
 }
 
-window.loadAvailableModels = async function() {
+window.Pivot.legacy.loadAvailableModels = async function() {
     const listEl = document.getElementById('available-models-list');
     if (!listEl) return;
-    if (window.apiAccessEnabled === false) {
+    if (window.Pivot.legacy.apiAccessEnabled === false) {
         PivotSafeHtml.setHtml(listEl, '<span style="color: var(--text-muted);">API 接入已关闭，暂无外部调用模型</span>');
         return;
     }
@@ -383,8 +383,8 @@ window.loadAvailableModels = async function() {
     }
 }
 
-window.createApiKey = function() {
-    if (window.apiAccessEnabled === false) {
+window.Pivot.legacy.createApiKey = function() {
+    if (window.Pivot.legacy.apiAccessEnabled === false) {
         showToast('API 接入已关闭，暂不能新建密钥', 'error');
         return;
     }
@@ -397,7 +397,7 @@ window.createApiKey = function() {
     document.getElementById('new-key-name')?.focus();
 }
 
-window.confirmCreateKey = async function() {
+window.Pivot.legacy.confirmCreateKey = async function() {
     const button = document.querySelector('[data-static-action="confirm-create-key"]');
     const name = document.getElementById('new-key-name').value || '未命名密钥';
     if (button) {
@@ -419,7 +419,7 @@ window.confirmCreateKey = async function() {
         document.getElementById('key-input-view').classList.add('hidden');
         document.getElementById('key-result-view').classList.remove('hidden');
         
-        loadApiKeys();
+        window.Pivot.legacy.loadApiKeys();
     } catch (e) {
         showToast(e.message, 'error');
     } finally {
@@ -430,13 +430,13 @@ window.confirmCreateKey = async function() {
     }
 }
 
-window.closeKeyModal = function() {
+window.Pivot.legacy.closeKeyModal = function() {
     const modal = document.getElementById('key-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
 }
 
-window.copyGeneratedKey = function() {
+window.Pivot.legacy.copyGeneratedKey = function() {
     const text = document.getElementById('generated-key-text').innerText;
     if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(text).then(() => {
@@ -473,13 +473,13 @@ function fallbackCopyTextToClipboard(text) {
     document.body.removeChild(textArea);
 }
 
-window.deleteApiKey = async function(id) {
-    showConfirm('删除 API Key', '确定要删除此 API Key 吗？相关服务将无法再通过此密钥访问。', async () => {
+window.Pivot.legacy.deleteApiKey = async function(id) {
+    window.Pivot.legacy.showConfirm('删除 API Key', '确定要删除此 API Key 吗？相关服务将无法再通过此密钥访问。', async () => {
         try {
             const res = await apiFetch(`${API_BASE}/auth/keys/${id}`, { method: 'DELETE' });
             if (res.ok) {
                 showToast('密钥已注销');
-                loadApiKeys();
+                window.Pivot.legacy.loadApiKeys();
             }
         } catch (e) {
             showToast('操作失败', 'error');
@@ -487,14 +487,14 @@ window.deleteApiKey = async function(id) {
     });
 }
 
-window.updatePassword = async function() {
+window.Pivot.legacy.updatePassword = async function() {
     const oldPassword = document.getElementById('pw-old').value;
     const newPassword = document.getElementById('pw-new').value;
     const confirmPassword = document.getElementById('pw-confirm').value;
 
     if (!oldPassword || !newPassword || !confirmPassword) return showToast('请填写所有密码项');
     if (newPassword !== confirmPassword) return showToast('新密码两次输入不一致', 'error');
-    const passwordError = window.getPasswordValidationMessage?.(newPassword, '新密码') || '';
+    const passwordError = window.Pivot.legacy.getPasswordValidationMessage?.(newPassword, '新密码') || '';
     if (passwordError) return showToast(passwordError, 'error');
 
     const button = document.getElementById('pw-update-btn');
@@ -515,7 +515,7 @@ window.updatePassword = async function() {
         document.getElementById('pw-new').value = '';
         document.getElementById('pw-confirm').value = '';
         showToast('密码修改成功，请重新登录');
-        setTimeout(() => window.logout(), 1500);
+        setTimeout(() => window.Pivot.legacy.logout(), 1500);
     } catch (e) {
         showToast(e.message, 'error');
     } finally {

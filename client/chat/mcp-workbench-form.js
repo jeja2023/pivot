@@ -297,9 +297,9 @@ function bindMcpFormControls(mode = 'create') {
     const closeButton = document.getElementById('mcp-edit-close-btn');
     if (editModal && closeButton && closeButton.dataset.boundMcpClose !== '1') {
         closeButton.dataset.boundMcpClose = '1';
-        closeButton.addEventListener('click', () => window.closeMcpEditModal?.());
+        closeButton.addEventListener('click', () => window.Pivot.legacy.closeMcpEditModal?.());
         editModal.addEventListener('click', event => {
-            if (event.target === editModal) window.closeMcpEditModal?.();
+            if (event.target === editModal) window.Pivot.legacy.closeMcpEditModal?.();
         });
     }
     const sourceType = mcpFormEl('source-type', mode);
@@ -321,17 +321,17 @@ function bindMcpFormControls(mode = 'create') {
     const testButton = mcpFormEl('test-db-btn', mode);
     if (testButton && testButton.dataset.boundMcpTest !== '1') {
         testButton.dataset.boundMcpTest = '1';
-        testButton.addEventListener('click', () => window.testMcpDatabaseConnection(mode));
+        testButton.addEventListener('click', () => window.Pivot.legacy.testMcpDatabaseConnection(mode));
     }
     const diagnoseButton = mcpFormEl('diagnose-btn', mode);
     if (diagnoseButton && diagnoseButton.dataset.boundMcpDiagnose !== '1') {
         diagnoseButton.dataset.boundMcpDiagnose = '1';
-        diagnoseButton.addEventListener('click', () => window.diagnoseMcpServer(mode));
+        diagnoseButton.addEventListener('click', () => window.Pivot.legacy.diagnoseMcpServer(mode));
     }
     const testImButton = mcpFormEl('test-im-btn', mode);
     if (testImButton && testImButton.dataset.boundMcpImTest !== '1') {
         testImButton.dataset.boundMcpImTest = '1';
-        testImButton.addEventListener('click', () => window.diagnoseMcpServer(mode, { action: 'test' }));
+        testImButton.addEventListener('click', () => window.Pivot.legacy.diagnoseMcpServer(mode, { action: 'test' }));
     }
     updateMcpDbTypeFields(mode);
     updateMcpDatabaseGuidance(mode);
@@ -345,14 +345,14 @@ function bindMcpToolsModalControls() {
     document.getElementById('mcp-tools-close-btn')?.addEventListener('click', () => setMcpModalVisibility(modal, false));
     document.getElementById('mcp-tools-refresh-btn')?.addEventListener('click', async event => {
         const id = event.currentTarget?.dataset?.mcpServerId;
-        if (id) await window.refreshMcpTools(id, { keepToolsModalOpen: true });
+        if (id) await window.Pivot.legacy.refreshMcpTools(id, { keepToolsModalOpen: true });
     });
     modal.addEventListener('click', event => {
         if (event.target === modal) setMcpModalVisibility(modal, false);
     });
 }
 
-window.openMcpWorkbench = async function(options = {}) {
+window.Pivot.legacy.openMcpWorkbench = async function(options = {}) {
     bindMcpModalAccessibility();
     const tabsApi = window.Pivot?.moduleApi?.('mcp.tabs', {}) || {};
     tabsApi.bindTabs?.();
@@ -360,7 +360,7 @@ window.openMcpWorkbench = async function(options = {}) {
     try { savedTab = sessionStorage.getItem('pivot.mcp.active_tab'); } catch (_) {}
     const activeTab = options?.tab || savedTab || 'tools';
     tabsApi.setActiveTab?.(activeTab);
-    window.showMainWorkspace?.('mcp');
+    window.Pivot.legacy.showMainWorkspace?.('mcp');
     const panel = document.getElementById('mcp-workbench-modal');
     if (!panel) return;
     bindMcpToolsModalControls();
@@ -370,18 +370,18 @@ window.openMcpWorkbench = async function(options = {}) {
     panel.querySelectorAll('.super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    await window.loadMcpWorkbench?.();
+    await window.Pivot.legacy.loadMcpWorkbench?.();
 };
 
-window.closeMcpWorkbench = function() {
-    window.showMainWorkspace?.('chat');
+window.Pivot.legacy.closeMcpWorkbench = function() {
+    window.Pivot.legacy.showMainWorkspace?.('chat');
 };
 
-window.closeMcpEditModal = function() {
+window.Pivot.legacy.closeMcpEditModal = function() {
     setMcpModalVisibility('mcp-edit-modal', false);
 };
 
-window.closeMcpToolsModal = function() {
+window.Pivot.legacy.closeMcpToolsModal = function() {
     setMcpModalVisibility('mcp-tools-modal', false);
 };
 
@@ -390,11 +390,11 @@ function setMcpEditTitle(title = '编辑工具服务') {
     if (heading) heading.textContent = title;
 }
 
-window.resetMcpForm = function() {
+window.Pivot.legacy.resetMcpForm = function() {
     setMcpFormDefaults('create', 'external');
 };
 
-window.openMcpCreateModal = function(type = 'external') {
+window.Pivot.legacy.openMcpCreateModal = function(type = 'external') {
     const service = mcpServiceCatalog.find(item => item.type === type) || mcpPersonalBuiltinServices.find(item => item.type === type) || (type === 'external' ? mcpExternalServiceCatalog : null);
     const modal = document.getElementById('mcp-edit-modal');
     if (!modal || !service) return;
@@ -485,7 +485,7 @@ function fillMcpForm(server, mode = 'create') {
     if (shared) shared.checked = !server.user_id;
 }
 
-window.openMcpEditModal = function(serverId) {
+window.Pivot.legacy.openMcpEditModal = function(serverId) {
     const server = mcpServersCache.find(item => String(item.id) === String(serverId));
     if (!server) return showToast('未找到工具服务', 'error');
     const modal = document.getElementById('mcp-edit-modal');

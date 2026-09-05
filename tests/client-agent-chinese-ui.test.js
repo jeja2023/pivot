@@ -7,12 +7,12 @@ const vm = require('node:vm');
 function createClientEnvironment() {
     const sandbox = {
         console,
-        window: {
+        window: { Pivot: { legacy: {
             _cachedAgentModels: [],
             PivotSafeHtml: {
                 setHtml: (el, html) => { if (el) el.innerHTML = html; }
             }
-        },
+        } } },
         document: {
             getElementById: () => null,
             querySelectorAll: () => [],

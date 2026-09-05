@@ -9,12 +9,12 @@ const { getBuiltInToolDefinitions } = require('../server/services/agent-tools');
 function loadDagCore(modelState = {}) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-core.js'), 'utf8');
     const sandbox = {
-        window: {
+        window: { Pivot: { legacy: {
             PivotSafeHtml: null,
             _cachedAgentModels: modelState.agent || [],
             _cachedModels: modelState.chat || [],
             isSelectableModelForCurrentUser: model => !model.user_id || String(model.user_id) === '7'
-        },
+        } } },
         document: { getElementById: () => null },
         currentUser: { id: 7 },
         console
@@ -32,7 +32,7 @@ function loadWizardFieldRenderer(models = []) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     const sandbox = {
-        window: { Pivot: { moduleApi: () => ({ listWorkflows: () => [] }) } },
+        window: { Pivot: { legacy: {}, moduleApi: () => ({ listWorkflows: () => [] }) } },
         console,
         normalizeSchemaType: schema => String(Array.isArray(schema?.type) ? schema.type[0] : (schema?.type || 'string')),
         friendlySchemaTypeLabel: () => '文本',

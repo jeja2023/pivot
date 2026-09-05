@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state } = app;
     const renderHeader = (...args) => app.renderHeader(...args);
@@ -176,7 +176,7 @@
         const requestedTab = normalizeTab(explicitTab || getStoredActiveTab());
         resetAiWorkspace();
         if (requestedDatasetId) state.activeId = requestedDatasetId;
-        window.setAppsSessionValue?.('pivot_apps_active_app', 'data-analysis');
+        window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('regulations-view')?.classList.add('hidden');
@@ -185,7 +185,7 @@
         if (typeof setAppsTitle === 'function') {
             setAppsTitle('数据分析', '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和智能分析洞察。');
         }
-        await window.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
+        await window.Pivot.legacy.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);

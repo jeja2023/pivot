@@ -53,7 +53,7 @@ function serializeOutput(row) {
 }
 
 async function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName, mimeType, status = 'ready' }) {
-    const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : { size: 0 };
+    const stat = await fs.promises.stat(filePath).catch(() => ({ size: 0 }));
     return await queryOne(`
         INSERT INTO document_outputs (
             user_id, file_id, job_id, output_type, file_path, file_name, mime_type, file_size, status, created_at
@@ -76,9 +76,9 @@ async function registerOutput({ userId, fileId, jobId, outputType, filePath, fil
 async function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content }) {
     const meta = outputTypeMeta(outputType);
     const diskName = String(jobId) + '-' + String(outputType) + '-' + Date.now() + meta.extension;
-    const targetPath = buildManagedPath(outputsRoot, userId, diskName);
-    if (Buffer.isBuffer(content)) fs.writeFileSync(targetPath, content);
-    else fs.writeFileSync(targetPath, String(content || ''), 'utf8');
+    const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
+    if (Buffer.isBuffer(content)) await fs.promises.writeFile(targetPath, content);
+    else await fs.promises.writeFile(targetPath, String(content || ''), 'utf8');
     const fileName = baseName(originalName) + '-' + outputType + meta.extension;
     return await registerOutput({
         userId,
@@ -154,11 +154,11 @@ function imageMimeType(filePath) {
     return 'image/png';
 }
 
-function imageDataUri(page) {
+async function imageDataUri(page) {
     const imagePath = resolveStoredDocumentPath(page?.image_path || page?.imagePath || '');
-    if (!imagePath || !fs.existsSync(imagePath)) return '';
+    if (!imagePath) return '';
     try {
-        return 'data:' + imageMimeType(imagePath) + ';base64,' + fs.readFileSync(imagePath).toString('base64');
+        return 'data:' + imageMimeType(imagePath) + ';base64,' + (await fs.promises.readFile(imagePath)).toString('base64');
     } catch (_err) {
         return '';
     }
@@ -227,11 +227,11 @@ function renderOverlayBlocks({ page, blocks }) {
     }).join('');
 }
 
-function renderHtmlPage({ page, blocks }) {
+async function renderHtmlPage({ page, blocks }) {
     const pageNumber = Number(page.page_number || page.pageNumber || 1);
     const width = Math.max(Number(page.width || 0), 1);
     const height = Math.max(Number(page.height || 0), 1);
-    const src = imageDataUri(page);
+    const src = await imageDataUri(page);
     const visual = src
         ? [
             '<div class="page-visual" style="max-width:' + width + 'px;aspect-ratio:' + width + '/' + height + '">',
@@ -249,11 +249,11 @@ function renderHtmlPage({ page, blocks }) {
     ].join('\n');
 }
 
-function buildHtml({ file, pages = [], blocks = [], text }) {
+async function buildHtml({ file, pages = [], blocks = [], text }) {
     const title = baseName(file?.original_name || file?.originalName || 'ocr-result');
     const blocksByPage = groupBlocksByPage(blocks);
     const body = pages.length
-        ? pages.map(page => renderHtmlPage({ page, blocks: blocksByPage.get(Number(page.id)) || [] })).join('\n')
+        ? (await Promise.all(pages.map(page => renderHtmlPage({ page, blocks: blocksByPage.get(Number(page.id)) || [] })))).join('\n')
         : '<pre>' + escapeHtml(text || '') + '</pre>';
     return [
         '<!DOCTYPE html>',
@@ -405,7 +405,7 @@ async function createTextOutputs({ userId, file, job, text = '', pages = [], blo
         } else if (format === OUTPUT_TYPES.JSON) {
             outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }) }));
         } else if (format === OUTPUT_TYPES.HTML) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildHtml({ file, pages, blocks, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildHtml({ file, pages, blocks, text: finalText }) }));
         } else if (format === OUTPUT_TYPES.DOCX) {
             outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildDocx({ file, pages, text: finalText }) }));
         } else {

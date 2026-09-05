@@ -98,7 +98,7 @@ function createSemanticHistoryHarness() {
     };
     installOptions(elements.get('data-analysis-semantic-dataset'), '<option value="dataset-1">测试数据集</option>', 'dataset-1');
     const context = {
-        window: { PivotDataAnalysis: app },
+        window: { Pivot: { legacy: { PivotDataAnalysis: app } } },
         document: { getElementById: id => elements.get(id) || null },
         PivotSafeHtml: { setHtml(element, markup) { element.innerHTML = String(markup); } },
         renderMarkdown: value => `<p>${value}</p>`,
@@ -111,6 +111,7 @@ function createSemanticHistoryHarness() {
         Set,
         encodeURIComponent
     };
+    context.window.Pivot.legacy.PivotSafeHtml = context.PivotSafeHtml;
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'data-analysis', 'ai.js'), 'utf8');
     vm.runInNewContext(source, context, { filename: 'client/chat/data-analysis/ai.js' });
     return { app, calls, completedJob, elements, state };

@@ -379,7 +379,7 @@ async function refreshMcpLocalAuthorizationCenter(options = {}) {
     const status = await getMcpLocalAuthorizationStatus({ refresh: true, silent: options.silent !== false });
     renderMcpLocalAuthorizationCenter(status);
     await registerMcpLocalExecutionBridge({ status, force: true }).catch(() => null);
-    await window.loadMcpWorkbench?.();
+    await window.Pivot.legacy.loadMcpWorkbench?.();
 }
 
 async function requestMcpLocalAuthorization(type, options = {}) {
@@ -401,7 +401,7 @@ async function requestMcpLocalAuthorization(type, options = {}) {
         if (typeof window.pivotDesktop?.syncLocalMcpConnector === 'function' && !synced?.active) {
             throw new Error('本机授权已保存，但桌面连接器尚未同步到服务器；请保持桌面客户端在线后重试。');
         }
-        await window.loadMcpWorkbench?.();
+        await window.Pivot.legacy.loadMcpWorkbench?.();
         showToast(type === 'local_browser' ? '浏览器授权与站点白名单已同步。' : '本机授权已更新。', 'success');
     } catch (e) {
         showToast(e.message || '本机授权失败。', 'error');
@@ -418,7 +418,7 @@ function confirmRevokeMcpLocalAuthorization(type) {
             mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(status);
             renderMcpLocalAuthorizationCenter(mcpLocalAuthorizationStatusCache);
             await registerMcpLocalExecutionBridge({ status: mcpLocalAuthorizationStatusCache, force: true });
-            await window.loadMcpWorkbench?.();
+            await window.Pivot.legacy.loadMcpWorkbench?.();
             showToast('本机授权已撤销。', 'success');
         } catch (e) {
             showToast(e.message || '撤销本机授权失败。', 'error');

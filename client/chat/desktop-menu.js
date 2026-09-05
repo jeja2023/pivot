@@ -102,7 +102,7 @@
         try {
             if (clearCache) {
                 toast('正在清理客户端缓存并刷新...', 'info');
-                if (window.PivotPwa?.reset) await window.PivotPwa.reset();
+                if (window.Pivot.legacy.PivotPwa?.reset) await window.Pivot.legacy.PivotPwa.reset();
             }
             if (typeof desktopApi.reload === 'function') {
                 await desktopApi.reload({ clearCache });

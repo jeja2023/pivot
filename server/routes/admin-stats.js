@@ -10,6 +10,7 @@ const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getModelEndpointRuntimeStatus } = require('../services/model-runtime');
 const { getMaintenanceStatus } = require('../services/maintenance');
 const { getDeploymentProfile } = require('../services/deployment-profile');
+const { getRagOperationsOverview } = require('../services/rag-operations-observability');
 const {
     getObservabilitySettings,
     listObservabilityEvents,
@@ -258,6 +259,7 @@ function createAdminStatsRouter({
             ...getRagMetricsSnapshot(),
             chunksIndexed: await getMonitorKnowledgeChunkCount()
         };
+        const ragOperations = await getRagOperationsOverview();
         const observabilityEvents = await listObservabilityEvents({ limit: 12 });
 
         const observabilityOpen = await query(`
@@ -324,7 +326,7 @@ function createAdminStatsRouter({
         const requestHosts = getRequestHostAliases(req);
         const modelEndpoints = await summarizeModelEndpoints({ requestHosts, publicUrl });
         const localNames = await getResolvedLocalHostnames({ requestHosts, publicUrl });
-        const health = getSystemHealthSnapshot();
+        const health = await getSystemHealthSnapshot();
         const maintenance = getMaintenanceStatus();
         const diskHealth = (health.checks || []).find(item => item.name === 'disk') || {};
 
@@ -383,6 +385,7 @@ function createAdminStatsRouter({
             gpu,
             modelEndpoints,
             rag: ragMetrics,
+            ragOperations,
             observability: {
                 events: observabilityEvents,
                 openByType: observabilityOpen,

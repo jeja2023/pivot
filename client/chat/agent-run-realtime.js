@@ -57,7 +57,7 @@ async function refreshAgentVisibleState(payload = {}) {
         const runId = payload.run?.id || payload.notification?.run_id || '';
         if (activeAgentRunId && typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen() && (!runId || runId === activeAgentRunId)) {
             try {
-                await window.openAgentRun(activeAgentRunId, { silent: true });
+                await window.Pivot.legacy.openAgentRun(activeAgentRunId, { silent: true });
             } catch (e) {}
         }
     } finally {
@@ -103,7 +103,7 @@ function handleAgentRealtimeEvent(event) {
     scheduleAgentRealtimeRefresh(payload);
 }
 
-window.initAgentRealtime = function() {
+window.Pivot.legacy.initAgentRealtime = function() {
     if (agentRealtimeSource || !window.EventSource || !currentUser) return;
     agentRealtimeSource = new EventSource(`${API_BASE}/events`, { withCredentials: true });
     agentRealtimeSource.addEventListener('connected', () => {
@@ -124,7 +124,7 @@ function handleAgentStreamingEvent(event) {
     let payload;
     try { payload = JSON.parse(event.data || '{}'); } catch (e) { return; }
     if (!payload || !payload.runId) return;
-    window.handleChatAgentStreamingEvent?.(payload);
+    window.Pivot.legacy.handleChatAgentStreamingEvent?.(payload);
     // 只为当前打开的任务渲染，避免后台任务覆盖前台 UI
     if (activeAgentRunId !== payload.runId) return;
     renderAgentStreamingPanel(payload);
@@ -183,7 +183,7 @@ function renderAgentStreamingPanel(payload) {
     }
 }
 
-window.closeAgentRealtime = function() {
+window.Pivot.legacy.closeAgentRealtime = function() {
     if (agentRealtimeRefreshTimer) clearTimeout(agentRealtimeRefreshTimer);
     agentRealtimeRefreshTimer = null;
     if (agentRefreshTimer) clearInterval(agentRefreshTimer);

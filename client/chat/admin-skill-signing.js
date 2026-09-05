@@ -1,9 +1,9 @@
 /* 组织 Skill 共享签名密钥管理。私钥只可提交，绝不读取或回显。 */
 /* global Pivot */
 (() => {
-    const apiBase = () => window.API_BASE || '/api';
-    const fetchApi = () => window.apiFetch || window.fetch.bind(window);
-    const toast = (message, type) => window.showToast?.(message, type);
+    const apiBase = () => window.Pivot.legacy.API_BASE || '/api';
+    const fetchApi = () => window.Pivot.legacy.apiFetch || window.fetch.bind(window);
+    const toast = (message, type) => window.Pivot.legacy.showToast?.(message, type);
 
     function elements() {
         return {

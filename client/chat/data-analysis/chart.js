@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, html, esc, activeDataset } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
@@ -119,7 +119,7 @@
                 <pre class="pivot-echart-error-text"></pre>
             </div>
         `);
-        window.renderPivotCharts?.(box);
+        window.Pivot.legacy.renderPivotCharts?.(box);
     }
 
     // 把当前图表块导出为 PNG：优先用 ECharts 实例的 getDataURL，回退到 2D canvas 的 toDataURL。

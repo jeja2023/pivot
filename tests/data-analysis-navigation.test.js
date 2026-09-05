@@ -31,7 +31,7 @@ function createElement(id, tab) {
 
 function createNavigationHarness() {
     const sessionStorage = createSessionStorage();
-    const window = { sessionStorage };
+    const window = { sessionStorage, Pivot: { legacy: {} } };
     const context = { window, String, Number, Set };
     vm.runInNewContext(read('client/chat/data-analysis/context.js'), context, {
         filename: 'client/chat/data-analysis/context.js'
@@ -60,20 +60,21 @@ function createNavigationHarness() {
         getElementById(id) { return elements.get(id) || null; }
     };
     context.document = document;
-    context.window.PivotDataAnalysis.updateToolbarHeader = () => {};
-    context.window.PivotDataAnalysis.renderVisualQueryControls = () => {};
-    context.window.PivotDataAnalysis.renderQuery = () => {};
-    context.window.PivotDataAnalysis.renderChart = () => {};
-    context.window.PivotDataAnalysis.renderCompare = () => {};
-    context.window.PivotDataAnalysis.renderCompareKeyOptions = () => {};
-    context.window.PivotDataAnalysis.renderPivot = () => {};
-    context.window.PivotDataAnalysis.renderHistory = () => {};
-    context.window.PivotDataAnalysis.resetAiWorkspace = () => {};
-    context.window.PivotDataAnalysis.resumeAiWorkspace = () => {};
+    const app = context.window.Pivot.legacy.PivotDataAnalysis;
+    app.updateToolbarHeader = () => {};
+    app.renderVisualQueryControls = () => {};
+    app.renderQuery = () => {};
+    app.renderChart = () => {};
+    app.renderCompare = () => {};
+    app.renderCompareKeyOptions = () => {};
+    app.renderPivot = () => {};
+    app.renderHistory = () => {};
+    app.resetAiWorkspace = () => {};
+    app.resumeAiWorkspace = () => {};
     vm.runInNewContext(read('client/chat/data-analysis/events.js'), context, {
         filename: 'client/chat/data-analysis/events.js'
     });
-    return { app: context.window.PivotDataAnalysis, sessionStorage };
+    return { app, sessionStorage };
 }
 
 test('数据分析页签刷新时恢复当前页，并在切换后清空上一页的临时查询结果', () => {

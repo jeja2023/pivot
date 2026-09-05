@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, esc, fmtNumber, activeDataset } = app;
     const buildOptions = (...args) => app.buildOptions(...args);
@@ -208,8 +208,8 @@
         `);
 
         const pager = document.getElementById('data-analysis-query-pagination');
-        if (pager && window.renderWorkspacePagination) {
-            window.renderWorkspacePagination(pager, {
+        if (pager && window.Pivot.legacy.renderWorkspacePagination) {
+            window.Pivot.legacy.renderWorkspacePagination(pager, {
                 total,
                 page: state.queryPage,
                 limit: pageSize,

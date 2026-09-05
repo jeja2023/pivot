@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env') });
+const playwrightArgs = process.argv.slice(2);
 
 function reserveAvailablePort() {
     return new Promise((resolve, reject) => {
@@ -81,7 +82,8 @@ async function main() {
             playwrightCli,
             'test',
             '--config',
-            path.join('tests', 'e2e', 'playwright.config.js')
+            path.join('tests', 'e2e', 'playwright.config.js'),
+            ...playwrightArgs
         ], env);
     } catch (error) {
         console.error(error.stack || error.message);

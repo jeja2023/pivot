@@ -137,6 +137,25 @@
 .settings-workspace-view #tab-content-monitor .monitor-panel-health { grid-area: health; }
 .settings-workspace-view #tab-content-monitor .monitor-panel-models { grid-area: models; }
 .settings-workspace-view #tab-content-monitor .monitor-panel-rag { grid-area: rag; }
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-trend {
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    color: #0f766e;
+}
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-head,
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #64748b;
+    font-size: 0.66rem;
+    font-weight: 700;
+}
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-head strong { color: #0f766e; }
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-trend svg { display: block; width: 100%; height: 58px; margin: 4px 0; overflow: visible; }
+.settings-workspace-view #tab-content-monitor .monitor-rag-latency-empty { color: #64748b; font-size: 0.68rem; line-height: 1.45; }
 .settings-workspace-view #tab-content-monitor .monitor-panel-observability { grid-area: observability; }
 .settings-workspace-view #tab-content-monitor .monitor-panel-card h4 {
     margin: 0 0 7px;

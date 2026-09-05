@@ -1,5 +1,5 @@
 (function () {
-    const Ann = window.PivotAnnouncements || {};
+    const Ann = window.Pivot.legacy.PivotAnnouncements || {};
     const state = Ann.state || {};
     const TYPE_LABELS = Ann.TYPE_LABELS || {};
     const PRIORITY_LABELS = Ann.PRIORITY_LABELS || {};
@@ -142,7 +142,7 @@
         modal?.setAttribute('aria-hidden', 'false');
     }
 
-    window.loadAnnouncementsAdmin = async function (page = 1) {
+    window.Pivot.legacy.loadAnnouncementsAdmin = async function (page = 1) {
         if (!isAdminUser()) return;
         const body = document.getElementById('announcement-list-body');
         if (!body) return;
@@ -202,7 +202,7 @@
                 }).join(''));
             }
             renderPagination?.('announcements', data.total || 0, page);
-            window.scheduleSettingsWorkspaceScale?.();
+            window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
         } catch (e) {
             renderTableMessage(body, 10, e.message, { color: 'var(--danger)' });
         }
@@ -223,7 +223,7 @@
             showToast?.('公告已保存', 'success');
             resetAnnouncementForm();
             closeAnnouncementModal();
-            await window.loadAnnouncementsAdmin?.(1);
+            await window.Pivot.legacy.loadAnnouncementsAdmin?.(1);
             await loadActiveAnnouncements();
             await loadLoginAnnouncements();
         } catch (e) {
@@ -268,7 +268,7 @@
             const currentStatus = action.dataset.status;
             const newStatus = currentStatus === 'published' ? 'draft' : 'published';
             const actionText = newStatus === 'published' ? '发布' : '撤下';
-            const ok = await (window.showConfirm?.(`${actionText}公告`, `确定要${actionText}这条公告吗？`) || Promise.resolve(window.confirm(`确定要${actionText}这条公告吗？`)));
+            const ok = await (window.Pivot.legacy.showConfirm?.(`${actionText}公告`, `确定要${actionText}这条公告吗？`) || Promise.resolve(window.confirm(`确定要${actionText}这条公告吗？`)));
             if (!ok) return;
             try {
                 await apiJson(`${API_BASE}/admin/announcements/${encodeURIComponent(id)}`, {
@@ -276,7 +276,7 @@
                     body: JSON.stringify({ status: newStatus })
                 });
                 showToast?.(`公告已${actionText}`, 'success');
-                await window.loadAnnouncementsAdmin?.(1);
+                await window.Pivot.legacy.loadAnnouncementsAdmin?.(1);
                 await loadActiveAnnouncements();
                 await loadLoginAnnouncements();
             } catch (e) {
@@ -289,12 +289,12 @@
         }
         if (action.dataset.announcementAdmin === 'delete') {
             if (row?.canDelete === false) return showToast?.('无权删除该公告', 'error');
-            const ok = await (window.showConfirm?.('删除公告', '确定要删除这条公告吗？') || Promise.resolve(window.confirm('确定要删除这条公告吗？')));
+            const ok = await (window.Pivot.legacy.showConfirm?.('删除公告', '确定要删除这条公告吗？') || Promise.resolve(window.confirm('确定要删除这条公告吗？')));
             if (!ok) return;
             try {
                 await apiJson(`${API_BASE}/admin/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 showToast?.('公告已删除', 'success');
-                await window.loadAnnouncementsAdmin?.(1);
+                await window.Pivot.legacy.loadAnnouncementsAdmin?.(1);
                 await loadActiveAnnouncements();
                 await loadLoginAnnouncements();
             } catch (e) {
@@ -314,11 +314,11 @@
             }
             applyAnnouncementPermissions({ id: document.getElementById('announcement-id')?.value });
         }
-        if (event.target?.id === 'announcement-status-filter') window.loadAnnouncementsAdmin?.(1);
+        if (event.target?.id === 'announcement-status-filter') window.Pivot.legacy.loadAnnouncementsAdmin?.(1);
     });
     document.addEventListener('input', (event) => {
         if (event.target?.id !== 'announcement-search') return;
-        clearTimeout(window.announcementSearchTimer);
-        window.announcementSearchTimer = setTimeout(() => window.loadAnnouncementsAdmin?.(1), 300);
+        clearTimeout(window.Pivot.legacy.announcementSearchTimer);
+        window.Pivot.legacy.announcementSearchTimer = setTimeout(() => window.Pivot.legacy.loadAnnouncementsAdmin?.(1), 300);
     });
 }());

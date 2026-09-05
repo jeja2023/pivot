@@ -1,11 +1,11 @@
 (function () {
     const state = { settings: {}, jobs: [], experiences: [], proposals: [], memories: [], memorySummary: {}, page: 1, limit: 8 };
 
-    const escape = value => window.PivotSafeHtml?.escapeHtml
-        ? window.PivotSafeHtml.escapeHtml(value)
+    const escape = value => window.Pivot.legacy.PivotSafeHtml?.escapeHtml
+        ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value)
         : String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
-    const escapeAttr = value => window.PivotSafeHtml?.escapeAttr
-        ? window.PivotSafeHtml.escapeAttr(value)
+    const escapeAttr = value => window.Pivot.legacy.PivotSafeHtml?.escapeAttr
+        ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value)
         : escape(value).replace(/"/g, '&quot;');
     const shortText = (value, max = 120) => {
         const text = String(value ?? '').trim();
@@ -24,7 +24,7 @@
     };
     const setMarkup = (element, markup) => {
         if (!element) return;
-        if (window.PivotSafeHtml?.setHtml) window.PivotSafeHtml.setHtml(element, markup);
+        if (window.Pivot.legacy.PivotSafeHtml?.setHtml) window.Pivot.legacy.PivotSafeHtml.setHtml(element, markup);
         else element.textContent = String(markup || '');
     };
     async function request(path, options = {}) {
@@ -41,8 +41,8 @@
     }
 
     function openMemoryCenter() {
-        window.showMainWorkspace?.('settings');
-        window.switchTab?.('memories');
+        window.Pivot.legacy.showMainWorkspace?.('settings');
+        window.Pivot.legacy.switchTab?.('memories');
     }
 
     function renderMemories() {
@@ -123,7 +123,7 @@
             const id = proposal?.id || '';
             return `<tr><td class="tc">${start + index + 1}</td><td title="${escapeAttr(title)}">${escape(shortText(title, 28))}</td><td class="tc"><span class="agent-inbox-type-badge badge-event">${escape(kindLabel(kind))}</span></td><td class="tc"><span class="agent-inbox-type-badge ${['published', 'personal_active'].includes(status) ? 'badge-run' : ['paused', 'archived', 'rolled_back', 'rejected'].includes(status) ? 'badge-event' : 'badge-approval'}">${escape(statusLabel(status))}</span></td><td class="tc mono">${escape(usesText)}</td><td class="tc mono">${escape(successText)}</td><td title="${escapeAttr(description)}">${escape(shortText(description, 100))}</td><td class="tc"><div class="aht-actions">${id && ['published', 'personal_active'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-learning-action="edit" data-agent-learning-id="${escapeAttr(id)}">编辑</button><button type="button" class="btn-secondary btn-xs" data-agent-learning-action="pause" data-agent-learning-id="${escapeAttr(id)}">暂停</button><button type="button" class="btn-secondary btn-xs" data-agent-learning-action="share" data-agent-learning-id="${escapeAttr(id)}">申请共享</button><button type="button" class="btn-danger-outline btn-xs" data-agent-learning-action="revoke" data-agent-learning-id="${escapeAttr(id)}">撤销</button>` : ''}${id && ['paused', 'archived'].includes(status) ? `${proposal?.kind === 'skill' ? `<button type="button" class="btn-secondary btn-xs" data-agent-learning-action="edit" data-agent-learning-id="${escapeAttr(id)}">编辑</button>` : ''}<button type="button" class="btn-primary btn-xs" data-agent-learning-action="restore" data-agent-learning-id="${escapeAttr(id)}">恢复</button>` : ''}${id && ['candidate_created', 'waiting_user_review'].includes(status) && proposal?.kind === 'skill' ? `<button type="button" class="btn-primary btn-xs" data-agent-learning-action="activate" data-agent-learning-id="${escapeAttr(id)}">确认启用</button><button type="button" class="btn-secondary btn-xs" data-agent-learning-action="reject" data-agent-learning-id="${escapeAttr(id)}">拒绝</button>` : ''}${proposal?.kind === 'workflow' && ['candidate_created', 'waiting_user_review'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-learning-action="preview" data-agent-learning-id="${escapeAttr(id)}">打开草稿</button><button type="button" class="btn-secondary btn-xs" data-agent-learning-action="share" data-agent-learning-id="${escapeAttr(id)}">发布后申请共享</button><button type="button" class="btn-secondary btn-xs" data-agent-learning-action="reject" data-agent-learning-id="${escapeAttr(id)}">拒绝</button>` : ''}</div></td></tr>`;
         }).join('')}</tbody></table></div>`);
-        if (pagination && window.renderWorkspacePagination) window.renderWorkspacePagination(pagination, { total, limit: state.limit, page: currentPage, onPageChange: page => { state.page = page; render(); } });
+        if (pagination && window.Pivot.legacy.renderWorkspacePagination) window.Pivot.legacy.renderWorkspacePagination(pagination, { total, limit: state.limit, page: currentPage, onPageChange: page => { state.page = page; render(); } });
     }
 
     async function load() {
@@ -154,7 +154,7 @@
             return window.Pivot?.moduleApi?.('agent.skillManagement')?.open?.({ versionId: proposal?.artifactVersionId, releaseId: proposal?.releaseId });
         }
         if (action === 'preview') {
-            return window.openAgentDagWorkbench?.({ workflowId: proposal?.artifactId, editor: true });
+            return window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId: proposal?.artifactId, editor: true });
         }
         const path = action === 'share'
             ? `/agents/evolution/proposals/${encodeURIComponent(id)}/share-request`

@@ -2,6 +2,18 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-09-05 工程与运维收口（v0.1.84）
+
+> 状态：本节列出的工程项已全部完成；下方较早版本中的“待确认/后续”属于当时的历史记录，不构成当前待开发计划。按本轮范围，多节点部署与 Capability Worker 启用不在处理范围；第三方凭据、账户账务和告警接收方属于目标环境的运维配置，不能由代码代填。
+
+- ✅ 请求路径文件 I/O 扩面治理：知识库、法规、文档处理、数据分析、Agent 数据适配器和系统健康探针均改用 Promise API；`check_sync_io_hotpaths` 现覆盖这些路由可达服务，并阻断新增的 Node `fs.*Sync` 调用。
+- ✅ 系统健康检查异步化：目录可写、磁盘容量探针并发执行并复用进行中的刷新任务，管理员监控、MCP 健康资源、Prometheus 与内置工具统一等待同一份缓存快照，不再在慢盘上阻塞事件循环。
+- ✅ RAG 运维可观测性闭环：新增按分钟聚合的 Embedding 延迟/失败指标迁移与服务端汇总；系统监控展示趋势、失败率和 24 小时检索诊断，避免保存输入文本或密钥。
+- ✅ 外部依赖体检与密钥保护：`check:external` 优先只读连接 PostgreSQL 配置库，PostgreSQL 连接串诊断永不输出用户名或密码；`check:external:live` 对未提供专用监控 URL 的模型只读探测 `/models`，对 Embedding 提供脱敏的上游错误摘要，并以管理员受控只读探针验证已保存的本机数据库连接，不放宽常规 MCP 的 SSRF 边界。
+- ✅ 异步/数据库门禁校准：检查器只扫描路由和服务请求路径，排除启动迁移与运维脚本中的同步 SQLite API；已知的 7 个同步语义调用以稳定源码签名白名单登记，任何新增未处理 Promise 均会使 `npm run check` 失败。
+- ✅ 前端与内置工具回归扩展：Playwright 已覆盖真实登录、聊天 SSE、知识上传、设置监控/用量/模型、知识库和 Agent 工作台；内置 MCP 的图表、文档与 IM 执行分支已纳入安全回归。所有业务 `window.*` 访问已统一收敛到 `window.Pivot.modules` / `window.Pivot.legacy`，AST 门禁阻断新增自由业务全局访问。
+- ✅ 依赖与供应链收口：升级 Express 5、Playwright 1.63、数据库驱动与核心安全依赖，锁定传递依赖修复版本；生产及开发依赖审计均为 0 漏洞。
+
 ## 2026-09-05 模型原生工具调用自适应降级与多节点预检及安全治理升级（v0.1.83）
 
 - ✅ 模型原生 Tool Calling 端点能力感知与降级：新增 `models.tool_call_mode` 数据库迁移，构建 `model-tool-call-capabilities` 判定服务；流式推理自动识别端点协议不兼容并优雅回退至 JSON 规划，前端配置支持灵活切换。
@@ -209,11 +221,11 @@ This document records optimization work that is intentionally staged instead of 
    - ✅ 路由级测试已覆盖额度拒绝、会话越权、模型缺失、RAG 命中与未命中、长期记忆命中、上下文自动裁剪、当前输入超限预检与流式中断持久化（`tests/security-chat/route-orchestration.js`，配套装置 `chat-route-harness.js`）。
    - ✅ 路由保持为薄 SSE 传输层，业务留在 `chat-preflight` / `chat-context-assembler` / `chat-persistence` 等服务中。
 
-2. RAG quality and operations — 🔄 进行中
+2. RAG quality and operations — ✅ 运维项已完成
    - ✅ 存储化 debug 历史已落地（`rag_debug_queries` 与调试弹窗历史）。
-   - ⬜ embedding 延迟趋势图未开始。
-   - ⬜ 按集合的检索预设（法律、法规、公文、数据分析）未开始。
-   - ⬜ 检索诊断尚未进入管理员可观测视图，目前仅在调试弹窗内可见。
+   - ✅ Embedding 延迟趋势、失败率与分钟聚合持久化已落地；监控页展示趋势而审计仅保留关键快照。
+   - ⏸ 按集合的检索预设（法律、法规、公文、数据分析）属于功能扩展，不纳入本轮工程/运维收口。
+   - ✅ 检索诊断已进入管理员可观测视图（24 小时查询数与平均耗时）。
 
 3. Enterprise persistence path — ✅ 已完成
    - ✅ 生产环境全面升级至纯 PostgreSQL（PostgreSQL 14+/16+/17+），全链路 Repository 异步 Promise API 改造完成。
@@ -226,10 +238,10 @@ This document records optimization work that is intentionally staged instead of 
    - ⬜ 为模型使用、工具审批、数据分级、留存与审计导出实现策略对象。
    - ⬜ 超级管理员的破窗访问保持可审计，且对租户自有密钥默认关闭。
 
-5. Frontend hardening — 🔄 进行中（存量未下降）
-   - ⚠️ `window.*` 存量由基线门禁冻结，只减不增；当前预算和大文件清单由 `npm run report:governance` 实时输出。后续按「每个版本迁 1 个工作区」推进。
+5. Frontend hardening — 🔄 进行中（受控存量持续下降）
+   - ⚠️ `window.*` 存量由基线门禁冻结，只减不增；本轮已由 297 降至 275，当前预算和大文件清单由 `npm run report:governance` 实时输出。遗留项仅保留为历史静态脚本兼容层，迁移须按工作区完成调用方替换后再移除别名。
    - ⬜ 按工作区逐个迁入 `Pivot.registerModule()`，调用方改用 `Pivot.modules.*` 后再移除旧别名。
-   - 🔄 Playwright 已纳入 CI 并覆盖页面 smoke 与工作流版本依赖；仍需扩展登录、聊天流式、上传、设置、知识库索引与核心工作台。
+   - ✅ Playwright 已纳入 CI，覆盖登录、聊天流式、上传、设置、知识库与核心 Agent 工作台，以及工作流版本依赖。
    - 说明：前端无构建链、4.3MB 静态资源 27 个 `<script>` 顺序加载，在内网部署且启用 compression 的前提下优先级低，不建议为此引入打包工具而牺牲「改完即生效」的运维简单性。
 
 6. Desktop distribution — 🔄 进行中
@@ -238,7 +250,7 @@ This document records optimization work that is intentionally staged instead of 
    - ✅ 导航、重定向和特权 IPC 已绑定配置目标同源，适配私有 IP、IPv6 字面量与局域网主机名，不依赖域名或证书（v0.0.237）。
    - ✅ 无证书环境默认关闭自动更新；若在可信隔离局域网启用 HTTP 更新，需显式开关和精确来源白名单（v0.0.203/204/237）。
    - ✅ 打包排除历史安装器，正式发布生成 SHA-256 清单，支持受控离线分发（v0.0.237）。
-   - ⬜ 为受信任的文档/更新域配置 `allowedExternalOrigins`。
+   - ✅ 为受信任的文档/更新域提供 `allowedExternalOrigins` 配置与严格 Origin 规范化校验；默认仍为关闭，部署方须显式填写可信来源。
 
 7. Agent quality platform — 🔄 进行中
    - ✅ 运行追踪第一阶段已完成：Trace/Span、敏感字段脱敏、标准/流式/DAG 三路径采集和运行详情时间瀑布。
@@ -246,7 +258,7 @@ This document records optimization work that is intentionally staged instead of 
    - ✅ 评测中心第一阶段已完成：任务集、期望输出、确定性规则评分、真实任务批量运行、历史基线对比和 Trace 回链。
    - ⬜ 增加模型裁判、人工标注校准和可选的发布/CI 回归门禁，避免仅靠字符串与结构规则判断语义质量。
    - ✅ 持久化检查点第一阶段已完成：规划、工具、DAG 和控制步骤保存有上限的恢复状态，自由任务恢复观察，DAG 复用完成节点并从失败点继续。
-   - ⬜ 将支持工具调用的模型默认迁移到原生 `tool_calls`，并记录能力探测与 JSON 规划器回退原因。
+   - ✅ 支持工具调用的模型已接入原生 `tool_calls` 自适应能力探测，并记录 JSON 规划器回退原因。
    - ✅ 多智能体 Supervisor/Handoff 第一阶段已完成：角色化委派、隔离上下文、结构化交接、并行研究/审阅模板、主裁决节点和 Trace 类型均已落地。
    - ⬜ 为多智能体节点补充独立预算分摊、角色级工具白名单和跨分支冲突检测；当前仍继承工作流总体权限、审批和预算边界。
 
@@ -255,8 +267,8 @@ This document records optimization work that is intentionally staged instead of 
 - **桌面构建链审计**：生产依赖、Electron 运行时与完整依赖树均由 `npm run audit:policy` 检查；门禁会递归追踪字符串 `via` 传递依赖，并正确识别对象型 `fixAvailable`，避免父包假阴性。漏洞数量以实时审计结果为准。
 - **大文件治理**：`npm run check:governance` 已建立全部存量大文件的逐文件行数上限；存量只允许缩小，任何新增大文件或行数反弹都会让 CI 失败。修改这些文件时继续按功能边界拆分。
 - **依赖跨主版本落后**：除 Electron 外，`express` 4→5、`better-sqlite3` 11→13、`mongodb` 6→7、`uuid` 11→14、`bcryptjs` 2→3 均为跨主版本升级，需按「一次一个、带回归」的节奏推进，不做批量升级。
-- **同步文件 IO**：`server/routes` 与 `server/services` 中约 19 处 `readFileSync` / `writeFileSync`，需逐个确认是否落在请求热路径上；启动期与低频管理操作可保留。
-- **内置工具库覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支尚未覆盖，其中 IM 涉及内网出站通知，建议下一轮优先补齐。
+- **同步文件 IO**：已完成路由可达的文档、知识库、法规、数据分析、Agent 数据适配器及系统健康路径治理，并由 `npm run check:sync_io_hotpaths` 阻断回归。启动装配、隔离子进程和低频运维脚本的同步 API 不属于 HTTP 热路径。
+- **内置工具库覆盖**：`builtin-mcp-visualization`、`builtin-mcp-documents`、`builtin-mcp-im` 的执行分支均已覆盖；IM 用本地受控 HTTP 夹具验证，未向真实内网端点发送消息。
 
 ## v0.0.241 自动化治理收口（2026-08-03）
 

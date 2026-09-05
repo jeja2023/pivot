@@ -1,6 +1,6 @@
 /* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
-    const ns = window.PivotRegulationsInternal;
+    const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.eventsReady) return;
     with (ns) {
@@ -340,8 +340,8 @@
 
             async function showRegulationsApp() {
                 await ensureModuleReadiness();
-                window.PivotDataAnalysis?.resetAiWorkspace?.();
-                window.setAppsSessionValue?.('pivot_apps_active_app', 'regulations');
+                window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
+                window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'regulations');
                 document.getElementById('apps-home-view')?.classList.add('hidden');
                 document.getElementById('official-writing-view')?.classList.add('hidden');
                 document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -352,7 +352,7 @@
                     setAppsTitle('法规查询', '检索法规条文、查看版本并围绕命中条文问答。');
                 }
                 renderShell();
-                await window.PivotAppModels?.refresh?.('regulations', 'regulations-ai-model');
+                await window.Pivot.legacy.PivotAppModels?.refresh?.('regulations', 'regulations-ai-model');
                 bindEvents(view);
                 try {
                     await Promise.all([loadDocuments({ keepActive: true, page: state.page }), loadFacets(), loadSavedSearches()]);
@@ -379,13 +379,13 @@
                 showRegulationsApp,
                 eventsReady: true
             });
-            window.PivotRegulations = {
+            window.Pivot.legacy.PivotRegulations = {
                 ready: true,
-                ensureReady: () => ensureModuleReadiness().then(() => window.PivotRegulations),
+                ensureReady: () => ensureModuleReadiness().then(() => window.Pivot.legacy.PivotRegulations),
                 showRegulationsApp,
                 loadDocuments: loadDocumentsFromRegistry,
                 runSearch: runSearchFromRegistry
             };
-            window.showRegulationsApp = showRegulationsApp;
+            window.Pivot.legacy.showRegulationsApp = showRegulationsApp;
     }
 })();

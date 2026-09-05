@@ -309,7 +309,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 if (params?.uri === 'pivot://system/health') {
                     if (!isSuperAdmin(req.user)) throw new Error('仅系统超级管理员可查看系统健康状态。');
                     return sendJsonRpc(res, id, {
-                        contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(getSystemHealthSnapshot(), null, 2) }]
+                        contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(await getSystemHealthSnapshot(), null, 2) }]
                     });
                 }
                 if (params?.uri === 'pivot://knowledge/search') {

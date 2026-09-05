@@ -26,7 +26,7 @@
     };
 
     const escapeRagHtml = (str) => {
-        if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(str);
+        if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeHtml(str);
         return String(str ?? '')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -36,7 +36,7 @@
     };
 
     const escapeRagAttr = (value) => {
-        if (window.PivotSafeHtml?.escapeAttr) return window.PivotSafeHtml.escapeAttr(value);
+        if (window.Pivot.legacy.PivotSafeHtml?.escapeAttr) return window.Pivot.legacy.PivotSafeHtml.escapeAttr(value);
         return escapeRagHtml(value).replace(/"/g, '&quot;');
     };
 
@@ -48,7 +48,6 @@
         return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
     };
 
-    window.Pivot = window.Pivot || {};
     window.Pivot.ragFormat = {
         RAG_ICONS,
         escapeRagAttr,
@@ -56,9 +55,9 @@
         formatRagDateToCN,
         formatRagSize
     };
-    window.RAG_ICONS = window.RAG_ICONS || RAG_ICONS;
-    window.escapeRagHtml = window.escapeRagHtml || escapeRagHtml;
-    window.escapeRagAttr = window.escapeRagAttr || escapeRagAttr;
-    window.formatRagDateToCN = window.formatRagDateToCN || formatRagDateToCN;
-    window.formatRagSize = window.formatRagSize || formatRagSize;
+    window.Pivot.legacy.RAG_ICONS = window.Pivot.legacy.RAG_ICONS || RAG_ICONS;
+    window.Pivot.legacy.escapeRagHtml = window.Pivot.legacy.escapeRagHtml || escapeRagHtml;
+    window.Pivot.legacy.escapeRagAttr = window.Pivot.legacy.escapeRagAttr || escapeRagAttr;
+    window.Pivot.legacy.formatRagDateToCN = window.Pivot.legacy.formatRagDateToCN || formatRagDateToCN;
+    window.Pivot.legacy.formatRagSize = window.Pivot.legacy.formatRagSize || formatRagSize;
 })();

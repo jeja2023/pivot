@@ -138,7 +138,7 @@ function renderAgentEvalRunDetail(payload = {}) {
         </div>
     `);
     target.querySelectorAll('[data-agent-eval-open-run]').forEach(button => {
-        button.addEventListener('click', () => window.openAgentRun(button.dataset.agentEvalOpenRun, { returnTab: 'workbench', returnSubview: 'quality', returnLabel: '质量评测' }));
+        button.addEventListener('click', () => window.Pivot.legacy.openAgentRun(button.dataset.agentEvalOpenRun, { returnTab: 'workbench', returnSubview: 'quality', returnLabel: '质量评测' }));
     });
 }
 
@@ -379,7 +379,7 @@ async function openAgentEvalEditor(payload = null, seed = null) {
     const modal = ensureAgentEvalEditorModal();
     const suite = payload?.suite || {};
     const workflows = await loadAgentEvalWorkflows();
-    const models = window._cachedAgentModels || [];
+    const models = window.Pivot.legacy._cachedAgentModels || [];
     PivotSafeHtml.setHtml(modal.querySelector('#agent-eval-editor-model'), `<option value="">自动选择</option>${models.map(model => `<option value="${agentEscapeAttr(model.id)}">${agentEscape(model.name)}</option>`).join('')}`);
     PivotSafeHtml.setHtml(modal.querySelector('#agent-eval-editor-workflow'), `<option value="">请选择已发布工作流</option>${workflows.filter(item => item.is_published).map(item => `<option value="${agentEscapeAttr(item.id)}">${agentEscape(item.name)} · 版本 ${Number(item.published_version || 0)}</option>`).join('')}`);
     modal.querySelector('#agent-eval-editor-id').value = suite.id || '';
@@ -441,7 +441,7 @@ async function saveAgentEvalSuite() {
 }
 
 function runAgentEvalSuite(suiteId, caseCount) {
-    showConfirm('运行质量评测', `将创建 ${caseCount} 个真实智能体任务，并计入模型用量。确定继续吗？`, async () => {
+    window.Pivot.legacy.showConfirm('运行质量评测', `将创建 ${caseCount} 个真实智能体任务，并计入模型用量。确定继续吗？`, async () => {
         const response = await apiFetch(`${API_BASE}/agents/evaluations/suites/${encodeURIComponent(suiteId)}/runs`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         });
@@ -454,7 +454,7 @@ function runAgentEvalSuite(suiteId, caseCount) {
 }
 
 function deleteAgentEvalSuite(suiteId) {
-    showConfirm('归档评测集', '归档后不再显示，但历史任务与评测数据仍保留。', async () => {
+    window.Pivot.legacy.showConfirm('归档评测集', '归档后不再显示，但历史任务与评测数据仍保留。', async () => {
         const response = await apiFetch(`${API_BASE}/agents/evaluations/suites/${encodeURIComponent(suiteId)}`, { method: 'DELETE' });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) return showToast(data.error || '评测集归档失败', 'error');
@@ -480,7 +480,7 @@ function bindAgentEvaluationCenter() {
 }
 
 async function openAgentEvaluationForRun(run) {
-    closeAgentRunDetailModal();
+    window.Pivot.legacy.closeAgentRunDetailModal();
     if (typeof globalThis['openAgentWorkbench'] === 'function') {
         await globalThis['openAgentWorkbench']({ tab: 'workbench' });
     }

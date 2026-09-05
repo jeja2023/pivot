@@ -40,7 +40,7 @@ function formatUsageRoleLabel(role) {
     return '其它调用';
 }
 
-window.loadDetails = async function(page = 1) {
+window.Pivot.legacy.loadDetails = async function(page = 1) {
     const titleEl = document.getElementById('details-title') || document.getElementById('usage-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
@@ -68,7 +68,7 @@ window.loadDetails = async function(page = 1) {
     } catch (e) { showToast('加载明细失败', 'error'); }
 };
 
-window.loadStats = async function(page = pageState.stats || 1) {
+window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     pageState.stats = requestedPage;
     const titleEl = document.getElementById('stats-title') || document.getElementById('usage-title');
@@ -225,30 +225,30 @@ function renderTrendChart(canvasId, data) {
     ctx.fillText(formatTokenCount(max), padLeft, 14);
 }
 
-window.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
-window.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
-window.exportCompliancePackage = () => {
+window.Pivot.legacy.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
+window.Pivot.legacy.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
+window.Pivot.legacy.exportCompliancePackage = () => {
     const start = document.getElementById('log-filter-start')?.value || '';
     const end = document.getElementById('log-filter-end')?.value || '';
     const params = new URLSearchParams({ start, end });
     downloadFileByFetch(`${API_BASE}/admin/compliance/export?${params.toString()}`, 'pivot_compliance_audit.zip');
 };
 
-window.openMonitorRoutesModal = () => {
+window.Pivot.legacy.openMonitorRoutesModal = () => {
     const modal = document.getElementById('monitor-routes-modal');
     modal?.classList.remove('hidden');
     modal?.setAttribute('aria-hidden', 'false');
 };
 
-window.closeMonitorRoutesModal = () => {
+window.Pivot.legacy.closeMonitorRoutesModal = () => {
     const modal = document.getElementById('monitor-routes-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
 };
 
-window.exportStats = () => downloadFileByFetch(`${API_BASE}/stats/usage/export`, 'usage_stats.csv');
+window.Pivot.legacy.exportStats = () => downloadFileByFetch(`${API_BASE}/stats/usage/export`, 'usage_stats.csv');
 
-window.loadLogs = async function(page = 1) {
+window.Pivot.legacy.loadLogs = async function(page = 1) {
     try {
         const username = document.getElementById('log-filter-user')?.value || '';
         const action = document.getElementById('log-filter-action')?.value || '';
@@ -301,15 +301,15 @@ window.loadLogs = async function(page = 1) {
     } catch (e) { showToast('加载日志失败', 'error'); }
 };
 
-window.resetLogFilters = () => {
+window.Pivot.legacy.resetLogFilters = () => {
     ['user', 'action', 'details', 'ip', 'start', 'end'].forEach(f => {
         const el = document.getElementById(`log-filter-${f}`);
         if (el) el.value = '';
     });
-    window.loadLogs(1);
+    window.Pivot.legacy.loadLogs(1);
 };
 
-window.exportLogs = () => {
+window.Pivot.legacy.exportLogs = () => {
     const username = document.getElementById('log-filter-user')?.value || '';
     const action = document.getElementById('log-filter-action')?.value || '';
     const details = document.getElementById('log-filter-details')?.value || '';
@@ -321,9 +321,9 @@ window.exportLogs = () => {
     downloadFileByFetch(`${API_BASE}/admin/logs/export?${params.toString()}`, 'audit_logs.csv');
 };
 
-window.loadReport = async function() {
-    window.bindReportDateFilters?.();
-    window.syncReportDateFilters?.();
+window.Pivot.legacy.loadReport = async function() {
+    window.Pivot.legacy.bindReportDateFilters?.();
+    window.Pivot.legacy.syncReportDateFilters?.();
     const unit = document.getElementById('report-unit')?.value || '';
     const username = document.getElementById('report-username')?.value || '';
     const period = document.getElementById('report-days')?.value || '30';
@@ -358,16 +358,16 @@ window.loadReport = async function() {
         renderTrendChart('report-trend-chart', data.trend);
         renderBarChart('report-user-chart', data.byUser, 'nickname', 'username');
         renderBarChart('report-unit-chart', data.byUnit, 'unit', 'unit');
-        window.scheduleSettingsWorkspaceScale?.();
-        setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
+        window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+        setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
     } catch (e) {
         showToast('加载报表失败', 'error');
     }
 };
 
 function exportReport() {
-    window.bindReportDateFilters?.();
-    window.syncReportDateFilters?.();
+    window.Pivot.legacy.bindReportDateFilters?.();
+    window.Pivot.legacy.syncReportDateFilters?.();
     const unit = document.getElementById('report-unit')?.value || '';
     const username = document.getElementById('report-username')?.value || '';
     const period = document.getElementById('report-days')?.value || '30';
@@ -389,26 +389,26 @@ window.Pivot?.exposeModule?.('chat.stats', {
     exportReport
 }, ['exportReport']);
 
-window.syncReportDateFilters = function() {
+window.Pivot.legacy.syncReportDateFilters = function() {
     const period = document.getElementById('report-days')?.value || '30';
     document.getElementById('report-custom-range')?.classList.toggle('hidden', period !== 'custom');
 };
 
-window.bindReportDateFilters = function() {
+window.Pivot.legacy.bindReportDateFilters = function() {
     const periodSelect = document.getElementById('report-days');
     if (periodSelect && periodSelect.dataset.boundReportRange !== '1') {
         periodSelect.dataset.boundReportRange = '1';
-        periodSelect.addEventListener('change', () => window.syncReportDateFilters());
+        periodSelect.addEventListener('change', () => window.Pivot.legacy.syncReportDateFilters());
     }
     const resetBtn = document.getElementById('report-reset-btn');
     if (resetBtn && resetBtn.dataset.boundReportReset !== '1') {
         resetBtn.dataset.boundReportReset = '1';
-        resetBtn.addEventListener('click', window.resetReportFilters);
+        resetBtn.addEventListener('click', window.Pivot.legacy.resetReportFilters);
     }
-    window.syncReportDateFilters();
+    window.Pivot.legacy.syncReportDateFilters();
 };
 
-window.resetReportFilters = function() {
+window.Pivot.legacy.resetReportFilters = function() {
     const unit = document.getElementById('report-unit');
     const username = document.getElementById('report-username');
     const period = document.getElementById('report-days');
@@ -419,8 +419,8 @@ window.resetReportFilters = function() {
     if (period) period.value = '30';
     if (start) start.value = '';
     if (end) end.value = '';
-    window.syncReportDateFilters?.();
-    window.loadReport?.();
+    window.Pivot.legacy.syncReportDateFilters?.();
+    window.Pivot.legacy.loadReport?.();
 };
 
 function renderBarChart(canvasId, data, labelField, fallbackField) {

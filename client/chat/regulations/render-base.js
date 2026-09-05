@@ -1,6 +1,6 @@
 /* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
-    const ns = window.PivotRegulationsInternal;
+    const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.renderBaseReady) return;
     with (ns) {
@@ -55,8 +55,8 @@
                     }
 
                     function renderDocumentsPagination() {
-                        if (typeof window.renderWorkspacePagination !== 'function') return;
-                        window.renderWorkspacePagination('regulations-pagination', {
+                        if (typeof window.Pivot.legacy.renderWorkspacePagination !== 'function') return;
+                        window.Pivot.legacy.renderWorkspacePagination('regulations-pagination', {
                             total: state.total,
                             page: state.page,
                             limit: state.pageSize,

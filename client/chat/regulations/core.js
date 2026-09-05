@@ -1,12 +1,12 @@
 (function () {
-    const ns = window.PivotRegulationsInternal || {};
+    const ns = window.Pivot.legacy.PivotRegulationsInternal || {};
     if (ns.coreReady) return;
-    window.PivotRegulationsInternal = ns;
+    window.Pivot.legacy.PivotRegulationsInternal = ns;
     const API = '/api/apps/regulations';
         const FILE_ACCEPT = '.txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp';
         const SUPPORTED_FORMATS = 'TXT、Markdown、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV、JSON、HTML/HTM';
         const REGULATIONS_PAGE_SIZE = 20;
-        const html = window.PivotSafeHtml || {
+        const html = window.Pivot.legacy.PivotSafeHtml || {
             escapeHtml(value) {
                 return String(value ?? '')
                     .replace(/&/g, '&amp;')
@@ -43,9 +43,9 @@
         function renderRichText(content) {
             const text = String(content || '').trim();
             if (!text) return '';
-            if (typeof window.renderMarkdown === 'function') {
+            if (typeof window.Pivot.legacy.renderMarkdown === 'function') {
                 try {
-                    const htmlText = window.renderMarkdown(text);
+                    const htmlText = window.Pivot.legacy.renderMarkdown(text);
                     if (htmlText) return htmlText;
                 } catch (_) { /* 渲染失败时回退到纯文本展示 */ }
             }
@@ -93,7 +93,7 @@
         }
 
         function getActiveUser() {
-            return typeof currentUser !== 'undefined' ? currentUser : window.currentUser;
+            return typeof currentUser !== 'undefined' ? currentUser : window.Pivot.legacy.currentUser;
         }
 
         function canManage() {
@@ -112,7 +112,7 @@
         }
 
         function getRegulationsSelectedModelId() {
-            return window.PivotAppModels?.getSelectedModel?.('regulations', 'regulations-ai-model')
+            return window.Pivot.legacy.PivotAppModels?.getSelectedModel?.('regulations', 'regulations-ai-model')
                 || document.getElementById('regulations-ai-model')?.value
                 || '';
         }
@@ -120,8 +120,8 @@
         // 删除类操作统一走项目内自定义确认弹窗（不使用浏览器默认 confirm）；showConfirm 不可用时回退
         function regulationConfirm(title, message) {
             return new Promise((resolve) => {
-                if (typeof window.showConfirm === 'function') {
-                    window.showConfirm(title, message, () => resolve(true));
+                if (typeof window.Pivot.legacy.showConfirm === 'function') {
+                    window.Pivot.legacy.showConfirm(title, message, () => resolve(true));
                     const cancelBtn = document.getElementById('modal-confirm-cancel');
                     const container = document.getElementById('confirm-container');
                     const cleanup = (result) => {

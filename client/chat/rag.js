@@ -9,7 +9,7 @@ const {
 
 const {
     escapeAttr: escapeRagAttr = (value) => String(value ?? '')
-} = window.Pivot?.html || window.PivotSafeHtml || {};
+} = window.Pivot?.html || window.Pivot.legacy.PivotSafeHtml || {};
 
 const {
     buildGraphCanvasMarkup,
@@ -109,13 +109,13 @@ const scheduleRagStatusRefresh = (docs) => {
     if (!Array.isArray(docs) || !docs.some(doc => doc.status === 'processing')) return;
     if (!shouldAutoRefreshRagDocs()) return;
     ragStatusRefreshTimer = setTimeout(() => {
-        if (shouldAutoRefreshRagDocs()) window.loadKnowledgeDocs();
+        if (shouldAutoRefreshRagDocs()) window.Pivot.legacy.loadKnowledgeDocs();
     }, 3000);
 };
 
 const ragConfirm = (title, message) => new Promise((resolve) => {
-    if (typeof window.showConfirm === 'function') {
-        window.showConfirm(title, message, () => resolve(true));
+    if (typeof window.Pivot.legacy.showConfirm === 'function') {
+        window.Pivot.legacy.showConfirm(title, message, () => resolve(true));
         const cancelBtn = document.getElementById('modal-confirm-cancel');
         const container = document.getElementById('confirm-container');
         const cancelHandler = () => {
@@ -155,31 +155,31 @@ document.addEventListener('click', async (event) => {
 
     const reindexBtn = event.target.closest('.rag-reindex-btn');
     if (reindexBtn) {
-        window.reindexKnowledgeDoc(reindexBtn.dataset.ragId);
+        window.Pivot.legacy.reindexKnowledgeDoc(reindexBtn.dataset.ragId);
         return;
     }
 
     const detailBtn = event.target.closest('.rag-detail-btn');
     if (detailBtn) {
-        window.showKnowledgeDocDetail(detailBtn.dataset.ragId);
+        window.Pivot.legacy.showKnowledgeDocDetail(detailBtn.dataset.ragId);
         return;
     }
 
     const metaBtn = event.target.closest('.rag-doc-meta-btn');
     if (metaBtn) {
-        window.openKnowledgeDocMetaModal?.(metaBtn.dataset.ragId);
+        window.Pivot.legacy.openKnowledgeDocMetaModal?.(metaBtn.dataset.ragId);
         return;
     }
 
     const docGraphBtn = event.target.closest('.rag-doc-graph-btn');
     if (docGraphBtn) {
-        window.openKnowledgeGraph(docGraphBtn.dataset.ragId);
+        window.Pivot.legacy.openKnowledgeGraph(docGraphBtn.dataset.ragId);
         return;
     }
 
     const feedbackBtn = event.target.closest('.rag-feedback-btn');
     if (feedbackBtn) {
-        window.sendRagFeedback(feedbackBtn);
+        window.Pivot.legacy.sendRagFeedback(feedbackBtn);
         return;
     }
 
@@ -187,18 +187,18 @@ document.addEventListener('click', async (event) => {
     if (debugChatBtn) {
         const query = debugChatBtn.dataset.ragDebugChat || document.getElementById('rag-debug-query')?.value || '';
         document.getElementById('rag-debug-modal')?.classList.add('hidden');
-        window.showMainWorkspace?.('chat');
+        window.Pivot.legacy.showMainWorkspace?.('chat');
         try {
             localStorage.setItem('pivot_chat_rag_enabled', 'true');
         } catch (e) {
             // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
         }
-        await window.applyRagDebugScopeToChat?.();
-        window.syncChatToolToggles?.();
+        await window.Pivot.legacy.applyRagDebugScopeToChat?.();
+        window.Pivot.legacy.syncChatToolToggles?.();
         const input = document.getElementById('user-input');
         if (input && query) {
             input.value = query;
-            window.resizeUserInput?.();
+            window.Pivot.legacy.resizeUserInput?.();
             input.focus();
         }
         showToast('已带着这个问题回到聊天，并打开知识库', 'success');
@@ -207,27 +207,27 @@ document.addEventListener('click', async (event) => {
 
     const deleteBtn = event.target.closest('.rag-delete-btn');
     if (deleteBtn) {
-        window.deleteKnowledgeDoc(deleteBtn.dataset.ragId);
+        window.Pivot.legacy.deleteKnowledgeDoc(deleteBtn.dataset.ragId);
         return;
     }
 
     if (event.target.closest('#rag-refresh-btn')) {
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
         return;
     }
 
     if (event.target.closest('#rag-create-collection-btn')) {
-        window.createKnowledgeCollectionFromPrompt?.();
+        window.Pivot.legacy.createKnowledgeCollectionFromPrompt?.();
         return;
     }
 
     if (event.target.closest('#rag-create-tag-btn')) {
-        window.createKnowledgeTagFromPrompt?.();
+        window.Pivot.legacy.createKnowledgeTagFromPrompt?.();
         return;
     }
 
     if (event.target.closest('#rag-graph-open-btn')) {
-        window.openKnowledgeGraph();
+        window.Pivot.legacy.openKnowledgeGraph();
         return;
     }
 
@@ -237,7 +237,7 @@ document.addEventListener('click', async (event) => {
     }
 
     if (event.target.closest('#rag-graph-query-btn')) {
-        window.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
+        window.Pivot.legacy.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
         return;
     }
 
@@ -254,42 +254,42 @@ document.addEventListener('click', async (event) => {
             mapView.suppressNextNodeClick = false;
             return;
         }
-        window.selectKnowledgeGraphEntity(graphEntityBtn.dataset.entityId);
+        window.Pivot.legacy.selectKnowledgeGraphEntity(graphEntityBtn.dataset.entityId);
         return;
     }
 
     if (event.target.closest('#rag-graph-edit-entity-btn')) {
-        window.showKnowledgeGraphEntityEditor(ragGraphState.selectedEntity);
+        window.Pivot.legacy.showKnowledgeGraphEntityEditor(ragGraphState.selectedEntity);
         return;
     }
 
     const saveEntityBtn = event.target.closest('#rag-graph-save-entity-btn');
     if (saveEntityBtn) {
-        window.saveKnowledgeGraphEntity(saveEntityBtn.dataset.entityId).catch(e => showToast(e.message || '实体保存失败', 'error'));
+        window.Pivot.legacy.saveKnowledgeGraphEntity(saveEntityBtn.dataset.entityId).catch(e => showToast(e.message || '实体保存失败', 'error'));
         return;
     }
 
     const mergeEntityBtn = event.target.closest('#rag-graph-merge-entity-btn');
     if (mergeEntityBtn) {
-        window.mergeKnowledgeGraphEntity(mergeEntityBtn.dataset.sourceEntityId).catch(e => showToast(e.message || '实体合并失败', 'error'));
+        window.Pivot.legacy.mergeKnowledgeGraphEntity(mergeEntityBtn.dataset.sourceEntityId).catch(e => showToast(e.message || '实体合并失败', 'error'));
         return;
     }
 
     const editRelationBtn = event.target.closest('.rag-graph-edit-relation-btn');
     if (editRelationBtn) {
-        window.editKnowledgeGraphRelation(editRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系编辑失败', 'error'));
+        window.Pivot.legacy.editKnowledgeGraphRelation(editRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系编辑失败', 'error'));
         return;
     }
 
     const saveRelationBtn = event.target.closest('#rag-graph-save-relation-btn');
     if (saveRelationBtn) {
-        window.saveKnowledgeGraphRelation(saveRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系保存失败', 'error'));
+        window.Pivot.legacy.saveKnowledgeGraphRelation(saveRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系保存失败', 'error'));
         return;
     }
 
     const confirmRelationBtn = event.target.closest('.rag-graph-confirm-relation-btn');
     if (confirmRelationBtn) {
-        window.confirmKnowledgeGraphRelation(confirmRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系确认失败', 'error'));
+        window.Pivot.legacy.confirmKnowledgeGraphRelation(confirmRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系确认失败', 'error'));
         return;
     }
 
@@ -300,32 +300,32 @@ document.addEventListener('click', async (event) => {
 
     const deleteRelationBtn = event.target.closest('.rag-graph-delete-relation-btn');
     if (deleteRelationBtn) {
-        window.deleteKnowledgeGraphRelation(deleteRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系删除失败', 'error'));
+        window.Pivot.legacy.deleteKnowledgeGraphRelation(deleteRelationBtn.dataset.relationId).catch(e => showToast(e.message || '关系删除失败', 'error'));
         return;
     }
 
     if (event.target.closest('#rag-graph-rebuild-doc-btn')) {
-        window.rebuildKnowledgeGraphForDoc().catch(e => showToast(e.message || '图谱重建失败', 'error'));
+        window.Pivot.legacy.rebuildKnowledgeGraphForDoc().catch(e => showToast(e.message || '图谱重建失败', 'error'));
         return;
     }
 
     if (event.target.closest('#rag-audit-btn')) {
-        window.showKnowledgeDocAudit();
+        window.Pivot.legacy.showKnowledgeDocAudit();
         return;
     }
 
     if (event.target.closest('#rag-batch-reindex-btn')) {
-        window.batchReindexKnowledgeDocs();
+        window.Pivot.legacy.batchReindexKnowledgeDocs();
         return;
     }
 
     if (event.target.closest('#rag-batch-delete-btn')) {
-        window.batchDeleteKnowledgeDocs();
+        window.Pivot.legacy.batchDeleteKnowledgeDocs();
         return;
     }
 
     if (event.target.closest('#rag-retry-failed-btn')) {
-        window.retryFailedKnowledgeDocs();
+        window.Pivot.legacy.retryFailedKnowledgeDocs();
         return;
     }
 
@@ -340,7 +340,7 @@ document.addEventListener('click', async (event) => {
     }
 
     if (event.target.closest('#rag-debug-btn')) {
-        window.debugRagQuery();
+        window.Pivot.legacy.debugRagQuery();
         return;
     }
 
@@ -418,28 +418,28 @@ document.addEventListener('focusout', (event) => {
 document.addEventListener('change', async (event) => {
     if (event.target?.id === 'rag-select-all') {
         document.querySelectorAll('.rag-doc-check').forEach(input => { input.checked = event.target.checked; });
-        window.syncRagSelectAllState?.();
+        window.Pivot.legacy.syncRagSelectAllState?.();
         return;
     }
     if (event.target?.id === 'rag-collection-filter') {
-        if (typeof window.handleRagCollectionScopeChange === 'function') {
-            await window.handleRagCollectionScopeChange('docs');
+        if (typeof window.Pivot.legacy.handleRagCollectionScopeChange === 'function') {
+            await window.Pivot.legacy.handleRagCollectionScopeChange('docs');
         } else {
-            window.loadKnowledgeDocs(1);
+            window.Pivot.legacy.loadKnowledgeDocs(1);
         }
         return;
     }
     if (event.target?.id === 'rag-tag-filter') {
-        window.loadKnowledgeDocs(1);
+        window.Pivot.legacy.loadKnowledgeDocs(1);
         return;
     }
     const enableToggle = event.target.closest?.('.rag-enable-toggle');
     if (enableToggle) {
-        window.toggleKnowledgeDocEnabled(enableToggle.dataset.ragId, enableToggle.checked);
+        window.Pivot.legacy.toggleKnowledgeDocEnabled(enableToggle.dataset.ragId, enableToggle.checked);
         return;
     }
     if (event.target.closest?.('.rag-doc-check')) {
-        window.syncRagSelectAllState?.();
+        window.Pivot.legacy.syncRagSelectAllState?.();
         return;
     }
     if (['rag-graph-type', 'rag-graph-quality'].includes(event.target?.id)) {
@@ -448,7 +448,7 @@ document.addEventListener('change', async (event) => {
     }
     if (['rag-graph-relation-status', 'rag-graph-relation-type', 'rag-graph-min-confidence'].includes(event.target?.id)) {
         if (ragGraphState.selectedEntityId) {
-            window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
+            window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
         } else {
             loadGraphRelations().catch(e => showToast(e.message || '关系筛选失败', 'error'));
         }
@@ -457,17 +457,17 @@ document.addEventListener('change', async (event) => {
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && event.target?.id === 'rag-debug-query') {
-        window.debugRagQuery();
+        window.Pivot.legacy.debugRagQuery();
     }
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-search') {
         refreshGraphSearch().catch(e => showToast(e.message || '实体搜索失败', 'error'));
     }
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-query') {
-        window.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
+        window.Pivot.legacy.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
     }
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-min-confidence') {
         if (ragGraphState.selectedEntityId) {
-            window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
+            window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));
         } else {
             loadGraphRelations().catch(e => showToast(e.message || '关系筛选失败', 'error'));
         }

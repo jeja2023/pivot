@@ -6,7 +6,7 @@
     const STORAGE_PREFIX = 'pivot_app_model:';
 
     function getUserScope() {
-        const user = typeof currentUser !== 'undefined' ? currentUser : (window.currentUser || {});
+        const user = typeof currentUser !== 'undefined' ? currentUser : (window.Pivot.legacy.currentUser || {});
         return String(user.id || user.username || 'anonymous');
     }
 
@@ -66,7 +66,7 @@
         const select = document.getElementById(selectorId);
         if (!select) return '';
 
-        if (typeof window.loadSelectableModels !== 'function') {
+        if (typeof window.Pivot.legacy.loadSelectableModels !== 'function') {
             setSelectorMessage(select, '模型列表未就绪');
             return '';
         }
@@ -74,7 +74,7 @@
         const currentId = String(select.value || '').trim();
         select.disabled = true;
         try {
-            const { models = [], defaultModelId } = await window.loadSelectableModels();
+            const { models = [], defaultModelId } = await window.Pivot.legacy.loadSelectableModels();
             if (!models.length) {
                 setSelectorMessage(select, '暂无可用模型');
                 return '';
@@ -85,8 +85,8 @@
                 const option = document.createElement('option');
                 option.value = String(model.id);
                 option.textContent = modelLabel(model);
-                option.title = typeof window['describeSelectorModel'] === 'function'
-                    ? window['describeSelectorModel'](model, false)
+                option.title = typeof window.Pivot.legacy.describeSelectorModel === 'function'
+                    ? window.Pivot.legacy.describeSelectorModel(model, false)
                     : option.textContent;
                 select.appendChild(option);
             });
@@ -119,6 +119,6 @@
     }
 
     const api = { refresh, getSelectedModel };
-    window['PivotAppModels'] = api;
+    window.Pivot.legacy.PivotAppModels = api;
     window.Pivot?.exposeModule?.('apps.modelSelector', api);
 })();

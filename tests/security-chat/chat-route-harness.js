@@ -7,6 +7,8 @@ const {
     http
 } = require('../security-helpers');
 
+const TEST_HTTP_TIMEOUT_MS = 15_000;
+
 // 上游默认按 OpenAI 兼容 SSE 返回，逐块下发内容后以 [DONE] 收尾。
 function writeSseChunks(res, { chunks = [], usage = null } = {}) {
     res.statusCode = 200;
@@ -41,6 +43,8 @@ async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usag
             return `http://127.0.0.1:${server.address().port}/v1/chat/completions`;
         },
         close() {
+            // 测试失败或客户端中止时，不让 keep-alive 连接阻塞下一个隔离用例。
+            server.closeAllConnections?.();
             return new Promise(resolve => server.close(resolve));
         }
     };
@@ -140,6 +144,7 @@ async function startChatRouteServer({
             return server.address().port;
         },
         close() {
+            server.closeAllConnections?.();
             return new Promise(resolve => server.close(resolve));
         }
     };
@@ -169,6 +174,14 @@ function parseSseEvents(sseText) {
 async function postChat(port, body) {
     const requestBody = JSON.stringify(body);
     const sseText = await new Promise((resolve, reject) => {
+        let settled = false;
+        let timeout;
+        const settle = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            callback(value);
+        };
         const req = http.request({
             hostname: '127.0.0.1',
             port,
@@ -182,9 +195,13 @@ async function postChat(port, body) {
             let text = '';
             res.setEncoding('utf8');
             res.on('data', chunk => { text += chunk; });
-            res.on('end', () => resolve(text));
+            res.on('error', error => settle(reject, error));
+            res.on('end', () => settle(resolve, text));
         });
-        req.on('error', reject);
+        timeout = setTimeout(() => {
+            req.destroy(new Error(`聊天路由测试在 ${TEST_HTTP_TIMEOUT_MS}ms 内未完成响应。`));
+        }, TEST_HTTP_TIMEOUT_MS);
+        req.on('error', error => settle(reject, error));
         req.write(requestBody);
         req.end();
     });

@@ -4,25 +4,29 @@ const {
     createSafeLookup,
     getSafeOutboundOptionsForUser
 } = require('../../security');
+const { isAdmin } = require('../../permissions');
 
 // 数据库出站 SSRF 守卫：解析 DNS 后校验真实 IP，拦截 loopback / link-local / 云元数据等敏感目标，
 // 默认仅管理员可连接内网（RFC1918）数据库（受 MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN 控制）。
-function databaseOutboundOptions(user) {
+function databaseOutboundOptions(user, { allowExplicitLoopbackForAdmin = false } = {}) {
     const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
+    // 仅供已保存连接的运维只读探针使用；常规 API 和工具执行不会传入此选项。
+    // 仍要求调用身份是管理员，不能借由关闭内网限制让普通用户访问本机地址。
+    const allowExplicitLoopback = Boolean(allowExplicitLoopbackForAdmin && isAdmin(user));
     if (!restrictPrivateHostsToAdmin) {
         // 关闭内网限制后，仍需拦截 loopback / link-local / 云元数据等敏感目标。
-        return { blockPrivate: false, allowExplicitLoopback: false };
+        return { blockPrivate: false, allowExplicitLoopback };
     }
     return getSafeOutboundOptionsForUser(user, {
         allowPrivateEnv: 'ALLOW_PRIVATE_DATABASE_HOSTS',
-        allowExplicitLoopbackForAdmin: false
+        allowExplicitLoopbackForAdmin: allowExplicitLoopback
     });
 }
 
 // 连接前再次解析并校验主机，缓解 TOCTOU / DNS rebinding。校验失败抛出 403 风格错误。
-async function assertSafeDatabaseHost(host, user) {
+async function assertSafeDatabaseHost(host, user, options = {}) {
     try {
-        await assertSafeOutboundHost(host, databaseOutboundOptions(user));
+        await assertSafeOutboundHost(host, databaseOutboundOptions(user, options));
     } catch (e) {
         const err = new Error('当前用户不允许连接内网、本机或云元数据数据库地址。');
         err.code = 'MCP_PRIVATE_HOST_RESTRICTED';
@@ -32,8 +36,8 @@ async function assertSafeDatabaseHost(host, user) {
 }
 
 // 为关系型驱动构造安全 lookup 钩子，连接握手阶段对解析出的 IP 再次校验，阻断 DNS rebinding。
-function databaseSafeLookup(user) {
-    return createSafeLookup(databaseOutboundOptions(user));
+function databaseSafeLookup(user, options = {}) {
+    return createSafeLookup(databaseOutboundOptions(user, options));
 }
 
 async function getConnectionOwnerAsync(connection = {}) {

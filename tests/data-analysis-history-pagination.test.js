@@ -27,8 +27,7 @@ function createHistoryPaginationHarness() {
     const pager = getOrCreate('data-analysis-history-pagination');
 
     let lastPaginationOptions = null;
-    const window = {
-        renderWorkspacePagination(containerOrId, options) {
+    const renderWorkspacePagination = (containerOrId, options) => {
             lastPaginationOptions = options;
             const container = typeof containerOrId === 'string' ? getOrCreate(containerOrId) : containerOrId;
             const total = Math.max(Number(options.total || 0), 0);
@@ -38,8 +37,8 @@ function createHistoryPaginationHarness() {
             container.replaceChildren();
             if (totalPages <= 1) return;
             container.innerHTML = `<span class="summary">第 ${page} / ${totalPages} 页（共 ${total} 条，每页 ${limit} 条）</span>`;
-        }
-    };
+        };
+    const window = { Pivot: { legacy: { renderWorkspacePagination } } };
 
     const context = {
         window,
@@ -49,6 +48,12 @@ function createHistoryPaginationHarness() {
         PivotSafeHtml: {
             setHtml(el, html) {
                 if (el) el.innerHTML = String(html);
+            },
+            escapeHtml(value) {
+                return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            },
+            escapeAttr(value) {
+                return this.escapeHtml(value).replace(/"/g, '&quot;');
             }
         },
         String,
@@ -58,12 +63,13 @@ function createHistoryPaginationHarness() {
         Math,
         encodeURIComponent
     };
+    window.Pivot.legacy.PivotSafeHtml = context.PivotSafeHtml;
 
     vm.runInNewContext(read('client/chat/data-analysis/context.js'), context, {
         filename: 'client/chat/data-analysis/context.js'
     });
 
-    const app = context.window.PivotDataAnalysis;
+    const app = context.window.Pivot.legacy.PivotDataAnalysis;
     app.fetchJson = async () => ({ artifacts: [] });
 
     vm.runInNewContext(read('client/chat/data-analysis/compare-history.js'), context, {

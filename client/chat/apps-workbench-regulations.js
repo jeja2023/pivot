@@ -36,16 +36,16 @@
     }
 
     async function ensureRegulationsWorkbench() {
-        if (window.PivotRegulations?.ready) return window.PivotRegulations;
+        if (window.Pivot.legacy.PivotRegulations?.ready) return window.Pivot.legacy.PivotRegulations;
         if (!readyPromise) {
             readyPromise = (async () => {
                 for (const src of scripts) {
                     await loadScriptOnce(src);
                 }
-                if (!window.PivotRegulations?.ready) {
+                if (!window.Pivot.legacy.PivotRegulations?.ready) {
                     throw new Error('法规工作台初始化失败');
                 }
-                return window.PivotRegulations;
+                return window.Pivot.legacy.PivotRegulations;
             })();
         }
         return readyPromise;
@@ -66,11 +66,11 @@
         return api.runSearch();
     }
 
-    window.PivotRegulations = Object.assign(window.PivotRegulations || {}, {
+    window.Pivot.legacy.PivotRegulations = Object.assign(window.Pivot.legacy.PivotRegulations || {}, {
         ensureReady: ensureRegulationsWorkbench,
         showRegulationsApp,
         loadDocuments,
         runSearch
     });
-    window.showRegulationsApp = showRegulationsApp;
+    window.Pivot.legacy.showRegulationsApp = showRegulationsApp;
 })();

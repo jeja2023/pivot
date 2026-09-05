@@ -24,10 +24,10 @@ const MIN_CONTENT_WIDTH = 960;
 
 const MIN_CONTENT_HEIGHT = 360;
 
-const dagEscapeHtml = (window.PivotSafeHtml && window.PivotSafeHtml.escapeHtml)
+const dagEscapeHtml = (window.Pivot.legacy.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeHtml)
         || ((value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
 
-const dagEscapeAttr = (window.PivotSafeHtml && window.PivotSafeHtml.escapeAttr)
+const dagEscapeAttr = (window.Pivot.legacy.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeAttr)
         || ((value) => dagEscapeHtml(value).replace(/"/g, '&quot;'));
 
 function uniqueId(existing, base = 'node') {
@@ -182,12 +182,12 @@ function readJson(text) {
     }
 
 function workflowModelOptions() {
-        const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
-            ? window.isSelectableModelForCurrentUser
+        const canSelectModel = typeof window.Pivot.legacy.isSelectableModelForCurrentUser === 'function'
+            ? window.Pivot.legacy.isSelectableModelForCurrentUser
             : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
         const candidates = [
-            ...(Array.isArray(window._cachedAgentModels) ? window._cachedAgentModels : []),
-            ...(Array.isArray(window._cachedModels) ? window._cachedModels : [])
+            ...(Array.isArray(window.Pivot.legacy._cachedAgentModels) ? window.Pivot.legacy._cachedAgentModels : []),
+            ...(Array.isArray(window.Pivot.legacy._cachedModels) ? window.Pivot.legacy._cachedModels : [])
         ];
         const seen = new Set();
         return candidates.filter(model => {

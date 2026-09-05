@@ -15,6 +15,7 @@ const officialWritingDocumentsMigrations = require('./official-writing-documents
 const agentGoalDispatchLeaseMigrations = require('./agent-goal-dispatch-lease');
 const agentContextAuditContractMigrations = require('./agent-context-audit-contract');
 const modelToolCallCapabilityMigrations = require('./model-tool-call-capabilities');
+const ragOperationsObservabilityMigrations = require('./rag-operations-observability');
 
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -940,6 +941,7 @@ const migrations = [
     ...agentGoalDispatchLeaseMigrations,
     ...agentContextAuditContractMigrations,
     ...modelToolCallCapabilityMigrations,
+    ...ragOperationsObservabilityMigrations,
     ...regulationsMigrations
 ];
 

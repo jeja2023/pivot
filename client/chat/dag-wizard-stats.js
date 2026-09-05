@@ -13,11 +13,11 @@ function createDagWizardStatsController(ctx) {
         const llmTool = wizardTools.find(tool => toolValue(tool) === 'agent.llm')
             || findPreferredTool(wizardTools, ['agent.llm']);
         if (!connections.length) {
-            window.showToast?.('请先在工具库启用数据库连接，并刷新工具。', 'error');
+            window.Pivot.legacy.showToast?.('请先在工具库启用数据库连接，并刷新工具。', 'error');
             return;
         }
         if (!chartTool) {
-            window.showToast?.('请先启用图表生成工具。', 'error');
+            window.Pivot.legacy.showToast?.('请先启用图表生成工具。', 'error');
             return;
         }
         let modal = document.getElementById('pivot-dag-stats-wizard');
@@ -208,12 +208,12 @@ function createDagWizardStatsController(ctx) {
                 ctx.recordHistory?.();
                 ctx.spec = ensureDefaults(nextSpec);
                 ctx.selectedId = 'llm_summary';
-                window.setAgentWorkflowDraftName?.(title, { ifEmpty: true });
+                window.Pivot.legacy.setAgentWorkflowDraftName?.(title, { ifEmpty: true });
                 ctx.render?.();
                 ctx.fitToContent?.();
                 ctx.flushOut?.();
                 modal.classList.add('hidden');
-                window.showToast?.('已生成统计图模板节点，可继续自定义编排。', 'success');
+                window.Pivot.legacy.showToast?.('已生成统计图模板节点，可继续自定义编排。', 'success');
             };
             // 检查当前画布是否有未保存的更改
             const hasUnsavedChanges = (() => {
@@ -222,11 +222,11 @@ function createDagWizardStatsController(ctx) {
                 if (!saved) return false;
                 return JSON.stringify(serialize(ctx.spec)) !== JSON.stringify(serialize(ensureDefaults(saved)));
             })();
-            if (ctx.spec.nodes.length && typeof window.showConfirm === 'function') {
+            if (ctx.spec.nodes.length && typeof window.Pivot.legacy.showConfirm === 'function') {
                 const message = hasUnsavedChanges
                     ? '当前画布有未保存的更改，替换将被丢弃。确定用统计图模板生成的节点替换当前画布吗？'
                     : '确定用统计图模板生成的节点替换当前画布吗？';
-                window.showConfirm('替换当前画布', message, apply);
+                window.Pivot.legacy.showConfirm('替换当前画布', message, apply);
             } else {
                 apply();
             }

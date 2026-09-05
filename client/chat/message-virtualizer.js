@@ -227,7 +227,7 @@
 
         existingMessages.forEach((messageEl, key) => {
             if (!activeKeys.has(key)) {
-                window.teardownPivotCharts?.(messageEl);
+                window.Pivot.legacy.teardownPivotCharts?.(messageEl);
                 messageEl.remove();
             }
         });
@@ -235,7 +235,7 @@
         state.range = nextRange;
         state.offsets = offsets;
 
-        newlyMountedAssistantNodes.forEach(node => window.renderPivotCharts?.(node));
+        newlyMountedAssistantNodes.forEach(node => window.Pivot.legacy.renderPivotCharts?.(node));
         observeMountedMessages();
 
         if (state.pinBottom) {
@@ -309,7 +309,7 @@
         state.resizeObserver?.disconnect();
         state.container.removeEventListener('scroll', handleScroll);
         state.container.classList.remove('is-virtualized');
-        window.teardownPivotCharts?.(state.container);
+        window.Pivot.legacy.teardownPivotCharts?.(state.container);
         if (clear) PivotSafeHtml.setHtml(state.container, '');
         state = null;
     }
@@ -350,7 +350,7 @@
         state.resizeObserver?.disconnect();
         container.removeEventListener('scroll', handleScroll);
         container.classList.remove('is-virtualized');
-        window.teardownPivotCharts?.(container);
+        window.Pivot.legacy.teardownPivotCharts?.(container);
         PivotSafeHtml.setHtml(container, '');
         const fragment = document.createDocumentFragment();
         const assistantNodes = [];
@@ -363,10 +363,10 @@
             if (record.role === 'assistant' && content) assistantNodes.push(content);
         });
         container.appendChild(fragment);
-        assistantNodes.forEach(node => window.renderPivotCharts?.(node));
+        assistantNodes.forEach(node => window.Pivot.legacy.renderPivotCharts?.(node));
         state.active = false;
         state = null;
-        window.scrollMessagesToBottom?.({ duration: 300 });
+        window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 300 });
     }
 
     window.Pivot.exposeModule('chat.messageVirtualizer', {

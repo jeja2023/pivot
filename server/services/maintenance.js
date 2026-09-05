@@ -455,10 +455,10 @@ function getMaintenanceStatus() {
     };
 }
 
-// 清理数据分析工作区的过期导出/临时文件（同步、best-effort，异常不影响其他维护任务）。
-function runAnalysisWorkspaceCleanup() {
+// 清理数据分析工作区的过期导出/临时文件；异常不影响其他维护任务。
+async function runAnalysisWorkspaceCleanup() {
     try {
-        cleanupAnalysisWorkspace();
+        await cleanupAnalysisWorkspace();
     } catch (err) {
         logger.warn({ err: err.message }, '数据分析工作区清理失败');
     }
@@ -503,7 +503,7 @@ function startMaintenanceTasks() {
     cleanupExpiredRefreshTokens().catch(() => {});
     cleanupRateLimitCounters().catch(() => {});
     cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
-    runAnalysisWorkspaceCleanup();
+    runAnalysisWorkspaceCleanup().catch(() => {});
     runDocumentProcessingCleanup().catch(() => {});
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
     optimizeDatabase().catch(() => {});
@@ -529,7 +529,7 @@ function startMaintenanceTasks() {
         cleanupExpiredRefreshTokens().catch(() => {});
         cleanupRateLimitCounters().catch(() => {});
         cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
-        runAnalysisWorkspaceCleanup();
+        runAnalysisWorkspaceCleanup().catch(() => {});
         runDocumentProcessingCleanup().catch(() => {});
         backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
         optimizeDatabase().catch(() => {});

@@ -57,7 +57,7 @@ function setSettingsTabState(state = '', message = '', { retry = false, tab = ''
         button.type = 'button';
         button.className = 'btn-secondary settings-state-retry';
         button.textContent = '重试';
-        button.addEventListener('click', () => window.loadTabData?.(tab, page));
+        button.addEventListener('click', () => window.Pivot.legacy.loadTabData?.(tab, page));
         el.appendChild(button);
     }
 }
@@ -84,7 +84,7 @@ async function loadSettings() {
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? 100;
         updateRagChunkOverlapLimit();
         setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
-        window.applyUploadRuntimeLimits?.(data.uploadLimits);
+        window.Pivot.legacy.applyUploadRuntimeLimits?.(data.uploadLimits);
         updateRuntimeSettingsForm(data.runtimeConfig);
         updateApiAccessState(data.apiAccessEnabled === true);
         updateEmbeddingSettingsForm(data.embeddingConfig);
@@ -205,7 +205,7 @@ function renderEnhancedMemorySummary(summary = {}) {
     `).join(''));
 }
 
-window.updateLongTermMemoryEnabled = async function(enabled) {
+window.Pivot.legacy.updateLongTermMemoryEnabled = async function(enabled) {
     const toggle = document.getElementById('long-term-memory-toggle');
     if (toggle) toggle.disabled = true;
     try {
@@ -271,7 +271,7 @@ async function mergeMemoryPair(targetId, sourceId) {
     return data;
 }
 
-window.openMemoryEditModal = function(memory) {
+window.Pivot.legacy.openMemoryEditModal = function(memory) {
     window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-edit-modal');
     const idInput = document.getElementById('memory-edit-id');
@@ -293,7 +293,7 @@ window.openMemoryEditModal = function(memory) {
     contentInput.focus();
 };
 
-window.closeMemoryEditModal = function() {
+window.Pivot.legacy.closeMemoryEditModal = function() {
     const modal = document.getElementById('memory-edit-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
@@ -323,7 +323,7 @@ function renderMemorySource(data = {}) {
     `);
 }
 
-window.openMemorySourceModal = async function(memoryId) {
+window.Pivot.legacy.openMemorySourceModal = async function(memoryId) {
     window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-source-modal');
     if (!modal) return;
@@ -356,7 +356,7 @@ async function openMemoryUsageModal(memoryId) {
     }
 };
 
-window.closeMemorySourceModal = function() {
+window.Pivot.legacy.closeMemorySourceModal = function() {
     const modal = document.getElementById('memory-source-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
@@ -383,7 +383,7 @@ function renderMemoryMergeSuggestions(suggestions = []) {
     `).join(''));
 }
 
-window.loadMemoryMergeSuggestions = async function() {
+window.Pivot.legacy.loadMemoryMergeSuggestions = async function() {
     const button = document.getElementById('memory-merge-suggestions-btn');
     if (button) button.disabled = true;
     try {
@@ -532,7 +532,7 @@ async function archiveExpiredMemories() {
     return data;
 }
 
-window.loadMemories = async function(page = pageState.memories || 1) {
+window.Pivot.legacy.loadMemories = async function(page = pageState.memories || 1) {
     const toggle = document.getElementById('long-term-memory-toggle');
     const requestedPage = Math.max(1, Number.parseInt(page, 10) || 1);
     pageState.memories = requestedPage;
@@ -548,7 +548,7 @@ window.loadMemories = async function(page = pageState.memories || 1) {
         const total = Number(data.total || 0);
         const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 15)));
         if (total > 0 && requestedPage > totalPages) {
-            await window.loadMemories(totalPages);
+            await window.Pivot.legacy.loadMemories(totalPages);
             return;
         }
         currentLongTermMemories = Array.isArray(data.memories) ? data.memories : [];
@@ -563,7 +563,7 @@ window.loadMemories = async function(page = pageState.memories || 1) {
     }
 };
 
-window.exportMemories = async function() {
+window.Pivot.legacy.exportMemories = async function() {
     try {
         const res = await apiFetch(`${API_BASE}/memories/export?${memoryQueryParams().toString()}`);
         const data = await res.json();
@@ -685,9 +685,9 @@ function collectRuntimeSettingsPayload(source = null) {
 }
 
 function updateRuntimeSettingsForm(runtimeConfig = {}) {
-    window.currentRuntimeConfig = runtimeConfig || {};
+    window.Pivot.legacy.currentRuntimeConfig = runtimeConfig || {};
     if (runtimeConfig?.values) {
-        window.applyUploadRuntimeLimits?.({
+        window.Pivot.legacy.applyUploadRuntimeLimits?.({
             maxAttachmentsPerMessage: runtimeConfig.values.maxAttachmentsPerMessage,
             maxImagesPerMessage: runtimeConfig.values.maxImagesPerMessage
         });
@@ -726,7 +726,7 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
 }
 
 
-window.saveRuntimeSettings = async function(source = null) {
+window.Pivot.legacy.saveRuntimeSettings = async function(source = null) {
     if (!isSuperAdminUser()) {
         const message = '只有 admin 权限层级可以修改全局参数';
         updateRuntimeStatusMirrors(message);
@@ -753,8 +753,8 @@ window.saveRuntimeSettings = async function(source = null) {
         if (!res.ok) throw new Error(data.error || '运行时配置保存失败');
         updateRuntimeSettingsForm(data.runtimeConfig);
         showToast('并发与上下文配置已保存');
-        if (window.refreshMonitorSummary) window.refreshMonitorSummary({ force: true });
-        else window.loadMonitorSummary?.({ force: true });
+        if (window.Pivot.legacy.refreshMonitorSummary) window.Pivot.legacy.refreshMonitorSummary({ force: true });
+        else window.Pivot.legacy.loadMonitorSummary?.({ force: true });
     } catch (e) {
         const message = e.message || '运行时配置保存失败';
         updateRuntimeStatusMirrors(message);
@@ -769,7 +769,7 @@ window.saveRuntimeSettings = async function(source = null) {
 
 function updateApiAccessState(enabled) {
     const isEnabled = enabled === true;
-    window.apiAccessEnabled = isEnabled;
+    window.Pivot.legacy.apiAccessEnabled = isEnabled;
     const toggle = document.getElementById('api-access-toggle');
     const badge = document.getElementById('api-access-status-badge');
     const hint = document.getElementById('api-access-disabled-hint');
@@ -788,9 +788,9 @@ function updateApiAccessState(enabled) {
     if (guide) guide.classList.toggle('is-disabled', !isEnabled);
 }
 
-window.updateApiAccessState = updateApiAccessState;
+window.Pivot.legacy.updateApiAccessState = updateApiAccessState;
 
-window.updateApiAccessSetting = async function() {
+window.Pivot.legacy.updateApiAccessSetting = async function() {
     if (!isSuperAdminUser()) return;
     const toggle = document.getElementById('api-access-toggle');
     if (!toggle) return;
@@ -805,7 +805,7 @@ window.updateApiAccessSetting = async function() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'API 接入设置保存失败');
         updateApiAccessState(data.apiAccessEnabled === true);
-        window.loadApiKeys?.();
+        window.Pivot.legacy.loadApiKeys?.();
         showToast(data.apiAccessEnabled ? 'API 接入已开启' : 'API 接入已关闭');
     } catch (e) {
         updateApiAccessState(!enabled);
@@ -821,28 +821,28 @@ function getEmbeddingModelValue() {
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
 
-document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.saveRuntimeSettings?.(event));
-document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.loadSettings?.());
-document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.loadMemories?.());
+document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.Pivot.legacy.saveRuntimeSettings?.(event));
+document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.Pivot.legacy.loadSettings?.());
+document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMemories?.());
 document.getElementById('long-term-memory-toggle')?.addEventListener('change', (event) => {
-    window.updateLongTermMemoryEnabled?.(event.target.checked === true);
+    window.Pivot.legacy.updateLongTermMemoryEnabled?.(event.target.checked === true);
 });
 
-document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.loadMemoryMergeSuggestions?.());
-document.getElementById('memory-export-btn')?.addEventListener('click', () => window.exportMemories?.());
+document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMemoryMergeSuggestions?.());
+document.getElementById('memory-export-btn')?.addEventListener('click', () => window.Pivot.legacy.exportMemories?.());
 document.getElementById('memory-search-input')?.addEventListener('input', () => {
-    clearTimeout(window.memorySearchTimer);
-    window.memorySearchTimer = setTimeout(() => window.loadMemories?.(1), 250);
+    clearTimeout(window.Pivot.legacy.memorySearchTimer);
+    window.Pivot.legacy.memorySearchTimer = setTimeout(() => window.Pivot.legacy.loadMemories?.(1), 250);
 });
-document.getElementById('memory-status-filter')?.addEventListener('change', () => window.loadMemories?.(1));
-document.getElementById('memory-type-filter')?.addEventListener('change', () => window.loadMemories?.(1));
+document.getElementById('memory-status-filter')?.addEventListener('change', () => window.Pivot.legacy.loadMemories?.(1));
+document.getElementById('memory-type-filter')?.addEventListener('change', () => window.Pivot.legacy.loadMemories?.(1));
 document.getElementById('memory-archive-expired-btn')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
         const data = await archiveExpiredMemories();
         showToast(`已归档 ${Number(data.archived || 0)} 条过期记忆`);
-        await window.loadMemories?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (e) {
         showToast(e.message || '过期记忆归档失败', 'error');
     } finally {
@@ -862,7 +862,7 @@ document.getElementById('memory-bulk-enable-btn')?.addEventListener('click', asy
     try {
         await bulkUpdateMemoryStatus(ids, 'active');
         showToast('选中记忆已恢复');
-        await window.loadMemories?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (error) {
         showToast(error.message || '批量恢复失败', 'error');
     } finally {
@@ -877,7 +877,7 @@ document.getElementById('memory-bulk-disable-btn')?.addEventListener('click', as
     try {
         await bulkUpdateMemoryStatus(ids, 'disabled');
         showToast('选中记忆已禁用');
-        await window.loadMemories?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (error) {
         showToast(error.message || '批量禁用失败', 'error');
     } finally {
@@ -892,7 +892,7 @@ document.getElementById('memory-bulk-delete-btn')?.addEventListener('click', asy
     try {
         await bulkUpdateMemoryStatus(ids, 'deleted');
         showToast('选中记忆已删除');
-        await window.loadMemories?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (error) {
         showToast(error.message || '批量删除失败', 'error');
     } finally {
@@ -913,7 +913,7 @@ document.getElementById('memory-jobs-panel')?.addEventListener('click', async (e
             const data = await cleanupMemoryJobs();
             showToast(`已清理 ${Number(data.deleted || 0)} 个旧任务`);
         }
-        await window.loadMemories?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (e) {
         showToast(e.message || '任务维护失败', 'error');
     } finally {
@@ -932,23 +932,23 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
         if (action === 'edit') {
             const memory = getCurrentMemory(memoryId);
             if (!memory) throw new Error('记忆数据已刷新，请重新加载后再编辑');
-            window.openMemoryEditModal?.(memory);
+            window.Pivot.legacy.openMemoryEditModal?.(memory);
         } else if (action === 'source') {
-            await window.openMemorySourceModal?.(memoryId);
+            await window.Pivot.legacy.openMemorySourceModal?.(memoryId);
         } else if (action === 'usage') {
             await openMemoryUsageModal(memoryId);
         } else if (action === 'disable') {
             await updateMemoryStatus(memoryId, 'disabled');
             showToast('长期记忆已禁用');
-            await window.loadMemories?.();
+            await window.Pivot.legacy.loadMemories?.();
         } else if (action === 'restore') {
             await updateMemoryStatus(memoryId, 'active');
             showToast('长期记忆已恢复');
-            await window.loadMemories?.();
+            await window.Pivot.legacy.loadMemories?.();
         } else if (action === 'delete') {
             await deleteMemory(memoryId);
             showToast('长期记忆已删除');
-            await window.loadMemories?.();
+            await window.Pivot.legacy.loadMemories?.();
         }
     } catch (e) {
         showToast(e.message || '长期记忆操作失败', 'error');
@@ -956,7 +956,7 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
         button.disabled = false;
     }
 }, true);
-document.getElementById('memory-edit-cancel')?.addEventListener('click', () => window.closeMemoryEditModal?.());
+document.getElementById('memory-edit-cancel')?.addEventListener('click', () => window.Pivot.legacy.closeMemoryEditModal?.());
 document.getElementById('memory-edit-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const saveButton = document.getElementById('memory-edit-save');
@@ -970,15 +970,15 @@ document.getElementById('memory-edit-form')?.addEventListener('submit', async (e
             confidence: Number(document.getElementById('memory-edit-confidence')?.value)
         });
         showToast('长期记忆已保存');
-        window.closeMemoryEditModal?.();
-        await window.loadMemories?.();
+        window.Pivot.legacy.closeMemoryEditModal?.();
+        await window.Pivot.legacy.loadMemories?.();
     } catch (e) {
         showToast(e.message || '记忆保存失败', 'error');
     } finally {
         if (saveButton) saveButton.disabled = false;
     }
 });
-document.getElementById('memory-source-close')?.addEventListener('click', () => window.closeMemorySourceModal?.());
+document.getElementById('memory-source-close')?.addEventListener('click', () => window.Pivot.legacy.closeMemorySourceModal?.());
 document.getElementById('memory-merge-panel')?.addEventListener('click', async (event) => {
     const button = event.target?.closest?.('[data-memory-merge-target]');
     if (!button) return;
@@ -986,8 +986,8 @@ document.getElementById('memory-merge-panel')?.addEventListener('click', async (
     try {
         await mergeMemoryPair(button.dataset.memoryMergeTarget, button.dataset.memoryMergeSource);
         showToast('长期记忆已合并');
-        await window.loadMemories?.();
-        await window.loadMemoryMergeSuggestions?.();
+        await window.Pivot.legacy.loadMemories?.();
+        await window.Pivot.legacy.loadMemoryMergeSuggestions?.();
     } catch (e) {
         showToast(e.message || '记忆合并失败', 'error');
     } finally {
@@ -995,13 +995,13 @@ document.getElementById('memory-merge-panel')?.addEventListener('click', async (
     }
 });
 document.getElementById('memory-edit-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'memory-edit-modal') window.closeMemoryEditModal?.();
+    if (event.target?.id === 'memory-edit-modal') window.Pivot.legacy.closeMemoryEditModal?.();
 });
 document.getElementById('memory-source-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'memory-source-modal') window.closeMemorySourceModal?.();
+    if (event.target?.id === 'memory-source-modal') window.Pivot.legacy.closeMemorySourceModal?.();
 });
 
-window.fetchEmbeddingModels = async () => {
+window.Pivot.legacy.fetchEmbeddingModels = async () => {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -1081,7 +1081,7 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
     setSettingsInitialValues('#setting-rag-embedding-url, #setting-rag-embedding-model');
 }
 
-window.saveSettings = async () => {
+window.Pivot.legacy.saveSettings = async () => {
     const scoreInput = document.getElementById('setting-rag-score-threshold');
     const topKInput = document.getElementById('setting-rag-top-k');
     const candidateInput = document.getElementById('setting-rag-candidate-limit');
@@ -1117,7 +1117,7 @@ window.saveSettings = async () => {
     }
 };
 
-window.saveEmbeddingSettings = async () => {
+window.Pivot.legacy.saveEmbeddingSettings = async () => {
     const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -1162,14 +1162,14 @@ window.saveEmbeddingSettings = async () => {
         updateEmbeddingSettingsForm(data.embeddingConfig);
         setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         showToast(isSuperAdminUser() ? '系统检索配置已保存' : '个人检索配置已保存');
-        if (modal) window.setKnowledgeModalVisibility?.(modal, false);
+        if (modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
     } catch (e) {
         showToast(e.message || '检索配置保存失败', 'error');
     } finally {
         if (saveBtn) saveBtn.disabled = false;
     }
 };
-window.testEmbeddingConnection = async () => {
+window.Pivot.legacy.testEmbeddingConnection = async () => {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
@@ -1214,7 +1214,7 @@ window.testEmbeddingConnection = async () => {
     }
 };
 
-window.bindEmbeddingModalEvents = function() {
+window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     const openBtn = document.getElementById('rag-embedding-modal-open-btn');
     const cancelBtn = document.getElementById('rag-embedding-modal-cancel');
     const testBtn = document.getElementById('rag-embedding-test-btn');
@@ -1228,23 +1228,23 @@ window.bindEmbeddingModalEvents = function() {
     if (openBtn.dataset.boundEmbeddingOpen !== '1') {
         openBtn.dataset.boundEmbeddingOpen = '1';
         openBtn.addEventListener('click', () => {
-            window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#setting-rag-score-threshold' });
+            window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#setting-rag-score-threshold' });
         });
     }
     if (cancelBtn && cancelBtn.dataset.boundEmbeddingCancel !== '1') {
         cancelBtn.dataset.boundEmbeddingCancel = '1';
-        cancelBtn.addEventListener('click', () => window.setKnowledgeModalVisibility?.(modal, false));
+        cancelBtn.addEventListener('click', () => window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false));
     }
     
     if (testBtn) {
-        testBtn.onclick = () => window.testEmbeddingConnection();
+        testBtn.onclick = () => window.Pivot.legacy.testEmbeddingConnection();
     }
     if (fetchModelsBtn) {
-        fetchModelsBtn.onclick = () => window.fetchEmbeddingModels();
+        fetchModelsBtn.onclick = () => window.Pivot.legacy.fetchEmbeddingModels();
     }
     const saveBtn = document.getElementById('rag-embedding-save-btn');
     if (saveBtn) {
-        saveBtn.onclick = () => window.saveEmbeddingSettings();
+        saveBtn.onclick = () => window.Pivot.legacy.saveEmbeddingSettings();
     }
     if (embeddingModelSelect) {
         embeddingModelSelect.onchange = (e) => {
@@ -1270,25 +1270,25 @@ document.addEventListener('input', event => {
     if (event.target?.id === 'setting-rag-chunk-size') updateRagChunkOverlapLimit();
 });
 
-window.bindRagDebugModalEvents = function() {
+window.Pivot.legacy.bindRagDebugModalEvents = function() {
     const openBtn = document.getElementById('rag-debug-modal-open-btn');
     const closeBtn = document.getElementById('rag-debug-modal-close');
     const modal = document.getElementById('rag-debug-modal');
     if (!openBtn || !modal) return;
 
     openBtn.onclick = () => {
-        window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-debug-query' });
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-debug-query' });
         // 如果是空的，自动填充默认参数
-        if (window.loadKnowledgeDocs) window.loadKnowledgeDocs();
-        window.loadRagDebugHistory?.();
+        if (window.Pivot.legacy.loadKnowledgeDocs) window.Pivot.legacy.loadKnowledgeDocs();
+        window.Pivot.legacy.loadRagDebugHistory?.();
     };
     
     if (closeBtn) {
-        closeBtn.onclick = () => window.setKnowledgeModalVisibility?.(modal, false);
+        closeBtn.onclick = () => window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
     }
     
     modal.onclick = (e) => {
-        if (e.target === modal) window.setKnowledgeModalVisibility?.(modal, false);
+        if (e.target === modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
     };
 };
 
@@ -1329,5 +1329,5 @@ document.addEventListener('click', (event) => {
     if (!button || button.disabled) return;
     const page = parseInt(button.dataset.paginationPage, 10);
     if (!Number.isFinite(page) || page < 1) return;
-    loadTabData(button.dataset.paginationTab, page);
+    window.Pivot.legacy.loadTabData(button.dataset.paginationTab, page);
 });

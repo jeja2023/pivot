@@ -220,7 +220,7 @@ async function openAgentWorkflowSchedules() {
     const subtitle = document.getElementById('agent-workflow-schedule-subtitle');
     const name = document.getElementById('agent-workflow-schedule-name');
     const inputSummary = document.getElementById('agent-workflow-schedule-input-summary');
-    const inputs = collectAgentDagInputs();
+    const inputs = window.Pivot.legacy.collectAgentDagInputs();
     if (subtitle) subtitle.textContent = `${workflow.name || '未命名工作流'} · 已发布版本 ${workflow.published_version}`;
     if (name) name.value = `${workflow.name || '工作流'}计划`.slice(0, 100);
     setAgentScheduleIntervalControls('agent-workflow-schedule', 60);
@@ -343,7 +343,7 @@ async function toggleAgentWorkflowSchedule(scheduleId) {
 }
 
 function deleteAgentWorkflowSchedule(scheduleId) {
-    showConfirm('删除工作流计划', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
+    window.Pivot.legacy.showConfirm('删除工作流计划', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
         const lockKey = `delete:${scheduleId}`;
         if (agentWorkflowScheduleActionLocks.has(lockKey)) return;
         agentWorkflowScheduleActionLocks.add(lockKey);

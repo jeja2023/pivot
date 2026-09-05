@@ -725,19 +725,19 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(source, /modelId: runSettings\.modelId/);
     assert.match(source, /maxSteps: runSettings\.maxSteps/);
     assert.match(source, /async function ensureAgentWorkflowNameForSave/);
-    assert.match(source, /await window\.showInputPrompt\?\.\(\{/);
+    assert.match(source, /await window\.Pivot\.legacy\.showInputPrompt\?\.\(\{/);
     assert.match(source, /const workflowName = await ensureAgentWorkflowNameForSave\(\)/);
     assert.doesNotMatch(source, /window\.prompt\?\(/);
     assert.match(source, /payload\.workflowVersion = 'draft'/);
     assert.match(source, /workflowRunSource: 'preview'/);
     assert.match(source, /payload\.workflowVersion = sourceMode === 'published' \? 'published' : 'current'/);
     assert.match(source, /workflowRunSource: sourceMode === 'published' \? 'published' : 'current'/);
-    assert.match(source, /await window\.openAgentRun\(data\.run\.id, \{ workflowPreview: true \}\)/);
+    assert.match(source, /await window\.Pivot\.legacy\.openAgentRun\(data\.run\.id, \{ workflowPreview: true \}\)/);
     assert.match(source, /function ensureAgentRunDetailModalVisible/);
     assert.match(source, /function startAgentWorkflowPreviewPolling/);
-    assert.match(source, /window\.cancelAgentWorkflowPreviewRun/);
+    assert.match(source, /window\.Pivot\.legacy\.cancelAgentWorkflowPreviewRun/);
     assert.match(source, /function agentDagNodeReadableOutputMarkup/);
-    assert.match(source, /window\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
+    assert.match(source, /window\.Pivot\.legacy\.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow/);
     assert.match(source, /async function openAgentWorkflowSchedules/);
     assert.match(source, /workflowVersion: 'published'/);
     assert.match(source, /<option value="interval">按间隔<\/option>/);
@@ -834,7 +834,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.doesNotMatch(agentPartial, /data-agent-open-dag/);
     assert.doesNotMatch(agentPartial, /id="agent-open-dag-btn"/);
     assert.match(dagPartial, /返回资产中心/);
-    assert.match(source, /window\.createWorkflowDraftFromAgentRun/);
+    assert.match(source, /window\.Pivot\.legacy\.createWorkflowDraftFromAgentRun/);
     assert.match(source, /kind: 'workflow'/);
     assert.match(source, /data-agent-create-workflow-draft/);
     assert.match(source, /pendingAgentWorkflowDraft/);
@@ -856,7 +856,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(source, /data-automation-schedule-runs/);
     assert.match(source, /exposeModule\('agent\.automation'/);
     assert.match(source, /exposeModule\('agent\.schedules'/);
-    assert.match(source, /window\.setTaskComposerOpen/);
+    assert.match(source, /window\.Pivot\.legacy\.setTaskComposerOpen/);
     assert.match(appMain, /matchMedia\('\(max-width: 720px\)'\)/);
     assert.match(appMain, /sidebar-mobile-close-btn/);
     assert.match(appMain, /automation-workbench-btn[^\n]*openAgentWorkbench/);
@@ -925,14 +925,14 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(ui, /function isSelectableModelForCurrentUser/);
     assert.match(ui, /const models = data\.filter\(isSelectableModelForCurrentUser\)/);
     assert.doesNotMatch(ui, /owner_role === 'admin'/);
-    assert.match(agents, /window\.isSelectableModelForCurrentUser/);
+    assert.match(agents, /window\.Pivot\.legacy\.isSelectableModelForCurrentUser/);
 
     assert.match(editor, /'agent\.llm': \['大模型节点'/);
     assert.match(editor, /key: 'llm', label: '大模型'/);
     assert.match(editor, /function defaultLlmInput/);
     assert.match(editor, /function defaultWorkflowModelId/);
     assert.match(editor, /function workflowModelOptions/);
-    assert.match(editor, /window\.isSelectableModelForCurrentUser/);
+    assert.match(editor, /window\.Pivot\.legacy\.isSelectableModelForCurrentUser/);
     assert.match(editor, /\['agent\.llm', 'agent\.content_review', 'agent\.delegate'\]\.includes\(toolValue\(tool\)\)/);
     assert.match(editor, /data-pivot-dag-model-select="1"/);
     assert.match(editor, /暂无可用模型/);

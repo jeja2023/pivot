@@ -174,7 +174,7 @@ if (document.readyState === 'loading') {
 function hasSendableChatPayload() {
     const inputEl = document.getElementById('user-input');
     const text = String(inputEl?.value || '').trim();
-    return Boolean(text) || pendingAttachments.length > 0;
+    return Boolean(text) || window.Pivot.legacy.pendingAttachments.length > 0;
 }
 
 async function postChatAgentControl(runId, path, body = {}) {
@@ -197,16 +197,16 @@ async function cancelChatAgentRun(runId) {
 
 async function openChatAgentRunDetail(runId) {
     if (!runId) return null;
-    if (typeof window.openAgentRun !== 'function') {
-        if (typeof window.ensureWorkspaceScripts !== 'function') {
+    if (typeof window.Pivot.legacy.openAgentRun !== 'function') {
+        if (typeof window.Pivot.legacy.ensureWorkspaceScripts !== 'function') {
             throw new Error('任务详情模块尚未初始化，请刷新页面后重试');
         }
-        await window.ensureWorkspaceScripts('agent');
+        await window.Pivot.legacy.ensureWorkspaceScripts('agent');
     }
-    if (typeof window.openAgentRun !== 'function') {
+    if (typeof window.Pivot.legacy.openAgentRun !== 'function') {
         throw new Error('任务详情模块加载失败，请刷新页面后重试');
     }
-    return window.openAgentRun(runId);
+    return window.Pivot.legacy.openAgentRun(runId);
 }
 
 function parseChatAgentStepPayload(value) {
@@ -288,7 +288,7 @@ function attachChatAgentControls(messageContent, runId, status = '') {
         addButton('继续', 'btn-primary', '从上次执行位置继续任务', async () => {
             await postChatAgentControl(runId, '/resume');
             showToast('已创建续跑任务', 'info');
-            window.attachChatAgentRunsForSession?.(currentSessionId);
+            window.Pivot.legacy.attachChatAgentRunsForSession?.(currentSessionId);
         });
     }
 }
@@ -346,7 +346,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
 ]);
 
 // 发新消息时先中断上一次生成再串行接管，而不是拦下用户输入
-window.sendMessage = async function(isRegenerate = false) {
+window.Pivot.legacy.sendMessage = async function(isRegenerate = false) {
     const shouldRegenerate = isRegenerate === true;
     // 空输入不应打断正在进行的生成
     if (!shouldRegenerate && !hasSendableChatPayload()) return;
@@ -378,19 +378,19 @@ async function runSendMessage(shouldRegenerate) {
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
     const modelId = document.getElementById('model-selector').value;
-    const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
+    const model = (window.Pivot.legacy._cachedModels || []).find(m => String(m.id) === String(modelId));
     
-    if (pendingAttachments.length > 0) {
+    if (window.Pivot.legacy.pendingAttachments.length > 0) {
         if (!model || Number(model.supports_vision || 0) !== 1) {
             showToast('当前模型不支持附件处理能力（图片、文档等）', 'error');
             return;
         }
     }
     
-    if (!content && pendingAttachments.length === 0 && !shouldRegenerate) return;
+    if (!content && window.Pivot.legacy.pendingAttachments.length === 0 && !shouldRegenerate) return;
 
-    if (pendingAttachments.length > 0) {
-        const sessionMismatches = pendingAttachments.some(item => item?.kind === 'uploaded' && !attachmentBelongsToSession(item, currentSessionId));
+    if (window.Pivot.legacy.pendingAttachments.length > 0) {
+        const sessionMismatches = window.Pivot.legacy.pendingAttachments.some(item => item?.kind === 'uploaded' && !attachmentBelongsToSession(item, currentSessionId));
         if (sessionMismatches) {
             clearPendingAttachments('附件属于其他会话，请重新上传后发送');
             return;
@@ -400,35 +400,35 @@ async function runSendMessage(shouldRegenerate) {
     if (!currentSessionId) {
         const draftTitle = userVisibleContent
             ? `${userVisibleContent.slice(0, 15)}...`
-            : (pendingAttachments.find(item => item?.file)?.name || '新对话');
+            : (window.Pivot.legacy.pendingAttachments.find(item => item?.file)?.name || '新对话');
         const data = await createSession(draftTitle);
         if (data && data.id) {
             currentSessionId = data.id;
-            if (window.loadSessions) window.loadSessions();
+            if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
             document.getElementById('current-title').innerText = data.title;
         } else return;
     }
 
-    if (pendingAttachments.length > 0) {
+    if (window.Pivot.legacy.pendingAttachments.length > 0) {
         const uploadSessionId = String(currentSessionId || '').trim() || null;
         try {
-            const uploadResult = await window.preparePendingAttachmentsForSend?.(uploadSessionId);
+            const uploadResult = await window.Pivot.legacy.preparePendingAttachmentsForSend?.(uploadSessionId);
             if (uploadResult?.aborted) return;
             if (uploadResult?.skippedCount > 0) showToast(`有 ${uploadResult.skippedCount} 个附件超出数量上限，已跳过`, 'warning');
         } catch (e) {
             showToast(e.message || '附件上传失败', 'error');
             return;
         }
-        const attachmentLinks = pendingAttachments.map(a => a.markdown).join('\n');
+        const attachmentLinks = window.Pivot.legacy.pendingAttachments.map(a => a.markdown).join('\n');
         content = (content ? content + '\n\n' : '') + attachmentLinks;
         displayContent = (displayContent ? displayContent + '\n\n' : '') + attachmentLinks;
-        const docTexts = pendingAttachments
+        const docTexts = window.Pivot.legacy.pendingAttachments
             .filter(a => a.extractedText)
             .map(a => '\n\n---\n【参考文档: ' + a.name + '】\n' + a.extractedText + '\n---')
             .join('');
         if (docTexts) content += docTexts;
     }
-    const sentAttachments = pendingAttachments.map(item => ({ ...item }));
+    const sentAttachments = window.Pivot.legacy.pendingAttachments.map(item => ({ ...item }));
 
     const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     const chatMode = window.Pivot.modules['chat.inputMenu']?.getChatMode?.() || 'normal';
@@ -437,15 +437,15 @@ async function runSendMessage(shouldRegenerate) {
     let localMcpBridge = null;
     let localMcpBridgeDebug = null;
     if (mcpEnabled) {
-        mcpConfirmed = mcpConfirmed || await ensureChatMcpConsent();
+        mcpConfirmed = mcpConfirmed || await window.Pivot.legacy.ensureChatMcpConsent();
         if (!mcpConfirmed) return;
         localMcpBridge = await syncChatLocalMcpBridgeBeforeSend();
         localMcpBridgeDebug = getChatLocalMcpBridgeDebugSnapshot();
     }
 
     document.getElementById('user-input').value = '';
-    if (window.resizeUserInput) window.resizeUserInput();
-    pendingAttachments = [];
+    if (window.Pivot.legacy.resizeUserInput) window.Pivot.legacy.resizeUserInput();
+    window.Pivot.legacy.pendingAttachments = [];
     syncPendingAttachmentsGlobal();
     renderAttachmentPreviews();
 
@@ -503,7 +503,7 @@ async function runSendMessage(shouldRegenerate) {
                 chatMode,
                 regenerate: shouldRegenerate,
                 ragEnabled,
-                ragScope: window.getRagScopeSelection?.('chat') || {},
+                ragScope: window.Pivot.legacy.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
                 mcpConfirmed,
                 mcpToolAllowlist: window.Pivot.modules['chat.inputMenu']?.getMcpToolAllowlist?.() ?? null,
@@ -520,8 +520,8 @@ async function runSendMessage(shouldRegenerate) {
             const data = await response.json();
             fullAiContent = data.content || data.error || '';
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
-            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
-            if (window.loadSessions) window.loadSessions();
+            if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
+            if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
             return;
         }
 
@@ -627,9 +627,9 @@ async function runSendMessage(shouldRegenerate) {
             hasRenderedPersistedAssistantContent = true;
             if (textBody && isRequestMessageVisible()) {
                 // 替换 DOM 前释放节点下的 ECharts 实例和监听器。
-                window.teardownPivotCharts?.(textBody);
+                window.Pivot.legacy.teardownPivotCharts?.(textBody);
                 PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
-                window.renderPivotCharts?.(textBody);
+                window.Pivot.legacy.renderPivotCharts?.(textBody);
             }
         };
         const trackChatAgentRun = async (runId) => {
@@ -649,7 +649,7 @@ async function runSendMessage(shouldRegenerate) {
                         const answer = String(run?.final_answer
                             || (run?.error_message ? `任务执行失败：${run.error_message}` : '任务未生成可用结果。')).trim();
                         if (answer) renderPersistedAssistantContent(answer);
-                        if (bridge.messageId) window.setMessageActionId?.(aiMsgEl, bridge.messageId);
+                        if (bridge.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, bridge.messageId);
                         unregisterChatAgentStreamingTarget(runId);
                         attachChatAgentControls(aiMsgEl, runId, status);
                         if (isViewingRequestSession()) {
@@ -660,12 +660,12 @@ async function runSendMessage(shouldRegenerate) {
                                 tokenCount: estimateStreamingTokenCount(answer),
                                 tps: answer ? estimateStreamingTokenCount(answer) / elapsed : 0
                             });
-                            window.refreshCurrentContextUsage?.(requestSessionId);
-                            window.scrollMessagesToBottom?.();
+                            window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
+                            window.Pivot.legacy.scrollMessagesToBottom?.();
                         } else {
                             showToast('原会话的 Agent 任务已完成，可切回查看。', 'info');
                         }
-                        if (window.loadSessions) window.loadSessions();
+                        if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
                         return;
                     }
                     if (isViewingRequestSession()) {
@@ -710,7 +710,7 @@ async function runSendMessage(shouldRegenerate) {
                     return;
                 }
                 if (data.type === 'mcp') {
-                    window.renderAssistantTraceEvent?.(aiMsgEl, data);
+                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在处理工具库工具');
                     if (data.status === 'error') showToast(data.message || '工具库工具调用失败', 'warning');
                     return;
@@ -719,7 +719,7 @@ async function runSendMessage(shouldRegenerate) {
                     return;
                 }
                 if (data.type === 'rag') {
-                    window.renderAssistantTraceEvent?.(aiMsgEl, data);
+                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在检索知识库');
                     if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
                     if (data.status === 'empty') showToast(data.message || '知识库未命中', 'warning');
@@ -732,12 +732,12 @@ async function runSendMessage(shouldRegenerate) {
                 }
                 if (data.type === 'message_saved') {
                     if (data.role === 'user') {
-                        window.setMessageActionId?.(userMsgEl, data.messageId);
-                        window.refreshCurrentContextUsage?.(requestSessionId);
+                        window.Pivot.legacy.setMessageActionId?.(userMsgEl, data.messageId);
+                        window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     if (data.role === 'assistant') {
-                        window.setMessageActionId?.(aiMsgEl, data.messageId);
-                        window.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
+                        window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
+                        window.Pivot.legacy.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
                         renderPersistedAssistantContent(data.content);
                         if (data.tokenCount !== undefined || data.costTime !== undefined || data.tps !== undefined) {
                             hasServerFinalStats = data.costTime !== undefined && data.tps !== undefined;
@@ -748,12 +748,12 @@ async function runSendMessage(shouldRegenerate) {
                                 tps: data.tps ?? getAverageTps()
                             });
                         }
-                        window.refreshCurrentContextUsage?.(requestSessionId);
+                        window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     return;
                 }
                 if (data.error) {
-                    if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
+                    if (data.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
                     if (data.content) {
                         fullAiContent = data.content;
                         tokenCount = estimateStreamingTokenCount(fullAiContent);
@@ -783,7 +783,7 @@ async function runSendMessage(shouldRegenerate) {
                     err.tps = finalTps;
                     throw err;
                 }
-                if (data.messageId) window.setMessageActionId?.(aiMsgEl, data.messageId);
+                if (data.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
                 if (data.content) {
                     enqueueStreamContent(data.content);
                 }
@@ -809,7 +809,7 @@ async function runSendMessage(shouldRegenerate) {
             return;
         }
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
-        if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
+        if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
 
         const finalElapsed = getElapsedSeconds();
         const finalTps = getAverageTps();
@@ -822,7 +822,7 @@ async function runSendMessage(shouldRegenerate) {
                     body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
                 });
             }
-            await window.refreshCurrentContextUsage?.(requestSessionId);
+            await window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
         } catch (statsError) {
             console.warn('更新会话统计失败', statsError);
         }
@@ -835,7 +835,7 @@ async function runSendMessage(shouldRegenerate) {
         
         // 延迟刷新侧边栏，等待后台标题生成完成
         setTimeout(() => {
-            if (window.loadSessions) window.loadSessions();
+            if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
         }, 1500);
     } catch (e) {
         if (localReplayTimer) clearTimeout(localReplayTimer);
@@ -854,16 +854,16 @@ async function runSendMessage(shouldRegenerate) {
                 fullAiContent += '\n\n[已由用户中断生成]';
             }
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, true));
-            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
+            if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
         } else {
-            if (e.messageId) window.setMessageActionId?.(aiMsgEl, e.messageId);
+            if (e.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, e.messageId);
             if (e.persistedContent) {
                 fullAiContent = e.persistedContent;
                 if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
             } else if (isRequestMessageVisible()) {
                 updateAssistantStatus(e.message, 'error');
             }
-            if (isViewingRequestSession()) window.scrollMessagesToBottom?.();
+            if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
             showToast(e.message, 'error');
         }
     } finally {

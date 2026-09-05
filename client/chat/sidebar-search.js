@@ -12,12 +12,12 @@ let sessionSearchTimer = null;
 let lastSearchFocusElement = null;
 
 function sessionEscapeHtml(value) {
-    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(value);
+    if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function sessionEscapeAttr(value) {
-    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeAttr(value);
+    if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeAttr(value);
     return sessionEscapeHtml(value).replace(/"/g, '&quot;');
 }
 
@@ -84,8 +84,8 @@ function renderSessionSearchResults(sessions) {
             tags: String(s.tags || '')
         });
         const rawTime = s.updated_at || s.created_at;
-        const timeText = window.formatSessionListTime ? window.formatSessionListTime(rawTime) : '';
-        const timeTitle = window.formatChatDateTime ? window.formatChatDateTime(rawTime) : String(rawTime || '');
+        const timeText = window.Pivot.legacy.formatSessionListTime ? window.Pivot.legacy.formatSessionListTime(rawTime) : '';
+        const timeTitle = window.Pivot.legacy.formatChatDateTime ? window.Pivot.legacy.formatChatDateTime(rawTime) : String(rawTime || '');
         const tagsHtml = String(s.tags || '').split(',').filter(Boolean).map(tag => `<em>${sessionEscapeHtml(tag)}</em>`).join('');
         const snippet = String(s.snippet || '').replace(/<\/?b>/gi, '');
         const snippetHtml = sessionHighlightText(snippet, parseSessionSearchValue(input?.value || '').keyword);
@@ -214,7 +214,7 @@ function globalSearchStatusLabel(status) {
 
 function globalSearchTime(value) {
     if (!value) return '';
-    if (typeof window.formatChatDateTime === 'function') return window.formatChatDateTime(value);
+    if (typeof window.Pivot.legacy.formatChatDateTime === 'function') return window.Pivot.legacy.formatChatDateTime(value);
     return String(value);
 }
 
@@ -514,7 +514,7 @@ async function runBatchTagAction(operation) {
         return;
     }
     if (selectedSessionIds.size === 0) return;
-    const tags = await window.showInputPrompt?.({
+    const tags = await window.Pivot.legacy.showInputPrompt?.({
         title: operation === 'add' ? '添加标签' : (operation === 'remove' ? '移除标签' : '替换标签'),
         message: '多个标签请用逗号分隔',
         placeholder: '项目A, 紧急'
@@ -527,7 +527,7 @@ async function runBatchTagAction(operation) {
     });
     if (res.ok) {
         selectedSessionIds.clear();
-        await window.loadSessions();
+        await window.Pivot.legacy.loadSessions();
         const { modal } = getSessionSearchEls();
         if (modal && !modal.classList.contains('hidden')) await loadSessionSearchResults();
         await loadSessionTagSummary();

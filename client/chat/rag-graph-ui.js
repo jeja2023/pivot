@@ -248,5 +248,5 @@ function zoomGraphMap(nextScale, graphState, options = {}) {
         zoomGraphMap,
         zoomGraphMapByAction
     };
-    window.Pivot = existingPivot;
+    Object.assign(window.Pivot, existingPivot);
 })();

@@ -201,7 +201,7 @@ test('数据清洗客户端可渲染质量报告、规则编辑器、预览和�
         fetchJson: async () => ({})
     };
     const context = {
-        window: { PivotDataAnalysis: app },
+        window: { Pivot: { legacy: { PivotDataAnalysis: app } } },
         document: { getElementById: id => elements.get(id) || null },
         PivotSafeHtml: { setHtml(element, html) { element.innerHTML = String(html); } },
         console,
@@ -214,6 +214,7 @@ test('数据清洗客户端可渲染质量报告、规则编辑器、预览和�
         Set,
         Promise
     };
+    context.window.Pivot.legacy.PivotSafeHtml = context.PivotSafeHtml;
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'data-analysis', 'cleaning.js'), 'utf8'), context, {
         filename: 'client/chat/data-analysis/cleaning.js'
     });

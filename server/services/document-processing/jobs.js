@@ -26,13 +26,14 @@ const {
 } = require('./constants');
 const {
     getDocumentFileForUser,
-    getDocumentFilePath,
+    getDocumentFilePathAsync,
     parseJson,
     registerUploadedFile,
     serializeFile,
     updateDocumentFileMetadata
 } = require('./files');
-const { createTextOutputs, createZip, pagesToText, serializeOutput } = require('./exporters');
+const { createTextOutputs, pagesToText, serializeOutput } = require('./exporters');
+const { getJobOutputsArchive, getOutputDownload, getPageImage } = require('./downloads');
 const { imageFileToPage, renderPdfPagesToFiles } = require('./renderers');
 const { normalizeEngine, recognizePage } = require('./ocr');
 const { PDF_TOOL_OPERATIONS, createSearchablePdfOutput, normalizePdfOperation, processPdfToolOperation } = require('./pdf');
@@ -43,7 +44,6 @@ const runningJobs = new Set();
 let runningCount = 0;
 const JOB_LEASE_MS = Math.max(60_000, Number.parseInt(process.env.DOCUMENT_PROCESSING_JOB_LEASE_MS || String(15 * 60 * 1000), 10) || 15 * 60 * 1000);
 const JOB_RECOVERY_BATCH = Math.max(1, Math.min(500, Number.parseInt(process.env.DOCUMENT_PROCESSING_RECOVERY_BATCH || '100', 10) || 100));
-const MAX_OUTPUT_ARCHIVE_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_ARCHIVE_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
 
 function jobLeaseCutoff() {
     return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS));
@@ -153,16 +153,6 @@ async function getJobRow(jobId, userId = null) {
         return await queryOne('SELECT * FROM document_jobs WHERE id = ? AND user_id = ?', [id, userId]) || null;
     }
     return await queryOne('SELECT * FROM document_jobs WHERE id = ?', [id]) || null;
-}
-
-async function getOutputRow(outputId, userId) {
-    const id = Number.parseInt(outputId, 10);
-    if (!Number.isSafeInteger(id) || id <= 0) return null;
-    return await queryOne(`
-        SELECT *
-        FROM document_outputs
-        WHERE id = ? AND user_id = ? AND status = 'ready'
-    `, [id, userId]) || null;
 }
 
 function serializeJob(row) {
@@ -317,10 +307,12 @@ async function getReviews(jobId) {
 async function cleanupJobArtifacts(jobId) {
     const outputs = await query('SELECT file_path FROM document_outputs WHERE job_id = ?', [jobId]);
     const pages = await query('SELECT image_path FROM document_pages WHERE job_id = ?', [jobId]);
-    outputs.forEach(row => safeUnlinkManaged(row.file_path));
-    pages.forEach(row => {
-        if (String(row.image_path || '').includes('/pages/')) safeUnlinkManaged(row.image_path);
-    });
+    await Promise.all([
+        ...outputs.map(row => safeUnlinkManaged(row.file_path)),
+        ...pages
+            .filter(row => String(row.image_path || '').includes('/pages/'))
+            .map(row => safeUnlinkManaged(row.image_path))
+    ]);
     await execute('DELETE FROM document_outputs WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_ocr_blocks WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_reviews WHERE job_id = ?', [jobId]);
@@ -355,7 +347,7 @@ async function cleanupJobSourceFiles(job, userId) {
     for (const fileId of fileIds) {
         const row = await queryOne('SELECT id, file_path FROM document_files WHERE id = ? AND user_id = ?', [fileId, userId]);
         if (!row) continue;
-        safeUnlinkManaged(row.file_path);
+        await safeUnlinkManaged(row.file_path);
         await execute(`
             UPDATE document_files
             SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
@@ -607,7 +599,7 @@ async function recognizePages({ job, file, pages, config }) {
         if (await isCancelled(job.id)) throw new Error('任务已取消');
         const page = pages[index];
         const imagePath = resolveStoredDocumentPath(page.image_path);
-        if (!imagePath || !fs.existsSync(imagePath)) {
+        if (!imagePath || !await fs.promises.access(imagePath, fs.constants.R_OK).then(() => true).catch(() => false)) {
             throw new Error(`第 ${page.page_number} 页预览图不存在，无法进行 OCR。`);
         }
         const result = await recognizePage(imagePath, {
@@ -716,7 +708,7 @@ async function processPdfToolJob({ job, file, config }) {
     const operation = normalizePdfOperation(config.operation);
     if (operation === PDF_TOOL_OPERATIONS.SEARCHABLE_PDF) {
         const targetFile = files.find(item => isPdfExtension(item.file_ext) || isImageExtension(item.file_ext)) || files[0];
-        const targetPath = getDocumentFilePath(targetFile);
+        const targetPath = await getDocumentFilePathAsync(targetFile);
         if (!targetPath) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
         const pageLimit = Math.min(Math.max(Number.parseInt(config.maxToolPages, 10) || 20, 1), 300);
         const searchableConfig = {
@@ -767,7 +759,7 @@ async function processJob(jobId) {
     const initialJob = await getJobRow(jobId);
     if (!initialJob || initialJob.status !== JOB_STATUSES.QUEUED) return null;
     const file = await getDocumentFileForUser(initialJob.file_id, initialJob.user_id);
-    const filePath = getDocumentFilePath(file);
+    const filePath = await getDocumentFilePathAsync(file);
     if (!file || !filePath) {
         return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
     }
@@ -861,89 +853,6 @@ async function deleteJob({ userId, jobId, sourceModule = '' }) {
     return deleted;
 }
 
-function sanitizeArchiveFileName(value, fallback = 'output') {
-    const clean = path.basename(String(value || fallback))
-        .replace(/[\\/:*?"<>|\0\r\n\t]/g, '-')
-        .replace(/\s+/g, ' ')
-        .replace(/-+/g, '-')
-        .trim()
-        .slice(0, 120);
-    return clean || fallback;
-}
-
-function uniqueArchiveFileName(value, seen, fallback) {
-    const clean = sanitizeArchiveFileName(value, fallback);
-    const ext = path.extname(clean);
-    const base = path.basename(clean, ext) || fallback;
-    let name = clean;
-    let index = 2;
-    while (seen.has(name.toLowerCase())) {
-        name = `${base}-${index}${ext}`;
-        index += 1;
-    }
-    seen.add(name.toLowerCase());
-    return name;
-}
-
-async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
-    const job = await getJobRow(jobId, userId);
-    if (!job) return null;
-    if (sourceModule && job.source_module !== sourceModule) return null;
-    const outputs = await getOutputs(job.id);
-    if (!outputs.length) return null;
-    const seen = new Set();
-    let totalBytes = 0;
-    const entries = outputs.map(output => {
-        const filePath = resolveStoredDocumentPath(output.file_path);
-        if (!filePath || !fs.existsSync(filePath)) return null;
-        const size = fs.statSync(filePath).size;
-        totalBytes += size;
-        if (totalBytes > MAX_OUTPUT_ARCHIVE_BYTES) {
-            const error = new Error(`输出归档超过 ${Math.round(MAX_OUTPUT_ARCHIVE_BYTES / 1024 / 1024)}MB 限制，请分批下载。`);
-            error.status = 413;
-            error.code = 'DOCUMENT_OUTPUT_ARCHIVE_TOO_LARGE';
-            throw error;
-        }
-        return {
-            name: uniqueArchiveFileName(output.file_name || `output-${output.id}`, seen, `output-${output.id}`),
-            data: fs.readFileSync(filePath)
-        };
-    }).filter(Boolean);
-    if (!entries.length) return null;
-    const file = await queryOne('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?', [job.file_id, userId]);
-    const base = sanitizeArchiveFileName(path.basename(String(file?.original_name || `pdf-job-${job.id}`), path.extname(String(file?.original_name || ''))), `pdf-job-${job.id}`);
-    return {
-        buffer: createZip(entries),
-        fileName: `${base || `pdf-job-${job.id}`}-全部输出.zip`,
-        mimeType: 'application/zip',
-        count: entries.length
-    };
-}
-
-async function getOutputDownload({ userId, outputId }) {
-    const output = await getOutputRow(outputId, userId);
-    if (!output) return null;
-    const filePath = resolveStoredDocumentPath(output.file_path);
-    if (!filePath || !fs.existsSync(filePath)) return null;
-    return {
-        filePath,
-        fileName: output.file_name || `document-output-${output.id}`,
-        mimeType: output.mime_type || 'application/octet-stream'
-    };
-}
-
-async function getPageImage({ userId, pageId }) {
-    const page = await queryOne(`
-        SELECT *
-        FROM document_pages
-        WHERE id = ? AND user_id = ?
-    `, [Number.parseInt(pageId, 10), userId]);
-    if (!page || !page.image_path) return null;
-    const filePath = resolveStoredDocumentPath(page.image_path);
-    if (!filePath || !fs.existsSync(filePath)) return null;
-    return { filePath, page };
-}
-
 async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'reviewed', lowConfidenceConfirmed = false }) {
     const page = await queryOne('SELECT * FROM document_pages WHERE id = ? AND user_id = ?', [Number.parseInt(pageId, 10), userId]);
     if (!page) return null;
@@ -996,12 +905,12 @@ function buildJobShareText(detail) {
     return chunks.join('\n\n').trim();
 }
 
-function createTempTextUpload({ userId, originalName, text }) {
+async function createTempTextUpload({ userId, originalName, text }) {
     const safeName = sanitizeShareFileName(originalName) + '-ocr.txt';
     const diskName = Date.now() + '-' + crypto.randomUUID() + '.txt';
-    const targetPath = buildManagedPath(tempRoot, userId, diskName);
-    fs.writeFileSync(targetPath, String(text || ''), 'utf8');
-    const stat = fs.statSync(targetPath);
+    const targetPath = await buildManagedPath(tempRoot, userId, diskName);
+    await fs.promises.writeFile(targetPath, String(text || ''), 'utf8');
+    const stat = await fs.promises.stat(targetPath);
     return {
         path: targetPath,
         originalname: safeName,
@@ -1023,7 +932,7 @@ async function shareJobResult({ user, jobId, target, options = {} }) {
     const normalizedTarget = String(target || '').trim().toLowerCase().replace(/_/g, '-');
     const originalName = detail.file?.originalName || ('ocr-job-' + detail.job.id);
     if (normalizedTarget === 'knowledge' || normalizedTarget === 'knowledge-base' || normalizedTarget === 'rag') {
-        const upload = createTempTextUpload({ userId, originalName, text });
+        const upload = await createTempTextUpload({ userId, originalName, text });
         const tags = Array.isArray(options.tags) ? options.tags : String(options.tags || 'ocr').split(/[;,\s]+/);
         const created = await createKnowledgeDocumentFromUpload({
             userId,
@@ -1041,7 +950,7 @@ async function shareJobResult({ user, jobId, target, options = {} }) {
         };
     }
     if (normalizedTarget === 'regulations' || normalizedTarget === 'regulation') {
-        const upload = createTempTextUpload({ userId, originalName, text });
+        const upload = await createTempTextUpload({ userId, originalName, text });
         const title = String(options.title || sanitizeShareFileName(originalName) + ' OCR').slice(0, 120);
         const created = await createRegulationDocumentFromUpload({
             userId,

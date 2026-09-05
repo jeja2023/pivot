@@ -59,7 +59,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
     // 版本标识优先取用户填写值或文件名识别的版本日期；留空时退回 v 序号
     const versionLabel = normalizeRegulationField(metadata.versionLabel || metadata.version_label || '', 80)
         || `v${(Number(doc.version_count || 0) || 0) + 1}`;
-    const sourceMeta = saveRegulationUploadedFile(file, normalizedDocId);
+    const sourceMeta = await saveRegulationUploadedFile(file, normalizedDocId);
     const createdAt = getBeijingTimestamp();
 
     try {
@@ -182,11 +182,11 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
             summary
         };
     } catch (error) {
-        try { if (file.path && fs.existsSync(file.path)) fs.rmSync(file.path, { force: true }); } catch (_cleanupErr) {}
+        if (file.path) await fs.promises.rm(file.path, { force: true }).catch(() => {});
         try {
             const target = resolveRegulationStoredPath(sourceMeta.sourcePath);
-            if (target && fs.existsSync(target)) {
-                fs.rmSync(target, { force: true });
+            if (target) {
+                await fs.promises.rm(target, { force: true });
                 clearDirSizeCache();
             }
         } catch (_cleanupErr) {}

@@ -47,7 +47,7 @@
 
     const getCurrentUser = () => {
         if (typeof currentUser !== 'undefined' && currentUser) return currentUser;
-        return window.currentUser || null;
+        return window.Pivot.legacy.currentUser || null;
     };
 
     const apiJson = async (url, options = {}) => {
@@ -396,7 +396,7 @@
         await loadActiveAnnouncements();
     }
 
-    window.initAnnouncements = function () {
+    window.Pivot.legacy.initAnnouncements = function () {
         ensureShell();
         if (!state.initialized) {
             state.initialized = true;
@@ -405,15 +405,15 @@
         loadActiveAnnouncements();
     };
     // 提供可停止的清理钩子（如登出时调用），避免轮询在不需要时继续运行
-    window.stopAnnouncements = function () {
+    window.Pivot.legacy.stopAnnouncements = function () {
         if (state.polling) {
             window.clearInterval(state.polling);
             state.polling = null;
         }
         state.initialized = false;
     };
-    window.loadLoginAnnouncements = loadLoginAnnouncements;
-    window.PivotAnnouncements = {
+    window.Pivot.legacy.loadLoginAnnouncements = loadLoginAnnouncements;
+    window.Pivot.legacy.PivotAnnouncements = {
         state,
         TYPE_LABELS,
         PRIORITY_LABELS,

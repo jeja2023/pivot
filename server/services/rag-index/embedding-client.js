@@ -5,6 +5,7 @@ const { estimateEmbeddingTokens } = require('../token-accounting');
 const { estimateTokens } = require('../../llm');
 const { logger } = require('../../logger');
 const { redactSecrets } = require('../../security');
+const { recordEmbeddingLatencyMetric } = require('../rag-operations-observability');
 
 const DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS = 120000;
@@ -121,120 +122,6 @@ function isEmbeddingCapacityError(error) {
         || code === 'EMBEDDING_TIMEOUT'
         || /out of memory|\boom\b|cuda|batch|payload|too large|context length|向量数量不匹配/i.test(message);
 }
-
-function normalizeTimeoutMs(value, fallback, min = 1000, max = MAX_EMBEDDING_REQUEST_TIMEOUT_MS) {
-    const parsed = Number.parseInt(value, 10);
-    const safeFallback = Math.min(Math.max(Number.parseInt(fallback, 10) || min, min), max);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) return safeFallback;
-    return Math.min(Math.max(parsed, min), max);
-}
-
-function getEmbeddingRequestTimeoutMs(timeoutMs = null) {
-    return normalizeTimeoutMs(
-        timeoutMs ?? process.env.EMBEDDING_REQUEST_TIMEOUT_MS,
-        DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS
-    );
-}
-
-function getRagIndexEmbeddingTimeoutMs(timeoutMs = null) {
-    return normalizeTimeoutMs(
-        timeoutMs ?? process.env.RAG_INDEX_EMBEDDING_TIMEOUT_MS ?? process.env.EMBEDDING_REQUEST_TIMEOUT_MS,
-        DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS
-    );
-}
-
-function formatDurationMs(ms) {
-    if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000} 秒`;
-    if (ms >= 1000) return `${(ms / 1000).toFixed(1)} 秒`;
-    return `${ms}ms`;
-}
-
-function wrapEmbeddingRequestError(error, timeoutMs) {
-    const message = String(error?.message || '');
-    const code = String(error?.code || '');
-    if (code === 'ECONNABORTED' || /timeout|timed\s*out/i.test(message)) {
-        const wrapped = new Error(`向量服务请求超时（已等待 ${formatDurationMs(timeoutMs)}）。请检查检索配置中的向量服务地址、模型名称和服务负载后重试。`);
-        wrapped.code = 'EMBEDDING_TIMEOUT';
-        wrapped.cause = error;
-        return wrapped;
-    }
-    return error;
-}
-
-function normalizeVectorValues(vector) {
-    if (!Array.isArray(vector) || vector.length === 0) {
-        return null;
-    }
-    const normalized = vector.map(Number);
-    if (normalized.some(value => !Number.isFinite(value))) {
-        return null;
-    }
-    return normalized;
-}
-
-function normalizeEmbeddingVectors(data) {
-    if (Array.isArray(data?.data)) {
-        const vectors = data.data
-            .slice()
-            .sort((a, b) => (a?.index ?? 0) - (b?.index ?? 0))
-            .map(item => normalizeVectorValues(item?.embedding))
-            .filter(Boolean);
-        if (vectors.length > 0) return vectors;
-    }
-
-    if (Array.isArray(data?.embeddings)) {
-        const embeddings = data.embeddings;
-        const vectors = Array.isArray(embeddings[0])
-            ? embeddings.map(normalizeVectorValues).filter(Boolean)
-            : [normalizeVectorValues(embeddings)].filter(Boolean);
-        if (vectors.length > 0) return vectors;
-    }
-
-    const vector = data?.data?.[0]?.embedding
-        || data?.embedding
-        || data?.response?.embedding;
-    const normalized = normalizeVectorValues(vector);
-    if (normalized) return [normalized];
-
-    throw new Error('Embedding 服务响应中未找到有效向量');
-}
-
-function normalizeEmbeddingVector(data) {
-    const vectors = normalizeEmbeddingVectors(data);
-    if (!vectors[0]) {
-        throw new Error('Embedding 服务响应中未找到有效向量');
-    }
-    return vectors[0];
-}
-
-function resolveEmbeddingUrl(url) {
-    const rawUrl = String(url || '').trim();
-    const lowerUrl = rawUrl.toLowerCase();
-    if (!rawUrl) return '';
-    if (
-        lowerUrl.endsWith('/embeddings') ||
-        lowerUrl.endsWith('/api/embed') ||
-        lowerUrl.endsWith('/api/embeddings')
-    ) {
-        return rawUrl;
-    }
-    if (lowerUrl.endsWith('/v1')) {
-        return `${rawUrl.replace(/\/+$/, '')}/embeddings`;
-    }
-    return `${rawUrl.replace(/\/+$/, '')}/v1/embeddings`;
-}
-
-function buildEmbeddingPayload(text, model, mode, url) {
-    const endpoint = String(url || '').toLowerCase();
-    if (endpoint.includes('/api/embeddings')) {
-        return { model, prompt: text };
-    }
-    if (endpoint.includes('/api/embed')) {
-        return { model, input: text };
-    }
-    return { input: text, model };
-}
-
 
 function normalizeTimeoutMs(value, fallback, min = 1000, max = MAX_EMBEDDING_REQUEST_TIMEOUT_MS) {
     const parsed = Number.parseInt(value, 10);
@@ -496,10 +383,33 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
 
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
-        const vector = await requestEmbedding(text, targetHttpConfig, {
-            timeoutMs: options.timeoutMs,
-            user: getEmbeddingRuntimeGuardUser(config, options.user)
-        });
+        const startedAt = Date.now();
+        let vector;
+        try {
+            vector = await requestEmbedding(text, targetHttpConfig, {
+                timeoutMs: options.timeoutMs,
+                user: getEmbeddingRuntimeGuardUser(config, options.user)
+            });
+            recordEmbeddingLatencyMetric({
+                model: targetHttpConfig?.model,
+                source: options.source || 'rag_embedding',
+                status: 'success',
+                durationMs: Date.now() - startedAt,
+                inputs: [text],
+                inputCount: 1,
+                vectorDimensions: vector.length
+            });
+        } catch (error) {
+            recordEmbeddingLatencyMetric({
+                model: targetHttpConfig?.model,
+                source: options.source || 'rag_embedding',
+                status: error?.code === 'EMBEDDING_TIMEOUT' ? 'timeout' : 'error',
+                durationMs: Date.now() - startedAt,
+                inputs: [text],
+                inputCount: 1
+            });
+            throw error;
+        }
         recordEmbeddingUsage({
             userId,
             config,
@@ -520,10 +430,33 @@ async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, u
 
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
-        const vectors = await requestEmbeddings(safeInputs, targetHttpConfig, {
-            timeoutMs: options.timeoutMs,
-            user: getEmbeddingRuntimeGuardUser(config, options.user)
-        });
+        const startedAt = Date.now();
+        let vectors;
+        try {
+            vectors = await requestEmbeddings(safeInputs, targetHttpConfig, {
+                timeoutMs: options.timeoutMs,
+                user: getEmbeddingRuntimeGuardUser(config, options.user)
+            });
+            recordEmbeddingLatencyMetric({
+                model: targetHttpConfig?.model,
+                source: options.source || 'rag_embedding',
+                status: 'success',
+                durationMs: Date.now() - startedAt,
+                inputs: safeInputs,
+                inputCount: safeInputs.length,
+                vectorDimensions: vectors[0]?.length || 0
+            });
+        } catch (error) {
+            recordEmbeddingLatencyMetric({
+                model: targetHttpConfig?.model,
+                source: options.source || 'rag_embedding',
+                status: error?.code === 'EMBEDDING_TIMEOUT' ? 'timeout' : 'error',
+                durationMs: Date.now() - startedAt,
+                inputs: safeInputs,
+                inputCount: safeInputs.length
+            });
+            throw error;
+        }
         recordEmbeddingUsage({
             userId,
             config,

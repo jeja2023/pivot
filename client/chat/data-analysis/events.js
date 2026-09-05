@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state } = app;
     const updateToolbarHeader = (...args) => app.updateToolbarHeader(...args), uploadDataset = (...args) => app.uploadDataset(...args);
@@ -182,8 +182,8 @@
             const rowCount = Number(dataset.rowCount || 0).toLocaleString();
             const colCount = Number(dataset.columnCount || 0).toLocaleString();
             const esc = str => String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-            if (window.PivotSafeHtml?.setHtml) {
-                window.PivotSafeHtml.setHtml(metaEl, `<div><strong>数据规模：</strong>${rowCount} 行 / ${colCount} 列</div><div><strong>文件类型：</strong>${esc(fileTypeLabel)}</div><div><strong>创建时间：</strong>${esc(dataset.createdAt || '-')}</div>`);
+            if (window.Pivot.legacy.PivotSafeHtml?.setHtml) {
+                window.Pivot.legacy.PivotSafeHtml.setHtml(metaEl, `<div><strong>数据规模：</strong>${rowCount} 行 / ${colCount} 列</div><div><strong>文件类型：</strong>${esc(fileTypeLabel)}</div><div><strong>创建时间：</strong>${esc(dataset.createdAt || '-')}</div>`);
             } else {
                 metaEl.textContent = `规模: ${rowCount} 行 / ${colCount} 列 | 类型: ${fileTypeLabel} | 创建: ${dataset.createdAt || '-'}`;
             }
@@ -491,8 +491,8 @@
                 const datasetId = rowDeleteBtn.dataset.dataAnalysisActionDelete;
                 const dataset = state.datasets.find(item => item.id === datasetId);
                 if (!dataset) return;
-                const confirmed = typeof window.showConfirm === 'function'
-                    ? await window.showConfirm('删除数据集', `确定删除数据集「${dataset.name}」吗？删除后相关分析记录和文件也会一并清理。`)
+                const confirmed = typeof window.Pivot.legacy.showConfirm === 'function'
+                    ? await window.Pivot.legacy.showConfirm('删除数据集', `确定删除数据集「${dataset.name}」吗？删除后相关分析记录和文件也会一并清理。`)
                     : false;
                 if (!confirmed) return;
                 setBusy(true, '正在删除数据集...');
@@ -729,8 +729,8 @@
             if (replayCleaningRun) {
                 const run = state.cleaningRuns.find(item => item.id === replayCleaningRun.dataset.cleaningReplayRun);
                 if (!run) return;
-                const confirmed = typeof showConfirm === 'function'
-                    ? await showConfirm('再次生成清洗后数据集', '将使用这条历史规则重新从源数据集生成新的派生数据集。')
+                const confirmed = typeof window.Pivot.legacy.showConfirm === 'function'
+                    ? await window.Pivot.legacy.showConfirm('再次生成清洗后数据集', '将使用这条历史规则重新从源数据集生成新的派生数据集。')
                     : true;
                 if (!confirmed) return;
                 try {

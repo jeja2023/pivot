@@ -1,181 +1,86 @@
-﻿const fs = require('fs');
+/* Enforce a single, explicit browser namespace for the classic-script client. */
+const acorn = require('acorn');
+const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const clientRoot = path.join(root, 'client', 'chat');
-const baselinePath = path.join(__dirname, 'window_globals_baseline.json');
-const writeBaseline = process.argv.includes('--write-baseline');
-const reportOnly = String(process.env.PIVOT_WINDOW_GLOBALS_REPORT_ONLY || '').toLowerCase() === 'true';
+const PIVOT_BOOTSTRAP_FILE = 'client/chat/pivot-core.js';
+const ALLOWED_WINDOW_PROPERTIES = new Set([
+    'Pivot', 'DOMPurify', 'confirm', 'prompt', 'location', 'URL',
+    'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+    'addEventListener', 'removeEventListener', 'requestAnimationFrame',
+    'cancelAnimationFrame', 'innerWidth', 'innerHeight', 'matchMedia',
+    'getComputedStyle', 'ResizeObserver', 'EventSource', 'isSecureContext',
+    'localStorage', 'sessionStorage', 'crypto', 'CSS', 'devicePixelRatio',
+    'fetch', 'getSelection', 'navigator', 'electronAPI', 'pivotDesktop',
+    'isDesktopApp', 'APP_VERSION_TAG', 'echarts', 'open', 'close', 'history',
+    'performance', 'AbortController', 'MutationObserver'
+]);
 
 function walk(dir, files = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         if (entry.name === 'vendor' || entry.name.startsWith('.')) continue;
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(fullPath, files);
-        else if (entry.isFile() && entry.name.endsWith('.js')) files.push(fullPath);
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, files);
+        else if (entry.name.endsWith('.js')) files.push(full);
     }
     return files;
 }
 
-function stripCommentsAndStrings(text) {
-    let out = '';
-    let state = 'code';
-    let quote = '';
-    for (let i = 0; i < text.length; i += 1) {
-        const ch = text[i];
-        const next = text[i + 1];
-        if (state === 'code') {
-            if (ch === '/' && next === '/') {
-                state = 'lineComment';
-                out += '  ';
-                i += 1;
-                continue;
-            }
-            if (ch === '/' && next === '*') {
-                state = 'blockComment';
-                out += '  ';
-                i += 1;
-                continue;
-            }
-            if (ch === '"' || ch === "'" || ch === '`') {
-                state = 'string';
-                quote = ch;
-                out += ' ';
-                continue;
-            }
-            out += ch;
-            continue;
-        }
-        if (state === 'lineComment') {
-            if (ch === '\n') {
-                state = 'code';
-                out += '\n';
-            } else {
-                out += ' ';
-            }
-            continue;
-        }
-        if (state === 'blockComment') {
-            if (ch === '*' && next === '/') {
-                state = 'code';
-                out += '  ';
-                i += 1;
-            } else {
-                out += ch === '\n' ? '\n' : ' ';
-            }
-            continue;
-        }
-        if (state === 'string') {
-            if (ch === '\\') {
-                out += ' ';
-                if (next) {
-                    out += next === '\n' ? '\n' : ' ';
-                    i += 1;
-                }
-                continue;
-            }
-            if (ch === quote) {
-                state = 'code';
-                quote = '';
-                out += ' ';
-            } else {
-                out += ch === '\n' ? '\n' : ' ';
-            }
+function parse(source, file) {
+    try {
+        return acorn.parse(source, { ecmaVersion: 'latest', locations: true, sourceType: 'script' });
+    } catch (_) {
+        try {
+            return acorn.parse(source, { ecmaVersion: 'latest', locations: true, sourceType: 'module' });
+        } catch (error) {
+            throw new Error(`无法解析 ${path.relative(root, file)}: ${error.message}`);
         }
     }
-    return out;
 }
 
-function lineNumberAt(text, index) {
-    let line = 1;
-    for (let i = 0; i < index; i += 1) {
-        if (text.charCodeAt(i) === 10) line += 1;
+function walkAst(node, visit, parent = null) {
+    if (!node || typeof node !== 'object') return;
+    visit(node, parent);
+    for (const [key, value] of Object.entries(node)) {
+        if (key === 'loc') continue;
+        if (Array.isArray(value)) value.forEach(item => walkAst(item, visit, node));
+        else if (value?.type) walkAst(value, visit, node);
     }
-    return line;
 }
 
-function lineTextAt(text, index) {
-    const start = text.lastIndexOf('\n', index) + 1;
-    const end = text.indexOf('\n', index);
-    return text.slice(start, end === -1 ? text.length : end).trim().slice(0, 180);
+function directWindowProperty(node) {
+    if (node?.type !== 'MemberExpression' || node.object?.type !== 'Identifier' || node.object.name !== 'window') return null;
+    if (node.computed) return typeof node.property?.value === 'string' ? node.property.value : '[computed]';
+    return node.property?.type === 'Identifier' ? node.property.name : null;
 }
 
-function findAssignments(file) {
-    const raw = fs.readFileSync(file, 'utf8');
-    const text = stripCommentsAndStrings(raw);
-    const rel = path.relative(root, file).replace(/\\/g, '/');
-    const findings = [];
-    const pattern = /\bwindow\.([A-Za-z_$][\w$]*)\s*=/g;
-    let match;
-    while ((match = pattern.exec(text))) {
-        findings.push({
-            file: rel,
-            global: match[1],
-            line: lineNumberAt(text, match.index),
-            text: lineTextAt(raw, match.index)
-        });
-    }
-    return findings;
+const violations = [];
+for (const file of walk(clientRoot)) {
+    const source = fs.readFileSync(file, 'utf8');
+    const relative = path.relative(root, file).replace(/\\/g, '/');
+    const lines = source.split(/\r?\n/);
+    const ast = parse(source, file);
+    walkAst(ast, (node, parent) => {
+        const property = directWindowProperty(node);
+        if (!property) return;
+        if (!ALLOWED_WINDOW_PROPERTIES.has(property)) {
+            violations.push({ file: relative, line: node.loc.start.line, property, reason: 'free-property', code: lines[node.loc.start.line - 1]?.trim() || '' });
+            return;
+        }
+        if (parent?.type === 'AssignmentExpression' && parent.left === node) {
+            const allowedBootstrap = property === 'Pivot' && relative === PIVOT_BOOTSTRAP_FILE && parent.operator === '=';
+            if (!allowedBootstrap) violations.push({ file: relative, line: node.loc.start.line, property, reason: 'assignment', code: lines[node.loc.start.line - 1]?.trim() || '' });
+        }
+    });
 }
 
-function summarize(findings) {
-    const byKey = new Map();
-    for (const item of findings) {
-        const key = `${item.file}#${item.global}`;
-        const entry = byKey.get(key) || { file: item.file, global: item.global, count: 0, lines: [] };
-        entry.count += 1;
-        entry.lines.push(item.line);
-        byKey.set(key, entry);
-    }
-    return Array.from(byKey.values()).sort((a, b) => a.file.localeCompare(b.file) || a.global.localeCompare(b.global));
-}
-
-function loadBaseline() {
-    if (!fs.existsSync(baselinePath)) return null;
-    return JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
-}
-
-const findings = walk(clientRoot).flatMap(findAssignments);
-const summary = summarize(findings);
-
-if (writeBaseline) {
-    const data = {
-        version: 1,
-        description: 'Baseline for legacy client/chat window.* assignments. New entries must use window.Pivot.modules.* via Pivot.exposeModule instead.',
-        generatedAt: new Date().toISOString(),
-        total: findings.length,
-        entries: summary
-    };
-    fs.writeFileSync(baselinePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-    console.log(`Window globals baseline written: ${findings.length} assignment(s), ${summary.length} file/global bucket(s).`);
-    process.exit(0);
-}
-
-const baseline = loadBaseline();
-if (!baseline) {
-    console.error('Window globals scan failed: missing scripts/window_globals_baseline.json. Run node scripts/check_window_globals_usage.js --write-baseline after reviewing the legacy baseline.');
+if (violations.length) {
+    console.error(`全局变量规范扫描失败：发现 ${violations.length} 个未命名空间化的 window 访问。`);
+    violations.slice(0, 50).forEach(item => console.error(` - ${item.file}:${item.line} [${item.reason}] window.${item.property}: ${item.code}`));
+    console.error('业务 API 请通过 window.Pivot.modules 或 window.Pivot.legacy 访问；仅浏览器 API、桌面预加载桥和 Pivot 启动根允许直接挂在 window。');
     process.exit(1);
 }
 
-const allowed = new Map((baseline.entries || []).map(item => [`${item.file}#${item.global}`, item.count]));
-const violations = [];
-for (const item of summary) {
-    const key = `${item.file}#${item.global}`;
-    const max = allowed.get(key) || 0;
-    if (item.count > max) violations.push({ ...item, allowed: max });
-}
-
-if (violations.length === 0 && findings.length <= Number(baseline.total || 0)) {
-    console.log(`全局变量规范扫描通过：共 ${findings.length}/${baseline.total} 处受控全局变量，未引入新的 window.* 暴露。`);
-    process.exit(0);
-}
-
-console.error(`全局变量规范扫描失败：发现 ${violations.length} 处未在白名单的全局变量。`);
-violations.slice(0, 30).forEach(item => {
-    console.error(` - ${item.file}: window.${item.global} count ${item.count} > baseline ${item.allowed}; lines ${item.lines.join(', ')}`);
-});
-if (findings.length > Number(baseline.total || 0)) {
-    console.error(` - Total assignments ${findings.length} > baseline ${baseline.total}.`);
-}
-console.error('新 API 请通过 window.Pivot.exposeModule(name, api, aliases) 注册。');
-if (!reportOnly) process.exit(1);
+console.log('全局变量规范扫描通过：业务 API 已收敛至 window.Pivot 命名空间，未发现自由 window.* 读写。');

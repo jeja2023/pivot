@@ -146,6 +146,7 @@
 
     const scriptLoadPromises = existingPivot._scriptLoadPromises || new Map();
     const modules = existingPivot.modules || Object.create(null);
+    const legacy = existingPivot.legacy || Object.create(null);
     const SCRIPT_LOAD_TIMEOUT_MS = 15000;
 
     function registerModule(name, api = {}) {
@@ -170,7 +171,10 @@
             const globalName = typeof alias === 'string' ? alias : alias.globalName;
             const exportName = typeof alias === 'string' ? alias : (alias.exportName || alias.globalName);
             if (!globalName || !exportName || moduleApi[exportName] === undefined) return;
-            window[globalName] = moduleApi[exportName];
+            // Old classic scripts consume these names through the single
+            // compatibility namespace. Do not recreate free window globals:
+            // every new API must be reachable through Pivot.modules instead.
+            legacy[globalName] = moduleApi[exportName];
         });
         return moduleApi;
     }
@@ -264,12 +268,13 @@
     existingPivot.loadScriptOnce = loadScriptOnce;
     existingPivot.loadScripts = loadScripts;
     existingPivot.modules = modules;
+    existingPivot.legacy = legacy;
     existingPivot.registerModule = registerModule;
     existingPivot.getModule = getModule;
     existingPivot.exposeModule = exposeModule;
     existingPivot.moduleApi = moduleApi;
     existingPivot._scriptLoadPromises = scriptLoadPromises;
     existingPivot.chooseStreamInterval = chooseStreamInterval;
-    existingPivot.html = window.PivotSafeHtml || existingPivot.html || null;
+    existingPivot.html = existingPivot.legacy.PivotSafeHtml || existingPivot.html || null;
     window.Pivot = existingPivot;
 })();

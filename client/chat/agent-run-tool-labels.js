@@ -17,7 +17,7 @@ function updateAgentModelCaps() {
     const caps = document.getElementById('agent-selected-model-caps');
     const name = document.getElementById('agent-selected-model-name');
     if (!select || !caps || !name) return;
-    const model = (window._cachedAgentModels || []).find(item => String(item.id) === String(select.value));
+    const model = (window.Pivot.legacy._cachedAgentModels || []).find(item => String(item.id) === String(select.value));
     name.textContent = model ? `${model.name}${model.user_id ? ' (个人)' : ''}` : '请选择模型';
     PivotSafeHtml.setHtml(caps, agentModelCapabilityMarkup(model));
 }

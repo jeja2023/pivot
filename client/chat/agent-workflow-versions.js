@@ -148,7 +148,7 @@ async function openAgentWorkflowVersions() {
             if (!version) return;
             writeAgentWorkflowText(version.dag_spec || { nodes: [] });
             mountAgentDagEditor();
-            window.refreshAgentDagEditor?.();
+            window.Pivot.legacy.refreshAgentDagEditor?.();
             updateAgentWorkflowRunUi();
             showToast(`已加载版本 ${version.version} 到画布，保存后会生成新版本`, 'success');
         });
@@ -157,7 +157,7 @@ async function openAgentWorkflowVersions() {
         btn.addEventListener('click', async () => {
             const version = btn.dataset.agentWorkflowVersionPublish;
             btn.setAttribute('disabled', 'disabled');
-            const published = await publishSelectedAgentWorkflow(version);
+            const published = await window.Pivot.legacy.publishSelectedAgentWorkflow(version);
             btn.removeAttribute('disabled');
             if (published) openAgentWorkflowVersions();
         });
@@ -165,7 +165,7 @@ async function openAgentWorkflowVersions() {
     body.querySelectorAll('[data-agent-workflow-version-restore]').forEach(btn => {
         btn.addEventListener('click', () => {
             const version = btn.dataset.agentWorkflowVersionRestore;
-        showConfirm('回滚工作流版本', `确定将工作流回滚到版本 ${version} 吗？系统会生成一个新的当前版本。`, async () => {
+        window.Pivot.legacy.showConfirm('回滚工作流版本', `确定将工作流回滚到版本 ${version} 吗？系统会生成一个新的当前版本。`, async () => {
                 const restoreRes = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(version)}/restore`, { method: 'POST' });
                 const restoreData = await restoreRes.json().catch(() => ({}));
                 if (!restoreRes.ok) return showToast(restoreData.error || '版本回滚失败', 'error');
@@ -175,7 +175,7 @@ async function openAgentWorkflowVersions() {
                 writeAgentWorkflowText(restoreData.workflow.dag_spec || { nodes: [] });
                 await loadAgentWorkflows();
                 mountAgentDagEditor();
-                window.refreshAgentDagEditor?.();
+                window.Pivot.legacy.refreshAgentDagEditor?.();
                 updateAgentWorkflowRunUi();
             showToast(`已回滚为版本 ${restoreData.workflow.current_version}`, 'success');
                 openAgentWorkflowVersions();

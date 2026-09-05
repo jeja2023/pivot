@@ -354,8 +354,8 @@ function renderToolPolicyGovernancePanel(entry = null) {
             </div>
         </div>
     `);
-    panel.querySelector('[data-tool-policy-close]')?.addEventListener('click', () => window.closeToolPolicyGovernancePanel());
-    panel.querySelector('[data-tool-policy-save]')?.addEventListener('click', event => window.saveToolPolicyTool(event.currentTarget));
+    panel.querySelector('[data-tool-policy-close]')?.addEventListener('click', () => window.Pivot.legacy.closeToolPolicyGovernancePanel());
+    panel.querySelector('[data-tool-policy-save]')?.addEventListener('click', event => window.Pivot.legacy.saveToolPolicyTool(event.currentTarget));
 }
 
 function renderToolPolicyTools() {
@@ -409,10 +409,10 @@ function renderToolPolicyTools() {
         `;
     }).join(''));
     body.querySelectorAll('[data-tool-policy-edit]').forEach(button => {
-        button.addEventListener('click', () => window.openToolPolicyGovernancePanel(button.dataset.toolPolicyEdit));
+        button.addEventListener('click', () => window.Pivot.legacy.openToolPolicyGovernancePanel(button.dataset.toolPolicyEdit));
     });
     body.querySelectorAll('[data-tool-policy-toggle]').forEach(button => {
-        button.addEventListener('click', () => window.toggleToolPolicyToolStatus(button));
+        button.addEventListener('click', () => window.Pivot.legacy.toggleToolPolicyToolStatus(button));
     });
     renderToolPolicyGovernancePanel(toolPolicySelectedToolEntry());
 }
@@ -460,7 +460,7 @@ async function loadToolPolicyToolsForPackage(item) {
     }));
 }
 
-window.loadToolPolicy = async function(options = {}) {
+window.Pivot.legacy.loadToolPolicy = async function(options = {}) {
     if (!isAdminUser()) return;
     if (!options.forceReload && toolPolicyToolsCache.length) {
         if (!options.preserveSelection) {
@@ -492,20 +492,20 @@ window.loadToolPolicy = async function(options = {}) {
     renderToolPolicyTools();
 };
 
-window.openToolPolicyGovernancePanel = function(entryKey) {
+window.Pivot.legacy.openToolPolicyGovernancePanel = function(entryKey) {
     const entry = toolPolicyEntryByKey(entryKey);
     toolPolicySelectedToolKey = entry?.key || '';
     toolPolicySelectedPackageKey = entry?.item?.package_key || '';
     renderToolPolicyTools();
 };
 
-window.closeToolPolicyGovernancePanel = function() {
+window.Pivot.legacy.closeToolPolicyGovernancePanel = function() {
     toolPolicySelectedToolKey = '';
     toolPolicySelectedPackageKey = '';
     renderToolPolicyTools();
 };
 
-window.saveToolPolicyPackageStatus = async function(input) {
+window.Pivot.legacy.saveToolPolicyPackageStatus = async function(input) {
     const packageKey = input?.getAttribute?.('data-tool-policy-package-enabled') || input?.dataset?.toolPolicyPackageEnabled || '';
     if (!packageKey) return;
     const item = toolPolicyPackagesCache.find(row => row.package_key === packageKey);
@@ -514,7 +514,7 @@ window.saveToolPolicyPackageStatus = async function(input) {
     try {
             await saveToolPolicyPackageEnabled(packageKey, nextEnabled);
             showToast(nextEnabled ? '工具包已启用' : '工具包已停用', 'success');
-            await window.loadToolPolicy({ forceReload: true, preserveSelection: true });
+            await window.Pivot.legacy.loadToolPolicy({ forceReload: true, preserveSelection: true });
     } catch (e) {
         showToast(e.message || '工具包状态保存失败', 'error');
     } finally {
@@ -522,7 +522,7 @@ window.saveToolPolicyPackageStatus = async function(input) {
     }
 };
 
-window.toggleToolPolicyToolStatus = async function(button) {
+window.Pivot.legacy.toggleToolPolicyToolStatus = async function(button) {
     const entryKey = button?.dataset?.toolPolicyToggle || '';
     const entry = toolPolicyEntryByKey(entryKey);
     if (!entry) return;
@@ -531,7 +531,7 @@ window.toggleToolPolicyToolStatus = async function(button) {
     try {
             await saveToolPolicyGovernance(entry, toolPolicyToolPayload(entry.tool, { enabled: nextEnabled }));
             showToast(nextEnabled ? '工具已启用' : '工具已停用', 'success');
-            await window.loadToolPolicy({ forceReload: true, preserveSelection: true });
+            await window.Pivot.legacy.loadToolPolicy({ forceReload: true, preserveSelection: true });
     } catch (e) {
         showToast(e.message || '工具状态保存失败', 'error');
     } finally {
@@ -539,7 +539,7 @@ window.toggleToolPolicyToolStatus = async function(button) {
     }
 };
 
-window.saveToolPolicyTool = async function(button) {
+window.Pivot.legacy.saveToolPolicyTool = async function(button) {
     const entryKey = button?.dataset?.toolPolicySave || '';
     const entry = toolPolicyEntryByKey(entryKey);
     if (!entry) return;
@@ -558,7 +558,7 @@ window.saveToolPolicyTool = async function(button) {
     try {
         await saveToolPolicyGovernance(entry, payload);
         showToast('工具策略已保存', 'success');
-        await window.loadToolPolicy({ forceReload: true, preserveSelection: true });
+        await window.Pivot.legacy.loadToolPolicy({ forceReload: true, preserveSelection: true });
     } catch (e) {
         showToast(e.message || '工具策略保存失败', 'error');
     } finally {
@@ -571,5 +571,5 @@ document.addEventListener('click', event => {
     const refresh = event.target.closest('#tool-policy-refresh-btn');
     if (!refresh) return;
     event.preventDefault();
-    window.loadToolPolicy?.({ forceReload: true });
+    window.Pivot.legacy.loadToolPolicy?.({ forceReload: true });
 });

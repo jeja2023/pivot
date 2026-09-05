@@ -142,8 +142,8 @@ async function saveRegulationAliases(documentId, title) {
     }
 }
 
-function ensureRegulationsSourceRoot() {
-    fs.mkdirSync(regulationsSourceRoot, { recursive: true });
+async function ensureRegulationsSourceRoot() {
+    await fs.promises.mkdir(regulationsSourceRoot, { recursive: true });
 }
 
 function getSafeRegulationExtension(filename) {
@@ -160,8 +160,8 @@ function resolveRegulationStoredPath(relativePath) {
     return target;
 }
 
-function buildRegulationSourcePath(documentId, originalName) {
-    ensureRegulationsSourceRoot();
+async function buildRegulationSourcePath(documentId, originalName) {
+    await ensureRegulationsSourceRoot();
     const ext = getSafeRegulationExtension(originalName);
     const targetDir = path.join(regulationsSourceRoot, String(documentId));
     const token = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
@@ -171,15 +171,19 @@ function buildRegulationSourcePath(documentId, originalName) {
     };
 }
 
-function saveRegulationUploadedFile(file, documentId) {
-    const { targetDir, targetPath } = buildRegulationSourcePath(documentId, file.originalname);
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.renameSync(file.path, targetPath);
+async function saveRegulationUploadedFile(file, documentId) {
+    const { targetDir, targetPath } = await buildRegulationSourcePath(documentId, file.originalname);
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    await fs.promises.rename(file.path, targetPath);
+    const [stat, sourceBuffer] = await Promise.all([
+        fs.promises.stat(targetPath),
+        fs.promises.readFile(targetPath)
+    ]);
     clearDirSizeCache();
     return {
         sourcePath: toProjectRelativePath(targetPath),
-        sourceSize: fs.statSync(targetPath).size,
-        sourceHash: crypto.createHash('sha256').update(fs.readFileSync(targetPath)).digest('hex'),
+        sourceSize: stat.size,
+        sourceHash: crypto.createHash('sha256').update(sourceBuffer).digest('hex'),
         absolutePath: targetPath
     };
 }

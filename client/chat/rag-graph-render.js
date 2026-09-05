@@ -435,7 +435,6 @@
     `;
     }
 
-    window.Pivot = window.Pivot || {};
     window.Pivot.ragGraphRender = {
         buildGraphCanvasMarkup,
         buildGraphEntitiesHtml,

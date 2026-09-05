@@ -208,7 +208,6 @@ async function apiFetch(url, options = {}) {
     return res;
 }
 
-window.Pivot = window.Pivot || {};
 window.Pivot.api = {
     fetch: apiFetch,
     authFetch,
@@ -221,6 +220,15 @@ window.Pivot.permissions = {
     getPermissionTier,
     getPermissionLabel
 };
+
+Object.defineProperties(window.Pivot.legacy, {
+    API_BASE: { get: () => API_BASE },
+    apiFetch: { get: () => apiFetch },
+    authFetch: { get: () => authFetch },
+    authHeaders: { get: () => authHeaders },
+    currentUser: { get: () => currentUser, set: value => { currentUser = value; } },
+    currentSessionId: { get: () => currentSessionId, set: value => { currentSessionId = value; } }
+});
 
 async function checkLogin(hasRetried = false) {
     try {
@@ -243,7 +251,7 @@ async function checkLogin(hasRetried = false) {
             if (data.csrfToken) setCsrfToken(data.csrfToken);
             currentUser = data.user;
             authFailureHandled = false;
-            if (window.showApp) window.showApp();
+            if (window.Pivot.legacy.showApp) window.Pivot.legacy.showApp();
         } else {
             handleUnauthorized();
         }
@@ -262,11 +270,11 @@ function handleUnauthorized() {
         localStorage.removeItem('pivot_official_writing_library_v2');
     } catch (_) {}
     setCsrfToken('');
-    if (window.closeAgentRealtime) window.closeAgentRealtime();
-    if (window.stopAnnouncements) window.stopAnnouncements();
+    if (window.Pivot.legacy.closeAgentRealtime) window.Pivot.legacy.closeAgentRealtime();
+    if (window.Pivot.legacy.stopAnnouncements) window.Pivot.legacy.stopAnnouncements();
     if (authFailureHandled) return;
     authFailureHandled = true;
-    if (window.showAuth) window.showAuth();
+    if (window.Pivot.legacy.showAuth) window.Pivot.legacy.showAuth();
 }
 
 function setCsrfToken(value) {

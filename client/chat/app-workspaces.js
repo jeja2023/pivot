@@ -353,8 +353,8 @@ function initChatToolsMenu() {
             if (tag) tag.value = '';
             if (search) search.value = '';
             filterChatRagCollectionOptions();
-            await window.handleRagCollectionScopeChange?.('chat');
-            window.updateChatToolReadiness?.({ silent: true });
+            await window.Pivot.legacy.handleRagCollectionScopeChange?.('chat');
+            window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
         });
     });
     document.querySelectorAll('[data-chat-tool-done]').forEach(button => {
@@ -376,7 +376,7 @@ window.Pivot.exposeModule('chat.inputMenu', {
     isAgentExecutionEnabled: () => chatAgentExecutionEnabled,
     setOpen: setChatToolsMenuOpen
 });
-window.resizeUserInput = () => {
+window.Pivot.legacy.resizeUserInput = () => {
     if (!userInput) return;
     userInput.style.height = 'auto';
     const sh = userInput.scrollHeight;
@@ -386,8 +386,8 @@ window.resizeUserInput = () => {
         userInput.style.height = '56px';
     }
 };
-userInput?.addEventListener('input', resizeUserInput);
-userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+userInput?.addEventListener('input', window.Pivot.legacy.resizeUserInput);
+userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); window.Pivot.legacy.sendMessage(); } });
 
 const CHAT_TOOL_TOGGLE_STORAGE = {
     rag: 'pivot_chat_rag_enabled',
@@ -461,7 +461,7 @@ function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {
     button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
     button.classList.toggle('is-active', enabled);
     if (tool === 'rag') syncChatRagScopeControls();
-    if (refreshReadiness && typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
+    if (refreshReadiness && typeof window.Pivot.legacy.updateChatToolReadiness === 'function') window.Pivot.legacy.updateChatToolReadiness({ silent: true });
 }
 
 function syncChatToolToggles() {
@@ -471,7 +471,7 @@ function syncChatToolToggles() {
         setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true', { refreshReadiness: false });
     });
     syncChatRagScopeControls();
-    if (typeof window.updateChatToolReadiness === 'function') window.updateChatToolReadiness({ silent: true });
+    if (typeof window.Pivot.legacy.updateChatToolReadiness === 'function') window.Pivot.legacy.updateChatToolReadiness({ silent: true });
 }
 
 function getEnabledChatTools() {
@@ -530,7 +530,7 @@ function getChatRagScopeLabel() {
 }
 
 function buildChatRagSummaryUrl() {
-    const scope = window.getRagScopeSelection?.('chat') || {};
+    const scope = window.Pivot.legacy.getRagScopeSelection?.('chat') || {};
     const params = new URLSearchParams();
     if (scope.collectionId) params.set('collectionId', String(scope.collectionId));
     const tag = Array.isArray(scope.tagNames) ? scope.tagNames[0] : '';
@@ -614,7 +614,7 @@ async function toggleChatTool(button) {
     const enabled = button.dataset.enabled !== 'true' && button.getAttribute('aria-pressed') !== 'true' && button.checked !== true;
     button.dataset.lastToggleAt = String(Date.now());
     if (tool === 'mcp' && enabled) {
-        const confirmed = await (window.ensureChatMcpConsent?.() || Promise.resolve(true));
+        const confirmed = await (window.Pivot.legacy.ensureChatMcpConsent?.() || Promise.resolve(true));
         if (!confirmed) {
             setChatToolToggleState(button, false);
             if (storageKey) localStorage.setItem(storageKey, 'false');
@@ -649,25 +649,25 @@ document.addEventListener('click', (event) => {
     if (!action) return;
     event.preventDefault();
     const tool = action.dataset.chatToolStatusAction;
-    if (tool === 'rag') window.openKnowledgeWorkbench?.();
-    if (tool === 'mcp') window.openMcpWorkbench?.();
+    if (tool === 'rag') window.Pivot.legacy.openKnowledgeWorkbench?.();
+    if (tool === 'mcp') window.Pivot.legacy.openMcpWorkbench?.();
 });
 document.addEventListener('change', async (event) => {
     if (event.target?.id === 'chat-rag-collection-scope') {
-        if (typeof window.handleRagCollectionScopeChange === 'function') {
-            await window.handleRagCollectionScopeChange('chat');
+        if (typeof window.Pivot.legacy.handleRagCollectionScopeChange === 'function') {
+            await window.Pivot.legacy.handleRagCollectionScopeChange('chat');
         } else {
-            window.updateChatToolReadiness?.({ silent: true });
+            window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
         }
         return;
     }
     if (event.target?.id !== 'chat-rag-tag-scope') return;
-    window.updateChatToolReadiness?.({ silent: true });
+    window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
 });
-window.setChatToolToggleState = setChatToolToggleState;
-window.syncChatToolToggles = syncChatToolToggles;
-window.syncChatRagScopeControls = syncChatRagScopeControls;
-window.updateChatToolReadiness = updateChatToolReadiness;
+window.Pivot.legacy.setChatToolToggleState = setChatToolToggleState;
+window.Pivot.legacy.syncChatToolToggles = syncChatToolToggles;
+window.Pivot.legacy.syncChatRagScopeControls = syncChatRagScopeControls;
+window.Pivot.legacy.updateChatToolReadiness = updateChatToolReadiness;
 updateChatToolReadiness({ silent: true });
 
 const MAIN_WORKSPACE_STORAGE_KEY = 'pivot_active_workspace';
@@ -765,7 +765,7 @@ async function ensureWorkspaceScripts(name) {
     return workspaceLoadPromises[name];
 }
 
-window.ensureWorkspaceScripts = ensureWorkspaceScripts;
+window.Pivot.legacy.ensureWorkspaceScripts = ensureWorkspaceScripts;
 
 function getStoredSessionValue(key) {
     try {
@@ -787,41 +787,41 @@ function removeStoredSessionValue(key) {
     try { sessionStorage.removeItem(key); } catch (e) {}
 }
 
-window.getStoredMainWorkspace = function() {
+window.Pivot.legacy.getStoredMainWorkspace = function() {
     const view = getStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY);
     return RESTORABLE_WORKSPACES.has(view) ? view : 'chat';
 };
 
-window.persistSettingsTab = function(tab) {
+window.Pivot.legacy.persistSettingsTab = function(tab) {
     if (tab) setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
 };
 
-window.getStoredSettingsTab = function() {
+window.Pivot.legacy.getStoredSettingsTab = function() {
     return getStoredSessionValue(SETTINGS_TAB_STORAGE_KEY);
 };
 
-window.persistActiveChatSession = function(sessionId) {
+window.Pivot.legacy.persistActiveChatSession = function(sessionId) {
     if (!sessionId) return removeStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
     setStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY, String(sessionId));
 };
 
-window.getStoredActiveChatSession = function() {
+window.Pivot.legacy.getStoredActiveChatSession = function() {
     return getStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
 };
 
-window.persistPrintWorkspaceSession = function(sessionId) {
+window.Pivot.legacy.persistPrintWorkspaceSession = function(sessionId) {
     if (!sessionId) return removeStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
     setStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY, String(sessionId));
 };
 
-window.getStoredPrintWorkspaceSession = function() {
+window.Pivot.legacy.getStoredPrintWorkspaceSession = function() {
     return getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 };
 
-window.showMainWorkspace = function(view = 'chat') {
+window.Pivot.legacy.showMainWorkspace = function(view = 'chat') {
     const target = ['chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'chat';
     if (document.body?.dataset.activeWorkspace === 'apps' && target !== 'apps') {
-        window.PivotDataAnalysis?.resetAiWorkspace?.();
+        window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     }
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
@@ -859,24 +859,24 @@ window.showMainWorkspace = function(view = 'chat') {
     document.body?.setAttribute('data-active-workspace', target);
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
     if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
-    if (target === 'manual') window.ensureManualFrameLoaded?.();
-    if (target !== 'agent' && target !== 'agent-dag') window.updateAgentAutoRefresh?.();
-    if (target === 'settings') window.scheduleSettingsWorkspaceScale?.();
+    if (target === 'manual') window.Pivot.legacy.ensureManualFrameLoaded?.();
+    if (target !== 'agent' && target !== 'agent-dag') window.Pivot.legacy.updateAgentAutoRefresh?.();
+    if (target === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     return target;
 };
 
 let settingsWorkspaceScaleObserver = null, settingsWorkspaceScaleRaf = 0;
 let lastObservedSettingsWidth = 0, lastObservedSettingsHeight = 0;
 
-window.scheduleSettingsWorkspaceScale = function() {
+window.Pivot.legacy.scheduleSettingsWorkspaceScale = function() {
     if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
     settingsWorkspaceScaleRaf = window.requestAnimationFrame(() => {
         settingsWorkspaceScaleRaf = 0;
-        window.updateSettingsWorkspaceScale?.();
+        window.Pivot.legacy.updateSettingsWorkspaceScale?.();
     });
 };
 
-window.updateSettingsWorkspaceScale = function() {
+window.Pivot.legacy.updateSettingsWorkspaceScale = function() {
     const stage = document.getElementById('settings-scale-stage');
     const canvas = document.getElementById('settings-scale-canvas');
     const content = document.querySelector('.settings-workspace-view .admin-content');
@@ -890,7 +890,7 @@ window.updateSettingsWorkspaceScale = function() {
                 if (Math.abs(width - lastObservedSettingsWidth) > 1 || Math.abs(height - lastObservedSettingsHeight) > 1) {
                     lastObservedSettingsWidth = width;
                     lastObservedSettingsHeight = height;
-                    window.scheduleSettingsWorkspaceScale?.();
+                    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
                 }
             }
         });
@@ -924,14 +924,14 @@ window.updateSettingsWorkspaceScale = function() {
 };
 
 window.addEventListener('resize', () => {
-    if (document.body?.dataset.activeWorkspace === 'settings') window.scheduleSettingsWorkspaceScale?.();
+    if (document.body?.dataset.activeWorkspace === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
 });
 
 function createLazyWorkspaceEntrypoint(group, functionName) {
-    const loadedImplementation = typeof window[functionName] === 'function' ? window[functionName] : null;
+    const loadedImplementation = typeof window.Pivot.legacy[functionName] === 'function' ? window.Pivot.legacy[functionName] : null;
     const lazyEntrypoint = async (...args) => {
         await ensureWorkspaceScripts(group);
-        const entrypoint = window[functionName];
+        const entrypoint = window.Pivot.legacy[functionName];
         const implementation = entrypoint === lazyEntrypoint ? loadedImplementation : entrypoint;
         if (typeof implementation !== 'function') {
             throw new Error(`${group} 工作区入口未就绪`);
@@ -942,57 +942,57 @@ function createLazyWorkspaceEntrypoint(group, functionName) {
 }
 
 const openAppsWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
-window.openAppsWorkbench = openAppsWorkbenchEntrypoint;
-window.openAgentWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
-window.openAgentDagWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
-window.openKnowledgeWorkbench = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
-window.openMcpWorkbench = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
+window.Pivot.legacy.openAppsWorkbench = openAppsWorkbenchEntrypoint;
+window.Pivot.legacy.openAgentWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
+window.Pivot.legacy.openAgentDagWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
+window.Pivot.legacy.openKnowledgeWorkbench = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
+window.Pivot.legacy.openMcpWorkbench = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
 window.Pivot?.exposeModule?.('workspaces.apps', {
     openAppsWorkbench: openAppsWorkbenchEntrypoint
 });
 
-window.closeAgentWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'agent') window.showMainWorkspace?.('chat'); };
-window.closeKnowledgeWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'knowledge') window.showMainWorkspace?.('chat'); };
-window.closeMcpWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'mcp') window.showMainWorkspace?.('chat'); };
+window.Pivot.legacy.closeAgentWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'agent') window.Pivot.legacy.showMainWorkspace?.('chat'); };
+window.Pivot.legacy.closeKnowledgeWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'knowledge') window.Pivot.legacy.showMainWorkspace?.('chat'); };
+window.Pivot.legacy.closeMcpWorkbench = () => { if (document.body?.dataset.activeWorkspace === 'mcp') window.Pivot.legacy.showMainWorkspace?.('chat'); };
 
-window.restoreMainWorkspaceAfterLogin = async function() {
-    const view = window.getStoredMainWorkspace?.() || 'chat';
-    if (view === 'settings' && window.openAdminPanel) return window.openAdminPanel({ restore: true });
-    if (view === 'apps' && window.openAppsWorkbench) return window.openAppsWorkbench();
-    if (view === 'knowledge' && window.openKnowledgeWorkbench) return window.openKnowledgeWorkbench();
-    if (view === 'mcp' && window.openMcpWorkbench) return window.openMcpWorkbench();
-    if (view === 'agent-dag' && window.openAgentDagWorkbench) return window.openAgentDagWorkbench();
-    if (view === 'agent' && window.openAgentWorkbench) return window.openAgentWorkbench();
-    if (view === 'manual') return window.showMainWorkspace?.('manual');
-    if (view === 'print' && window.openPrintWorkbench) {
-        const sessionId = window.getStoredPrintWorkspaceSession?.() || window.getStoredActiveChatSession?.();
-        if (sessionId) return window.openPrintWorkbench(sessionId);
+window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
+    const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'chat';
+    if (view === 'settings' && window.Pivot.legacy.openAdminPanel) return window.Pivot.legacy.openAdminPanel({ restore: true });
+    if (view === 'apps' && window.Pivot.legacy.openAppsWorkbench) return window.Pivot.legacy.openAppsWorkbench();
+    if (view === 'knowledge' && window.Pivot.legacy.openKnowledgeWorkbench) return window.Pivot.legacy.openKnowledgeWorkbench();
+    if (view === 'mcp' && window.Pivot.legacy.openMcpWorkbench) return window.Pivot.legacy.openMcpWorkbench();
+    if (view === 'agent-dag' && window.Pivot.legacy.openAgentDagWorkbench) return window.Pivot.legacy.openAgentDagWorkbench();
+    if (view === 'agent' && window.Pivot.legacy.openAgentWorkbench) return window.Pivot.legacy.openAgentWorkbench();
+    if (view === 'manual') return window.Pivot.legacy.showMainWorkspace?.('manual');
+    if (view === 'print' && window.Pivot.legacy.openPrintWorkbench) {
+        const sessionId = window.Pivot.legacy.getStoredPrintWorkspaceSession?.() || window.Pivot.legacy.getStoredActiveChatSession?.();
+        if (sessionId) return window.Pivot.legacy.openPrintWorkbench(sessionId);
     }
     if (view === 'chat') {
-        const sessionId = window.getStoredActiveChatSession?.();
-        if (sessionId && window.selectSession) return window.selectSession(sessionId, undefined, { restore: true });
+        const sessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
+        if (sessionId && window.Pivot.legacy.selectSession) return window.Pivot.legacy.selectSession(sessionId, undefined, { restore: true });
     }
-    return window.showMainWorkspace?.('chat');
+    return window.Pivot.legacy.showMainWorkspace?.('chat');
 };
 
-window.ensureManualFrameLoaded = () => {
+window.Pivot.legacy.ensureManualFrameLoaded = () => {
     const frame = document.getElementById('manual-frame');
     if (!frame || frame.getAttribute('src')) return;
     frame.setAttribute('src', frame.dataset.src || '/manual?embed=1');
 };
 
-window.openManualWorkbench = () => window.showMainWorkspace?.('manual');
-window.closeManualWorkbench = () => window.showMainWorkspace?.('chat');
+window.Pivot.legacy.openManualWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('manual');
+window.Pivot.legacy.closeManualWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');
 
 // 会话打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图
-window.openPrintWorkbench = (sessionId) => {
+window.Pivot.legacy.openPrintWorkbench = (sessionId) => {
     if (!sessionId) return;
-    window.persistPrintWorkspaceSession?.(sessionId);
+    window.Pivot.legacy.persistPrintWorkspaceSession?.(sessionId);
     const frame = document.getElementById('print-frame');
     if (frame) {
         const nextSrc = `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/print?embed=1`;
         if (frame.getAttribute('src') !== nextSrc) frame.setAttribute('src', nextSrc);
     }
-    window.showMainWorkspace?.('print');
+    window.Pivot.legacy.showMainWorkspace?.('print');
 };
-window.closePrintWorkbench = () => window.showMainWorkspace?.('chat');
+window.Pivot.legacy.closePrintWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');

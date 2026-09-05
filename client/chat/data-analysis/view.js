@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, esc, fmtNumber, activeDataset } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
@@ -816,8 +816,8 @@
             );
         }).join(''));
         if (!pager) return;
-        if (typeof window.renderWorkspacePagination === 'function') {
-            window.renderWorkspacePagination(pager, {
+        if (typeof window.Pivot.legacy.renderWorkspacePagination === 'function') {
+            window.Pivot.legacy.renderWorkspacePagination(pager, {
                 total,
                 page: state.overviewPage,
                 limit: pageSize,
@@ -905,8 +905,8 @@
             `);
         }
 
-        if (pager && window.renderWorkspacePagination) {
-            window.renderWorkspacePagination(pager, {
+        if (pager && window.Pivot.legacy.renderWorkspacePagination) {
+            window.Pivot.legacy.renderWorkspacePagination(pager, {
                 total,
                 page,
                 limit: pageSize,

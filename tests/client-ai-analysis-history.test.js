@@ -111,9 +111,10 @@ function createAiHistoryHarness() {
     };
 
     const context = {
-        window: {
+        window: { Pivot: { legacy: {
             PivotDataAnalysis: app,
-            renderPivotCharts: el => { renderedCharts.push(el); },
+            renderPivotCharts: el => { renderedCharts.push(el); }
+        } },
             matchMedia: () => ({ matches: false })
         },
         document: {

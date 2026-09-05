@@ -19,7 +19,7 @@ const MIME_TYPE_MAP = {
     'application/json': 'JSON 数据'
 };
 
-window.loadAttachments = async function(page = 1) {
+window.Pivot.legacy.loadAttachments = async function(page = 1) {
     const keyword = document.getElementById('attachment-search-input')?.value || '';
     const res = await apiFetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
     const { data, total, isSuperAdmin } = await res.json();
@@ -63,7 +63,7 @@ window.loadAttachments = async function(page = 1) {
 document.getElementById('attachment-list-body')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-attachment-action="delete"]');
     if (!button) return;
-    window.deleteAttachment(button.dataset.attachmentId);
+    window.Pivot.legacy.deleteAttachment(button.dataset.attachmentId);
 });
 
 function formatFileSize(size) {
@@ -73,28 +73,28 @@ function formatFileSize(size) {
     return `${v} B`;
 }
 
-window.deleteAttachment = (id) => {
-    showConfirm('删除附件', '确定删除该附件吗？', async () => {
+window.Pivot.legacy.deleteAttachment = (id) => {
+    window.Pivot.legacy.showConfirm('删除附件', '确定删除该附件吗？', async () => {
         const res = await apiFetch(`${API_BASE}/attachments/${id}`, { method: 'DELETE', headers: authHeaders() });
-        if (res.ok) { showToast('附件已删除'); loadAttachments(pageState.attachments); }
+        if (res.ok) { showToast('附件已删除'); window.Pivot.legacy.loadAttachments(pageState.attachments); }
     });
 };
 
 let attachmentSearchTimer = null;
 document.getElementById('attachment-search-input')?.addEventListener('input', () => {
     clearTimeout(attachmentSearchTimer);
-    attachmentSearchTimer = setTimeout(() => loadAttachments(1), 300);
+    attachmentSearchTimer = setTimeout(() => window.Pivot.legacy.loadAttachments(1), 300);
 });
 
-window.changePassword = async () => {
+window.Pivot.legacy.changePassword = async () => {
     const oldPassword = document.getElementById('pw-old').value;
     const newPassword = document.getElementById('pw-new').value;
     const confirmPassword = document.getElementById('pw-confirm').value;
     if (!oldPassword || !newPassword) return showToast('请输入完整密码信息', 'error');
     if (newPassword !== confirmPassword) return showToast('两次输入的新密码不一致', 'error');
-    const passwordError = window.getPasswordValidationMessage?.(newPassword, '新密码') || '';
+    const passwordError = window.Pivot.legacy.getPasswordValidationMessage?.(newPassword, '新密码') || '';
     if (passwordError) return showToast(passwordError, 'error');
-    showConfirm('确认修改密码', '修改密码后，您需要重新登录，确定继续吗？', async () => {
+    window.Pivot.legacy.showConfirm('确认修改密码', '修改密码后，您需要重新登录，确定继续吗？', async () => {
         try {
             const res = await apiFetch(`${API_BASE}/settings/password`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ oldPassword, newPassword }) });
             if (!res.ok) { const data = await res.json(); throw new Error(data.error || '修改失败'); }

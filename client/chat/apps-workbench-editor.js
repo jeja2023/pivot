@@ -116,11 +116,11 @@ function renderOfficialWritingDocTableRows(docs, startIndex = 0) {
 function renderOfficialWritingDocPagination(pageInfo) {
     const pager = document.getElementById('official-writing-pagination');
     if (!pager) return;
-    if (typeof window.renderWorkspacePagination !== 'function') {
+    if (typeof window.Pivot.legacy.renderWorkspacePagination !== 'function') {
         pager.replaceChildren();
         return;
     }
-    window.renderWorkspacePagination(pager, {
+    window.Pivot.legacy.renderWorkspacePagination(pager, {
         total: pageInfo.total,
         page: pageInfo.page,
         limit: pageInfo.limit,
@@ -231,7 +231,7 @@ function openOfficialWritingDraftDialog() {
     }
     setOfficialWritingDraftDialogError('');
     modal.classList.remove('hidden');
-    void window.PivotAppModels?.refresh?.('official-writing-draft', 'official-writing-draft-model');
+    void window.Pivot.legacy.PivotAppModels?.refresh?.('official-writing-draft', 'official-writing-draft-model');
     window.setTimeout(() => input?.focus(), 0);
 }
 
@@ -330,7 +330,7 @@ function createOfficialWritingDoc(options = {}) {
 async function renameOfficialWritingDoc(docId) {
     const doc = officialWritingLibrary.docs.find(item => item.id === docId);
     if (!doc) return;
-    const next = await window.showInputPrompt?.({
+    const next = await window.Pivot.legacy.showInputPrompt?.({
         title: '重命名公文',
         message: '请输入新的公文标题：',
         placeholder: '新公文',
@@ -354,7 +354,7 @@ async function deleteOfficialWritingDoc(docId) {
     const doc = officialWritingLibrary.docs[index];
     const hasContent = String(doc.state?.draft || '').trim() || String(doc.state?.source || '').trim();
     if (hasContent) {
-        const confirmed = await (window.showConfirm?.('删除公文', `确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)
+        const confirmed = await (window.Pivot.legacy.showConfirm?.('删除公文', `确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)
             ?? Promise.resolve(window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)));
         if (!confirmed) return;
     }

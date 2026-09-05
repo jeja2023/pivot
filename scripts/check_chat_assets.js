@@ -322,6 +322,7 @@ function createMarkdownRenderSandbox() {
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
     sandbox.self = sandbox;
+    sandbox.Pivot = { legacy: Object.create(null) };
     sandbox.PivotSafeHtml = {
         escapeHtml(value) {
             return String(value ?? '')

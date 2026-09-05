@@ -6,6 +6,7 @@ const { getBeijingTimestamp } = require('../time');
 const DEFAULT_HEALTH_CACHE_TTL_MS = 10_000;
 let cachedDetailedSnapshot = null;
 let detailedSnapshotExpiresAt = 0;
+let detailedSnapshotLoad = null;
 
 function checkDatabase() {
     try {
@@ -40,19 +41,17 @@ function sweepLegacyProbeFiles(resolvedDir) {
         .catch(() => {});
 }
 
-function checkWritableDirectory(label, dir) {
+async function checkWritableDirectory(label, dir) {
     const resolved = path.resolve(dir);
     const probe = path.join(resolved, PROBE_FILE_NAME);
     try {
-        fs.mkdirSync(resolved, { recursive: true });
-        fs.writeFileSync(probe, 'ok');
-        fs.unlinkSync(probe);
+        await fs.promises.mkdir(resolved, { recursive: true });
+        await fs.promises.writeFile(probe, 'ok');
+        await fs.promises.unlink(probe);
         sweepLegacyProbeFiles(resolved);
         return { label, path: resolved, status: 'ok', message: '目录正常可写' };
     } catch (e) {
-        try {
-            if (fs.existsSync(probe)) fs.unlinkSync(probe);
-        } catch (_) {}
+        await fs.promises.rm(probe, { force: true }).catch(() => {});
         return { label, path: resolved, status: 'error', message: e.message };
     }
 }
@@ -71,10 +70,10 @@ function checkMemory() {
     };
 }
 
-function checkDiskUsage(dir) {
+async function checkDiskUsage(dir) {
     try {
-        if (typeof fs.statfsSync === 'function') {
-            const stats = fs.statfsSync(dir);
+        if (typeof fs.promises.statfs === 'function') {
+            const stats = await fs.promises.statfs(dir);
             const total = stats.bsize * stats.blocks;
             const free = stats.bsize * stats.bavail;
             const usedRatio = total > 0 ? (total - free) / total : 0;
@@ -172,32 +171,49 @@ function getPublicSystemHealthSnapshot() {
 
 function getSystemHealthSnapshot(options = {}) {
     if (options.public === true) return getPublicSystemHealthSnapshot();
+    return getDetailedSystemHealthSnapshot(options);
+}
+
+async function getDetailedSystemHealthSnapshot(options = {}) {
     const cacheTtlMs = Math.max(0, Number(process.env.HEALTH_DETAIL_CACHE_TTL_MS) || DEFAULT_HEALTH_CACHE_TTL_MS);
     if (options.force !== true && cachedDetailedSnapshot && Date.now() < detailedSnapshotExpiresAt) {
         return cachedDetailedSnapshot;
     }
+    if (options.force !== true && detailedSnapshotLoad) return detailedSnapshotLoad;
     const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../data');
     const uploadDir = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
         ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
         : path.resolve(__dirname, '../../uploads');
-    const checks = [
-        { name: 'database', ...checkDatabase() },
-        { name: 'dataDir', ...checkWritableDirectory('Data directory', dataDir) },
-        { name: 'uploadsDir', ...checkWritableDirectory('Uploads directory', uploadDir) },
-        { name: 'memory', ...checkMemory() },
-        { name: 'disk', ...checkDiskUsage(dataDir) },
-        { name: 'writeQueue', ...checkWriteQueue() },
-        { name: 'deployment', ...checkDeployment() }
-    ];
-
-    const snapshot = {
-        status: overallStatus(checks),
-        timestamp: getBeijingTimestamp(),
-        checks
-    };
-    cachedDetailedSnapshot = snapshot;
-    detailedSnapshotExpiresAt = Date.now() + cacheTtlMs;
-    return snapshot;
+    const refresh = (async () => {
+        const [dataDirCheck, uploadsDirCheck, diskCheck] = await Promise.all([
+            checkWritableDirectory('Data directory', dataDir),
+            checkWritableDirectory('Uploads directory', uploadDir),
+            checkDiskUsage(dataDir)
+        ]);
+        const checks = [
+            { name: 'database', ...checkDatabase() },
+            { name: 'dataDir', ...dataDirCheck },
+            { name: 'uploadsDir', ...uploadsDirCheck },
+            { name: 'memory', ...checkMemory() },
+            { name: 'disk', ...diskCheck },
+            { name: 'writeQueue', ...checkWriteQueue() },
+            { name: 'deployment', ...checkDeployment() }
+        ];
+        const snapshot = {
+            status: overallStatus(checks),
+            timestamp: getBeijingTimestamp(),
+            checks
+        };
+        cachedDetailedSnapshot = snapshot;
+        detailedSnapshotExpiresAt = Date.now() + cacheTtlMs;
+        return snapshot;
+    })();
+    detailedSnapshotLoad = refresh;
+    try {
+        return await refresh;
+    } finally {
+        if (detailedSnapshotLoad === refresh) detailedSnapshotLoad = null;
+    }
 }
 
 module.exports = {

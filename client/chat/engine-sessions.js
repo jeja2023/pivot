@@ -17,7 +17,7 @@ function updateReattachedAgentMessage(entry, status, message = '') {
     if (!textBody) return;
     const detail = message || chatAgentStatusText(status);
     PivotSafeHtml.setHtml(textBody, `<div class="queue-detail">${escapeChatStatusHtml(detail)}</div>`);
-    window.attachChatAgentControls?.(entry.element, entry.runId, status);
+    window.Pivot.legacy.attachChatAgentControls?.(entry.element, entry.runId, status);
 }
 
 async function trackReattachedChatAgent(runId, sessionId, entry) {
@@ -30,16 +30,16 @@ async function trackReattachedChatAgent(runId, sessionId, entry) {
             const status = String(run?.status || '').toLowerCase();
             if (CHAT_AGENT_TERMINAL_STATUSES.has(status)) {
                 reattachedChatAgents.delete(String(runId));
-                window.unregisterChatAgentStreamingTarget?.(runId);
+                window.Pivot.legacy.unregisterChatAgentStreamingTarget?.(runId);
                 if (String(currentSessionId || '') === String(sessionId)) {
                     await selectSession(sessionId);
                 } else {
-                    window.loadSessions?.();
+                    window.Pivot.legacy.loadSessions?.();
                 }
                 return;
             }
             if (String(currentSessionId || '') === String(sessionId)) {
-                const progressText = window.chatAgentProgressText?.(detail, status) || chatAgentStatusText(status);
+                const progressText = window.Pivot.legacy.chatAgentProgressText?.(detail, status) || chatAgentStatusText(status);
                 updateReattachedAgentMessage(entry, status, progressText);
             }
         } catch (_error) {
@@ -75,7 +75,7 @@ async function attachChatAgentRunsForSession(sessionId) {
             entry.element = element;
             reattachedChatAgents.set(runId, entry);
             updateReattachedAgentMessage(entry, run.status);
-            window.registerChatAgentStreamingTarget?.(runId, element, safeSessionId);
+            window.Pivot.legacy.registerChatAgentStreamingTarget?.(runId, element, safeSessionId);
             if (!existing) trackReattachedChatAgent(runId, safeSessionId, entry).catch(() => {});
         }
     } catch (_error) {
@@ -115,13 +115,13 @@ async function selectSession(id, title, options = {}) {
         selectionSequence === sessionSelectionSequence
         && String(currentSessionId || '') === requestedSessionId
     );
-    window.showMainWorkspace?.('chat');
+    window.Pivot.legacy.showMainWorkspace?.('chat');
     if (String(currentSessionId || '') !== requestedSessionId) {
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
     }
     currentSessionId = id;
-    window.persistActiveChatSession?.(id);
-    window.markActiveSessionInList?.(id);
+    window.Pivot.legacy.persistActiveChatSession?.(id);
+    window.Pivot.legacy.markActiveSessionInList?.(id);
     if (title) document.getElementById('current-title').innerText = title;
 
     let data = null;
@@ -132,7 +132,7 @@ async function selectSession(id, title, options = {}) {
         if (!res.ok) {
             if (options.restore || res.status === 404) {
                 currentSessionId = null;
-                window.persistActiveChatSession?.('');
+                window.Pivot.legacy.persistActiveChatSession?.('');
                 const titleEl = document.getElementById('current-title');
                 if (titleEl) titleEl.innerText = '请选择或新建对话';
                 const msgEl = document.getElementById('message-container');
@@ -149,7 +149,7 @@ async function selectSession(id, title, options = {}) {
         if (!isCurrentSelection()) return;
         if (options.restore) {
             currentSessionId = null;
-            window.persistActiveChatSession?.('');
+            window.Pivot.legacy.persistActiveChatSession?.('');
             const titleEl = document.getElementById('current-title');
             if (titleEl) titleEl.innerText = '请选择或新建对话';
             return;
@@ -162,7 +162,7 @@ async function selectSession(id, title, options = {}) {
 
     const session = data.session;
     const messages = data.messages;
-    if (window.updateContextUsage) window.updateContextUsage(data.contextMeta || null);
+    if (window.Pivot.legacy.updateContextUsage) window.Pivot.legacy.updateContextUsage(data.contextMeta || null);
 
     if (session && session.title) document.getElementById('current-title').innerText = session.title;
 
@@ -193,9 +193,9 @@ async function selectSession(id, title, options = {}) {
             if (m.role === 'assistant' && contentEl) assistantContentNodes.push(contentEl);
         });
     container.appendChild(fragment);
-    assistantContentNodes.forEach(node => window.renderPivotCharts?.(node));
-    window.scrollMessagesToBottom?.({ duration: 2400 });
-    setTimeout(() => window.scrollMessagesToBottom?.({ duration: 900 }), 320);
+    assistantContentNodes.forEach(node => window.Pivot.legacy.renderPivotCharts?.(node));
+    window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 2400 });
+    setTimeout(() => window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 900 }), 320);
     if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
     attachChatAgentRunsForSession(id);
 }

@@ -186,7 +186,7 @@ function createConfigSandbox(fetchImpl) {
         window: {
             APP_VERSION_TAG: '',
             location: { origin: 'http://localhost' },
-            Pivot: {}
+            Pivot: { legacy: {} }
         }
     };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'config.js'), 'utf8'), sandbox, {
@@ -237,8 +237,8 @@ test('apiFetch returns to login when refresh token is no longer valid', async ()
     });
     let showAuthCount = 0;
     let closedRealtimeCount = 0;
-    sandbox.window.showAuth = () => { showAuthCount += 1; };
-    sandbox.window.closeAgentRealtime = () => { closedRealtimeCount += 1; };
+    sandbox.window.Pivot.legacy.showAuth = () => { showAuthCount += 1; };
+    sandbox.window.Pivot.legacy.closeAgentRealtime = () => { closedRealtimeCount += 1; };
 
     await assert.rejects(() => sandbox.apiFetch('/api/sessions'), /Refresh failed|令牌刷新失败/);
 

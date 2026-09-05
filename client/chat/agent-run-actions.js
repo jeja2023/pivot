@@ -71,13 +71,13 @@ function getAgentRunPayload(goalOverride = '') {
         retryLimit: document.getElementById('agent-retry-limit')?.value || 1,
         toolAllowlist: getSelectedAgentToolAllowlist(),
         contextConfig: getAgentContextConfig(),
-        skillId: window.getAgentHarnessSkillId?.() || '',
-        sessionId: window.currentSessionId || null
+        skillId: window.Pivot.legacy.getAgentHarnessSkillId?.() || '',
+        sessionId: window.Pivot.legacy.currentSessionId || null
     };
     return payload;
 }
 
-window.createAgentRun = async function() {
+window.Pivot.legacy.createAgentRun = async function() {
     const payload = getAgentRunPayload();
     if (!payload.goal) return showToast('请先填写任务目标', 'error');
     if (!payload.modelId) return showToast('请选择模型', 'error');
@@ -108,8 +108,8 @@ window.createAgentRun = async function() {
         const titleInput = document.getElementById('agent-title-input');
         if (titleInput) titleInput.value = '';
         await Promise.all([loadAgentRuns(1), loadAgentNotifications()]);
-        window.setTaskComposerOpen?.(false);
-        await window.openAgentRun(data.run.id);
+        window.Pivot.legacy.setTaskComposerOpen?.(false);
+        await window.Pivot.legacy.openAgentRun(data.run.id);
     } catch (e) {
         showToast(e.message || '任务创建失败', 'error');
     } finally {
@@ -122,14 +122,14 @@ async function saveCurrentAgentTaskAsSchedule() {
     if (!payload.goal) return showToast('请先填写任务目标', 'error');
     if (!payload.modelId) return showToast('请选择模型', 'error');
     if (payload._invalid) return;
-    window.setTaskComposerOpen?.(false);
-    await window.openAgentDagWorkbench?.({
+    window.Pivot.legacy.setTaskComposerOpen?.(false);
+    await window.Pivot.legacy.openAgentDagWorkbench?.({
         tab: 'schedules',
         scheduleDraft: payload
     });
 }
 
-window.approveAgentRun = async function(runId, approve = true) {
+window.Pivot.legacy.approveAgentRun = async function(runId, approve = true) {
     await runAgentActionOnce(`approval:${runId}:${approve}`, runId, '[data-agent-approve], [data-agent-reject]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
             method: 'POST',
@@ -140,12 +140,12 @@ window.approveAgentRun = async function(runId, approve = true) {
         if (!res.ok) throw new Error(data.error || '审批处理失败');
         showToast(approve ? '已批准工具调用，任务继续排队' : '已拒绝工具调用', 'success');
         await loadAgentRuns();
-        await window.openAgentRun(runId);
+        await window.Pivot.legacy.openAgentRun(runId);
     }, '审批处理失败');
 };
 
-window.cancelAgentRun = function(runId) {
-    showConfirm('停止自主任务', '确定停止这个正在执行的自主任务吗？', async () => {
+window.Pivot.legacy.cancelAgentRun = function(runId) {
+    window.Pivot.legacy.showConfirm('停止自主任务', '确定停止这个正在执行的自主任务吗？', async () => {
         await runAgentActionOnce(`cancel:${runId}`, runId, '[data-agent-cancel]', async () => {
             const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
             const data = await res.json().catch(() => ({}));
@@ -153,46 +153,46 @@ window.cancelAgentRun = function(runId) {
             showToast('自主任务已停止', 'success');
             await loadAgentRuns();
             const stillExists = agentRunsCache.some(run => run.id === runId);
-            if (stillExists) await window.openAgentRun(runId);
+            if (stillExists) await window.Pivot.legacy.openAgentRun(runId);
         }, '停止失败');
     });
 };
 
-window.cancelAgentWorkflowPreviewRun = function(runId) {
-    showConfirm('停止预览运行', '确定停止这次工作流预览运行吗？', async () => {
+window.Pivot.legacy.cancelAgentWorkflowPreviewRun = function(runId) {
+    window.Pivot.legacy.showConfirm('停止预览运行', '确定停止这次工作流预览运行吗？', async () => {
         await runAgentActionOnce(`preview-cancel:${runId}`, runId, '[data-agent-cancel]', async () => {
             const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || '停止失败');
             showToast('预览运行已停止', 'success');
-            await window.openAgentRun(runId, { workflowPreview: true });
+            await window.Pivot.legacy.openAgentRun(runId, { workflowPreview: true });
         }, '停止失败');
     });
 };
 
-window.rerunAgentRun = async function(runId) {
+window.Pivot.legacy.rerunAgentRun = async function(runId) {
     await runAgentActionOnce(`rerun:${runId}`, runId, '[data-agent-rerun]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '重新运行失败');
         showToast('已创建新的自主任务', 'success');
         await loadAgentRuns(1);
-        await window.openAgentRun(data.run.id);
+        await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '重新运行失败');
 };
 
-window.resumeAgentRun = async function(runId) {
+window.Pivot.legacy.resumeAgentRun = async function(runId) {
     await runAgentActionOnce(`resume:${runId}`, runId, '[data-agent-resume]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '断点续跑失败');
         showToast('已从上次执行位置创建续跑任务', 'success');
         await loadAgentRuns(1);
-        await window.openAgentRun(data.run.id);
+        await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '断点续跑失败');
 };
 
-window.createWorkflowDraftFromAgentRun = async function(runId) {
+window.Pivot.legacy.createWorkflowDraftFromAgentRun = async function(runId) {
     try {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/learn`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'workflow', runNow: true })
@@ -202,8 +202,8 @@ window.createWorkflowDraftFromAgentRun = async function(runId) {
         const result = data.job?.resultSummary || {};
         if (!result.workflowId) throw new Error('本次任务没有足够的安全步骤可生成工作流草稿。');
         showToast('已生成受控工作流草稿，请预览、评测后再发布。', 'success');
-        closeAgentRunDetailModal();
-        await window.openAgentDagWorkbench?.({ workflowId: result.workflowId, editor: true });
+        window.Pivot.legacy.closeAgentRunDetailModal();
+        await window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId: result.workflowId, editor: true });
     } catch (e) {
         showToast(e.message || '生成工作流草稿失败', 'error');
     }
@@ -228,7 +228,7 @@ async function learnFromAgentRun(runId) {
 
 window.Pivot?.exposeModule?.('agent.runActions', { learnFromAgentRun }, ['learnFromAgentRun']);
 
-window.rerunAgentDagNode = async function(runId, nodeId = '') {
+window.Pivot.legacy.rerunAgentDagNode = async function(runId, nodeId = '') {
     await runAgentActionOnce(`dag-rerun:${runId}:${nodeId}`, runId, '[data-agent-dag-rerun-node]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/dag/rerun`, {
             method: 'POST',
@@ -239,24 +239,24 @@ window.rerunAgentDagNode = async function(runId, nodeId = '') {
         if (!res.ok) throw new Error(data.error || '节点重跑失败');
         showToast('已创建节点重跑任务', 'success');
         await loadAgentRuns(1);
-        await window.openAgentRun(data.run.id);
+        await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '节点重跑失败');
 };
 
-window.deleteAgentRun = function(runId) {
-    showConfirm('移除任务记录', '确定从任务列表移除这条任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
+window.Pivot.legacy.deleteAgentRun = function(runId) {
+    window.Pivot.legacy.showConfirm('移除任务记录', '确定从任务列表移除这条任务记录吗？记录会保留给 admin 权限层级审计。', async () => {
         await runAgentActionOnce(`delete:${runId}`, runId, '[data-agent-run-delete]', async () => {
             const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || '移除记录失败');
             showToast('任务记录已移除', 'success');
-            closeAgentRunDetailModal();
+            window.Pivot.legacy.closeAgentRunDetailModal();
             await loadAgentRuns();
         }, '移除记录失败');
     });
 };
 
-window.showAgentRunAudit = async function() {
+window.Pivot.legacy.showAgentRunAudit = async function() {
     if (!isSuperAdminUser()) {
         showToast('仅 admin 权限层级可查看任务删除审计', 'error');
         return;

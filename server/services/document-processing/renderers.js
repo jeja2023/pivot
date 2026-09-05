@@ -7,8 +7,8 @@ const { readImageMetadata } = require('./files');
 
 async function writePageBuffer({ userId, jobId, pageNumber, buffer }) {
     const fileName = `${jobId}-page-${String(pageNumber).padStart(4, '0')}.png`;
-    const targetPath = buildManagedPath(pagesRoot, userId, fileName);
-    fs.writeFileSync(targetPath, buffer);
+    const targetPath = await buildManagedPath(pagesRoot, userId, fileName);
+    await fs.promises.writeFile(targetPath, buffer);
     let width = 0;
     let height = 0;
     try {

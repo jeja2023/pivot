@@ -9,10 +9,10 @@ function mountAgentDagEditor() {
     const textarea = document.getElementById('agent-dag-spec');
     const toolbar = document.getElementById('agent-dag-editor-toolbar');
     const inspector = document.getElementById('agent-dag-editor-inspector');
-    if (!canvas || !textarea || !window.PivotDagEditor) return;
+    if (!canvas || !textarea || !window.Pivot.legacy.PivotDagEditor) return;
     if (!canvas.offsetParent && activeAgentConfigSection !== 'advanced') return;
     if (dagEditorInstance) dagEditorInstance.destroy();
-    dagEditorInstance = window.PivotDagEditor.mount({
+    dagEditorInstance = window.Pivot.legacy.PivotDagEditor.mount({
         canvas,
         textarea,
         toolbar,
@@ -34,7 +34,7 @@ function mountAgentDagEditor() {
     dagEditorInstance?.fitToContent?.();
 }
 
-window.refreshAgentDagEditor = () => {
+window.Pivot.legacy.refreshAgentDagEditor = () => {
     dagEditorInstance?.refresh();
     dagEditorInstance?.fitToContent?.();
 };
@@ -126,7 +126,7 @@ function collectAgentDagInputs() {
     return result;
 }
 
-window.refreshAgentDagInputs = refreshAgentDagInputsPanel;
+window.Pivot.legacy.refreshAgentDagInputs = refreshAgentDagInputsPanel;
 
-window.collectAgentDagInputs = collectAgentDagInputs;
+window.Pivot.legacy.collectAgentDagInputs = collectAgentDagInputs;
 

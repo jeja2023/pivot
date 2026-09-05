@@ -1,5 +1,5 @@
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, esc, fmtNumber, activeDataset } = app;
     const buildOptions = (...args) => app.buildOptions(...args);

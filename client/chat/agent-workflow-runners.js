@@ -91,7 +91,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
         retryLimit: runSettings.retryLimit,
         toolAllowlist: runSettings.toolAllowlist,
         contextConfig: runSettings.contextConfig,
-        sessionId: window.currentSessionId || null
+        sessionId: window.Pivot.legacy.currentSessionId || null
     };
     if (!payload.goal) {
         showToast('请先填写任务目标或工作流名称', 'error');
@@ -150,7 +150,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
             workflowName: workflow.name || currentAgentWorkflowName()
         };
     }
-    const visualInputs = collectAgentDagInputs();
+    const visualInputs = window.Pivot.legacy.collectAgentDagInputs();
     if (Object.keys(visualInputs).length) payload.dagInputs = visualInputs;
     return payload;
 }
@@ -197,13 +197,13 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
             if (sourceMode === 'draft') {
                 setAgentWorkflowRunConsoleStatus('预览运行已入队，可在预览详情查看节点轨迹。', 'ready');
                 showToast('预览运行已入队', 'success');
-                await window.openAgentRun(data.run.id, { workflowPreview: true });
+                await window.Pivot.legacy.openAgentRun(data.run.id, { workflowPreview: true });
                 startAgentWorkflowPreviewPolling(data.run.id);
             } else {
                 setAgentWorkflowRunConsoleStatus(`${agentWorkflowRunSourceLabel(sourceMode)}已入队，可在任务详情查看节点轨迹。`, 'ready');
                 showToast(`${agentWorkflowRunSourceLabel(sourceMode)}已入队`, 'success');
                 await Promise.all([loadAgentRuns(1), loadAgentSchedules(), loadAgentNotifications()]);
-                await window.openAgentRun(data.run.id);
+                await window.Pivot.legacy.openAgentRun(data.run.id);
             }
             return data.run;
         } catch (e) {
@@ -215,17 +215,17 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
 }
 
 async function publishAndRunAgentWorkflow() {
-    const workflow = await publishSelectedAgentWorkflow('current');
+    const workflow = await window.Pivot.legacy.publishSelectedAgentWorkflow('current');
     if (!workflow) return null;
     return runAgentWorkflowFromWorkbench('published', { workflow });
 }
 
-window.runAgentWorkflowPreview = () => runAgentWorkflowFromWorkbench('draft');
+window.Pivot.legacy.runAgentWorkflowPreview = () => runAgentWorkflowFromWorkbench('draft');
 
-window.runAgentWorkflowPublished = () => runAgentWorkflowFromWorkbench('published');
+window.Pivot.legacy.runAgentWorkflowPublished = () => runAgentWorkflowFromWorkbench('published');
 
-window.publishSelectedAgentWorkflow = publishSelectedAgentWorkflow;
+window.Pivot.legacy.publishSelectedAgentWorkflow = publishSelectedAgentWorkflow;
 
-window.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow;
+window.Pivot.legacy.publishAndRunAgentWorkflow = publishAndRunAgentWorkflow;
 
-window.openAgentWorkflowVersions = openAgentWorkflowVersions;
+window.Pivot.legacy.openAgentWorkflowVersions = openAgentWorkflowVersions;

@@ -12,11 +12,11 @@ const ICONS = {
     speed: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
 };
 
-const escapeCodeHtml = (value) => window.PivotSafeHtml
-    ? window.PivotSafeHtml.escapeHtml(value)
+const escapeCodeHtml = (value) => window.Pivot.legacy.PivotSafeHtml
+    ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value)
     : String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const escapeAttrValue = (value) => window.PivotSafeHtml
-    ? window.PivotSafeHtml.escapeAttr(value)
+const escapeAttrValue = (value) => window.Pivot.legacy.PivotSafeHtml
+    ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value)
     : escapeCodeHtml(value).replace(/"/g, '&quot;');
 const PROSE_CODE_LANGUAGES = new Set([
     'markdown', 'md', 'mdown', 'gfm', 'commonmark',
@@ -174,10 +174,10 @@ function formatSessionGroupDate(value) {
         : `${parts.year}年${parts.month}月${parts.day}日`;
 }
 
-window.formatChatDateTime = formatChatDateTime;
-window.formatChatCompactDateTime = formatChatCompactDateTime;
-window.formatSessionListTime = formatSessionListTime;
-window.formatSessionGroupDate = formatSessionGroupDate;
+window.Pivot.legacy.formatChatDateTime = formatChatDateTime;
+window.Pivot.legacy.formatChatCompactDateTime = formatChatCompactDateTime;
+window.Pivot.legacy.formatSessionListTime = formatSessionListTime;
+window.Pivot.legacy.formatSessionGroupDate = formatSessionGroupDate;
 
 let scrollMessagesToBottomTimer = null;
 let scrollMessagesToBottomUntil = 0;
@@ -204,7 +204,7 @@ function observeScrollMessagesToBottom(container) {
     Array.from(container.children || []).forEach(child => scrollMessagesToBottomObserver.observe(child));
 }
 
-window.scrollMessagesToBottom = function(options = {}) {
+window.Pivot.legacy.scrollMessagesToBottom = function(options = {}) {
     const container = document.getElementById('message-container');
     if (!container) return;
     const apply = () => {
@@ -241,7 +241,7 @@ customRenderer.code = (code, infostring, _escaped) => {
     const chartLanguages = new Set(['pivot-echart', 'pivot-chart', 'chart', 'charts']);
     const isRenderableChart = normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code));
     if (isRenderableChart) {
-        if (window._deferPivotCharts) return '';
+        if (window.Pivot.legacy._deferPivotCharts) return '';
         return `<div class="pivot-echart-block" data-pivot-echart="${escapeAttrValue(code)}"><div class="pivot-echart-title">图表</div><div class="pivot-echart-canvas"></div><canvas height="300"></canvas><pre class="pivot-echart-error-text"></pre></div>`;
     }
     const languageLabel = language || 'code';
@@ -395,7 +395,7 @@ if (typeof marked !== 'undefined') {
             }
         },
         renderer(token) {
-            const isOpen = window._tempThoughtStates && window._tempThoughtStates[window._tempThoughtCounter++];
+            const isOpen = window.Pivot.legacy._tempThoughtStates && window.Pivot.legacy._tempThoughtStates[window.Pivot.legacy._tempThoughtCounter++];
             const thinkingClass = token.isClosed ? '' : ' thinking';
             const summary = token.isClosed ? '模型思考内容' : '模型正在思考';
             return `<div class="thought-block${thinkingClass}${isOpen ? ' is-open' : ''}"><div class="thought-summary">${summary}</div><div class="thought-content-wrapper"><div class="thought-content-inner"><div class="thought-content">${renderMarkdown(token.text)}</div></div></div></div>`;
@@ -408,31 +408,31 @@ if (typeof marked !== 'undefined') {
 function renderMarkdown(content, options = {}) {
     if (!content) return '';
     const hasDeferOption = options && Object.prototype.hasOwnProperty.call(options, 'deferPivotCharts');
-    const previousDefer = window._deferPivotCharts;
-    if (hasDeferOption) window._deferPivotCharts = Boolean(options.deferPivotCharts);
+    const previousDefer = window.Pivot.legacy._deferPivotCharts;
+    if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = Boolean(options.deferPivotCharts);
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(content));
     let rawHtml = marked.parse(normalizedContent, { renderer: customRenderer, breaks: true, gfm: true });
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
 
-    if (window.PivotSafeHtml) {
-        const sanitizedHtml = window.PivotSafeHtml.sanitizeHtml(rawHtml, {
+    if (window.Pivot.legacy.PivotSafeHtml) {
+        const sanitizedHtml = window.Pivot.legacy.PivotSafeHtml.sanitizeHtml(rawHtml, {
             ADD_TAGS: [
                 'details', 'summary', 'thought', 
                 'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot', 'mspace', 'mtext', 'mstyle', 'merror'
             ], 
             ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel'] 
         });
-        if (hasDeferOption) window._deferPivotCharts = previousDefer;
+        if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
         return sanitizedHtml;
     }
     if (window.DOMPurify) {
         const sanitizedHtml = DOMPurify.sanitize(rawHtml);
-        if (hasDeferOption) window._deferPivotCharts = previousDefer;
+        if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
         return sanitizedHtml;
     }
-    if (hasDeferOption) window._deferPivotCharts = previousDefer;
+    if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
     return rawHtml;
 }
 

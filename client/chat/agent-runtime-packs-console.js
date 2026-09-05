@@ -2,9 +2,9 @@
 /* global Pivot */
 (() => {
     const state = { available: false, packs: [], page: 1, limit: 8 };
-    const apiBase = () => window.API_BASE || '/api';
-    const escape = value => window.PivotSafeHtml?.escapeHtml ? window.PivotSafeHtml.escapeHtml(value) : String(value ?? '');
-    const escapeAttr = value => window.PivotSafeHtml?.escapeAttr ? window.PivotSafeHtml.escapeAttr(value) : escape(value);
+    const apiBase = () => window.Pivot.legacy.API_BASE || '/api';
+    const escape = value => window.Pivot.legacy.PivotSafeHtml?.escapeHtml ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value) : String(value ?? '');
+    const escapeAttr = value => window.Pivot.legacy.PivotSafeHtml?.escapeAttr ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value) : escape(value);
     const short = (value, max = 20) => { const text = String(value || ''); return text.length > max ? `${text.slice(0, max)}...` : text; };
     const notice = (message, tone = '') => {
         const target = document.getElementById('agent-harness-notice');
@@ -13,7 +13,7 @@
         target.className = `agent-harness-notice${tone ? ` is-${tone}` : ''}`;
     };
     const setHtml = (element, html) => {
-        if (window.PivotSafeHtml?.setHtml) window.PivotSafeHtml.setHtml(element, html);
+        if (window.Pivot.legacy.PivotSafeHtml?.setHtml) window.Pivot.legacy.PivotSafeHtml.setHtml(element, html);
         else element.textContent = String(html || '');
     };
     const formatDate = value => {
@@ -21,7 +21,7 @@
         return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
     async function request(path, options = {}) {
-        const response = await (window.apiFetch || window.fetch.bind(window))(`${apiBase()}${path}`, options);
+        const response = await (window.Pivot.legacy.apiFetch || window.fetch.bind(window))(`${apiBase()}${path}`, options);
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || '运行资源包请求失败。');
         return data;
@@ -55,8 +55,8 @@
         const start = (state.page - 1) * state.limit;
         const rows = state.packs.slice(start, start + state.limit);
         setHtml(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th class="tc">序号</th><th>包 ID</th><th class="tc">类型</th><th class="tc">版本</th><th class="tc">大小</th><th class="mono">SHA256</th><th class="tc">安装时间</th></tr></thead><tbody>${rows.map((pack, index) => `<tr><td class="tc">${start + index + 1}</td><td title="${escapeAttr(pack.id)}">${escape(pack.id || '运行资源')}</td><td class="tc">${escape(pack.type === 'browser' ? '浏览器' : '数据处理')}</td><td class="tc mono">v${escape(pack.version || '1.0.0')}</td><td class="tc">${escape(pack.size || 0)}</td><td class="mono" title="${escapeAttr(pack.sha256 || '')}">${escape(short(pack.sha256 || '—'))}</td><td class="tc">${escape(formatDate(pack.installedAt || pack.installed_at))}</td></tr>`).join('')}</tbody></table></div>`);
-        if (pagination && window.renderWorkspacePagination) {
-            window.renderWorkspacePagination(pagination, { total, limit: state.limit, page: state.page, onPageChange: page => { state.page = page; render(); } });
+        if (pagination && window.Pivot.legacy.renderWorkspacePagination) {
+            window.Pivot.legacy.renderWorkspacePagination(pagination, { total, limit: state.limit, page: state.page, onPageChange: page => { state.page = page; render(); } });
         }
     }
     async function refreshStatus() {

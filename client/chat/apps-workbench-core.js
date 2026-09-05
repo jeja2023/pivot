@@ -373,8 +373,8 @@ function setAppsWorkbenchState(state = '', message = '', { retryApp = '' } = {})
     if (message && state === 'error') {
         if (typeof showToast === 'function') {
             showToast(message, 'error');
-        } else if (typeof window.showToast === 'function') {
-            window.showToast(message, 'error');
+        } else if (typeof window.Pivot.legacy.showToast === 'function') {
+            window.Pivot.legacy.showToast(message, 'error');
         }
     }
 }
@@ -508,7 +508,7 @@ function setStoredAppsActiveApp(appId) {
 
 function showAppsHome() {
     setStoredAppsActiveApp('');
-    window.PivotDataAnalysis?.resetAiWorkspace?.();
+    window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.remove('hidden');
     document.getElementById('official-writing-view')?.classList.add('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -523,7 +523,7 @@ function showAppsHome() {
 
 async function showOfficialWritingApp() {
     setStoredAppsActiveApp('official-writing');
-    window.PivotDataAnalysis?.resetAiWorkspace?.();
+    window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -533,7 +533,7 @@ async function showOfficialWritingApp() {
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
     await loadOfficialWritingState();
-    await window.PivotAppModels?.refresh?.('official-writing-selection', 'official-writing-selection-model');
+    await window.Pivot.legacy.PivotAppModels?.refresh?.('official-writing-selection', 'official-writing-selection-model');
     if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
     hydrateOfficialWritingForm();
     setOfficialWritingMaterialSource(officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource);
@@ -550,39 +550,39 @@ async function showOfficialWritingApp() {
     if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
 }
 async function showDataAnalysisAppFromRegistry() {
-    if (typeof window.showDataAnalysisApp === 'function') {
-        await window.showDataAnalysisApp();
+    if (typeof window.Pivot.legacy.showDataAnalysisApp === 'function') {
+        await window.Pivot.legacy.showDataAnalysisApp();
         return;
     }
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-data-analysis.js');
-    await window.showDataAnalysisApp?.();
+    await window.Pivot.legacy.showDataAnalysisApp?.();
 }
 
 async function showRegulationsAppFromRegistry() {
-    if (typeof window.showRegulationsApp === 'function') {
-        await window.showRegulationsApp();
+    if (typeof window.Pivot.legacy.showRegulationsApp === 'function') {
+        await window.Pivot.legacy.showRegulationsApp();
         return;
     }
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-regulations.js');
-    await window.showRegulationsApp?.();
+    await window.Pivot.legacy.showRegulationsApp?.();
 }
 
 async function showOcrAppFromRegistry() {
-    if (typeof window.showOcrApp === 'function') {
-        await window.showOcrApp();
+    if (typeof window.Pivot.legacy.showOcrApp === 'function') {
+        await window.Pivot.legacy.showOcrApp();
         return;
     }
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-ocr.js');
-    await window.showOcrApp?.();
+    await window.Pivot.legacy.showOcrApp?.();
 }
 
 async function showPdfToolsAppFromRegistry() {
-    if (typeof window.showPdfToolsApp === 'function') {
-        await window.showPdfToolsApp();
+    if (typeof window.Pivot.legacy.showPdfToolsApp === 'function') {
+        await window.Pivot.legacy.showPdfToolsApp();
         return;
     }
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-pdf-tools.js');
-    await window.showPdfToolsApp?.();
+    await window.Pivot.legacy.showPdfToolsApp?.();
 }
 
 function openRegisteredApp(appId) {

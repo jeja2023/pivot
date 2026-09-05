@@ -97,7 +97,6 @@
         });
     }
 
-    window.Pivot = window.Pivot || {};
     window.Pivot.ragGraphLayout = {
         buildGraphEdgeLabelData,
         buildGraphEdgePathData,

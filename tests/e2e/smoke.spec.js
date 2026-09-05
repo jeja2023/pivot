@@ -1,7 +1,27 @@
 /* global document, Event, window -- Playwright 浏览器端执行上下文全局变量 */
 const { expect, test } = require('@playwright/test');
 
+if (process.env.PIVOT_E2E_DEBUG === 'true') {
+    test.beforeEach(({ page }) => {
+        page.on('pageerror', error => console.error(`[pageerror] ${error.stack || error.message}`));
+        page.on('console', message => {
+            if (message.type() === 'error') console.error(`[browser] ${message.text()}`);
+        });
+    });
+}
+
 test.describe('Pivot browser smoke', () => {
+    test('login form establishes a browser session and reveals the authenticated workspace', async ({ page }) => {
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#auth-container')).toBeVisible();
+        await page.locator('#username').fill('admin');
+        await page.locator('#password').fill(process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123');
+        await page.locator('#auth-submit').click();
+        await expect(page.locator('#auth-container')).toBeHidden();
+        await expect(page.locator('#app')).toBeVisible();
+        await expect(page.locator('#user-info')).toContainText(/admin|管理员/i);
+    });
+
     test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
         const login = await page.request.post('/api/auth/login', {
             data: {
@@ -234,6 +254,24 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#report-query-btn')).toBeVisible();
     });
 
+    test('system monitor renders RAG diagnostics and embedding latency state', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: {
+                username: 'admin',
+                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
+            }
+        });
+        expect(login.ok()).toBeTruthy();
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.locator('#admin-panel-btn').click();
+        await page.locator('#tab-monitor').click();
+
+        await expect(page.locator('#tab-content-monitor')).toBeVisible();
+        await expect(page.locator('#monitor-summary-grid')).toContainText('平均延迟');
+        await expect(page.locator('#monitor-rag-storage-list')).toContainText('检索诊断（24h）');
+        await expect(page.locator('#monitor-rag-latency-trend')).toContainText(/Embedding|暂无/);
+    });
+
     test('model configuration sends the native tool-call mode selected by an administrator', async ({ page }) => {
         const login = await page.request.post('/api/auth/login', {
             data: {
@@ -260,5 +298,61 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#m-submit-btn').click();
         await expect.poll(() => savedPayload).not.toBeNull();
         expect(savedPayload.tool_call_mode).toBe('disabled');
+    });
+
+    test('chat submits an SSE request and renders the persisted streaming answer', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
+        });
+        expect(login.ok()).toBeTruthy();
+        let requestPayload = null;
+        await page.route('**/api/chat', async route => {
+            requestPayload = route.request().postDataJSON();
+            return route.fulfill({
+                status: 200,
+                contentType: 'text/event-stream; charset=utf-8',
+                body: [
+                    'data: {"content":"E2E 流式回答"}',
+                    '',
+                    'data: {"type":"message_saved","role":"assistant","messageId":999,"content":"E2E 流式回答","tokenCount":6,"costTime":0.1,"tps":60}',
+                    '',
+                    'data: [DONE]',
+                    ''
+                ].join('\n')
+            });
+        });
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.locator('#user-input').fill('请返回一段 E2E 流式文本');
+        await page.locator('#send-btn').click();
+        await expect(page.locator('#message-container')).toContainText('E2E 流式回答');
+        await expect.poll(() => requestPayload).not.toBeNull();
+        expect(requestPayload.content).toContain('E2E 流式文本');
+        expect(requestPayload.sessionId).toBeTruthy();
+    });
+
+    test('knowledge upload queue accepts a selected file and sends it through the guarded upload route', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
+        });
+        expect(login.ok()).toBeTruthy();
+        let uploadObserved = false;
+        await page.route('**/api/rag/upload', async route => {
+            uploadObserved = route.request().method() === 'POST';
+            return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, docId: 987, message: '后台处理中' }) });
+        });
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.locator('#knowledge-workbench-btn').click();
+        await page.locator('#rag-upload-btn').click();
+        await expect(page.locator('#knowledge-upload-modal')).toBeVisible();
+        await page.locator('#rag-upload-input').setInputFiles({
+            name: 'e2e-knowledge.md',
+            mimeType: 'text/markdown',
+            buffer: Buffer.from('# E2E 知识库\n\n用于验证上传队列。', 'utf8')
+        });
+        await expect(page.locator('#knowledge-upload-list')).toContainText('e2e-knowledge.md');
+        await expect(page.locator('#knowledge-upload-submit-btn')).toBeEnabled();
+        await page.locator('#knowledge-upload-submit-btn').click();
+        await expect.poll(() => uploadObserved).toBe(true);
+        await expect(page.locator('#knowledge-upload-modal')).toBeHidden();
     });
 });

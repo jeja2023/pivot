@@ -1,6 +1,6 @@
 // 聊天流式响应、SSE 解析与助手统计辅助函数 Chat streaming, SSE parsing, and assistant stats helpers
 const escapeChatStatusHtml = (value) => {
-    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(value);
+    if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
     return String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -222,8 +222,8 @@ function handleAssistantTraceAction(event) {
     if (!action) return;
     event.preventDefault();
     const target = action.dataset.chatTraceAction;
-    if (target === 'rag') window.openKnowledgeWorkbench?.();
-    if (target === 'mcp') window.openMcpWorkbench?.();
+    if (target === 'rag') window.Pivot.legacy.openKnowledgeWorkbench?.();
+    if (target === 'mcp') window.Pivot.legacy.openMcpWorkbench?.();
 }
 
 document.addEventListener('click', handleAssistantTraceAction);
@@ -393,7 +393,7 @@ function isMessageContainerNearBottom(threshold = 160) {
 
 function keepMessageContainerPinnedToBottom(wasNearBottom) {
     if (!wasNearBottom) return;
-    window.scrollMessagesToBottom?.();
+    window.Pivot.legacy.scrollMessagesToBottom?.();
 }
 
 function keepLatestCodeBlockPinned(root, wasNearBottom) {
@@ -408,12 +408,12 @@ function isMessageContentInDocument(messageContent) {
 }
 
 async function refreshCurrentContextUsage(sessionId = currentSessionId) {
-    if (!sessionId || !window.updateContextUsage) return null;
+    if (!sessionId || !window.Pivot.legacy.updateContextUsage) return null;
     try {
         const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/context`);
         const data = await res.json().catch(() => ({}));
         if (res.ok) {
-            window.updateContextUsage(data.contextMeta || null);
+            window.Pivot.legacy.updateContextUsage(data.contextMeta || null);
             return data.contextMeta || null;
         }
     } catch (e) {

@@ -79,8 +79,8 @@ async function loadSessions(append = false) {
             const archiveBadge = s.is_archived ? '<span class="session-badge">已归档</span>' : '';
             const pinnedBadge = s.is_pinned ? '<span class="session-badge pinned-badge">置顶</span>' : '';
             const sessionRawTime = s.updated_at || s.created_at;
-            const sessionListTime = window.formatSessionListTime ? window.formatSessionListTime(sessionRawTime) : '';
-            const sessionTimeTitle = window.formatChatDateTime ? window.formatChatDateTime(sessionRawTime) : String(sessionRawTime || '');
+            const sessionListTime = window.Pivot.legacy.formatSessionListTime ? window.Pivot.legacy.formatSessionListTime(sessionRawTime) : '';
+            const sessionTimeTitle = window.Pivot.legacy.formatChatDateTime ? window.Pivot.legacy.formatChatDateTime(sessionRawTime) : String(sessionRawTime || '');
             const msgCount = Number(s.msg_count || 0);
             const sessionInfoTitle = escapeAttrValue([safeHTMLTitle, sessionTimeTitle, msgCount ? `${msgCount} 条消息` : ''].filter(Boolean).join(' · '));
 
@@ -161,7 +161,7 @@ document.getElementById('session-list')?.addEventListener('click', (event) => {
         }
     const session = sessionMenuData.get(String(id));
     if (session) {
-        window.selectSession(session.id, session.title);
+        window.Pivot.legacy.selectSession(session.id, session.title);
     }
 }
 });
@@ -202,8 +202,8 @@ document.addEventListener('click', async (event) => {
     if (taskSearchResult) {
         const runId = taskSearchResult.dataset.globalSearchTaskId;
         getSidebarSearchApi().close?.();
-        await window.openAgentWorkbench?.();
-        await window.openAgentRun?.(runId);
+        await window.Pivot.legacy.openAgentWorkbench?.();
+        await window.Pivot.legacy.openAgentRun?.(runId);
         return;
     }
 
@@ -211,7 +211,7 @@ document.addEventListener('click', async (event) => {
     if (workflowSearchResult) {
         const workflowId = workflowSearchResult.dataset.globalSearchWorkflowId;
         getSidebarSearchApi().close?.();
-        await window.openAgentDagWorkbench?.({ workflowId, editor: true });
+        await window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId, editor: true });
         return;
     }
 
@@ -244,7 +244,7 @@ document.addEventListener('click', async (event) => {
             return;
         }
         getSidebarSearchApi().close?.();
-        window.selectSession(searchResult.dataset.sessionSearchId, searchResult.dataset.sessionSearchTitle || '新对话');
+        window.Pivot.legacy.selectSession(searchResult.dataset.sessionSearchId, searchResult.dataset.sessionSearchTitle || '新对话');
         return;
     }
 
@@ -280,7 +280,7 @@ document.addEventListener('click', async (event) => {
     const rename = event.target.closest('[data-session-tag-rename]');
     if (rename) {
         const fromTag = rename.dataset.sessionTagRename || '';
-        const toTag = await window.showInputPrompt?.({
+        const toTag = await window.Pivot.legacy.showInputPrompt?.({
             title: '重命名标签',
             message: fromTag,
             value: fromTag,
@@ -303,7 +303,7 @@ document.addEventListener('click', async (event) => {
     const remove = event.target.closest('[data-session-tag-remove]');
     if (remove) {
         const tag = remove.dataset.sessionTagRemove || '';
-        showConfirm('删除标签', `确定从所有会话中移除标签「${tag}」吗？`, async () => {
+        window.Pivot.legacy.showConfirm('删除标签', `确定从所有会话中移除标签「${tag}」吗？`, async () => {
             const res = await apiFetch(`${API_BASE}/sessions/tags/remove`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -354,7 +354,7 @@ const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     makeItem('编辑标签', '', () => editSessionTags(id, tags));
     makeItem(isArchived ? '恢复对话' : '归档对话', '', () => toggleArchiveSession(id, isArchived));
     makeItem('导出为 Markdown', '', () => exportSession(id));
-    makeItem('打印 / 导出 PDF', '', () => window.printSession?.(id));
+    makeItem('打印 / 导出 PDF', '', () => window.Pivot.legacy.printSession?.(id));
     makeItem('删除', 'danger', () => deleteSession(id));
     document.body.appendChild(menu);
 
@@ -400,7 +400,7 @@ const toggleArchiveSession = async (id, currentArchived) => {
         showToast(!currentArchived ? '已归档' : '已恢复');
         if (currentSessionId === id && !sidebarState.archived) {
             currentSessionId = null;
-            window.persistActiveChatSession?.('');
+            window.Pivot.legacy.persistActiveChatSession?.('');
             document.getElementById('current-title').innerText = '请选择或新建对话';
             PivotSafeHtml.setHtml(document.getElementById('message-container'), '');
         }

@@ -126,10 +126,10 @@ async function compactCurrentSessionContext() {
         if (!res.ok) throw new Error(data.error || '上下文压缩失败');
         updateContextUsage(data.contextMeta || null);
         showToast(data.message || (data.compressed ? '上下文已压缩' : '当前没有可压缩内容'), data.compressed ? 'success' : (data.inProgress ? 'warning' : 'info'));
-        if (data.compressed && currentSessionId) await window.selectSession?.(currentSessionId);
+        if (data.compressed && currentSessionId) await window.Pivot.legacy.selectSession?.(currentSessionId);
     } catch (e) {
         showToast(e.message || '上下文压缩失败', 'error');
-        await window.refreshCurrentContextUsage?.();
+        await window.Pivot.legacy.refreshCurrentContextUsage?.();
     } finally {
         pill?.classList.remove('is-busy');
         if (pill) pill.disabled = false;
@@ -144,10 +144,10 @@ function isSelectableModelForCurrentUser(model) {
 
 function applyUploadRuntimeLimits(limits = {}) {
     const maxAttachments = limits?.maxAttachmentsPerMessage;
-    if (maxAttachments !== undefined && typeof window.setMaxPendingAttachments === 'function') {
-        window.setMaxPendingAttachments(maxAttachments);
+    if (maxAttachments !== undefined && typeof window.Pivot.legacy.setMaxPendingAttachments === 'function') {
+        window.Pivot.legacy.setMaxPendingAttachments(maxAttachments);
     } else if (maxAttachments !== undefined) {
-        window.MAX_PENDING_ATTACHMENTS = maxAttachments;
+        window.Pivot.legacy.MAX_PENDING_ATTACHMENTS = maxAttachments;
     }
 };
 
@@ -159,7 +159,7 @@ async function loadSelectableModels() {
     if (!modelRes.ok) throw new Error('加载可用模型列表失败');
 
     const { data = [] } = await modelRes.json();
-    window._cachedModels = data;
+    window.Pivot.legacy._cachedModels = data;
     const settings = settingsRes.ok ? await settingsRes.json() : {};
     applyUploadRuntimeLimits(settings.uploadLimits);
     const defaultModelId = settings.personalDefaultModelId || settings.defaultModelId;
@@ -262,7 +262,7 @@ function moveModelDropdownActive(delta) {
 
 function selectDropdownModel(id, shouldClose = true) {
     const hiddenInput = document.getElementById('model-selector');
-    const models = window._cachedModels || [];
+    const models = window.Pivot.legacy._cachedModels || [];
     const model = models.find(m => String(m.id) === String(id));
     if (!model) return;
 
@@ -290,7 +290,7 @@ function selectDropdownModel(id, shouldClose = true) {
         }
     }
 
-    if (window.pendingAttachments && window.pendingAttachments.length > 0 && !hasVision) {
+    if (window.Pivot.legacy.pendingAttachments && window.Pivot.legacy.pendingAttachments.length > 0 && !hasVision) {
         showToast('警告：当前模型不支持已添加的附件，发送将受限', 'warning');
     }
 
@@ -303,7 +303,7 @@ function selectDropdownModel(id, shouldClose = true) {
 // --- 初始化 ---
 document.addEventListener('DOMContentLoaded', () => {
     renderCopyright();
-    if (window.showAuth) window.showAuth();
+    if (window.Pivot.legacy.showAuth) window.Pivot.legacy.showAuth();
     
     const container = document.getElementById('model-selector-container');
     const trigger = document.getElementById('model-selector-btn');
@@ -375,6 +375,7 @@ window.Pivot.exposeModule('chat.ui', {
     applyUploadRuntimeLimits: 'applyUploadRuntimeLimits',
     closeImageViewer: 'closeImageViewer',
     compactCurrentSessionContext: 'compactCurrentSessionContext',
+    describeSelectorModel: 'describeSelectorModel',
     isSelectableModelForCurrentUser: 'isSelectableModelForCurrentUser',
     loadSelectableModels: 'loadSelectableModels',
     refreshModelSelector: 'refreshModelSelector',

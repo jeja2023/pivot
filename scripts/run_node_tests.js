@@ -10,7 +10,11 @@ const availableTestFiles = fs.readdirSync(testsDir, { withFileTypes: true })
     .filter(entry => entry.isFile() && entry.name.endsWith('.test.js'))
     .map(entry => path.join('tests', entry.name))
     .sort();
-const requestedTestFiles = process.argv.slice(2);
+// 保留 Node 原生 test 过滤选项，方便在完整 PostgreSQL 隔离装置内稳定复现单个用例。
+// 其它参数仍按测试文件名处理，避免静默把拼写错误的文件当作 Node 参数忽略。
+const requestedArgs = process.argv.slice(2);
+const nodeTestOptions = requestedArgs.filter(arg => arg.startsWith('--test-'));
+const requestedTestFiles = requestedArgs.filter(arg => !arg.startsWith('--test-'));
 const testFiles = requestedTestFiles.length
     ? availableTestFiles.filter(file => requestedTestFiles.some(requested => (
         file.replace(/\\/g, '/') === requested.replace(/\\/g, '/') || path.basename(file) === requested
@@ -69,6 +73,7 @@ try {
         '--test',
         '--test-concurrency=1',
         '--test-reporter=spec',
+        ...nodeTestOptions,
         ...testFiles
     ], {
         cwd: root,

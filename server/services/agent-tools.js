@@ -952,7 +952,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
 
     if (name === 'system.health') {
         assertAdmin(user);
-        return getSystemHealthSnapshot();
+        return await getSystemHealthSnapshot();
     }
 
     if (name === 'system.modelRuntime') {

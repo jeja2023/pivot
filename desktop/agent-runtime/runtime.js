@@ -4,7 +4,7 @@ const { TaskBudget, normalizeTaskBudget } = require('../../server/services/agent
 const { normalizeToolContract } = require('../../server/services/agent-contracts');
 const { evaluateToolPolicy } = require('../../server/services/agent-policy');
 const { buildToolExecutionPlan, summarizeToolExecutionPlan } = require('../../server/services/agent-tool-execution-plan');
-const { buildAgentAuditFields, createAgentStepContext } = require('../../server/services/agent-step-context');
+const { buildAgentAuditFields, buildWorldState, createAgentStepContext } = require('../../server/services/agent-step-context');
 const { buildRecoveryPlan, diagnoseError } = require('../../server/services/agent-diagnosis');
 const { compileTraceToWorkflow } = require('../../server/services/agent-trace-compiler');
 const { DesktopAgentStateStore } = require('./state-store');
@@ -113,28 +113,52 @@ class DesktopAgentRuntime extends EventEmitter {
                 }
             });
             tool.input = executionPlan.input;
+            const contextRun = {
+                ...run,
+                run_mode: run.run_mode || 'desktop',
+                metadata: { ...(run.metadata || {}), entrypoint: 'desktop' }
+            };
+            const contextConfig = {
+                entrypoint: 'desktop',
+                sandboxMode: options.sandboxMode || run.metadata?.sandboxMode || '',
+                budget: run.budgetConfig || {}
+            };
+            const environment = {
+                entrypoint: 'desktop',
+                platform: process.platform,
+                arch: process.arch
+            };
+            const worldState = buildWorldState({
+                run: contextRun,
+                modelCfg: options.modelCfg || null,
+                toolList: this.registry?.list?.() || [tool],
+                contextConfig,
+                environment
+            });
+            const turnId = `${runId}:turn:${index + 1}`;
+            const contextWindow = this.store.prepareWorldStateWindow({
+                runId,
+                turnId,
+                stepIndex: index + 1,
+                worldState
+            });
             const stepContext = createAgentStepContext({
-                run: {
-                    ...run,
-                    run_mode: run.run_mode || 'desktop',
-                    metadata: { ...(run.metadata || {}), entrypoint: 'desktop' }
-                },
-                turnId: `${runId}:turn:${index + 1}`,
+                run: contextRun,
+                turnId,
                 stepIndex: index + 1,
                 modelCfg: options.modelCfg || null,
                 toolList: this.registry?.list?.() || [tool],
-                contextConfig: {
-                    entrypoint: 'desktop',
-                    sandboxMode: options.sandboxMode || run.metadata?.sandboxMode || '',
-                    budget: run.budgetConfig || {}
-                },
-                environment: {
-                    entrypoint: 'desktop',
-                    platform: process.platform,
-                    arch: process.arch
-                },
-                forceWorldStateFull: true
+                worldState,
+                previousWorldState: contextWindow.previousWorldState,
+                forceWorldStateFull: contextWindow.forceWorldStateFull,
+                worldStateWindow: contextWindow.worldStateWindow,
+                contextConfig,
+                environment,
+                approval: { granted: options.approvalGranted === true },
+                sandbox: summarizeToolExecutionPlan(executionPlan).sandbox || {}
             });
+            this.store.persistWorldStateSnapshot({ runId, turnId, stepIndex: index + 1, stepContext });
+            const stepAudit = buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_plan' });
             const stepId = `${runId}:step:${index + 1}`;
             const operationKey = String(plan.operationKey || `${runId}:${index + 1}:${tool.name}:${crypto.createHash('sha256').update(JSON.stringify(tool.input)).digest('hex')}`);
             budget.consumeStep();
@@ -159,9 +183,10 @@ class DesktopAgentRuntime extends EventEmitter {
                     executionPlan: summarizeToolExecutionPlan(executionPlan),
                     contextHash: stepContext.contextHash,
                     worldStateHash: stepContext.worldStateHash,
-                    audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_plan' })
+                    audit: stepAudit
                 },
-                status: policy.decision === 'denied' ? 'error' : 'success'
+                status: policy.decision === 'denied' ? 'error' : 'success',
+                stepContext
             });
             if (executionPlan.network.preflight === 'denied' || executionPlan.sandbox.preflight === 'denied') {
                 const error = new Error(executionPlan.network.error?.message || executionPlan.sandbox.error?.message || '桌面工具执行前置策略检查失败。');
@@ -174,7 +199,7 @@ class DesktopAgentRuntime extends EventEmitter {
                 const error = new Error(policy.reasons.join('；'));
                 error.code = 'AGENT_POLICY_DENIED';
                 const diagnosis = diagnoseError(error, { tool: tool.name, step: index + 1 });
-                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'diagnose', toolName: tool.name, input: tool.input, output: diagnosis, status: 'error', errorCategory: diagnosis.category, errorMessage: error.message });
+                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'diagnose', toolName: tool.name, input: tool.input, output: diagnosis, status: 'error', errorCategory: diagnosis.category, errorMessage: error.message, stepContext });
                 throw error;
             }
             if (policy.decision === 'require_approval' && options.approvalGranted !== true) {
@@ -182,7 +207,7 @@ class DesktopAgentRuntime extends EventEmitter {
                 this.emit('approval', { run, tool: tool.name, operationKey });
                 return { status: 'waiting_approval', run, operationKey };
             }
-            const checkpoint = this.store.beginTool({ runId, stepId, operationKey, toolName: tool.name, input: tool.input, inputHash: crypto.createHash('sha256').update(JSON.stringify(tool.input)).digest('hex'), idempotent: tool.idempotent, policyDecision: policy.decision });
+            const checkpoint = this.store.beginTool({ runId, stepId, operationKey, toolName: tool.name, input: tool.input, inputHash: crypto.createHash('sha256').update(JSON.stringify(tool.input)).digest('hex'), idempotent: tool.idempotent, policyDecision: policy.decision, contextSnapshot: stepAudit.context });
             if (checkpoint.replay) continue;
             const started = this.now();
             try {
@@ -195,8 +220,8 @@ class DesktopAgentRuntime extends EventEmitter {
                     contextHash: stepContext.contextHash,
                     worldStateHash: stepContext.worldStateHash,
                     audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_completed' })
-                }, 'completed');
-                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'execute', toolName: tool.name, input: tool.input, output, status: 'success', durationMs: this.now() - started });
+                }, 'completed', stepAudit.context);
+                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'execute', toolName: tool.name, input: tool.input, output, status: 'success', durationMs: this.now() - started, stepContext });
                 budget.recordSuccess();
                 this._persistBudget(runId, budget);
                 this.emit('step', { runId, tool: tool.name, output });
@@ -215,8 +240,8 @@ class DesktopAgentRuntime extends EventEmitter {
                     contextHash: stepContext.contextHash,
                     worldStateHash: stepContext.worldStateHash,
                     audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_failed' })
-                }, 'error');
-                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'diagnose', toolName: tool.name, input: tool.input, output: { diagnosis, recoveryPlan }, status: 'error', errorCategory: diagnosis.category, errorMessage: error.message, durationMs: this.now() - started });
+                }, 'error', stepAudit.context);
+                this.store.appendStep(runId, { stepIndex: index + 1, phase: 'diagnose', toolName: tool.name, input: tool.input, output: { diagnosis, recoveryPlan }, status: 'error', errorCategory: diagnosis.category, errorMessage: error.message, durationMs: this.now() - started, stepContext });
                 run = this.store.transitionRun(runId, 'diagnosing');
                 throw error;
             }

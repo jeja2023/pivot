@@ -46,8 +46,8 @@
             if (!text) return;
 
             const tooltip = getMemoryTooltip();
-            if (window.PivotSafeHtml?.setText) {
-                window.PivotSafeHtml.setText(tooltip, text);
+            if (window.Pivot.legacy.PivotSafeHtml?.setText) {
+                window.Pivot.legacy.PivotSafeHtml.setText(tooltip, text);
             } else {
                 tooltip.textContent = text;
             }

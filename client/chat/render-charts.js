@@ -577,8 +577,8 @@ function renderPivotCharts(root = document) {
     });
 }
 
-window.renderPivotCharts = renderPivotCharts;
-window.teardownPivotCharts = teardownPivotCharts;
+window.Pivot.legacy.renderPivotCharts = renderPivotCharts;
+window.Pivot.legacy.teardownPivotCharts = teardownPivotCharts;
 
 function compactChartErrorText(raw) {
     const text = String(raw || '').trim();

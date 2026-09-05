@@ -29,10 +29,10 @@ const {
 
 test('DOMPurify 不可用时安全 HTML 兜底会转义输入', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'safe-html.js'), 'utf8');
-    const sandbox = { window: {} };
+    const sandbox = { window: { Pivot: { legacy: {} } } };
     vm.runInNewContext(source, sandbox);
     assert.equal(
-        sandbox.window.PivotSafeHtml.sanitizeHtml('<img src=x onerror=alert(1)>'),
+        sandbox.window.Pivot.legacy.PivotSafeHtml.sanitizeHtml('<img src=x onerror=alert(1)>'),
         '&lt;img src=x onerror=alert(1)&gt;'
     );
 });
@@ -88,10 +88,10 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(ragDocs, /updateRagDebugSamples/);
     assert.match(ragDocs, /getRagDocDisplayName/);
     assert.match(ragDocs, /ensureAdminSettingsScript/);
-    assert.match(adminCore, /window\.ensureAdminSettingsScript/);
+    assert.match(adminCore, /window\.Pivot\.legacy\.ensureAdminSettingsScript/);
     assert.match(adminCore, /'tool-policy'/);
-    assert.match(adminCore, /window\.loadToolPolicy/);
-    assert.match(authCore, /window\.showApp = \(options = \{\}\)/);
+    assert.match(adminCore, /window\.Pivot\.legacy\.loadToolPolicy/);
+    assert.match(authCore, /window\.Pivot\.legacy\.showApp = \(options = \{\}\)/);
     assert.match(authCore, /options\.restoreWorkspace !== false/);
     assert.match(authCore, /showApp\(\{ restoreWorkspace: false \}\)/);
     assert.match(appCore, /'tool-policy'/);
@@ -226,7 +226,7 @@ test('应用中心入口支持恢复、存储降级和失败重试', () => {
 });
 
 test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息', () => {
-    const sandbox = { window: {} };
+    const sandbox = { window: { Pivot: { legacy: {} } } };
     const escapeHtml = value => String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -447,7 +447,7 @@ test('chat send does not auto-enable MCP when toolbox is off', () => {
 
     assert.doesNotMatch(engine, /shouldAutoEnableMcpForPrompt\s*\(/);
     assert.doesNotMatch(engine, /activateChatMcpToggle\s*\(/);
-    assert.match(engine, /if \(mcpEnabled\) \{\s*mcpConfirmed = mcpConfirmed \|\| await ensureChatMcpConsent\(\);/s);
+    assert.match(engine, /if \(mcpEnabled\) \{\s*mcpConfirmed = mcpConfirmed \|\| await window\.Pivot\.legacy\.ensureChatMcpConsent\(\);/s);
 });
 
 test('viewing a session record scrolls to bottom', () => {
@@ -460,7 +460,7 @@ test('viewing a session record scrolls to bottom', () => {
     assert.match(render, /new ResizeObserver/);
     assert.match(render, /requestAnimationFrame\(\(\) => requestAnimationFrame\(apply\)\)/);
     assert.match(sessions, /scrollMessagesToBottom\?\.\(\{ duration: 2400 \}\)/);
-    assert.match(sessions, /setTimeout\(\(\) => window\.scrollMessagesToBottom\?\.\(\{ duration: 900 \}\), 320\)/);
+    assert.match(sessions, /setTimeout\(\(\) => window\.Pivot\.legacy\.scrollMessagesToBottom\?\.\(\{ duration: 900 \}\), 320\)/);
     assert.match(users, /const displayData = sessionId \? data\.slice\(\)\.reverse\(\) : data;/);
     assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
 });
@@ -492,18 +492,19 @@ test('usage audit page merges stats, details and admin report views', () => {
     assert.match(usageStatsPartial, /id="pagination-stats" class="pagination"/);
     assert.match(usageDetailsPartial, /id="pagination-details" class="pagination"/);
     assert.match(usageReportPartial, /id="report-trend-chart"/);
-    assert.match(stats, /window\.loadStats = async function\(page = pageState\.stats \|\| 1\)/);
+    assert.match(stats, /window\.Pivot\.legacy\.loadStats = async function\(page = pageState\.stats \|\| 1\)/);
     assert.match(stats, /stats\/usage\?\$\{params\.toString\(\)\}/);
     assert.match(stats, /renderPagination\('stats', total, requestedPage\)/);
-    assert.match(stats, /window\.exportStats = \(\) => downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export`, 'usage_stats\.csv'\)/);
+    assert.match(stats, /window\.Pivot\.legacy\.exportStats = \(\) => downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export`, 'usage_stats\.csv'\)/);
     assert.match(adminStatsRoute, /router\.get\('\/usage'[\s\S]*LIMIT (?:\?|@limit) OFFSET (?:\?|@offset)/);
     assert.match(adminStatsRoute, /router\.get\('\/usage\/export'[\s\S]*filename=usage_stats\.csv/);
     assert.match(adminStatsRoute, /res\.json\(\{ data: stats, total, page, limit \}\)/);
     assert.match(adminStatsRoute, /const forceRefresh = req\.query\?\.refresh === '1'/);
-    assert.match(statsMonitor, /window\.loadMonitorSummary = async function\(options = \{\}\)/);
+    assert.match(statsMonitor, /const loadMonitorSummary = async function\(options = \{\}\)/);
     assert.match(statsMonitor, /\?refresh=1/);
-    assert.match(statsMonitor, /window\.refreshMonitorSummary = function\(options = \{\}\)/);
-    assert.match(adminSettings, /window\.refreshMonitorSummary\(\{ force: true \}\)/);
+    assert.match(statsMonitor, /const refreshMonitorSummary = function\(options = \{\}\)/);
+    assert.match(statsMonitor, /exposeModule\?\.\('settings\.monitor', \{/);
+    assert.match(adminSettings, /window\.Pivot\.legacy\.refreshMonitorSummary\(\{ force: true \}\)/);
 });
 
 test('long-term memory table and modals use shared controls', () => {
@@ -526,7 +527,7 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(memoryPartial, /<div class="model-modal-header memory-modal-header">\s*<h3>来源<\/h3>\s*<button id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close">关闭<\/button>\s*<\/div>/);
     assert.match(memoryPartial, /id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close"/);
     assert.doesNotMatch(memoryPartial, /<div class="model-form memory-source-form">[\s\S]*?model-modal-actions memory-modal-actions/);
-    assert.match(adminCore, /window\.loadMemories\(page\)/);
+    assert.match(adminCore, /window\.Pivot\.legacy\.loadMemories\(page\)/);
     assert.match(adminSettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
     assert.match(adminSettings, /function collectRuntimeSettingsPayload\(source = null\)/);
     assert.match(adminSettings, /sourceEl\?\.closest\?\.\('#tab-content-global-params'\)/);

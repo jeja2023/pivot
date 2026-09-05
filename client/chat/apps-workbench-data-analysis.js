@@ -54,13 +54,13 @@
 
     async function showDataAnalysisApp(options = {}) {
         await loadDataAnalysisModules();
-        if (typeof window.PivotDataAnalysis?.showDataAnalysisApp !== 'function') {
+        if (typeof window.Pivot.legacy.PivotDataAnalysis?.showDataAnalysisApp !== 'function') {
             throw new Error('数据分析应用加载失败');
         }
-        return window.PivotDataAnalysis.showDataAnalysisApp(options);
+        return window.Pivot.legacy.PivotDataAnalysis.showDataAnalysisApp(options);
     }
 
-    window.showDataAnalysisApp = showDataAnalysisApp;
+    window.Pivot.legacy.showDataAnalysisApp = showDataAnalysisApp;
     window.Pivot?.exposeModule?.('apps.dataAnalysis', {
         showDataAnalysisApp
     });

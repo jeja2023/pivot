@@ -3,12 +3,15 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const dotenv = require('dotenv');
+const { toPostgresParams } = require('../server/db/client');
 const {
     assertSafeMcpOutboundUrl,
     assertSafeOutboundUrl,
     createSafeHttpAgentsForUser,
-    decryptSecret
+    decryptSecret,
+    redactSecrets
 } = require('../server/security');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -57,39 +60,87 @@ function urlPreview(value) {
     if (!raw) return '';
     try {
         const parsed = new URL(raw);
-        if (!['http:', 'https:'].includes(parsed.protocol)) return raw.slice(0, 120);
+        if (['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+            // Never include credentials from a database connection string in
+            // diagnostics emitted by a readiness check.
+            return `${parsed.protocol}//${parsed.host}${parsed.pathname || ''}`;
+        }
+        if (!['http:', 'https:'].includes(parsed.protocol)) return `${parsed.protocol}//${parsed.host}${parsed.pathname || ''}`.slice(0, 120);
         return `${parsed.origin}${parsed.pathname}${parsed.search ? '?...' : ''}`;
     } catch (_) {
         return raw.slice(0, 120);
     }
 }
 
-function openReadOnlyDb() {
+function resolvePgSchema() {
+    const candidate = String(process.env.PG_TEST_SCHEMA || '').trim();
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(candidate) ? candidate : '';
+}
+
+async function openReadOnlyConfigStore() {
+    const connectionString = String(process.env.DATABASE_URL || process.env.TEST_DATABASE_URL || '').trim();
+    if (connectionString) {
+        const schema = resolvePgSchema();
+        const pool = new Pool({
+            connectionString,
+            max: 1,
+            connectionTimeoutMillis: timeoutMs,
+            idleTimeoutMillis: 1000,
+            ...(schema ? { options: `-c search_path=${schema},public` } : {})
+        });
+        try {
+            await pool.query('SELECT 1');
+            return {
+                kind: 'PostgreSQL',
+                location: schema ? `${new URL(connectionString).host}/${schema}` : new URL(connectionString).host,
+                async tableExists(name) {
+                    const result = await pool.query('SELECT to_regclass($1) AS relation', [`${schema || 'public'}.${String(name)}`]);
+                    return Boolean(result.rows[0]?.relation);
+                },
+                async all(sql, params = []) {
+                    return (await pool.query(toPostgresParams(sql), params)).rows;
+                },
+                async close() { await pool.end(); }
+            };
+        } catch (err) {
+            await pool.end().catch(() => {});
+            add('配置库', 'PostgreSQL', 'warn', `无法连接 ${urlPreview(connectionString)}: ${err.message}`);
+        }
+    }
     if (!fs.existsSync(dbPath)) {
-        add('配置库', 'SQLite', 'warn', `未找到 ${dbPath}，只能检查 .env 中的配置。`);
+        add('配置库', '配置数据库', 'warn', `未找到 PostgreSQL 连接或 SQLite 配置库 ${dbPath}，只能检查 .env 中的配置。`);
         return null;
     }
     try {
-        return new Database(dbPath, { readonly: true, fileMustExist: true });
+        const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
+        return {
+            kind: 'SQLite',
+            location: dbPath,
+            async tableExists(name) {
+                return Boolean(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+            },
+            async all(sql, params = []) { return sqlite.prepare(sql).all(...params); },
+            async close() { sqlite.close(); }
+        };
     } catch (err) {
         add('配置库', 'SQLite', 'warn', `无法只读打开 ${dbPath}: ${err.message}`);
         return null;
     }
 }
 
-function tableExists(db, name) {
-    if (!db) return false;
+async function tableExists(store, name) {
+    if (!store) return false;
     try {
-        return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+        return await store.tableExists(name);
     } catch (_) {
         return false;
     }
 }
 
-function safeAll(db, sql, params = []) {
-    if (!db) return [];
+async function safeAll(store, sql, params = []) {
+    if (!store) return [];
     try {
-        return db.prepare(sql).all(...params);
+        return await store.all(sql, params);
     } catch (err) {
         add('配置库', 'SQL 查询', 'warn', err.message);
         return [];
@@ -111,6 +162,19 @@ function resolveEmbeddingUrl(rawUrl) {
     return `${trimmed}/v1/embeddings`;
 }
 
+function resolveModelCatalogUrl(rawUrl) {
+    try {
+        const url = new URL(String(rawUrl || '').trim());
+        const normalizedPath = url.pathname.replace(/\/(?:chat\/completions|completions|responses)\/?$/i, '').replace(/\/$/, '');
+        url.pathname = normalizedPath.endsWith('/models') ? normalizedPath : `${normalizedPath}/models`;
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+    } catch (_) {
+        return '';
+    }
+}
+
 function buildEmbeddingPayload(input, model, targetUrl) {
     const endpoint = String(targetUrl || '').toLowerCase();
     if (endpoint.includes('/api/embeddings')) return { model, prompt: input };
@@ -125,6 +189,18 @@ function extractEmbeddingVector(data) {
     if (Array.isArray(data?.embeddings?.[0])) return data.embeddings[0];
     if (Array.isArray(data?.result?.embedding)) return data.result.embedding;
     return [];
+}
+
+function summarizeSafeResponseError(data) {
+    const candidate = data?.error?.message || data?.error || data?.message || data?.detail || data?.code || '';
+    if (!candidate) return '';
+    let text;
+    try {
+        text = typeof candidate === 'string' ? candidate : JSON.stringify(candidate);
+    } catch (_) {
+        text = String(candidate);
+    }
+    return String(redactSecrets(text)).replace(/\s+/g, ' ').trim().slice(0, 320);
 }
 
 async function checkHttpGet(scope, name, url, mode = 'model') {
@@ -146,6 +222,38 @@ async function checkHttpGet(scope, name, url, mode = 'model') {
         add(scope, name, status, `HTTP ${response.status}，${Date.now() - startedAt}ms`, { url: urlPreview(url) });
     } catch (err) {
         add(scope, name, 'fail', err.message, { url: urlPreview(url) });
+    }
+}
+
+// GET /models 是零生成开销的 OpenAI-compatible 目录探针；仅在未配置专用 monitor_url 时使用。
+async function checkModelCatalogLive(model) {
+    const targetUrl = resolveModelCatalogUrl(model.url);
+    if (!targetUrl) {
+        add('模型', `${model.name} live`, 'fail', '模型 URL 无法解析为只读 /models 探针。');
+        return;
+    }
+    const startedAt = Date.now();
+    try {
+        await assertSafeOutboundUrl(targetUrl, adminGuardUser);
+        const agents = createSafeHttpAgentsForUser(adminGuardUser, {
+            allowPrivateEnv: 'ALLOW_PRIVATE_MODEL_URLS',
+            allowExplicitLoopbackForAdmin: true
+        });
+        const response = await axios.get(targetUrl, {
+            headers: model.api_key ? { Authorization: `Bearer ${decryptQuiet(model.api_key)}` } : undefined,
+            timeout: timeoutMs,
+            proxy: false,
+            ...agents,
+            validateStatus: () => true
+        });
+        if (response.status < 200 || response.status >= 300) {
+            const detail = summarizeSafeResponseError(response.data);
+            add('模型', `${model.name} catalog`, 'fail', `HTTP ${response.status}${detail ? `：${detail}` : ''}，${Date.now() - startedAt}ms`, { url: urlPreview(targetUrl) });
+            return;
+        }
+        add('模型', `${model.name} catalog`, 'ok', `只读模型目录可达，${Date.now() - startedAt}ms`, { url: urlPreview(targetUrl) });
+    } catch (err) {
+        add('模型', `${model.name} catalog`, 'fail', err.message, { url: urlPreview(targetUrl) });
     }
 }
 
@@ -173,7 +281,8 @@ async function checkEmbeddingLive(config) {
             }
         );
         if (response.status < 200 || response.status >= 300) {
-            add('Embedding', '向量服务 live', 'fail', `HTTP ${response.status}，${Date.now() - startedAt}ms`, { url: urlPreview(targetUrl) });
+            const detail = summarizeSafeResponseError(response.data);
+            add('Embedding', '向量服务 live', 'fail', `HTTP ${response.status}${detail ? `：${detail}` : ''}，${Date.now() - startedAt}ms`, { url: urlPreview(targetUrl) });
             return;
         }
         const vector = extractEmbeddingVector(response.data);
@@ -218,7 +327,7 @@ async function checkDatabaseLive(rows) {
         };
         try {
             const connection = tester.validateDatabaseConnectionPayload(payload, adminGuardUser);
-            await tester.testDatabaseConnection(connection);
+            await tester.testDatabaseConnection(connection, { allowLoopbackForAdminProbe: true });
             add('数据库 MCP', row.server_name, 'ok', `${row.database_type} 只读连通测试成功`);
         } catch (err) {
             const failure = tester.normalizeDatabaseConnectionError
@@ -230,14 +339,14 @@ async function checkDatabaseLive(rows) {
 }
 
 async function main() {
-    const configDb = openReadOnlyDb();
-    const settings = tableExists(configDb, 'app_settings')
-        ? new Map(safeAll(configDb, 'SELECT key, value FROM app_settings').map(row => [row.key, row.value]))
+    const configDb = await openReadOnlyConfigStore();
+    const settings = await tableExists(configDb, 'app_settings')
+        ? new Map((await safeAll(configDb, 'SELECT key, value FROM app_settings')).map(row => [row.key, row.value]))
         : new Map();
 
-    const models = tableExists(configDb, 'models')
-        ? safeAll(configDb, `
-            SELECT id, name, url, model_name, monitor_url, status
+    const models = await tableExists(configDb, 'models')
+        ? await safeAll(configDb, `
+            SELECT id, name, url, api_key, model_name, monitor_url, status
             FROM models
             WHERE COALESCE(status, 'active') = 'active'
             ORDER BY id ASC
@@ -255,8 +364,8 @@ async function main() {
         : (process.env.EMBEDDING_API_KEY || '');
     add('Embedding', 'HTTP 配置', embeddingUrl ? 'ok' : 'warn', embeddingUrl ? `${embeddingModel} @ ${urlPreview(embeddingUrl)}` : '未配置 EMBEDDING_API_URL 或系统向量地址。');
 
-    const mcpServers = tableExists(configDb, 'mcp_servers')
-        ? safeAll(configDb, `
+    const mcpServers = await tableExists(configDb, 'mcp_servers')
+        ? await safeAll(configDb, `
             SELECT id, name, base_url, api_key, config, status, last_error, last_checked_at
             FROM mcp_servers
             WHERE COALESCE(status, 'active') != 'deleted'
@@ -274,8 +383,8 @@ async function main() {
         add('MCP', server.name, status, detail, { url: urlPreview(server.base_url) });
     });
 
-    const databaseRows = tableExists(configDb, 'mcp_database_connections')
-        ? safeAll(configDb, `
+    const databaseRows = await tableExists(configDb, 'mcp_database_connections')
+        ? await safeAll(configDb, `
             SELECT c.*, s.name AS server_name, s.status AS server_status
             FROM mcp_database_connections c
             JOIN mcp_servers s ON s.id = c.mcp_server_id
@@ -289,8 +398,8 @@ async function main() {
         add('数据库 MCP', row.server_name, row.database_name ? 'ok' : 'warn', `${row.database_type} @ ${row.host || 'sqlite'} / ${row.database_name || '未填数据库名'}`);
     });
 
-    const builtinRows = tableExists(configDb, 'mcp_builtin_configs')
-        ? safeAll(configDb, `
+    const builtinRows = await tableExists(configDb, 'mcp_builtin_configs')
+        ? await safeAll(configDb, `
             SELECT c.*, s.name AS server_name, s.status AS server_status
             FROM mcp_builtin_configs c
             JOIN mcp_servers s ON s.id = c.mcp_server_id
@@ -308,12 +417,12 @@ async function main() {
     const alertWebhook = settings.get('observability_webhook_url') || process.env.PIVOT_ALERT_WEBHOOK_URL || '';
     add('告警 Webhook', 'observability', alertWebhook ? 'ok' : 'warn', alertWebhook ? `已配置 ${urlPreview(alertWebhook)}` : '未配置慢查询/异常告警 Webhook。');
 
-    if (configDb) configDb.close();
+    if (configDb) await configDb.close();
 
     if (live) {
         for (const model of models) {
             if (model.monitor_url) await checkHttpGet('模型', `${model.name} monitor`, model.monitor_url, 'model');
-            else add('模型', `${model.name} live`, 'skipped', '未配置 monitor_url；本脚本不直接发起模型补全，避免消耗真实额度。');
+            else await checkModelCatalogLive(model);
         }
         if (embeddingUrl) await checkEmbeddingLive({ url: embeddingUrl, model: embeddingModel, apiKey: embeddingApiKey });
         for (const server of mcpServers.filter(item => getBuiltinType(item.base_url) === 'external')) {
@@ -331,7 +440,7 @@ async function main() {
         return acc;
     }, {});
     console.log(`Pivot 外部链路体检 ${live ? '(live)' : '(config-only)'}`);
-    console.log(`配置库: ${dbPath}`);
+    console.log(`配置库: ${configDb?.kind || '未连接'} ${configDb?.location || dbPath}`);
     checks.forEach(item => {
         const prefix = item.status.toUpperCase().padEnd(7);
         const url = item.url ? ` [${item.url}]` : '';
@@ -339,7 +448,7 @@ async function main() {
     });
     console.log(`汇总: ok=${counts.ok || 0}, warn=${counts.warn || 0}, fail=${counts.fail || 0}, skipped=${counts.skipped || 0}`);
     if (!live) {
-        console.log('提示: 使用 npm run check:external -- --live 请求已配置的健康检查、Embedding 和数据库只读连通测试。');
+        console.log('提示: 使用 npm run check:external:live 请求已配置的健康检查、Embedding 和数据库只读连通测试。');
     } else {
         console.log('提示: 模型补全、IM 发送和告警投递仍需按生产目标手动验收，避免误耗额度或误发消息。');
     }

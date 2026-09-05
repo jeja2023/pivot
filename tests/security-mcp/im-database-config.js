@@ -10,6 +10,7 @@ const {
     test,
     validateDatabaseConnectionPayload
 } = require('../security-helpers');
+const { assertSafeDatabaseHost } = require('../../server/services/database-mcp/connection-policy');
 
 test('内置即时消息 MCP 校验目标白名单并发送局域网 webhook 载荷', async () => {
     const suffix = Date.now().toString(36);
@@ -130,6 +131,23 @@ test('数据库 MCP 默认限制私有局域网主机，并支持显式关闭限
         if (previous === undefined) delete process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN;
         else process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN = previous;
     }
+});
+
+test('数据库 MCP 仅允许管理员在受控只读诊断中探测显式 loopback 地址', async () => {
+    const admin = { id: 1002, username: 'admin', role: 'admin' };
+    const user = { id: 1001, username: 'operator', role: 'user' };
+
+    await assert.rejects(
+        assertSafeDatabaseHost('127.0.0.1', admin),
+        err => err?.code === 'MCP_PRIVATE_HOST_RESTRICTED'
+    );
+    await assert.doesNotReject(
+        assertSafeDatabaseHost('127.0.0.1', admin, { allowExplicitLoopbackForAdmin: true })
+    );
+    await assert.rejects(
+        assertSafeDatabaseHost('127.0.0.1', user, { allowExplicitLoopbackForAdmin: true }),
+        err => err?.code === 'MCP_PRIVATE_HOST_RESTRICTED'
+    );
 });
 
 test('数据库 MCP 测试配置会展开驱动所需选项', () => {

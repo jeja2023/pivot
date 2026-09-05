@@ -39,7 +39,7 @@ async function ocrImageFile(filePath, options = {}) {
 
 async function ocrPdfFile(filePath, options = {}) {
     const safe = normalizeOcrOptions(options);
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-pdf-ocr-'));
+    const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'pivot-pdf-ocr-'));
     const imagePaths = [];
     try {
         const pages = await renderPdfPages(filePath, {
@@ -51,17 +51,15 @@ async function ocrPdfFile(filePath, options = {}) {
         for (const page of pages) {
             const pageNo = Number(page.page || texts.length + 1);
             const imagePath = path.join(tmpDir, `page-${String(pageNo).padStart(4, '0')}.png`);
-            fs.writeFileSync(imagePath, page.data);
+            await fs.promises.writeFile(imagePath, page.data);
             imagePaths.push(imagePath);
             const text = await ocrImageFile(imagePath, safe);
             if (text) texts.push(text);
         }
         return texts.join('\n\n').trim();
     } finally {
-        for (const imagePath of imagePaths) {
-            try { fs.rmSync(imagePath, { force: true }); } catch (_err) { /* ignore */ }
-        }
-        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_err) { /* ignore */ }
+        await Promise.all(imagePaths.map(imagePath => fs.promises.rm(imagePath, { force: true }).catch(() => {})));
+        await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
 }
 

@@ -1,6 +1,6 @@
 
 (function () {
-    const app = window.PivotDataAnalysis;
+    const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
     const { API, state, html, esc, fmtNumber, activeDataset } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
@@ -492,7 +492,7 @@
                     idField: document.getElementById('data-analysis-semantic-id-field')?.value || '',
                     instruction,
                     batchTokens: document.getElementById('data-analysis-semantic-batch-tokens')?.value || 24000,
-                    model: window.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
+                    model: window.Pivot.legacy.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
                         || document.getElementById('data-analysis-ai-model')?.value
                         || ''
                 })
@@ -773,7 +773,7 @@
             ${evidenceHtml}
             ${stepsHtml}
         `);
-        if (charts.length) window.renderPivotCharts?.(box);
+        if (charts.length) window.Pivot.legacy.renderPivotCharts?.(box);
     }
 
     async function runAi() {
@@ -790,7 +790,7 @@
         if (state.aiBusy) return;
         const result = document.getElementById('data-analysis-ai-result');
         const workspaceEpoch = Number(state.aiWorkspaceEpoch || 0);
-        const model = window.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
+        const model = window.Pivot.legacy.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
             || document.getElementById('data-analysis-ai-model')?.value
             || '';
         const deep = document.getElementById('data-analysis-ai-deep')?.checked;

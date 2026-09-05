@@ -1,4 +1,6 @@
 /* 前端 HTML 安全辅助函数 */
+let PivotSafeHtml;
+
 (function () {
     const escapeHtml = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -57,7 +59,7 @@
         prependHtml
     };
 
-    window.PivotSafeHtml = api;
-    window.Pivot = window.Pivot || {};
+    PivotSafeHtml = api;
+    window.Pivot.legacy.PivotSafeHtml = api;
     window.Pivot.html = api;
 })();

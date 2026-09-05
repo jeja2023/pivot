@@ -143,7 +143,7 @@ function dagNodeVisual(toolName) {
 
 // 运行状态徽章：从外部通过 dagNodeRunStates 注入当前运行状态（画布实例外部写入）。
 // key = node.id，value = { status, durationMs?, error? }
-if (!window.dagNodeRunStates) window.dagNodeRunStates = new Map();
+if (!window.Pivot.legacy.dagNodeRunStates) window.Pivot.legacy.dagNodeRunStates = new Map();
 
 const DAG_CULL_THRESHOLD = 48;
 
@@ -248,7 +248,7 @@ const renderEdges = () => {
                 if (!dagNodeIntersectsViewport(node, viewport)) return;
                 const llmNode = isLlmNode(node);
                 const visual = dagNodeVisual(node.tool);
-                const runState = window.dagNodeRunStates.get(node.id);
+                const runState = window.Pivot.legacy.dagNodeRunStates.get(node.id);
                 const runStatus = runState?.status || '';
                 const hasVisualIcon = Boolean(visual.svgIcon || visual.iconText);
 

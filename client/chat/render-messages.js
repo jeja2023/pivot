@@ -6,8 +6,8 @@
 function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) {
     if (!content) return '';
     // 使用全局变量传递状态给 marked 渲染器
-    window._tempThoughtCounter = 0;
-    window._tempThoughtStates = thoughtOpenStates;
+    window.Pivot.legacy._tempThoughtCounter = 0;
+    window.Pivot.legacy._tempThoughtStates = thoughtOpenStates;
     return renderMarkdown(content, { deferPivotCharts: Boolean(_isStreaming) });
 }
 
@@ -36,8 +36,8 @@ function renderMessageAttachmentTiles(attachments = []) {
         const safeName = escapeCodeHtml(file.name);
         const safeAttrName = escapeAttrValue(file.name);
         const safeUrl = escapeAttrValue(file.url);
-        const isImage = typeof window.isChatImageAttachment === 'function'
-            ? window.isChatImageAttachment(file)
+        const isImage = typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+            ? window.Pivot.legacy.isChatImageAttachment(file)
             : String(file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)(?:[?#].*)?$/i.test(file.url);
         if (isImage) {
             return `
@@ -80,7 +80,7 @@ function buildUserMessageHtml(content, stats = null) {
 
 function attachMessageImageLoadPinning(root) {
     root?.querySelectorAll?.('img.message-image').forEach(img => {
-        img.addEventListener('load', () => window.scrollMessagesToBottom?.(), { once: true });
+        img.addEventListener('load', () => window.Pivot.legacy.scrollMessagesToBottom?.(), { once: true });
     });
 }
 
@@ -114,8 +114,8 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
     const displayContent = getDisplayContent(role, content);
     const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : buildUserMessageHtml(displayContent, stats);
     const createdAt = stats?.createdAt || stats?.created_at || stats?.created_at_text;
-    const messageTime = formatChatDateTime(createdAt);
-    const messageTimeTitle = formatChatDateTime(createdAt);
+    const messageTime = window.Pivot.legacy.formatChatDateTime(createdAt);
+    const messageTimeTitle = window.Pivot.legacy.formatChatDateTime(createdAt);
     const messageTimeHtml = messageTime ? `<span class="message-meta" title="${escapeAttrValue(messageTimeTitle)}">${escapeCodeHtml(messageTime)}</span>` : '';
     const statsHtml = role === 'assistant' ? buildAssistantStatsHtml(stats || {}) : '';
     const footerClass = [
@@ -147,8 +147,8 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
     if (!mountOptions?.disableImagePinning) attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
     if (!deferRender) {
-        if (role === 'assistant') renderPivotCharts(div);
-        window.scrollMessagesToBottom?.();
+        if (role === 'assistant') window.Pivot.legacy.renderPivotCharts(div);
+        window.Pivot.legacy.scrollMessagesToBottom?.();
     }
     return div.querySelector('.message-content');
 }
@@ -226,7 +226,7 @@ function setMessageActionId(messageContent, id) {
     }
 }
 
-window.setMessageActionId = setMessageActionId;
+window.Pivot.legacy.setMessageActionId = setMessageActionId;
 
 /* Legacy attachment renderer kept as a compatibility reference. The modern renderer below is canonical.
 function renderAttachmentPreviews() {
@@ -282,7 +282,7 @@ function renderAttachmentPreviews() {
 function renderAttachmentPreviews() {
     const previewArea = document.getElementById('attachment-preview');
     if (!previewArea) return;
-    if (pendingAttachments.length === 0) {
+    if (window.Pivot.legacy.pendingAttachments.length === 0) {
         previewArea.classList.add('hidden');
         PivotSafeHtml.setHtml(previewArea, '');
         previewArea.title = '';
@@ -290,17 +290,17 @@ function renderAttachmentPreviews() {
         return;
     }
 
-    const maxAttachments = typeof window.getMaxPendingAttachments === 'function'
-        ? window.getMaxPendingAttachments()
-        : (window.MAX_PENDING_ATTACHMENTS || 5);
-    if (pendingAttachments.length > maxAttachments) pendingAttachments.splice(maxAttachments);
-    if (typeof window.syncPendingAttachmentsGlobal === 'function') window.syncPendingAttachmentsGlobal();
+    const maxAttachments = typeof window.Pivot.legacy.getMaxPendingAttachments === 'function'
+        ? window.Pivot.legacy.getMaxPendingAttachments()
+        : (window.Pivot.legacy.MAX_PENDING_ATTACHMENTS || 5);
+    if (window.Pivot.legacy.pendingAttachments.length > maxAttachments) window.Pivot.legacy.pendingAttachments.splice(maxAttachments);
+    if (typeof window.Pivot.legacy.syncPendingAttachmentsGlobal === 'function') window.Pivot.legacy.syncPendingAttachmentsGlobal();
     previewArea.classList.remove('hidden');
-    const imageCount = pendingAttachments.filter(file => typeof window.isChatImageAttachment === 'function'
-        ? window.isChatImageAttachment(file)
+    const imageCount = window.Pivot.legacy.pendingAttachments.filter(file => typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+        ? window.Pivot.legacy.isChatImageAttachment(file)
         : String(file.type || '').startsWith('image/')).length;
-    const fileCount = Math.max(0, pendingAttachments.length - imageCount);
-    previewArea.title = [`附件 ${pendingAttachments.length}`, `图片 ${imageCount}`, `文件 ${fileCount}`].join(' · ');
+    const fileCount = Math.max(0, window.Pivot.legacy.pendingAttachments.length - imageCount);
+    previewArea.title = [`附件 ${window.Pivot.legacy.pendingAttachments.length}`, `图片 ${imageCount}`, `文件 ${fileCount}`].join(' · ');
     previewArea.setAttribute('aria-label', previewArea.title);
 
     const removeButton = index => `
@@ -342,9 +342,9 @@ function renderAttachmentPreviews() {
         return `<div class="preview-card file-card preview-card-local">${icon}<div class="file-main"><div class="file-name">${escapeCodeHtml(name)}</div>${isLocal ? '<span class="preview-state-badge">待上传</span>' : ''}</div>${removeButton(index)}</div>`;
     };
 
-    PivotSafeHtml.setHtml(previewArea, pendingAttachments.map((file, index) => {
-        const isImage = typeof window.isChatImageAttachment === 'function'
-            ? window.isChatImageAttachment(file)
+    PivotSafeHtml.setHtml(previewArea, window.Pivot.legacy.pendingAttachments.map((file, index) => {
+        const isImage = typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+            ? window.Pivot.legacy.isChatImageAttachment(file)
             : String(file.type || '').startsWith('image/');
         const isLocal = file?.kind === 'local' || file?.status === 'local';
         const previewUrl = isLocal ? String(file.previewUrl || '') : String(file.url || '');
@@ -387,17 +387,17 @@ document.addEventListener('click', (event) => {
     if (messageButton) {
         const action = messageButton.dataset.messageAction;
         const messageId = Number.parseInt(messageButton.dataset.messageId || '', 10);
-        if (action === 'copy') window.copyMsg(messageButton);
-        if (action === 'fork' && Number.isSafeInteger(messageId)) window.forkSessionFromMessage?.(messageId);
-        if (action === 'regenerate' && Number.isSafeInteger(messageId)) window.regenerateMsg(messageId);
-        if (action === 'delete' && Number.isSafeInteger(messageId)) window.deleteMsg(messageId, messageButton);
+        if (action === 'copy') window.Pivot.legacy.copyMsg(messageButton);
+        if (action === 'fork' && Number.isSafeInteger(messageId)) window.Pivot.legacy.forkSessionFromMessage?.(messageId);
+        if (action === 'regenerate' && Number.isSafeInteger(messageId)) window.Pivot.legacy.regenerateMsg(messageId);
+        if (action === 'delete' && Number.isSafeInteger(messageId)) window.Pivot.legacy.deleteMsg(messageId, messageButton);
         return;
     }
 
     const removeButton = event.target.closest('[data-remove-attachment]');
     if (removeButton) {
         const index = Number.parseInt(removeButton.dataset.removeAttachment || '', 10);
-        if (Number.isSafeInteger(index)) window.removeAttachment(index);
+        if (Number.isSafeInteger(index)) window.Pivot.legacy.removeAttachment(index);
     }
 });
 
@@ -482,7 +482,7 @@ document.addEventListener('click', async (e) => {
             if (!success) throw new Error('执行命令复制失败');
         }
 
-        if (window.showToast) showToast('代码已复制到剪贴板');
+        if (window.Pivot.legacy.showToast) showToast('代码已复制到剪贴板');
 
         // 按钮文字反馈
         const span = btn.querySelector('span');
@@ -497,7 +497,7 @@ document.addEventListener('click', async (e) => {
         }
     } catch (err) {
         console.error('复制失败:', err);
-        if (window.showToast) showToast('复制失败，请手动选择复制', 'error');
+        if (window.Pivot.legacy.showToast) showToast('复制失败，请手动选择复制', 'error');
     }
 });
 

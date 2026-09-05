@@ -160,7 +160,7 @@ function createDagInteractionController(ctx) {
             if (targetId && targetId !== connecting.fromId) {
                 const targetNode = ctx.spec.nodes.find(item => item.id === targetId);
                 if (targetNode && !targetNode.dependsOn.includes(connecting.fromId)) {
-                    if (ctx.wouldCreateCycle(connecting.fromId, targetId)) window.showToast?.('不能添加循环依赖', 'error');
+                    if (ctx.wouldCreateCycle(connecting.fromId, targetId)) window.Pivot.legacy.showToast?.('不能添加循环依赖', 'error');
                     else {
                         ctx.recordHistory();
                         targetNode.dependsOn.push(connecting.fromId);

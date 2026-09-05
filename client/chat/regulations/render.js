@@ -1,5 +1,5 @@
 (function () {
-    const ns = window.PivotRegulationsInternal;
+    const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.renderReadyPromise || (ns.renderBaseReady && ns.renderShellReady && ns.renderDocumentsReady && ns.renderResultsReady)) return;
     function loadScriptOnce(src) {

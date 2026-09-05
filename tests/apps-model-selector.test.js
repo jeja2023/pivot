@@ -29,21 +29,25 @@ function createSelectorHarness(models, defaultModelId) {
         createElement() { return { value: '', textContent: '', title: '' }; }
     };
     const window = {
-        currentUser: { id: 'user-1' },
         document,
         localStorage: {
             getItem(key) { return values.get(key) || null; },
             setItem(key, value) { values.set(key, String(value)); }
         },
-        loadSelectableModels: async () => ({ models, defaultModelId }),
-        describeSelectorModel: model => `${model.name} | ${model.model_name}`,
-        Pivot: { exposeModule() {} }
+        Pivot: {
+            legacy: {
+                currentUser: { id: 'user-1' },
+                loadSelectableModels: async () => ({ models, defaultModelId }),
+                describeSelectorModel: model => `${model.name} | ${model.model_name}`
+            },
+            exposeModule() {}
+        }
     };
     const context = { window, document, console, String, Set };
     vm.runInNewContext(read('client/chat/apps-model-selector.js'), context, {
         filename: 'client/chat/apps-model-selector.js'
     });
-    return { select, values, api: window.PivotAppModels };
+    return { select, values, api: window.Pivot.legacy.PivotAppModels };
 }
 
 test('应用内模型选择器使用默认模型初始化，并按应用和用户隔离保存', async () => {

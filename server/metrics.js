@@ -371,7 +371,7 @@ async function renderPrometheusMetrics() {
     lines.push('# TYPE pivot_gpu_overloaded gauge');
     lines.push(line('pivot_gpu_overloaded', {}, gpu.overloaded ? 1 : 0));
 
-    const health = getSystemHealthSnapshot();
+    const health = await getSystemHealthSnapshot();
     lines.push('# HELP pivot_system_health_status System health status by component (1 ok, 0 degraded/error).');
     lines.push('# TYPE pivot_system_health_status gauge');
     health.checks.forEach(item => {

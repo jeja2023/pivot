@@ -19,7 +19,7 @@ function applyAgentTemplate(template) {
     const steps = document.getElementById('agent-max-steps');
     const templateMaxSteps = Number(template.max_steps || 0);
     if (steps) steps.value = templateMaxSteps > 0 ? String(templateMaxSteps) : '';
-    window.syncAgentRunModeStepLimit?.();
+    window.Pivot.legacy.syncAgentRunModeStepLimit?.();
     const budget = document.getElementById('agent-token-budget');
     if (budget) budget.value = template.max_token_budget || '';
     const retry = document.getElementById('agent-retry-limit');
@@ -95,7 +95,7 @@ async function saveCurrentAgentTemplate() {
     if (payload._invalid) return;
     try {
         const suggestedName = payload.goal.slice(0, 24);
-        const promptFn = window['showInputPrompt'];
+        const promptFn = window.Pivot.legacy.showInputPrompt;
         const value = typeof promptFn === 'function'
             ? await promptFn({
                 title: '保存为模板',
@@ -128,7 +128,7 @@ async function saveCurrentAgentTemplate() {
 }
 
 function deleteAgentTemplate(templateId) {
-    showConfirm('删除自主任务模板', '确定删除这个自主任务模板吗？已创建的任务记录不会受影响。', async () => {
+    window.Pivot.legacy.showConfirm('删除自主任务模板', '确定删除这个自主任务模板吗？已创建的任务记录不会受影响。', async () => {
         const res = await apiFetch(`${API_BASE}/agents/templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除模板失败', 'error');

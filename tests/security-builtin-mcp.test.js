@@ -18,6 +18,8 @@ const {
 const { executeFormatConversionTool } = require('../server/services/builtin-mcp-format');
 const { executeDataProcessingTool } = require('../server/services/builtin-mcp-data');
 const { executeReportConfigTool } = require('../server/services/builtin-mcp-reports');
+const { executeDocumentTool } = require('../server/services/builtin-mcp-documents');
+const { buildImPayload, sendIm, validateImTarget } = require('../server/services/builtin-mcp-im');
 
 const SAMPLE_ROWS = [
     { 部门: '财务部', 金额: '120', 备注: ' 已核销 ' },
@@ -297,6 +299,86 @@ test('报表目录工具读取不带 BOM 的 UTF-8 CSV 不会出现中文乱码'
         assert.deepEqual(queried.columns, ['部门', '金额']);
     } finally {
         sandbox.cleanup();
+    }
+});
+
+test('可视化与报告编排工具生成受限、可渲染的结构化输出', async () => {
+    const chart = await executeBuiltinMcpTool({ base_url: 'pivot-visualization://local' }, 'viz.build_chart', {
+        rows: SAMPLE_ROWS,
+        chartType: 'bar',
+        xAxis: '部门',
+        yAxis: '金额',
+        aggregation: 'sum'
+    });
+    assert.equal(chart.type, 'pivot_chart');
+    assert.deepEqual(chart.labels, ['财务部', '技术部']);
+    assert.deepEqual(chart.series[0].data, [200, 200]);
+    assert.equal(chart.echartsOption.series[0].type, 'bar');
+
+    const table = await executeBuiltinMcpTool({ base_url: 'pivot-visualization://local' }, 'viz.build_table', {
+        rows: SAMPLE_ROWS,
+        columns: ['部门', '金额']
+    });
+    assert.match(table.markdown, /\| 部门 \| 金额 \|/);
+
+    const report = await executeBuiltinMcpTool({ base_url: 'pivot-report://local' }, 'report.compose', {
+        title: '月度汇总',
+        sections: [{ title: '图表', type: 'chart', chart }, { title: '表格', type: 'table', table }]
+    });
+    assert.equal(report.type, 'pivot_report');
+    assert.match(report.markdown, /pivot-echart/);
+});
+
+test('文档工具提取大纲、键值与段落分块并拒绝空输入', async () => {
+    const text = '# 总则\n\n1.1. 范围\n负责人：张三\n\n第一段内容。\n\n' + '第二段内容。'.repeat(60);
+    const outline = await executeBuiltinMcpTool({ base_url: 'pivot-documents://local' }, 'doc.extract_outline', { text });
+    assert.equal(outline.type, 'document_outline');
+    assert.equal(outline.headings.length, 2);
+    const keyValues = executeDocumentTool(null, 'doc.extract_key_values', { text });
+    assert.deepEqual(keyValues.items[0], { key: '负责人', value: '张三', line: 4 });
+    const chunks = executeDocumentTool(null, 'doc.chunk_text', { text, maxChars: 200 });
+    assert.ok(chunks.chunkCount >= 2);
+    assert.throws(() => executeDocumentTool(null, 'doc.chunk_text', { text: '' }), error => error.status === 400);
+});
+
+test('内网 IM 执行严格受目标白名单约束，并向受控端点投递模板化载荷', async () => {
+    const nodeHttp = require('node:http');
+    let received = null;
+    const server = nodeHttp.createServer((req, res) => {
+        const chunks = [];
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', () => {
+            received = { headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+            res.writeHead(202, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ accepted: true }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const config = {
+        endpointUrl: `http://127.0.0.1:${port}/webhook`,
+        method: 'POST',
+        authHeader: 'X-Pivot-Token',
+        allowedTargets: ['group:ops'],
+        defaultTarget: '',
+        allowAtAll: false,
+        maxMessageLength: 1000,
+        payloadTemplate: '{"to":"{{payload.target}}","text":"{{payload.message}}","from":"{{user.username}}"}'
+    };
+    const previousAllowPrivate = process.env.ALLOW_PRIVATE_MCP_URLS;
+    process.env.ALLOW_PRIVATE_MCP_URLS = 'true';
+    try {
+        assert.equal(validateImTarget(config, 'ops', 'group'), 'ops');
+        assert.throws(() => validateImTarget(config, 'finance', 'group'), error => error.status === 403);
+        const payload = buildImPayload(config, { target: 'ops', message: '部署完成' }, { username: 'admin' });
+        const result = await sendIm(config, 'secret-token', payload, { id: 1, username: 'admin', role: 'admin' });
+        assert.equal(result.status, 202);
+        assert.equal(received.headers['x-pivot-token'], 'secret-token');
+        assert.deepEqual(received.body, { to: 'ops', text: '部署完成', from: 'admin' });
+    } finally {
+        if (previousAllowPrivate === undefined) delete process.env.ALLOW_PRIVATE_MCP_URLS;
+        else process.env.ALLOW_PRIVATE_MCP_URLS = previousAllowPrivate;
+        await new Promise(resolve => server.close(resolve));
     }
 });
 

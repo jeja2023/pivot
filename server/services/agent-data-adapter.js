@@ -52,7 +52,7 @@ async function queryDataSource(filePath, options = {}) {
         return { source: detected, materializedPath: queryPath, rows: await duckReadAll(sql), limit, offset };
     } finally {
         if (materialized.cleanup) {
-            try { fs.rmSync(queryPath, { force: true }); } catch (_) {}
+            try { await fs.promises.rm(queryPath, { force: true }); } catch (_) {}
         }
     }
 }
@@ -64,21 +64,21 @@ async function materializeDataSource(filePath, options = {}) {
     const root = options.jail
         ? options.jail.resolve('tmp/data')
         : path.resolve(options.workspaceRoot || options.workspace || path.join(os.tmpdir(), 'pivot-agent-data'));
-    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    await fs.promises.mkdir(root, { recursive: true, mode: 0o700 });
     const target = path.join(root, `${Date.now()}-${Math.random().toString(16).slice(2)}.parquet`);
     if (detected.kind === 'csv') await importCsvToParquet(sourcePath, target);
     else if (detected.kind === 'xlsx' || detected.kind === 'xls') {
-        const parsed = readSpreadsheet(sourcePath, sourcePath);
+        const parsed = await readSpreadsheet(sourcePath, sourcePath);
         await createParquetFromRows(parsed.columns, parsed.rows, target);
     } else if (detected.kind === 'sqlite') await importSqliteToParquet(sourcePath, target);
     else if (detected.kind === 'json') {
-        const stat = fs.statSync(sourcePath);
+        const stat = await fs.promises.stat(sourcePath);
         if (stat.size > MAX_JSON_SOURCE_BYTES) {
             const error = new Error(`JSON 数据源超过 ${Math.round(MAX_JSON_SOURCE_BYTES / 1024 / 1024)}MB 限制。`);
             error.code = 'AGENT_DATA_JSON_TOO_LARGE';
             throw error;
         }
-        const parsed = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
+        const parsed = JSON.parse(await fs.promises.readFile(sourcePath, 'utf8'));
         const rows = (Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.rows) ? parsed.rows : [])).slice(0, MAX_UPLOAD_ROWS);
         const normalized = normalizeTabularRows(rows);
         const keys = [...new Set(normalized.flatMap(row => Object.keys(row)))].slice(0, MAX_UPLOAD_COLUMNS);

@@ -13,15 +13,15 @@ const { buildManagedPath, outputsRoot, resolveStoredDocumentPath } = require('..
 
 const MAX_PDF_BUFFER_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_MAX_BUFFER_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
 
-function readBoundedBinary(filePath) {
-    const size = fs.statSync(filePath).size;
+async function readBoundedBinary(filePath) {
+    const size = (await fs.promises.stat(filePath)).size;
     if (size > MAX_PDF_BUFFER_BYTES) {
         const error = new Error(`PDF/图片大小超过解析缓冲区上限 ${Math.round(MAX_PDF_BUFFER_BYTES / 1024 / 1024)}MB。`);
         error.status = 413;
         error.code = 'DOCUMENT_BUFFER_LIMIT_EXCEEDED';
         throw error;
     }
-    return fs.readFileSync(filePath);
+    return await fs.promises.readFile(filePath);
 }
 
 const PDF_TOOL_OPERATIONS = Object.freeze({
@@ -61,9 +61,9 @@ function sanitizeOutputName(value, fallback = 'pdf-output') {
         .slice(0, 120) || fallback;
 }
 
-function getStoredPathForFile(file) {
+async function getStoredPathForFile(file) {
     const target = resolveStoredDocumentPath(file?.file_path);
-    if (!target || !fs.existsSync(target)) {
+    if (!target || !await fs.promises.access(target, fs.constants.R_OK).then(() => true).catch(() => false)) {
         const error = new Error('原始文件不存在，请重新上传后再处理。');
         error.status = 404;
         throw error;
@@ -71,22 +71,22 @@ function getStoredPathForFile(file) {
     return target;
 }
 
-function requirePdfFile(file) {
+async function requirePdfFile(file) {
     if (!file || !isPdfExtension(file.file_ext)) {
         const error = new Error('该操作仅支持 PDF 文件。');
         error.status = 400;
         throw error;
     }
-    return getStoredPathForFile(file);
+    return await getStoredPathForFile(file);
 }
 
-function requireImageFile(file) {
+async function requireImageFile(file) {
     if (!file || !isImageExtension(file.file_ext)) {
         const error = new Error('图片转 PDF 仅支持图片文件。');
         error.status = 400;
         throw error;
     }
-    return getStoredPathForFile(file);
+    return await getStoredPathForFile(file);
 }
 
 function parsePageSelection(value, pageCount, { defaultAll = true } = {}) {
@@ -124,8 +124,8 @@ function clampToolPageCount(count, limit = 100) {
 }
 
 async function loadPdf(file, config = {}) {
-    const filePath = requirePdfFile(file);
-    const bytes = readBoundedBinary(filePath);
+    const filePath = await requirePdfFile(file);
+    const bytes = await readBoundedBinary(filePath);
     return PDFDocument.load(bytes, {
         ignoreEncryption: false,
         password: config.password || undefined
@@ -134,8 +134,8 @@ async function loadPdf(file, config = {}) {
 
 async function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf' }) {
     const diskName = `${jobId}-${sanitizeOutputName(outputType)}-${crypto.randomUUID()}${extension}`;
-    const targetPath = buildManagedPath(outputsRoot, userId, diskName);
-    fs.writeFileSync(targetPath, Buffer.from(bytes));
+    const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
+    await fs.promises.writeFile(targetPath, Buffer.from(bytes));
     const fileName = `${baseName(sourceName)}-${suffix}${extension}`;
     return serializeOutput(await registerOutput({
         userId,
@@ -289,7 +289,7 @@ async function reorderPdf({ job, file, config, onProgress }) {
 }
 
 async function extractPdfTextOutput({ job, file, config }) {
-    const filePath = requirePdfFile(file);
+    const filePath = await requirePdfFile(file);
     const text = truncateExtractedText(
         await extractDocumentText(filePath, '', file.original_name, { password: config.password }),
         getKnowledgeLimits().extractMaxChars
@@ -307,7 +307,7 @@ async function extractPdfTextOutput({ job, file, config }) {
 }
 
 async function pdfToImages({ job, file, config, onProgress }) {
-    const filePath = requirePdfFile(file);
+    const filePath = await requirePdfFile(file);
     const rendered = await renderPdfPagesToFiles({
         filePath,
         userId: job.user_id,
@@ -336,9 +336,9 @@ async function pdfToImages({ job, file, config, onProgress }) {
 }
 
 async function readImageForPdf(file) {
-    const filePath = requireImageFile(file);
+    const filePath = await requireImageFile(file);
     const ext = String(file.file_ext || '').toLowerCase();
-    const raw = readBoundedBinary(filePath);
+    const raw = await readBoundedBinary(filePath);
     if (ext === '.jpg' || ext === '.jpeg' || ext === '.png') return { bytes: raw, ext };
     const converted = await sharp(raw).png().toBuffer();
     return { bytes: converted, ext: '.png' };
@@ -403,7 +403,7 @@ function parseBlockBbox(block) {
 
 async function embedImage(pdf, imagePath) {
     const ext = path.extname(imagePath).toLowerCase();
-    const raw = fs.readFileSync(imagePath);
+    const raw = await fs.promises.readFile(imagePath);
     if (ext === '.jpg' || ext === '.jpeg') return pdf.embedJpg(raw);
     if (ext === '.png') return pdf.embedPng(raw);
     const png = await sharp(raw).png().toBuffer();
@@ -432,7 +432,7 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
         let width = Number(pageRow.width || 0) || 595;
         let height = Number(pageRow.height || 0) || 842;
         const page = pdf.addPage([width, height]);
-        if (imagePath && fs.existsSync(imagePath)) {
+        if (imagePath && await fs.promises.access(imagePath, fs.constants.R_OK).then(() => true).catch(() => false)) {
             const embedded = await embedImage(pdf, imagePath);
             width = Number(pageRow.width || 0) || embedded.width;
             height = Number(pageRow.height || 0) || embedded.height;

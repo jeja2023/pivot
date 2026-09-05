@@ -1,6 +1,6 @@
 /* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
-    const ns = window.PivotRegulationsInternal;
+    const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsAdvancedReady) return;
     with (ns) {
@@ -231,7 +231,7 @@
                     }
 
                     function renderAnnotations(body, annotations, articleId) {
-                        const currentUserId = (typeof currentUser !== 'undefined' ? currentUser : window.currentUser)?.id;
+                        const currentUserId = (typeof currentUser !== 'undefined' ? currentUser : window.Pivot.legacy.currentUser)?.id;
                         PivotSafeHtml.setHtml(body, `
                             <form class="regulations-annotation-form" data-annotation-article="${esc(articleId)}">
                                 <textarea class="form-input" name="content" rows="3" placeholder="输入内部理解、适用案例或注意事项…" required></textarea>

@@ -1,7 +1,7 @@
 (function () {
 let confirmCallback = null;
 let confirmResolve = null;
-window.showConfirm = (title, message, callback) => {
+window.Pivot.legacy.showConfirm = (title, message, callback) => {
     const container = document.getElementById('confirm-container');
     const titleEl = document.getElementById('confirm-title');
     const messageEl = document.getElementById('confirm-message');
@@ -15,7 +15,7 @@ window.showConfirm = (title, message, callback) => {
         confirmResolve = resolve;
     });
 };
-window.closeConfirmModal = (confirmed = false) => {
+window.Pivot.legacy.closeConfirmModal = (confirmed = false) => {
     document.getElementById('confirm-container')?.classList.add('hidden');
     const resolve = confirmResolve;
     confirmCallback = null;
@@ -25,9 +25,9 @@ window.closeConfirmModal = (confirmed = false) => {
 document.getElementById('confirm-ok-btn')?.addEventListener('click', () => {
     const callback = confirmCallback;
     if (callback) callback();
-    window.closeConfirmModal(true);
+    window.Pivot.legacy.closeConfirmModal(true);
 });
-document.getElementById('modal-confirm-cancel')?.addEventListener('click', () => window.closeConfirmModal(false));
+document.getElementById('modal-confirm-cancel')?.addEventListener('click', () => window.Pivot.legacy.closeConfirmModal(false));
 
 // --- 消息操作 ---
 let inputPromptResolve = null;
@@ -52,7 +52,7 @@ function closeInputPrompt(value = null) {
     if (resolve) resolve(value);
 }
 
-window.showInputPrompt = function(options = {}) {
+window.Pivot.legacy.showInputPrompt = function(options = {}) {
     const container = document.getElementById('input-prompt-container');
     const titleEl = document.getElementById('input-prompt-title');
     const messageEl = document.getElementById('input-prompt-message');
@@ -124,5 +124,5 @@ async function writeTextToClipboard(text) {
     textArea.remove();
     if (!success) throw new Error('执行命令复制失败');
 }
-    window.chatDialogHelpers = { writeTextToClipboard };
+    window.Pivot.legacy.chatDialogHelpers = { writeTextToClipboard };
 })();

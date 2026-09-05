@@ -10,7 +10,7 @@ const { applySqlLimit } = require('../server/services/database-mcp/sql-governanc
 function loadDagCore() {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-core.js'), 'utf8');
     const sandbox = {
-        window: { PivotSafeHtml: null, _cachedAgentModels: [] },
+        window: { Pivot: { legacy: { PivotSafeHtml: null, _cachedAgentModels: [] } } },
         document: { getElementById: () => null },
         currentUser: null,
         Event: class Event {}

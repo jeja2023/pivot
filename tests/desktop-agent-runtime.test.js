@@ -28,6 +28,34 @@ test('desktop runtime executes governed tools and persists checkpoints', async (
         const planStep = runtime.store.listSteps(run.id).find(step => step.phase === 'plan');
         assert.match(planStep.output.contextHash, /^[a-f0-9]{64}$/);
         assert.match(planStep.output.worldStateHash, /^[a-f0-9]{64}$/);
+        assert.equal(planStep.contextSnapshot.schemaVersion, 1);
+        assert.equal(planStep.contextSnapshot.entrypoint, 'desktop');
+        const toolCall = runtime.store.listToolCalls(run.id)[0];
+        assert.equal(toolCall.contextSnapshot.contextHash, planStep.contextSnapshot.contextHash);
+        const snapshots = runtime.store.listWorldStateSnapshots(run.id);
+        assert.equal(snapshots.length, 1);
+        assert.equal(snapshots[0].contextSnapshot.worldStateWindow.snapshotVersion, 1);
+        assert.equal(snapshots[0].contextSnapshot.worldStateWindow.fullRefreshReason, 'initial');
+    } finally {
+        runtime.close();
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('desktop runtime reuses the context window and records a diff-capable second snapshot', async () => {
+    const { root, runtime } = makeRuntime();
+    try {
+        const run = runtime.createRun({ goal: '连续读取两个文件' });
+        const result = await runtime.execute(run.id, [
+            { tool: 'filesystem.read', input: { path: 'first.csv' } },
+            { tool: 'filesystem.read', input: { path: 'second.csv' } }
+        ]);
+        assert.equal(result.status, 'completed');
+        const snapshots = runtime.store.listWorldStateSnapshots(run.id);
+        assert.equal(snapshots.length, 2);
+        assert.equal(snapshots[0].window_id, snapshots[1].window_id);
+        assert.equal(snapshots[1].contextSnapshot.worldStateWindow.snapshotVersion, 2);
+        assert.notEqual(snapshots[1].contextSnapshot.worldStateMode, 'full');
     } finally {
         runtime.close();
         fs.rmSync(root, { recursive: true, force: true });

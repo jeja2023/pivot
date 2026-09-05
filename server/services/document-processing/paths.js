@@ -12,10 +12,9 @@ const pagesRoot = path.join(documentRoot, 'pages');
 const outputsRoot = path.join(documentRoot, 'outputs');
 const tempRoot = path.join(documentRoot, 'tmp');
 
-function ensureDocumentProcessingDirs() {
-    [documentRoot, originalsRoot, pagesRoot, outputsRoot, tempRoot].forEach(dir => {
-        fs.mkdirSync(dir, { recursive: true });
-    });
+async function ensureDocumentProcessingDirs() {
+    await Promise.all([documentRoot, originalsRoot, pagesRoot, outputsRoot, tempRoot]
+        .map(dir => fs.promises.mkdir(dir, { recursive: true })));
 }
 
 function isPathInside(parent, target) {
@@ -62,28 +61,29 @@ function resolveStoredDocumentPath(relativePath) {
     return target;
 }
 
-function buildManagedPath(root, userId, name) {
-    ensureDocumentProcessingDirs();
+async function buildManagedPath(root, userId, name) {
+    await ensureDocumentProcessingDirs();
     const safeUserId = String(Number.parseInt(userId, 10) || 'unknown');
     const safeName = String(name || '').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 180) || `${Date.now()}`;
     const dir = resolveInside(root, safeUserId);
-    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.mkdir(dir, { recursive: true });
     return resolveInside(dir, safeName);
 }
 
-function fileExists(filePath) {
+async function fileExists(filePath) {
     try {
-        return !!filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+        if (!filePath) return false;
+        return (await fs.promises.stat(filePath)).isFile();
     } catch (_err) {
         return false;
     }
 }
 
-function safeUnlinkManaged(relativePath) {
+async function safeUnlinkManaged(relativePath) {
     const target = resolveStoredDocumentPath(relativePath);
-    if (!target || !fileExists(target)) return false;
+    if (!target || !await fileExists(target)) return false;
     try {
-        fs.rmSync(target, { force: true, maxRetries: 4, retryDelay: 80 });
+        await fs.promises.rm(target, { force: true, maxRetries: 4, retryDelay: 80 });
         return true;
     } catch (_err) {
         return false;

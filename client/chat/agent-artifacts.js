@@ -205,7 +205,7 @@ async function loadAgentArtifactModal(artifactId) {
     });
     list.querySelectorAll('[data-artifact-rollback]').forEach(btn => {
         btn.addEventListener('click', () => {
-            showConfirm('回滚结果版本', `确定回滚到版本 ${btn.dataset.artifactRollback} 吗？会生成一个新的当前版本。`, async () => {
+            window.Pivot.legacy.showConfirm('回滚结果版本', `确定回滚到版本 ${btn.dataset.artifactRollback} 吗？会生成一个新的当前版本。`, async () => {
                 const rollbackRes = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/rollback`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

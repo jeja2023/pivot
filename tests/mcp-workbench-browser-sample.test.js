@@ -16,6 +16,7 @@ function loadWorkbenchApi(input) {
         },
         window: {
             Pivot: {
+                legacy: {},
                 exposeModule(_name, exposed) { api = exposed; },
                 moduleApi() { return {}; }
             }

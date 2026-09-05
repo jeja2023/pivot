@@ -68,7 +68,7 @@ function canTestModelConnection(model) {
     return !model.user_id && isAdminUser();
 }
 
-window.loadModels = async function(page = 1) {
+window.Pivot.legacy.loadModels = async function(page = 1) {
     const [modelRes, settingsRes] = await Promise.all([
         apiFetch(`${API_BASE}/models?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() }),
         apiFetch(`${API_BASE}/settings`, { headers: authHeaders() })
@@ -162,7 +162,7 @@ window.loadModels = async function(page = 1) {
     
     data.filter(canTestModelConnection).forEach(m => checkSingleModelStatus(m.id));
     renderPagination('models', total, page);
-    window.scheduleSettingsWorkspaceScale?.();
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
 }
 
 document.getElementById('model-list-body')?.addEventListener('click', async (event) => {
@@ -173,16 +173,16 @@ document.getElementById('model-list-body')?.addEventListener('click', async (eve
     const page = Number.parseInt(button.dataset.page, 10) || pageState.models || 1;
     const model = button.dataset.model ? JSON.parse(decodeURIComponent(button.dataset.model)) : null;
 
-    if (action === 'test' && model) return window.testExistingModel(model);
-    if (action === 'edit' && model) return window.prepareEditModel(model);
-    if (action === 'delete' && modelId) return window.deleteModel(modelId);
+    if (action === 'test' && model) return window.Pivot.legacy.testExistingModel(model);
+    if (action === 'edit' && model) return window.Pivot.legacy.prepareEditModel(model);
+    if (action === 'delete' && modelId) return window.Pivot.legacy.deleteModel(modelId);
     if (action === 'set-global-default') {
-        await window.setGlobalDefaultModel(modelId, button);
-        return window.loadModels(page);
+        await window.Pivot.legacy.setGlobalDefaultModel(modelId, button);
+        return window.Pivot.legacy.loadModels(page);
     }
     if (action === 'set-personal-default') {
-        await window.saveMyDefaultModel(modelId, button);
-        return window.loadModels(page);
+        await window.Pivot.legacy.saveMyDefaultModel(modelId, button);
+        return window.Pivot.legacy.loadModels(page);
     }
 });
 
@@ -218,16 +218,16 @@ async function checkSingleModelStatus(id) {
     }
 }
 
-window.openModelModal = () => {
+window.Pivot.legacy.openModelModal = () => {
     ensureModelCostFields();
-    resetModelForm();
+    window.Pivot.legacy.resetModelForm();
     document.getElementById('model-modal-title').innerText = '添加新模型';
-    window.updateModelScopeControls?.();
+    window.Pivot.legacy.updateModelScopeControls?.();
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
-window.closeModelModal = () => document.getElementById('model-modal-container').classList.add('hidden');
+window.Pivot.legacy.closeModelModal = () => document.getElementById('model-modal-container').classList.add('hidden');
 
-window.prepareEditModel = (model) => {
+window.Pivot.legacy.prepareEditModel = (model) => {
     ensureModelCostFields();
     document.getElementById('m-id').value = model.id;
     const scopeEl = document.getElementById('m-scope');
@@ -277,17 +277,17 @@ window.prepareEditModel = (model) => {
     const currencyEl = document.getElementById('m-price-currency');
     if (currencyEl) currencyEl.value = formatModelPriceCurrency(model.price_currency);
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
-    window.updateModelScopeControls?.(model);
+    window.Pivot.legacy.updateModelScopeControls?.(model);
     document.getElementById('model-modal-container').classList.remove('hidden');
 };
 
-window.testExistingModel = async (model) => {
+window.Pivot.legacy.testExistingModel = async (model) => {
     if (!canTestModelConnection(model)) return showToast('无权测试该模型', 'error');
     if (pendingTests.has(model.id)) return showToast('该模型正在自动检测，请稍后再试', 'info');
     await testConnection(null, null, null, model.id);
 };
 
-window.testModelConfig = async () => {
+window.Pivot.legacy.testModelConfig = async () => {
     const id = document.getElementById('m-id').value;
     const url = document.getElementById('m-url').value;
     const api_key = document.getElementById('m-key').value;
@@ -312,7 +312,7 @@ async function testConnection(url, api_key, model_name, id = null) {
 }
 
 // refreshModelSelector 已在 ui.js 中定义
-window.resetModelForm = () => {
+window.Pivot.legacy.resetModelForm = () => {
     ensureModelCostFields();
     ['m-id', 'm-name', 'm-url', 'm-model', 'm-key', 'm-daily-limit', 'm-units', 'm-temp', 'm-max-input-tokens', 'm-max-tokens', 'm-context-window-tokens', 'm-max-concurrent', 'm-monitor-url', 'm-input-price', 'm-output-price'].forEach(id => {
         const el = document.getElementById(id);
@@ -336,7 +336,7 @@ window.resetModelForm = () => {
     if (keyInput) keyInput.type = 'password';
 };
 
-window.updateModelScopeControls = (model = null) => {
+window.Pivot.legacy.updateModelScopeControls = (model = null) => {
     const isSuperAdmin = isSuperAdminUser();
     const scopeWrap = document.getElementById('m-scope-wrap');
     const scopeUnitsRow = scopeWrap?.closest('.model-scope-units-row');

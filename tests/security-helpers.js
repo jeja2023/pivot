@@ -544,6 +544,7 @@ function createChatRenderSandbox() {
     };
     sandbox.Pivot = {
         modules: Object.create(null),
+        legacy: Object.create(null),
         registerModule(name, api = {}) {
             const key = String(name || '').trim();
             this.modules[key] = api;
@@ -558,7 +559,7 @@ function createChatRenderSandbox() {
             (Array.isArray(aliases) ? aliases : []).forEach(alias => {
                 const globalName = typeof alias === 'string' ? alias : alias.globalName;
                 const exportName = typeof alias === 'string' ? alias : (alias.exportName || alias.globalName);
-                if (globalName && exportName && moduleApi[exportName] !== undefined) sandbox[globalName] = moduleApi[exportName];
+                if (globalName && exportName && moduleApi[exportName] !== undefined) this.legacy[globalName] = moduleApi[exportName];
             });
             return moduleApi;
         },
@@ -569,6 +570,7 @@ function createChatRenderSandbox() {
             return 80;
         }
     };
+    sandbox.Pivot.legacy.PivotSafeHtml = sandbox.PivotSafeHtml;
 
     const context = vm.createContext(sandbox);
     vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'common', 'vendor', 'marked.min.js'), 'utf8'), context, {
@@ -588,7 +590,7 @@ function createChatRenderSandbox() {
 
 function createAgentWorkbenchSandbox() {
     const sandbox = createChatRenderSandbox();
-    sandbox.escapeHtml = value => sandbox.PivotSafeHtml.escapeHtml(value);
+    sandbox.escapeHtml = value => sandbox.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
     const rootDir = path.resolve(__dirname, '..');
     [
         'dag-core.js',

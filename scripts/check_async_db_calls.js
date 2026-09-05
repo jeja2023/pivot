@@ -3,7 +3,6 @@ const path = require('path');
 const acorn = require('acorn');
 
 const SERVER_DIR = path.resolve(__dirname, '../server');
-const SCRIPTS_DIR = path.resolve(__dirname, '../scripts');
 const jsonMode = process.argv.includes('--json');
 const enforceMode = process.argv.includes('--enforce');
 
@@ -23,11 +22,15 @@ function findJsFiles(dir) {
     return results;
 }
 
-const allServerFiles = findJsFiles(SERVER_DIR);
-const allScriptFiles = findJsFiles(SCRIPTS_DIR);
-const targetFiles = [...allServerFiles, ...allScriptFiles];
+// This gate protects code that can run in response to a request. Startup
+// migrations and operator scripts intentionally use synchronous SQLite APIs and
+// are neither request-path code nor meaningful Promise findings.
+const targetFiles = [
+    ...findJsFiles(path.join(SERVER_DIR, 'routes')),
+    ...findJsFiles(path.join(SERVER_DIR, 'services'))
+];
 
-if (!jsonMode) console.log(`Scanning ${targetFiles.length} files across server/ and scripts/...`);
+if (!jsonMode) console.log(`Scanning ${targetFiles.length} request-path files across server/routes and server/services...`);
 
 // Known DB and Async primitives
 const DB_PRIMITIVES = new Set([
@@ -65,7 +68,6 @@ function walkAst(node, parent, visitor) {
 
 // Pass 1: Collect all async functions and methods defined across the codebase
 const asyncFunctions = new Map(); // function name -> Set of filePaths
-const asyncMethods = new Set(); // method names
 
 for (const filePath of targetFiles) {
     const code = fs.readFileSync(filePath, 'utf8');
@@ -92,12 +94,10 @@ for (const filePath of targetFiles) {
             }
         } else if (node.type === 'Property' && node.value && (node.value.type === 'ArrowFunctionExpression' || node.value.type === 'FunctionExpression') && node.value.async) {
             if (node.key?.name) {
-                asyncMethods.add(node.key.name);
                 if (!asyncFunctions.has(node.key.name)) asyncFunctions.set(node.key.name, new Set());
                 asyncFunctions.get(node.key.name).add(filePath);
             }
         } else if (node.type === 'MethodDefinition' && node.value?.async && node.key?.name) {
-            asyncMethods.add(node.key.name);
             if (!asyncFunctions.has(node.key.name)) asyncFunctions.set(node.key.name, new Set());
             asyncFunctions.get(node.key.name).add(filePath);
         }
@@ -179,8 +179,12 @@ for (const filePath of targetFiles) {
             const propName = node.callee.property?.name;
             calleeName = propName;
             if (DB_OBJECT_METHODS.has(propName)) isDbObjectMethod = true;
-            if (asyncMethods.has(propName)) isKnownAsync = true;
-            if (asyncFunctions.has(propName)) isKnownAsync = true;
+            // A method name alone is not sufficient evidence that an object
+            // method returns a Promise: `yaml.load()` and SQLite
+            // `statement.all()` are synchronous yet share common names with
+            // async methods elsewhere. Keep member checks to the explicit DB
+            // API vocabulary above; identifier calls still use the collected
+            // async-function set.
         }
 
         if (isDbPrimitive || isDbObjectMethod || isKnownAsync) {

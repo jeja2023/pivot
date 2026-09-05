@@ -27,7 +27,7 @@ const ensureRagDetailModal = () => {
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-detail-close-btn')) {
-            window.setKnowledgeModalVisibility?.(modal, false);
+            window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
         }
     });
     return modal;
@@ -72,7 +72,7 @@ const ensureRagAuditModal = () => {
     document.body.appendChild(modal);
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-audit-close-btn')) {
-            window.setKnowledgeModalVisibility?.(modal, false);
+            window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
         }
     });
     return modal;
@@ -85,12 +85,12 @@ const renderRagAuditRows = (items = []) => {
     return items.map((item, index) => `
         <tr>
             <td class="text-center">${index + 1}</td>
-            <td title="${escapeRagHtml(item.name)}">${escapeRagHtml(item.name)}</td>
-            <td>${escapeRagHtml(item.nickname || item.username || `用户 ${item.user_id || '-'}`)}</td>
-            <td>${escapeRagHtml(getRagStatusLabel(item.status))}</td>
+            <td title="${window.Pivot.legacy.escapeRagHtml(item.name)}">${window.Pivot.legacy.escapeRagHtml(item.name)}</td>
+            <td>${window.Pivot.legacy.escapeRagHtml(item.nickname || item.username || `用户 ${item.user_id || '-'}`)}</td>
+            <td>${window.Pivot.legacy.escapeRagHtml(getRagStatusLabel(item.status))}</td>
             <td>${Number(item.indexed_chunks || item.chunk_count || 0)} / ${Number(item.chunk_count || 0)}</td>
-            <td title="${escapeRagHtml(item.source_path || '')}">${escapeRagHtml(item.source_path || '-')}</td>
-            <td>${formatRagDateToCN(item.deleted_at)}</td>
+            <td title="${window.Pivot.legacy.escapeRagHtml(item.source_path || '')}">${window.Pivot.legacy.escapeRagHtml(item.source_path || '-')}</td>
+            <td>${window.Pivot.legacy.formatRagDateToCN(item.deleted_at)}</td>
         </tr>
     `).join('');
 };
@@ -106,8 +106,8 @@ function enableChatToolFromWorkspace(tool, message) {
     } catch (e) {
         // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
     }
-    window.showMainWorkspace?.('chat');
-    window.syncChatToolToggles?.();
+    window.Pivot.legacy.showMainWorkspace?.('chat');
+    window.Pivot.legacy.syncChatToolToggles?.();
     document.getElementById('user-input')?.focus();
     if (message) showToast(message, 'success');
 }
@@ -126,17 +126,17 @@ const showRagDetailModal = (data) => {
     if (meta) {
         const enabledText = Number(doc.is_enabled ?? 1) === 1 ? '已启用' : '已停用';
         const items = [
-            { icon: RAG_ICONS.status, label: '解析状态', value: getRagStatusLabel(doc.status), class: `status-${doc.status}` },
-            { icon: RAG_ICONS.enable, label: '生效状态', value: enabledText, class: enabledText === '已启用' ? 'status-ready' : 'status-error' },
-            { icon: RAG_ICONS.progress, label: '索引进度', value: `${Number(doc.progress || 0)}%` },
-            { icon: RAG_ICONS.chunks, label: '分块总数', value: Number(data.totalChunks || 0) },
-            { icon: RAG_ICONS.time, label: '创建时间', value: formatRagDateToCN(doc.created_at) },
-            { icon: RAG_ICONS.time, label: '更新时间', value: formatRagDateToCN(doc.updated_at || doc.processed_at) }
+            { icon: window.Pivot.legacy.RAG_ICONS.status, label: '解析状态', value: getRagStatusLabel(doc.status), class: `status-${doc.status}` },
+            { icon: window.Pivot.legacy.RAG_ICONS.enable, label: '生效状态', value: enabledText, class: enabledText === '已启用' ? 'status-ready' : 'status-error' },
+            { icon: window.Pivot.legacy.RAG_ICONS.progress, label: '索引进度', value: `${Number(doc.progress || 0)}%` },
+            { icon: window.Pivot.legacy.RAG_ICONS.chunks, label: '分块总数', value: Number(data.totalChunks || 0) },
+            { icon: window.Pivot.legacy.RAG_ICONS.time, label: '创建时间', value: window.Pivot.legacy.formatRagDateToCN(doc.created_at) },
+            { icon: window.Pivot.legacy.RAG_ICONS.time, label: '更新时间', value: window.Pivot.legacy.formatRagDateToCN(doc.updated_at || doc.processed_at) }
         ];
         PivotSafeHtml.setHtml(meta, items.map(item => `
             <div class="rag-meta-card ${item.class || ''}">
-                <div class="rag-meta-label">${item.icon}<span>${escapeRagHtml(item.label)}</span></div>
-                <div class="rag-meta-value" title="${escapeRagAttr(item.value)}">${escapeRagHtml(item.value)}</div>
+                <div class="rag-meta-label">${item.icon}<span>${window.Pivot.legacy.escapeRagHtml(item.label)}</span></div>
+                <div class="rag-meta-value" title="${window.Pivot.legacy.escapeRagAttr(item.value)}">${window.Pivot.legacy.escapeRagHtml(item.value)}</div>
             </div>
         `).join(''));
     }
@@ -148,15 +148,15 @@ const showRagDetailModal = (data) => {
                         <strong>#${index + 1}</strong>
                         <span>${Number(chunk.length || String(chunk.content || '').length)} 字</span>
                     </header>
-                    <p>${escapeRagHtml(chunk.content || '')}</p>
+                    <p>${window.Pivot.legacy.escapeRagHtml(chunk.content || '')}</p>
                 </article>
             `).join('')
             : '<div class="rag-debug-empty">暂无可预览分块</div>');
     }
-    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-detail-close-btn' });
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-detail-close-btn' });
 };
 
-window.showKnowledgeDocAudit = async () => {
+window.Pivot.legacy.showKnowledgeDocAudit = async () => {
     if (!isSuperAdminUser()) {
         showToast('仅 admin 权限层级可查看知识库删除审计', 'error');
         return;
@@ -168,7 +168,7 @@ window.showKnowledgeDocAudit = async () => {
         const modal = ensureRagAuditModal();
         const body = modal.querySelector('#rag-audit-body');
         if (body) PivotSafeHtml.setHtml(body, renderRagAuditRows(data.data || []));
-        window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-audit-close-btn' });
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-audit-close-btn' });
     } catch (e) {
         showToast(e.message || '删除审计加载失败', 'error');
     }
@@ -186,7 +186,7 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const hasGraphSummary = graphSummary && !graphSummary.error;
     const graphEntities = hasGraphSummary ? graphSummary.entities : signals.graphEntities;
     const graphRelations = hasGraphSummary ? graphSummary.relations : signals.graphRelations;
-    const metric = ([label, value]) => `<span><b>${escapeRagHtml(value)}</b>${escapeRagHtml(label)}</span>`;
+    const metric = ([label, value]) => `<span><b>${window.Pivot.legacy.escapeRagHtml(value)}</b>${window.Pivot.legacy.escapeRagHtml(label)}</span>`;
     const docItems = [
         ['文档', summary.total || 0],
         ['就绪', summary.ready || 0],
@@ -195,7 +195,7 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     ];
     const indexItems = [
         ['分块', summary.chunks || 0],
-        ['源文件', formatRagSize(summary.sourceSize || 0)],
+        ['源文件', window.Pivot.legacy.formatRagSize(summary.sourceSize || 0)],
         ['队列', `${summary.queue?.running || 0}/${summary.queue?.pending || 0}`]
     ];
     const diagnosticItems = [
@@ -207,7 +207,7 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
         ...(graphRelations === undefined || graphRelations === null ? [] : [['关系', Number(graphRelations || 0)]])
     ].filter(([, value]) => value !== undefined && value !== null);
     const lastError = summary.lastError?.error_message
-        ? `<span class="rag-summary-error" title="${escapeRagHtml(summary.lastError.error_message)}">最近错误：${escapeRagHtml(summary.lastError.name || '文档')}</span>`
+        ? `<span class="rag-summary-error" title="${window.Pivot.legacy.escapeRagHtml(summary.lastError.error_message)}">最近错误：${window.Pivot.legacy.escapeRagHtml(summary.lastError.name || '文档')}</span>`
         : '';
     PivotSafeHtml.setHtml(el, `
         <div class="rag-summary-items">
@@ -264,14 +264,14 @@ const renderRagQualityReport = (report) => {
         </div>
         ${issueItems.length ? `
             <div class="governance-metrics">
-                ${issueItems.map(([label, value]) => `<span><b>${Number(value || 0)}</b>${escapeRagHtml(label)}</span>`).join('')}
+                ${issueItems.map(([label, value]) => `<span><b>${Number(value || 0)}</b>${window.Pivot.legacy.escapeRagHtml(label)}</span>`).join('')}
             </div>
         ` : ''}
         ${visibleProblems.length ? `
             <div class="governance-list">
                 ${visibleProblems.map(doc => `
                 <span class="${doc.status === 'error' ? 'is-error' : ''}">
-                    ${escapeRagHtml(doc.name || '文档')} · ${escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
+                    ${window.Pivot.legacy.escapeRagHtml(doc.name || '文档')} · ${window.Pivot.legacy.escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
                 </span>
                 `).join('')}
             </div>
@@ -301,9 +301,9 @@ const renderRagDebugHistory = (items = []) => {
             ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)}`
             : '-';
         return `
-                    <button type="button" class="rag-debug-history-item" data-rag-debug-sample="${escapeRagAttr(item.query || '')}">
-                        <span class="rag-debug-history-query">${escapeRagHtml(item.query || '-')}</span>
-                        <span class="rag-debug-history-meta">命中 ${Number(item.matchedCount || 0)} / 候选 ${Number(item.candidateCount || 0)} / 最高 ${top.toFixed(3)} / 队列 ${escapeRagHtml(queueLabel)} / ${Number(item.elapsedMs || 0)} ms</span>
+                    <button type="button" class="rag-debug-history-item" data-rag-debug-sample="${window.Pivot.legacy.escapeRagAttr(item.query || '')}">
+                        <span class="rag-debug-history-query">${window.Pivot.legacy.escapeRagHtml(item.query || '-')}</span>
+                        <span class="rag-debug-history-meta">命中 ${Number(item.matchedCount || 0)} / 候选 ${Number(item.candidateCount || 0)} / 最高 ${top.toFixed(3)} / 队列 ${window.Pivot.legacy.escapeRagHtml(queueLabel)} / ${Number(item.elapsedMs || 0)} ms</span>
                     </button>
                 `;
     }).join('')}
@@ -323,7 +323,7 @@ const renderRagDebugResults = (data) => {
         .sort((a, b) => b.length - a.length)
         .slice(0, 16);
     const highlightChunk = (text) => {
-        const escaped = escapeRagHtml(text || '');
+        const escaped = window.Pivot.legacy.escapeRagHtml(text || '');
         if (keywords.length === 0) return escaped;
         try {
             const pattern = keywords
@@ -391,27 +391,27 @@ const renderRagDebugResults = (data) => {
     })();
 
     PivotSafeHtml.setHtml(el, `
-        <div class="rag-debug-verdict is-${escapeRagHtml(debugVerdict.tone)}">
+        <div class="rag-debug-verdict is-${window.Pivot.legacy.escapeRagHtml(debugVerdict.tone)}">
             <div>
-                <strong>${escapeRagHtml(debugVerdict.title)}</strong>
-                <span>${escapeRagHtml(debugVerdict.detail)}</span>
+                <strong>${window.Pivot.legacy.escapeRagHtml(debugVerdict.title)}</strong>
+                <span>${window.Pivot.legacy.escapeRagHtml(debugVerdict.detail)}</span>
             </div>
-            <button type="button" data-rag-debug-chat="${escapeRagAttr(data.query || '')}">${escapeRagHtml(debugVerdict.action)}</button>
+            <button type="button" data-rag-debug-chat="${window.Pivot.legacy.escapeRagAttr(data.query || '')}">${window.Pivot.legacy.escapeRagHtml(debugVerdict.action)}</button>
         </div>
         <div class="rag-debug-meta">
-            <span>关键词：${escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
+            <span>关键词：${window.Pivot.legacy.escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
             <span>候选：${Number(data.candidateCount || 0)}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
-            ${rankingMode ? `<span>Mode: ${escapeRagHtml(rankingMode)}</span>` : ''}
-            ${hybridLabel ? `<span>Hybrid: ${escapeRagHtml(hybridLabel)}</span>` : ''}
-            ${queueLabel ? `<span>Queue: ${escapeRagHtml(queueLabel)}</span>` : ''}
+            ${rankingMode ? `<span>Mode: ${window.Pivot.legacy.escapeRagHtml(rankingMode)}</span>` : ''}
+            ${hybridLabel ? `<span>Hybrid: ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}</span>` : ''}
+            ${queueLabel ? `<span>Queue: ${window.Pivot.legacy.escapeRagHtml(queueLabel)}</span>` : ''}
             ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
         </div>
         ${groupedList.length > 1 ? `
             <div class="rag-debug-grouped" role="list">
                 ${groupedList.map(g => `
                     <div class="rag-debug-grouped-item" role="listitem">
-                        <span class="rag-debug-grouped-source">${escapeRagHtml(g.source)}</span>
+                        <span class="rag-debug-grouped-source">${window.Pivot.legacy.escapeRagHtml(g.source)}</span>
                         <span class="rag-debug-grouped-stats">命中 ${g.matched}/${g.count}<span class="rag-debug-grouped-divider">·</span>峰值 ${g.top.toFixed(3)}<span class="rag-debug-grouped-divider">·</span>均值 ${(g.totalScore / g.count).toFixed(3)}</span>
                     </div>
                 `).join('')}
@@ -435,17 +435,17 @@ const renderRagDebugResults = (data) => {
         return `
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
-                        <strong>#${index + 1} ${escapeRagHtml(m.source || '-')}</strong>
+                        <strong>#${index + 1} ${window.Pivot.legacy.escapeRagHtml(m.source || '-')}</strong>
                         <span class="rag-debug-score" title="Dense / fused / FTS / MMR breakdown">${score.toFixed(3)}${m.matched ? ' HIT' : ''}${m.selected ? ' | MMR' : ''}</span>
                     </div>
                     <div class="rag-debug-score-bar" aria-hidden="true">
                         <div class="rag-debug-score-bar-fill" style="width:${percent.toFixed(1)}%"></div>
                     </div>
-                    <div class="rag-debug-score-breakdown">${escapeRagHtml(scoreDetails)}</div>
+                    <div class="rag-debug-score-breakdown">${window.Pivot.legacy.escapeRagHtml(scoreDetails)}</div>
                     <p>${highlightChunk(m.text || '')}</p>
                     <div class="rag-feedback-actions">
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${score}">有用</button>
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${escapeRagHtml(m.source || '')}" data-score="${score}">无用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${window.Pivot.legacy.escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagHtml(m.source || '')}" data-score="${score}">有用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${window.Pivot.legacy.escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagHtml(m.source || '')}" data-score="${score}">无用</button>
                     </div>
                 </div>
                 `;

@@ -28,11 +28,11 @@
     // 请求提交状态，避免旧请求在创建目标后返回并把新列表覆盖掉。
     let controlPlaneLoadSequence = 0;
     let controlPlaneLoadController = null;
-    const escape = value => window.PivotSafeHtml?.escapeHtml
-        ? window.PivotSafeHtml.escapeHtml(value)
+    const escape = value => window.Pivot.legacy.PivotSafeHtml?.escapeHtml
+        ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value)
         : String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
-    const escapeAttr = value => window.PivotSafeHtml?.escapeAttr
-        ? window.PivotSafeHtml.escapeAttr(value)
+    const escapeAttr = value => window.Pivot.legacy.PivotSafeHtml?.escapeAttr
+        ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value)
         : escape(value).replace(/"/g, '&quot;');
     const formatDate = value => {
         const text = String(value || '').trim();
@@ -175,8 +175,8 @@
                 : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
             const paginationContainer = document.getElementById('agent-goals-pagination');
             if (paginationContainer) {
-                if (window.renderWorkspacePagination) {
-                    window.renderWorkspacePagination(paginationContainer, {
+                if (window.Pivot.legacy.renderWorkspacePagination) {
+                    window.Pivot.legacy.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
                         page: currentPage,
@@ -207,8 +207,8 @@
 
             const paginationContainer = document.getElementById('agent-inbox-pagination');
             if (paginationContainer) {
-                if (window.renderWorkspacePagination) {
-                    window.renderWorkspacePagination(paginationContainer, {
+                if (window.Pivot.legacy.renderWorkspacePagination) {
+                    window.Pivot.legacy.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
                         page: currentPage,
@@ -245,8 +245,8 @@
 
             const paginationContainer = document.getElementById('agent-reliability-pagination');
             if (paginationContainer) {
-                if (window.renderWorkspacePagination) {
-                    window.renderWorkspacePagination(paginationContainer, {
+                if (window.Pivot.legacy.renderWorkspacePagination) {
+                    window.Pivot.legacy.renderWorkspacePagination(paginationContainer, {
                         total,
                         limit,
                         page: currentPage,
@@ -365,7 +365,7 @@
     }
     const jsonText = value => { try { return JSON.stringify(value ?? {}, null, 2); } catch (_) { return '{}'; } };
 
-    const getCurrentUser = () => (typeof currentUser !== 'undefined' ? currentUser : window.currentUser || null);
+    const getCurrentUser = () => (typeof currentUser !== 'undefined' ? currentUser : window.Pivot.legacy.currentUser || null);
 
     function setNotice(message = '', tone = '') {
         if (!message) return;
@@ -382,13 +382,13 @@
 
     function setMarkup(element, markup) {
         if (!element) return;
-        if (window.PivotSafeHtml?.setHtml) window.PivotSafeHtml.setHtml(element, markup);
+        if (window.Pivot.legacy.PivotSafeHtml?.setHtml) window.Pivot.legacy.PivotSafeHtml.setHtml(element, markup);
         else element.textContent = String(markup || '');
     }
 
     function prependMarkup(element, markup) {
         if (!element) return;
-        if (window.PivotSafeHtml?.prependHtml) window.PivotSafeHtml.prependHtml(element, markup);
+        if (window.Pivot.legacy.PivotSafeHtml?.prependHtml) window.Pivot.legacy.PivotSafeHtml.prependHtml(element, markup);
         else element.prepend(document.createTextNode(String(markup || '')));
     }
 
@@ -423,8 +423,8 @@
         }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
-            if (window.renderWorkspacePagination) {
-                window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } });
+            if (window.Pivot.legacy.renderWorkspacePagination) {
+                window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } });
             } else { paginationContainer.replaceChildren(); }
         }
     }
@@ -527,8 +527,8 @@
         }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
-            if (window.renderWorkspacePagination) {
-                window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.residentsPage = newPage; renderResidents(); } });
+            if (window.Pivot.legacy.renderWorkspacePagination) {
+                window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.residentsPage = newPage; renderResidents(); } });
             } else { paginationContainer.replaceChildren(); }
         }
     }
@@ -674,8 +674,8 @@
         const fbOutcomeBadge = (o) => o === 'success' ? `<span class="agent-inbox-type-badge badge-run">成功</span>` : o === 'failure' ? `<span class="agent-inbox-type-badge badge-approval">失败</span>` : `<span class="agent-inbox-type-badge badge-event">${escape(o || '反馈')}</span>`;
         setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:320px" class="tc">运行 ID</th><th style="width:80px" class="tc">结论</th><th style="width:70px" class="tc">评分</th><th>修正意见</th><th style="width:160px" class="tc">时间</th></tr></thead><tbody>${pageFeedback.map((item, i) => `<tr><td class="tc font-mono">${startIndex + i + 1}</td><td class="tc mono" title="${escapeAttr(item.runId)}">${escape(shortText(item.runId, 36))}</td><td class="tc">${fbOutcomeBadge(item.outcome)}</td><td class="tc">${item.rating ? `${item.rating}/5` : '—'}</td><td title="${escapeAttr(item.correction || item.modifiedAnswer || '')}">${escape(shortText(item.correction || item.modifiedAnswer || '—', 80))}</td><td class="tc">${escape(formatDate(item.updatedAt))}</td></tr>`).join('')}</tbody></table></div>`);
         if (paginationContainer) {
-            if (window.renderWorkspacePagination) {
-                window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.feedbackPage = newPage; renderFeedback(); } });
+            if (window.Pivot.legacy.renderWorkspacePagination) {
+                window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.feedbackPage = newPage; renderFeedback(); } });
             } else { paginationContainer.replaceChildren(); }
         }
     }
@@ -711,8 +711,8 @@
         setMarkup(list, `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:40px" class="tc">序号</th><th style="width:160px">提议标题</th><th style="width:90px" class="tc">类型</th><th style="width:90px" class="tc">状态</th><th>说明</th><th style="width:130px" class="tc">操作</th></tr></thead><tbody>${pageProposals.map((item, i) => `<tr><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(item.title || '')}">${escape(shortText(item.title || '未命名提议', 22))}</td><td class="tc">${escape(kindLabels[item.kind] || item.kind || '提议')}</td><td class="tc">${propStatusBadge(item.status)}</td><td title="${escapeAttr(proposalDescription(item))}">${escape(shortText(proposalDescription(item), 100))}</td><td class="tc"><div class="aht-actions">${item.status === 'pending' || item.scope === 'organization_candidate' && item.status === 'pending_review' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-decision="approve" data-agent-evolution-id="${escapeAttr(item.id)}">批准</button><button type="button" class="btn-secondary btn-xs" data-agent-evolution-decision="reject" data-agent-evolution-id="${escapeAttr(item.id)}">拒绝</button>` : ''}${item.status === 'approved' && item.kind === 'preference' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-apply="${escapeAttr(item.id)}">应用</button>` : ''}${['pending_review', 'approved'].includes(item.status) && item.kind !== 'preference' ? `<button type="button" class="btn-secondary btn-xs" data-agent-evolution-validate="${escapeAttr(item.id)}">验证</button>` : ''}${item.status === 'versioned_draft' ? `<button type="button" class="btn-primary btn-xs" data-agent-evolution-publish="${escapeAttr(item.id)}">发布</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
 
         if (paginationContainer) {
-            if (window.renderWorkspacePagination) {
-                window.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.proposalsPage = newPage; renderProposals(); } });
+            if (window.Pivot.legacy.renderWorkspacePagination) {
+                window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.proposalsPage = newPage; renderProposals(); } });
             } else { paginationContainer.replaceChildren(); }
         }
     }

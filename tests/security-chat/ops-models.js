@@ -395,11 +395,11 @@ test('可信或已检测容器运行时中 Docker 内部服务名视为本地', 
     }
 });
 
-test('系统健康快照报告核心检查和汇总状态', () => {
+test('系统健康快照报告核心检查和汇总状态', async () => {
     assert.equal(overallStatus([{ status: 'ok' }, { status: 'degraded' }]), 'degraded');
     assert.equal(overallStatus([{ status: 'ok' }, { status: 'error' }]), 'error');
 
-    const health = getSystemHealthSnapshot();
+    const health = await getSystemHealthSnapshot();
     assert.ok(['ok', 'degraded', 'error'].includes(health.status));
     assert.ok(health.checks.some(item => item.name === 'database'));
     assert.ok(health.checks.some(item => item.name === 'dataDir'));

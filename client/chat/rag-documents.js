@@ -156,9 +156,9 @@ function renderRagTagCheckboxes(selectedTags = [], collectionId = '') {
         const count = Number(item.doc_count || 0);
         const label = `${tag}${count > 0 ? ` (${count})` : ''}`;
         return `
-            <label class="knowledge-tag-check" for="${escapeRagAttr(id)}" title="${escapeRagAttr(label)}">
-                <input id="${escapeRagAttr(id)}" type="checkbox" value="${escapeRagAttr(tag)}" ${selected.has(tag) ? 'checked' : ''}>
-                <span>${escapeRagHtml(label)}</span>
+            <label class="knowledge-tag-check" for="${window.Pivot.legacy.escapeRagAttr(id)}" title="${window.Pivot.legacy.escapeRagAttr(label)}">
+                <input id="${window.Pivot.legacy.escapeRagAttr(id)}" type="checkbox" value="${window.Pivot.legacy.escapeRagAttr(tag)}" ${selected.has(tag) ? 'checked' : ''}>
+                <span>${window.Pivot.legacy.escapeRagHtml(label)}</span>
             </label>
         `;
     }).join('');
@@ -181,13 +181,13 @@ function refreshRagTagCheckboxControls() {
 function renderRagCollectionCell(doc = {}) {
     const name = String(doc.collection_name || '').trim();
     const label = name || '未归类';
-    return `<span class="knowledge-collection-pill ${name ? '' : 'is-muted'}" title="${escapeRagAttr(label)}">${escapeRagHtml(label)}</span>`;
+    return `<span class="knowledge-collection-pill ${name ? '' : 'is-muted'}" title="${window.Pivot.legacy.escapeRagAttr(label)}">${window.Pivot.legacy.escapeRagHtml(label)}</span>`;
 }
 
 function renderRagTagsCell(doc = {}) {
     const tags = getRagDocTags(doc);
     if (!tags.length) return '<span class="knowledge-empty-meta">-</span>';
-    return `<div class="knowledge-tag-list">${tags.map(tag => `<span class="knowledge-tag-pill" title="${escapeRagAttr(tag)}">${escapeRagHtml(tag)}</span>`).join('')}</div>`;
+    return `<div class="knowledge-tag-list">${tags.map(tag => `<span class="knowledge-tag-pill" title="${window.Pivot.legacy.escapeRagAttr(tag)}">${window.Pivot.legacy.escapeRagHtml(tag)}</span>`).join('')}</div>`;
 }
 
 function getCachedKnowledgeDoc(id) {
@@ -204,16 +204,16 @@ function getRagCollectionOptionsHtml(selectedId = '', {
     const selected = normalizeRagCollectionId(selectedId);
     const options = [];
     if (includeAll) {
-        options.push(`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(allLabel)}</option>`);
+        options.push(`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(allLabel)}</option>`);
     } else {
-        options.push(`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(unassignedLabel)}</option>`);
+        options.push(`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(unassignedLabel)}</option>`);
     }
     ragCollections.forEach(collection => {
         const id = normalizeRagCollectionId(collection.id);
         if (!id) return;
         const count = Number(collection.doc_count || 0);
         const label = `${collection.name || '专题库'}${count > 0 ? ` (${count})` : ''}`;
-        options.push(`<option value="${escapeRagAttr(id)}" ${id === selected ? 'selected' : ''}>${escapeRagHtml(label)}</option>`);
+        options.push(`<option value="${window.Pivot.legacy.escapeRagAttr(id)}" ${id === selected ? 'selected' : ''}>${window.Pivot.legacy.escapeRagHtml(label)}</option>`);
     });
     return options.join('');
 }
@@ -231,13 +231,13 @@ function getRagTagOptionsHtml(selectedTag = '', {
     collectionId = ''
 } = {}) {
     const selected = normalizeRagTag(selectedTag);
-    const options = includeAll ? [`<option value="" ${selected ? '' : 'selected'}>${escapeRagHtml(allLabel)}</option>`] : [];
+    const options = includeAll ? [`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(allLabel)}</option>`] : [];
     getRagTagsForCollection(collectionId).forEach(item => {
         const tag = normalizeRagTag(item.tag || item);
         if (!tag) return;
         const count = Number(item.doc_count || 0);
         const label = `${tag}${count > 0 ? ` (${count})` : ''}`;
-        options.push(`<option value="${escapeRagAttr(tag)}" ${tag === selected ? 'selected' : ''}>${escapeRagHtml(label)}</option>`);
+        options.push(`<option value="${window.Pivot.legacy.escapeRagAttr(tag)}" ${tag === selected ? 'selected' : ''}>${window.Pivot.legacy.escapeRagHtml(label)}</option>`);
     });
     return options.join('');
 }
@@ -303,7 +303,7 @@ function updateRagTagControls() {
     refreshRagTagCheckboxControls();
 }
 
-window.getRagScopeSelection = function (source = 'chat') {
+window.Pivot.legacy.getRagScopeSelection = function (source = 'chat') {
     const idMap = {
         chat: 'chat-rag-collection-scope',
         debug: 'rag-debug-collection',
@@ -323,21 +323,21 @@ window.getRagScopeSelection = function (source = 'chat') {
     };
 };
 
-window.applyRagDebugScopeToChat = async function () {
+window.Pivot.legacy.applyRagDebugScopeToChat = async function () {
     const debugValue = normalizeRagCollectionId(document.getElementById('rag-debug-collection')?.value);
     const debugTag = normalizeRagTag(document.getElementById('rag-debug-tag')?.value);
     const chatSelect = document.getElementById('chat-rag-collection-scope');
     const chatTagSelect = document.getElementById('chat-rag-tag-scope');
     if (chatSelect) chatSelect.value = debugValue;
-    await window.loadKnowledgeTags?.(debugValue, { updateControls: false });
+    await window.Pivot.legacy.loadKnowledgeTags?.(debugValue, { updateControls: false });
     updateRagTagControls();
     if (chatTagSelect) {
         chatTagSelect.value = Array.from(chatTagSelect.options).some(option => option.value === debugTag) ? debugTag : '';
     }
-    window.updateChatToolReadiness?.({ silent: true });
+    window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
 };
 
-window.loadKnowledgeCollections = async function () {
+window.Pivot.legacy.loadKnowledgeCollections = async function () {
     if (!hasRagAuthContext()) return ragCollections;
     try {
         const res = await apiFetch(`${API_BASE}/rag/collections`, { headers: authHeaders() });
@@ -348,7 +348,7 @@ window.loadKnowledgeCollections = async function () {
         ragControlLoadErrors.delete('专题库');
         updateRagCollectionControls();
         filterWritableRagCollectionSelects();
-        window.updateChatToolReadiness?.({ silent: true });
+        window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
         return ragCollections;
     } catch (e) {
         console.error('加载知识库专题失败', e);
@@ -368,7 +368,7 @@ function getRagTagCollectionIdsInUse() {
     ].map(getRagTagCacheKey))];
 }
 
-window.loadKnowledgeTags = async function (collectionId = '', { updateControls = true, force = false } = {}) {
+window.Pivot.legacy.loadKnowledgeTags = async function (collectionId = '', { updateControls = true, force = false } = {}) {
     const key = getRagTagCacheKey(collectionId);
     if (!hasRagAuthContext()) return getRagTagsForCollection(key);
     if (!force && ragTagsByCollection.has(key)) {
@@ -384,7 +384,7 @@ window.loadKnowledgeTags = async function (collectionId = '', { updateControls =
         setRagTagsForCollection(key, data.data);
         ragControlLoadErrors.delete('标签');
         if (updateControls) updateRagTagControls();
-        window.updateChatToolReadiness?.({ silent: true });
+        window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
         return getRagTagsForCollection(key);
     } catch (e) {
         console.error('加载知识库标签失败', e);
@@ -393,24 +393,24 @@ window.loadKnowledgeTags = async function (collectionId = '', { updateControls =
     }
 };
 
-window.refreshRagTagControlsForSelectedCollections = async function ({ force = false } = {}) {
+window.Pivot.legacy.refreshRagTagControlsForSelectedCollections = async function ({ force = false } = {}) {
     const ids = getRagTagCollectionIdsInUse();
-    await Promise.all(ids.map(id => window.loadKnowledgeTags(id, { updateControls: false, force })));
+    await Promise.all(ids.map(id => window.Pivot.legacy.loadKnowledgeTags(id, { updateControls: false, force })));
     updateRagTagControls();
-    window.updateChatToolReadiness?.({ silent: true });
+    window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
 };
 
-window.handleRagCollectionScopeChange = async function (source = '') {
-    await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+window.Pivot.legacy.handleRagCollectionScopeChange = async function (source = '') {
+    await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.({ force: true });
     if (source === 'docs') {
-        window.loadKnowledgeDocs(1);
+        window.Pivot.legacy.loadKnowledgeDocs(1);
     } else if (source === 'chat') {
-        window.updateChatToolReadiness?.({ silent: true });
+        window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
     }
 };
 
-window.createKnowledgeCollectionFromPrompt = async function () {
-    const name = await window.showInputPrompt?.({
+window.Pivot.legacy.createKnowledgeCollectionFromPrompt = async function () {
+    const name = await window.Pivot.legacy.showInputPrompt?.({
         title: '新建专题库',
         message: '专题库用于把知识库文档按业务、项目或制度范围归类。',
         placeholder: '例如：制度规范',
@@ -425,19 +425,19 @@ window.createKnowledgeCollectionFromPrompt = async function () {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '专题库创建失败');
-        await window.loadKnowledgeCollections?.();
+        await window.Pivot.legacy.loadKnowledgeCollections?.();
         const collectionId = normalizeRagCollectionId(data.collection?.id);
         const filter = document.getElementById('rag-collection-filter');
         if (filter && collectionId) filter.value = collectionId;
         showToast('专题库已创建');
-        window.loadKnowledgeDocs(1);
+        window.Pivot.legacy.loadKnowledgeDocs(1);
     } catch (e) {
         showToast(e.message || '专题库创建失败', 'error');
     }
 };
 
-window.createKnowledgeTagFromPrompt = async function () {
-    const tag = await window.showInputPrompt?.({
+window.Pivot.legacy.createKnowledgeTagFromPrompt = async function () {
+    const tag = await window.Pivot.legacy.showInputPrompt?.({
         title: '新建标签',
         message: '标签用于在专题库之外补充细粒度检索范围。',
         placeholder: '例如：合同 / 财务 / 运维',
@@ -453,12 +453,12 @@ window.createKnowledgeTagFromPrompt = async function () {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '标签创建失败');
         invalidateRagTagCache();
-        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+        await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.({ force: true });
         const safeTag = normalizeRagTag(data.tag?.tag || tag);
         const filter = document.getElementById('rag-tag-filter');
         if (filter && safeTag && Array.from(filter.options).some(option => option.value === safeTag)) filter.value = safeTag;
         showToast('标签已创建');
-        window.loadKnowledgeDocs(1);
+        window.Pivot.legacy.loadKnowledgeDocs(1);
     } catch (e) {
         showToast(e.message || '标签创建失败', 'error');
     }
@@ -511,7 +511,7 @@ async function openKnowledgeCollectionShareModal() {
             </div>
             <div class="agent-workflow-share-body">
                 <div class="agent-workflow-share-summary">
-                    <strong>${escapeRagHtml(current.name || '专题库')}</strong>
+                    <strong>${window.Pivot.legacy.escapeRagHtml(current.name || '专题库')}</strong>
                     <span>共享后，接收方只能检索、查看详情和知识图谱，无法上传、编辑、重建或删除文档。</span>
                 </div>
                 <fieldset class="agent-workflow-share-scope-fieldset">
@@ -547,7 +547,7 @@ async function openKnowledgeCollectionShareModal() {
                         </div>
                     </div>
                     <div id="knowledge-share-target-tree" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户">
-                        ${window.PivotShareTargetTree?.render({
+                        ${window.Pivot.legacy.PivotShareTargetTree?.render({
         units,
         users,
         allowedUnits: [...allowed],
@@ -557,8 +557,8 @@ async function openKnowledgeCollectionShareModal() {
         isAll,
         unitInputName: 'knowledge-share-unit',
         userInputName: 'knowledge-share-user',
-        escapeText: escapeRagHtml,
-        escapeAttr: escapeRagAttr
+        escapeText: window.Pivot.legacy.escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr
     }) || '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>'}
                     </div>
                 </section>
@@ -572,11 +572,11 @@ async function openKnowledgeCollectionShareModal() {
     `);
 
     const closeButtons = modal.querySelectorAll('[data-knowledge-share-close]');
-    closeButtons.forEach(btn => btn.addEventListener('click', () => window.setKnowledgeModalVisibility?.(modal, false)));
+    closeButtons.forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false)));
     if (modal.dataset.boundKnowledgeShareOverlay !== '1') {
         modal.dataset.boundKnowledgeShareOverlay = '1';
         modal.addEventListener('click', e => {
-            if (e.target === modal) window.setKnowledgeModalVisibility?.(modal, false);
+            if (e.target === modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
         });
     }
 
@@ -615,11 +615,11 @@ async function openKnowledgeCollectionShareModal() {
             const group = button.dataset.knowledgeShareSelect || button.dataset.knowledgeShareClear;
             const checked = Boolean(button.dataset.knowledgeShareSelect);
             const tree = modal.querySelector('#knowledge-share-target-tree');
-            if (group === 'tree') window.PivotShareTargetTree?.setChecked(tree, checked);
+            if (group === 'tree') window.Pivot.legacy.PivotShareTargetTree?.setChecked(tree, checked);
             setKnowledgeError('');
         });
     });
-    window.PivotShareTargetTree?.bind(modal.querySelector('#knowledge-share-target-tree'), {
+    window.Pivot.legacy.PivotShareTargetTree?.bind(modal.querySelector('#knowledge-share-target-tree'), {
         unitSelector: 'input[name="knowledge-share-unit"]',
         userSelector: 'input[name="knowledge-share-user"]',
         onChange: () => setKnowledgeError('')
@@ -660,10 +660,10 @@ async function openKnowledgeCollectionShareModal() {
                 const saveData = await saveRes.json().catch(() => ({}));
                 if (!saveRes.ok) throw new Error(saveData.error || '共享设置保存失败');
 
-                window.setKnowledgeModalVisibility?.(modal, false);
+                window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
                 showToast('专题库共享设置已更新', 'success');
-                await window.loadKnowledgeCollections?.();
-                window.loadKnowledgeDocs(1);
+                await window.Pivot.legacy.loadKnowledgeCollections?.();
+                window.Pivot.legacy.loadKnowledgeDocs(1);
             } catch (err) {
                 setKnowledgeError(err.message || '共享设置保存失败');
             } finally {
@@ -672,15 +672,15 @@ async function openKnowledgeCollectionShareModal() {
         });
     }
 
-    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '[name="knowledge-share-scope"]' });
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '[name="knowledge-share-scope"]' });
 };
 
 function renderRagDocsPagination(total, page, limit) {
-    window.renderWorkspacePagination?.('pagination-ragDocs', {
+    window.Pivot.legacy.renderWorkspacePagination?.('pagination-ragDocs', {
         total,
         page,
         limit,
-        onPageChange: targetPage => window.loadKnowledgeDocs(targetPage)
+        onPageChange: targetPage => window.Pivot.legacy.loadKnowledgeDocs(targetPage)
     });
 }
 
@@ -712,13 +712,13 @@ function updateRagDebugSamples(docs = []) {
     });
 }
 
-window.loadKnowledgeDocs = async (page = ragDocsPage) => {
+window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
     const requestSequence = ++ragDocsLoadSequence;
     ragDocsPage = Math.max(Number(page) || 1, 1);
     setKnowledgeWorkbenchState('loading', '正在加载知识库…');
     try {
-        await window.loadKnowledgeCollections?.();
-        await window.refreshRagTagControlsForSelectedCollections?.();
+        await window.Pivot.legacy.loadKnowledgeCollections?.();
+        await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.();
         if (requestSequence !== ragDocsLoadSequence) return;
         const activeCollectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
         const activeTag = normalizeRagTag(document.getElementById('rag-tag-filter')?.value);
@@ -755,19 +755,19 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
             <tr>
                 <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
                 <td class="text-center">${(pageNo - 1) * pageSize + index + 1}</td>
-                <td title="${escapeRagHtml(d.name)}">${escapeRagHtml(d.name)}</td>
+                <td title="${window.Pivot.legacy.escapeRagHtml(d.name)}">${window.Pivot.legacy.escapeRagHtml(d.name)}</td>
                 <td>${renderRagCollectionCell(d)}</td>
                 <td>${renderRagTagsCell(d)}</td>
                 <td class="text-center">
-                    <span class="status-badge ${escapeRagHtml(d.status)}" title="${escapeRagHtml(d.error_message || '')}">${getRagStatusLabel(d.status)}</span>
+                    <span class="status-badge ${window.Pivot.legacy.escapeRagHtml(d.status)}" title="${window.Pivot.legacy.escapeRagHtml(d.error_message || '')}">${getRagStatusLabel(d.status)}</span>
                 </td>
                 <td class="text-center">
                     <input type="checkbox" class="rag-enable-toggle" data-rag-id="${d.id}" ${Number(d.is_enabled ?? 1) === 1 ? 'checked' : ''}>
                 </td>
                 <td class="text-center">${Number(d.chunk_count || 0)}</td>
                 <td class="text-center">${Number(d.progress || (d.status === 'ready' ? 100 : 0))}%</td>
-                <td>${escapeRagHtml(formatRagDateToCN(d.created_at))}</td>
-                <td>${escapeRagHtml(formatRagDateToCN(d.updated_at || d.processed_at))}</td>
+                <td>${window.Pivot.legacy.escapeRagHtml(window.Pivot.legacy.formatRagDateToCN(d.created_at))}</td>
+                <td>${window.Pivot.legacy.escapeRagHtml(window.Pivot.legacy.formatRagDateToCN(d.updated_at || d.processed_at))}</td>
                 <td class="text-center">
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
@@ -797,9 +797,9 @@ window.loadKnowledgeDocs = async (page = ragDocsPage) => {
     }
 };
 
-window.openKnowledgeWorkbench = async function () {
-    await window.ensureWorkspaceScripts?.('knowledge');
-    window.showMainWorkspace?.('knowledge');
+window.Pivot.legacy.openKnowledgeWorkbench = async function () {
+    await window.Pivot.legacy.ensureWorkspaceScripts?.('knowledge');
+    window.Pivot.legacy.showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
     panel.setAttribute('aria-hidden', 'false');
@@ -817,7 +817,7 @@ window.openKnowledgeWorkbench = async function () {
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
     try {
-        await window.ensureAdminSettingsScript?.();
+        await window.Pivot.legacy.ensureAdminSettingsScript?.();
     } catch (e) {
         console.error('加载知识库配置脚本失败', e);
         showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
@@ -829,20 +829,20 @@ window.openKnowledgeWorkbench = async function () {
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    window.bindEmbeddingModalEvents?.();
-    window.bindRagDebugModalEvents?.();
-    await window.loadSettings?.();
-    await window.loadKnowledgeDocs?.();
+    window.Pivot.legacy.bindEmbeddingModalEvents?.();
+    window.Pivot.legacy.bindRagDebugModalEvents?.();
+    await window.Pivot.legacy.loadSettings?.();
+    await window.Pivot.legacy.loadKnowledgeDocs?.();
     const restoreGraphDocId = getKnowledgeGraphRestoreDocId();
     if (restoreGraphDocId !== null) {
-        await window.openKnowledgeGraph?.(restoreGraphDocId || null);
+        await window.Pivot.legacy.openKnowledgeGraph?.(restoreGraphDocId || null);
     }
 };
 
-window.closeKnowledgeWorkbench = function () {
+window.Pivot.legacy.closeKnowledgeWorkbench = function () {
     closeKnowledgeGraphModal();
     document.getElementById('knowledge-workbench-modal')?.setAttribute('aria-hidden', 'true');
-    window.showMainWorkspace?.('chat');
+    window.Pivot.legacy.showMainWorkspace?.('chat');
 };
 
 function ensureKnowledgeUploadModal() {
@@ -891,7 +891,7 @@ function ensureKnowledgeUploadModal() {
         document.body.appendChild(modal);
         modal.addEventListener('click', (event) => {
             if (event.target === modal || event.target.closest('#knowledge-upload-close-btn')) {
-                window.closeKnowledgeUploadModal?.();
+                window.Pivot.legacy.closeKnowledgeUploadModal?.();
             }
         });
     }
@@ -901,22 +901,22 @@ function ensureKnowledgeUploadModal() {
     return modal;
 }
 
-window.openKnowledgeUploadModal = async function () {
+window.Pivot.legacy.openKnowledgeUploadModal = async function () {
     const modal = ensureKnowledgeUploadModal();
     const collectionId = getLinkedRagCollectionId('upload');
-    await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
+    await window.Pivot.legacy.loadKnowledgeTags?.(collectionId, { updateControls: false });
     updateRagTagControls();
     renderKnowledgeUploadQueue();
-    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-upload-zone' });
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-upload-zone' });
 };
 
-window.closeKnowledgeUploadModal = function () {
+window.Pivot.legacy.closeKnowledgeUploadModal = function () {
     if (knowledgeUploading) {
         showToast('文档正在上传，请等待当前任务完成后再关闭', 'info');
         return;
     }
     const modal = document.getElementById('knowledge-upload-modal');
-    window.setKnowledgeModalVisibility?.(modal, false);
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
     // 关闭即清空待上传队列，避免下次打开残留。
     knowledgeUploadQueue = [];
     renderKnowledgeUploadQueue();
@@ -958,11 +958,11 @@ function ensureKnowledgeDocMetaModal() {
         document.body.appendChild(modal);
         modal.addEventListener('click', (event) => {
             if (event.target === modal || event.target.closest('#knowledge-doc-meta-close-btn') || event.target.closest('#knowledge-doc-meta-cancel-btn')) {
-                window.closeKnowledgeDocMetaModal?.();
+                window.Pivot.legacy.closeKnowledgeDocMetaModal?.();
                 return;
             }
             if (event.target.closest('#knowledge-doc-meta-save-btn')) {
-                window.saveKnowledgeDocMeta?.();
+                window.Pivot.legacy.saveKnowledgeDocMeta?.();
             }
         });
     }
@@ -971,7 +971,7 @@ function ensureKnowledgeDocMetaModal() {
     return modal;
 }
 
-window.openKnowledgeDocMetaModal = async function (id) {
+window.Pivot.legacy.openKnowledgeDocMetaModal = async function (id) {
     const doc = getCachedKnowledgeDoc(id);
     if (!doc) return showToast('未找到文档，请刷新后重试', 'error');
     const modal = ensureKnowledgeDocMetaModal();
@@ -986,16 +986,16 @@ window.openKnowledgeDocMetaModal = async function (id) {
         collectionSelect.value = normalizeRagCollectionId(doc.collection_id);
     }
     const collectionId = normalizeRagCollectionId(doc.collection_id);
-    await window.loadKnowledgeTags?.(collectionId, { updateControls: false });
+    await window.Pivot.legacy.loadKnowledgeTags?.(collectionId, { updateControls: false });
     setRagTagCheckboxes(tagsList, getRagDocTags(doc), collectionId);
-    window.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-doc-meta-collection' });
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-doc-meta-collection' });
 };
 
-window.closeKnowledgeDocMetaModal = function () {
-    window.setKnowledgeModalVisibility?.(document.getElementById('knowledge-doc-meta-modal'), false);
+window.Pivot.legacy.closeKnowledgeDocMetaModal = function () {
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(document.getElementById('knowledge-doc-meta-modal'), false);
 };
 
-window.saveKnowledgeDocMeta = async function () {
+window.Pivot.legacy.saveKnowledgeDocMeta = async function () {
     const docId = normalizeRagCollectionId(document.getElementById('knowledge-doc-meta-id')?.value);
     if (!docId) return showToast('未找到文档，请刷新后重试', 'error');
     const lockKey = `meta:${docId}`;
@@ -1022,12 +1022,12 @@ window.saveKnowledgeDocMeta = async function () {
         const tagsData = await tagsRes.json().catch(() => ({}));
         if (!collectionRes.ok || collectionData.error) throw new Error(collectionData.error || '专题库更新失败');
         if (!tagsRes.ok || tagsData.error) throw new Error(tagsData.error || '标签更新失败');
-        window.closeKnowledgeDocMetaModal?.();
+        window.Pivot.legacy.closeKnowledgeDocMetaModal?.();
         invalidateRagTagCache();
-        await window.loadKnowledgeCollections?.();
-        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
+        await window.Pivot.legacy.loadKnowledgeCollections?.();
+        await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.({ force: true });
         showToast('文档整理信息已更新');
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '文档整理失败', 'error');
     } finally {
@@ -1056,31 +1056,31 @@ function bindKnowledgeUploadZone(root = document) {
     uploadZone.addEventListener('drop', event => {
         const files = event.dataTransfer?.files;
         if (!files || !files.length) return;
-        window.addKnowledgeUploadFiles(files); // 仅入队，不自动上传
+        window.Pivot.legacy.addKnowledgeUploadFiles(files); // 仅入队，不自动上传
     });
 
     const scope = root.querySelector ? root : document;
     const fileInput = document.getElementById('rag-upload-input');
     if (fileInput && fileInput.dataset.boundKnowledgeInput !== '1') {
         fileInput.dataset.boundKnowledgeInput = '1';
-        fileInput.addEventListener('change', () => window.addKnowledgeUploadFiles(fileInput.files));
+        fileInput.addEventListener('change', () => window.Pivot.legacy.addKnowledgeUploadFiles(fileInput.files));
     }
     const submitBtn = scope.querySelector('#knowledge-upload-submit-btn');
     if (submitBtn && submitBtn.dataset.bound !== '1') {
         submitBtn.dataset.bound = '1';
-        submitBtn.addEventListener('click', () => window.submitKnowledgeUpload());
+        submitBtn.addEventListener('click', () => window.Pivot.legacy.submitKnowledgeUpload());
     }
     const clearBtn = scope.querySelector('#knowledge-upload-clear-btn');
     if (clearBtn && clearBtn.dataset.bound !== '1') {
         clearBtn.dataset.bound = '1';
-        clearBtn.addEventListener('click', () => window.clearKnowledgeUploadQueue());
+        clearBtn.addEventListener('click', () => window.Pivot.legacy.clearKnowledgeUploadQueue());
     }
     const listEl = scope.querySelector('#knowledge-upload-list');
     if (listEl && listEl.dataset.bound !== '1') {
         listEl.dataset.bound = '1';
         listEl.addEventListener('click', event => {
             const removeBtn = event.target.closest?.('.knowledge-upload-item-remove');
-            if (removeBtn) window.removeKnowledgeUploadFile(removeBtn.dataset.index);
+            if (removeBtn) window.Pivot.legacy.removeKnowledgeUploadFile(removeBtn.dataset.index);
         });
     }
 }
@@ -1089,7 +1089,7 @@ const getSelectedRagDocIds = () => Array.from(document.querySelectorAll('.rag-do
     .map(input => Number(input.value))
     .filter(Boolean);
 
-window.batchReindexKnowledgeDocs = async () => {
+window.Pivot.legacy.batchReindexKnowledgeDocs = async () => {
     const docIds = getSelectedRagDocIds();
     if (docIds.length === 0) return showToast('请选择文档', 'error');
     const lockKey = 'batch-reindex';
@@ -1104,7 +1104,7 @@ window.batchReindexKnowledgeDocs = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '批量重建失败');
         showToast(`已加入 ${data.scheduled || 0} 个重建任务`);
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量重建失败', 'error');
     } finally {
@@ -1112,7 +1112,7 @@ window.batchReindexKnowledgeDocs = async () => {
     }
 };
 
-window.batchDeleteKnowledgeDocs = async () => {
+window.Pivot.legacy.batchDeleteKnowledgeDocs = async () => {
     const docIds = getSelectedRagDocIds();
     if (docIds.length === 0) return showToast('请选择文档', 'error');
     const confirmed = await ragConfirm('批量删除知识库文档', `确定删除选中的 ${docIds.length} 个知识库文档吗？大模型将不再参考这些文档。`);
@@ -1129,7 +1129,7 @@ window.batchDeleteKnowledgeDocs = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '批量删除失败');
         showToast(`已删除 ${data.deleted || 0} 个文档`);
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量删除失败', 'error');
     } finally {
@@ -1137,7 +1137,7 @@ window.batchDeleteKnowledgeDocs = async () => {
     }
 };
 
-window.toggleKnowledgeDocEnabled = async (id, enabled) => {
+window.Pivot.legacy.toggleKnowledgeDocEnabled = async (id, enabled) => {
     const docId = normalizeRagCollectionId(id);
     if (!docId) return;
     const lockKey = `enabled:${docId}`;
@@ -1154,7 +1154,7 @@ window.toggleKnowledgeDocEnabled = async (id, enabled) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '启停失败');
         showToast(enabled ? '文档已启用' : '文档已停用');
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         if (toggle) toggle.checked = !enabled;
         showToast(e.message || '启停失败', 'error');
@@ -1164,7 +1164,7 @@ window.toggleKnowledgeDocEnabled = async (id, enabled) => {
     }
 };
 
-window.showKnowledgeDocDetail = async (id) => {
+window.Pivot.legacy.showKnowledgeDocDetail = async (id) => {
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/${id}?limit=50`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
@@ -1175,7 +1175,7 @@ window.showKnowledgeDocDetail = async (id) => {
     }
 };
 
-window.sendRagFeedback = async (button) => {
+window.Pivot.legacy.sendRagFeedback = async (button) => {
     try {
         const res = await apiFetch(`${API_BASE}/rag/feedback`, {
             method: 'POST',
@@ -1215,7 +1215,7 @@ window.Pivot.exposeModule('rag.debug', {
     loadRagDebugHistory: 'loadRagDebugHistory'
 });
 
-window.debugRagQuery = async () => {
+window.Pivot.legacy.debugRagQuery = async () => {
     const input = document.getElementById('rag-debug-query');
     const button = document.getElementById('rag-debug-btn');
     const results = document.getElementById('rag-debug-results');
@@ -1250,7 +1250,7 @@ window.debugRagQuery = async () => {
             },
             body: JSON.stringify({
                 query,
-                ragScope: window.getRagScopeSelection?.('debug') || {},
+                ragScope: window.Pivot.legacy.getRagScopeSelection?.('debug') || {},
                 scoreThreshold: document.getElementById('rag-debug-score-threshold')?.value,
                 topK: document.getElementById('rag-debug-top-k')?.value,
                 candidateLimit: document.getElementById('rag-debug-candidate-limit')?.value
@@ -1259,7 +1259,7 @@ window.debugRagQuery = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '检索测试失败');
         renderRagDebugResults(data);
-        window.loadRagDebugHistory?.();
+        window.Pivot.legacy.loadRagDebugHistory?.();
     } catch (e) {
         showToast(e.message || '检索测试失败', 'error');
         if (results) {
@@ -1274,7 +1274,7 @@ window.debugRagQuery = async () => {
     }
 };
 
-window.retryFailedKnowledgeDocs = async () => {
+window.Pivot.legacy.retryFailedKnowledgeDocs = async () => {
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/retry-failed`, {
             method: 'POST',
@@ -1283,7 +1283,7 @@ window.retryFailedKnowledgeDocs = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '批量重试失败');
         showToast(`已加入 ${data.scheduled || 0} 个重新索引任务`);
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量重试失败', 'error');
     }
@@ -1464,7 +1464,7 @@ function renderKnowledgeUploadQueue() {
 }
 
 // 将文件加入待上传队列（按 名称+大小 去重），不立即上传。
-window.addKnowledgeUploadFiles = (fileList = null) => {
+window.Pivot.legacy.addKnowledgeUploadFiles = (fileList = null) => {
     if (knowledgeUploading) { showToast('正在上传，请稍候再添加', 'info'); return; }
     const fileInput = document.getElementById('rag-upload-input');
     const incoming = Array.from(fileList && fileList.length ? fileList : (fileInput?.files || []));
@@ -1484,7 +1484,7 @@ window.addKnowledgeUploadFiles = (fileList = null) => {
     renderKnowledgeUploadQueue();
 };
 
-window.removeKnowledgeUploadFile = (index) => {
+window.Pivot.legacy.removeKnowledgeUploadFile = (index) => {
     if (knowledgeUploading) return;
     const i = Number(index);
     if (Number.isInteger(i) && i >= 0 && i < knowledgeUploadQueue.length) {
@@ -1493,7 +1493,7 @@ window.removeKnowledgeUploadFile = (index) => {
     }
 };
 
-window.clearKnowledgeUploadQueue = () => {
+window.Pivot.legacy.clearKnowledgeUploadQueue = () => {
     if (knowledgeUploading) return;
     knowledgeUploadQueue = [];
     renderKnowledgeUploadQueue();
@@ -1501,7 +1501,7 @@ window.clearKnowledgeUploadQueue = () => {
 
 // 上传当前待上传队列：以并发 KNOWLEDGE_UPLOAD_CONCURRENCY 上传，并逐文件更新进度/状态徽标。
 // 成功的文件移出队列；全部成功才关闭弹窗，否则保留失败文件供重试。
-window.uploadKnowledgeDocs = async () => {
+window.Pivot.legacy.uploadKnowledgeDocs = async () => {
     if (knowledgeUploading) return;
     const entries = knowledgeUploadQueue.slice();
     if (!entries.length) return;
@@ -1567,29 +1567,29 @@ window.uploadKnowledgeDocs = async () => {
 
     if (success > 0) {
         invalidateRagTagCache();
-        await window.loadKnowledgeCollections?.();
-        await window.refreshRagTagControlsForSelectedCollections?.({ force: true });
-        window.loadKnowledgeDocs();
+        await window.Pivot.legacy.loadKnowledgeCollections?.();
+        await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.({ force: true });
+        window.Pivot.legacy.loadKnowledgeDocs();
     }
 
     if (failures.length === 0) {
         document.querySelectorAll('#knowledge-upload-tags-list input[type="checkbox"]').forEach(input => { input.checked = false; });
-        window.closeKnowledgeUploadModal?.();
+        window.Pivot.legacy.closeKnowledgeUploadModal?.();
     } else {
         renderKnowledgeUploadQueue(); // 恢复按钮状态并展示剩余失败文件
     }
 };
 
 // 提交按钮入口：上传当前待上传队列。
-window.submitKnowledgeUpload = () => window.uploadKnowledgeDocs();
+window.Pivot.legacy.submitKnowledgeUpload = () => window.Pivot.legacy.uploadKnowledgeDocs();
 
 // 向后兼容的单文件入口：加入队列后立即上传。
-window.uploadKnowledgeDoc = (selectedFile = null) => {
-    if (selectedFile) window.addKnowledgeUploadFiles([selectedFile]);
-    return window.uploadKnowledgeDocs();
+window.Pivot.legacy.uploadKnowledgeDoc = (selectedFile = null) => {
+    if (selectedFile) window.Pivot.legacy.addKnowledgeUploadFiles([selectedFile]);
+    return window.Pivot.legacy.uploadKnowledgeDocs();
 };
 
-window.reindexKnowledgeDoc = async (id) => {
+window.Pivot.legacy.reindexKnowledgeDoc = async (id) => {
     const docId = normalizeRagCollectionId(id);
     if (!docId) return;
     const lockKey = `reindex:${docId}`;
@@ -1603,7 +1603,7 @@ window.reindexKnowledgeDoc = async (id) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '重新索引失败');
         showToast(data.message || '已加入重新索引队列');
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '重新索引失败', 'error');
     } finally {
@@ -1611,7 +1611,7 @@ window.reindexKnowledgeDoc = async (id) => {
     }
 };
 
-window.deleteKnowledgeDoc = async (id) => {
+window.Pivot.legacy.deleteKnowledgeDoc = async (id) => {
     const docId = normalizeRagCollectionId(id);
     if (!docId) return;
     const confirmed = await ragConfirm('删除知识库文档', '确定要从知识库中移除该文档吗？大模型将不再参考此文档。');
@@ -1628,7 +1628,7 @@ window.deleteKnowledgeDoc = async (id) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '删除失败');
         showToast('文档已移除');
-        window.loadKnowledgeDocs();
+        window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast('删除失败', 'error');
     } finally {
@@ -1639,14 +1639,14 @@ window.deleteKnowledgeDoc = async (id) => {
 document.addEventListener('change', async (event) => {
     const id = event.target?.id;
     if (id === 'rag-debug-collection') {
-        await window.handleRagCollectionScopeChange?.('debug');
+        await window.Pivot.legacy.handleRagCollectionScopeChange?.('debug');
         return;
     }
     if (id === 'knowledge-upload-collection') {
-        await window.handleRagCollectionScopeChange?.('upload');
+        await window.Pivot.legacy.handleRagCollectionScopeChange?.('upload');
         return;
     }
     if (id === 'knowledge-doc-meta-collection') {
-        await window.handleRagCollectionScopeChange?.('meta');
+        await window.Pivot.legacy.handleRagCollectionScopeChange?.('meta');
     }
 });

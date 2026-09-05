@@ -26,7 +26,7 @@ function createDagInspectorController(ctx) {
                 body: JSON.stringify({
                     tool: node.tool,
                     input: node.input || {},
-                    dagInputs: window.collectAgentDagInputs?.() || {}
+                    dagInputs: window.Pivot.legacy.collectAgentDagInputs?.() || {}
                 })
             });
             const data = await response.json().catch(() => ({}));
@@ -212,7 +212,7 @@ function createDagInspectorController(ctx) {
             ctx.render?.();
             ctx.flushOut?.();
             closeJson();
-            window.showToast?.('高级参数已更新', 'success');
+            window.Pivot.legacy.showToast?.('高级参数已更新', 'success');
         };
         const insertToken = token => {
             if (!token || !textareaEl) return;
@@ -528,7 +528,7 @@ function createDagInspectorController(ctx) {
             ctx.render?.();
             ctx.flushOut?.();
             close();
-            window.showToast?.('节点契约已更新', 'success');
+            window.Pivot.legacy.showToast?.('节点契约已更新', 'success');
         });
         modal.classList.remove('hidden');
         requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
@@ -865,7 +865,7 @@ function createDagInspectorController(ctx) {
         node.input = { ...template };
         ctx.render?.();
         ctx.flushOut?.();
-        window.showToast?.('已套用工具参数模板', 'success');
+        window.Pivot.legacy.showToast?.('已套用工具参数模板', 'success');
     };
 
     const handleInspectorEdit = (input, options = {}) => {
@@ -929,7 +929,7 @@ function createDagInspectorController(ctx) {
         if (checkbox.checked) {
             if (wouldCreateCycle(dep, node.id)) {
                 checkbox.checked = false;
-                window.showToast?.('不能添加循环依赖', 'error');
+                window.Pivot.legacy.showToast?.('不能添加循环依赖', 'error');
                 return;
             }
             deps.add(dep);

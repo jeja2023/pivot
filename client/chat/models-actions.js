@@ -1,5 +1,5 @@
 // --- 模型管理动作模块 ---
-window.toggleKeyVisibility = async () => {
+window.Pivot.legacy.toggleKeyVisibility = async () => {
     const keyInput = document.getElementById('m-key');
     const eyeIcon = document.getElementById('eye-icon');
     const modelId = document.getElementById('m-id').value;
@@ -11,7 +11,7 @@ window.toggleKeyVisibility = async () => {
     };
 
     if (keyInput.type === 'password' && keyInput.value === '********' && modelId) {
-        const pwd = await window.showInputPrompt({
+        const pwd = await window.Pivot.legacy.showInputPrompt({
             title: '安全验证',
             message: '请输入当前登录密码以查看明文密钥。',
             type: 'password',
@@ -50,7 +50,7 @@ window.toggleKeyVisibility = async () => {
     }
 };
 
-window.addModel = async () => {
+window.Pivot.legacy.addModel = async () => {
     const id = document.getElementById('m-id').value;
     const payload = {
         name: document.getElementById('m-name').value,
@@ -93,20 +93,20 @@ window.addModel = async () => {
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload)
         });
-        if (res.ok) { loadModels(); closeModelModal(); showToast(id ? '更新成功' : '添加成功'); }
+        if (res.ok) { window.Pivot.legacy.loadModels(); window.Pivot.legacy.closeModelModal(); showToast(id ? '更新成功' : '添加成功'); }
         else { const err = await res.json(); showToast(err.error || '操作失败', 'error'); }
     } catch (e) { showToast('请求失败', 'error'); }
     finally { btn.disabled = false; btn.innerText = oldText; }
 };
 
-window.deleteModel = (id) => {
-    showConfirm('删除模型', '确定要删除该模型配置吗？', async () => {
+window.Pivot.legacy.deleteModel = (id) => {
+    window.Pivot.legacy.showConfirm('删除模型', '确定要删除该模型配置吗？', async () => {
         const res = await apiFetch(`${API_BASE}/models/${id}`, { method: 'DELETE', headers: authHeaders() });
-        if (res.ok) { showToast('模型已删除'); loadModels(pageState.models); }
+        if (res.ok) { showToast('模型已删除'); window.Pivot.legacy.loadModels(pageState.models); }
     });
 };
 
-window.setGlobalDefaultModel = async (modelId, btn = null) => {
+window.Pivot.legacy.setGlobalDefaultModel = async (modelId, btn = null) => {
     if (btn) {
         btn.innerText = modelId ? '取消默认' : '设为默认';
         btn.style.borderColor = modelId ? 'var(--danger)' : 'var(--primary)';

@@ -1,16 +1,16 @@
 // 聊天附件上传与待发送附件状态 Chat attachment upload and pending attachment state
 let pendingAttachments = [];
 const DEFAULT_MAX_PENDING_ATTACHMENTS = 5;
-let maxPendingAttachments = Number.parseInt(window.MAX_PENDING_ATTACHMENTS, 10);
+let maxPendingAttachments = Number.parseInt(window.Pivot.legacy.MAX_PENDING_ATTACHMENTS, 10);
 if (!Number.isFinite(maxPendingAttachments) || maxPendingAttachments <= 0) {
     maxPendingAttachments = DEFAULT_MAX_PENDING_ATTACHMENTS;
 }
 let pendingAttachmentCounter = 0;
-window.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
-window.pendingAttachments = pendingAttachments;
+window.Pivot.legacy.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
+window.Pivot.legacy.pendingAttachments = pendingAttachments;
 
 function syncPendingAttachmentsGlobal() {
-    window.pendingAttachments = pendingAttachments;
+    window.Pivot.legacy.pendingAttachments = pendingAttachments;
 }
 
 function normalizeMaxPendingAttachments(value) {
@@ -19,15 +19,15 @@ function normalizeMaxPendingAttachments(value) {
 }
 
 function getMaxPendingAttachments() {
-    const configured = normalizeMaxPendingAttachments(window.MAX_PENDING_ATTACHMENTS);
+    const configured = normalizeMaxPendingAttachments(window.Pivot.legacy.MAX_PENDING_ATTACHMENTS);
     maxPendingAttachments = configured;
-    window.MAX_PENDING_ATTACHMENTS = configured;
+    window.Pivot.legacy.MAX_PENDING_ATTACHMENTS = configured;
     return configured;
 }
 
 function setMaxPendingAttachments(value) {
     maxPendingAttachments = normalizeMaxPendingAttachments(value);
-    window.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
+    window.Pivot.legacy.MAX_PENDING_ATTACHMENTS = maxPendingAttachments;
     renderAttachmentPreviews?.();
     return maxPendingAttachments;
 }
@@ -144,7 +144,7 @@ async function uploadPendingAttachmentItem(item, uploadSessionId) {
         data = await uploadOnce('');
     } catch (uploadErr) {
         if (uploadErr.data?.passwordRequired) {
-            const password = await window.showInputPrompt({
+            const password = await window.Pivot.legacy.showInputPrompt({
                 title: '文档密码',
                 message: `文档 ${item.name} 已加密，请输入文档密码。`,
                 type: 'password',
@@ -291,7 +291,7 @@ function createUploadProgress(label) {
 
 async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支持的文件' } = {}) {
     const modelId = document.getElementById('model-selector').value;
-    const model = (window._cachedModels || []).find(m => String(m.id) === String(modelId));
+    const model = (window.Pivot.legacy._cachedModels || []).find(m => String(m.id) === String(modelId));
     if (!model || Number(model.supports_vision || 0) !== 1) {
         showToast('当前选中的模型不具备视觉或文档分析能力，无法上传附件', 'error');
         return { acceptedCount: 0, rejected: true };

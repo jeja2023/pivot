@@ -43,8 +43,8 @@ function getMaxConcurrentIndexes() {
     return getBackgroundRuntimeConfig().ragIndexMaxConcurrent;
 }
 
-function ensureKnowledgeSourceRoot() {
-    fs.mkdirSync(knowledgeSourceRoot, { recursive: true });
+async function ensureKnowledgeSourceRoot() {
+    await fs.promises.mkdir(knowledgeSourceRoot, { recursive: true });
 }
 
 function normalizeKnowledgeDocId(value) {
@@ -315,18 +315,19 @@ function toProjectRelativePath(filePath) {
     return uploadRelative ? `uploads/${uploadRelative}` : 'uploads';
 }
 
-function persistUploadedKnowledgeFile(file, userId, docId) {
-    ensureKnowledgeSourceRoot();
+async function persistUploadedKnowledgeFile(file, userId, docId) {
+    await ensureKnowledgeSourceRoot();
     const safeUserId = String(normalizeKnowledgeDocId(userId) || 'unknown');
     const ext = getSafeKnowledgeExtension(file.originalname);
     const targetDir = path.join(knowledgeSourceRoot, safeUserId);
     const targetPath = path.join(targetDir, `${docId}${ext}`);
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.renameSync(file.path, targetPath);
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    await fs.promises.rename(file.path, targetPath);
+    const stat = await fs.promises.stat(targetPath);
     clearDirSizeCache();
     return {
         sourcePath: toProjectRelativePath(targetPath),
-        sourceSize: fs.statSync(targetPath).size
+        sourceSize: stat.size
     };
 }
 
@@ -350,7 +351,7 @@ async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = 
     const assignedTags = safeTags.length ? await setKnowledgeDocumentTags({ docId, userId, tags: safeTags }) : [];
 
     try {
-        const savedFile = persistUploadedKnowledgeFile(file, userId, docId);
+        const savedFile = await persistUploadedKnowledgeFile(file, userId, docId);
         await execute(`
             UPDATE knowledge_docs
             SET source_path = ?, source_size = ?, updated_at = ?
@@ -443,7 +444,7 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     }
 
     const sourcePath = getKnowledgeSourcePath(doc.source_path);
-    if (!sourcePath || !fs.existsSync(sourcePath)) {
+    if (!sourcePath || !await fs.promises.access(sourcePath, fs.constants.R_OK).then(() => true).catch(() => false)) {
         const error = new Error('原始文件不存在，无法重新索引，请重新上传文档');
         await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error });
         throw error;

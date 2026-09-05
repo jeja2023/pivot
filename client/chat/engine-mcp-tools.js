@@ -3,7 +3,7 @@ function confirmChatMcpUse() {
     const title = '允许调用工具库工具';
     const message = '工具库工具可能访问已保存的外部服务、数据库结构或数据库查询结果。数据库工具会继续受只读限制保护；确认后本浏览器会话内不再重复提醒。';
     return new Promise(resolve => {
-        if (typeof window.showConfirm !== 'function') return resolve(window.confirm(message));
+        if (typeof window.Pivot.legacy.showConfirm !== 'function') return resolve(window.confirm(message));
         const cancelBtn = document.getElementById('modal-confirm-cancel');
         const overlay = document.getElementById('confirm-container');
         let settled = false;
@@ -21,7 +21,7 @@ function confirmChatMcpUse() {
             resolve(result);
         };
         const onCancelClick = () => settle(false);
-        window.showConfirm(title, message, () => settle(true));
+        window.Pivot.legacy.showConfirm(title, message, () => settle(true));
         cancelBtn?.addEventListener('click', onCancelClick);
         overlay?.addEventListener('click', onOverlayClick);
     });
@@ -52,9 +52,9 @@ async function ensureChatMcpConsent() {
     return confirmed;
 }
 
-window.confirmChatMcpUse = confirmChatMcpUse;
-window.hasChatMcpConsent = hasChatMcpConsent;
-window.ensureChatMcpConsent = ensureChatMcpConsent;
+window.Pivot.legacy.confirmChatMcpUse = confirmChatMcpUse;
+window.Pivot.legacy.hasChatMcpConsent = hasChatMcpConsent;
+window.Pivot.legacy.ensureChatMcpConsent = ensureChatMcpConsent;
 
 function isChatToolEnabled(id, storageKey) {
     const button = document.getElementById(id);
@@ -79,7 +79,7 @@ function shouldAutoEnableMcpForPrompt(value = '') {
 
 function activateChatMcpToggle() {
     const button = document.getElementById('chat-mcp-enabled');
-    window.setChatToolToggleState?.(button, true);
+    window.Pivot.legacy.setChatToolToggleState?.(button, true);
     try {
         localStorage.setItem('pivot_chat_mcp_enabled', 'true');
     } catch (e) {
@@ -87,5 +87,5 @@ function activateChatMcpToggle() {
     }
 }
 
-window.shouldAutoEnableMcpForPrompt = shouldAutoEnableMcpForPrompt;
-window.activateChatMcpToggle = activateChatMcpToggle;
+window.Pivot.legacy.shouldAutoEnableMcpForPrompt = shouldAutoEnableMcpForPrompt;
+window.Pivot.legacy.activateChatMcpToggle = activateChatMcpToggle;

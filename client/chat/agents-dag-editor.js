@@ -26,7 +26,7 @@
  */
 /* global createDagIcon, placeNewNode */
 (function () {
-if (window.PivotDagEditor) return;
+if (window.Pivot.legacy.PivotDagEditor) return;
 
 const raf = typeof globalThis.requestAnimationFrame === 'function'
     ? callback => globalThis.requestAnimationFrame(callback)
@@ -74,13 +74,13 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
         const undo = () => {
             const previous = undoStack.pop();
-            if (!previous) return window.showToast?.('没有可撤销的修改', 'info');
+            if (!previous) return window.Pivot.legacy.showToast?.('没有可撤销的修改', 'info');
             redoStack.push(snapshot());
             restoreSnapshot(previous);
         };
         const redo = () => {
             const next = redoStack.pop();
-            if (!next) return window.showToast?.('没有可重做的修改', 'info');
+            if (!next) return window.Pivot.legacy.showToast?.('没有可重做的修改', 'info');
             undoStack.push(snapshot());
             restoreSnapshot(next);
         };
@@ -366,7 +366,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const showValidationResult = () => {
             const report = validateWorkflow();
             const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
-            window.showToast?.(message, report.errors.length ? 'error' : report.warnings.length ? 'warning' : 'success');
+            window.Pivot.legacy.showToast?.(message, report.errors.length ? 'error' : report.warnings.length ? 'warning' : 'success');
             renderToolbarStatus();
         };
 
@@ -426,11 +426,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const ids = new Set(selectedIds);
             if (!ids.size && selectedId) ids.add(selectedId);
             clipboardNodes = spec.nodes.filter(node => ids.has(node.id)).map(node => JSON.parse(JSON.stringify(node)));
-            window.showToast?.(clipboardNodes.length ? `已复制 ${clipboardNodes.length} 个节点` : '请先选择节点', clipboardNodes.length ? 'success' : 'warning');
+            window.Pivot.legacy.showToast?.(clipboardNodes.length ? `已复制 ${clipboardNodes.length} 个节点` : '请先选择节点', clipboardNodes.length ? 'success' : 'warning');
         };
 
         const pasteSelection = () => {
-            if (!clipboardNodes.length) return window.showToast?.('剪贴板中没有节点', 'warning');
+            if (!clipboardNodes.length) return window.Pivot.legacy.showToast?.('剪贴板中没有节点', 'warning');
             recordHistory();
             const existing = spec.nodes.map(node => node.id);
             const idMap = new Map();
@@ -486,7 +486,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             render();
             if (wasEmpty) fitToContent();
             flushOut();
-            window.showToast?.(anchorNode ? `已在「${anchorNode.title || anchorNode.id}」后添加新节点` : '已添加新的起始节点', 'success');
+            window.Pivot.legacy.showToast?.(anchorNode ? `已在「${anchorNode.title || anchorNode.id}」后添加新节点` : '已添加新的起始节点', 'success');
         };
 
         const addPresetNode = (preset) => {
@@ -496,7 +496,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 || (!registry ? findPreferredTool(tools, preset.patterns || []) : null);
             if (!preferred) {
                 const reason = registry?.availability(preset, tools)?.reason || `当前没有可用的“${preset.title || '节点'}”工具`;
-                window.showToast?.(reason, 'warning');
+                window.Pivot.legacy.showToast?.(reason, 'warning');
                 return null;
             }
             const wasEmpty = spec.nodes.length === 0;
@@ -526,7 +526,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             render();
             if (wasEmpty) fitToContent();
             flushOut();
-            window.showToast?.(
+            window.Pivot.legacy.showToast?.(
                 selectedNode
                     ? `已在「${selectedNode.title || selectedNode.id}」后添加${node.title}`
                     : `已添加${node.title}起始节点`,
@@ -601,7 +601,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             render();
             if (wasEmpty) fitToContent();
             flushOut();
-            window.showToast?.('已添加并行专家与主管智能体，可继续调整角色、模型和交接契约', 'success');
+            window.Pivot.legacy.showToast?.('已添加并行专家与主管智能体，可继续调整角色、模型和交接契约', 'success');
         };
 
         const resetLayout = () => {
@@ -748,7 +748,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             updateViewBox();
         };
         const mountNodeLibrary = () => {
-            if (!window.PivotDagNodeLibrary) return;
+            if (!window.Pivot.legacy.PivotDagNodeLibrary) return;
             // host 必须挂在 canvas 本身内部，才能正确相对定位
             let host = canvas.querySelector('.pivot-dag-node-library-host');
             if (!host) {
@@ -756,7 +756,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 host.className = 'pivot-dag-node-library-host';
                 canvas.appendChild(host);
             }
-            nodeLibraryInstance = window.PivotDagNodeLibrary.mount({
+            nodeLibraryInstance = window.Pivot.legacy.PivotDagNodeLibrary.mount({
                 container: host,
                 onAddNode: (preset) => addPresetNode(preset),
                 onToggleCollapse: (collapsed) => setLibraryCollapsed(collapsed),
@@ -861,5 +861,5 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
     }
 
-window.PivotDagEditor = { mount };
+window.Pivot.legacy.PivotDagEditor = { mount };
 })();

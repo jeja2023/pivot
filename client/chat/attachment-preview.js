@@ -1,8 +1,8 @@
 /* 附件预览 */
 const ATTACHMENT_TEXT_LIMIT = 12000;
 
-const escapePreviewHtml = (value) => window.PivotSafeHtml
-    ? window.PivotSafeHtml.escapeHtml(value)
+const escapePreviewHtml = (value) => window.Pivot.legacy.PivotSafeHtml
+    ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value)
     : String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function guessAttachmentKind(url = '', mimeType = '') {

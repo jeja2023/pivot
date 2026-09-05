@@ -1,7 +1,7 @@
 let opsSummaryLoadController = null;
 let opsSummaryLoadPromise = null;
 
-window.loadOpsSummary = function(options = {}) {
+const loadOpsSummary = function(options = {}) {
     if (opsSummaryLoadPromise && !options.force && !options.refresh) return opsSummaryLoadPromise;
     opsSummaryLoadController?.abort();
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -35,7 +35,7 @@ window.loadOpsSummary = function(options = {}) {
             PivotSafeHtml.setHtml(gridEl, cards.map(([l, v], index) => `<div class="ops-card ${index < 2 ? 'primary' : ''}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong></div>`).join(''));
         }
         renderTrendChart('usage-trend-chart', Array.isArray(trend) ? trend : []);
-        window.scheduleSettingsWorkspaceScale?.();
+        window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
         if (e?.name === 'AbortError') return false;
         showToast(e.message || '加载概览失败', 'error');
@@ -57,13 +57,37 @@ let monitorTimer = null;
 let monitorSummaryLoadController = null;
 let monitorSummaryLoadPromise = null;
 
+function renderRagEmbeddingLatencyTrend(container, embedding = {}) {
+    if (!container) return;
+    const points = Array.isArray(embedding.trend) ? embedding.trend : [];
+    if (!points.length) {
+        PivotSafeHtml.setHtml(container, '<div class="monitor-rag-latency-empty">暂无 Embedding 调用样本；首次检索或索引后自动显示趋势。</div>');
+        return;
+    }
+    const width = 280;
+    const height = 58;
+    const max = Math.max(...points.map(item => Number(item.averageDurationMs || 0)), 1);
+    const polyline = points.map((item, index) => {
+        const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+        const y = height - (Math.min(Math.max(Number(item.averageDurationMs || 0), 0), max) / max) * (height - 8) - 4;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const summary = embedding.summary || {};
+    const last = points.at(-1) || {};
+    PivotSafeHtml.setHtml(container, `
+        <div class="monitor-rag-latency-head"><span>Embedding 延迟趋势（${escapeHtml(String(embedding.minutes || 0))} 分钟）</span><strong>${formatMetricNumber(summary.averageDurationMs, 1)} ms</strong></div>
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Embedding 平均延迟趋势" preserveAspectRatio="none"><polyline points="${polyline}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+        <div class="monitor-rag-latency-meta"><span>最近 ${formatMetricNumber(last.averageDurationMs, 1)} ms</span><span>失败率 ${(Number(summary.errorRate || 0) * 100).toFixed(1)}%</span></div>
+    `);
+}
+
 function cancelOpsSummaryLoad() {
     opsSummaryLoadController?.abort();
     opsSummaryLoadController = null;
     opsSummaryLoadPromise = null;
 }
 
-window.loadMonitorSummary = async function(options = {}) {
+const loadMonitorSummary = async function(options = {}) {
     if (!isAdminUser()) return;
     if (monitorSummaryLoadPromise && !options.force && !options.refresh) return monitorSummaryLoadPromise;
     monitorSummaryLoadController?.abort();
@@ -254,6 +278,10 @@ window.loadMonitorSummary = async function(options = {}) {
         const ragStorageEl = document.getElementById('monitor-rag-storage-list');
         if (ragStorageEl) {
             const ragData = data.rag || {};
+            const ragOperations = data.ragOperations || {};
+            const embedding = ragOperations.embedding || {};
+            const embeddingSummary = embedding.summary || {};
+            const diagnostics = ragOperations.diagnostics || {};
             const storageData = data.storage || {};
             const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
             PivotSafeHtml.setHtml(ragStorageEl, [
@@ -261,10 +289,14 @@ window.loadMonitorSummary = async function(options = {}) {
                 ['命中率', `<strong>${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%</strong>`],
                 ['缓存命中率', `<strong>${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
                 ['平均耗时', `<strong>${avgRetrieval} ms</strong>`],
+                ['Embedding 平均耗时', `<strong>${formatMetricNumber(embeddingSummary.averageDurationMs, 1)} ms</strong>`],
+                ['Embedding 失败率', `<strong>${(Number(embeddingSummary.errorRate || 0) * 100).toFixed(1)}%</strong>`],
+                ['检索诊断（24h）', `<strong>${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms</strong>`],
                 ['索引分片', `<strong>${formatMetricNumber(ragData.chunksIndexed)}</strong>`],
                 ['数据库大小', `<strong>${formatBytes(storageData.db)}</strong>`],
                 ['附件总存储', `<strong>${formatBytes(storageData.uploads)}</strong>`]
             ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
+            renderRagEmbeddingLatencyTrend(document.getElementById('monitor-rag-latency-trend'), embedding);
         }
 
         const observability = data.observability || {};
@@ -330,7 +362,7 @@ window.loadMonitorSummary = async function(options = {}) {
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();
-        window.scheduleSettingsWorkspaceScale?.();
+        window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     } catch (e) {
         if (e?.name === 'AbortError') return false;
         showToast(e.message || '系统监控加载失败', 'error');
@@ -361,14 +393,8 @@ function cancelMonitorSummaryLoad() {
     monitorSummaryLoadPromise = null;
 }
 
-window.Pivot?.exposeModule?.('settings.monitor', {
-    clearMonitorRefreshTimer,
-    cancelMonitorSummaryLoad,
-    cancelOpsSummaryLoad
-}, ['clearMonitorRefreshTimer', 'cancelMonitorSummaryLoad', 'cancelOpsSummaryLoad']);
-
-window.refreshMonitorSummary = function(options = {}) {
-    return window.loadMonitorSummary({ ...options, force: true });
+const refreshMonitorSummary = function(options = {}) {
+    return loadMonitorSummary({ ...options, force: true });
 };
 
 function scheduleMonitorRefresh() {
@@ -382,13 +408,13 @@ function scheduleMonitorRefresh() {
             const stillActive = document.body?.dataset?.activeWorkspace === 'settings';
             const stillVisible = stillActive && !document.getElementById('tab-content-monitor')?.classList.contains('hidden');
             if (stillVisible) {
-                window.loadMonitorSummary();
+                loadMonitorSummary();
             }
         }, 10000);
     }
 }
 
-window.saveObservabilityWebhook = async function() {
+const saveObservabilityWebhook = async function() {
     const input = document.getElementById('observability-webhook-url');
     const res = await apiFetch(`${API_BASE}/stats/observability/settings`, {
         method: 'PUT',
@@ -398,5 +424,23 @@ window.saveObservabilityWebhook = async function() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '告警设置保存失败', 'error');
     showToast('告警设置已保存', 'success');
-    window.loadMonitorSummary();
+    loadMonitorSummary();
 };
+
+window.Pivot?.exposeModule?.('settings.monitor', {
+    loadOpsSummary,
+    loadMonitorSummary,
+    refreshMonitorSummary,
+    saveObservabilityWebhook,
+    clearMonitorRefreshTimer,
+    cancelMonitorSummaryLoad,
+    cancelOpsSummaryLoad
+}, [
+    'loadOpsSummary',
+    'loadMonitorSummary',
+    'refreshMonitorSummary',
+    'saveObservabilityWebhook',
+    'clearMonitorRefreshTimer',
+    'cancelMonitorSummaryLoad',
+    'cancelOpsSummaryLoad'
+]);

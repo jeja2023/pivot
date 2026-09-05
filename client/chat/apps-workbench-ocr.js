@@ -1,5 +1,5 @@
 (function () {
-    if (window.PivotOcr?.ready) return;
+    if (window.Pivot.legacy.PivotOcr?.ready) return;
 
     const API = '/api/apps/ocr';
     const state = {
@@ -17,7 +17,7 @@
         timer: null
     };
 
-    const html = window.PivotSafeHtml || {
+    const html = window.Pivot.legacy.PivotSafeHtml || {
         escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -351,11 +351,11 @@
     function renderJobPagination() {
         const pager = document.getElementById('ocr-job-pagination');
         if (!pager) return;
-        if (typeof window.renderWorkspacePagination !== 'function') {
+        if (typeof window.Pivot.legacy.renderWorkspacePagination !== 'function') {
             pager.replaceChildren();
             return;
         }
-        window.renderWorkspacePagination(pager, {
+        window.Pivot.legacy.renderWorkspacePagination(pager, {
             total: state.total,
             page: state.page,
             limit: state.limit,
@@ -916,7 +916,7 @@
     function startPolling() {
         if (state.timer) return;
         state.timer = window.setInterval(() => {
-            if (window.getAppsSessionValue?.('pivot_apps_active_app') !== 'ocr') return;
+            if (window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'ocr') return;
             const active = state.jobs.some(job => job.status === 'pending' || job.status === 'processing');
             if (active) loadJobs({ keepActive: true }).catch(() => {});
         }, 4000);
@@ -924,8 +924,8 @@
 
     async function showOcrApp() {
         const view = ensureView();
-        window.PivotDataAnalysis?.resetAiWorkspace?.();
-        window.setAppsSessionValue?.('pivot_apps_active_app', 'ocr');
+        window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
+        window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'ocr');
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -942,12 +942,12 @@
         await Promise.all(loaders);
     }
 
-    window.PivotOcr = {
+    window.Pivot.legacy.PivotOcr = {
         ready: true,
         state,
         showOcrApp,
         loadJobs,
         loadDetail
     };
-    window.showOcrApp = showOcrApp;
+    window.Pivot.legacy.showOcrApp = showOcrApp;
 })();

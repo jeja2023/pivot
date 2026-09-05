@@ -88,6 +88,10 @@ function throwIfAborted(signal) {
     throw err;
 }
 
+function getDatabaseProbeOutboundOptions(connection) {
+    return { allowExplicitLoopbackForAdmin: connection?._allowLoopbackForAdminProbe === true };
+}
+
 function withOperationTimeout(promise, timeoutMs, connection, phase, options = {}) {
     let timer;
     // 外层超时是统一的请求边界；超时同时触发 AbortSignal，不能只拒绝外层 Promise。
@@ -106,7 +110,8 @@ async function withPostgres(connection, handler, signal) {
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // 连接前再次解析校验，缓解配置入库后 DNS 被改写（rebinding）的 SSRF。
-    await assertSafeDatabaseHost(connection.host, owner);
+    const outboundOptions = getDatabaseProbeOutboundOptions(connection);
+    await assertSafeDatabaseHost(connection.host, owner, outboundOptions);
     const client = new Client({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.postgres,
@@ -117,7 +122,7 @@ async function withPostgres(connection, handler, signal) {
         ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : false,
         connectionTimeoutMillis: timeoutMs,
         // 握手阶段对解析出的 IP 再次校验，关闭 DNS rebinding。
-        lookup: databaseSafeLookup(owner)
+        lookup: databaseSafeLookup(owner, outboundOptions)
     });
     let connected = false;
     const abort = () => {
@@ -147,7 +152,7 @@ async function withMysql(connection, handler, signal) {
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // mysql2 不支持自定义 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, owner);
+    await assertSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
     const client = await mysql.createConnection({
         host: connection.host,
         port: connection.port || DEFAULT_PORTS.mysql,
@@ -180,7 +185,7 @@ async function withSqlServer(connection, handler, signal) {
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // mssql/tedious 不便注入 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, owner);
+    await assertSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
     const pool = new sql.ConnectionPool({
         server: connection.host,
         port: connection.port || DEFAULT_PORTS.sqlserver,
@@ -403,7 +408,7 @@ async function executeMongoTool(connection, name, input = {}) {
     const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
     const cfg = connection;
     // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, await getConnectionOwnerAsync(connection));
+    await assertSafeDatabaseHost(connection.host, await getConnectionOwnerAsync(connection), getDatabaseProbeOutboundOptions(connection));
     const auth = connection.username
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
@@ -469,9 +474,12 @@ async function executeMongoTool(connection, name, input = {}) {
     })(), cfg.query_timeout_ms || timeoutMs, cfg, 'MongoDB database query', { onTimeout: () => client.close().catch(() => {}) });
 }
 
-async function testDatabaseConnection(connection) {
+async function testDatabaseConnection(connection, { allowLoopbackForAdminProbe = false } = {}) {
     const timeoutMs = getDatabaseTestTimeoutMs();
     const testConnection = buildDatabaseTestConnectionConfig(connection);
+    // 外部链路体检只对数据库内已保存、经过管理员读取的连接启用本机回环探针。
+    // 该内部标记不会来自请求载荷、不会入库，也不会流入实际 MCP 工具执行。
+    testConnection._allowLoopbackForAdminProbe = Boolean(allowLoopbackForAdminProbe);
     if (testConnection.database_type === 'sqlite') {
         // better-sqlite3 为同步驱动，仍包一层超时以与其他方言保持一致并防止极端阻塞。
         return withOperationTimeout(Promise.resolve().then(() => withSqlite(testConnection, client => {
@@ -506,7 +514,11 @@ async function testDatabaseConnection(connection) {
     if (testConnection.database_type === 'mongodb') {
         const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
         // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-        await assertSafeDatabaseHost(testConnection.host, await getConnectionOwnerAsync(testConnection));
+        await assertSafeDatabaseHost(
+            testConnection.host,
+            await getConnectionOwnerAsync(testConnection),
+            getDatabaseProbeOutboundOptions(testConnection)
+        );
         const auth = testConnection.username
             ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';

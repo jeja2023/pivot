@@ -14,7 +14,7 @@ const formatDateToCN = (dateStr) => {
     }).replace(/\//g, '-');
 };
 const escapeHtml = (str) => {
-    if (window.PivotSafeHtml) return window.PivotSafeHtml.escapeHtml(str);
+    if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeHtml(str);
     return String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -173,8 +173,8 @@ function switchUsageSubtab(subtab, options = {}) {
     if (descEl && meta) descEl.textContent = meta.desc;
     if (!options.skipPersist) persistUsageSubtab(target);
     if (!options.skipLoad) loadTabData(target, options.page || pageState[target] || 1);
-    window.scheduleSettingsWorkspaceScale?.();
-    setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+    setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
     return target;
 }
 
@@ -241,9 +241,9 @@ const loadScriptOnce = (src) => {
     return Promise.reject(new Error(`脚本加载器不可用: ${src}`));
 };
 
-window.ensureAdminSettingsScript = () => loadScriptOnce('/chat/admin-settings.js');
+window.Pivot.legacy.ensureAdminSettingsScript = () => loadScriptOnce('/chat/admin-settings.js');
 
-window.ensureAdminFeatureScripts = async () => {
+window.Pivot.legacy.ensureAdminFeatureScripts = async () => {
     if (adminFeatureLoadPromise) return adminFeatureLoadPromise;
     adminFeatureLoadPromise = (async () => {
         if (window.Pivot?.loadScripts) {
@@ -262,18 +262,18 @@ window.ensureAdminFeatureScripts = async () => {
     }
 };
 
-window.openAdminPanel = async (options = {}) => {
+window.Pivot.legacy.openAdminPanel = async (options = {}) => {
     const openSequence = ++settingsPanelOpenSequence;
     try {
-        await withSettingsTimeout(() => window.ensureAdminFeatureScripts());
+        await withSettingsTimeout(() => window.Pivot.legacy.ensureAdminFeatureScripts());
     } catch (error) {
         adminFeatureLoadPromise = null;
-        window.setSettingsLoadState?.('error', error.message || '设置模块加载失败', { retry: true });
+        window.Pivot.legacy.setSettingsLoadState?.('error', error.message || '设置模块加载失败', { retry: true });
         showToast(error.message || '设置模块加载失败', 'error');
         return;
     }
     const adminContainer = document.getElementById('admin-container');
-    window.showMainWorkspace?.('settings');
+    window.Pivot.legacy.showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
     adminContainer?.setAttribute('aria-hidden', 'false');
     const isAdmin = isAdminUser();
@@ -293,50 +293,50 @@ window.openAdminPanel = async (options = {}) => {
     document.querySelectorAll('.super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
-    const loaded = await window.loadSettings?.();
+    const loaded = await window.Pivot.legacy.loadSettings?.();
     if (openSequence !== settingsPanelOpenSequence || loaded === false) return;
-    const targetTab = options.restore ? normalizeSettingsTab(window.getStoredSettingsTab?.()) : getDefaultSettingsTab();
-    await window.switchTab(targetTab);
+    const targetTab = options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab();
+    await window.Pivot.legacy.switchTab(targetTab);
 };
 
-window.closeModal = () => {
-    window.cancelSettingsLoad?.();
-    window.cancelOpsSummaryLoad?.();
-    window.cancelMonitorSummaryLoad?.();
-    window.clearMonitorRefreshTimer?.();
+window.Pivot.legacy.closeModal = () => {
+    window.Pivot.legacy.cancelSettingsLoad?.();
+    window.Pivot.legacy.cancelOpsSummaryLoad?.();
+    window.Pivot.legacy.cancelMonitorSummaryLoad?.();
+    window.Pivot.legacy.clearMonitorRefreshTimer?.();
     document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
-    return window.showMainWorkspace?.('chat');
+    return window.Pivot.legacy.showMainWorkspace?.('chat');
 };
 
-window.switchTab = async (tab, options = {}) => {
+window.Pivot.legacy.switchTab = async (tab, options = {}) => {
     try {
-        await withSettingsTimeout(() => window.ensureAdminFeatureScripts());
+        await withSettingsTimeout(() => window.Pivot.legacy.ensureAdminFeatureScripts());
     } catch (error) {
         adminFeatureLoadPromise = null;
-        window.setSettingsTabState?.('error', error.message || '设置模块加载超时', { retry: true, tab, page: options.page || 1 });
+        window.Pivot.legacy.setSettingsTabState?.('error', error.message || '设置模块加载超时', { retry: true, tab, page: options.page || 1 });
         showToast(error.message || '设置模块加载超时', 'error');
         return false;
     }
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
     if (tab !== 'ops') {
-        window.cancelOpsSummaryLoad?.();
+        window.Pivot.legacy.cancelOpsSummaryLoad?.();
     }
     if (tab !== 'global-params') {
-        window.cancelSettingsLoad?.();
+        window.Pivot.legacy.cancelSettingsLoad?.();
     }
     if (tab !== 'monitor') {
-        window.cancelMonitorSummaryLoad?.();
-        window.clearMonitorRefreshTimer?.();
+        window.Pivot.legacy.cancelMonitorSummaryLoad?.();
+        window.Pivot.legacy.clearMonitorRefreshTimer?.();
     }
     const currentTab = document.querySelector('.admin-tab.active')?.id?.replace(/^tab-/, '');
-    if (!options.skipDirtyCheck && currentTab && currentTab !== tab && window.settingsHasUnsavedChanges?.()) {
-        const confirmed = await (window.showConfirm?.(
+    if (!options.skipDirtyCheck && currentTab && currentTab !== tab && window.Pivot.legacy.settingsHasUnsavedChanges?.()) {
+        const confirmed = await (window.Pivot.legacy.showConfirm?.(
             '放弃未保存修改？',
             '当前设置还有未保存的修改，切换分区会丢失这些内容。'
         ) ?? Promise.resolve(window.confirm('当前设置还有未保存的修改，确定切换分区吗？')));
         if (!confirmed) return false;
-        window.clearSettingsDirty?.();
+        window.Pivot.legacy.clearSettingsDirty?.();
     }
     const tabs = SETTINGS_TABS;
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
@@ -354,7 +354,7 @@ window.switchTab = async (tab, options = {}) => {
 
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
-    window.persistSettingsTab?.(tab);
+    window.Pivot.legacy.persistSettingsTab?.(tab);
     if (tab === 'usage') {
         const usageSubtab = switchUsageSubtab(options.subtab || (LEGACY_SETTINGS_TAB_ALIASES.has(requestedTab) ? requestedTab : getUsageSubtab()), {
             skipPersist: false,
@@ -362,9 +362,9 @@ window.switchTab = async (tab, options = {}) => {
         });
         if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
     }
-    window.scheduleSettingsWorkspaceScale?.();
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     await loadTabData(tab);
-    setTimeout(() => window.scheduleSettingsWorkspaceScale?.(), 0);
+    setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
 };
 
 async function loadTabData(tab, page = 1) {
@@ -373,7 +373,7 @@ async function loadTabData(tab, page = 1) {
     } catch (error) {
         settingsTabLoadSequence += 1;
         const message = error.message || '设置数据加载超时';
-        window.setSettingsTabState?.('error', message, { retry: true, tab, page });
+        window.Pivot.legacy.setSettingsTabState?.('error', message, { retry: true, tab, page });
         showToast(message, 'error');
         return false;
     }
@@ -381,69 +381,69 @@ async function loadTabData(tab, page = 1) {
 
 async function loadTabDataInternal(tab, page = 1) {
     const loadSequence = ++settingsTabLoadSequence;
-    window.setSettingsTabState?.('loading', '正在加载设置数据…');
+    window.Pivot.legacy.setSettingsTabState?.('loading', '正在加载设置数据…');
     try {
         if (LEGACY_SETTINGS_TAB_ALIASES.has(tab)) {
             if (document.getElementById('tab-content-usage') && document.getElementById('tab-content-usage').classList.contains('hidden')) {
-                await window.switchTab('usage', { subtab: tab, page });
+                await window.Pivot.legacy.switchTab('usage', { subtab: tab, page });
                 return true;
             }
             const usageSubtab = normalizeUsageSubtab(tab);
             pageState[usageSubtab] = page;
-            if (usageSubtab === 'stats' && window.loadStats) await loadStats(page);
-            if (usageSubtab === 'details' && window.loadDetails) await loadDetails(page);
-            if (usageSubtab === 'report' && window.loadReport) await loadReport();
+            if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(page);
+            if (usageSubtab === 'details' && window.Pivot.legacy.loadDetails) await window.Pivot.legacy.loadDetails(page);
+            if (usageSubtab === 'report' && window.Pivot.legacy.loadReport) await window.Pivot.legacy.loadReport();
         } else {
             pageState[tab] = page;
-            if (tab === 'models' && window.loadModels) await loadModels(page);
-            if (tab === 'users' && window.loadUsers) {
-                await loadUsers(page);
-                setTimeout(() => window.ensureUserRecordButtons?.(), 0);
+            if (tab === 'models' && window.Pivot.legacy.loadModels) await window.Pivot.legacy.loadModels(page);
+            if (tab === 'users' && window.Pivot.legacy.loadUsers) {
+                await window.Pivot.legacy.loadUsers(page);
+                setTimeout(() => window.Pivot.legacy.ensureUserRecordButtons?.(), 0);
             }
-            if (tab === 'logs' && window.loadLogs) await loadLogs(page);
-            if (tab === 'monitor' && window.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
+            if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
+            if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
-                if (usageSubtab === 'stats' && window.loadStats) await loadStats(pageState.stats || page);
-                if (usageSubtab === 'details' && window.loadDetails) await loadDetails(pageState.details || page);
-                if (usageSubtab === 'report' && window.loadReport) await loadReport();
+                if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);
+                if (usageSubtab === 'details' && window.Pivot.legacy.loadDetails) await window.Pivot.legacy.loadDetails(pageState.details || page);
+                if (usageSubtab === 'report' && window.Pivot.legacy.loadReport) await window.Pivot.legacy.loadReport();
             }
-            if (tab === 'memories' && window.loadMemories) await window.loadMemories(page);
-            if (tab === 'attachments' && window.loadAttachments) await loadAttachments(page);
-            if (tab === 'announcements' && window.loadAnnouncementsAdmin) await window.loadAnnouncementsAdmin(page);
-            if (tab === 'tool-policy' && window.loadToolPolicy) await window.loadToolPolicy();
-            if (tab === 'ops' && window.loadOpsSummary) await loadOpsSummary({ propagateErrors: true });
-            if (tab === 'details' && window.loadDetails) await loadDetails(page);
-            if (tab === 'apiCallLogs' && window.loadApiCallLogs) await loadApiCallLogs(page);
-            if (tab === 'userRecords' && window.loadUserRecordMessages) await loadUserRecordMessages(page);
-            if (tab === 'global-params' && window.loadSettings) {
-                await window.loadSettings();
+            if (tab === 'memories' && window.Pivot.legacy.loadMemories) await window.Pivot.legacy.loadMemories(page);
+            if (tab === 'attachments' && window.Pivot.legacy.loadAttachments) await window.Pivot.legacy.loadAttachments(page);
+            if (tab === 'announcements' && window.Pivot.legacy.loadAnnouncementsAdmin) await window.Pivot.legacy.loadAnnouncementsAdmin(page);
+            if (tab === 'tool-policy' && window.Pivot.legacy.loadToolPolicy) await window.Pivot.legacy.loadToolPolicy();
+            if (tab === 'ops' && window.Pivot.legacy.loadOpsSummary) await loadOpsSummary({ propagateErrors: true });
+            if (tab === 'details' && window.Pivot.legacy.loadDetails) await window.Pivot.legacy.loadDetails(page);
+            if (tab === 'apiCallLogs' && window.Pivot.legacy.loadApiCallLogs) await window.Pivot.legacy.loadApiCallLogs(page);
+            if (tab === 'userRecords' && window.Pivot.legacy.loadUserRecordMessages) await window.Pivot.legacy.loadUserRecordMessages(page);
+            if (tab === 'global-params' && window.Pivot.legacy.loadSettings) {
+                await window.Pivot.legacy.loadSettings();
                 await window.Pivot?.moduleApi?.('settings.skillSigning')?.load?.();
             }
-            if (tab === 'keys' && window.loadApiKeys) {
-                await loadApiKeys();
+            if (tab === 'keys' && window.Pivot.legacy.loadApiKeys) {
+                await window.Pivot.legacy.loadApiKeys();
                 const displayEl = document.getElementById('api-base-url-display');
                 if (displayEl) {
                     // 优先使用后端配置的公网 URL，否则根据当前访问地址智能生成
-                    const origin = window.publicUrl || window.location.origin;
+                    const origin = window.Pivot.legacy.publicUrl || window.location.origin;
                     displayEl.innerText = `${origin}/v1`;
                 }
             }
         }
-        if (loadSequence === settingsTabLoadSequence) window.setSettingsTabState?.('', '');
+        if (loadSequence === settingsTabLoadSequence) window.Pivot.legacy.setSettingsTabState?.('', '');
         return true;
     } catch (error) {
         if (loadSequence !== settingsTabLoadSequence) return false;
         const message = error.message || '设置数据加载失败';
-        window.setSettingsTabState?.('error', message, { retry: true, tab, page });
+        window.Pivot.legacy.setSettingsTabState?.('error', message, { retry: true, tab, page });
         showToast(message, 'error');
         return false;
     }
 }
-window.loadTabData = loadTabData;
+window.Pivot.legacy.loadTabData = loadTabData;
 
 // 智能获取远程模型列表
-window.fetchRemoteModels = async function() {
+window.Pivot.legacy.fetchRemoteModels = async function() {
     const url = document.getElementById('m-url').value;
     const apiKey = document.getElementById('m-key').value;
     const id = document.getElementById('m-id').value;

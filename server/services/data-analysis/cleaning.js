@@ -461,7 +461,7 @@ async function applyCleaning({ user, datasetId, rules: rawRules, name }) {
     const outputDir = resolveInside(datasetRoot, String(user.id), outputDatasetId);
     const outputParquetPath = resolveInside(outputDir, 'data.parquet');
     const outputName = normalizeDatasetName('', stringValue(name, 120) || `${dataset.name}（清洗后）`);
-    fs.mkdirSync(outputDir, { recursive: true });
+    await fs.promises.mkdir(outputDir, { recursive: true });
     let datasetInserted = false;
     try {
         const result = await withAnalysisSlot(async () => {
@@ -499,7 +499,7 @@ async function applyCleaning({ user, datasetId, rules: rawRules, name }) {
             user.id,
             outputName,
             `${dataset.name}（清洗后）`,
-            fs.statSync(outputParquetPath).size,
+            (await fs.promises.stat(outputParquetPath)).size,
             toProjectRelative(outputParquetPath),
             result.count,
             plan.outputColumns.length,

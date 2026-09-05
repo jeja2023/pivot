@@ -1,5 +1,5 @@
 // --- 默认模型保存模块 ---
-window.saveMyDefaultModel = async (modelId = undefined, btn = null) => {
+const saveMyDefaultModel = async (modelId = undefined, btn = null) => {
     const targetModelId = (modelId === undefined) ? document.getElementById('model-selector')?.value : modelId;
     if (btn) {
         btn.innerText = targetModelId ? '取消默认' : '设为默认';
@@ -16,3 +16,5 @@ window.saveMyDefaultModel = async (modelId = undefined, btn = null) => {
         }
     } catch (e) { showToast('设置失败', 'error'); }
 };
+
+window.Pivot?.exposeModule?.('chat.defaultModel', { saveMyDefaultModel }, ['saveMyDefaultModel']);

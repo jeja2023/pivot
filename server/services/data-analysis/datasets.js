@@ -87,8 +87,8 @@ function sanitizeRows(rows) {
     };
 }
 
-function readSpreadsheet(filePath, originalName) {
-    const workbook = XLSX.readFile(filePath, { cellDates: true });
+async function readSpreadsheet(filePath, originalName) {
+    const workbook = XLSX.read(await fs.promises.readFile(filePath), { type: 'buffer', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     if (!sheetName) {
         const err = new Error('工作簿中没有可读取的工作表。');
@@ -294,7 +294,7 @@ async function importSqliteToParquet(sourcePath, parquetPath) {
 async function ingestUpload({ datasetDir, file, ext }) {
     const sourceName = path.basename(file.originalname || `dataset${ext}`).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
     const sourcePath = resolveInside(datasetDir, sourceName);
-    moveUploadedFile(file.path, sourcePath);
+    await moveUploadedFile(file.path, sourcePath);
     const parquetPath = resolveInside(datasetDir, 'data.parquet');
     let columns;
     let rowCount;
@@ -324,7 +324,7 @@ async function ingestUpload({ datasetDir, file, ext }) {
         sheetName = meta.tableName || '';
         sourceType = 'sqlite';
     } else {
-        const parsed = readSpreadsheet(sourcePath, sourceName);
+        const parsed = await readSpreadsheet(sourcePath, sourceName);
         await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
         columns = parsed.columns;
         rowCount = parsed.rows.length;
@@ -338,7 +338,7 @@ async function ingestUpload({ datasetDir, file, ext }) {
     }
     const profile = await profileViaSql(parquetPath, columns, rowCount);
     const previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
-    const fileSize = file.size || fs.statSync(sourcePath).size;
+    const fileSize = file.size || (await fs.promises.stat(sourcePath)).size;
     return {
         sourceName, sourcePath, parquetPath, columns, rowCount, sheetName, sourceType,
         profile, previewRows, fileSize, sourceRowCount, sourceColumnCount, truncated, truncationReason
@@ -346,7 +346,7 @@ async function ingestUpload({ datasetDir, file, ext }) {
 }
 
 async function importDataset({ user, file, name }) {
-    ensureAnalysisDirs();
+    await ensureAnalysisDirs();
     if (!file?.path) {
         const err = new Error('未收到上传文件。');
         err.status = 400;
@@ -360,7 +360,7 @@ async function importDataset({ user, file, name }) {
     }
     const datasetId = analysisId('ds');
     const datasetDir = resolveInside(datasetRoot, String(user.id), datasetId);
-    fs.mkdirSync(datasetDir, { recursive: true });
+    await fs.promises.mkdir(datasetDir, { recursive: true });
     let committed = false;
     try {
         // 导入分流由 ingestUpload 内部完成（CSV 走 DuckDB 快路径，XLSX/XLS 走 JS 解析），
@@ -538,37 +538,31 @@ async function updateDataset(userId, datasetId, updates = {}) {
     return serializeDataset(updatedRow);
 }
 
-function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmpRetentionMs = TMP_RETENTION_MS } = {}) {
+async function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmpRetentionMs = TMP_RETENTION_MS } = {}) {
     const now = Date.now();
     let removed = 0;
-    const sweep = (root, retentionMs) => {
-        let entries = [];
-        try {
-            entries = fs.readdirSync(root, { withFileTypes: true });
-        } catch (_err) {
+    const sweep = async (root, retentionMs) => {
+        const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => null);
+        if (!entries) {
             return; // 目录尚未创建则跳过
         }
-        entries.forEach(entry => {
+        for (const entry of entries) {
             const target = path.join(root, entry.name);
             try {
-                const stat = fs.statSync(target);
-                if (now - stat.mtimeMs < retentionMs) return;
-                fs.rmSync(target, { force: true, recursive: entry.isDirectory(), maxRetries: 2, retryDelay: 100 });
+                const stat = await fs.promises.stat(target);
+                if (now - stat.mtimeMs < retentionMs) continue;
+                await fs.promises.rm(target, { force: true, recursive: entry.isDirectory(), maxRetries: 2, retryDelay: 100 });
                 removed += 1;
             } catch (err) {
                 logger.warn({ err: err.message, target }, '工作区文件清理失败');
             }
-        });
+        }
     };
     // 导出目录按用户分子目录：逐用户子目录扫描其中的导出文件。
-    let userDirs = [];
-    try {
-        userDirs = fs.readdirSync(exportRoot, { withFileTypes: true }).filter(entry => entry.isDirectory());
-    } catch (_err) {
-        userDirs = [];
-    }
-    userDirs.forEach(dir => sweep(path.join(exportRoot, dir.name), exportRetentionMs));
-    sweep(tempRoot, tmpRetentionMs);
+    const userDirs = (await fs.promises.readdir(exportRoot, { withFileTypes: true }).catch(() => []))
+        .filter(entry => entry.isDirectory());
+    for (const dir of userDirs) await sweep(path.join(exportRoot, dir.name), exportRetentionMs);
+    await sweep(tempRoot, tmpRetentionMs);
     if (removed) logger.info({ removed }, '数据分析工作区清理完成');
     return { removed };
 }
@@ -605,7 +599,7 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
 
 // 从内存数据行构建数据集，用于数据库导入等非文件源
 async function createDatasetFromRows({ user, name, rows, sourceType = 'database', sourceRowCount = null, sourceColumnCount = null, truncated = false, truncationReason = '' }) {
-    ensureAnalysisDirs();
+    await ensureAnalysisDirs();
     const sourceRows = Array.isArray(rows) ? rows : [];
     if (!sourceRows.length) {
         const err = new Error('查询结果为空，没有可导入的数据行。');
@@ -655,7 +649,7 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
     const datasetId = analysisId('ds');
     const datasetName = normalizeDatasetName('', name);
     const datasetDir = resolveInside(datasetRoot, String(user.id), datasetId);
-    fs.mkdirSync(datasetDir, { recursive: true });
+    await fs.promises.mkdir(datasetDir, { recursive: true });
     let committed = false;
     try {
         const parquetPath = resolveInside(datasetDir, 'data.parquet');
@@ -678,7 +672,7 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
                 sourceType,
                 profile,
                 previewRows,
-                fileSize: fs.statSync(parquetPath).size
+                fileSize: (await fs.promises.stat(parquetPath)).size
             };
         });
         const now = getBeijingTimestamp();

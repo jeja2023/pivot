@@ -38,7 +38,7 @@ const RAG_GRAPH_ZOOM_STEP = 0.16;
 
 const GRAPH_UI_OPTIONS = {
     clampZoom: clampGraphZoom,
-    escapeHtml: escapeRagHtml,
+    escapeHtml: window.Pivot.legacy.escapeRagHtml,
     maxZoom: RAG_GRAPH_MAX_ZOOM,
     minZoom: RAG_GRAPH_MIN_ZOOM,
     zoomStep: RAG_GRAPH_ZOOM_STEP
@@ -85,25 +85,25 @@ const graphTypeLabel = (type) => graphTypeLabelText(type);
 const graphRelationLabel = (type) => graphRelationLabelText(type);
 
 const graphTypeOptionsHtml = (selectedType = 'concept') => buildGraphTypeOptionsHtml(selectedType, {
-    escapeAttr: escapeRagAttr,
-    escapeHtml: escapeRagHtml
+    escapeAttr: window.Pivot.legacy.escapeRagAttr,
+    escapeHtml: window.Pivot.legacy.escapeRagHtml
 });
 
 const graphRelationOptionsHtml = (selectedType = 'related_to') => buildGraphRelationOptionsHtml(selectedType, {
-    escapeAttr: escapeRagAttr,
-    escapeHtml: escapeRagHtml
+    escapeAttr: window.Pivot.legacy.escapeRagAttr,
+    escapeHtml: window.Pivot.legacy.escapeRagHtml
 });
 
 const graphTypeFilterOptionsHtml = () => buildGraphTypeFilterOptionsHtml({
     emptyLabel: '全部类型',
-    escapeAttr: escapeRagAttr,
-    escapeHtml: escapeRagHtml
+    escapeAttr: window.Pivot.legacy.escapeRagAttr,
+    escapeHtml: window.Pivot.legacy.escapeRagHtml
 });
 
 const graphRelationFilterOptionsHtml = () => buildGraphRelationFilterOptionsHtml({
     emptyLabel: '全部关系',
-    escapeAttr: escapeRagAttr,
-    escapeHtml: escapeRagHtml
+    escapeAttr: window.Pivot.legacy.escapeRagAttr,
+    escapeHtml: window.Pivot.legacy.escapeRagHtml
 });
 
 const getGraphRelationFilters = () => {
@@ -155,8 +155,8 @@ const ensureRagGraphModal = () => {
     modal.id = 'rag-graph-modal';
     modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
     PivotSafeHtml.setHtml(modal, buildGraphModalShellHtml({
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         messages: {
             canvasTitle: '关系地图',
             closeLabel: '关闭',
@@ -197,7 +197,7 @@ const ensureRagGraphEditorModal = () => {
     modal.id = 'rag-graph-editor-modal';
     modal.className = 'modal-overlay hidden rag-graph-editor-modal-overlay';
     PivotSafeHtml.setHtml(modal, buildGraphEditorModalShellHtml({
-        escapeHtml: escapeRagHtml,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         messages: {
             closeLabel: '关闭',
             title: '实体校准'
@@ -216,7 +216,7 @@ const renderGraphSummary = (summary = {}) => {
     const el = document.getElementById('rag-graph-summary');
     if (!el) return;
     PivotSafeHtml.setHtml(el, buildGraphSummaryHtml(summary, {
-        escapeHtml: escapeRagHtml,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         graphTypeLabel,
         labels: {
             entities: '实体',
@@ -237,8 +237,8 @@ const renderGraphEntities = (payload = {}) => {
     if (count) count.textContent = String(Number(payload.total || entities.length));
     if (!list) return;
     PivotSafeHtml.setHtml(list, buildGraphEntitiesHtml(entities, {
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         buildGraphNodeTooltip,
         graphTypeLabel,
         selectedEntityId: ragGraphState.selectedEntityId,
@@ -259,8 +259,8 @@ const renderGraphCanvas = (graph = {}) => {
     const editEntityBtn = document.getElementById('rag-graph-edit-entity-btn');
     const { hasNodes, html } = buildGraphCanvasMarkup(graph, {
         centerId: Number(graph.center?.id || ragGraphState.selectedEntityId),
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         buildGraphNodeTooltip,
         getGraphNodeName,
         graphRelationLabel,
@@ -295,8 +295,8 @@ const renderGraphRelations = (payload = {}) => {
     if (count) count.textContent = String(Number(payload.total || relations.length));
     if (!list) return;
     PivotSafeHtml.setHtml(list, buildGraphRelationsHtml(relations, {
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         buildGraphRelationTooltip,
         graphRelationLabel,
         messages: {
@@ -360,7 +360,7 @@ const loadGraphRelations = async (entityId = ragGraphState.selectedEntityId) => 
 const refreshGraphSearch = async () => {
     const payload = await loadGraphEntities();
     const firstEntity = payload.data?.[0];
-    if (firstEntity) await window.selectKnowledgeGraphEntity(firstEntity.id);
+    if (firstEntity) await window.Pivot.legacy.selectKnowledgeGraphEntity(firstEntity.id);
     else {
         ragGraphState.selectedEntityId = null;
         ragGraphState.selectedEntity = null;
@@ -374,7 +374,7 @@ const renderGraphQueryResult = (result = {}) => {
     const el = document.getElementById('rag-graph-query-results');
     if (!el) return;
     PivotSafeHtml.setHtml(el, buildGraphQueryResultHtml(result, {
-        escapeHtml: escapeRagHtml,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         graphRelationLabel,
         messages: {
             defaultSource: '知识图谱',
@@ -386,7 +386,7 @@ const renderGraphQueryResult = (result = {}) => {
     }));
 };
 
-window.openKnowledgeGraph = async (docId = null) => {
+window.Pivot.legacy.openKnowledgeGraph = async (docId = null) => {
     const modal = ensureRagGraphModal();
     const normalizedDocId = Number.parseInt(docId, 10);
     const scopedDocId = Number.isSafeInteger(normalizedDocId) && normalizedDocId > 0 ? normalizedDocId : null;
@@ -409,7 +409,7 @@ window.openKnowledgeGraph = async (docId = null) => {
         await loadGraphSummary();
         const entities = await loadGraphEntities();
         const firstEntity = entities.data?.[0];
-        if (firstEntity) await window.selectKnowledgeGraphEntity(firstEntity.id);
+        if (firstEntity) await window.Pivot.legacy.selectKnowledgeGraphEntity(firstEntity.id);
         else {
             ragGraphState.selectedEntityId = null;
             ragGraphState.selectedEntity = null;
@@ -421,7 +421,7 @@ window.openKnowledgeGraph = async (docId = null) => {
     }
 };
 
-window.selectKnowledgeGraphEntity = async (entityId) => {
+window.Pivot.legacy.selectKnowledgeGraphEntity = async (entityId) => {
     ragGraphState.selectedEntityId = Number(entityId);
     renderGraphEntities({ data: ragGraphState.entities, total: ragGraphState.entities.length });
     try {
@@ -446,7 +446,7 @@ window.selectKnowledgeGraphEntity = async (entityId) => {
     }
 };
 
-window.showKnowledgeGraphEntityEditor = (entity) => {
+window.Pivot.legacy.showKnowledgeGraphEntityEditor = (entity) => {
     if (!entity) return;
     const modal = ensureRagGraphEditorModal();
     const title = modal.querySelector('#rag-graph-editor-title');
@@ -459,8 +459,8 @@ window.showKnowledgeGraphEntityEditor = (entity) => {
         .filter(item => Number(item.id) !== Number(entity.id))
         .slice(0, 80);
     PivotSafeHtml.setHtml(body, buildGraphEntityEditorHtml(entity, {
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         graphTypeLabel,
         mergeCandidates,
         typeOptionsHtml: graphTypeOptionsHtml(entity.type || 'concept'),
@@ -478,7 +478,7 @@ window.showKnowledgeGraphEntityEditor = (entity) => {
     modal.classList.remove('hidden');
 };
 
-window.saveKnowledgeGraphEntity = async (entityId) => {
+window.Pivot.legacy.saveKnowledgeGraphEntity = async (entityId) => {
     const payload = {
         name: document.getElementById('rag-graph-edit-name')?.value,
         type: document.getElementById('rag-graph-edit-type')?.value,
@@ -494,11 +494,11 @@ window.saveKnowledgeGraphEntity = async (entityId) => {
     showToast('实体已保存');
     await loadGraphSummary();
     await loadGraphEntities();
-    await window.selectKnowledgeGraphEntity(entityId);
+    await window.Pivot.legacy.selectKnowledgeGraphEntity(entityId);
     closeKnowledgeGraphEditorModal();
 };
 
-window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
+window.Pivot.legacy.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
     const targetEntityId = Number(document.getElementById('rag-graph-merge-target')?.value || 0);
     if (!targetEntityId || Number(targetEntityId) === Number(sourceEntityId)) return showToast('请输入有效的目标实体 ID', 'error');
     const confirmed = await ragConfirm('合并知识图谱实体', `确定将实体 ${sourceEntityId} 合并到 ${targetEntityId} 吗？`);
@@ -513,17 +513,17 @@ window.mergeKnowledgeGraphEntity = async (sourceEntityId) => {
     showToast('实体已合并');
     await loadGraphSummary();
     await loadGraphEntities();
-    await window.selectKnowledgeGraphEntity(targetEntityId);
+    await window.Pivot.legacy.selectKnowledgeGraphEntity(targetEntityId);
     closeKnowledgeGraphEditorModal();
 };
 
-window.editKnowledgeGraphRelation = async (relationId) => {
+window.Pivot.legacy.editKnowledgeGraphRelation = async (relationId) => {
     const relation = ragGraphState.relations.find(item => Number(item.id) === Number(relationId));
     if (!relation) return;
-    window.showKnowledgeGraphRelationEditor(relation);
+    window.Pivot.legacy.showKnowledgeGraphRelationEditor(relation);
 };
 
-window.showKnowledgeGraphRelationEditor = (relation) => {
+window.Pivot.legacy.showKnowledgeGraphRelationEditor = (relation) => {
     if (!relation) return;
     const modal = ensureRagGraphEditorModal();
     const title = modal.querySelector('#rag-graph-editor-title');
@@ -533,8 +533,8 @@ window.showKnowledgeGraphRelationEditor = (relation) => {
     if (title) title.textContent = '关系校准';
     if (subtitle) subtitle.textContent = `#${Number(relation.id)} · 可信度 ${Number(relation.confidence || 0).toFixed(2)}`;
     PivotSafeHtml.setHtml(body, buildGraphRelationEditorHtml(relation, {
-        escapeAttr: escapeRagAttr,
-        escapeHtml: escapeRagHtml,
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
+        escapeHtml: window.Pivot.legacy.escapeRagHtml,
         messages: {
             cancelLabel: '取消',
             descriptionLabel: '关系描述',
@@ -548,7 +548,7 @@ window.showKnowledgeGraphRelationEditor = (relation) => {
     modal.classList.remove('hidden');
 };
 
-window.saveKnowledgeGraphRelation = async (relationId) => {
+window.Pivot.legacy.saveKnowledgeGraphRelation = async (relationId) => {
     const relation = ragGraphState.relations.find(item => Number(item.id) === Number(relationId));
     if (!relation) return;
     const relationType = document.getElementById('rag-graph-edit-relation-type')?.value || relation.relation_type || 'related_to';
@@ -562,42 +562,42 @@ window.saveKnowledgeGraphRelation = async (relationId) => {
     if (!res.ok || data.error) throw new Error(data.error || '关系保存失败');
     showToast('关系已保存');
     await loadGraphSummary();
-    if (ragGraphState.selectedEntityId) await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    if (ragGraphState.selectedEntityId) await window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
     else await loadGraphRelations();
     closeKnowledgeGraphEditorModal();
 };
 
-window.confirmKnowledgeGraphRelation = async (relationId) => {
+window.Pivot.legacy.confirmKnowledgeGraphRelation = async (relationId) => {
     const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}/confirm`, { method: 'POST', headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系确认失败');
     showToast('关系已确认');
     await loadGraphSummary();
-    if (ragGraphState.selectedEntityId) await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    if (ragGraphState.selectedEntityId) await window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
     else await loadGraphRelations();
 };
 
-window.deleteKnowledgeGraphRelation = async (relationId) => {
+window.Pivot.legacy.deleteKnowledgeGraphRelation = async (relationId) => {
     const confirmed = await ragConfirm('删除知识图谱关系', '确定删除该关系吗？');
     if (!confirmed) return;
     const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系删除失败');
     showToast('关系已删除');
-    await window.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
+    await window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId);
 };
 
-window.rebuildKnowledgeGraphForDoc = async () => {
+window.Pivot.legacy.rebuildKnowledgeGraphForDoc = async () => {
     const docId = document.getElementById('rag-graph-modal')?.dataset?.docId;
     if (!docId) return;
     const res = await apiFetch(`${API_BASE}/rag/graph/docs/${docId}/rebuild`, { method: 'POST', headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '图谱重建失败');
     showToast(`图谱已重建：实体 ${data.entities || 0}，关系 ${data.relations || 0}`);
-    await window.openKnowledgeGraph(docId);
+    await window.Pivot.legacy.openKnowledgeGraph(docId);
 };
 
-window.debugKnowledgeGraphQuery = async () => {
+window.Pivot.legacy.debugKnowledgeGraphQuery = async () => {
     const query = document.getElementById('rag-graph-query')?.value?.trim() || '';
     if (!query) {
         renderGraphQueryResult({ query: '' });

@@ -107,8 +107,8 @@ async function confirmAgentWorkflowDiscard(message) {
         ? !currentWorkflowMatchesSelected(workflow)
         : (!draftSummary.valid || draftSummary.nodeCount > 0);
     if (!hasUnsavedWork) return true;
-    if (typeof showConfirm === 'function') {
-        return showConfirm('放弃未保存修改', message);
+    if (typeof window.Pivot.legacy.showConfirm === 'function') {
+        return window.Pivot.legacy.showConfirm('放弃未保存修改', message);
     }
     return typeof confirm !== 'function' || confirm(message);
 }
@@ -733,7 +733,7 @@ function newAgentWorkflow(options = {}) {
     renderAgentWorkflowLibrary();
     if (remount) {
         mountAgentDagEditor();
-        window.refreshAgentDagEditor?.();
+        window.Pivot.legacy.refreshAgentDagEditor?.();
     }
     updateAgentWorkflowRunUi();
     if (shouldShowToast) showToast(agentWorkflowDraftName ? `已新建工作流草稿：${agentWorkflowDraftName}` : '已新建工作流草稿', 'success');
@@ -744,7 +744,7 @@ function currentAgentWorkflowName() {
     return String(agentWorkflowDraftName || selected?.name || '未命名工作流').trim().slice(0, 100) || '未命名工作流';
 }
 
-window.setAgentWorkflowDraftName = function(name, options = {}) {
+window.Pivot.legacy.setAgentWorkflowDraftName = function(name, options = {}) {
     const nextName = String(name || '').trim().slice(0, 100);
     if (!nextName) return;
     if (options.ifEmpty && (selectedAgentWorkflow()?.name || agentWorkflowDraftName)) return;
@@ -756,7 +756,7 @@ async function ensureAgentWorkflowNameForSave() {
     const existing = String(agentWorkflowDraftName || selectedAgentWorkflow()?.name || '').trim().slice(0, 100);
     if (existing) return existing;
     const suggested = '未命名工作流';
-    const value = await window.showInputPrompt?.({
+    const value = await window.Pivot.legacy.showInputPrompt?.({
         title: '保存工作流',
         message: '给当前工作流起一个名称，保存后会进入已保存工作流。',
         value: suggested,
@@ -843,7 +843,7 @@ function loadSelectedAgentWorkflow() {
     updateAgentWorkflowRunUi();
     renderAgentWorkflowLibrary();
     mountAgentDagEditor();
-    window.refreshAgentDagEditor?.();
+    window.Pivot.legacy.refreshAgentDagEditor?.();
     showToast(`已加载工作流：${workflow.name}`, 'success');
 }
 
@@ -852,7 +852,7 @@ function deleteSelectedAgentWorkflow() {
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(select?.value || activeAgentWorkflowId));
     if (!workflow) return showToast('请选择要删除的工作流', 'warning');
     if (!workflow.can_edit) return showToast('共享工作流不能由接收方删除', 'warning');
-    showConfirm('删除工作流', `确定删除「${workflow.name}」吗？已产生的任务记录不会受影响。`, async () => {
+    window.Pivot.legacy.showConfirm('删除工作流', `确定删除「${workflow.name}」吗？已产生的任务记录不会受影响。`, async () => {
         const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || '删除工作流失败', 'error');
@@ -906,8 +906,8 @@ async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         if (res.status === 409 && (data.code === 'WORKFLOW_EVALUATION_GATE_FAILED' || String(data.error || '').includes('评测集') || String(data.error || '').includes('门禁'))) {
-            if (typeof showConfirm === 'function') {
-                showConfirm('发布门禁提示', '当前工作流尚未通过固定评测集（要求评测通过率 ≥ 80%）。是否跳过评测门禁直接发布当前版本？', async () => {
+            if (typeof window.Pivot.legacy.showConfirm === 'function') {
+                window.Pivot.legacy.showConfirm('发布门禁提示', '当前工作流尚未通过固定评测集（要求评测通过率 ≥ 80%）。是否跳过评测门禁直接发布当前版本？', async () => {
                     await publishSelectedAgentWorkflow(version, { skipEvaluationGate: true });
                 });
                 return null;
@@ -945,13 +945,13 @@ function persistAgentWorkflow(key, label) {
     return true;
 }
 
-window.saveAgentWorkflowDraft = function() {
+window.Pivot.legacy.saveAgentWorkflowDraft = function() {
     if (persistAgentWorkflow(AGENT_WORKFLOW_DRAFT_KEY, '保存草稿')) {
         showToast('工作流草稿已保存', 'success');
     }
 };
 
-window.saveAgentWorkflow = async function() {
+window.Pivot.legacy.saveAgentWorkflow = async function() {
     const saved = await saveAgentWorkflowToLibrary();
     if (!saved) return;
     persistAgentWorkflow(AGENT_WORKFLOW_SAVED_KEY, '保存工作流');

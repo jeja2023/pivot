@@ -209,7 +209,7 @@ function openAgentScheduleEditor(scheduleId = '', options = {}) {
 
     replaceAgentScheduleOptions(
         document.getElementById('agent-schedule-editor-model'),
-        (window._cachedAgentModels || []).map(model => ({ value: model.id, label: model.name || model.title || `模型 ${model.id}` })),
+        (window.Pivot.legacy._cachedAgentModels || []).map(model => ({ value: model.id, label: model.name || model.title || `模型 ${model.id}` })),
         '选择模型'
     );
     replaceAgentScheduleOptions(
@@ -317,8 +317,8 @@ async function runAgentScheduleLegacy(scheduleId) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
     showToast('计划任务已入队', 'success');
-    await window.openAgentWorkbench?.();
-    await window.openAgentRun(data.run.id);
+    await window.Pivot.legacy.openAgentWorkbench?.();
+    await window.Pivot.legacy.openAgentRun(data.run.id);
 }
 
 async function runAgentSchedule(scheduleId) {
@@ -346,8 +346,8 @@ async function runAgentSchedule(scheduleId) {
         document.getElementById('agent-schedule-editor-modal')?.classList.add('hidden');
         document.getElementById('agent-workflow-schedule-modal')?.classList.add('hidden');
         agentScheduleFilterId = '';
-        await window.openAgentWorkbench?.();
-        await window.openAgentRun(data.run.id);
+        await window.Pivot.legacy.openAgentWorkbench?.();
+        await window.Pivot.legacy.openAgentRun(data.run.id);
     } catch (error) {
         showToast(error.message || '计划运行失败', 'error');
     } finally {
@@ -409,11 +409,11 @@ async function toggleAgentSchedule(scheduleId) {
 async function openAgentScheduleRuns(scheduleId) {
     const schedule = agentSchedulesCache.find(item => String(item.id) === String(scheduleId));
     if (!schedule) return;
-    await window.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
+    await window.Pivot.legacy.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
 }
 
 function deleteAgentSchedule(scheduleId) {
-    showConfirm('删除计划任务', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
+    window.Pivot.legacy.showConfirm('删除计划任务', '确定删除这个计划吗？已产生的任务记录不会受影响。', async () => {
         const lockKey = `delete:${scheduleId}`;
         if (agentScheduleActionLocks.has(lockKey)) return;
         agentScheduleActionLocks.add(lockKey);
@@ -451,7 +451,7 @@ async function loadAgentNotifications() {
             try {
                 const res = await apiFetch(`${API_BASE}/agents/notifications/${encodeURIComponent(btn.dataset.agentNotificationId)}/read`, { method: 'POST' });
                 if (!res.ok) throw new Error('通知状态更新失败');
-                if (btn.dataset.agentNotificationRun) await window.openAgentRun(btn.dataset.agentNotificationRun);
+                if (btn.dataset.agentNotificationRun) await window.Pivot.legacy.openAgentRun(btn.dataset.agentNotificationRun);
                 await loadAgentNotifications();
             } catch (error) {
                 showToast(error.message || '通知状态更新失败', 'error');

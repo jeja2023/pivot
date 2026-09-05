@@ -1,6 +1,6 @@
 
 (function () {
-    if (window.PivotDataAnalysis?.state) return;
+    if (window.Pivot.legacy.PivotDataAnalysis?.state) return;
     const API = '/api/apps/data-analysis';
     const ACTIVE_TAB_STORAGE_KEY = 'pivot_data_analysis_active_tab';
     const VALID_TABS = new Set(['overview', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'history']);
@@ -80,7 +80,7 @@
         visualQuery: createVisualQuery()
     };
 
-    const html = window.PivotSafeHtml || {
+    const html = window.Pivot.legacy.PivotSafeHtml || {
         escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -110,8 +110,8 @@
         return state.datasets.find(item => item.id === state.activeId) || null;
     }
 
-    window.PivotDataAnalysis = {
-        ...(window.PivotDataAnalysis || {}),
+    window.Pivot.legacy.PivotDataAnalysis = {
+        ...(window.Pivot.legacy.PivotDataAnalysis || {}),
         API,
         state,
         html,

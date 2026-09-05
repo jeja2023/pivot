@@ -338,8 +338,8 @@ test('知识图谱顶部入口与文档列表行操作入口具备范围隔离�
     const kgServiceJs = require('fs').readFileSync('server/services/knowledge-graph.js', 'utf8');
 
     // 1. 前端列表行按钮传入对应文档 docId，顶部入口传入全局（无 docId）
-    assert.match(ragJs, /docGraphBtn[\s\S]*?window\.openKnowledgeGraph\(docGraphBtn\.dataset\.ragId\)/);
-    assert.match(ragJs, /#rag-graph-open-btn[\s\S]*?window\.openKnowledgeGraph\(\)/);
+    assert.match(ragJs, /docGraphBtn[\s\S]*?window\.Pivot\.legacy\.openKnowledgeGraph\(docGraphBtn\.dataset\.ragId\)/);
+    assert.match(ragJs, /#rag-graph-open-btn[\s\S]*?window\.Pivot\.legacy\.openKnowledgeGraph\(\)/);
 
     // 2. 前端控制器将 docId 贯穿到概览、实体列表、关系地图、关系列表与图谱查询
     assert.match(graphControllerJs, /modal\.dataset\.docId\s*=/);
@@ -395,7 +395,7 @@ test('数据分析上传数据预览弹窗加宽加高与服务端分页契约',
     assert.match(viewJs, /class="modal data-analysis-preview-modal-dialog"/);
     assert.match(viewJs, /id="data-analysis-preview-pagination"/);
     assert.match(viewJs, /page=\$\{page\}&pageSize=/);
-    assert.match(viewJs, /window\.renderWorkspacePagination/);
+    assert.match(viewJs, /window\.Pivot\.legacy\.renderWorkspacePagination/);
 
     // 2. 服务端 datasets.js 中支持分页查询与按页提取 Parquet 记录
     assert.match(datasetsJs, /async function getDatasetDetail\(userId, datasetId, options = \{\}\)/);
@@ -578,10 +578,10 @@ test('数据分析历史记录数据表格具备全局统一分页控件与行�
     assert.match(viewJs, /class="table-container workspace-table-wrap data-analysis-history-table-wrap"/);
     assert.match(viewJs, /id="data-analysis-history-pagination"\s+class="pagination workspace-pagination/);
 
-    // 3. compare-history.js 中调用全局统一分页控件 window.renderWorkspacePagination 并支持分页切片
+    // 3. compare-history.js 通过 Pivot 兼容命名空间调用统一分页控件并支持分页切片
     assert.match(compareHistoryJs, /state\.historyPageSize/);
     assert.match(compareHistoryJs, /getElementById\(['"]data-analysis-history-pagination['"]\)/);
-    assert.match(compareHistoryJs, /window\.renderWorkspacePagination/);
+    assert.match(compareHistoryJs, /window\.Pivot\.legacy\.renderWorkspacePagination/);
 
     // 4. CSS 中历史记录表格行高与单元格高度统一为全局 38px，并包含分页控件布局样式
     assert.match(overviewCss, /\.data-analysis-history-table td\s*\{[\s\S]*?height:\s*38px;/);

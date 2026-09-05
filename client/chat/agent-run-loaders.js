@@ -5,15 +5,15 @@
 let agentRunsLoadSequence = 0;
 
 async function loadAgentModels() {
-    const loaded = typeof window.loadSelectableModels === 'function'
-        ? await window.loadSelectableModels()
+    const loaded = typeof window.Pivot.legacy.loadSelectableModels === 'function'
+        ? await window.Pivot.legacy.loadSelectableModels()
         : { models: [], defaultModelId: '' };
     const defaultModelId = loaded.defaultModelId || '';
-    const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
-        ? window.isSelectableModelForCurrentUser
+    const canSelectModel = typeof window.Pivot.legacy.isSelectableModelForCurrentUser === 'function'
+        ? window.Pivot.legacy.isSelectableModelForCurrentUser
         : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
     const nextModels = (loaded.models || []).filter(model => model.type !== 'embedding' && canSelectModel(model));
-    window._cachedAgentModels = nextModels;
+    window.Pivot.legacy._cachedAgentModels = nextModels;
     const optionHtml = nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
         .join('');
@@ -74,11 +74,11 @@ async function _loadAgentModelsLegacy() {
     if (!select) return;
     const res = await apiFetch(`${API_BASE}/models/available`);
     if (!res.ok) throw new Error('自主任务模型列表加载失败');
-    const canSelectModel = typeof window.isSelectableModelForCurrentUser === 'function'
-        ? window.isSelectableModelForCurrentUser
+    const canSelectModel = typeof window.Pivot.legacy.isSelectableModelForCurrentUser === 'function'
+        ? window.Pivot.legacy.isSelectableModelForCurrentUser
         : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
     const nextModels = (await res.json()).filter(model => model.type !== 'embedding' && canSelectModel(model));
-    window._cachedAgentModels = nextModels;
+    window.Pivot.legacy._cachedAgentModels = nextModels;
     PivotSafeHtml.setHtml(select, nextModels
         .map(model => `<option value="${model.id}">${agentEscape(model.name)}${model.user_id ? ' (个人)' : ''}</option>`)
         .join(''));
@@ -159,7 +159,7 @@ async function loadAgentTools() {
         });
     agentToolsCache = visibleTools;
     if (dagEditorInstance) {
-        window.refreshAgentDagEditor?.();
+        window.Pivot.legacy.refreshAgentDagEditor?.();
     } else {
         mountAgentDagEditor();
     }
@@ -279,7 +279,7 @@ async function preflightAgentPayload(payload) {
 }
 
 function renderAgentRunsPagination(page = agentRunsPage, total = agentRunsTotal, limit = AGENT_RUNS_PAGE_SIZE) {
-    window.renderWorkspacePagination?.('pagination-agentRuns', {
+    window.Pivot.legacy.renderWorkspacePagination?.('pagination-agentRuns', {
         total,
         page,
         limit,
@@ -324,7 +324,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     if (agentRunsTotal === 0 && !status && !runType && !query) {
         PivotSafeHtml.setHtml(list, '');
         activeAgentRunId = '';
-        closeAgentRunDetailModal();
+        window.Pivot.legacy.closeAgentRunDetailModal();
         PivotSafeHtml.setHtml(list, `
             <div class="agent-empty-state agent-empty-hero">
                 <strong>还没有任务记录</strong>
@@ -419,19 +419,19 @@ async function loadAgentRuns(page = agentRunsPage) {
     list.querySelectorAll('tbody tr[data-agent-run-id]').forEach(row => {
         row.addEventListener('click', event => {
             if (event.target.closest('button, a, input, select, textarea')) return;
-            window.openAgentRun(row.dataset.agentRunId);
+            window.Pivot.legacy.openAgentRun(row.dataset.agentRunId);
         });
     });
     list.querySelectorAll('[data-agent-run-detail]').forEach(btn => {
-        btn.addEventListener('click', () => window.openAgentRun(btn.dataset.agentRunDetail));
+        btn.addEventListener('click', () => window.Pivot.legacy.openAgentRun(btn.dataset.agentRunDetail));
     });
     list.querySelectorAll('[data-agent-run-delete]').forEach(btn => {
-        btn.addEventListener('click', () => window.deleteAgentRun(btn.dataset.agentRunDelete));
+        btn.addEventListener('click', () => window.Pivot.legacy.deleteAgentRun(btn.dataset.agentRunDelete));
     });
     bindAgentRunTitleTooltip(list);
 
     if (hasSelectedRun && activeAgentRunId && document.getElementById('agent-tasks-detail-container')) {
-        window.openAgentRun(activeAgentRunId, { silent: true });
+        window.Pivot.legacy.openAgentRun(activeAgentRunId, { silent: true });
     } else if (!hasSelectedRun) {
         document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
     }
