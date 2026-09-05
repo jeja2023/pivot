@@ -168,7 +168,8 @@ document.getElementById('session-list')?.addEventListener('click', (event) => {
 
 document.addEventListener('click', async (event) => {
     if (event.target.closest('#session-search-open')) {
-        getSidebarSearchApi().open?.();
+        const isPersonal = document.body?.dataset.activeWorkspace === 'personal';
+        getSidebarSearchApi().open?.('', { scope: isPersonal ? 'global' : 'sessions' });
         return;
     }
 
@@ -331,6 +332,16 @@ document.getElementById('session-search-modal-input')?.addEventListener('input',
 document.getElementById('session-search-modal-input')?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') getSidebarSearchApi().close?.();
     if (event.key === 'Enter') getSidebarSearchApi().refresh?.();
+});
+
+document.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        const isInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.readOnly;
+        if (isInput && document.activeElement?.id !== 'session-search-modal-input') return;
+        event.preventDefault();
+        const isPersonal = document.body?.dataset.activeWorkspace === 'personal';
+        getSidebarSearchApi().open?.('', { scope: isPersonal ? 'global' : 'sessions' });
+    }
 });
 
 const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {

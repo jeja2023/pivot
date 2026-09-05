@@ -607,7 +607,11 @@
                 await openShortcut('official-writing');
                 return document.getElementById('official-writing-create-doc-btn')?.click();
             }
-            if (action === 'open-search') return document.getElementById('session-search-open')?.click();
+            if (action === 'open-search') {
+                const searchApi = window.Pivot?.moduleApi ? window.Pivot.moduleApi('sidebar.search') : null;
+                if (searchApi?.open) return searchApi.open('', { scope: 'global' });
+                return document.getElementById('session-search-open')?.click();
+            }
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
             if (action === 'open-automation') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();

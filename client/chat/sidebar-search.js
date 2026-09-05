@@ -6,6 +6,7 @@ const selectedSessionIds = new Set();
 let sessionBatchMode = false;
 let sessionSearchArchived = false;
 let globalSearchType = 'sessions';
+let globalSearchScope = 'sessions';
 let globalSearchRequestId = 0;
 // 搜索框输入防抖计时器由 sidebar.search 模块内部管理。
 let sessionSearchTimer = null;
@@ -50,6 +51,9 @@ function parseSessionSearchValue(value) {
 function getSessionSearchEls() {
     return {
         modal: document.getElementById('session-search-modal'),
+        title: document.getElementById('session-search-title'),
+        subtitle: document.getElementById('session-search-subtitle'),
+        types: document.querySelector('.global-search-types'),
         input: document.getElementById('session-search-modal-input'),
         results: document.getElementById('session-search-modal-results'),
         status: document.getElementById('session-search-modal-status'),
@@ -321,7 +325,23 @@ async function loadGlobalWorkflowSearchResults() {
 }
 
 function updateGlobalSearchUi() {
-    const { input, sessionScope, clearButton } = getSessionSearchEls();
+    const { modal, title, subtitle, types, input, sessionScope, clearButton } = getSessionSearchEls();
+    const isGlobal = globalSearchScope === 'global';
+
+    if (modal) {
+        modal.classList.toggle('search-scope-global', isGlobal);
+        modal.classList.toggle('search-scope-sessions', !isGlobal);
+    }
+    if (types) {
+        types.classList.toggle('hidden', !isGlobal);
+    }
+    if (title) {
+        title.textContent = isGlobal ? '全局搜索' : '搜索会话';
+    }
+    if (subtitle) {
+        subtitle.textContent = isGlobal ? '搜索会话、任务和工作流。' : '搜索会话标题、消息内容与标签。';
+    }
+
     document.querySelectorAll('[data-global-search-type]').forEach(button => {
         const isActive = button.dataset.globalSearchType === globalSearchType;
         button.classList.toggle('active', isActive);
@@ -342,7 +362,11 @@ function updateGlobalSearchUi() {
 }
 
 function setGlobalSearchType(type = 'sessions') {
-    globalSearchType = ['sessions', 'tasks', 'workflows'].includes(type) ? type : 'sessions';
+    if (globalSearchScope !== 'global') {
+        globalSearchType = 'sessions';
+    } else {
+        globalSearchType = ['sessions', 'tasks', 'workflows'].includes(type) ? type : 'sessions';
+    }
     globalSearchRequestId += 1;
     if (globalSearchType !== 'sessions' && sessionBatchMode) setSessionBatchMode(false);
     updateGlobalSearchUi();
@@ -380,7 +404,12 @@ async function loadSessionSearchResults() {
     return loadSessionOnlySearchResults();
 }
 
-function openSessionSearchModal(prefill = '') {
+function openSessionSearchModal(prefill = '', options = {}) {
+    const opts = typeof prefill === 'object' && prefill !== null ? prefill : options;
+    const queryStr = typeof prefill === 'string' ? prefill : (opts.query || '');
+    const currentWorkspace = document.body?.dataset.activeWorkspace || 'chat';
+    globalSearchScope = opts.scope || (currentWorkspace === 'personal' ? 'global' : 'sessions');
+
     const { modal, input, openButton } = getSessionSearchEls();
     if (!modal) return;
     lastSearchFocusElement = document.activeElement && document.activeElement !== document.body
@@ -395,7 +424,7 @@ function openSessionSearchModal(prefill = '') {
     clearTimeout(sessionSearchTimer);
     sessionSearchTimer = null;
     if (input) {
-        input.value = prefill;
+        input.value = queryStr;
         setTimeout(() => input.focus(), 0);
     }
     updateSessionBatchBar();

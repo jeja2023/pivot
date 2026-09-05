@@ -35,3 +35,17 @@ test('工作流搜索接口支持服务端关键词过滤并返回计数', () =>
     assert.match(service, /\.includes\(searchText\)/);
     assert.match(read('server/repositories/agent-workflows.js'), /searchPattern = searchText\.replace/);
 });
+
+test('对话视图搜索弹窗隐藏任务与工作流，仅个人工作台作为全局搜索展示全量选项卡', () => {
+    const search = read('client/chat/sidebar-search.js');
+    const styles = read('client/chat/styles/sessions-prompts.css');
+    const sidebar = read('client/chat/sidebar.js');
+    const personal = read('client/chat/personal-workbench.js');
+
+    assert.match(search, /globalSearchScope/);
+    assert.match(search, /search-scope-sessions/);
+    assert.match(search, /search-scope-global/);
+    assert.match(styles, /\.session-search-modal\.search-scope-sessions \.global-search-types/);
+    assert.match(sidebar, /scope:\s*isPersonal \? 'global' : 'sessions'/);
+    assert.match(personal, /scope:\s*'global'/);
+});

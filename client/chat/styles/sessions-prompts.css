@@ -215,6 +215,9 @@
     border-radius: 8px;
     background: #f8fafc;
 }
+.session-search-modal.search-scope-sessions .global-search-types {
+    display: none !important;
+}
 .global-search-type {
     min-width: 78px;
     height: 30px;
