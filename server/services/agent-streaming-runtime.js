@@ -9,6 +9,11 @@ const { recordAgentToolCall } = require('./agent-tool-audit');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { executeToolCallsInOrder } = require('./agent-tool-scheduler');
 const { fitMessagesToContextBudget } = require('./context-budget');
+const {
+    classifyNativeToolCallError,
+    recordNativeToolCallCapability,
+    shouldUseNativeToolCalls
+} = require('./model-tool-call-capabilities');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -84,8 +89,10 @@ function createStreamingSnapshotSampler({
 }
 
 // v0.0.49 开始支持 Agent 运行中的流式工具调用。
-function isStreamingToolsEnabled() {
-    return String(process.env.AGENT_STREAMING_TOOLS || '').toLowerCase() === 'true';
+function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
+    const legacySwitch = String(env.AGENT_STREAMING_TOOLS || '').trim().toLowerCase();
+    if (['0', 'false', 'disabled', 'off'].includes(legacySwitch)) return false;
+    return shouldUseNativeToolCalls(modelCfg, env);
 }
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
@@ -98,6 +105,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         const compactToolOutput = deps.compactToolOutputForModel || compactToolOutputForModel;
         const recordToolCall = deps.recordAgentToolCall || recordAgentToolCall;
         const recordUsage = deps.recordAgentModelUsage || recordAgentModelUsage;
+        const recordToolCallCapability = deps.recordNativeToolCallCapability || recordNativeToolCallCapability;
         const taskBudget = deps.taskBudget || null;
         const tools = buildAgentToolSchemas(toolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
@@ -143,6 +151,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         roundsUsed = lastStep;
         let lastOperationSignature = '';
         let stagnantRounds = 0;
+        let capabilityRecorded = false;
         const completeWithWarning = async (reason) => {
             let answer = '';
             try {
@@ -303,6 +312,17 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     '流式工具规划',
                     { signal: deps.signal || null }
                 );
+                if (!capabilityRecorded) {
+                    capabilityRecorded = true;
+                    try {
+                        await recordToolCallCapability(modelCfg, {
+                            status: 'supported',
+                            protocol: result?.provider?.protocol || 'chat_completions'
+                        });
+                    } catch (_) {
+                        // Capability telemetry must never invalidate a successful task.
+                    }
+                }
                 try {
                     for (const providerEvent of providerEvents) {
                         await deps.recordAgentEvent?.({
@@ -601,12 +621,32 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         return { completed: false, roundsUsed };
     } catch (streamErr) {
         if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED'].includes(streamErr.code)) throw streamErr;
+        const fallback = classifyNativeToolCallError(streamErr);
+        try {
+            await (deps.recordNativeToolCallCapability || recordNativeToolCallCapability)(modelCfg, fallback);
+        } catch (_) {
+            // Fallback remains safe when the capability record cannot be persisted.
+        }
+        try {
+            await deps.recordAgentEvent?.({
+                runId,
+                userId: user?.id || null,
+                type: 'model.native_tool_calls_fallback',
+                payload: {
+                    purpose: 'agent_native_tool_calls_fallback',
+                    capabilityStatus: fallback.status,
+                    httpStatus: fallback.httpStatus,
+                    reason: fallback.reason
+                },
+                eventKey: `native-tool-calls:${modelCfg?.id || modelCfg?.model_name || 'unknown'}:${fallback.status}`
+            });
+        } catch (_) {}
         // 流式调用异常时记录控制步骤，并继续使用 JSON 规划。
-        deps.logger.warn({ runId, err: streamErr.message }, '流式工具调用失败，已回退到 JSON 规划器');
+        deps.logger.warn({ runId, err: streamErr.message, capabilityStatus: fallback.status }, '原生工具调用失败，已回退到 JSON 规划器');
         await deps.insertStep(runId, (await deps.listSteps(runId)).length + 1, {
             type: 'control',
             title: '流式工具调用兜底',
-            output: { error: streamErr.message }
+            output: { error: streamErr.message, fallbackReason: fallback.reason, capabilityStatus: fallback.status }
         });
         return { completed: false, roundsUsed };
     }

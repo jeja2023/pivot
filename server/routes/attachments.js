@@ -32,23 +32,21 @@ function getSafeUploadPath(userId, sessionId, filename) {
     return { uploadRoot, target };
 }
 
-function removeLocalFile(filePath, logContext = '上传文件删除失败') {
+async function removeLocalFile(filePath, logContext = '上传文件删除失败') {
     if (!filePath) return false;
     try {
-        if (fs.existsSync(filePath)) {
-            fs.rmSync(filePath, { force: true, maxRetries: 5, retryDelay: 80 });
-            clearDirSizeCache();
-            return true;
-        }
+        await fs.promises.rm(filePath, { force: true, maxRetries: 5, retryDelay: 80 });
+        clearDirSizeCache();
+        return true;
     } catch (e) {
         logger.warn({ err: e.message, path: filePath }, logContext);
     }
     return false;
 }
 
-function removeTempUploadFile(file) {
+async function removeTempUploadFile(file) {
     if (!file?.path) return;
-    removeLocalFile(file.path, '临时上传文件删除失败');
+    await removeLocalFile(file.path, '临时上传文件删除失败');
 }
 
 function normalizeAttachmentRelativePath(value, fallbackName = '附件') {
@@ -123,7 +121,11 @@ function createAttachmentsRouter({
         }
 
         const { target } = getSafeUploadPath(req.params.userId, req.params.sessionId, req.params.filename);
-        if (!fs.existsSync(target)) return res.status(404).json({ error: '附件文件不存在' });
+        try {
+            await fs.promises.access(target, fs.constants.R_OK);
+        } catch (_) {
+            return res.status(404).json({ error: '附件文件不存在' });
+        }
 
         res.setHeader('Cache-Control', 'private, max-age=604800');
         res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -139,7 +141,7 @@ function createAttachmentsRouter({
         const userId = req.user.id;
         const sessionId = String(req.query.sessionId || '').trim();
         if (!sessionId) {
-            removeTempUploadFile(req.file);
+            await removeTempUploadFile(req.file);
             return res.status(400).json({ error: '缺少会话 ID，请先创建或选择会话' });
         }
 
@@ -150,14 +152,12 @@ function createAttachmentsRouter({
 
         const session = await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sessionId, userId]);
         if (!session) {
-            removeTempUploadFile(req.file);
+            await removeTempUploadFile(req.file);
             return res.status(404).json({ error: '会话不存在或无权上传附件' });
         }
 
         const targetDir = path.join(uploadRoot, userId.toString(), sessionId);
-        if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-        }
+        await fs.promises.mkdir(targetDir, { recursive: true });
 
         const safeOriginalName = path.basename(originalName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 160);
         const imageOutput = isLikelyImageMime(mimeType) || isImagePath(originalName);
@@ -177,7 +177,7 @@ function createAttachmentsRouter({
         try {
             if (imageOutput) {
                 await normalizeUploadedImage(req.file.path, finalPath);
-                removeLocalFile(req.file.path);
+                await removeLocalFile(req.file.path);
             } else {
                 try {
                     extractedText = truncateExtractedText(
@@ -187,7 +187,7 @@ function createAttachmentsRouter({
                 } catch (readErr) {
                     logger.error({ err: readErr.message, path: req.file.path, originalName }, '附件文本读取失败');
                     if (isPasswordError(readErr) || readErr.code === 'PASSWORD_UNSUPPORTED') {
-                        removeLocalFile(req.file.path);
+                        await removeLocalFile(req.file.path);
                         return res.status(422).json({
                             error: password ? '文档密码不正确或当前格式不支持密码解密' : '该文档已加密，请输入密码后重试',
                             code: 'DOCUMENT_PASSWORD_REQUIRED',
@@ -199,7 +199,7 @@ function createAttachmentsRouter({
                     }
                     extractedText = '';
                 }
-                fs.renameSync(req.file.path, finalPath);
+                await fs.promises.rename(req.file.path, finalPath);
 
                 if (path.extname(originalName).toLowerCase() === '.pdf' && !String(extractedText || '').trim()) {
                     try {
@@ -208,7 +208,7 @@ function createAttachmentsRouter({
                             const pageToken = crypto.randomBytes(24).toString('base64url');
                             const pageFileName = `${Date.now()}-${crypto.randomUUID()}-${path.basename(safeOriginalName, path.extname(safeOriginalName))}-page-${page.page}.png`;
                             const pagePath = path.join(targetDir, pageFileName);
-                            fs.writeFileSync(pagePath, page.data);
+                            await fs.promises.writeFile(pagePath, page.data);
                             const pageRelativePath = toProjectRelativePath(pagePath);
                             const pageUrl = encodeAttachmentUrl(pageRelativePath, pageToken);
                             await execute(`
@@ -238,8 +238,8 @@ function createAttachmentsRouter({
             clearDirSizeCache();
             res.json({ url: `${publicUrl}?token=${accessToken}`, name: originalName, type: imageOutput ? 'image/jpeg' : mimeType, sessionId, extractedText, visionAttachments });
         } catch (e) {
-            removeLocalFile(req.file.path);
-            removeLocalFile(finalPath);
+            await removeLocalFile(req.file.path);
+            await removeLocalFile(finalPath);
             throw e; // 转发给全局错误处理器
         }
     }));

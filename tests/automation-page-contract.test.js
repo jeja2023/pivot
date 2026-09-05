@@ -297,10 +297,11 @@ test('Agent控制台各模块具备分页控件且收件箱点击详情自动标
     assert.match(js, /renderWorkspacePagination/);
     assert.match(js, /data-agent-inbox-open-run/);
     assert.match(js, /data-agent-inbox-unread/);
-    assert.match(js, /\/agents\/inbox\/[\s\S]*?\/read/);
+    assert.match(js, /inboxLimit:\s*20/);
+    assert.match(js, /state\.inboxLimit\s*\|\|\s*20/);
 
-    // 3. CSS 包含分页样式
-    assert.match(css, /\.agent-inbox-pagination/);
+    // 3. CSS 包含分页样式，且待办中心分页居中
+    assert.match(css, /\.agent-inbox-pagination\s*\{[\s\S]*?justify-content:\s*center;/);
     assert.match(css, /\.agent-goals-pagination/);
     assert.match(css, /\.agent-reliability-pagination/);
     assert.match(css, /\.agent-feedback-pagination/);

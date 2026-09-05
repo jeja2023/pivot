@@ -19,7 +19,7 @@
         profile: null, memoryPolicy: null,
         feedback: [], feedbackPage: 1, feedbackLimit: 15, feedbackSummary: null,
         proposals: [], proposalsPage: 1, proposalsLimit: 8,
-        inbox: [], inboxPage: 1, inboxLimit: 15,
+        inbox: [], inboxPage: 1, inboxLimit: 20,
         goals: [], goalsPage: 1, goalsLimit: 8,
         reliability: [], reliabilityPage: 1, reliabilityLimit: 15,
         quality: null, channels: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
@@ -192,7 +192,7 @@
         }
         if (inboxPanel) {
             const page = Math.max(1, Number(state.inboxPage || 1));
-            const limit = Math.max(1, Number(state.inboxLimit || 15));
+            const limit = Math.max(1, Number(state.inboxLimit || 20));
             const total = state.inbox.length;
             const totalPages = Math.max(1, Math.ceil(total / limit));
             const currentPage = Math.min(page, totalPages);

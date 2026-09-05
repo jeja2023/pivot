@@ -174,7 +174,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             logAction(req, '导入 Agent Skill 包草稿', `Skill: ${version.name}@${version.version}，包摘要: ${installed.package.digest}`);
             res.status(201).json({ success: true, version, package: { digest: installed.package.digest, installDir: installed.installDir, bytes: installed.package.bytes }, status: 'draft' });
         } finally {
-            try { require('fs').rmSync(req.file.path, { force: true }); } catch (_) {}
+            if (req.file?.path) await require('fs/promises').rm(req.file.path, { force: true }).catch(() => {});
         }
     }));
 

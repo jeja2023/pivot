@@ -18,9 +18,10 @@ function initEarlyDesktopEnv() {
 }
 initEarlyDesktopEnv();
 
-const { loadDesktopConfig, normalizeRemoteUrl, saveUserDesktopConfig } = require('./config');
+const { loadDesktopConfig, normalizeRemoteUrl, normalizeTrustedExternalOrigins, saveUserDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
+const { isTrustedExternalNavigation } = require('./external-navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 const { runDesktopWorker } = require('./agent-runtime');
 const { createDesktopDeliveryController } = require('./delivery/controller');
@@ -350,22 +351,7 @@ async function resolveTargetUrl(config) {
 }
 
 function shouldOpenExternal(targetUrl) {
-    if (!runtimeConfig || !runtimeConfig.allowExternalOpen) return false;
-    try {
-        const target = new URL(targetUrl);
-        if (!['http:', 'https:'].includes(target.protocol)) return false;
-        if (currentTargetUrl) {
-            const current = new URL(currentTargetUrl);
-            if (target.origin === current.origin) return false;
-        }
-        const allowed = Array.isArray(runtimeConfig.allowedExternalOrigins)
-            ? runtimeConfig.allowedExternalOrigins
-            : [];
-        if (allowed.length === 0) return true;
-        return allowed.some(item => item === target.origin || item === target.hostname);
-    } catch (_err) {
-        return false;
-    }
+    return isTrustedExternalNavigation(targetUrl, currentTargetUrl, runtimeConfig || {});
 }
 
 function trustedRendererOptions() {
@@ -857,6 +843,8 @@ ipcMain.handle('pivot-desktop:get-server-config', async (event) => {
         mode: runtimeConfig?.mode || 'local',
         remoteUrl: runtimeConfig?.remoteUrl || '',
         stealthSecret: process.env.PIVOT_STEALTH_SECRET || runtimeConfig?.stealthSecret || '',
+        allowExternalOpen: runtimeConfig?.allowExternalOpen === true,
+        allowedExternalOrigins: runtimeConfig?.allowedExternalOrigins || [],
         environmentName: runtimeConfig?.environmentName || ''
     };
 });
@@ -913,10 +901,22 @@ ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) =>
         }
     }
     const stealthSecret = typeof payload.stealthSecret === 'string' ? payload.stealthSecret.trim() : undefined;
+    const allowExternalOpen = payload.allowExternalOpen === true;
+    let allowedExternalOrigins;
+    try {
+        allowedExternalOrigins = normalizeTrustedExternalOrigins(payload.allowedExternalOrigins);
+    } catch (error) {
+        return { success: false, error: error.message || '外部站点白名单无效' };
+    }
+    if (allowExternalOpen && allowedExternalOrigins.length === 0) {
+        return { success: false, error: '启用外部站点打开前，至少需要配置一个受信任 Origin。' };
+    }
     
     saveUserDesktopConfig(app, {
         mode,
         remoteUrl,
+        allowExternalOpen,
+        allowedExternalOrigins,
         ...(stealthSecret !== undefined ? { stealthSecret } : {})
     });
 

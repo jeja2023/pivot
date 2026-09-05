@@ -2882,7 +2882,17 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     transition: all 0.15s ease !important;
 }
 
-.agent-inbox-pagination,
+.agent-inbox-pagination {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
 .agent-goals-pagination,
 .agent-reliability-pagination,
 .agent-feedback-pagination,

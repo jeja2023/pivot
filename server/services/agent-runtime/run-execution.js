@@ -274,7 +274,7 @@ async function runAgent(runId, user) {
             Number(resumeContext.latestStepIndex || 0) || 0,
             0
         );
-        if (isStreamingToolsEnabled()) {
+        if (isStreamingToolsEnabled(modelCfg)) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
             if (chatBridge) {
                 streamingDeps.synthesizeFinalAnswer = (streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, options = {}) => (

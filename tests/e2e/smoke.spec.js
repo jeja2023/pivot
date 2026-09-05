@@ -233,4 +233,32 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#tab-content-report')).toBeVisible();
         await expect(page.locator('#report-query-btn')).toBeVisible();
     });
+
+    test('model configuration sends the native tool-call mode selected by an administrator', async ({ page }) => {
+        const login = await page.request.post('/api/auth/login', {
+            data: {
+                username: 'admin',
+                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
+            }
+        });
+        expect(login.ok()).toBeTruthy();
+        let savedPayload = null;
+        await page.route('**/api/models', async route => {
+            if (route.request().method() !== 'POST') return route.continue();
+            savedPayload = route.request().postDataJSON();
+            return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        });
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.locator('#admin-panel-btn').click();
+        await page.locator('#tab-models').click();
+        await page.locator('#model-add-btn').click();
+        await expect(page.locator('#m-tool-call-mode')).toHaveValue('auto');
+        await page.locator('#m-name').fill('E2E tool mode');
+        await page.locator('#m-url').fill('https://models.example.com/v1');
+        await page.locator('#m-model').fill('e2e-tool-mode');
+        await page.locator('#m-tool-call-mode').selectOption('disabled');
+        await page.locator('#m-submit-btn').click();
+        await expect.poll(() => savedPayload).not.toBeNull();
+        expect(savedPayload.tool_call_mode).toBe('disabled');
+    });
 });

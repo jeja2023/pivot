@@ -11,6 +11,7 @@ const {
 const { normalizeAutoUpdate, normalizeConfig, normalizeUpdatePath, resolveUpdateUrlFromRemote } = require('../desktop/config');
 const { resolveInitializedServer } = require('../desktop/local-server');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
+const { isTrustedExternalNavigation, normalizeTrustedExternalOrigins } = require('../desktop/external-navigation-policy');
 
 test('desktop local mode waits for server initialization before resolving', async () => {
     let resolveInit;
@@ -162,4 +163,32 @@ test('desktop renderer policy supports LAN HTTP origins without trusting redirec
     assert.equal(isTrustedRendererUrl(pathToFileURL(errorPage).toString(), 'http://192.168.10.20:9006/', {
         allowedFilePaths: [errorPage]
     }), true);
+});
+
+test('desktop external navigation requires explicit origin-scoped trust', () => {
+    assert.deepEqual(
+        normalizeTrustedExternalOrigins(['https://docs.example.com', 'https://docs.example.com']),
+        ['https://docs.example.com']
+    );
+    assert.throws(
+        () => normalizeTrustedExternalOrigins(['https://docs.example.com/path']),
+        /Origin|路径/
+    );
+    assert.throws(
+        () => normalizeTrustedExternalOrigins(['https://user:password@docs.example.com']),
+        /账号|HTTP\/HTTPS/
+    );
+    assert.equal(isTrustedExternalNavigation('https://docs.example.com/guide', 'https://pivot.example.com/', {
+        allowExternalOpen: true,
+        allowedExternalOrigins: ['https://docs.example.com']
+    }), true);
+    assert.equal(isTrustedExternalNavigation('https://evil.example.com/', 'https://pivot.example.com/', {
+        allowExternalOpen: true,
+        allowedExternalOrigins: ['https://docs.example.com']
+    }), false);
+    assert.equal(isTrustedExternalNavigation('https://docs.example.com/', 'https://pivot.example.com/', {
+        allowExternalOpen: true,
+        allowedExternalOrigins: []
+    }), false);
+    assert.equal(normalizeConfig({ mode: 'remote', remoteUrl: 'https://pivot.example.com', allowExternalOpen: true }, {}, {}).allowExternalOpen, false);
 });

@@ -2,6 +2,15 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-09-05 模型原生工具调用自适应降级与多节点预检及安全治理升级（v0.1.83）
+
+- ✅ 模型原生 Tool Calling 端点能力感知与降级：新增 `models.tool_call_mode` 数据库迁移，构建 `model-tool-call-capabilities` 判定服务；流式推理自动识别端点协议不兼容并优雅回退至 JSON 规划，前端配置支持灵活切换。
+- ✅ 多节点集群部署预检 CLI 与真实验收：新增 `scripts/preflight_deployment.js`（`npm run preflight:deployment`）与 `docs/多节点部署预检.md`；严格核验网络共享存储同源挂载与数据库连接，健康检查接入集群就绪度。
+- ✅ 核心请求路径同步 I/O 深度治理：新增 `scripts/check_sync_io_hotpaths.js` AST 静态阻断门禁；附件分发、法规文档与文件上传全面升级为异步 Stream 与 Promise，根治事件循环阻塞隐患。
+- ✅ 桌面端外部链接安全导航沙箱：新增 `desktop/external-navigation-policy.js`，在 Electron 主进程对外链实施强同源白名单，外链强制由操作系统默认浏览器打开，防范内嵌提权与跨站攻击。
+- ✅ 控制台待办中心分页体验优化：待办中心默认分页大小由 15 升级为 20 条，底部分页组件水平居中排布，固化自动化契约测试。
+- ✅ 环境变量与配置模板逐行对齐：同步 `.env` 与 `.env.example`，补充多节点部署、`AGENT_NATIVE_TOOL_CALLS` 与双轨采样快照配置。
+
 ## 2026-09-05 Agent 运行时架构分层治理与统一上下文审计契约升级（v0.1.82）
 
 - ✅ Agent 核心运行时架构分层治理：彻底拆解 `server/services/agent-runtime/index.js`（2200+ 行巨石模块），分层解耦出 `run-state.js`、`run-lifecycle.js` 与 `run-execution.js`，主文件压缩至 ~790 行，完全满足架构治理要求。

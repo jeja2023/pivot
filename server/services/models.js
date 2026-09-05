@@ -4,12 +4,13 @@ const { decryptSecret } = require('../security');
 const { normalizeTokenUsage } = require('./token-accounting');
 const { normalizePriceCurrency, normalizePriceValue } = require('./model-costs');
 const { getBeijingTimestamp } = require('../time');
+const { normalizeToolCallMode } = require('./model-tool-call-capabilities');
 const {
     enqueueModelUsageEvent,
     getPendingModelUsageTotal
 } = require('./db-write-queue');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, tool_call_probe_status, tool_call_probe_protocol, tool_call_probe_error, tool_call_probed_at, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -307,6 +308,7 @@ module.exports = {
     modelListFields,
     normalizeTags,
     normalizeBooleanFlag,
+    normalizeToolCallMode,
     normalizeModelTokenLimit,
     validateModelTokenSettings,
     MAX_MODEL_TOKEN_LIMIT,

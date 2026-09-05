@@ -1,3 +1,4 @@
+const path = require('path');
 const { getDeploymentProviders } = require('./deployment-providers');
 function normalizeDeploymentMode(value) {
     const mode = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
@@ -6,24 +7,36 @@ function normalizeDeploymentMode(value) {
     return 'single_node';
 }
 
-function hasEnv(env, keys = []) {
-    return keys.some(key => String(env[key] || '').trim().length > 0);
+function isPathInside(root, target) {
+    const relative = path.relative(root, target);
+    return relative === '' || (relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function getSharedStorageLayout(env = process.env, provider = {}) {
+    const rootRaw = String(env.PIVOT_SHARED_STORAGE_ROOT || '').trim();
+    if (!rootRaw || provider.key !== 'shared_fs') {
+        return { root: '', dataDir: '', uploadDir: '', coversData: false, coversUploads: false, ready: false };
+    }
+    const root = path.resolve(rootRaw);
+    const dataDir = path.resolve(env.DATA_DIR || path.join(root, 'data'));
+    const uploadDir = path.resolve(env.PIVOT_UPLOAD_DIR || env.UPLOAD_DIR || path.join(root, 'uploads'));
+    const coversData = isPathInside(root, dataDir);
+    const coversUploads = isPathInside(root, uploadDir);
+    return { root, dataDir, uploadDir, coversData, coversUploads, ready: coversData && coversUploads };
 }
 
 function getDeploymentProfile(env = process.env) {
     const requestedMode = normalizeDeploymentMode(env.PIVOT_DEPLOYMENT_MODE || env.DEPLOYMENT_MODE);
     const databaseProvider = String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() || 'postgres';
     const providers = getDeploymentProviders(env);
-    const objectStorageConfigured = hasEnv(env, ['PIVOT_OBJECT_STORAGE_URL', 'S3_BUCKET', 'AWS_S3_BUCKET']);
-    const queueConfigured = hasEnv(env, ['PIVOT_QUEUE_URL', 'REDIS_URL', 'RABBITMQ_URL']);
-    const lockConfigured = hasEnv(env, ['PIVOT_LOCK_URL', 'REDIS_URL', 'ETCD_ENDPOINTS']);
+    const sharedStorage = getSharedStorageLayout(env, providers.objectStorage);
     const databaseReady = providers.database?.ready === true && databaseProvider !== 'sqlite';
+    const objectStorageOperational = providers.objectStorage?.ready === true
+        && (providers.objectStorage?.key !== 'shared_fs' || sharedStorage.ready);
+    const objectStorageReady = objectStorageOperational && providers.objectStorage?.multiNodeReady === true;
     const multiNodeReady = databaseReady
-        && providers.objectStorage?.key === 's3_compatible'
-        && providers.objectStorage?.ready === true
-        && providers.queue?.key === 'distributed'
+        && objectStorageReady
         && providers.queue?.ready === true
-        && providers.lock?.key === 'distributed'
         && providers.lock?.ready === true;
     const warnings = [];
 
@@ -32,6 +45,12 @@ function getDeploymentProfile(env = process.env) {
     }
     if (requestedMode !== 'single_node' && [providers.objectStorage, providers.queue, providers.lock].some(provider => provider?.configured && !provider?.ready)) {
         warnings.push('multi_node_provider_adapter_not_wired');
+    }
+    if (requestedMode !== 'single_node' && providers.objectStorage?.key === 'shared_fs' && !sharedStorage.ready) {
+        warnings.push('multi_node_shared_storage_must_cover_data_and_uploads');
+    }
+    if (requestedMode !== 'single_node' && providers.objectStorage?.key === 'local_fs') {
+        warnings.push('multi_node_shared_storage_required');
     }
 
     return {
@@ -47,22 +66,23 @@ function getDeploymentProfile(env = process.env) {
             adapterRequiredForMultiNode: !databaseReady
         },
         objectStorage: {
-            provider: objectStorageConfigured ? 'external' : 'local_fs',
-            configured: objectStorageConfigured,
+            provider: providers.objectStorage?.key || 'local_fs',
+            configured: providers.objectStorage?.configured === true,
             adapterWired: providers.objectStorage?.adapterWired === true,
-            ready: providers.objectStorage?.ready === true,
-            adapterRequiredForMultiNode: providers.objectStorage?.ready !== true
+            ready: objectStorageOperational,
+            adapterRequiredForMultiNode: !objectStorageReady,
+            sharedStorage
         },
         queue: {
-            provider: queueConfigured ? 'external' : 'in_process',
-            configured: queueConfigured,
+            provider: providers.queue?.key || 'in_process',
+            configured: providers.queue?.configured === true,
             adapterWired: providers.queue?.adapterWired === true,
             ready: providers.queue?.ready === true,
             adapterRequiredForMultiNode: providers.queue?.ready !== true
         },
         locks: {
-            provider: lockConfigured ? 'external' : 'in_process_or_sqlite',
-            configured: lockConfigured,
+            provider: providers.lock?.key || 'in_process_or_sqlite',
+            configured: providers.lock?.configured === true,
             adapterWired: providers.lock?.adapterWired === true,
             ready: providers.lock?.ready === true,
             adapterRequiredForMultiNode: providers.lock?.ready !== true
@@ -75,13 +95,34 @@ function getDeploymentProfile(env = process.env) {
             tenantOwnedSecrets: false,
             auditExport: false,
             distributedTasks: providers.queue?.ready === true,
-            distributedLocks: providers.lock?.ready === true
+            distributedLocks: providers.lock?.ready === true,
+            sharedFileStorage: objectStorageReady,
+            sharedFileStorageCoverage: sharedStorage.ready ? ['data', 'uploads'] : []
         },
         warnings
     };
 }
 
+function isDeploymentReadinessRequired(env = process.env) {
+    return ['1', 'true', 'yes', 'on'].includes(String(env.PIVOT_REQUIRE_DEPLOYMENT_READY || '').trim().toLowerCase());
+}
+
+function assertDeploymentReady(env = process.env) {
+    const profile = getDeploymentProfile(env);
+    if (!isDeploymentReadinessRequired(env) || profile.requestedMode !== 'multi_node' || profile.capabilities.multiNodeReady === true) {
+        return profile;
+    }
+    const error = new Error(`多节点部署预检未通过：${profile.warnings.join(', ') || '缺少共享基础设施'}`);
+    error.code = 'PIVOT_DEPLOYMENT_NOT_READY';
+    error.profile = profile;
+    throw error;
+}
+
 module.exports = {
+    assertDeploymentReady,
     getDeploymentProfile,
+    getSharedStorageLayout,
+    isDeploymentReadinessRequired,
+    isPathInside,
     normalizeDeploymentMode
 };

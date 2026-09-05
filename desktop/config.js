@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeOriginList, normalizeUpdateFeedUrl } = require('./update-policy');
+const { normalizeTrustedExternalOrigins } = require('./external-navigation-policy');
 
 const DEFAULT_AUTO_UPDATE = {
     enabled: false,
@@ -20,7 +21,7 @@ const DEFAULT_CONFIG = {
     remoteUrl: '',
     partition: '',
     windowTitle: '智枢 Pivot',
-    allowExternalOpen: true,
+    allowExternalOpen: false,
     allowedExternalOrigins: [],
     sandbox: true,
     autoUpdate: DEFAULT_AUTO_UPDATE
@@ -95,11 +96,6 @@ function candidateConfigPaths(app, argv = process.argv, env = process.env) {
         { source: 'executable', path: path.join(executableDir, 'config.json') },
         { source: 'resources', path: path.join(resourceDir, 'config.json') }
     ].filter(item => item.path);
-}
-
-function normalizeStringList(value) {
-    const items = Array.isArray(value) ? value : String(value || '').split(',');
-    return items.map(item => String(item || '').trim()).filter(Boolean);
 }
 
 function normalizeMode(value) {
@@ -196,8 +192,11 @@ function normalizeConfig(raw, meta = {}, env = process.env) {
         remoteUrl,
         partition: normalizePartition(merged.partition, mode, environmentName),
         windowTitle: typeof merged.windowTitle === 'string' ? merged.windowTitle.trim() : '智枢 Pivot',
-        allowExternalOpen: merged.allowExternalOpen !== false,
-        allowedExternalOrigins: normalizeStringList(merged.allowedExternalOrigins),
+        // External navigation is opt-in and origin-scoped. A legacy config that
+        // only had allowExternalOpen=true is migrated safely to disabled until
+        // the administrator explicitly names the destinations it trusts.
+        allowExternalOpen: merged.allowExternalOpen === true && normalizeTrustedExternalOrigins(merged.allowedExternalOrigins).length > 0,
+        allowedExternalOrigins: normalizeTrustedExternalOrigins(merged.allowedExternalOrigins),
         sandbox: merged.sandbox !== false,
         stealthSecret: typeof merged.stealthSecret === 'string' ? merged.stealthSecret.trim() : (env.PIVOT_STEALTH_SECRET || ''),
         autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl }),
@@ -223,6 +222,7 @@ module.exports = {
     normalizeAutoUpdate,
     normalizeConfig,
     normalizeRemoteUrl,
+    normalizeTrustedExternalOrigins,
     normalizeUpdatePath,
     resolveUpdateUrlFromRemote,
     saveUserDesktopConfig

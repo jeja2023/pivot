@@ -126,6 +126,25 @@ function checkWriteQueue() {
     }
 }
 
+function checkDeployment() {
+    try {
+        const { getDeploymentProfile } = require('./deployment-profile');
+        const profile = getDeploymentProfile();
+        const requestedMultiNode = profile.requestedMode === 'multi_node';
+        const ready = profile.capabilities?.multiNodeReady === true;
+        return {
+            status: requestedMultiNode && !ready ? 'error' : 'ok',
+            requestedMode: profile.requestedMode,
+            effectiveMode: profile.effectiveMode,
+            message: requestedMultiNode && !ready
+                ? `多节点部署预检未通过：${profile.warnings.join(', ') || '缺少共享基础设施'}`
+                : `部署模式：${profile.effectiveMode}`
+        };
+    } catch (error) {
+        return { status: 'error', message: error.message };
+    }
+}
+
 function overallStatus(checks) {
     const statuses = checks.map(item => item.status);
     if (statuses.includes('error')) return 'error';
@@ -167,7 +186,8 @@ function getSystemHealthSnapshot(options = {}) {
         { name: 'uploadsDir', ...checkWritableDirectory('Uploads directory', uploadDir) },
         { name: 'memory', ...checkMemory() },
         { name: 'disk', ...checkDiskUsage(dataDir) },
-        { name: 'writeQueue', ...checkWriteQueue() }
+        { name: 'writeQueue', ...checkWriteQueue() },
+        { name: 'deployment', ...checkDeployment() }
     ];
 
     const snapshot = {
@@ -182,6 +202,7 @@ function getSystemHealthSnapshot(options = {}) {
 
 module.exports = {
     checkDatabase,
+    checkDeployment,
     checkDiskUsage,
     checkMemory,
     checkWriteQueue,

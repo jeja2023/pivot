@@ -247,7 +247,7 @@ test('运行资源包控制台默认收起，只有显式 true 才开放内部�
     assert.equal(isRuntimePackConsoleEnabled({ PIVOT_RUNTIME_PACKS_CONSOLE_ENABLED: 'true' }), true);
 });
 
-test('skill ZIP upload passes binary magic validation', () => {
+test('skill ZIP upload passes binary magic validation', async () => {
     const root = tempRoot();
     const zipPath = path.join(root, 'demo.skill.zip');
     writeZip(zipPath, [['SKILL.yaml', 'id: corp.demo\nname: demo\nversion: 1.0.0\n']]);
@@ -255,7 +255,7 @@ test('skill ZIP upload passes binary magic validation', () => {
     const req = { file: { path: zipPath, originalname: 'demo.skill.zip' }, _pivotUploadRoot: root, _pivotUploadPaths: new Set() };
     const res = { status() { return this; }, json() { return this; } };
     try {
-        uploadSecurityMiddleware(req, res, () => { called = true; });
+        await uploadSecurityMiddleware(req, res, () => { called = true; });
         assert.equal(called, true);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

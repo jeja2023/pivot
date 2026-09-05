@@ -4,7 +4,8 @@
   "remoteUrl": "http://192.168.10.20:3000/",
   "partition": "persist:pivot-production",
   "windowTitle": "智枢 Pivot",
-  "allowExternalOpen": true,
+  "allowExternalOpen": false,
+  "allowedExternalOrigins": [],
   "autoUpdate": {
     "enabled": false,
     "path": "/downloads/",

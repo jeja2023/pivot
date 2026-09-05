@@ -32,6 +32,7 @@ function main() {
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.ui"]');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.attachments"]');
     assertIncludes('tests/e2e/smoke.spec.js', '#rag-debug-history');
+    assertIncludes('tests/e2e/smoke.spec.js', "tool_call_mode");
     assertIncludes('client/chat/partials/scripts.html', '/chat/pivot-core.js');
     assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-history"');
     if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'node scripts/run_e2e_tests.js') {

@@ -139,7 +139,7 @@ function registerDocumentRoutes(router, deps) {
                 return res.status(404).json({ error: { message: '法规源文件不存在', type: 'invalid_request_error' } });
             }
             const filePath = resolveRegulationVersionDownloadPath(currentVer);
-            if (!filePath || !fs.existsSync(filePath)) {
+            if (!filePath || !await fs.promises.access(filePath).then(() => true).catch(() => false)) {
                 return res.status(404).json({ error: { message: '源文件已被移动或删除', type: 'not_found' } });
             }
             await recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'download', detail: detail.document.title });
@@ -148,7 +148,7 @@ function registerDocumentRoutes(router, deps) {
     
         router.post('/documents/batch', authMiddleware, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
-                cleanupTempUploads(req.files);
+                await cleanupTempUploads(req.files);
                 return;
             }
             const files = Array.isArray(req.files) ? req.files : [];
@@ -160,7 +160,7 @@ function registerDocumentRoutes(router, deps) {
             const failed = [];
             for (const file of files) {
                 try {
-                    const duplicateOf = await findRegulationDuplicateByHash(hashUploadedFile(file));
+                    const duplicateOf = await findRegulationDuplicateByHash(await hashUploadedFile(file));
                     const prepared = await prepareRegulationUploadMetadata(file, sharedMetadata);
                     const result = await createRegulationDocumentFromUpload({
                         userId: req.user.id,
@@ -180,7 +180,7 @@ function registerDocumentRoutes(router, deps) {
                         fileName: file.originalname || '',
                         message: error.message || '导入失败'
                     });
-                    cleanupTempUpload(file);
+                    await cleanupTempUpload(file);
                 }
             }
             logAction(req, '法规查询批量导入', `成功 ${created.length} / 共 ${files.length}${failed.length ? `，失败 ${failed.length}` : ''}`);
@@ -193,14 +193,14 @@ function registerDocumentRoutes(router, deps) {
     
         router.post('/documents', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
                 return;
             }
             if (!req.file) {
                 return res.status(400).json({ error: { message: `请选择要导入的法规文档，支持 ${SUPPORTED_UPLOAD_LABEL}`, type: 'invalid_request_error' } });
             }
             try {
-                const duplicateOf = await findRegulationDuplicateByHash(hashUploadedFile(req.file));
+                const duplicateOf = await findRegulationDuplicateByHash(await hashUploadedFile(req.file));
                 const prepared = await prepareRegulationUploadMetadata(req.file, readRegulationMetadata(req.body || {}));
                 const result = await createRegulationDocumentFromUpload({
                     userId: req.user.id,
@@ -217,7 +217,7 @@ function registerDocumentRoutes(router, deps) {
                     summary: result.summary
                 });
             } catch (error) {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
                 throw error;
             }
         }));
@@ -225,7 +225,7 @@ function registerDocumentRoutes(router, deps) {
         // #7 导入前预览：只解析不落库，返回切出的条文列表供管理员校正
         router.post('/documents/preview', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
                 return;
             }
             if (!req.file) {
@@ -246,13 +246,13 @@ function registerDocumentRoutes(router, deps) {
                     }))
                 });
             } finally {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
             }
         }));
     
         router.post('/documents/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
                 return;
             }
             if (!req.file) {
@@ -276,7 +276,7 @@ function registerDocumentRoutes(router, deps) {
                     summary: result.summary
                 });
             } catch (error) {
-                cleanupTempUpload(req.file);
+                await cleanupTempUpload(req.file);
                 throw error;
             }
         }));

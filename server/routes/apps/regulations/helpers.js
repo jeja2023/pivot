@@ -41,25 +41,25 @@ const {
 
 const SUPPORTED_UPLOAD_LABEL = 'TXT、Markdown、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV、JSON、HTML/HTM';
 
-function cleanupTempUpload(file) {
+async function cleanupTempUpload(file) {
     if (!file?.path) return;
     try {
-        fs.rmSync(file.path, { force: true });
+        await fs.promises.rm(file.path, { force: true });
     } catch (_err) {
         // 忽略临时文件清理阶段的非致命错误
     }
 }
 
-function cleanupTempUploads(files) {
+async function cleanupTempUploads(files) {
     const list = Array.isArray(files) ? files : (files ? [files] : []);
-    list.forEach(cleanupTempUpload);
+    await Promise.all(list.map(cleanupTempUpload));
 }
 
 // 计算上传临时文件的 sha256，用于导入前的重复检测（失败时返回空串，不影响导入）
-function hashUploadedFile(file) {
+async function hashUploadedFile(file) {
     if (!file?.path) return '';
     try {
-        return crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex');
+        return crypto.createHash('sha256').update(await fs.promises.readFile(file.path)).digest('hex');
     } catch (_err) {
         return '';
     }

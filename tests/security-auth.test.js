@@ -1138,8 +1138,7 @@ test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the fi
         json(body) { this.body = body; return this; }
     };
     let nextCalled = false;
-    uploadSecurityMiddleware(req, res, () => { nextCalled = true; });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await uploadSecurityMiddleware(req, res, () => { nextCalled = true; });
     assert.equal(nextCalled, false);
     assert.equal(res.statusCode, 400);
     assert.match(res.body.error, /文件内容/);

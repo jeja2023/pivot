@@ -1,3 +1,16 @@
+## [v0.1.83] - 2026-09-05
+
+### 模型原生工具调用自适应降级与多节点预检及安全治理升级
+
+- **模型原生 Tool Calling 端点能力探测与自适应降级**：新增数据库迁移 `202609050004_model_tool_call_capabilities.js`，在 `models` 表引入 `tool_call_mode` 字段；构建 `model-tool-call-capabilities.js` 判定服务，支持全局环境 `AGENT_NATIVE_TOOL_CALLS` 与单个模型粒度配置（自动探测 / 强制启用 / 强制禁用）；在 Agent 流式推理中无缝集成端点能力感知，当第三方端点不支持 tools 时自动记录审计事件并优雅回退到 JSON 回合制规划。
+- **多节点集群部署预检脚手架与真实验收**：新增 `scripts/preflight_deployment.js`（`npm run preflight:deployment`）与配套运维文档 [docs/多节点部署预检.md](docs/多节点部署预检.md)；在 `deployment-profile.js` 与 `deployment-providers.js` 中严格校验共享卷挂载一致性（`DATA_DIR` 与 `PIVOT_UPLOAD_DIR` 同源存储）与数据库真实连接，系统健康检查同步接入多节点集群真实就绪度诊断。
+- **请求热路径同步 I/O 深度治理与静态门禁**：新增 `scripts/check_sync_io_hotpaths.js` 并接入 `npm run check`，基于 AST 深度扫描阻断关键请求路径中的同步文件 I/O 操作；将附件下载、法规文档分发与文件上传中间件中的同步读写全面升级为异步 Stream 与 Promise，彻底消除主事件循环微卡顿风险。
+- **桌面客户端外部链接安全导航策略治理**：新增 `desktop/external-navigation-policy.js`，在 Electron 主进程针对窗口跳转（`will-navigate`）与弹窗打开（`setWindowOpenHandler`）建立受信源白名单与外链沙箱策略，所有非同源或外部 URL 强制通过系统默认浏览器（`shell.openExternal`）打开，阻断跨站劫持与提权漏洞。
+- **Agent 控制台待办中心分页体验优化**：在 `client/chat/agent-harness.js` 将待办中心默认每页显示条数升级为 20 条（`inboxLimit: 20`）；在 `agent-harness.css` 中将底部分页控件（`.agent-inbox-pagination`）调整为水平居中排布，并在自动化契约测试中固化约束。
+- **环境变量配置与模板全面对齐**：对齐 `.env` 与 `.env.example`，补充多节点部署、`AGENT_NATIVE_TOOL_CALLS` 与双轨采样快照配置注释说明，确保生产配置模板与开发实例逐行对应。
+
+详细发布记录见 [v0.1.83 发布记录](docs/releases/v0.1.83-模型原生工具调用自适应降级与多节点预检及安全治理升级.md)。
+
 ## [v0.1.82] - 2026-09-05
 
 ### Agent 运行时架构分层治理与统一上下文审计契约升级

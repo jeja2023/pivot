@@ -34,6 +34,16 @@ const PROVIDER_REGISTRY = {
             status: 'active',
             capabilities: ['single_node']
         },
+        shared_fs: {
+            key: 'shared_fs',
+            label: 'Shared POSIX filesystem',
+            interface: 'ObjectStorageProvider',
+            local: false,
+            multiNodeReady: true,
+            adapterWired: true,
+            status: 'active',
+            capabilities: ['multi_node', 'shared_volume', 'atomic_rename']
+        },
         s3_compatible: {
             key: 's3_compatible',
             label: 'S3 compatible object storage',
@@ -58,6 +68,16 @@ const PROVIDER_REGISTRY = {
             status: 'active',
             capabilities: ['single_node']
         },
+        postgres: {
+            key: 'postgres',
+            label: 'PostgreSQL durable queue',
+            interface: 'QueueProvider',
+            local: false,
+            multiNodeReady: true,
+            adapterWired: true,
+            status: 'active',
+            capabilities: ['multi_node', 'retry', 'visibility_timeout', 'skip_locked']
+        },
         distributed: {
             key: 'distributed',
             label: 'Distributed queue',
@@ -79,6 +99,16 @@ const PROVIDER_REGISTRY = {
             adapterWired: true,
             status: 'active',
             capabilities: ['single_node']
+        },
+        postgres: {
+            key: 'postgres',
+            label: 'PostgreSQL lease lock',
+            interface: 'LockProvider',
+            local: false,
+            multiNodeReady: true,
+            adapterWired: true,
+            status: 'active',
+            capabilities: ['multi_node', 'lease_renewal', 'fencing_token', 'row_lock']
         },
         distributed: {
             key: 'distributed',
@@ -125,18 +155,26 @@ function resolveProviderKey(type, env = process.env) {
         return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() || 'postgres';
     }
     if (type === 'objectStorage') {
-        return hasEnv(env, ['PIVOT_OBJECT_STORAGE_URL', 'S3_BUCKET', 'AWS_S3_BUCKET']) ? 's3_compatible' : 'local_fs';
+        if (hasEnv(env, ['PIVOT_OBJECT_STORAGE_URL', 'S3_BUCKET', 'AWS_S3_BUCKET'])) return 's3_compatible';
+        return hasEnv(env, ['PIVOT_SHARED_STORAGE_ROOT']) ? 'shared_fs' : 'local_fs';
     }
     if (type === 'queue') {
-        return hasEnv(env, ['PIVOT_QUEUE_URL', 'REDIS_URL', 'RABBITMQ_URL']) ? 'distributed' : 'in_process';
+        if (hasEnv(env, ['PIVOT_QUEUE_URL', 'REDIS_URL', 'RABBITMQ_URL'])) return 'distributed';
+        return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() === 'postgres'
+            ? 'postgres'
+            : 'in_process';
     }
     if (type === 'lock') {
-        return hasEnv(env, ['PIVOT_LOCK_URL', 'REDIS_URL', 'ETCD_ENDPOINTS']) ? 'distributed' : 'in_process_or_sqlite';
+        if (hasEnv(env, ['PIVOT_LOCK_URL', 'REDIS_URL', 'ETCD_ENDPOINTS'])) return 'distributed';
+        return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() === 'postgres'
+            ? 'postgres'
+            : 'in_process_or_sqlite';
     }
     return '';
 }
 
 function getDeploymentProviders(env = process.env) {
+    const databaseConfigured = hasEnv(env, ['DATABASE_URL', 'TEST_DATABASE_URL']);
     return Array.from(PROVIDER_TYPES).reduce((acc, type) => {
         const requestedKey = resolveProviderKey(type, env);
         const provider = providerFor(type, requestedKey);
@@ -145,7 +183,10 @@ function getDeploymentProviders(env = process.env) {
         // Provider 则由环境变量显式选择。这里的 configured 只表示“选中了”，
         // ready 还必须经过 adapterWired + active 检查。
         const configured = provider.local
-            || (type === 'database' ? hasEnv(env, ['DATABASE_URL', 'TEST_DATABASE_URL']) : requestedKey !== defaultKeys[type]);
+            || (type === 'database' ? databaseConfigured
+                : provider.key === 'postgres' ? databaseConfigured
+                    : provider.key === 'shared_fs' ? hasEnv(env, ['PIVOT_SHARED_STORAGE_ROOT'])
+                        : requestedKey !== defaultKeys[type]);
         const ready = provider.local
             ? true
             : configured && provider.adapterWired === true && provider.multiNodeReady === true && provider.status === 'active';

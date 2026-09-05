@@ -345,7 +345,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             res.json({ dataset });
         } catch (e) {
             if (req.file?.path) {
-                try { require('fs').rmSync(req.file.path, { force: true }); } catch (_err) { /* noop */ }
+                await require('fs/promises').rm(req.file.path, { force: true }).catch(() => {});
             }
             throw e;
         }

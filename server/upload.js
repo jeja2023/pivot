@@ -112,19 +112,20 @@ function cleanupRequestUploads(req, root = uploadRoot) {
     Array.from(req._pivotUploadPaths || []).forEach(filePath => removeUploadedPath(filePath, root));
 }
 
-function verifyUploadedMagic(file) {
+async function verifyUploadedMagic(file) {
     if (!file?.path) return true;
 
     const buffer = Buffer.alloc(1024);
     let bytesRead = 0;
     let fd;
     try {
-        fd = fs.openSync(file.path, 'r');
-        bytesRead = fs.readSync(fd, buffer, 0, 1024, 0);
+        fd = await fs.promises.open(file.path, 'r');
+        const result = await fd.read(buffer, 0, 1024, 0);
+        bytesRead = result.bytesRead;
     } catch (e) {
         return false;
     } finally {
-        if (fd) fs.closeSync(fd);
+        if (fd) await fd.close().catch(() => {});
     }
 
     const actualData = buffer.subarray(0, bytesRead);
@@ -143,11 +144,11 @@ function verifyUploadedMagic(file) {
     return checkLen === 0 || !actualData.subarray(0, checkLen).includes(0);
 }
 
-function uploadSecurityMiddleware(req, res, next) {
+async function uploadSecurityMiddleware(req, res, next) {
     const root = req._pivotUploadRoot || uploadRoot;
     const files = collectRequestFiles(req);
     for (const file of files) {
-        if (!verifyUploadedMagic(file)) {
+        if (!await verifyUploadedMagic(file)) {
             cleanupRequestUploads(req, root);
             return res.status(400).json({ error: '文件内容与扩展名不匹配，已拒绝上传' });
         }
@@ -178,9 +179,10 @@ function validateMultipartBody(req) {
 function createStorage(root) {
     return multer.diskStorage({
         destination: (req, file, cb) => {
-            fs.mkdirSync(root, { recursive: true });
             req._pivotUploadRoot = root;
-            cb(null, root);
+            fs.promises.mkdir(root, { recursive: true })
+                .then(() => cb(null, root))
+                .catch(error => cb(error));
         },
         filename: (req, file, cb) => {
             const ext = path.extname(normalizeUploadedOriginalName(file.originalname));

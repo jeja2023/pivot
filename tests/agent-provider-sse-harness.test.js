@@ -83,6 +83,7 @@ function streamingDeps({ run, _modelCfg, _toolList, steps, events, executeToolBy
         insertStep: async (_runId, _stepIndex, step) => { steps.push(step); },
         captureStepContext: async options => createAgentStepContext(options),
         recordAgentEvent: async event => { events.push(event); },
+        recordNativeToolCallCapability: async () => {},
         recordAgentModelUsage: async () => {},
         recordAgentToolCall: async () => {},
         callModelStreamingWithTools,
@@ -146,6 +147,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             input_schema: { type: 'object', properties: { value: { type: 'string' } } }
         }];
         const taskBudget = new TaskBudget({ max_steps: 2, max_tool_calls: 1 });
+        const capabilityRecords = [];
         const result = await tryRunAgentStreaming({
             run,
             user: { id: 7, role: 'admin' },
@@ -163,6 +165,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             insertStep: async (_runId, _stepIndex, step) => { steps.push(step); },
             captureStepContext: async options => createAgentStepContext(options),
             recordAgentEvent: async event => { events.push(event); },
+            recordNativeToolCallCapability: async (_cfg, result) => { capabilityRecords.push(result); },
             recordAgentModelUsage: async () => {},
             recordAgentToolCall: async () => {},
             callModelStreamingWithTools,
@@ -201,6 +204,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
         assert.ok(deltaEvents.length >= 2);
         assert.ok(deltaEvents.some(event => event.payload.partialToolCalls.some(call => call.name === 'test.echo')));
         assert.ok(deltaEvents.some(event => event.payload.completed === true));
+        assert.deepEqual(capabilityRecords, [{ status: 'supported', protocol: 'chat_completions' }]);
     } finally {
         await closeServer(server);
     }

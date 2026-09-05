@@ -501,7 +501,7 @@ function createAdminUsersRouter({
             logAction(req, '导入用户', `成功导入 ${count} 名用户，跳过 ${skipped} 行`);
             res.json({ success: true, count, skipped, skippedRows, omittedSkippedRows, truncated: rowIndex >= MAX_USER_IMPORT_ROWS });
         } finally {
-            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+            if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
         }
     }));
 

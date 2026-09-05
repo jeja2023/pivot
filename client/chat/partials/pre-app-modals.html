@@ -304,6 +304,17 @@
                         </div>
                     </div>
                     <div class="model-form-row">
+                        <div class="form-item">
+                            <label>Agent 原生工具调用</label>
+                            <select id="m-tool-call-mode" class="form-input">
+                                <option value="auto">自动探测（推荐）</option>
+                                <option value="enabled">强制启用</option>
+                                <option value="disabled">禁用，使用 JSON 规划</option>
+                            </select>
+                            <small id="m-tool-call-probe-status">自动模式会在首次 Agent 调用中探测端点能力；不支持时自动回退。</small>
+                        </div>
+                    </div>
+                    <div class="model-form-row">
                         <div class="form-item model-capability-row">
                             <div>
                                 <label>思考模型</label>

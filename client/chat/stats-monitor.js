@@ -171,6 +171,8 @@ window.loadMonitorSummary = async function(options = {}) {
                 'uploadsDir': '附件目录',
                 'memory': '系统内存',
                 'disk': '磁盘空间',
+                'writeQueue': '数据库写入队列',
+                'deployment': '部署就绪状态',
                 'api': '接口可用性',
                 'cache': '缓存服务'
             };

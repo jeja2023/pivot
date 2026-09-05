@@ -12,6 +12,7 @@ const {
 const {
     normalizeTags,
     normalizeBooleanFlag,
+    normalizeToolCallMode,
     validateModelTokenSettings,
     normalizePriceCurrency,
     normalizePriceValue,
@@ -111,6 +112,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             supports_vision: model.supports_vision,
             supports_reasoning: model.supports_reasoning,
             chat_thinking_enabled: isChatThinkingEnabled(model) ? 1 : 0,
+            supports_tool_calls: model.supports_tool_calls,
+            tool_call_mode: normalizeToolCallMode(model.tool_call_mode),
+            tool_call_probe_status: model.tool_call_probe_status || 'unknown',
             input_price_per_million: model.input_price_per_million || 0,
             output_price_per_million: model.output_price_per_million || 0,
             price_currency: normalizePriceCurrency(model.price_currency),
@@ -119,7 +123,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             capabilities: [
                 'chat',
                 Number(model.supports_vision || 0) === 1 ? 'vision' : null,
-                Number(model.supports_reasoning || 0) === 1 ? 'reasoning' : null
+                Number(model.supports_reasoning || 0) === 1 ? 'reasoning' : null,
+                normalizeToolCallMode(model.tool_call_mode) !== 'disabled'
+                    && (Number(model.supports_tool_calls || 0) === 1 || normalizeToolCallMode(model.tool_call_mode) === 'enabled')
+                    ? 'tool_calls'
+                    : null
             ].filter(Boolean)
         }));
 
@@ -304,7 +312,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 END) as url,
                 m.model_name, m.is_default, 
                 m.daily_token_limit, m.allowed_units, m.created_at,
-                m.temperature, m.max_input_tokens, m.max_tokens, m.context_window_tokens, m.monitor_url, m.max_concurrent, m.supports_vision, m.supports_reasoning, m.chat_thinking_enabled,
+                m.temperature, m.max_input_tokens, m.max_tokens, m.context_window_tokens, m.monitor_url, m.max_concurrent, m.supports_vision, m.supports_reasoning, m.chat_thinking_enabled, m.supports_tool_calls, m.tool_call_mode, m.tool_call_probe_status, m.tool_call_probe_protocol, m.tool_call_probe_error, m.tool_call_probed_at,
                 m.input_price_per_million, m.output_price_per_million, m.price_currency,
                 (CASE WHEN m.api_key IS NOT NULL AND length(m.api_key) > 0 THEN '********' ELSE '' END) AS api_key,
                 COALESCE(NULLIF(u.deleted_username, ''), u.username) as owner_name, u.nickname as owner_nickname, u.role as owner_role
@@ -350,13 +358,14 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
         const supportsReasoning = normalizeBooleanFlag(req.body.supports_reasoning);
         const chatThinkingEnabled = normalizeChatThinkingEnabledFlag(req.body);
+        const toolCallMode = normalizeToolCallMode(req.body.tool_call_mode);
         const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency);
 
         await execute(
-            'INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency]
+            'INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, 0, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency]
         );
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
@@ -386,6 +395,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const supportsVision = normalizeBooleanFlag(req.body.supports_vision);
         const supportsReasoning = normalizeBooleanFlag(req.body.supports_reasoning);
         const chatThinkingEnabled = normalizeChatThinkingEnabledFlag(req.body);
+        const toolCallMode = normalizeToolCallMode(req.body.tool_call_mode ?? existing.tool_call_mode);
         const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
@@ -393,13 +403,13 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let changed;
         if (isSuperAdmin(req.user) && existing.user_id === null) {
             changed = await execute(
-                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?',
-                [name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id]
+                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?',
+                [name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id]
             );
         } else {
             changed = await execute(
-                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
-                [name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id]
+                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
+                [name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id]
             );
         }
 

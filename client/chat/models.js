@@ -51,6 +51,14 @@ function renderModelCapabilityBadges(model) {
         icons.push('<span class="model-capability-icon cap-icon reasoning" title="支持思考/推理" aria-label="支持思考/推理"><svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 1 0 7.5 11.5C8.3 12.3 8.8 13 9 14"/></svg></span>');
     }
 
+    const toolCallMode = String(model.tool_call_mode || 'auto');
+    const toolCallStatus = String(model.tool_call_probe_status || 'unknown');
+    if (toolCallMode !== 'disabled' && (Number(model.supports_tool_calls || 0) === 1 || toolCallMode === 'enabled')) {
+        icons.push('<span class="model-capability-icon cap-icon reasoning" title="支持 Agent 原生工具调用" aria-label="支持 Agent 原生工具调用"><svg viewBox="0 0 24 24"><path d="M8 5V3"/><path d="M16 5V3"/><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 11h8"/><path d="M8 15h4"/></svg></span>');
+    } else if (toolCallMode === 'auto' && toolCallStatus === 'unsupported') {
+        icons.push('<span class="model-capability-icon cap-icon text" title="端点不支持原生工具调用，Agent 将使用 JSON 规划回退" aria-label="原生工具调用已回退"><svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="m8 10 4 4 4-4"/><path d="M5 21h14"/></svg></span>');
+    }
+
     return icons.join('');
 }
 
@@ -242,6 +250,20 @@ window.prepareEditModel = (model) => {
     if (maxConcurrentEl) maxConcurrentEl.value = model.max_concurrent || '';
     const monitorUrlEl = document.getElementById('m-monitor-url');
     if (monitorUrlEl) monitorUrlEl.value = model.monitor_url || '';
+    const toolCallModeEl = document.getElementById('m-tool-call-mode');
+    if (toolCallModeEl) toolCallModeEl.value = ['auto', 'enabled', 'disabled'].includes(model.tool_call_mode) ? model.tool_call_mode : 'auto';
+    const toolCallProbeEl = document.getElementById('m-tool-call-probe-status');
+    if (toolCallProbeEl) {
+        const status = String(model.tool_call_probe_status || 'unknown');
+        const details = String(model.tool_call_probe_error || '').trim();
+        const labels = {
+            supported: '已验证支持原生工具调用。',
+            unsupported: '端点不支持原生工具调用，Agent 将自动使用 JSON 规划回退。',
+            degraded: '最近一次原生工具调用异常，Agent 将尝试自动回退。',
+            unknown: '尚未探测；自动模式会在首次 Agent 调用中验证。'
+        };
+        toolCallProbeEl.textContent = `${labels[status] || labels.unknown}${details ? ` 原因：${details}` : ''}`;
+    }
     const supportsVisionEl = document.getElementById('m-supports-vision');
     if (supportsVisionEl) supportsVisionEl.checked = Number(model.supports_vision || 0) === 1;
     const supportsReasoningEl = document.getElementById('m-supports-reasoning');
@@ -298,6 +320,10 @@ window.resetModelForm = () => {
     });
     const currencyEl = document.getElementById('m-price-currency');
     if (currencyEl) currencyEl.value = '人民币';
+    const toolCallModeEl = document.getElementById('m-tool-call-mode');
+    if (toolCallModeEl) toolCallModeEl.value = 'auto';
+    const toolCallProbeEl = document.getElementById('m-tool-call-probe-status');
+    if (toolCallProbeEl) toolCallProbeEl.textContent = '自动模式会在首次 Agent 调用中探测端点能力；不支持时自动回退。';
     const scopeEl = document.getElementById('m-scope');
     if (scopeEl) scopeEl.value = 'personal';
     const supportsVisionEl = document.getElementById('m-supports-vision');

@@ -68,6 +68,7 @@ window.addModel = async () => {
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
         supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
         chat_thinking_enabled: document.getElementById('m-chat-thinking-enabled')?.checked ? 1 : 0,
+        tool_call_mode: document.getElementById('m-tool-call-mode')?.value || 'auto',
         input_price_per_million: Number(document.getElementById('m-input-price')?.value || 0),
         output_price_per_million: Number(document.getElementById('m-output-price')?.value || 0),
         price_currency: (document.getElementById('m-price-currency')?.value || '人民币').trim(),
