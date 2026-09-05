@@ -45,7 +45,7 @@ test('enterprise deployment migration creates provider and policy tables', () =>
     }
 });
 
-test('deployment providers expose multi-node placeholders', () => {
+test('deployment providers do not claim multi-node readiness before adapters are wired', () => {
     const env = {
         PIVOT_DEPLOYMENT_MODE: 'multi_node',
         PIVOT_DB_PROVIDER: 'postgres',
@@ -57,7 +57,14 @@ test('deployment providers expose multi-node placeholders', () => {
     assert.equal(providers.objectStorage.key, 's3_compatible');
     assert.equal(providers.queue.key, 'distributed');
     assert.equal(providers.lock.key, 'distributed');
-    assert.equal(getDeploymentProfile(env).capabilities.multiNodeReady, true);
+    assert.equal(getDeploymentProfile(env).capabilities.multiNodeReady, false);
+    assert.equal(getDeploymentProfile(env).effectiveMode, 'single_node');
+    assert.equal(providers.objectStorage.adapterWired, false);
+    assert.equal(providers.queue.adapterWired, false);
+    assert.equal(providers.lock.adapterWired, false);
+    assert.equal(providers.objectStorage.ready, false);
+    assert.equal(providers.queue.ready, false);
+    assert.equal(providers.lock.ready, false);
     assert.equal(getDeploymentProfile(env).providers.database.interface, 'DatabaseProvider');
 });
 

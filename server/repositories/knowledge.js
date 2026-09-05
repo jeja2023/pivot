@@ -131,13 +131,25 @@ function listAllDocumentChunks(docId) {
  * 语义，且调用方随后要在 JS 侧逐条计算余弦相似度，故统一返回数组。
  * 候选集规模由 scopeFilter 与 RAG_CANDIDATE_LIMIT 约束，不会无界膨胀。
  */
-function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
+function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null, queryVector = null, limit = null }) {
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     const params = user
         ? [...scopeFilter.params, ...scopeFilter.accessParams]
         : [userId, ...scopeFilter.params];
     // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
     const isEnabledCond = 'COALESCE(d.is_enabled, 1) != 0';
+    const vector = Array.isArray(queryVector) && queryVector.length
+        ? queryVector.map(value => Number(value)).every(Number.isFinite) ? queryVector : null
+        : null;
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 0, 1), 5000);
+    // pgvector 只允许同维度向量参与距离计算。不同 Embedding 模型可能产生不同维度，
+    // 先按维度过滤，再把余弦距离排序和 LIMIT 下推 PostgreSQL；异常时由上层回退旧的
+    // JS 计算路径，保证历史混合维度数据仍可检索。
+    const vectorFilter = vector ? ' AND vector_dims(c.embedding) = ?' : '';
+    const orderLimit = vector
+        ? ' ORDER BY c.embedding <=> ?::vector ASC, c.id ASC LIMIT ?'
+        : '';
+    if (vector) params.push(vector.length, JSON.stringify(vector), safeLimit);
     return query(`
         SELECT c.id, c.content, c.embedding, c.heading_path, d.name
         FROM knowledge_chunks c
@@ -150,6 +162,8 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null }) {
           AND ${isEnabledCond}
           ${scopeFilter.sql}
           ${scopeFilter.accessSql}
+          ${vectorFilter}
+          ${orderLimit}
     `, params);
 }
 

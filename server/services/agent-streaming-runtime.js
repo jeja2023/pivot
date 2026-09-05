@@ -6,11 +6,82 @@ const { buildAssistantToolMessage, buildToolResultMessage } = require('./streami
 const { compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeToolInput } = require('./agent-policy');
 const { recordAgentToolCall } = require('./agent-tool-audit');
-const { buildWorldStatePrompt } = require('./agent-step-context');
+const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { executeToolCallsInOrder } = require('./agent-tool-scheduler');
 const { fitMessagesToContextBudget } = require('./context-budget');
 
-const MAX_STREAM_DELTA_EVENTS = Math.min(Math.max(Number(process.env.AGENT_EVENT_MAX_DELTAS || 512) || 512, 32), 2048);
+const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
+    Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
+    256
+);
+const STREAM_UI_SAMPLE_INTERVAL_MS = 100;
+const STREAM_AUDIT_SAMPLE_INTERVAL_MS = 400;
+const STREAM_AUDIT_MIN_GROWTH = 800;
+
+function createStreamingSnapshotSampler({
+    maxAuditSnapshots = MAX_STREAM_AUDIT_SNAPSHOTS,
+    uiIntervalMs = STREAM_UI_SAMPLE_INTERVAL_MS,
+    auditIntervalMs = STREAM_AUDIT_SAMPLE_INTERVAL_MS,
+    auditMinGrowth = STREAM_AUDIT_MIN_GROWTH
+} = {}) {
+    let lastUiAt = null;
+    let lastUiLength = 0;
+    let lastAuditAt = null;
+    let lastAuditLength = 0;
+    let lastAuditSignature = '';
+    let auditCount = 0;
+    let auditOverflow = false;
+
+    const signatureOf = snapshot => JSON.stringify({
+        content: String(snapshot?.content || ''),
+        partialToolCalls: Array.isArray(snapshot?.partialToolCalls) ? snapshot.partialToolCalls : [],
+        finishReason: snapshot?.finishReason || ''
+    });
+
+    function sampleUi(snapshot, now = Date.now()) {
+        if (!snapshot) return false;
+        const contentLength = String(snapshot.content || '').length;
+        const changedEnough = Math.abs(contentLength - lastUiLength) >= 120;
+        if (lastUiAt !== null && now - lastUiAt < uiIntervalMs && !changedEnough) return false;
+        lastUiAt = now;
+        lastUiLength = contentLength;
+        return true;
+    }
+
+    function sampleAudit(snapshot, { completed = false, now = Date.now() } = {}) {
+        if (!snapshot) return null;
+        const signature = signatureOf(snapshot);
+        if (!completed && signature === lastAuditSignature) return null;
+        const contentLength = String(snapshot.content || '').length;
+        const toolCount = Array.isArray(snapshot.partialToolCalls) ? snapshot.partialToolCalls.length : 0;
+        const changedEnough = Math.abs(contentLength - lastAuditLength) >= auditMinGrowth;
+        const toolChanged = signature !== lastAuditSignature && toolCount > 0;
+        const timeReached = lastAuditAt === null || now - lastAuditAt >= auditIntervalMs;
+        const isKeySnapshot = completed || auditCount === 0 || changedEnough || toolChanged || Boolean(snapshot.finishReason) || timeReached;
+        if (!isKeySnapshot) return null;
+        // Reserve the final slot so every step has a durable terminal snapshot.
+        if (!completed && auditCount >= Math.max(Number(maxAuditSnapshots) - 1, 1)) {
+            auditOverflow = true;
+            return null;
+        }
+        if (completed && auditCount >= Number(maxAuditSnapshots)) {
+            auditOverflow = true;
+            return { replaceLast: true, overflow: true };
+        }
+        lastAuditSignature = signature;
+        lastAuditAt = now;
+        lastAuditLength = contentLength;
+        auditCount += 1;
+        return { replaceLast: false, overflow: auditOverflow, index: auditCount };
+    }
+
+    return {
+        sampleUi,
+        sampleAudit,
+        getAuditCount: () => auditCount,
+        didOverflow: () => auditOverflow
+    };
+}
 
 // v0.0.49 开始支持 Agent 运行中的流式工具调用。
 function isStreamingToolsEnabled() {
@@ -129,13 +200,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 turnId: stepContext?.turnId || `${runId}:turn:${step}`,
                 stepIndex: step,
                 type: 'step.context_captured',
-                payload: {
-                    contextHash: stepContext?.contextHash || '',
-                    worldStateHash: stepContext?.worldStateHash || '',
-                    worldStateMode: stepContext?.worldStateInjection?.mode || 'full',
-                    previousWorldStateHash: stepContext?.previousWorldStateHash || '',
-                    contextWindow: stepContext?.worldStateWindow || {}
-                },
+                payload: buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_context_captured' }),
                 eventKey: stepContext?.contextHash || ''
             });
             conversation[0] = {
@@ -151,29 +216,18 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 details: { purpose: 'agent_planner_streaming', step },
                 contextHash: stepContext?.contextHash || ''
             });
-            // 限制流式更新频率：除非内容增长明显，否则最多每 100ms 推送一次。
-            let lastEmittedAt = 0;
-            let lastEmittedLen = 0;
             let persistedContentLength = 0;
-            let lastDeltaSignature = '';
-            let deltaIndex = 0;
-            let deltaOverflow = false;
+            const snapshotSampler = createStreamingSnapshotSampler();
             let deltaEvents = Promise.resolve();
             const recordDelta = (snapshot, { completed = false } = {}) => {
                 const content = String(snapshot?.content || '');
                 const partialToolCalls = Array.isArray(snapshot?.partialToolCalls) ? snapshot.partialToolCalls : [];
-                const signature = JSON.stringify({ content, partialToolCalls, finishReason: snapshot?.finishReason || '' });
-                if (!completed && signature === lastDeltaSignature) return;
-                lastDeltaSignature = signature;
+                const sampled = snapshotSampler.sampleAudit(snapshot, { completed });
+                if (!sampled) return;
                 const contentDelta = content.slice(persistedContentLength);
                 persistedContentLength = content.length;
-                if (!completed && deltaIndex >= MAX_STREAM_DELTA_EVENTS) {
-                    deltaOverflow = true;
-                    return;
-                }
-                deltaIndex += 1;
-                const eventDeltaIndex = deltaIndex;
-                const eventDeltaOverflow = deltaOverflow;
+                const eventDeltaIndex = sampled.index || snapshotSampler.getAuditCount();
+                const eventDeltaOverflow = sampled.overflow;
                 const eventKey = `model:${stepContext?.contextHash || step}:delta:${eventDeltaIndex}`;
                 deltaEvents = deltaEvents.then(async () => {
                     try {
@@ -183,6 +237,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                             turnId: stepContext?.turnId || `${runId}:turn:${step}`,
                             stepIndex: step,
                             type: 'model.delta',
+                            stepContext,
+                            entrypoint: 'agent',
                             payload: {
                                 purpose: 'agent_planner_streaming',
                                 deltaIndex: eventDeltaIndex,
@@ -202,12 +258,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             };
             const emitDelta = (snapshot) => {
                 if (!snapshot) return;
-                const now = Date.now();
-                const contentLen = (snapshot.content || '').length;
-                const sizeDelta = Math.abs(contentLen - lastEmittedLen);
-                if (now - lastEmittedAt < 100 && sizeDelta < 120) return;
-                lastEmittedAt = now;
-                lastEmittedLen = contentLen;
+                if (!snapshotSampler.sampleUi(snapshot)) return;
                 recordDelta(snapshot);
                 deps.publishUserEvent(user.id, 'agent.streaming', {
                     runId,
@@ -234,7 +285,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         turnId: stepContext?.turnId || `${runId}:turn:${step}`,
                         stepIndex: step,
                         type: 'model.requested',
-                        payload: { purpose: 'agent_planner_streaming', messageCount: conversationForModel.length, toolCount: tools.length, contextHash: stepContext?.contextHash || '' },
+                        payload: { ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_requested' }), messageCount: conversationForModel.length, toolCount: tools.length },
                         eventKey: `model:${stepContext?.contextHash || step}:requested`
                     });
                 } catch (_) {}
@@ -271,7 +322,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         stepIndex: step,
                         type: 'model.completed',
                         payload: {
-                            purpose: 'agent_planner_streaming',
+                            ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_completed' }),
                             responseLength: String(result?.content || '').length,
                             toolCallCount: result?.toolCalls?.length || 0,
                             contextHash: stepContext?.contextHash || '',
@@ -300,7 +351,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         turnId: stepContext?.turnId || `${runId}:turn:${step}`,
                         stepIndex: step,
                         type: 'model.failed',
-                        payload: { purpose: 'agent_planner_streaming', errorCode: modelError.code || '', errorMessage: modelError.message, contextHash: stepContext?.contextHash || '' },
+                        payload: { ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_failed' }), errorCode: modelError.code || '', errorMessage: modelError.message },
                         eventKey: `model:${stepContext?.contextHash || step}:failed`
                     });
                 } catch (_) {}
@@ -473,7 +524,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         errorMessage: message,
                         status: 'error',
                         durationMs: 0,
-                        contextHash: stepContext?.contextHash || ''
+                        contextHash: stepContext?.contextHash || '',
+                        stepContext,
+                        entrypoint: 'agent'
                     });
                     await recordToolCall({
                         runId,
@@ -487,7 +540,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         errorCategory: 'permission',
                         errorMessage: message,
                         durationMs: 0,
-                        contextHash: stepContext?.contextHash || ''
+                        contextHash: stepContext?.contextHash || '',
+                        stepContext,
+                        entrypoint: 'agent'
                     });
                     if (taskBudget) taskBudget.recordError();
                     conversation.push(buildToolResultMessage(call.id, { error: message }));
@@ -506,6 +561,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
                         input: args, output: compactOutput, policyDecision: 'allow', status: 'success',
                         durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
+                        ,stepContext, entrypoint: 'agent'
                     });
                     conversation.push(buildToolResultMessage(call.id, compactOutput));
                     await deps.finishAgentTraceSpan?.(executed.toolSpanId, {
@@ -528,6 +584,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
                     status: 'error', errorCategory: toolErr.category || 'unknown', errorMessage: toolErr.message,
                     durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
+                    ,stepContext, entrypoint: 'agent'
                 });
                 conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
                 await deps.finishAgentTraceSpan?.(executed.toolSpanId, {
@@ -556,6 +613,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
 }
 
 module.exports = {
+    createStreamingSnapshotSampler,
     isStreamingToolsEnabled,
     tryRunAgentStreaming
 };

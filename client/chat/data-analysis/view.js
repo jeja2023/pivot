@@ -422,7 +422,6 @@
                                         <option value="">加载模型中…</option>
                                     </select>
                                 </label>
-                                <div id="data-analysis-ai-dataset-meta" class="data-analysis-ai-dataset-meta"></div>
                             </div>
                         </div>
 

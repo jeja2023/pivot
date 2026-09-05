@@ -25,7 +25,6 @@ const {
     validateJsonSchemaDefinition,
     validateValueAgainstSchema
 } = require('./agent-dag-contracts');
-const vm = require('vm');
 const {
     executeReportCompose,
     executeWorkflowCondition,
@@ -38,6 +37,20 @@ const {
 const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } = require('./agent-tools-artifacts');
 
 const MAX_TEXT = 12000;
+// 动态代码只能在独立的桌面 Worker / 受控执行平面中运行。
+// Node 的 vm.runInNewContext 不是安全沙箱：恶意代码可以通过构造器链重新取得宿主
+// 对象。因此所有直接调用 executeBuiltInTool 的入口（MCP、OpenAI、工具测试 API）
+// 都必须在这里统一拒绝，不能依赖调用方自行传入 autonomous 标志。
+const IN_PROCESS_DYNAMIC_CODE_TOOLS = new Set(['agent.code', 'workflow.foreach']);
+
+function assertDynamicCodeExecutionIsSandboxed(toolName) {
+    if (!IN_PROCESS_DYNAMIC_CODE_TOOLS.has(String(toolName || '').trim())) return;
+    const error = new Error('动态代码只能在独立 Worker 沙箱中执行，当前服务端执行入口已拒绝。');
+    error.code = 'AGENT_SANDBOX_REQUIRED';
+    error.category = 'policy';
+    error.status = 403;
+    throw error;
+}
 
 function clampText(value, max = MAX_TEXT) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
@@ -145,7 +158,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.code',
             title: '代码执行',
-            description: '在受限沙箱中执行一段 JavaScript，对上游数据做转换、计算、过滤或格式整理。用 return 返回结果。',
+            description: '仅允许在独立受控 Worker 沙箱中执行 JavaScript；服务端进程不直接执行。对上游数据做转换、计算、过滤或格式整理时用 return 返回结果。',
             input_schema: asJsonSchema({
                 code: { type: 'string', description: '要执行的 JS 代码，使用 return 返回结果。可直接引用 vars 中定义的变量名。' },
                 vars: { type: 'object', description: '注入到代码作用域的变量，支持 {{nodes.*.output}} 等模板引用。' }
@@ -252,7 +265,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.foreach',
             title: '循环 / 批处理',
-            description: '对数组逐项执行受限 JavaScript 转换，并汇总结果和错误。',
+            description: '仅允许在独立受控 Worker 沙箱中对数组逐项执行 JavaScript 转换，并汇总结果和错误。',
             input_schema: asJsonSchema({
                 items: { type: 'array' },
                 code: { type: 'string', default: 'return item;' },
@@ -670,48 +683,6 @@ function executeAgentHandoff(input = {}) {
 }
 
 // ——————————————————————————————————————————
-// agent.code：在隔离 VM 沙箱中执行用户内联 JS，并返回 return 语句的值。
-// 安全策略：vm.runInNewContext 禁止访问 require/process/global；超时 5s。
-// ——————————————————————————————————————————
-function executeAgentCode(input = {}) {
-    const code = String(input.code || '').trim();
-    if (!code) throw new Error('代码节点需要填写要执行的 JS 代码。');
-    const rawVars = input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars)
-        ? input.vars
-        : {};
-    const sandbox = {
-        vars: rawVars,
-        ...rawVars,
-        JSON,
-        Math,
-        Number,
-        String: globalThis.String,
-        Array: globalThis.Array,
-        Object: globalThis.Object,
-        Boolean: globalThis.Boolean,
-        Date: globalThis.Date,
-        console: { log: () => {}, error: () => {} }
-    };
-    let result;
-    try {
-        const wrapped = `(function() { ${code} })()`;
-        result = vm.runInNewContext(wrapped, vm.createContext(sandbox), { timeout: 5000 });
-    } catch (e) {
-        throw new Error(`代码执行失败：${e.message}`);
-    }
-    const output = result === undefined ? null : result;
-    return {
-        output,
-        text: typeof output === 'string'
-            ? output
-            : output === null || output === undefined
-                ? ''
-                : JSON.stringify(output),
-        type: Array.isArray(output) ? 'array' : (output !== null && typeof output === 'object' ? 'object' : typeof output)
-    };
-}
-
-// ——————————————————————————————————————————
 // agent.http：通过已有的安全 HTTP 客户端调用外部 REST API，支持 GET/POST/PUT/DELETE/PATCH。
 // ——————————————————————————————————————————
 async function executeAgentHttp(input = {}, user, context = {}) {
@@ -848,6 +819,7 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
+    assertDynamicCodeExecutionIsSandboxed(name);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
@@ -965,9 +937,6 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         return buildTableBlock(input);
     }
 
-    if (name === 'agent.code') {
-        return executeAgentCode(input);
-    }
 
     if (name === 'agent.http') {
         return executeAgentHttp(input, user, context);

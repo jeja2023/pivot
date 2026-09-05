@@ -51,38 +51,85 @@ async function searchRegulationArticles({ query: searchQuery, documentId = null,
     }
 
     const like = `%${normalizedQuery}%`;
-    return await query(`
-        SELECT
-            d.id AS document_id,
-            d.title AS document_title,
-            d.category,
-            d.issuing_body,
-            d.jurisdiction,
-            d.summary AS document_summary,
-            v.id AS version_id,
-            v.version_label,
-            a.id AS article_id,
-            a.sort_order,
-            a.article_label,
-            a.article_title,
-            a.content,
-            a.embedding,
-            substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
-            999 AS score
-        FROM regulation_documents d
-        JOIN regulation_versions v ON v.id = d.current_version_id
-        JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
-        ${whereBase}
-          AND (
-            LOWER(d.title) LIKE LOWER(?)
-            OR LOWER(d.summary) LIKE LOWER(?)
-            OR LOWER(a.article_label) LIKE LOWER(?)
-            OR LOWER(a.article_title) LIKE LOWER(?)
-            OR LOWER(a.content) LIKE LOWER(?)
-          )
-        ORDER BY d.updated_at DESC, a.sort_order ASC
-        LIMIT ?
-    `, [...params, like, like, like, like, like, safeLimit]);
+    // 优先在 PostgreSQL 中计算词法相关度并排序。这样法规库扩大后不会把一批
+    // “命中但按更新时间排列”的结果交给 Node 再猜顺序；pg_trgm 不可用时保留
+    // ILIKE 兼容路径，避免可选扩展故障导致法规查询整体下线。
+    const relevanceSql = `GREATEST(
+        similarity(COALESCE(d.title, ''), ?),
+        similarity(COALESCE(d.summary, ''), ?),
+        similarity(COALESCE(a.article_label, ''), ?),
+        similarity(COALESCE(a.article_title, ''), ?),
+        similarity(COALESCE(a.content, ''), ?)
+    )`;
+    const matchParams = [normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery];
+    try {
+        return await query(`
+            SELECT
+                d.id AS document_id,
+                d.title AS document_title,
+                d.category,
+                d.issuing_body,
+                d.jurisdiction,
+                d.summary AS document_summary,
+                v.id AS version_id,
+                v.version_label,
+                a.id AS article_id,
+                a.sort_order,
+                a.article_label,
+                a.article_title,
+                a.content,
+                a.embedding,
+                substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
+                ${relevanceSql} AS score
+            FROM regulation_documents d
+            JOIN regulation_versions v ON v.id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            ${whereBase}
+              AND (
+                LOWER(d.title) LIKE LOWER(?)
+                OR LOWER(d.summary) LIKE LOWER(?)
+                OR LOWER(a.article_label) LIKE LOWER(?)
+                OR LOWER(a.article_title) LIKE LOWER(?)
+                OR LOWER(a.content) LIKE LOWER(?)
+              )
+            ORDER BY score DESC, d.updated_at DESC, a.sort_order ASC
+            LIMIT ?
+        `, [...matchParams, ...params, like, like, like, like, like, safeLimit]);
+    } catch (error) {
+        console.warn('[regulations] 词法相关度排序不可用，回退基础检索:', error.message);
+        return await query(`
+            SELECT
+                d.id AS document_id,
+                d.title AS document_title,
+                d.category,
+                d.issuing_body,
+                d.jurisdiction,
+                d.summary AS document_summary,
+                v.id AS version_id,
+                v.version_label,
+                a.id AS article_id,
+                a.sort_order,
+                a.article_label,
+                a.article_title,
+                a.content,
+                a.embedding,
+                substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
+                1 AS score
+            FROM regulation_documents d
+            JOIN regulation_versions v ON v.id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            ${whereBase}
+              AND (
+                LOWER(d.title) LIKE LOWER(?)
+                OR LOWER(d.summary) LIKE LOWER(?)
+                OR LOWER(a.article_label) LIKE LOWER(?)
+                OR LOWER(a.article_title) LIKE LOWER(?)
+                OR LOWER(a.content) LIKE LOWER(?)
+              )
+            ORDER BY d.updated_at DESC, a.sort_order ASC
+            LIMIT ?
+        `, [...params, like, like, like, like, like, safeLimit]);
+    }
 }
 
 // #2 混合检索（BM25 + 向量重排）：先用 BM25 召回候选，再用向量相似度重排
@@ -159,17 +206,37 @@ async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
             LIMIT ?
         `, [aid, ...(param ? [param] : []), safeLimit]);
     }
-    // 向量近邻：遍历所有有向量的条文，计算相似度，返回 top-k
-    const candidates = await query(`
-        SELECT a.id, a.document_id, a.article_label, a.article_title, a.embedding,
-               substr(replace(a.content, '\n', ' '), 1, 200) AS excerpt,
-               d.title AS document_title, d.category, d.issuing_body
-        FROM regulation_articles a
-        JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
-        WHERE a.id != ? AND a.embedding IS NOT NULL AND d.deleted_at IS NULL
-        LIMIT 1000
-    `, [aid]);
+    // 向量近邻优先由 pgvector 排序并限制候选集，避免把最多 1000 条向量拉到
+    // Node.js 再计算。vector_dims 过滤可避免不同 Embedding 模型维度混算。
+    let candidates;
+    try {
+        candidates = await query(`
+            SELECT a.id, a.document_id, a.article_label, a.article_title,
+                   substr(replace(a.content, '\n', ' '), 1, 200) AS excerpt,
+                   d.title AS document_title, d.category, d.issuing_body,
+                   1 - (a.embedding <=> ?::vector) AS similarity
+            FROM regulation_articles a
+            JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
+            WHERE a.id != ? AND a.embedding IS NOT NULL
+              AND vector_dims(a.embedding) = ?
+              AND d.deleted_at IS NULL
+            ORDER BY a.embedding <=> ?::vector ASC, a.id ASC
+            LIMIT ?
+        `, [JSON.stringify(sourceVector), aid, sourceVector.length, JSON.stringify(sourceVector), Math.min(1000, Math.max(safeLimit * 20, 100))]);
+    } catch (error) {
+        console.warn('[regulations] 相似条文向量排序下推失败，回退应用层计算:', error.message);
+        candidates = await query(`
+            SELECT a.id, a.document_id, a.article_label, a.article_title, a.embedding,
+                   substr(replace(a.content, '\n', ' '), 1, 200) AS excerpt,
+                   d.title AS document_title, d.category, d.issuing_body
+            FROM regulation_articles a
+            JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
+            WHERE a.id != ? AND a.embedding IS NOT NULL AND d.deleted_at IS NULL
+            LIMIT 1000
+        `, [aid]);
+    }
     const withScore = candidates.map(c => {
+        if (Number.isFinite(Number(c.similarity))) return { ...c, article_id: c.id, similarity: Number(c.similarity) };
         try {
             const vec = JSON.parse(c.embedding);
             const sim = cosineSimilarity(sourceVector, vec);

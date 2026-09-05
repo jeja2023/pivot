@@ -47,7 +47,6 @@ function createAiHistoryHarness() {
         ['data-analysis-ai-result-time', makeElement()],
         ['data-analysis-ai-result', makeElement()],
         ['data-analysis-ai-dataset', makeElement()],
-        ['data-analysis-ai-dataset-meta', makeElement()],
         ['data-analysis-ai-profile-content', makeElement()],
         ['data-analysis-ai-stop', makeElement()],
         ['data-analysis-ai-run', makeElement()]

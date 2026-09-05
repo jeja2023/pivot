@@ -13,7 +13,7 @@ const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
 const { maybeBuildMcpChatContext } = require('./chat-mcp-context');
-const { buildWorldStatePrompt } = require('./agent-step-context');
+const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
 const {
     buildLongTermMemoryContextMessage,
@@ -215,9 +215,7 @@ async function assembleChatContext({
         writeSse(JSON.stringify({
             type: 'context',
             status: 'captured',
-            contextHash: chatStepContext.contextHash,
-            worldStateHash: chatStepContext.worldStateHash,
-            contextWindow: chatStepContext.worldStateWindow,
+            ...buildAgentAuditFields(chatStepContext, { entrypoint: 'chat', purpose: 'chat_context_captured' }),
             injectionMode: chatStepContext.worldStateInjection?.mode || 'full'
         }));
     } catch (error) {

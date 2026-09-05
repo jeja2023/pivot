@@ -147,23 +147,12 @@
     // 渲染数据集特征画像概览与顶部微型徽章
     function renderAiDatasetProfile() {
         const dataset = activeDataset();
-        const metaEl = document.getElementById('data-analysis-ai-dataset-meta');
         const profileEl = document.getElementById('data-analysis-ai-profile-content');
         if (!dataset) {
-            if (metaEl) PivotSafeHtml.setHtml(metaEl, '');
             if (profileEl) {
                 PivotSafeHtml.setHtml(profileEl, '<div class="data-analysis-ai-profile-empty">请选择分析数据集以查看字段画像与推荐探索方向。</div>');
             }
             return;
-        }
-
-        if (metaEl) {
-            const rowCountStr = fmtNumber(dataset.rowCount || dataset.sourceRowCount || 0);
-            const colsCount = (dataset.columns || []).length;
-            PivotSafeHtml.setHtml(metaEl, `
-                <span class="data-analysis-pill" title="数据集总行数">${rowCountStr} 行</span>
-                <span class="data-analysis-pill" title="数据集字段总数">${colsCount} 个字段</span>
-            `);
         }
 
         if (profileEl) {

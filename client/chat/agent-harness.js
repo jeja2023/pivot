@@ -24,6 +24,10 @@
         reliability: [], reliabilityPage: 1, reliabilityLimit: 15,
         quality: null, channels: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
     };
+    // 控制面会在打开工作台、切换子页和保存操作后重复刷新。只允许最新一轮
+    // 请求提交状态，避免旧请求在创建目标后返回并把新列表覆盖掉。
+    let controlPlaneLoadSequence = 0;
+    let controlPlaneLoadController = null;
     const escape = value => window.PivotSafeHtml?.escapeHtml
         ? window.PivotSafeHtml.escapeHtml(value)
         : String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
@@ -37,13 +41,11 @@
         if (Number.isNaN(date.getTime())) return text;
         return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
-
     const shortText = (value, max = 120) => {
         const text = String(value ?? '').trim();
         return text.length > max ? `${text.slice(0, max)}...` : text;
     };
     const canReviewOrganizationExperience = () => Boolean(isAdminUser?.() || currentUser?.role === 'root' || isSuperAdminUser?.());
-
     const getInboxTypeMeta = t => ({
         approval: { label: '待审批', badgeClass: 'badge-approval' },
         evolution: { label: '进化提议', badgeClass: 'badge-evolution' },
@@ -171,8 +173,6 @@
             setMarkup(goalsPanel, state.goals.length
                 ? `<div class="agent-goal-table-wrap"><table class="agent-goal-table"><thead><tr><th style="width:52px" class="text-center">序号</th><th style="width:90px" class="text-center">状态</th><th style="width:170px">目标名称</th><th style="width:120px">触发方式</th><th>目标内容</th><th style="width:170px" class="text-center">操作</th></tr></thead><tbody>${pageGoals.map((goal, index) => `<tr><td class="text-center">${startIndex + index + 1}</td><td class="text-center">${goalStatusBadge(goal.status)}</td><td title="${escapeAttr(goal.title)}">${escape(shortText(goal.title, 24))}</td><td>${escape(formatGoalTrigger(goal.triggerSpec))}</td><td title="${escapeAttr(goal.goal || '')}">${escape(shortText(goal.goal || '-', 80))}</td><td class="text-center"><div class="agent-goal-table-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="edit" data-agent-goal-id="${escapeAttr(goal.id)}">编辑</button><button type="button" class="btn-danger btn-xs" data-agent-goal-action="delete" data-agent-goal-id="${escapeAttr(goal.id)}">删除</button></div></td></tr>`).join('')}</tbody></table></div>`
                 : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
-
-
             const paginationContainer = document.getElementById('agent-goals-pagination');
             if (paginationContainer) {
                 if (window.renderWorkspacePagination) {
@@ -267,25 +267,39 @@
     }
 
     async function loadControlPlane() {
-        const [inbox, goals, reliability, quality, channels] = await Promise.all([
-            apiJson(`${API_BASE}/agents/inbox?limit=100`, { cache: 'no-store' }),
-            apiJson(`${API_BASE}/agents/goals?limit=50`, { cache: 'no-store' }),
-            apiJson(`${API_BASE}/agents/tools/reliability?days=30`, { cache: 'no-store' }),
-            apiJson(`${API_BASE}/agents/quality?days=30`, { cache: 'no-store' }).catch(() => ({ dashboard: null })),
-            apiJson(`${API_BASE}/agents/channels?status=active`, { cache: 'no-store' }).catch(() => ({ data: [] }))
-        ]);
-        state.inbox = Array.isArray(inbox.data) ? inbox.data : [];
-        state.goals = Array.isArray(goals.data) ? goals.data : [];
-        state.reliability = Array.isArray(reliability.signals) ? reliability.signals : [];
-        state.quality = quality.dashboard || null;
-        state.channels = Array.isArray(channels.data) ? channels.data : [];
-        renderAgentControlPlane();
-        let currentSub = 'inbox';
-        try { currentSub = sessionStorage.getItem('pivot.agent.cp_subview') || 'inbox'; } catch (_) {}
-        if (currentSub === 'quality') {
-            loadFeedback().catch(() => {});
-            window.Pivot?.moduleApi?.('agent.evaluations')?.bind?.();
-            window.Pivot?.moduleApi?.('agent.evaluations')?.loadSuites?.({ silent: true })?.catch(() => {});
+        const sequence = ++controlPlaneLoadSequence;
+        controlPlaneLoadController?.abort();
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        controlPlaneLoadController = controller;
+        const requestOptions = { cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) };
+        try {
+            const [inbox, goals, reliability, quality, channels] = await Promise.all([
+                apiJson(`${API_BASE}/agents/inbox?limit=100`, requestOptions),
+                apiJson(`${API_BASE}/agents/goals?limit=50`, requestOptions),
+                apiJson(`${API_BASE}/agents/tools/reliability?days=30`, requestOptions),
+                apiJson(`${API_BASE}/agents/quality?days=30`, requestOptions).catch(() => ({ dashboard: null })),
+                apiJson(`${API_BASE}/agents/channels?status=active`, requestOptions).catch(() => ({ data: [] }))
+            ]);
+            if (sequence !== controlPlaneLoadSequence) return false;
+            state.inbox = Array.isArray(inbox.data) ? inbox.data : [];
+            state.goals = Array.isArray(goals.data) ? goals.data : [];
+            state.reliability = Array.isArray(reliability.signals) ? reliability.signals : [];
+            state.quality = quality.dashboard || null;
+            state.channels = Array.isArray(channels.data) ? channels.data : [];
+            renderAgentControlPlane();
+            let currentSub = 'inbox';
+            try { currentSub = sessionStorage.getItem('pivot.agent.cp_subview') || 'inbox'; } catch (_) {}
+            if (currentSub === 'quality') {
+                loadFeedback().catch(() => {});
+                window.Pivot?.moduleApi?.('agent.evaluations')?.bind?.();
+                window.Pivot?.moduleApi?.('agent.evaluations')?.loadSuites?.({ silent: true })?.catch(() => {});
+            }
+            return true;
+        } catch (error) {
+            if (controller?.signal.aborted || sequence !== controlPlaneLoadSequence) return false;
+            throw error;
+        } finally {
+            if (controlPlaneLoadController === controller) controlPlaneLoadController = null;
         }
     }
 
@@ -346,12 +360,9 @@
             setNotice(error.message || '删除持续目标失败。', 'error');
         }
     }
-
-
     async function changeAgentGoal(id, action) {
         try { await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(id)}/${action}`, { method: 'POST' }); await loadControlPlane(); } catch (error) { setNotice(error.message || '持续目标操作失败。', 'error'); }
     }
-
     const jsonText = value => { try { return JSON.stringify(value ?? {}, null, 2); } catch (_) { return '{}'; } };
 
     const getCurrentUser = () => (typeof currentUser !== 'undefined' ? currentUser : window.currentUser || null);
@@ -1027,7 +1038,7 @@
         try { savedSubview = sessionStorage.getItem('pivot.agent.cp_subview'); } catch (_) { }
         if (savedSubview) switchAgentCpSubview(savedSubview);
         document.querySelectorAll('#agent-inbox-refresh').forEach(btn => btn.addEventListener('click', () => loadControlPlane().catch(error => setNotice(error.message, 'error'))));
-        document.querySelectorAll('#agent-goal-create, #agent-goal-create-top-btn, [data-agent-goal-create]').forEach(el => el.addEventListener('click', openGoalModal));
+        document.querySelectorAll('#agent-goal-create, #agent-goal-create-top-btn, [data-agent-goal-create]').forEach(el => el.addEventListener('click', () => openGoalModal()));
         document.getElementById('agent-goal-cancel')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal-close')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal')?.addEventListener('click', event => { if (event.target.id === 'agent-goal-modal') closeGoalModal(); });

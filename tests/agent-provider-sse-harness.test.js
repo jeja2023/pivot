@@ -4,9 +4,23 @@ const http = require('node:http');
 const test = require('node:test');
 const { callModelStreamingWithTools } = require('../server/services/agent-model');
 const { createModelItemEnvelope } = require('../server/services/agent-provider-envelope');
-const { tryRunAgentStreaming } = require('../server/services/agent-streaming-runtime');
+const { createStreamingSnapshotSampler, tryRunAgentStreaming } = require('../server/services/agent-streaming-runtime');
 const { createAgentStepContext } = require('../server/services/agent-step-context');
 const { TaskBudget } = require('../server/services/agent-budget');
+
+test('streaming sampler merges UI updates and reserves one audit snapshot for completion', () => {
+    const sampler = createStreamingSnapshotSampler({ maxAuditSnapshots: 4, uiIntervalMs: 100, auditIntervalMs: 1000, auditMinGrowth: 3 });
+    assert.equal(sampler.sampleUi({ content: 'a' }, 0), true);
+    assert.equal(sampler.sampleUi({ content: 'ab' }, 10), false);
+    assert.equal(sampler.sampleUi({ content: 'a'.repeat(121) }, 20), true);
+    assert.equal(sampler.sampleAudit({ content: 'a' }, { now: 0 }).index, 1);
+    assert.equal(sampler.sampleAudit({ content: 'ab' }, { now: 10 }), null);
+    assert.equal(sampler.sampleAudit({ content: 'abcd' }, { now: 20 }).index, 2);
+    assert.equal(sampler.sampleAudit({ content: 'abcde' }, { now: 30 }), null);
+    assert.equal(sampler.sampleAudit({ content: 'abcdefg' }, { now: 40 }).index, 3);
+    assert.equal(sampler.sampleAudit({ content: 'abcdef', finishReason: 'stop' }, { completed: true, now: 50 }).index, 4);
+    assert.equal(sampler.getAuditCount(), 4);
+});
 
 function startMockProvider(received) {
     const server = http.createServer((req, res) => {

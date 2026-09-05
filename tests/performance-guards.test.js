@@ -130,6 +130,18 @@ test('RAG tokenizer preserves code identifiers and their symbols as searchable t
     assert.ok(content.includes('zsym2fz'));
 });
 
+test('RAG PostgreSQL retrieval pushes vector distance and lexical ranking into the database', () => {
+    const root = path.resolve(__dirname, '..');
+    const repository = fs.readFileSync(path.join(root, 'server/repositories/knowledge.js'), 'utf8');
+    const rag = fs.readFileSync(path.join(root, 'server/services/rag-index/index.js'), 'utf8');
+    const regulations = fs.readFileSync(path.join(root, 'server/services/regulations/search.js'), 'utf8');
+    assert.match(repository, /vector_dims\(c\.embedding\)\s*=\s*\?/);
+    assert.match(repository, /c\.embedding\s*<=>\s*\?::vector/);
+    assert.match(rag, /ORDER BY lexical_score DESC/);
+    assert.match(regulations, /a\.embedding\s*<=>\s*\?::vector/);
+    assert.match(regulations, /ORDER BY score DESC/);
+});
+
 test('DAG node watchdog uses a node-specific timeout and does not retry a timed-out node', async () => {
     const timeout = new Error('slow node timed out');
     timeout.code = 'AGENT_NODE_TIMEOUT';

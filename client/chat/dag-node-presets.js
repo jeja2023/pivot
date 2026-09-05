@@ -183,7 +183,7 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'code', title: '代码执行', svgIcon: 'code', theme: 'code',
                 advanced: true,
-                desc: '在沙箱中执行 JS，对数据做转换或计算', toolName: 'agent.code',
+                desc: '需独立受控 Worker 沙箱，服务端不会直接执行 JS', toolName: 'agent.code',
                 getInput: ({ selectedNode }) => ({
                     code: '// vars 保存下方配置的变量\nreturn vars.input;',
                     vars: { input: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}' }
@@ -193,7 +193,7 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
                 advanced: true,
-                desc: '逐项执行安全 JS 转换，并汇总结果', toolName: 'workflow.foreach',
+                desc: '需独立受控 Worker 沙箱，服务端不会直接执行循环代码', toolName: 'workflow.foreach',
                 getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
                 outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
             },

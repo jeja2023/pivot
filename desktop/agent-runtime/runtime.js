@@ -4,7 +4,7 @@ const { TaskBudget, normalizeTaskBudget } = require('../../server/services/agent
 const { normalizeToolContract } = require('../../server/services/agent-contracts');
 const { evaluateToolPolicy } = require('../../server/services/agent-policy');
 const { buildToolExecutionPlan, summarizeToolExecutionPlan } = require('../../server/services/agent-tool-execution-plan');
-const { createAgentStepContext } = require('../../server/services/agent-step-context');
+const { buildAgentAuditFields, createAgentStepContext } = require('../../server/services/agent-step-context');
 const { buildRecoveryPlan, diagnoseError } = require('../../server/services/agent-diagnosis');
 const { compileTraceToWorkflow } = require('../../server/services/agent-trace-compiler');
 const { DesktopAgentStateStore } = require('./state-store');
@@ -158,7 +158,8 @@ class DesktopAgentRuntime extends EventEmitter {
                     ...policy,
                     executionPlan: summarizeToolExecutionPlan(executionPlan),
                     contextHash: stepContext.contextHash,
-                    worldStateHash: stepContext.worldStateHash
+                    worldStateHash: stepContext.worldStateHash,
+                    audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_plan' })
                 },
                 status: policy.decision === 'denied' ? 'error' : 'success'
             });
@@ -192,7 +193,8 @@ class DesktopAgentRuntime extends EventEmitter {
                     input: tool.input,
                     output,
                     contextHash: stepContext.contextHash,
-                    worldStateHash: stepContext.worldStateHash
+                    worldStateHash: stepContext.worldStateHash,
+                    audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_completed' })
                 }, 'completed');
                 this.store.appendStep(runId, { stepIndex: index + 1, phase: 'execute', toolName: tool.name, input: tool.input, output, status: 'success', durationMs: this.now() - started });
                 budget.recordSuccess();
@@ -211,7 +213,8 @@ class DesktopAgentRuntime extends EventEmitter {
                     diagnosis,
                     recoveryPlan,
                     contextHash: stepContext.contextHash,
-                    worldStateHash: stepContext.worldStateHash
+                    worldStateHash: stepContext.worldStateHash,
+                    audit: buildAgentAuditFields(stepContext, { entrypoint: 'desktop', purpose: 'desktop_tool_failed' })
                 }, 'error');
                 this.store.appendStep(runId, { stepIndex: index + 1, phase: 'diagnose', toolName: tool.name, input: tool.input, output: { diagnosis, recoveryPlan }, status: 'error', errorCategory: diagnosis.category, errorMessage: error.message, durationMs: this.now() - started });
                 run = this.store.transitionRun(runId, 'diagnosing');

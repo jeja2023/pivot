@@ -12,6 +12,8 @@ const agentArtifactCasRefcountMigrations = require('./agent-artifact-cas-refcoun
 const agentLocalConnectorMigrations = require('./agent-local-connector');
 const agentLearningMigrations = require('./agent-learning');
 const officialWritingDocumentsMigrations = require('./official-writing-documents');
+const agentGoalDispatchLeaseMigrations = require('./agent-goal-dispatch-lease');
+const agentContextAuditContractMigrations = require('./agent-context-audit-contract');
 
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -934,6 +936,8 @@ const migrations = [
     ...agentLocalConnectorMigrations,
     ...agentLearningMigrations,
     ...officialWritingDocumentsMigrations,
+    ...agentGoalDispatchLeaseMigrations,
+    ...agentContextAuditContractMigrations,
     ...regulationsMigrations
 ];
 

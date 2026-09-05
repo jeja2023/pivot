@@ -4,6 +4,8 @@ const acorn = require('acorn');
 
 const SERVER_DIR = path.resolve(__dirname, '../server');
 const SCRIPTS_DIR = path.resolve(__dirname, '../scripts');
+const jsonMode = process.argv.includes('--json');
+const enforceMode = process.argv.includes('--enforce');
 
 function findJsFiles(dir) {
     let results = [];
@@ -25,7 +27,7 @@ const allServerFiles = findJsFiles(SERVER_DIR);
 const allScriptFiles = findJsFiles(SCRIPTS_DIR);
 const targetFiles = [...allServerFiles, ...allScriptFiles];
 
-console.log(`Scanning ${targetFiles.length} files across server/ and scripts/...`);
+if (!jsonMode) console.log(`Scanning ${targetFiles.length} files across server/ and scripts/...`);
 
 // Known DB and Async primitives
 const DB_PRIMITIVES = new Set([
@@ -102,7 +104,7 @@ for (const filePath of targetFiles) {
     });
 }
 
-console.log(`Found ${asyncFunctions.size} async functions/methods across codebase.`);
+if (!jsonMode) console.log(`Found ${asyncFunctions.size} async functions/methods across codebase.`);
 
 // Pass 2: Check all CallExpressions
 const findings = [];
@@ -205,7 +207,27 @@ for (const filePath of targetFiles) {
     });
 }
 
-console.log(`\n=== SCAN COMPLETE: Found ${findings.length} unawaited async/DB calls ===\n`);
+function findingSignature(finding) {
+    return `${finding.file}|${finding.callee}|${finding.code}`;
+}
+
+if (jsonMode) {
+    process.stdout.write(JSON.stringify(findings));
+    process.exit(0);
+}
+
+if (enforceMode) {
+    const { isAllowedFinding } = require('./async-db-calls-allowlist');
+    const unexpected = findings.filter(finding => !isAllowedFinding(finding));
+    if (unexpected.length) {
+        console.error(`异步/数据库调用检查失败：发现 ${unexpected.length} 项未进入白名单的调用。`);
+        unexpected.forEach(finding => console.error(`  ${finding.file}:${finding.line}:${finding.column} [${finding.callee}] ${finding.code}`));
+        console.error('请等待调用、显式处理 Promise，或在确认属于既有遗留边界后登记稳定源码签名。');
+        process.exit(1);
+    }
+}
+
+console.log(`\n=== SCAN COMPLETE: Found ${findings.length} unawaited async/DB calls (${enforceMode ? 'all allowlisted' : 'report only'}) ===\n`);
 
 const grouped = {};
 for (const f of findings) {
@@ -219,3 +241,5 @@ for (const [file, items] of Object.entries(grouped)) {
         console.log(`  L${item.line}:${item.column} [${item.type}] ${item.callee} -> ${item.code}`);
     }
 }
+
+module.exports = { findingSignature };

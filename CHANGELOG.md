@@ -1,3 +1,30 @@
+## [v0.1.82] - 2026-09-05
+
+### Agent 运行时架构分层治理与统一上下文审计契约升级
+
+- **Agent 核心运行时架构解耦与超大模块分层治理**：针对 `server/services/agent-runtime/index.js`（原 2200+ 行巨石模块）进行模块化拆解重构，主入口精简至 ~790 行并严格符合系统红线规范；将业务逻辑分层解耦为 `run-state.js`（状态机流转与执行状态维护）、`run-lifecycle.js`（生命周期管理、超时与完成态收敛）与 `run-execution.js`（单步规划、工具调度与异常诊断拦截），大幅降低代码复杂度与测试隔离成本。
+- **MCP 工具库路由模块化拆分与分层治理**：针对 `server/routes/mcp/index.js`（原 1400+ 行）进行路由分层治理，主路由压缩至 ~680 行；将外部服务配置、数据库连接测试诊断、报表工具预检与消息测试等子路由抽离至独立的 `configuration-routes.js` 与 `management-routes.js`，消除超大路由文件维护瓶颈。
+- **智能对话 MCP 意图分析与知识图谱抽取引擎解耦**：从 `server/services/chat-mcp-context.js` 中抽离纯函数式意图决策与 Fallback 策略模块 `server/services/chat-mcp-intent.js`；从 `server/services/knowledge-graph.js` 中独立出实体清洗、关系识别与模式解析算法库 `server/services/knowledge-graph-extraction.js`，实现业务接入与算法计算解耦。
+- **Agent StepContext 统一审计契约与全端对齐**：新增数据库迁移 `202609050003_agent_context_audit_contract.js`，在 `agent_tool_calls` 表增加 `context_snapshot`（JSONB）及 `contextHash` 索引；在 `agent-step-context.js` 中确立 `AGENT_STEP_CONTEXT_SCHEMA_VERSION = 1` 规范，提供规范化序列化与审计构造函数，全面拉通 Chat、Agent 工作台与 Desktop 桌面运行时，使工具调用的 WorldState、Window、Policy、Approval 与 Sandbox 具备不可篡改的标准审计快照。
+- **Agent 流式输出双轨采样器与完成态快照保全**：在 `server/services/agent-streaming-runtime.js` 引入 `createStreamingSnapshotSampler`，对高频流式增量进行 UI 渲染与审计事件双轨隔离（UI 节流防抖合并，审计独立步长采样），并强制在完成态（`finishReason`）触发时保全落库，消除频繁写库开销并杜绝审计事件丢失。
+- **前端 HTML 资产标签平衡性 AST 严格校验**：升级 `scripts/check_chat_assets.js`，结合 `parse5` 与 `acorn` 对全量静态 HTML 片段及 JS 模板字符串（`TemplateLiteral`）中的 HTML 片段进行 AST 遍历与标签栈匹配校验，严格防范未配对闭合、多余闭合或非法自闭合标签穿透至浏览器。
+- **异步与数据库调用门禁强制模式升级**：升级 `scripts/check_async_db_calls.js` 引入 `--enforce` 阻断模式与白名单机制（`async_db_calls_allowlist.json`），并在 `npm run check` 中全面启用，坚决阻断任何未等待或未处理的异步/DB 悬挂调用。
+
+详细发布记录见 [v0.1.82 发布记录](docs/releases/v0.1.82-Agent运行时架构分层治理与统一上下文审计契约升级.md)。
+
+## [v0.1.81] - 2026-09-05
+
+### 动态代码沙箱收口与多节点持续调度及检索下沉优化
+
+- **动态代码执行安全收口与独立沙箱强制隔离**：彻底移除服务端主进程内置 `vm.runInNewContext` 执行逻辑，消除原型链逃逸与宿主安全穿透隐患；`agent.code` 与 `workflow.foreach` 在未配置独立受控 Worker 沙箱时统一返回 403 `AGENT_SANDBOX_REQUIRED` 拒绝执行，并在前端节点预设与使用文档中明确环境依赖。
+- **Agent 工作台目标创建传参修复与请求竞态消除**：修复持续目标新建入口将 DOM 原生 `PointerEvent` 点击事件对象误传给 `openGoalModal` 导致初始表单数据错乱的缺陷；为控制面 `loadControlPlane` 引入全局序列号与 `AbortController`，高频切换 Tab 或刷新时主动中止旧请求并忽略失序响应，彻底消除多请求异步竞态与界面闪烁。
+- **语义分析批次事务化、行级排他锁与断点恢复一致性校验**：重构 `ensureSemanticBatches`，将批次初始化收敛至单一数据库事务并加入 `FOR UPDATE` 行级锁；支持进程异常崩溃后的半成品批次增量补齐，同时严格校验既有批次切分边界，若发现边界不一致或多余批次立即抛出 409 阻断，杜绝数据被静默污染或覆盖。
+- **RAG 向量检索与法规检索运算全面下沉 PostgreSQL**：知识库与法规库检索接入 PostgreSQL `pgvector` 原生距离操作符与 `vector_dims` 维度校验，将向量排序与候选集截断直接下沉至数据库执行，避免海量 embedding 载入 Node.js 内存；全文检索接入 `pg_trgm` `similarity()` 计算词法得分并下推排序，保留无缝兼容回退机制。
+- **多节点企业级部署画像适配器真实验收与就绪解耦**：将 Provider 状态拆解为 `configured`（配置存在）、`adapterWired`（适配器接入）与 `ready`（真实验收就绪）；在真实对象存储、队列与分布式锁适配器接通前，严格标记为未就绪并发出告警，杜绝生产多节点部署虚报就绪。
+- **持续目标调度多实例租约机制（PostgreSQL Claim Lease）**：新增 `agent-goal-dispatch-lease` 数据库迁移，引入 `claim_token` 与 `claim_expires_at` 字段及复合索引；实现原子抢占（Claim）、周期心跳续租、超时接管与优雅释放机制，从源头解决集群多节点部署下同一目标被并发争抢与重复调度问题。
+
+详细发布记录见 [v0.1.81 发布记录](docs/releases/v0.1.81-动态代码沙箱收口与多节点持续调度及检索下沉优化.md)。
+
 ## [v0.1.80] - 2026-09-05
 
 ### 应用中心独立模型选择器与弹窗布局重构

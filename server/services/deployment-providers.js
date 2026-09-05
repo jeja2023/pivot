@@ -8,6 +8,7 @@ const PROVIDER_REGISTRY = {
             interface: 'DatabaseProvider',
             local: false,
             multiNodeReady: true,
+            adapterWired: true,
             status: 'active',
             capabilities: ['multi_node', 'transactional']
         },
@@ -17,6 +18,7 @@ const PROVIDER_REGISTRY = {
             interface: 'DatabaseProvider',
             local: true,
             multiNodeReady: false,
+            adapterWired: true,
             status: 'deprecated',
             capabilities: ['single_node']
         }
@@ -28,6 +30,7 @@ const PROVIDER_REGISTRY = {
             interface: 'ObjectStorageProvider',
             local: true,
             multiNodeReady: false,
+            adapterWired: true,
             status: 'active',
             capabilities: ['single_node']
         },
@@ -36,7 +39,10 @@ const PROVIDER_REGISTRY = {
             label: 'S3 compatible object storage',
             interface: 'ObjectStorageProvider',
             local: false,
-            multiNodeReady: true,
+            // 仅识别 S3 环境变量不代表已经有可用的对象存储适配器。
+            // 在适配器真正接入前，部署画像必须保持 not_ready。
+            multiNodeReady: false,
+            adapterWired: false,
             status: 'planned',
             capabilities: ['multi_node', 'presigned_url']
         }
@@ -48,6 +54,7 @@ const PROVIDER_REGISTRY = {
             interface: 'QueueProvider',
             local: true,
             multiNodeReady: false,
+            adapterWired: true,
             status: 'active',
             capabilities: ['single_node']
         },
@@ -56,7 +63,8 @@ const PROVIDER_REGISTRY = {
             label: 'Distributed queue',
             interface: 'QueueProvider',
             local: false,
-            multiNodeReady: true,
+            multiNodeReady: false,
+            adapterWired: false,
             status: 'planned',
             capabilities: ['multi_node', 'retry', 'visibility_timeout']
         }
@@ -68,6 +76,7 @@ const PROVIDER_REGISTRY = {
             interface: 'LockProvider',
             local: true,
             multiNodeReady: false,
+            adapterWired: true,
             status: 'active',
             capabilities: ['single_node']
         },
@@ -76,7 +85,8 @@ const PROVIDER_REGISTRY = {
             label: 'Distributed lock',
             interface: 'LockProvider',
             local: false,
-            multiNodeReady: true,
+            multiNodeReady: false,
+            adapterWired: false,
             status: 'planned',
             capabilities: ['multi_node', 'lease_renewal', 'fencing_token']
         }
@@ -103,7 +113,8 @@ function providerFor(type, key) {
         label: `External ${safeType} provider`,
         interface: fallback?.interface || 'DeploymentProvider',
         local: false,
-        multiNodeReady: true,
+        multiNodeReady: false,
+        adapterWired: false,
         status: 'planned',
         capabilities: ['external', 'multi_node']
     };
@@ -129,11 +140,22 @@ function getDeploymentProviders(env = process.env) {
     return Array.from(PROVIDER_TYPES).reduce((acc, type) => {
         const requestedKey = resolveProviderKey(type, env);
         const provider = providerFor(type, requestedKey);
+        const defaultKeys = { database: 'postgres', objectStorage: 'local_fs', queue: 'in_process', lock: 'in_process_or_sqlite' };
+        // 默认 Provider 代表当前单节点运行时已经存在的本地/数据库实现；外部
+        // Provider 则由环境变量显式选择。这里的 configured 只表示“选中了”，
+        // ready 还必须经过 adapterWired + active 检查。
+        const configured = provider.local
+            || (type === 'database' ? hasEnv(env, ['DATABASE_URL', 'TEST_DATABASE_URL']) : requestedKey !== defaultKeys[type]);
+        const ready = provider.local
+            ? true
+            : configured && provider.adapterWired === true && provider.multiNodeReady === true && provider.status === 'active';
         acc[type] = {
             ...provider,
             requestedKey,
-            configured: provider.multiNodeReady || provider.local === true,
-            adapterRequiredForMultiNode: provider.multiNodeReady !== true
+            configured,
+            adapterWired: provider.adapterWired === true,
+            ready,
+            adapterRequiredForMultiNode: !ready && !provider.local
         };
         return acc;
     }, {});

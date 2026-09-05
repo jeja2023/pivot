@@ -138,7 +138,7 @@ function readAgentCssBundle() {
     ].map(fileName => fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', fileName), 'utf8')).join('\n');
 }
 
-test('workflow built-ins cover presets and code nodes expose vars', async () => {
+test('workflow built-ins cover presets and keep dynamic code off the server process', async () => {
     const definitions = getBuiltInToolDefinitions({ role: 'user' });
     const names = new Set(definitions.map(tool => tool.name));
     [
@@ -147,11 +147,17 @@ test('workflow built-ins cover presets and code nodes expose vars', async () => 
     ].forEach(name => assert.equal(names.has(name), true, `${name} should be registered`));
     assert.equal(definitions.find(tool => tool.name === 'workflow.approval')?.alwaysRequiresApproval, true);
 
-    const code = await executeBuiltInTool('agent.code', {
-        code: 'return vars.input;',
-        vars: { input: { ok: true } }
-    }, { id: 1 });
-    assert.deepEqual(code.output, { ok: true });
+    await assert.rejects(
+        () => executeBuiltInTool('agent.code', {
+            code: 'return vars.input;',
+            vars: { input: { ok: true } }
+        }, { id: 1 }),
+        error => error.code === 'AGENT_SANDBOX_REQUIRED' && error.status === 403
+    );
+    await assert.rejects(
+        () => executeBuiltInTool('workflow.foreach', { items: [1], code: 'return item;' }, { id: 1 }),
+        error => error.code === 'AGENT_SANDBOX_REQUIRED' && error.status === 403
+    );
 
     const workflowInput = await executeBuiltInTool('workflow.input', {
         name: 'limit', type: 'number', required: true
@@ -189,12 +195,12 @@ test('agent execution rounds support automatic mode defaults and mode-specific c
     assert.equal(resolveMaxSteps(80, 'standard'), 30);
     assert.equal(resolveMaxSteps(80, 'deep'), 50);
 
-    const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8');
+    const executionSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-execution.js'), 'utf8');
     const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
     const taskEditor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
     assert.match(streamingSource, /roundsUsed\s*=\s*(?:step|lastStep|\w+)/);
-    assert.match(runtimeSource, /for \(let step = roundsUsed \+ 1; step <= maxSteps; step \+= 1\)/);
-    assert.match(runtimeSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
+    assert.match(executionSource, /for \(let step = roundsUsed \+ 1; step <= maxSteps; step \+= 1\)/);
+    assert.match(executionSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
     assert.match(taskEditor, /最大执行轮次/);
     assert.match(taskEditor, /id="agent-max-steps"[^>]*placeholder="自动"/);
     assert.doesNotMatch(taskEditor, /id="agent-max-steps"[^>]*value="10"/);
@@ -910,7 +916,8 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     const editor = readDagEditorSourceBundle();
     const tools = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools.js'), 'utf8');
     const runtime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'index.js'), 'utf8')
-        + fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-creation.js'), 'utf8');
+        + fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-creation.js'), 'utf8')
+        + fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-execution.js'), 'utf8');
     const dagRunConfig = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'dag-run-config.js'), 'utf8');
     const dagRuntime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-dag-runtime.js'), 'utf8');
     const model = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-model.js'), 'utf8');
@@ -2128,4 +2135,3 @@ test('listRuns enriches model_name for standard, DAG node models, and pure tool 
     assert.ok(run3);
     assert.equal(run3.model_name, '无需模型 (纯工具)');
 });
-

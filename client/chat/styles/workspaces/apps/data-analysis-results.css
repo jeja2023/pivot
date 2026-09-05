@@ -693,25 +693,6 @@
     width: 190px;
 }
 
-.data-analysis-ai-dataset-meta {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.76rem;
-    color: #64748b;
-}
-
-.data-analysis-ai-dataset-meta .meta-tag {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: #e0f2fe;
-    color: #0369a1;
-    font-weight: 600;
-    font-size: 0.72rem;
-}
-
 .data-analysis-ai-subpanel {
     display: flex;
     flex-direction: column;

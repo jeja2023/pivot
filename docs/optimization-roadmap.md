@@ -2,6 +2,25 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-09-05 Agent 运行时架构分层治理与统一上下文审计契约升级（v0.1.82）
+
+- ✅ Agent 核心运行时架构分层治理：彻底拆解 `server/services/agent-runtime/index.js`（2200+ 行巨石模块），分层解耦出 `run-state.js`、`run-lifecycle.js` 与 `run-execution.js`，主文件压缩至 ~790 行，完全满足架构治理要求。
+- ✅ MCP 工具库路由模块化拆分：重构 `server/routes/mcp/index.js`（1400+ 行），将配置连接诊断和工具治理接口解耦拆分至 `configuration-routes.js` 与 `management-routes.js`。
+- ✅ 意图分析与知识图谱抽取引擎解耦：从 `chat-mcp-context.js` 中抽离纯函数式意图决策模块 `chat-mcp-intent.js`；从 `knowledge-graph.js` 独立出实体与关系抽取算法引擎 `knowledge-graph-extraction.js`。
+- ✅ Agent StepContext 统一审计契约：数据库迁移 `202609050003_agent_context_audit_contract.js`，为 `agent_tool_calls` 表增加 `context_snapshot`（JSONB）和 `contextHash` 索引；建立 `SCHEMA_VERSION = 1` 协议，统一 Chat、Agent 工作台与 Desktop 桌面端审计快照标准。
+- ✅ Agent 流式双轨采样器与终态保全：在 `agent-streaming-runtime.js` 引入 `createStreamingSnapshotSampler`，实现前端 UI 渲染与审计写库双轨隔离，并在 `finishReason` / 完成态时强制保全完整快照落盘。
+- ✅ 前端 HTML 资产 AST 标签平衡性静态校验：升级 `scripts/check_chat_assets.js`，基于 Parse5 与 Acorn AST 深度扫描静态 HTML 片段与 JS 模板字符串（`TemplateLiteral`）中的标签栈配对，杜绝未闭合或多闭合标签。
+- ✅ 异步与数据库调用强制门禁升级：升级 `scripts/check_async_db_calls.js` 支持 `--enforce` 阻断模式与白名单机制，接入 `npm run check` 自动拦截未处理的悬挂调用。
+
+## 2026-09-05 动态代码沙箱收口与多节点持续调度及检索下沉优化（v0.1.81）
+
+- ✅ 动态代码执行安全收口：彻底移除服务端主进程 `vm.runInNewContext` 执行逻辑，`agent.code` / `workflow.foreach` 未接入独立受控 Worker 沙箱时统一返回 403 `AGENT_SANDBOX_REQUIRED` 阻断。
+- ✅ Agent 工作台传参修复与竞态消除：修复持续目标新建入口将原生点击事件对象误传为既有目标导致的初始表单错乱；控制面异步加载引入全局序列号与 `AbortController`，高频切换时即刻中止旧请求，根除请求竞态与界面闪烁。
+- ✅ 语义分析批次事务化与行锁：重构 `ensureSemanticBatches` 为单一原子事务并施加 `FOR UPDATE` 行级排他锁；支持服务异常中断后断点增量补齐，严格校验既有切分边界，遇到边界漂移或多余批次立即以 409 拦截。
+- ✅ RAG 向量与法规检索下沉 PostgreSQL：知识库与法规库全量检索将 `pgvector` 距离计算、维度校验与 Top-K 截断下沉数据库层；全文检索利用 `pg_trgm` `similarity()` 计算词法得分并排序，大幅降低主进程 CPU 与内存开销。
+- ✅ 多节点企业级部署画像适配器真实验收：将 Provider 状态细分为 `configured`、`adapterWired` 与 `ready`；在真实 S3 对象存储、分布式队列与分布式锁适配器实际接通前保持未就绪并发出告警，杜绝生产多节点部署虚报就绪。
+- ✅ 持续目标调度多实例租约（Claim Lease）：新增 `agent_goals` 租约字段迁移（`claim_token`、`claim_expires_at` 及复合调度索引），实现原子抢占、周期心跳续租、超时接管与优雅释放机制，避免多实例并发争抢与重复调度。
+
 ## 2026-08-24 运行环境大屏与能力治理优化（v0.1.43）
 
 - ✅ 全量语义分析与智能分析模块全面增加 `AbortController` 即时断流机制，取消任务立即停止后台大模型推理。

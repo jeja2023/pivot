@@ -50,7 +50,7 @@ const agentToolDisplayMap = {
     'agent.content_review': { title: '富文本内容校对', description: '清洗富文本记录，按上下文预算逐条校对并生成完整报告。' },
     'agent.delegate': { title: '委派智能体', description: '调用独立模型运行具名专家，返回专家结果并自动附带结构化交接上下文。' },
     'agent.handoff': { title: '智能体交接', description: '将已有结论、证据、风险和待决问题整理为结构化交接文档。' },
-    'agent.code': { title: '代码执行', description: '在受限沙箱中执行 JavaScript 代码对数据进行转换与计算。' },
+    'agent.code': { title: '代码执行', description: '需要独立受控 Worker 沙箱；服务端不会直接执行 JavaScript。' },
     'agent.http': { title: 'HTTP 请求', description: '调用外部 REST API 并返回状态码与响应数据。' },
     'agent.browser': { title: '浏览器自动化', description: '在受控浏览器沙箱中打开目标页面并提取关键内容。' },
     'agent.merge': { title: '变量聚合', description: '把多个上游节点的输出合并为一个结构化对象。' },
@@ -58,7 +58,7 @@ const agentToolDisplayMap = {
     'workflow.output': { title: '工作流输出', description: '声明工作流最终输出，便于按名称读取交付结果。' },
     'workflow.condition': { title: '条件路由', description: '比较输入值并返回匹配路由，供下游条件分支引用。' },
     'workflow.approval': { title: '人工审批', description: '暂停工作流等待指定人员审批，支持多级审批与超时策略。' },
-    'workflow.foreach': { title: '循环 / 批处理', description: '对列表逐项执行受限转换并汇总结果。' },
+    'workflow.foreach': { title: '循环 / 批处理', description: '需要独立受控 Worker 沙箱；服务端不会直接执行循环代码。' },
     'workflow.subworkflow': { title: '子工作流', description: '调用另一个已发布工作流。' },
     'workflow.delay': { title: '延时等待', description: '挂起工作流到指定时间后继续执行。' },
 

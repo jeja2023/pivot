@@ -192,13 +192,16 @@ function buildRetrievalScopeSql(scope, docAlias = 'd', user = null) {
 async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
     const keywordWhere = keywords.map(() => '(c.search_content ILIKE ? OR c.content ILIKE ?)').join(' OR ');
+    const lexicalScore = `GREATEST(${keywords.map(() => 'GREATEST(similarity(COALESCE(c.search_content, \'\'), ?), similarity(COALESCE(c.content, \'\'), ?))').join(', ')})`;
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     const searchParams = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
+    const scopeParams = user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params];
 
     try {
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+            SELECT c.id, c.content, c.embedding, c.heading_path, d.name,
+                   ${lexicalScore} AS lexical_score
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
@@ -209,29 +212,76 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
               AND COALESCE(d.is_enabled, 1) = 1
               ${scopeFilter.sql}
               ${scopeFilter.accessSql}
-            ORDER BY c.id DESC
+            ORDER BY lexical_score DESC, c.id DESC
             LIMIT ?
-        `, [...searchParams, ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), limit]);
+        `, [
+            ...keywords.flatMap(k => [k, k]),
+            ...searchParams,
+            ...scopeParams,
+            limit
+        ]);
     } catch (e) {
-        logger.warn({ err: e.message }, 'RAG 文本检索候选召回失败');
-        return [];
+        // pg_trgm 可能未安装或历史库权限不足。保留原 ILIKE 路径作为兼容回退，
+        // 但在可用时始终按数据库计算的 lexical_score 排序，而不是按 chunk id。
+        logger.warn({ err: e.message }, 'RAG 词法相关度排序下推失败，回退基础文本检索');
+        try {
+            return await query(`
+                SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+                FROM knowledge_chunks c
+                JOIN knowledge_docs d ON c.doc_id = d.id
+                ${scopeFilter.accessJoin}
+                WHERE (${keywordWhere})
+                  ${ownerFilter}
+                  AND d.status = 'ready'
+                  AND d.deleted_at IS NULL
+                  AND COALESCE(d.is_enabled, 1) = 1
+                  ${scopeFilter.sql}
+                  ${scopeFilter.accessSql}
+                ORDER BY c.id DESC
+                LIMIT ?
+            `, [...searchParams, ...scopeParams, limit]);
+        } catch (fallbackError) {
+            logger.warn({ err: fallbackError.message }, 'RAG 文本检索候选召回失败');
+            return [];
+        }
     }
 }
 
 async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
     const keywordWhere = keywords.map(() => 'c.content ILIKE ?').join(' OR ');
+    const lexicalScore = `GREATEST(${keywords.map(() => 'similarity(COALESCE(c.content, \'\'), ?)').join(', ')})`;
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    return await query(`
-        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
-        FROM knowledge_chunks c
-        JOIN knowledge_docs d ON c.doc_id = d.id
-        ${scopeFilter.accessJoin}
-        WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
-        ORDER BY c.id DESC
-        LIMIT ?
-    `, [...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]), ...keywords.map(k => `%${k}%`), limit]);
+    const scopeParams = user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params];
+    try {
+        return await query(`
+            SELECT c.id, c.content, c.embedding, c.heading_path, d.name,
+                   ${lexicalScore} AS lexical_score
+            FROM knowledge_chunks c
+            JOIN knowledge_docs d ON c.doc_id = d.id
+            ${scopeFilter.accessJoin}
+            WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
+            ORDER BY lexical_score DESC, c.id DESC
+            LIMIT ?
+        `, [
+            ...keywords,
+            ...scopeParams,
+            ...keywords.map(k => `%${k}%`),
+            limit
+        ]);
+    } catch (error) {
+        logger.warn({ err: error.message }, 'RAG LIKE 相关度排序下推失败，回退基础文本检索');
+        return await query(`
+            SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+            FROM knowledge_chunks c
+            JOIN knowledge_docs d ON c.doc_id = d.id
+            ${scopeFilter.accessJoin}
+            WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
+            ORDER BY c.id DESC
+            LIMIT ?
+        `, [...scopeParams, ...keywords.map(k => `%${k}%`), limit]);
+    }
 }
 
 async function selectLexicalCandidates(userId, queryText, candidateLimit, scope = {}, user = null) {
@@ -284,7 +334,23 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const queryNorm = computeVectorNorm(queryVector);
     const top = [];
-    const chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user })) || [];
+    let chunks = [];
+    try {
+        // 优先让 PostgreSQL/pgvector 完成同维度向量距离排序和候选截断，避免把整库
+        // embedding 拉入 Node.js。仍在 JS 侧计算最终分数和 MMR，保持调试输出一致。
+        chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({
+            userId,
+            scopeFilter,
+            user,
+            queryVector,
+            limit
+        })) || [];
+    } catch (error) {
+        // 兼容旧库、pgvector 版本差异或异常混合维度数据：只在下推路径失败时
+        // 回退到原有访问过滤，不能因性能优化让知识库完全不可用。
+        logger.warn({ err: error.message }, 'RAG 向量排序下推失败，回退到应用层计算');
+        chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user })) || [];
+    }
     for (const chunk of chunks) {
         const entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
         if (!entry) continue;

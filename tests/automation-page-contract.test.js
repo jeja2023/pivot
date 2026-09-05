@@ -477,7 +477,6 @@ test('数据分析智能分析页面看板引导、结构化画像、场景卡�
     // 1. 结构契约：顶部统合工具栏、输入提示、冷启动引导看板与结果操作栏
     assert.match(viewJs, /class="data-analysis-ai-header-bar"/);
     assert.match(viewJs, /id="data-analysis-ai-dataset"/);
-    assert.match(viewJs, /id="data-analysis-ai-dataset-meta"/);
     assert.match(viewJs, /id="data-analysis-ai-prompt"/);
     assert.match(viewJs, /id="data-analysis-ai-clear-prompt"/);
     assert.match(viewJs, /class="data-analysis-ai-input-tip"/);

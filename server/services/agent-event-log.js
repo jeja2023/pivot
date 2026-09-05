@@ -2,14 +2,26 @@ const crypto = require('crypto');
 const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { redactTraceValue } = require('./agent-traces');
+const { buildAgentAuditFields } = require('./agent-step-context');
 
 function payloadHash(payload) {
     return crypto.createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex');
 }
 
-async function recordAgentEvent({ runId, userId = null, type, payload = {}, turnId = '', stepIndex = 0, providerVisible = false, eventKey = '' } = {}) {
+async function recordAgentEvent({ runId, userId = null, type, payload = {}, turnId = '', stepIndex = 0, providerVisible = false, eventKey = '', stepContext = null, entrypoint = '' } = {}) {
     if (!runId || !type) return null;
-    const safePayload = redactTraceValue(payload);
+    const auditContext = buildAgentAuditFields({
+        ...(stepContext && typeof stepContext === 'object' ? stepContext : {}),
+        runId,
+        turnId,
+        stepIndex,
+        contextHash: stepContext?.contextHash || payload?.contextHash || '',
+        worldStateHash: stepContext?.worldStateHash || payload?.worldStateHash || '',
+        worldStateMode: stepContext?.worldStateInjection?.mode || payload?.worldStateMode || '',
+        previousWorldStateHash: stepContext?.previousWorldStateHash || payload?.previousWorldStateHash || '',
+        worldStateWindow: stepContext?.worldStateWindow || payload?.contextWindow || {}
+    }, { entrypoint: entrypoint || stepContext?.entrypoint || payload?.entrypoint || 'agent', purpose: type });
+    const safePayload = redactTraceValue({ ...payload, ...auditContext });
     const hash = payloadHash(safePayload);
     const now = getBeijingTimestamp();
     const safeEventKey = String(eventKey || '').slice(0, 255);

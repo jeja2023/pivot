@@ -5,7 +5,9 @@ const {
     buildWorldState,
     buildWorldStatePrompt,
     buildWorldStateInjection,
-    createAgentStepContext
+    createAgentStepContext,
+    buildAgentAuditFields,
+    serializeAgentStepContext
 } = require('../server/services/agent-step-context');
 const { createToolOrchestrator } = require('../server/services/agent-tool-orchestrator');
 const {
@@ -62,6 +64,34 @@ test('WorldState uses reference or diff injection after a full baseline', () => 
     const prompt = buildWorldStatePrompt(changed, { injection });
     assert.match(prompt, /"mode":"diff"/);
     assert.match(prompt, /\/run\/goal/);
+});
+
+test('Chat, Agent and Desktop audit fields share one canonical StepContext serialization', () => {
+    const base = {
+        run: { id: 'run-audit', goal: '统一审计', run_mode: 'standard', metadata: {} },
+        turnId: 'turn-audit',
+        stepIndex: 3,
+        contextConfig: { entrypoint: 'chat' },
+        environment: { entrypoint: 'chat' },
+        policy: { toolPolicy: 'all' },
+        approval: { required: false },
+        sandbox: { mode: 'workspace' }
+    };
+    const contexts = ['chat', 'agent', 'desktop'].map(entrypoint => createAgentStepContext({ ...base, entrypoint }));
+    const audits = contexts.map(context => buildAgentAuditFields(context));
+    audits.forEach(audit => {
+        assert.deepEqual(Object.keys(audit).sort(), [
+            'context', 'contextHash', 'contextWindow', 'entrypoint', 'previousWorldStateHash',
+            'approval', 'policy', 'sandbox', 'schemaVersion', 'stepIndex', 'turnId', 'worldStateHash', 'worldStateMode'
+        ].sort());
+        assert.equal(audit.context.schemaVersion, 1);
+        assert.equal(audit.contextHash, audit.context.contextHash);
+        assert.equal(audit.worldStateHash, audit.context.worldStateHash);
+    });
+    assert.equal(serializeAgentStepContext(contexts[0]).stepIndex, serializeAgentStepContext(contexts[2]).stepIndex);
+    assert.equal(audits[0].entrypoint, 'chat');
+    assert.equal(audits[1].entrypoint, 'agent');
+    assert.equal(audits[2].entrypoint, 'desktop');
 });
 
 test('Provider envelope strips internal metadata while preserving model protocol fields', () => {

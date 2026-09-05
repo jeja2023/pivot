@@ -7,8 +7,6 @@
  * 属于「职责混杂、持续膨胀」的大文件。本模块只负责工作流控制节点与报告组装，
  * 逻辑逐字迁移，未改变任何行为，agent-tools.js 只保留薄分派入口。
  */
-const vm = require('vm');
-
 function renderWorkflowValue(value) {
     if (typeof value === 'string') return value;
     if (value === undefined || value === null) return '';
@@ -124,36 +122,12 @@ function executeWorkflowCondition(input = {}) {
     return { matched, value, compareTo, operator, route: matched ? 'matched' : 'unmatched', text: matched ? 'matched' : 'unmatched' };
 }
 
-async function executeWorkflowForeach(input = {}) {
-    const items = Array.isArray(input.items) ? input.items : [];
-    if (items.length > 500) throw new Error('循环节点单次最多处理 500 项。');
-    const code = String(input.code || 'return item;').trim();
-    const commonVars = input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? input.vars : {};
-    const output = new Array(items.length);
-    const errors = [];
-    const concurrency = Math.max(1, Math.min(Number.parseInt(input.concurrency, 10) || 4, 20));
-    const runItem = async (item, index) => {
-        try {
-            const sandbox = { item, index, items, vars: commonVars, JSON, Math, Number, String, Array, Object, Boolean, Date };
-            const result = vm.runInNewContext(`(function() { ${code} })()`, vm.createContext(sandbox), { timeout: 1000 });
-            output[index] = await new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('单项异步执行超时')), 1000);
-                Promise.resolve(result).then(
-                    value => { clearTimeout(timer); resolve(value); },
-                    error => { clearTimeout(timer); reject(error); }
-                );
-            });
-        } catch (e) {
-            errors.push({ index, message: e.message });
-            if (input.stopOnError !== false) throw new Error(`循环第 ${index + 1} 项执行失败：${e.message}`);
-            output[index] = null;
-        }
-    };
-    for (let start = 0; start < items.length; start += concurrency) {
-        const batch = items.slice(start, start + concurrency);
-        await Promise.all(batch.map((item, offset) => runItem(item, start + offset)));
-    }
-    return { items: output, count: output.length, errors, concurrency, text: renderWorkflowValue(output) };
+async function executeWorkflowForeach(_input = {}) {
+    const error = new Error('动态代码只能在独立 Worker 沙箱中执行，服务端循环执行已关闭。');
+    error.code = 'AGENT_SANDBOX_REQUIRED';
+    error.category = 'policy';
+    error.status = 403;
+    throw error;
 }
 
 async function executeWorkflowDelay(input = {}, context = {}) {

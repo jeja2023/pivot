@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 
+const AGENT_STEP_CONTEXT_SCHEMA_VERSION = 1;
+
 function stableValue(value, seen = new WeakSet()) {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'object') return value;
@@ -138,11 +140,60 @@ function buildWorldState({ run = {}, modelCfg = null, toolList = [], contextConf
     return { ...canonical, hash: hashValue(canonical) };
 }
 
-function createAgentStepContext({ run = {}, turnId = '', stepIndex = 0, modelCfg = null, toolList = [], worldState = null, previousWorldState = null, forceWorldStateFull = false, worldStateWindow = null, policy = {}, approval = {}, sandbox = {}, signal = null, deadline = 0, contextConfig = {}, resumeContext = {}, environment = {}, memory = {} } = {}) {
+function normalizeEntrypoint(value, fallback = 'agent') {
+    const entrypoint = String(value || '').trim().toLowerCase();
+    return ['chat', 'agent', 'desktop'].includes(entrypoint) ? entrypoint : fallback;
+}
+
+function serializeAgentStepContext(context = {}) {
+    const safe = context && typeof context === 'object' ? context : {};
+    const injection = safe.worldStateInjection && typeof safe.worldStateInjection === 'object'
+        ? safe.worldStateInjection
+        : {};
+    return stableValue({
+        schemaVersion: AGENT_STEP_CONTEXT_SCHEMA_VERSION,
+        entrypoint: normalizeEntrypoint(safe.entrypoint),
+        runId: String(safe.runId || ''),
+        turnId: String(safe.turnId || ''),
+        stepIndex: Math.max(Number(safe.stepIndex) || 0, 0),
+        contextHash: String(safe.contextHash || ''),
+        worldStateHash: String(safe.worldStateHash || ''),
+        worldStateMode: String(safe.worldStateMode || injection.mode || 'full'),
+        previousWorldStateHash: String(safe.previousWorldStateHash || injection.baseHash || ''),
+        worldStateWindow: stableValue(safe.worldStateWindow || {}),
+        policy: stableValue(safe.policy || {}),
+        approval: stableValue(safe.approval || {}),
+        sandbox: stableValue(safe.sandbox || {})
+    });
+}
+
+function buildAgentAuditFields(context = {}, { entrypoint = '', purpose = '', extra = {} } = {}) {
+    const serialized = serializeAgentStepContext({ ...context, entrypoint: entrypoint || context.entrypoint });
+    return {
+        schemaVersion: AGENT_STEP_CONTEXT_SCHEMA_VERSION,
+        entrypoint: serialized.entrypoint,
+        turnId: serialized.turnId,
+        stepIndex: serialized.stepIndex,
+        contextHash: serialized.contextHash,
+        worldStateHash: serialized.worldStateHash,
+        worldStateMode: serialized.worldStateMode,
+        previousWorldStateHash: serialized.previousWorldStateHash,
+        contextWindow: serialized.worldStateWindow,
+        policy: serialized.policy,
+        approval: serialized.approval,
+        sandbox: serialized.sandbox,
+        context: serialized,
+        ...(purpose ? { purpose: String(purpose) } : {}),
+        ...(extra && typeof extra === 'object' ? extra : {})
+    };
+}
+
+function createAgentStepContext({ run = {}, entrypoint = '', turnId = '', stepIndex = 0, modelCfg = null, toolList = [], worldState = null, previousWorldState = null, forceWorldStateFull = false, worldStateWindow = null, policy = {}, approval = {}, sandbox = {}, signal = null, deadline = 0, contextConfig = {}, resumeContext = {}, environment = {}, memory = {} } = {}) {
     const resolvedWorldState = worldState || buildWorldState({ run, modelCfg, toolList, contextConfig, resumeContext, environment, memory });
     const worldStateInjection = buildWorldStateInjection(resolvedWorldState, previousWorldState, { forceFull: forceWorldStateFull });
     const snapshot = {
-        schemaVersion: 1,
+        schemaVersion: AGENT_STEP_CONTEXT_SCHEMA_VERSION,
+        entrypoint: normalizeEntrypoint(entrypoint || environment?.entrypoint || contextConfig?.entrypoint || run?.metadata?.entrypoint),
         runId: String(run.id || ''),
         turnId: String(turnId || `${run.id || 'run'}:turn:${Number(stepIndex) || 0}`),
         stepIndex: Math.max(Number(stepIndex) || 0, 0),
@@ -178,6 +229,8 @@ function buildWorldStatePrompt(worldState = {}, options = {}) {
 }
 
 module.exports = {
+    AGENT_STEP_CONTEXT_SCHEMA_VERSION,
+    buildAgentAuditFields,
     buildWorldStatePrompt,
     buildWorldStateInjection,
     buildWorldState,
@@ -186,5 +239,7 @@ module.exports = {
     freezeDeep,
     hashValue,
     normalizeToolSnapshot,
+    normalizeEntrypoint,
+    serializeAgentStepContext,
     stableValue
 };

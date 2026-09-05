@@ -2,6 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const parse5 = require('parse5');
+const acorn = require('acorn');
 const { loadChatHtmlTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
 const { renderManualHtml, stripVersionUpdateSections } = require('../server/manual-page');
 
@@ -123,6 +125,98 @@ function collectFiles(dir, extension, files = []) {
     return files;
 }
 
+const HTML_VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const HTML_OPTIONAL_CLOSE = new Set(['li', 'dt', 'dd', 'p', 'rt', 'rp', 'optgroup', 'option', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th']);
+
+function findTagEnd(fragment, start) {
+    let quote = '';
+    for (let index = start + 1; index < fragment.length; index += 1) {
+        const char = fragment[index];
+        if (quote) {
+            if (char === quote) quote = '';
+        } else if (char === '"' || char === "'") {
+            quote = char;
+        } else if (char === '>') {
+            return index;
+        }
+    }
+    return -1;
+}
+
+function validateHtmlFragment(fragment, sourceName) {
+    const text = String(fragment || '');
+    const parsed = parse5.parseFragment(text);
+    if (parsed.childNodes.some(node => ['html', 'head', 'body'].includes(node.nodeName))) {
+        fail(`${sourceName} must remain an HTML fragment, not a full document`);
+    }
+    const stack = [];
+    for (let index = 0; index < text.length; index += 1) {
+        if (text[index] !== '<') continue;
+        if (text.startsWith('<!--', index)) {
+            const commentEnd = text.indexOf('-->', index + 4);
+            if (commentEnd < 0) fail(`${sourceName} contains an unclosed HTML comment`);
+            index = commentEnd + 2;
+            continue;
+        }
+        const end = findTagEnd(text, index);
+        if (end < 0) fail(`${sourceName} contains an unclosed HTML tag`);
+        const token = text.slice(index + 1, end).trim();
+        if (!token || token.startsWith('!') || token.startsWith('?')) {
+            index = end;
+            continue;
+        }
+        const closing = token.startsWith('/');
+        const match = token.match(/^\/?\s*([A-Za-z][\w:-]*)/);
+        if (!match) {
+            index = end;
+            continue;
+        }
+        const name = match[1].toLowerCase();
+        if (closing) {
+            const top = stack.at(-1);
+            if (top !== name) {
+                fail(`${sourceName} has an unmatched closing tag </${name}>${top ? `; expected </${top}>` : ''}`);
+            }
+            stack.pop();
+        } else if (!token.endsWith('/') && !HTML_VOID_ELEMENTS.has(name)) {
+            // HTML permits a small set of optional end tags. Close only those
+            // elements; all other tags must be explicitly balanced so duplicate
+            // closing tags cannot be silently swallowed by the browser parser.
+            if (HTML_OPTIONAL_CLOSE.has(name) && stack.at(-1) === name) stack.pop();
+            stack.push(name);
+        }
+        index = end;
+    }
+    if (stack.length) fail(`${sourceName} has unclosed tag(s): ${stack.join(', ')}`);
+}
+
+function validateHtmlTemplateLiterals(filePath) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    let ast;
+    try {
+        ast = acorn.parse(source, { ecmaVersion: 'latest', locations: true, sourceType: 'script' });
+    } catch (error) {
+        fail(`${relative(filePath)} cannot be parsed for HTML template validation: ${error.message}`);
+    }
+    let count = 0;
+    const visit = node => {
+        if (!node || typeof node !== 'object') return;
+        if (node.type === 'TemplateLiteral') {
+            const fragment = node.quasis.map(quasi => quasi.value.raw).join('');
+            if (/<\/?[A-Za-z][\s\S]*>/.test(fragment)) {
+                count += 1;
+                validateHtmlFragment(fragment, `${relative(filePath)} template #${count}`);
+            }
+        }
+        Object.entries(node).forEach(([key, value]) => {
+            if (key === 'loc' || key === 'start' || key === 'end') return;
+            if (Array.isArray(value)) value.forEach(visit);
+            else if (value && typeof value === 'object') visit(value);
+        });
+    };
+    visit(ast);
+}
+
 const partialFiles = collectFiles(partialsDir, '.html');
 if (partialFiles.length < 10) fail('expected chat partial files are missing');
 partialFiles.forEach(filePath => {
@@ -132,6 +226,8 @@ partialFiles.forEach(filePath => {
         fail(`${relative(filePath)} should be an HTML fragment, not a full document`);
     }
 });
+validateHtmlFragment(html, 'assembled client/chat template');
+validateHtmlTemplateLiterals(path.join(chatDir, 'agent-artifacts.js'));
 
 const cssFiles = [cssEntryPath, ...collectFiles(stylesDir, '.css')];
 const imports = [];

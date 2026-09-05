@@ -7,6 +7,7 @@ const {
 } = require('./agent-checkpoints');
 const { recordAgentEvent } = require('./agent-event-log');
 const { summarizeToolExecutionPlan } = require('./agent-tool-execution-plan');
+const { buildAgentAuditFields } = require('./agent-step-context');
 
 function operationKeyFor({ run, tool, input, context = {} }) {
     const runId = run?.id || context.runId;
@@ -25,6 +26,11 @@ function createToolOrchestrator(overrides = {}) {
     async function event(type, request, payload = {}) {
         if (typeof emitEvent !== 'function' || !request?.run?.id) return;
         try {
+            const stepContext = {
+                ...(request.context?.stepContext || {}),
+                runId: request.run.id,
+                entrypoint: request.context?.entrypoint || request.context?.stepContext?.entrypoint || 'agent'
+            };
             await emitEvent({
                 runId: request.run.id,
                 userId: request.run.user_id || request.user?.id || null,
@@ -33,9 +39,9 @@ function createToolOrchestrator(overrides = {}) {
                 type,
                 eventKey: request.operationKey || '',
                 payload: {
+                    ...buildAgentAuditFields(stepContext, { purpose: type }),
                     tool: request.tool.name,
                     operationKey: request.operationKey || '',
-                    contextHash: request.context?.stepContext?.contextHash || '',
                     ...payload
                 }
             });

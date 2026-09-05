@@ -4,6 +4,7 @@ const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
 const { redactTraceValue } = require('./agent-traces');
 const { putAgentBlob } = require('./agent-blob-store');
+const { buildAgentAuditFields } = require('./agent-step-context');
 
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value ?? {})).digest('hex'); }
 
@@ -12,6 +13,10 @@ async function recordAgentToolCall(data = {}) {
     const id = data.id || crypto.randomUUID();
     const input = redactTraceValue(data.input ?? {});
     const output = redactTraceValue(data.output ?? {});
+    const auditContext = buildAgentAuditFields(data.stepContext || data, {
+        entrypoint: data.entrypoint || data.stepContext?.entrypoint || 'agent',
+        purpose: 'tool_call'
+    });
     const outputBlob = await putAgentBlob(output, { runId: data.runId });
     const now = data.createdAt || getBeijingTimestamp();
     const sql = `
@@ -20,8 +25,8 @@ async function recordAgentToolCall(data = {}) {
             policy_version, approval_id, idempotent, input_payload, input_hash,
             output_payload_ref, output_hash, status, error_category, error_message,
             duration_ms, created_at, attempt, operation_key, context_hash
-            ,tenant_id, tool_version, task_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ,tenant_id, tool_version, task_type, context_snapshot
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const params = [
         id,
@@ -49,6 +54,7 @@ async function recordAgentToolCall(data = {}) {
         ,data.tenantId || data.tenant_id || null
         ,String(data.toolVersion || data.tool_version || '').slice(0, 64)
         ,String(data.taskType || data.task_type || '').slice(0, 160)
+        ,JSON.stringify(auditContext)
     ];
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -89,13 +95,15 @@ async function listAgentToolCalls(runId, options = {}) {
         SELECT id, run_id, step_id, tool_name, capability, risk_level, policy_decision,
                policy_version, approval_id, idempotent, input_payload, input_hash,
                output_payload_ref, output_hash, status, error_category, error_message,
-               duration_ms, created_at, context_hash
+               duration_ms, created_at, context_hash, context_snapshot
         FROM agent_tool_calls WHERE run_id = ? ORDER BY created_at ASC LIMIT ?
     `, [runId, limit]);
     return rows.map(row => {
         let input = {};
         try { input = JSON.parse(row.input_payload || '{}'); } catch (_) {}
-        return { ...row, input_payload: input };
+        let contextSnapshot = {};
+        try { contextSnapshot = JSON.parse(row.context_snapshot || '{}'); } catch (_) {}
+        return { ...row, input_payload: input, context_snapshot: contextSnapshot };
     });
 }
 

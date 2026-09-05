@@ -1,4 +1,4 @@
-const { query, queryOne, execute } = require('../../db/client');
+const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { getAccessibleModelAsync } = require('../models');
 const { callModelTextWithBudget } = require('../model-text-call');
@@ -280,28 +280,90 @@ async function loadSemanticRows(datasetRow, textColumn, idColumn) {
 }
 
 async function ensureSemanticBatches(job, batches) {
-    const existing = await queryOne('SELECT COUNT(*) AS count FROM analysis_semantic_batches WHERE job_id = ?', [job.id]);
-    if (Number(existing?.count || 0) > 0) return;
-    for (let index = 0; index < batches.length; index += 1) {
-        const batch = batches[index];
-        await execute(`
-            INSERT INTO analysis_semantic_batches (
-                id, job_id, batch_index, segment_start, segment_end, row_start, row_end,
-                segment_count, row_count, char_count, status, max_attempts, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-            analysisId('semb'), job.id, index,
-            batch.segmentStart, batch.segmentEnd, batch.rowStart, batch.rowEnd,
-            batch.segments.length, batch.rowCount, batch.charCount,
-            SEMANTIC_BATCH_STATUS.queued, DEFAULT_BATCH_MAX_ATTEMPTS,
-            getBeijingTimestamp(), getBeijingTimestamp()
-        ]);
+    if (!job?.id || !Array.isArray(batches) || batches.length === 0) {
+        throw new Error('语义分析任务缺少有效的批次定义。');
     }
-    await execute(`
-        UPDATE analysis_semantic_jobs
-        SET total_batches = ?, updated_at = ?
-        WHERE id = ?
-    `, [batches.length, getBeijingTimestamp(), job.id]);
+
+    // 批次初始化必须和任务行锁在同一事务中完成。旧实现逐条 INSERT，进程在中途
+    // 崩溃时会留下“部分批次”；恢复逻辑看到任意一条记录后就会跳过初始化，最终
+    // 可能把不完整任务误判为完成。这里同时兼容已存在的旧部分数据：校验既有边界，
+    // 只补缺失批次，并拒绝不一致的批次规划。
+    await transaction(async trx => {
+        const task = await trx.queryOne('SELECT id FROM analysis_semantic_jobs WHERE id = ? FOR UPDATE', [job.id]);
+        if (!task) throw new Error('语义分析任务不存在，无法初始化批次。');
+
+        const existing = await trx.query(`
+            SELECT id, batch_index, segment_start, segment_end, row_start, row_end,
+                   segment_count, row_count, char_count
+            FROM analysis_semantic_batches
+            WHERE job_id = ?
+            ORDER BY batch_index ASC
+            FOR UPDATE
+        `, [job.id]);
+        const byIndex = new Map(existing.map(row => [Number(row.batch_index), row]));
+        const expectedIndexes = new Set();
+
+        for (let index = 0; index < batches.length; index += 1) {
+            const batch = batches[index];
+            expectedIndexes.add(index);
+            const expected = {
+                segmentStart: Number(batch.segmentStart) || 0,
+                segmentEnd: Number(batch.segmentEnd) || 0,
+                rowStart: Number(batch.rowStart) || 0,
+                rowEnd: Number(batch.rowEnd) || 0,
+                segmentCount: batch.segments.length,
+                rowCount: Number(batch.rowCount) || 0,
+                charCount: Number(batch.charCount) || 0
+            };
+            const current = byIndex.get(index);
+            if (current) {
+                const sameDefinition = [
+                    ['segment_start', expected.segmentStart],
+                    ['segment_end', expected.segmentEnd],
+                    ['row_start', expected.rowStart],
+                    ['row_end', expected.rowEnd],
+                    ['segment_count', expected.segmentCount],
+                    ['row_count', expected.rowCount],
+                    ['char_count', expected.charCount]
+                ].every(([key, value]) => Number(current[key]) === value);
+                if (!sameDefinition) {
+                    const error = new Error(`语义分析批次 ${index + 1} 的恢复边界与原任务不一致。`);
+                    error.code = 'SEMANTIC_BATCH_DEFINITION_MISMATCH';
+                    error.status = 409;
+                    throw error;
+                }
+                continue;
+            }
+
+            const now = getBeijingTimestamp();
+            await trx.execute(`
+                INSERT INTO analysis_semantic_batches (
+                    id, job_id, batch_index, segment_start, segment_end, row_start, row_end,
+                    segment_count, row_count, char_count, status, max_attempts, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (job_id, batch_index) DO NOTHING
+            `, [
+                analysisId('semb'), job.id, index,
+                expected.segmentStart, expected.segmentEnd, expected.rowStart, expected.rowEnd,
+                expected.segmentCount, expected.rowCount, expected.charCount,
+                SEMANTIC_BATCH_STATUS.queued, DEFAULT_BATCH_MAX_ATTEMPTS, now, now
+            ]);
+        }
+
+        const extras = existing.filter(row => !expectedIndexes.has(Number(row.batch_index)));
+        if (extras.length > 0) {
+            const error = new Error('语义分析任务中存在超出当前规划的批次，已停止恢复以避免覆盖结果。');
+            error.code = 'SEMANTIC_BATCH_COUNT_MISMATCH';
+            error.status = 409;
+            throw error;
+        }
+
+        await trx.execute(`
+            UPDATE analysis_semantic_jobs
+            SET total_batches = ?, updated_at = ?
+            WHERE id = ?
+        `, [batches.length, getBeijingTimestamp(), job.id]);
+    });
 }
 
 async function claimSemanticJob() {
@@ -868,6 +930,7 @@ module.exports = {
     normalizeBatchTokenBudget,
     normalizeSemanticBatchConcurrency,
     normalizeMaxSegmentsPerBatch,
+    ensureSemanticBatches,
     resolveSemanticBatchConcurrency,
     normalizeBatchResult,
     analyzeSemanticBatchSegments,

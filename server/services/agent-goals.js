@@ -17,6 +17,14 @@ const GOAL_STATUSES = Object.freeze(['active', 'paused', 'suspended', 'completed
 const GOAL_TRIGGER_TYPES = Object.freeze(['manual', 'timer', 'webhook', 'file', 'database']);
 const MAX_GOALS_PER_USER = 100;
 const MAX_FAILURES = 10;
+const GOAL_CLAIM_LEASE_MS = Math.max(
+    Number.parseInt(process.env.AGENT_GOAL_CLAIM_LEASE_MS || String(5 * 60 * 1000), 10) || 5 * 60 * 1000,
+    30 * 1000
+);
+const GOAL_CLAIM_RENEW_INTERVAL_MS = Math.min(
+    Math.max(Math.floor(GOAL_CLAIM_LEASE_MS / 3), 10 * 1000),
+    60 * 1000
+);
 
 let createAgentRunCallback = null;
 let createAgentNotificationCallback = () => null;
@@ -277,6 +285,40 @@ function readByPath(payload, pathText) {
     return String(pathText || '').split('.').filter(Boolean).reduce((value, key) => value == null ? undefined : value[key], payload);
 }
 
+function startGoalClaimRenewal(goalId, claimToken) {
+    let running = false;
+    const timer = setInterval(async () => {
+        if (running) return;
+        running = true;
+        try {
+            await execute(`
+                UPDATE agent_goals
+                SET claim_expires_at = ?, updated_at = ?::timestamptz
+                WHERE id = ? AND status = 'active' AND claim_token = ?
+            `, [getBeijingTimestamp(new Date(Date.now() + GOAL_CLAIM_LEASE_MS)), getBeijingTimestamp(), goalId, claimToken]);
+        } catch (error) {
+            // 续租失败不放宽权限；当前处理完成后仍会用 token 条件释放/提交，
+            // 让其它实例可以在租约真正到期后接管。
+        } finally {
+            running = false;
+        }
+    }, GOAL_CLAIM_RENEW_INTERVAL_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
+}
+
+async function claimAgentGoal(goalId, claimToken = crypto.randomUUID()) {
+    const token = String(claimToken || '').trim().slice(0, 128);
+    if (!token) return false;
+    const changes = await execute(`
+        UPDATE agent_goals
+        SET claim_token = ?, claim_expires_at = ?, updated_at = ?::timestamptz
+        WHERE id = ? AND status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= NOW()
+          AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= NOW())
+    `, [token, getBeijingTimestamp(new Date(Date.now() + GOAL_CLAIM_LEASE_MS)), getBeijingTimestamp(), goalId]);
+    return changes === 1 ? token : false;
+}
+
 async function runAgentGoalNow(goal, user, options = {}) {
     const run = ensureCreateRun();
     const auth = parseJson(goal.authorization_spec ?? goal.authorizationSpec, {});
@@ -320,7 +362,9 @@ async function runAgentGoalNow(goal, user, options = {}) {
         contextConfig: options.metadata && typeof options.metadata === 'object' ? { goalTriggerInputs: options.metadata } : undefined
     });
     const now = getBeijingTimestamp();
-    await execute('UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?', [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id]);
+    const claimToken = String(options.claimToken || '').trim();
+    const claimClause = claimToken ? ' AND claim_token = ?' : '';
+    await execute(`UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?${claimClause}`, [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id, ...(claimToken ? [claimToken] : [])]);
     try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
     return created;
 }
@@ -342,7 +386,7 @@ async function pollFileGoal(row, user) {
         if (Date.now() - stat.mtimeMs < Number(trigger.stableSeconds || 5) * 1000) continue;
         const fingerprint = `${entry.name}:${stat.size}:${stat.mtimeMs}`;
         const key = `goal:${row.id}:file:${crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 32)}`;
-        const run = await runAgentGoalNow(row, user, { triggerType: 'file', triggerKey: key, metadata: { [trigger.inputName || 'filePath']: filePath, fileName: entry.name, fileSize: stat.size, modifiedAt: getBeijingTimestamp(new Date(stat.mtimeMs)) } });
+        const run = await runAgentGoalNow(row, user, { triggerType: 'file', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'filePath']: filePath, fileName: entry.name, fileSize: stat.size, modifiedAt: getBeijingTimestamp(new Date(stat.mtimeMs)) } });
         if (!run?.deduped) created.push(run);
     }
     return created;
@@ -359,10 +403,10 @@ async function pollDatabaseGoal(row, user) {
     const values = rows.map(item => item?.[trigger.watermarkField]).filter(value => value !== undefined && value !== null).map(String).sort();
     const nextWatermark = values[values.length - 1] || watermark;
     const key = `goal:${row.id}:database:${crypto.createHash('sha256').update(`${nextWatermark}:${rows.length}`).digest('hex').slice(0, 32)}`;
-    const run = await runAgentGoalNow(row, user, { triggerType: 'database', triggerKey: key, metadata: { [trigger.inputName || 'rows']: rows, watermark: nextWatermark, rowCount: rows.length } });
+    const run = await runAgentGoalNow(row, user, { triggerType: 'database', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'rows']: rows, watermark: nextWatermark, rowCount: rows.length } });
     if (!run?.deduped) {
         trigger.watermark = nextWatermark;
-        await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ?::timestamptz WHERE id = ?', [JSON.stringify(trigger), getBeijingTimestamp(), row.id]);
+        await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [JSON.stringify(trigger), getBeijingTimestamp(), row.id, row.claim_token || null]);
         return [run];
     }
     return [];
@@ -374,33 +418,44 @@ async function runDueAgentGoals(limit = 20) {
         FROM agent_goals g JOIN users u ON u.id = g.user_id
         WHERE g.status = 'active' AND g.next_run_at IS NOT NULL AND g.next_run_at <= NOW()
           AND u.deleted_at IS NULL AND COALESCE(u.status, 'active') != 'disabled'
+          AND (g.claim_token IS NULL OR g.claim_expires_at IS NULL OR g.claim_expires_at <= NOW())
         ORDER BY g.next_run_at ASC LIMIT ?
     `, [Math.max(1, Math.min(Number.parseInt(limit, 10) || 20, 100))]);
     const created = [];
     for (const row of due) {
+        const claimToken = crypto.randomUUID();
+        if (!(await claimAgentGoal(row.id, claimToken))) continue;
+
+        // 只有拿到 claim_token 的实例可以推进水位线、下次执行时间和失败熔断状态。
+        // Agent Run 的 dedupe key 仍保留，作为第二道幂等保护。
+        const claimedRow = { ...row, claim_token: claimToken };
+        const stopClaimRenewal = startGoalClaimRenewal(row.id, claimToken);
         const trigger = parseJson(row.trigger_spec, {});
         const user = { id: row.user_id, username: row.username, nickname: row.nickname, unit: row.unit, role: row.role, tenant_id: row.tenant_id };
         const scheduledFor = String(row.next_run_at || '');
         try {
             const triggerType = trigger.type || 'timer';
             if (triggerType === 'file') {
-                created.push(...await pollFileGoal(row, user));
-                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
+                created.push(...await pollFileGoal(claimedRow, user));
+                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id, claimToken]);
                 continue;
             }
             if (triggerType === 'database') {
-                created.push(...await pollDatabaseGoal(row, user));
-                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id]);
+                created.push(...await pollDatabaseGoal(claimedRow, user));
+                await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [getBeijingTimestamp(new Date(Date.now() + 60000)), getBeijingTimestamp(), row.id, claimToken]);
                 continue;
             }
-            const run = await runAgentGoalNow(row, user, { triggerType: 'timer', scheduledFor, triggerKey: `goal:${row.id}:${scheduledFor}`, nextRunAt: computeNextGoalRun(trigger, getBeijingTimestamp()) });
-            await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, failure_count = 0, last_error = \'\', updated_at = ?::timestamptz WHERE id = ?', [computeNextGoalRun(trigger, getBeijingTimestamp()), getBeijingTimestamp(), row.id]);
+            const run = await runAgentGoalNow(claimedRow, user, { triggerType: 'timer', scheduledFor, claimToken, triggerKey: `goal:${row.id}:${scheduledFor}`, nextRunAt: computeNextGoalRun(trigger, getBeijingTimestamp()) });
+            await execute('UPDATE agent_goals SET next_run_at = ?::timestamptz, failure_count = 0, last_error = \'\', updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [computeNextGoalRun(trigger, getBeijingTimestamp()), getBeijingTimestamp(), row.id, claimToken]);
             created.push(run);
         } catch (error) {
             const failureCount = Number(row.failure_count || 0) + 1;
             const paused = failureCount >= Number(row.max_failures || 5);
-            await execute('UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN \'paused\' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = ?, updated_at = ?::timestamptz WHERE id = ?', [failureCount, paused, paused, String(error.message || '目标调度失败').slice(0, 1000), getBeijingTimestamp(), row.id]);
+            await execute('UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN \'paused\' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = ?, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [failureCount, paused, paused, String(error.message || '目标调度失败').slice(0, 1000), getBeijingTimestamp(), row.id, claimToken]);
             try { await createAgentNotificationCallback(row.user_id, null, paused ? 'error' : 'warning', paused ? '持续目标已熔断' : '持续目标调度失败', `${row.title}: ${error.message}`); } catch (_) {}
+        } finally {
+            stopClaimRenewal();
+            await execute('UPDATE agent_goals SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [getBeijingTimestamp(), row.id, claimToken]);
         }
     }
     return created;
@@ -452,6 +507,7 @@ async function recordAgentGoalRunOutcome(runId, outcome) {
 module.exports = {
     GOAL_STATUSES,
     GOAL_TRIGGER_TYPES,
+    claimAgentGoal,
     configureAgentGoals,
     createAgentGoal,
     dispatchAgentGoalWebhook,
