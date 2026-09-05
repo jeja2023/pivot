@@ -24,6 +24,9 @@ test('个人工作台接入主模板、当前用户聚合接口与持久化快�
     assert.doesNotMatch(template, /id="personal-header-user-initial"/);
     assert.match(template, /class="personal-hero"/);
     assert.match(template, /id="personal-shortcuts-modal"/);
+    assert.match(template, /id="personal-user-modal"/);
+    assert.match(template, /data-personal-action="open-user-profile"/);
+    assert.match(client, /openUserProfileModal/);
     assert.match(workspace, /personal: 'personal-workbench-modal'/);
     assert.match(workspace, /RESTORABLE_WORKSPACES = new Set\(\['personal'/);
     assert.match(client, /\/user\/workbench-summary/);

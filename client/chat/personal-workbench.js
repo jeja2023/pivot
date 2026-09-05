@@ -383,7 +383,8 @@
 
     function renderDashboard(dashboard = {}) {
         state.dashboard = dashboard;
-        const userName = currentUser?.nickname || currentUser?.username || '你';
+        const user = getCurrentUser();
+        const userName = user?.nickname || user?.username || '你';
         const hour = new Date().getHours();
         const greeting = hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好';
         const initial = String(userName).trim().slice(0, 1) || '我';
@@ -496,6 +497,81 @@
         window.Pivot.legacy.showToast?.('常用入口已保存');
     }
 
+    function getCurrentUser() {
+        return (typeof currentUser !== 'undefined' && currentUser) || window.Pivot?.legacy?.currentUser || null;
+    }
+
+    function openUserProfileModal() {
+        const modal = document.getElementById('personal-user-modal');
+        if (!modal) return;
+
+        const user = getCurrentUser();
+        const userName = user?.nickname || user?.username || '当前用户';
+        const account = user?.username ? `@${user.username}` : '@user';
+        const initial = String(userName).trim().slice(0, 1) || '我';
+
+        let roleText = '普通用户';
+        if (typeof isSuperAdminUser === 'function' && isSuperAdminUser(user)) {
+            roleText = '超级管理员';
+        } else if (typeof getPermissionLabel === 'function') {
+            roleText = getPermissionLabel(user);
+        } else if (typeof isAdminUser === 'function' && isAdminUser(user)) {
+            roleText = '系统管理员';
+        } else if (user?.role === 'admin') {
+            roleText = '管理员';
+        }
+
+        const avatarLg = document.getElementById('personal-user-avatar-lg');
+        if (avatarLg) avatarLg.textContent = initial;
+
+        const nameEl = document.getElementById('personal-user-dialog-title');
+        if (nameEl) nameEl.textContent = userName;
+
+        const accountEl = document.getElementById('personal-user-account');
+        if (accountEl) accountEl.textContent = account;
+
+        const roleBadge = document.getElementById('personal-user-role-badge');
+        if (roleBadge) {
+            const isSuper = (typeof isSuperAdminUser === 'function' && isSuperAdminUser(user)) || user?.role === 'admin';
+            clear(roleBadge);
+            const pill = document.createElement('span');
+            pill.className = isSuper ? 'personal-role-pill is-admin' : 'personal-role-pill';
+            pill.textContent = roleText;
+            roleBadge.appendChild(pill);
+        }
+
+        const unitEl = document.getElementById('personal-user-unit');
+        if (unitEl) unitEl.textContent = user?.unit || '默认单位';
+
+        const idEl = document.getElementById('personal-user-id');
+        if (idEl) idEl.textContent = user?.id ? `#${user.id}` : '#-';
+
+        const createdEl = document.getElementById('personal-user-created-at');
+        if (createdEl) {
+            if (user?.created_at) {
+                try {
+                    const d = new Date(user.created_at);
+                    if (!Number.isNaN(d.getTime())) {
+                        createdEl.textContent = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                    } else {
+                        createdEl.textContent = String(user.created_at);
+                    }
+                } catch {
+                    createdEl.textContent = String(user.created_at);
+                }
+            } else {
+                createdEl.textContent = '系统初始用户';
+            }
+        }
+
+        modal.classList.remove('hidden');
+    }
+
+    function closeUserProfileModal() {
+        const modal = document.getElementById('personal-user-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
     async function handleRecentWork(button) {
         const kind = button.dataset.personalRecentKind;
         const id = button.dataset.personalRecentId;
@@ -518,6 +594,12 @@
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
             if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
+            if (action === 'open-user-profile') return openUserProfileModal();
+            if (action === 'close-user-modal') return closeUserProfileModal();
+            if (action === 'user-to-settings') {
+                closeUserProfileModal();
+                return window.Pivot.legacy.openAdminPanel?.();
+            }
             if (action === 'logout') return window.Pivot.legacy.logout?.();
             if (action === 'open-inbox') {
                 await window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
@@ -536,6 +618,19 @@
         if (recent) await handleRecentWork(recent);
         const attention = event.target.closest('[data-personal-item-type]');
         if (attention) await window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+    });
+
+    document.getElementById('personal-user-modal')?.addEventListener('click', event => {
+        if (event.target.id === 'personal-user-modal') closeUserProfileModal();
+    });
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            const userModal = document.getElementById('personal-user-modal');
+            if (userModal && !userModal.classList.contains('hidden')) {
+                closeUserProfileModal();
+            }
+        }
     });
 
     document.getElementById('personal-shortcuts-cancel')?.addEventListener('click', closeShortcutEditor);
