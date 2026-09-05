@@ -1117,3 +1117,47 @@
 .official-writing-left-rail.is-material-editor-open .official-writing-material-card-list {
     display: none;
 }
+
+.official-writing-draft-model-selector {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px !important;
+    margin-bottom: 2px;
+}
+
+.official-writing-draft-model-selector span {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    line-height: 34px;
+    color: #475569;
+    font-size: 0.74rem;
+    font-weight: 800;
+}
+
+.official-writing-draft-model-selector .form-input {
+    flex: 0 1 auto;
+    width: min(320px, 100%) !important;
+    height: 34px;
+    margin: 0;
+    padding: 0 10px;
+    font-size: 0.8rem;
+}
+
+.official-writing-review-model-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #64748b;
+    font-size: 0.74rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.official-writing-review-model-selector .form-input {
+    width: 172px;
+    height: 34px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 0.78rem;
+}

@@ -352,6 +352,7 @@
                     setAppsTitle('法规查询', '检索法规条文、查看版本并围绕命中条文问答。');
                 }
                 renderShell();
+                await window.PivotAppModels?.refresh?.('regulations', 'regulations-ai-model');
                 bindEvents(view);
                 try {
                     await Promise.all([loadDocuments({ keepActive: true, page: state.page }), loadFacets(), loadSavedSearches()]);

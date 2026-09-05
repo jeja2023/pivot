@@ -92,6 +92,12 @@
                                     <p id="official-writing-draft-modal-desc">输入起草要求后，AI 会直接写入正文稿。</p>
                                 </div>
                                 <form id="official-writing-draft-form" class="official-writing-draft-form">
+                                    <label class="official-writing-draft-model-selector" for="official-writing-draft-model">
+                                        <span>起草模型</span>
+                                        <select id="official-writing-draft-model" class="form-input" data-pivot-app-model="official-writing-draft" aria-label="选择 AI 全文起草模型" disabled>
+                                            <option value="">加载模型中…</option>
+                                        </select>
+                                    </label>
                                     <label for="official-writing-draft-instruction">起草要求</label>
                                     <textarea id="official-writing-draft-instruction" class="form-input" rows="6" placeholder="例如：起草一份关于召开季度安全生产会议的通知，要求简洁正式，包含时间、参会范围和工作要求。"></textarea>
                                     <p id="official-writing-draft-error" class="official-writing-create-error hidden">请输入起草要求</p>
@@ -112,6 +118,12 @@
                                 <span class="official-writing-status-pill">建议 <b id="official-writing-status-pending">0</b></span>
                             </div>
                             <div class="official-writing-command-row" aria-label="公文写作命令栏">
+                                <label class="official-writing-model-selector" for="official-writing-selection-model">
+                                    <span>局部改写</span>
+                                    <select id="official-writing-selection-model" class="form-input" data-pivot-app-model="official-writing-selection" aria-label="选择局部润色、扩写和压缩模型" disabled>
+                                        <option value="">加载模型中…</option>
+                                    </select>
+                                </label>
                                 <button id="official-writing-open-draft-modal-btn" class="btn-primary official-writing-command-action" type="button">AI全文起草</button>
                                 <button id="official-writing-review-suggestions-btn" class="btn-secondary official-writing-command-action" type="button">审校建议</button>
                                 <button id="official-writing-toggle-left-btn" class="btn-secondary official-writing-command-action" type="button" aria-pressed="false">写作资源</button>
@@ -277,7 +289,14 @@
                                                     <span>先做基础校对，再生成 AI 审校建议。</span>
                                                 </div>
                                                 <div class="official-writing-review-actions">
+                                                    <label class="official-writing-review-model-selector" for="official-writing-review-model">
+                                                        <span>模型</span>
+                                                        <select id="official-writing-review-model" class="form-input" data-pivot-app-model="official-writing-review" aria-label="选择 AI 审校模型" disabled>
+                                                            <option value="">加载模型中…</option>
+                                                        </select>
+                                                    </label>
                                                     <span id="official-writing-drawer-ai-indicator" class="official-writing-ai-indicator official-writing-drawer-ai-indicator hidden" role="status" aria-live="polite"></span>
+                                                    <button id="official-writing-stop-review-btn" class="btn-danger-outline hidden" type="button">停止审校</button>
                                                     <button id="official-writing-generate-suggestions-btn" class="btn-secondary" type="button">开始审校</button>
                                                 </div>
                                             </div>

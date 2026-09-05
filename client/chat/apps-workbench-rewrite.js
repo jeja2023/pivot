@@ -64,6 +64,7 @@ async function runOfficialWritingStreamRewrite(selection) {
             },
             {
                 stream: true,
+                modelId: getOfficialWritingTaskModelId('selection'),
                 onDelta(full) {
                     if (preview) preview.textContent = full;
                 }

@@ -689,6 +689,10 @@
     flex-wrap: wrap;
 }
 
+.data-analysis-ai-model-selector select {
+    width: 190px;
+}
+
 .data-analysis-ai-dataset-meta {
     display: inline-flex;
     align-items: center;
@@ -2041,4 +2045,3 @@ body.dark-mode .data-analysis-ai-question-text,
 .dark-mode .data-analysis-ai-question-text {
     color: #f1f5f9;
 }
-

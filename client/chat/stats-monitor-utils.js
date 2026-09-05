@@ -209,6 +209,7 @@ const ROUTE_NAME_MAP = {
     '/chat/sidebar-search.js': '侧边栏搜索脚本',
     '/chat/app.js': '程序主入口脚本',
     '/chat/app-workspaces.js': '工作区切换脚本',
+    '/chat/apps-model-selector.js': '应用中心独立模型选择脚本',
     '/chat/apps-workbench-core.js': '应用中心工作区脚本（核心/状态）',
     '/chat/apps-workbench-editor.js': '应用中心工作区脚本（编辑/版式）',
     '/chat/apps-workbench-proofread.js': '应用中心工作区脚本（校对/导出）',

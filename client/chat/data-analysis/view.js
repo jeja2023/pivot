@@ -416,6 +416,12 @@
                                     <span>分析数据集</span>
                                     <select id="data-analysis-ai-dataset" class="form-input"></select>
                                 </div>
+                                <label class="data-analysis-dataset-selector-wrap data-analysis-ai-model-selector" for="data-analysis-ai-model">
+                                    <span>模型</span>
+                                    <select id="data-analysis-ai-model" class="form-input" aria-label="选择数据智能分析模型" disabled>
+                                        <option value="">加载模型中…</option>
+                                    </select>
+                                </label>
                                 <div id="data-analysis-ai-dataset-meta" class="data-analysis-ai-dataset-meta"></div>
                             </div>
                         </div>

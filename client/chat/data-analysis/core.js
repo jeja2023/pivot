@@ -185,6 +185,7 @@
         if (typeof setAppsTitle === 'function') {
             setAppsTitle('数据分析', '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和智能分析洞察。');
         }
+        await window.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);

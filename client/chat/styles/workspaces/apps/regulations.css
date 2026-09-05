@@ -70,6 +70,29 @@
     line-height: 1.5;
 }
 
+.regulations-ai-model-field {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px !important;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.regulations-ai-model-field span {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    line-height: 32px;
+}
+
+.regulations-ai-model-field select {
+    flex: 0 1 auto;
+    width: min(320px, 100%) !important;
+    height: 32px;
+}
+
 .regulations-searchbar .btn-primary,
 .regulations-toolbar .btn-primary,
 .regulations-toolbar .btn-secondary,

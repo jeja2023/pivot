@@ -678,6 +678,7 @@ const RESTORABLE_WORKSPACES = new Set(['chat', 'apps', 'agent', 'agent-dag', 'kn
 
 const WORKSPACE_SCRIPT_GROUPS = {
     apps: [
+        '/chat/apps-model-selector.js',
         '/chat/apps-workbench-core.js',
         '/chat/apps-workbench-editor.js',
         '/chat/apps-workbench-proofread.js',
@@ -995,5 +996,3 @@ window.openPrintWorkbench = (sessionId) => {
     window.showMainWorkspace?.('print');
 };
 window.closePrintWorkbench = () => window.showMainWorkspace?.('chat');
-
-// --- 全局确认弹窗 ---

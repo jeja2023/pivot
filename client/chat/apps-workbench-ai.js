@@ -6,8 +6,16 @@ function formatOfficialWritingAiErrorMessage(data, status) {
     }
     return message || `AI 请求失败（${status}）`;
 }
-function getOfficialWritingSelectedModelId() {
-    return document.getElementById('model-selector')?.value || '';
+function getOfficialWritingTaskModelId(task = 'selection') {
+    const selectorByTask = {
+        draft: ['official-writing-draft', 'official-writing-draft-model'],
+        review: ['official-writing-review', 'official-writing-review-model'],
+        selection: ['official-writing-selection', 'official-writing-selection-model']
+    };
+    const [scope, selectorId] = selectorByTask[task] || selectorByTask.selection;
+    return window.PivotAppModels?.getSelectedModel?.(scope, selectorId)
+        || document.getElementById(selectorId)?.value
+        || '';
 }
 function isOfficialWritingDrawerOpen() {
     const drawer = document.getElementById('official-writing-drawer');
@@ -29,23 +37,37 @@ function syncOfficialWritingAiIndicators() {
     }
 }
 
-function setOfficialWritingAiBusy(busy, label) {
+function setOfficialWritingAiBusy(busy, label, mode = '') {
     officialWritingAiBusy = !!busy;
     officialWritingAiBusyLabel = busy ? (label || 'AI 处理中…') : '';
-    const buttons = document.querySelectorAll('[data-official-writing-run-mode], #official-writing-open-draft-modal-btn, #official-writing-draft-confirm-btn, #official-writing-review-suggestions-btn, #official-writing-generate-suggestions-btn, [data-official-writing-selection-action]');
+    officialWritingAiTaskMode = busy ? String(mode || '') : '';
+    const buttons = document.querySelectorAll('[data-official-writing-run-mode], #official-writing-open-draft-modal-btn, #official-writing-draft-confirm-btn, #official-writing-review-suggestions-btn, #official-writing-generate-suggestions-btn, [data-official-writing-selection-action], #official-writing-selection-model, #official-writing-draft-model, #official-writing-review-model');
     buttons.forEach(button => {
-        button.disabled = !!busy;
+        const isModelSelector = ['official-writing-selection-model', 'official-writing-draft-model', 'official-writing-review-model'].includes(button.id);
+        button.disabled = !!busy || (isModelSelector && !button.value);
         button.setAttribute('aria-busy', busy ? 'true' : 'false');
     });
+    const stopButton = document.getElementById('official-writing-stop-review-btn');
+    const canStopReview = !!busy && officialWritingAiTaskMode === 'review' && !!officialWritingAiAbortController;
+    if (stopButton) {
+        stopButton.classList.toggle('hidden', !canStopReview);
+        stopButton.disabled = !canStopReview;
+    }
     syncOfficialWritingAiIndicators();
     if (typeof renderOfficialWritingSuggestions === 'function') renderOfficialWritingSuggestions();
+}
+
+function stopOfficialWritingReview() {
+    if (!officialWritingAiBusy || officialWritingAiTaskMode !== 'review' || !officialWritingAiAbortController) return;
+    officialWritingAiAbortController.abort();
+    showToast('已停止 AI 审校', 'info');
 }
 
 // 统一调用后端公文写作 AI 接口：提示词组装、模型权限/配额/上下文预算与审计均在后端完成，
 // 前端只传结构化参数（mode/action/source/draft/requirements/selection 等）。
 // 非流式返回解析后的对象（{ content, items? }）；流式经 onDelta 回调累积文本并返回 { content }。
-// 失败时返回 null 并提示。模型取聊天页选择器，未选时由后端回退到默认模型。
-async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}) {
+// 失败时返回 null 并提示。模型由公文写作应用内选择器决定，未选时由后端回退到默认模型。
+async function requestOfficialWritingAi(params, { stream = false, onDelta, signal, modelId } = {}) {
     if (typeof apiFetch !== 'function') {
         showToast('当前环境不支持调用模型', 'error');
         return null;
@@ -54,7 +76,7 @@ async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}
     const useStream = stream && typeof createBrowserSseParser === 'function';
     const payload = {
         ...params,
-        model: getOfficialWritingSelectedModelId() || undefined,
+        model: String(modelId || '').trim() || undefined,
         stream: useStream
     };
     let full = '';
@@ -62,7 +84,8 @@ async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}
         const res = await apiFetch('/api/apps/official-writing/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(useStream ? { Accept: 'text/event-stream' } : {}) },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal
         });
         if (!res.ok || (useStream && !res.body)) {
             const data = await res.clone().json().catch(() => ({}));
@@ -99,6 +122,7 @@ async function requestOfficialWritingAi(params, { stream = false, onDelta } = {}
         }
         return { content: full.trim() };
     } catch (e) {
+        if (signal?.aborted || e?.name === 'AbortError') return { aborted: true };
         showToast(useStream ? 'AI 流式请求异常，请稍后重试' : 'AI 请求异常，请稍后重试', 'error');
         return useStream && full.trim() ? { content: full.trim() } : null;
     }
@@ -162,12 +186,15 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
         selection: selection?.text ? { text: selection.text } : null
     };
 
-    setOfficialWritingAiBusy(true, `AI ${modeLabel}中…`);
+    const abortController = typeof AbortController === 'function' ? new AbortController() : null;
+    officialWritingAiAbortController = abortController;
+    setOfficialWritingAiBusy(true, `AI ${modeLabel}中…`, mode);
+    const modelId = getOfficialWritingTaskModelId(mode === 'draft' ? 'draft' : (mode === 'review' ? 'review' : 'selection'));
     try {
         if (mode === 'review') {
             // 审校结果需后端完成 JSON 提取与校验，必须拿到完整文本，保持非流式。
-            const result = await requestOfficialWritingAi(params);
-            if (result == null) return;
+            const result = await requestOfficialWritingAi(params, { signal: abortController?.signal, modelId });
+            if (abortController?.signal.aborted || result == null || result.aborted) return;
             const text = String(result.content || '').trim();
             const items = Array.isArray(result.items) ? result.items : [];
             if (!items.length) {
@@ -215,7 +242,8 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
         }
 
         if (mode === 'draft') {
-            const result = await requestOfficialWritingAi(params, { stream: true });
+            const result = await requestOfficialWritingAi(params, { stream: true, signal: abortController?.signal, modelId });
+            if (abortController?.signal.aborted || result?.aborted) return;
             const text = result ? String(result.content || '').trim() : '';
             if (!text) {
                 if (result != null) showToast(officialWritingNoContentMessage(result), 'warning');
@@ -246,8 +274,14 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
         const placeholder = addOfficialWritingSuggestion({ ...cardMeta, replacement: '', streaming: true });
         const result = await requestOfficialWritingAi(params, {
             stream: true,
+            signal: abortController?.signal,
+            modelId,
             onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
         });
+        if (abortController?.signal.aborted || result?.aborted) {
+            removeOfficialWritingSuggestionById(placeholder.id);
+            return;
+        }
         const text = result ? String(result.content || '').trim() : '';
         if (!text) {
             removeOfficialWritingSuggestionById(placeholder.id);
@@ -257,6 +291,7 @@ async function runOfficialWritingAiTask(mode, { selection } = {}) {
         finalizeOfficialWritingStreamingCard(placeholder.id, text);
         showToast(successToast);
     } finally {
+        if (officialWritingAiAbortController === abortController) officialWritingAiAbortController = null;
         setOfficialWritingAiBusy(false);
     }
 }
@@ -349,7 +384,7 @@ async function runOfficialWritingSelectionCustomAi(selection, instruction) {
             replacement: '',
             detail: `按指令改写：${compactTextPreview(instruction, 40)}`,
             streaming: true
-        });
+        }, { openDrawer: false });
         const result = await requestOfficialWritingAi({
             mode: 'selection',
             action: 'custom',
@@ -360,6 +395,7 @@ async function runOfficialWritingSelectionCustomAi(selection, instruction) {
             selection: { text: selection.text }
         }, {
             stream: true,
+            modelId: getOfficialWritingTaskModelId('selection'),
             onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
         });
         const text = result ? String(result.content || '').trim() : '';
@@ -391,7 +427,7 @@ async function runOfficialWritingSelectionAi(action, selection) {
             replacement: '',
             detail: `来自选区浮动工具条的 AI ${label}。`,
             streaming: true
-        });
+        }, { openDrawer: false });
         const result = await requestOfficialWritingAi({
             mode: 'selection',
             action,
@@ -401,6 +437,7 @@ async function runOfficialWritingSelectionAi(action, selection) {
             selection: { text: selection.text }
         }, {
             stream: true,
+            modelId: getOfficialWritingTaskModelId('selection'),
             onDelta(full) { updateOfficialWritingStreamingCard(placeholder.id, full); }
         });
         const text = result ? String(result.content || '').trim() : '';

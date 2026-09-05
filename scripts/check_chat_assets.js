@@ -170,6 +170,7 @@ const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.cs
 
 // apps-workbench 已按工作流拆分为多个全局脚本；逐个确认存在后合并校验关键守卫片段。
 const appsWorkbenchSlices = [
+    'apps-model-selector.js',
     'apps-workbench-core.js',
     'apps-workbench-editor.js',
     'apps-workbench-proofread.js',

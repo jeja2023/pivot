@@ -112,7 +112,9 @@
         }
 
         function getRegulationsSelectedModelId() {
-            return document.getElementById('model-selector')?.value || '';
+            return window.PivotAppModels?.getSelectedModel?.('regulations', 'regulations-ai-model')
+                || document.getElementById('regulations-ai-model')?.value
+                || '';
         }
 
         // 删除类操作统一走项目内自定义确认弹窗（不使用浏览器默认 confirm）；showConfirm 不可用时回退

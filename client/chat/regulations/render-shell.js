@@ -126,6 +126,12 @@
                                         <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-ai>关闭</button>
                                     </div>
                                     <div class="workspace-modal-body regulations-ai-modal-body">
+                                        <label class="regulations-ai-model-field" for="regulations-ai-model">
+                                            <span>模型</span>
+                                            <select id="regulations-ai-model" class="form-input" aria-label="选择法规 AI 问答模型" disabled>
+                                                <option value="">加载模型中…</option>
+                                            </select>
+                                        </label>
                                         <textarea id="regulations-ai-question" class="form-input regulations-ai-question-input" placeholder="输入问题，例如：该制度对审批流程有哪些要求？"></textarea>
                                         <div class="regulations-ai-actions">
                                             <button id="regulations-ai-btn" class="btn-primary" type="button">生成回答</button>

@@ -327,6 +327,7 @@ function bindAppsWorkbenchEvents() {
         closeOfficialWritingCommandMenu();
     });
     document.getElementById('official-writing-generate-suggestions-btn')?.addEventListener('click', runOfficialWritingReview);
+    document.getElementById('official-writing-stop-review-btn')?.addEventListener('click', stopOfficialWritingReview);
     document.getElementById('official-writing-add-comment-btn')?.addEventListener('click', addOfficialWritingComment);
     document.getElementById('official-writing-clear-comments-btn')?.addEventListener('click', () => {
         officialWritingState.comments = [];

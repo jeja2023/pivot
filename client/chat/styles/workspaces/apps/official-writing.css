@@ -152,6 +152,25 @@
     overflow: visible;
 }
 
+.official-writing-model-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: #64748b;
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.official-writing-model-selector select {
+    width: 164px;
+    height: 32px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 0.76rem;
+}
+
 .official-writing-command-group {
     display: inline-flex;
     align-items: center;

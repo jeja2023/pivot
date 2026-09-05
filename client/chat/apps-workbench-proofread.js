@@ -281,6 +281,9 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     renderOfficialWritingReferences();
     renderOfficialWritingProofread();
     if (tab === 'elements') hydrateOfficialWritingMetaForm();
+    if (tab === 'suggestions') {
+        void window.PivotAppModels?.refresh?.('official-writing-review', 'official-writing-review-model');
+    }
     resizeOfficialWritingDraftPage();
     updateOfficialWritingDrawerToggleLabel();
     if (typeof syncOfficialWritingAiIndicators === 'function') syncOfficialWritingAiIndicators();
@@ -435,7 +438,7 @@ function deleteOfficialWritingComment(commentId) {
     renderOfficialWritingWorkspace();
 }
 
-function addOfficialWritingSuggestion(payload) {
+function addOfficialWritingSuggestion(payload, { openDrawer = true } = {}) {
     const suggestion = {
         id: `suggestion-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         status: 'pending',
@@ -447,7 +450,7 @@ function addOfficialWritingSuggestion(payload) {
         officialWritingState.suggestions = officialWritingState.suggestions.slice(0, OFFICIAL_WRITING_SUGGESTION_LIMIT);
     }
     saveOfficialWritingState();
-    openOfficialWritingDrawer('suggestions');
+    if (openDrawer) openOfficialWritingDrawer('suggestions');
     renderOfficialWritingWorkspace();
     return suggestion;
 }

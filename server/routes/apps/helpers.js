@@ -106,7 +106,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
     if (!modelCfg) {
         return res.status(404).json({
             error: {
-                message: '未找到可用模型，请在聊天页选择模型或设置默认模型后再使用 AI 功能。',
+                message: '未找到可用模型，请在当前应用中选择模型或设置默认模型后再使用 AI 功能。',
                 type: 'invalid_request_error',
                 code: 'model_not_found'
             }

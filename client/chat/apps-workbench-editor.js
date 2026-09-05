@@ -231,6 +231,7 @@ function openOfficialWritingDraftDialog() {
     }
     setOfficialWritingDraftDialogError('');
     modal.classList.remove('hidden');
+    void window.PivotAppModels?.refresh?.('official-writing-draft', 'official-writing-draft-model');
     window.setTimeout(() => input?.focus(), 0);
 }
 

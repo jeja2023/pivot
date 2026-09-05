@@ -119,6 +119,7 @@
         const runBtn = document.getElementById('data-analysis-ai-run');
         const promptInput = document.getElementById('data-analysis-ai-prompt');
         const deepToggle = document.getElementById('data-analysis-ai-deep');
+        const modelSelector = document.getElementById('data-analysis-ai-model');
         if (stopBtn) stopBtn.classList.toggle('hidden', !running);
         if (runBtn) {
             runBtn.disabled = Boolean(running);
@@ -126,6 +127,7 @@
         }
         if (promptInput) promptInput.disabled = Boolean(running);
         if (deepToggle) deepToggle.disabled = Boolean(running);
+        if (modelSelector) modelSelector.disabled = Boolean(running) || !modelSelector.value;
     }
 
     function stopAi() {
@@ -501,7 +503,9 @@
                     idField: document.getElementById('data-analysis-semantic-id-field')?.value || '',
                     instruction,
                     batchTokens: document.getElementById('data-analysis-semantic-batch-tokens')?.value || 24000,
-                    model: document.getElementById('model-selector')?.value || ''
+                    model: window.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
+                        || document.getElementById('data-analysis-ai-model')?.value
+                        || ''
                 })
             });
             state.semanticJob = data.job;
@@ -797,7 +801,9 @@
         if (state.aiBusy) return;
         const result = document.getElementById('data-analysis-ai-result');
         const workspaceEpoch = Number(state.aiWorkspaceEpoch || 0);
-        const model = document.getElementById('model-selector')?.value || '';
+        const model = window.PivotAppModels?.getSelectedModel?.('data-analysis', 'data-analysis-ai-model')
+            || document.getElementById('data-analysis-ai-model')?.value
+            || '';
         const deep = document.getElementById('data-analysis-ai-deep')?.checked;
         if (deep) {
             await runAiAgent(dataset, prompt, model, result);

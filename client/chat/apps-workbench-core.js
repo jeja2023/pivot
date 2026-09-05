@@ -306,6 +306,8 @@ let officialWritingUiState = {
 };
 let officialWritingAiBusy = false;
 let officialWritingAiBusyLabel = '';
+let officialWritingAiTaskMode = '';
+let officialWritingAiAbortController = null;
 let officialWritingProgrammaticTextUpdate = false;
 const OFFICIAL_WRITING_HISTORY_LIMIT = 50;
 // 批注 / 修改建议为只增不减的 unshift 列表，配额裁剪不会触及它们，
@@ -531,6 +533,7 @@ async function showOfficialWritingApp() {
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
     await loadOfficialWritingState();
+    await window.PivotAppModels?.refresh?.('official-writing-selection', 'official-writing-selection-model');
     if (typeof setOfficialWritingScreen === 'function') setOfficialWritingScreen('library');
     hydrateOfficialWritingForm();
     setOfficialWritingMaterialSource(officialWritingState.materialSource || OFFICIAL_WRITING_DEFAULT_FORM_STATE.materialSource);

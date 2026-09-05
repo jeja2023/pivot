@@ -142,6 +142,8 @@
                             return;
                         }
                         state.aiBusy = true;
+                        const modelSelector = document.getElementById('regulations-ai-model');
+                        if (modelSelector) modelSelector.disabled = true;
                         renderAiAnswer();
                         setBusy(true, '正在生成回答...');
                         try {
@@ -160,6 +162,7 @@
                             toast(e.message || 'AI 回答失败', 'error');
                         } finally {
                             state.aiBusy = false;
+                            if (modelSelector) modelSelector.disabled = !modelSelector.value;
                             setBusy(false);
                             renderAiAnswer();
                         }
