@@ -44,6 +44,8 @@
     .rag-debug-grouped-divider { margin: 0 4px; color: var(--text-muted); opacity: 0.6; }
     .rag-feedback-actions { display: flex; gap: 5px; margin-top: 7px; }
     .rag-feedback-actions button { padding: 1px 7px; font-size: 0.7rem; }
+    .rag-feedback-actions button:disabled { opacity: 0.58; cursor: not-allowed; }
+    .rag-feedback-actions button.is-selected { border-color: rgba(16, 185, 129, 0.55); color: #047857; }
     .rag-debug-empty { padding: 10px; color: var(--text-muted); text-align: center; font-size: 0.76rem; }
     .rag-detail-modal-overlay { z-index: 5400; }
     #rag-graph-modal.rag-detail-modal-overlay {

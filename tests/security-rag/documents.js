@@ -34,6 +34,7 @@ const {
     toProjectRelativePath,
     uploadRoot
 } = require('../security-helpers');
+const crypto = require('node:crypto');
 
 test('knowledge_docs 支持索引状态元数据', () => {
     const suffix = Date.now().toString(36);
@@ -150,8 +151,9 @@ test('RAG 文档上传会保存修复后的中文文件名', async () => {
             }
         });
         docId = result.docId;
-        const row = db.prepare('SELECT name FROM knowledge_docs WHERE id = ?').get(docId);
+        const row = db.prepare('SELECT name, source_hash FROM knowledge_docs WHERE id = ?').get(docId);
         assert.equal(row.name, '测试文档.txt');
+        assert.equal(row.source_hash, crypto.createHash('sha256').update('中文文件名测试').digest('hex'));
     } finally {
         if (docId) {
             const doc = db.prepare('SELECT source_path FROM knowledge_docs WHERE id = ?').get(docId);
@@ -488,7 +490,7 @@ test('RAG 调试检索无需外部嵌入也会返回带分数的分块', async (
         docInfo.lastInsertRowid,
         otherContent,
         buildRagSearchContent(otherContent),
-        JSON.stringify([0, 1])
+        JSON.stringify([0.98, 0.2])
     );
 
     try {
@@ -502,7 +504,23 @@ test('RAG 调试检索无需外部嵌入也会返回带分数的分块', async (
         assert.equal(result.matches[0].chunkId, matched.lastInsertRowid);
         assert.equal(result.matches[0].score, 1);
         assert.equal(result.matches[0].matched, true);
+        assert.ok(result.matches[0].citationConfidence > 0);
+        assert.match(result.injectedContext, /检索可信度:/);
         assert.match(result.injectedContext, /权限配置流程/);
+
+        db.prepare(`
+            INSERT INTO rag_feedback (user_id, query, chunk_id, doc_name, score, helpful, note, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, '', datetime('now', '+8 hours'))
+        `).run(userInfo.lastInsertRowid, '权限配置审批', other.lastInsertRowid, `rag_debug_${suffix}.txt`, 0.98);
+        const feedbackResult = await debugRetrieveContext(
+            userInfo.lastInsertRowid,
+            '权限配置审批',
+            { queryVector: [1, 0], topK: 2, candidateLimit: 5, scoreThreshold: 0.95 }
+        );
+        const feedbackMatch = feedbackResult.matches.find(match => match.chunkId === other.lastInsertRowid);
+        assert.ok(feedbackMatch, '反馈目标仍应保留在候选排序中');
+        assert.equal(feedbackMatch.feedback.helpful, 1);
+        assert.ok(feedbackMatch.rankScore > feedbackMatch.fusedScore);
 
         const strictResult = await debugRetrieveContext(
             userInfo.lastInsertRowid,
@@ -511,6 +529,7 @@ test('RAG 调试检索无需外部嵌入也会返回带分数的分块', async (
         );
         assert.equal(strictResult.matches[0].matched, false);
     } finally {
+        db.prepare('DELETE FROM rag_feedback WHERE user_id = ? AND query = ?').run(userInfo.lastInsertRowid, '权限配置审批');
         db.prepare('DELETE FROM knowledge_chunks WHERE id IN (?, ?)').run(matched.lastInsertRowid, other.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);

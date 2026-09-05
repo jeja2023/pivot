@@ -20,6 +20,8 @@ const {
     chunkDocument,
     detectDocType,
     applyMMR,
+    applyFeedbackRanking,
+    attachCitationConfidence,
     debugRetrieveContext,
     confirmRelation,
     cosineSimilarity,
@@ -213,6 +215,22 @@ test('MMR 去重会在相关性与多样性间平衡，剔除近重复片段', (
     assert.equal(ids[0], 1);
     assert.equal(ids.includes(3), true); // 多样片段优先于近重复
     assert.equal(ids.includes(2), false);
+});
+
+test('RAG 反馈以小样本收缩方式调整排序并生成引用可信度', () => {
+    const feedbackSignals = new Map([
+        ['chunk:2', { helpful: 5, unhelpful: 0 }]
+    ]);
+    const ranked = applyFeedbackRanking([
+        { chunkId: 1, fused: 0.030, denseScore: 0.8, headingPath: '第一章' },
+        { chunkId: 2, fused: 0.029, denseScore: 0.8, headingPath: '第二章' }
+    ], feedbackSignals);
+    assert.equal(ranked[0].chunkId, 2);
+    assert.ok(ranked[0].feedbackAdjustment > 0);
+    assert.ok(ranked[1].feedbackAdjustment === 0);
+    const withConfidence = attachCitationConfidence(ranked, 0.4);
+    assert.ok(withConfidence.every(item => item.citationConfidence >= 0 && item.citationConfidence <= 1));
+    assert.ok(withConfidence[0].citationConfidence >= withConfidence[1].citationConfidence);
 });
 
 test('RRF 会融合独立向量召回，不受已占满的关键词候选池限制', async () => {

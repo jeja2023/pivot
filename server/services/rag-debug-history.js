@@ -32,6 +32,14 @@ function normalizeDebugScores(matches = []) {
         source: String(item.source || '').slice(0, 240),
         score: Number(item.score || 0),
         fusedScore: Number(item.fusedScore ?? item.scores?.fused ?? item.score ?? 0),
+        rankScore: Number(item.rankScore ?? item.scores?.rank ?? item.fusedScore ?? item.score ?? 0),
+        citationConfidence: Number(item.citationConfidence || 0),
+        feedback: item.feedback ? {
+            helpful: Number(item.feedback.helpful || 0),
+            unhelpful: Number(item.feedback.unhelpful || 0),
+            total: Number(item.feedback.total || 0),
+            scope: String(item.feedback.scope || 'query').slice(0, 16)
+        } : null,
         matched: item.matched === true,
         selected: item.selected === true,
         denseRank: item.scores?.denseRank || null,

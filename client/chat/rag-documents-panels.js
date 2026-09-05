@@ -248,19 +248,22 @@ const renderRagQualityReport = (report) => {
     const overview = report.overview || {};
     const problemDocs = Array.isArray(report.problemDocs) ? report.problemDocs : [];
     const visibleProblems = problemDocs.filter(doc => doc.status === 'error' || Number(doc.chunk_count || 0) === 0).slice(0, 3);
+    const duplicateGroups = Array.isArray(report.duplicates?.groups) ? report.duplicates.groups.slice(0, 3) : [];
+    const unhashedReady = Number(report.duplicates?.unhashedReady || 0);
     const issueItems = [
         ['异常', Number(overview.error || 0)],
         ['停用', Number(overview.disabled || 0)],
-        ['空分块', Number(overview.emptyReady || 0)]
+        ['空分块', Number(overview.emptyReady || 0)],
+        ['重复组', Number(report.duplicates?.groups?.length || 0)]
     ].filter(([, value]) => value > 0);
-    if (!issueItems.length && !visibleProblems.length) {
+    if (!issueItems.length && !visibleProblems.length && unhashedReady <= 0) {
         PivotSafeHtml.setHtml(el, '');
         return;
     }
     PivotSafeHtml.setHtml(el, `
         <div class="governance-head">
             <strong>质量诊断</strong>
-            <span>${visibleProblems.length ? `发现 ${visibleProblems.length} 个需处理文档` : '存在需关注指标'}</span>
+            <span>${duplicateGroups.length ? `发现 ${duplicateGroups.length} 组重复文档` : visibleProblems.length ? `发现 ${visibleProblems.length} 个需处理文档` : '存在需关注指标'}</span>
         </div>
         ${issueItems.length ? `
             <div class="governance-metrics">
@@ -276,6 +279,16 @@ const renderRagQualityReport = (report) => {
                 `).join('')}
             </div>
         ` : ''}
+        ${duplicateGroups.length ? `
+            <div class="governance-list is-duplicate">
+                ${duplicateGroups.map(group => `
+                <span>
+                    ${window.Pivot.legacy.escapeRagHtml(group.documents?.map(document => document.name || '文档').join('、') || '重复文档')} · 完全相同
+                </span>
+                `).join('')}
+            </div>
+        ` : ''}
+        ${unhashedReady > 0 ? `<div class="governance-note">${unhashedReady} 个历史文档尚未生成重复检测指纹，批量重建后可纳入检测。</div>` : ''}
     `);
 };
 
@@ -354,6 +367,7 @@ const renderRagDebugResults = (data) => {
     const maxScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0) || 1;
     const elapsed = Number(data.elapsedMs || data.elapsed || 0);
     const matchedCount = matches.filter(m => m.matched).length;
+    const feedbackAdjustedCount = matches.filter(m => m.feedback && Number(m.feedback.total || 0) > 0).length;
     const topScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0);
     const queue = data.queue || {};
     const hybrid = data.hybrid || {};
@@ -402,6 +416,7 @@ const renderRagDebugResults = (data) => {
             <span>关键词：${window.Pivot.legacy.escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
             <span>候选：${Number(data.candidateCount || 0)}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
+            ${feedbackAdjustedCount ? `<span>反馈校正：${feedbackAdjustedCount} 条</span>` : ''}
             ${rankingMode ? `<span>Mode: ${window.Pivot.legacy.escapeRagHtml(rankingMode)}</span>` : ''}
             ${hybridLabel ? `<span>Hybrid: ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}</span>` : ''}
             ${queueLabel ? `<span>Queue: ${window.Pivot.legacy.escapeRagHtml(queueLabel)}</span>` : ''}
@@ -421,6 +436,8 @@ const renderRagDebugResults = (data) => {
             ${matches.map((m, index) => {
         const score = Number(m.score || 0);
         const fusedScore = Number(m.fusedScore ?? m.scores?.fused ?? score);
+        const rankScore = Number(m.rankScore ?? m.scores?.rank ?? fusedScore);
+        const citationConfidence = Number(m.citationConfidence || 0);
         const denseRank = m.scores?.denseRank || null;
         const ftsRank = m.scores?.ftsRank || null;
         const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
@@ -428,6 +445,8 @@ const renderRagDebugResults = (data) => {
             `rank #${Number(m.rank || index + 1)}`,
             `dense ${score.toFixed(3)}`,
             `fused ${fusedScore.toFixed(3)}`,
+            `排序 ${rankScore.toFixed(3)}`,
+            `引用可信度 ${Math.round(citationConfidence * 100)}%`,
             denseRank ? `dense-rank #${denseRank}` : '',
             ftsRank ? `fts #${ftsRank}` : '',
             m.selected ? 'MMR selected' : ''
@@ -436,7 +455,7 @@ const renderRagDebugResults = (data) => {
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
                         <strong>#${index + 1} ${window.Pivot.legacy.escapeRagHtml(m.source || '-')}</strong>
-                        <span class="rag-debug-score" title="Dense / fused / FTS / MMR breakdown">${score.toFixed(3)}${m.matched ? ' HIT' : ''}${m.selected ? ' | MMR' : ''}</span>
+                        <span class="rag-debug-score" title="Dense / fused / feedback rank / citation confidence">${score.toFixed(3)}${m.matched ? ' HIT' : ''}${m.selected ? ' | MMR' : ''} · ${Math.round(citationConfidence * 100)}%</span>
                     </div>
                     <div class="rag-debug-score-bar" aria-hidden="true">
                         <div class="rag-debug-score-bar-fill" style="width:${percent.toFixed(1)}%"></div>
@@ -444,8 +463,8 @@ const renderRagDebugResults = (data) => {
                     <div class="rag-debug-score-breakdown">${window.Pivot.legacy.escapeRagHtml(scoreDetails)}</div>
                     <p>${highlightChunk(m.text || '')}</p>
                     <div class="rag-feedback-actions">
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${window.Pivot.legacy.escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagHtml(m.source || '')}" data-score="${score}">有用</button>
-                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${window.Pivot.legacy.escapeRagHtml(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagHtml(m.source || '')}" data-score="${score}">无用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="true" data-query="${window.Pivot.legacy.escapeRagAttr(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagAttr(m.documentName || m.source || '')}" data-score="${score}">有用</button>
+                        <button class="btn-secondary rag-feedback-btn" data-helpful="false" data-query="${window.Pivot.legacy.escapeRagAttr(data.query || '')}" data-chunk-id="${m.chunkId || ''}" data-doc-name="${window.Pivot.legacy.escapeRagAttr(m.documentName || m.source || '')}" data-score="${score}">无用</button>
                     </div>
                 </div>
                 `;

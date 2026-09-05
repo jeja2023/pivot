@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('./document-processing/text-extraction');
 const { getKnowledgeLimits } = require('./resource-limits');
 const { query, queryOne, execute, transaction } = require('../db/client');
@@ -13,6 +14,7 @@ const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
 const knowledgeRepository = require('../repositories/knowledge');
+const { listDuplicateKnowledgeDocuments } = require('./rag-document-quality');
 const {
     buildDocumentAccessFilter,
     normalizeKnowledgeUser
@@ -22,7 +24,6 @@ const {
 } = require('./unit-visibility');
 const { isAdmin } = require('../permissions');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
-
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -38,28 +39,28 @@ const allowedExtensions = new Set([
 const activeIndexes = new Set();
 const pendingIndexes = new Map();
 let runningIndexCount = 0;
-
 function getMaxConcurrentIndexes() {
     return getBackgroundRuntimeConfig().ragIndexMaxConcurrent;
 }
-
 async function ensureKnowledgeSourceRoot() {
     await fs.promises.mkdir(knowledgeSourceRoot, { recursive: true });
 }
-
+async function hashFileSha256(filePath) {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    for await (const chunk of stream) hash.update(chunk);
+    return hash.digest('hex');
+}
 function normalizeKnowledgeDocId(value) {
     const id = Number.parseInt(value, 10);
     return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
-
 function normalizeKnowledgeCollectionName(value) {
     return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
 }
-
 function normalizeKnowledgeCollectionDescription(value) {
     return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 300);
 }
-
 function normalizeKnowledgeTag(value) {
     return String(value || '')
         .trim()
@@ -67,7 +68,6 @@ function normalizeKnowledgeTag(value) {
         .replace(/\s+/g, ' ')
         .slice(0, 40);
 }
-
 function parseKnowledgeTags(value) {
     const values = Array.isArray(value)
         ? value
@@ -324,10 +324,18 @@ async function persistUploadedKnowledgeFile(file, userId, docId) {
     await fs.promises.mkdir(targetDir, { recursive: true });
     await fs.promises.rename(file.path, targetPath);
     const stat = await fs.promises.stat(targetPath);
+    let sourceHash = '';
+    try {
+        sourceHash = await hashFileSha256(targetPath);
+    } catch (error) {
+        // 指纹只用于质量治理，不能让文件已经安全落地后因元数据计算失败而丢失任务。
+        logger.warn({ err: error.message, docId }, '知识库文档指纹计算失败');
+    }
     clearDirSizeCache();
     return {
         sourcePath: toProjectRelativePath(targetPath),
-        sourceSize: stat.size
+        sourceSize: stat.size,
+        sourceHash
     };
 }
 
@@ -354,9 +362,9 @@ async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = 
         const savedFile = await persistUploadedKnowledgeFile(file, userId, docId);
         await execute(`
             UPDATE knowledge_docs
-            SET source_path = ?, source_size = ?, updated_at = ?
+            SET source_path = ?, source_size = ?, source_hash = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `, [savedFile.sourcePath, savedFile.sourceSize, getBeijingTimestamp(), docId, userId]);
+        `, [savedFile.sourcePath, savedFile.sourceSize, savedFile.sourceHash || '', getBeijingTimestamp(), docId, userId]);
         clearRagCacheForUser(userId);
         return { docId, collectionId: resolvedCollectionId, tags: assignedTags, ...savedFile };
     } catch (e) {
@@ -450,6 +458,19 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         throw error;
     }
 
+    try {
+        const sourceHash = await hashFileSha256(sourcePath);
+        if (sourceHash !== String(doc.source_hash || '').trim()) {
+            await execute(`
+                UPDATE knowledge_docs
+                SET source_hash = ?, updated_at = ?
+                WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+            `, [sourceHash, getBeijingTimestamp(), normalizedDocId, userId]);
+        }
+    } catch (error) {
+        logger.warn({ err: error.message, docId: normalizedDocId }, '知识库重建时指纹计算失败');
+    }
+
     await markKnowledgeDocumentProcessing({ docId: normalizedDocId, userId });
     clearRagCacheForUser(userId);
     await clearKnowledgeGraphForDocument(normalizedDocId);
@@ -526,18 +547,27 @@ async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     const ids = normalizeDocIds(docIds);
     let scheduled = 0;
     let skipped = 0;
+    let alreadyProcessing = 0;
+    const items = [];
     for (const id of ids) {
         const doc = await getKnowledgeDocumentForUser(id, userId);
         if (!doc || !doc.source_path) {
             skipped += 1;
+            items.push({ docId: id, status: 'skipped', reason: 'source_missing' });
             continue;
         }
         const result = scheduleKnowledgeDocumentIndexing({ docId: id, userId, user });
-        if (result.started) scheduled += 1;
-        else skipped += 1;
+        if (result.started) {
+            scheduled += 1;
+            items.push({ docId: id, status: 'queued' });
+        } else {
+            skipped += 1;
+            if (result.reason === 'already_processing') alreadyProcessing += 1;
+            items.push({ docId: id, status: 'skipped', reason: result.reason || 'not_queued' });
+        }
     }
     if (scheduled > 0) clearRagCacheForUser(userId);
-    return { requested: ids.length, scheduled, skipped };
+    return { requested: ids.length, scheduled, skipped, alreadyProcessing, items };
 }
 
 async function recordRagFeedback({ userId, query: userQuery, chunkId, docName, score, helpful, note }) {
@@ -559,6 +589,8 @@ async function recordRagFeedback({ userId, query: userQuery, chunkId, docName, s
         String(note || '').slice(0, 1000),
         now
     ]);
+    // 反馈会直接影响同问题的排序；主动清缓存不依赖时间戳精度，确保下一次检索立即生效。
+    clearRagCacheForUser(userId);
     return { id: row?.id };
 }
 
@@ -611,7 +643,7 @@ function clampQualityScore(value) {
     return Math.max(0, Math.min(score, 100));
 }
 
-function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
+function buildKnowledgeQualitySignals({ overview, feedback, graph, duplicates = null }) {
     const total = Number(overview.total || 0);
     const ready = Number(overview.ready || 0);
     const readyEnabled = Number(overview.readyEnabled || 0);
@@ -626,6 +658,7 @@ function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
     const avgChunksPerReadyDoc = ready > 0 ? Math.round((chunks / ready) * 10) / 10 : 0;
     const graphEntities = Number(graph.entities || 0);
     const graphRelations = Number(graph.relations || 0);
+    const duplicateGroups = Number(duplicates?.groups?.length || 0);
 
     let score = total > 0 ? 55 : 0;
     score += Math.min(readinessRate * 0.25, 25);
@@ -647,7 +680,8 @@ function buildKnowledgeQualitySignals({ overview, feedback, graph }) {
         helpfulRate,
         staleReady,
         graphEntities,
-        graphRelations
+        graphRelations,
+        duplicateGroups
     };
 }
 
@@ -657,7 +691,8 @@ async function getKnowledgeQualityReport(userId) {
     const problemDocs = (await knowledgeRepository.listProblemDocuments(normalized.id)) || [];
     const feedback = await getRagFeedbackSummary(normalized.id);
     const graph = getGraphSummary(userId);
-    const signals = buildKnowledgeQualitySignals({ overview, feedback, graph });
+    const duplicates = await listDuplicateKnowledgeDocuments(normalized.id);
+    const signals = buildKnowledgeQualitySignals({ overview, feedback, graph, duplicates });
     const recommendations = [];
     if (Number(overview.total || 0) === 0) recommendations.push('先上传一批高频业务资料，再用召回测试验证真实问题能否命中。');
     if (Number(overview.error || 0) > 0) recommendations.push('存在索引失败文档，建议先使用“重试失败”恢复可用资料。');
@@ -669,6 +704,8 @@ async function getKnowledgeQualityReport(userId) {
     if (problemDocs.some(doc => Number(doc.unhelpful || 0) > Number(doc.helpful || 0))) {
         recommendations.push('部分文档收到较多负反馈，建议检查内容时效性、命名和切片质量。');
     }
+    if (duplicates.groups.length > 0) recommendations.push(`发现 ${duplicates.groups.length} 组内容完全相同的文档，建议保留权威版本并停用重复版本。`);
+    if (duplicates.unhashedReady > 0) recommendations.push(`${duplicates.unhashedReady} 个历史文档尚未生成重复检测指纹，可执行批量重建索引补齐。`);
     if (recommendations.length === 0) recommendations.push('知识库质量状态正常，可以通过召回测试持续观察命中效果。');
     return {
         overview: {
@@ -686,6 +723,7 @@ async function getKnowledgeQualityReport(userId) {
         signals,
         feedback,
         graph,
+        duplicates,
         problemDocs,
         recommendations,
         queue: {
@@ -939,6 +977,7 @@ module.exports = {
     getKnowledgeIndexQueueStatus,
     getKnowledgeQualityReport,
     getRagFeedbackSummary,
+    listDuplicateKnowledgeDocuments,
     listKnowledgeCollections,
     listKnowledgeTags,
     markKnowledgeDocumentError,

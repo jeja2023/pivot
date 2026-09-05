@@ -27,6 +27,17 @@ const {
 } = require('../rag-config');
 const { chunkText, chunkDocument, detectDocType } = require('../rag-chunker');
 const { recordSlowRagRetrieval } = require('../observability');
+const {
+    applyFeedbackRanking,
+    attachCitationConfidence,
+    calculateCitationConfidence
+} = require('./ranking');
+const {
+    buildRagCacheScope: buildRagCacheScopeBase,
+    formatInjectedContext,
+    loadRagFeedbackSignals: loadRagFeedbackSignalsBase,
+    normalizeRetrievalDebugMatch
+} = require('./retrieval-context');
 
 const MAX_DEBUG_CANDIDATE_LIMIT = 1000;
 const {
@@ -187,6 +198,14 @@ function buildRetrievalScopeSql(scope, docAlias = 'd', user = null) {
         accessParams: access ? access.params : [],
         accessJoin: user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = d.collection_id AND c_access.deleted_at IS NULL' : ''
     };
+}
+
+function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
+    return buildRagCacheScopeBase(userId, config, scope, user, buildRetrievalScopeSql);
+}
+
+function loadRagFeedbackSignals(userId, queryText) {
+    return loadRagFeedbackSignalsBase(userId, queryText, logger);
 }
 
 async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
@@ -426,6 +445,7 @@ function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
             chunkId: chunk.id,
             text: chunk.content,
             source: chunk.name,
+            documentName: chunk.name,
             headingPath: chunk.heading_path || '',
             denseScore,
             denseRank: Number.isInteger(chunk.__denseRank) ? chunk.__denseRank : null,
@@ -456,7 +476,7 @@ function gateHybridPool(scored, hybrid, scoreThreshold) {
 // MMR 去重：在融合相关性与结果多样性之间平衡，剔除近重复片段。
 function applyMMR(ranked, topK, lambda) {
     if (ranked.length <= 1) return ranked.slice(0, topK);
-    const maxFused = ranked[0].fused || 1;
+    const maxFused = ranked[0].rankScore ?? ranked[0].fused ?? 1;
     const remaining = ranked.slice();
     const selected = [];
     while (selected.length < topK && remaining.length) {
@@ -464,7 +484,7 @@ function applyMMR(ranked, topK, lambda) {
         let bestScore = -Infinity;
         for (let i = 0; i < remaining.length; i += 1) {
             const cand = remaining[i];
-            const relevance = (cand.fused || 0) / maxFused;
+            const relevance = (cand.rankScore ?? cand.fused ?? 0) / maxFused;
             let maxSim = 0;
             if (cand.entry) {
                 for (const sel of selected) {
@@ -501,94 +521,14 @@ function scoreKeywordChunks(chunks, query, minScore = KEYWORD_FALLBACK_MIN_SCORE
         const score = matchedWeight / totalWeight;
         if (score <= minScore) return null;
         return {
+            chunkId: chunk.id,
             text: chunk.content,
             source: chunk.name,
+            documentName: chunk.name,
             headingPath: chunk.heading_path || '',
             score
         };
     }).filter(Boolean);
-}
-
-function formatInjectedContext(topChunks) {
-    let injectedContext = '\n\n【参考内部知识库信息如下】：\n';
-    topChunks.forEach((chunk, index) => {
-        // 优先用面包屑（已含文档标题/章节/条），无则退回文件名。
-        const location = String(chunk.headingPath || '').trim() || chunk.source;
-        injectedContext += `[引用 ${index + 1} | 来源: ${location}]: ${chunk.text}\n`;
-    });
-    injectedContext += '请基于上述参考信息回答我的问题。如果参考信息中没有答案，请告知无法在知识库中查阅到该信息。\n';
-    return injectedContext;
-}
-
-async function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
-    const hybrid = getHybridRetrievalConfig();
-    const scopeFilter = buildRetrievalScopeSql(scope, 'knowledge_docs', user);
-    const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
-    const accessFilter = user ? scopeFilter.accessSql : '';
-    const accessJoin = user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = knowledge_docs.collection_id AND c_access.deleted_at IS NULL' : '';
-    const docs = (await queryOne(`
-        SELECT
-            COUNT(*) AS doc_count,
-            COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
-            COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version
-        FROM knowledge_docs
-        ${accessJoin}
-        WHERE 1 = 1 ${ownerFilter}
-          AND knowledge_docs.deleted_at IS NULL
-          AND knowledge_docs.status = 'ready'
-          AND COALESCE(knowledge_docs.is_enabled, 1) = 1
-          ${scopeFilter.sql}
-          ${accessFilter}
-    `, (user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]))) || {};
-    const entityVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]);
-    const relationVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]);
-    const graph = {
-        entity_version: entityVersionRow?.entity_version || '',
-        relation_version: relationVersionRow?.relation_version || ''
-    };
-
-    return [
-        'algo=dual_rrf_v2',
-        `k=${Number(config.topK || 0)}`,
-        `c=${Number(config.candidateLimit || 0)}`,
-        `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
-        `rrf=${hybrid.rrfK}:${hybrid.wDense}:${hybrid.wFts}`,
-        `mmr=${hybrid.mmrLambda}:${hybrid.ftsRankFloor}`,
-        `scope=${scopeFilter.normalized.cacheKey}|unit=${String(user?.unit || '')}|shared=${user ? '1' : '0'}`,
-        `d=${Number(docs.doc_count || 0)}`,
-        `h=${Number(docs.chunk_count || 0)}`,
-        `dv=${docs.doc_version || ''}`,
-        `ge=${graph.entity_version || ''}`,
-        `gr=${graph.relation_version || ''}`
-    ].join('|');
-}
-
-function roundDebugScore(value) {
-    const num = Number(value);
-    return Number.isFinite(num) ? Number(num.toFixed(6)) : 0;
-}
-
-function normalizeRetrievalDebugMatch(match, scoreThreshold, rank = 0, selectedIds = new Set()) {
-    const denseScore = match.denseScore != null ? match.denseScore : match.score;
-    const fusedScore = match.fused != null ? match.fused : denseScore;
-    const selected = selectedIds.has(match.chunkId);
-    return {
-        chunkId: match.chunkId,
-        source: match.source,
-        score: roundDebugScore(denseScore),
-        fusedScore: roundDebugScore(fusedScore),
-        matched: Number(denseScore || 0) > scoreThreshold,
-        selected,
-        rank: rank + 1,
-        scores: {
-            dense: roundDebugScore(denseScore),
-            fused: roundDebugScore(fusedScore),
-            denseRank: Number.isInteger(match.denseRank) ? match.denseRank + 1 : null,
-            ftsRank: Number.isInteger(match.ftsRank) ? match.ftsRank + 1 : null,
-            mmrSelected: selected
-        },
-        text: String(match.text || '').slice(0, 800)
-    };
 }
 
 async function debugRetrieveContext(userId, query, {
@@ -636,6 +576,7 @@ async function debugRetrieveContext(userId, query, {
         };
     }
     const hybrid = getHybridRetrievalConfig();
+    const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
     let candidates = lexicalCandidates;
     let scored = [];
     let gated = [];
@@ -645,34 +586,36 @@ async function debugRetrieveContext(userId, query, {
         const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
         const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
-        scored = scoreCandidatesHybrid(candidates, vector, hybrid);
+        scored = applyFeedbackRanking(scoreCandidatesHybrid(candidates, vector, hybrid), feedbackSignals);
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
     } catch (e) {
         usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
         const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
-        scored = scoreKeywordChunks(candidates, normalizedQuery)
+        scored = applyFeedbackRanking(scoreKeywordChunks(candidates, normalizedQuery)
             .sort((a, b) => b.score - a.score)
             .map(chunk => ({
-                chunkId: candidates.find(item => item.content === chunk.text && item.name === chunk.source)?.id,
+                chunkId: chunk.chunkId,
                 text: chunk.text,
                 source: chunk.source,
+                documentName: chunk.documentName || chunk.source,
                 headingPath: chunk.headingPath || '',
                 denseScore: chunk.score,
                 fused: chunk.score,
                 ftsRank: null,
                 entry: null
-            }));
+            })), feedbackSignals);
         gated = scored.filter(item => item.denseScore > config.scoreThreshold);
     }
     // matches 展示全部候选评分（便于调参）；注入上下文只取门控+MMR 结果。
-    const selected = applyMMR(gated, safeTopK, hybrid.mmrLambda);
+    const selected = attachCitationConfidence(applyMMR(gated, safeTopK, hybrid.mmrLambda), config.scoreThreshold);
     const selectedIds = new Set(selected.map(match => match.chunkId));
+    const maxRankScore = scored.reduce((max, match) => Math.max(max, Number(match.rankScore ?? match.fused ?? match.score) || 0), 0);
     const matches = scored.map((match, index) => normalizeRetrievalDebugMatch({
         ...match,
         source: match.headingPath || match.source
-    }, config.scoreThreshold, index, selectedIds));
+    }, config.scoreThreshold, index, selectedIds, maxRankScore));
 
     return {
         query: normalizedQuery,
@@ -689,7 +632,7 @@ async function debugRetrieveContext(userId, query, {
             selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
             gatedCount: gated.length
         },
-        injectedContext: formatInjectedContext(selected) + (graphContext.context || '')
+        injectedContext: formatInjectedContext(selected, config.scoreThreshold) + (graphContext.context || '')
     };
 }
 
@@ -773,11 +716,12 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 options.user || null
             );
             chunks = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
-            const scored = scoreCandidatesHybrid(chunks, queryVector, hybrid);
+            const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
+            const scored = applyFeedbackRanking(scoreCandidatesHybrid(chunks, queryVector, hybrid), feedbackSignals);
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);
             // 软门控筛选后做 MMR 去重，取最终 topK。
             const gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
-            topChunks = applyMMR(gated, config.topK, hybrid.mmrLambda);
+            topChunks = attachCitationConfidence(applyMMR(gated, config.topK, hybrid.mmrLambda), config.scoreThreshold);
         } catch (e) {
             usedKeywordFallback = true;
             logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
@@ -789,9 +733,11 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 options.user || null
             );
             chunks = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
-            topChunks = scoreKeywordChunks(chunks, normalizedQuery)
+            const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
+            topChunks = applyFeedbackRanking(scoreKeywordChunks(chunks, normalizedQuery)
                 .sort((a, b) => b.score - a.score)
-                .slice(0, config.topK);
+                .slice(0, config.topK), feedbackSignals);
+            topChunks = attachCitationConfidence(topChunks, config.scoreThreshold);
             topScore = topChunks.length > 0 ? topChunks[0].score : 0;
         }
 
@@ -807,7 +753,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             return '';
         }
 
-        const injectedContext = formatInjectedContext(topChunks) + (graphContext.context || '');
+        const injectedContext = formatInjectedContext(topChunks, config.scoreThreshold) + (graphContext.context || '');
         setToCache(userId, normalizedQuery, config.topK, injectedContext, cacheScope);
         recordRetrieval({
             status: usedKeywordFallback ? 'keyword_fallback_hit' : 'hit',
@@ -962,6 +908,9 @@ module.exports = {
     chunkDocument,
     detectDocType,
     applyMMR,
+    applyFeedbackRanking,
+    attachCitationConfidence,
+    calculateCitationConfidence,
     buildKeywordCandidates,
     buildFtsOrQuery,
     normalizeRetrievalScope,

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.",
-  "total": 821,
+  "total": 824,
   "entries": [
     {
       "file": "scripts/check_external_links.js",
@@ -26,6 +26,10 @@
     {
       "file": "server/db/migrations/index.js",
       "count": 20
+    },
+    {
+      "file": "server/db/migrations/rag-precision-signals.js",
+      "count": 1
     },
     {
       "file": "server/db/migrations/legacy.js",
@@ -149,7 +153,7 @@
     },
     {
       "file": "tests/security-rag/documents.js",
-      "count": 114
+      "count": 116
     },
     {
       "file": "tests/security-rag/embedding-config.js",
@@ -165,7 +169,7 @@
     },
     {
       "file": "tests/security-rag/retrieval-usage.js",
-      "count": 35
+      "count": 39
     }
   ]
 }

@@ -9,7 +9,6 @@ const ragActionLocks = new Set();
 const knowledgeModalFocus = new Map();
 const ragControlLoadErrors = new Set();
 let ragDocsLoadSequence = 0;
-
 function setKnowledgeWorkbenchState(state = '', message = '', { _retry = false } = {}) {
     const el = document.getElementById('rag-workbench-state');
     if (el) {
@@ -23,7 +22,6 @@ function setKnowledgeWorkbenchState(state = '', message = '', { _retry = false }
         showToast(message, 'warning');
     }
 }
-
 function syncRagSelectAllState() {
     const selectAll = document.getElementById('rag-select-all');
     const checks = [...document.querySelectorAll('.rag-doc-check')];
@@ -32,7 +30,6 @@ function syncRagSelectAllState() {
     selectAll.checked = checks.length > 0 && checkedCount === checks.length;
     selectAll.indeterminate = checkedCount > 0 && checkedCount < checks.length;
 }
-
 function setKnowledgeModalVisibility(modalOrId, open, { focusSelector = '' } = {}) {
     const modal = typeof modalOrId === 'string' ? document.getElementById(modalOrId) : modalOrId;
     if (!modal) return;
@@ -1103,7 +1100,10 @@ window.Pivot.legacy.batchReindexKnowledgeDocs = async () => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '批量重建失败');
-        showToast(`已加入 ${data.scheduled || 0} 个重建任务`);
+        const skipped = Number(data.skipped || 0);
+        showToast(skipped > 0
+            ? `已加入 ${data.scheduled || 0} 个重建任务，跳过 ${skipped} 个（含重复处理中或缺少源文件）`
+            : `已加入 ${data.scheduled || 0} 个重建任务`);
         window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量重建失败', 'error');
@@ -1163,7 +1163,6 @@ window.Pivot.legacy.toggleKnowledgeDocEnabled = async (id, enabled) => {
         if (toggle && document.body.contains(toggle)) toggle.disabled = false;
     }
 };
-
 window.Pivot.legacy.showKnowledgeDocDetail = async (id) => {
     try {
         const res = await apiFetch(`${API_BASE}/rag/docs/${id}?limit=50`, { headers: authHeaders() });
@@ -1174,7 +1173,6 @@ window.Pivot.legacy.showKnowledgeDocDetail = async (id) => {
         showToast(e.message || '详情加载失败', 'error');
     }
 };
-
 window.Pivot.legacy.sendRagFeedback = async (button) => {
     try {
         const res = await apiFetch(`${API_BASE}/rag/feedback`, {
@@ -1190,6 +1188,14 @@ window.Pivot.legacy.sendRagFeedback = async (button) => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '反馈失败');
+        const actionGroup = button.parentElement;
+        actionGroup?.querySelectorAll('.rag-feedback-btn').forEach(item => {
+            item.disabled = true;
+            if (item === button) {
+                item.classList.add('is-selected');
+                item.textContent = '已记录';
+            }
+        });
         showToast('反馈已记录');
     } catch (e) {
         showToast(e.message || '反馈失败', 'error');

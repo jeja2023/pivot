@@ -13,6 +13,7 @@ This document records optimization work that is intentionally staged instead of 
 - ✅ 异步/数据库门禁校准：检查器只扫描路由和服务请求路径，排除启动迁移与运维脚本中的同步 SQLite API；已知的 7 个同步语义调用以稳定源码签名白名单登记，任何新增未处理 Promise 均会使 `npm run check` 失败。
 - ✅ 前端与内置工具回归扩展：Playwright 已覆盖真实登录、聊天 SSE、知识上传、设置监控/用量/模型、知识库和 Agent 工作台；内置 MCP 的图表、文档与 IM 执行分支已纳入安全回归。所有业务 `window.*` 访问已统一收敛到 `window.Pivot.modules` / `window.Pivot.legacy`，AST 门禁阻断新增自由业务全局访问。
 - ✅ 依赖与供应链收口：升级 Express 5、Playwright 1.63、数据库驱动与核心安全依赖，锁定传递依赖修复版本；生产及开发依赖审计均为 0 漏洞。
+- ✅ RAG 无模型精度增强：利用既有反馈、RRF/MMR 和来源元数据完成反馈感知排序、检索可信度标注、源文件指纹重复检测及批量重建结果明细；未增加任何模型调用。
 
 ## 2026-09-05 模型原生工具调用自适应降级与多节点预检及安全治理升级（v0.1.83）
 

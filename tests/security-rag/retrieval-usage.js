@@ -304,3 +304,33 @@ test('knowledge quality report exposes scored governance signals', async () => {
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });
+
+test('知识库质量报告识别同一用户的完全重复文档并提示未生成指纹的历史文档', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', 'RAG Duplicate Test', 'QA', 'user', 'active', datetime('now', '+8 hours'))
+    `).run(`rag_duplicate_${suffix}`);
+    const userId = Number(userInfo.lastInsertRowid);
+    const insert = db.prepare(`
+        INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, source_hash, created_at, updated_at)
+        VALUES (?, ?, 'ready', 1, 1, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `);
+    const first = insert.run(userId, `duplicate-a-${suffix}.pdf`, 'a'.repeat(64));
+    const second = insert.run(userId, `duplicate-b-${suffix}.pdf`, 'a'.repeat(64));
+    insert.run(userId, `unhashed-${suffix}.txt`, '');
+
+    try {
+        const duplicates = await require('../../server/services/rag-documents').listDuplicateKnowledgeDocuments(userId);
+        assert.equal(duplicates.groups.length, 1);
+        assert.equal(duplicates.groups[0].count, 2);
+        assert.deepEqual(duplicates.groups[0].documents.map(item => item.id).sort((a, b) => a - b), [first.lastInsertRowid, second.lastInsertRowid]);
+        assert.equal(duplicates.unhashedReady, 1);
+        const report = await getKnowledgeQualityReport(userId);
+        assert.equal(report.signals.duplicateGroups, 1);
+        assert.ok(report.recommendations.some(item => item.includes('重复')));
+    } finally {
+        db.prepare('DELETE FROM knowledge_docs WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
