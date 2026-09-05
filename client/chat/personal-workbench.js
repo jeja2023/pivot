@@ -197,6 +197,22 @@
         statConfigs.forEach(cfg => {
             const card = document.createElement('div');
             card.className = `personal-stat personal-stat-${cfg.type}`;
+            if (cfg.type === 'automation') {
+                card.dataset.personalAction = 'open-automation';
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.setAttribute('title', '查看自动化任务');
+            } else if (cfg.type === 'attention') {
+                card.dataset.personalAction = 'open-inbox';
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.setAttribute('title', '查看待处理事项');
+            } else if (cfg.type === 'artifact') {
+                card.dataset.personalAction = 'open-apps';
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.setAttribute('title', '查看应用成果');
+            }
 
             const copy = document.createElement('div');
             copy.className = 'personal-stat-copy';
@@ -442,6 +458,7 @@
             if (session) await sessions.selectSession?.(session.id, session.title, { refreshSidebar: true });
             return;
         }
+        if (key === 'automation' || key === 'tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
         if (key === 'apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
         if (key === 'knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
         if (key === 'workflows') return window.Pivot.legacy.openAgentDagWorkbench?.({ tab: 'workflows' });
@@ -592,6 +609,7 @@
             }
             if (action === 'open-search') return document.getElementById('session-search-open')?.click();
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
+            if (action === 'open-automation') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
             if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
             if (action === 'open-user-profile') return openUserProfileModal();

@@ -169,9 +169,7 @@ window.Pivot.legacy.bindAgentWorkbenchShortcuts = function() {
 
 window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     window.Pivot.legacy.showMainWorkspace?.('agent');
-    let savedTab = null;
-    try { savedTab = sessionStorage.getItem('pivot.agent.active_tab'); } catch (_) {}
-    const tab = (options.tab || savedTab) === 'workbench' ? 'workbench' : 'tasks';
+    const tab = options.tab || 'tasks';
     try { sessionStorage.setItem('pivot.agent.active_tab', tab); } catch (_) {}
     window.Pivot.legacy.syncAutomationPrimaryTabs(tab);
     const panel = document.getElementById('agent-workbench-modal');
