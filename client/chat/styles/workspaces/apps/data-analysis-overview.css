@@ -1279,7 +1279,7 @@
 /* 历史记录表格列宽（复用 .data-table compact-table 全局样式） */
 .data-analysis-history-table { table-layout: fixed; }
 .data-analysis-history-table .col-history-index  { width: 52px; }
-.data-analysis-history-table .col-history-type   { width: 72px; }
+.data-analysis-history-table .col-history-type   { width: 92px; }
 .data-analysis-history-table .col-history-date   { width: 170px; }
 .data-analysis-history-table .col-history-action { width: 72px; }
 
