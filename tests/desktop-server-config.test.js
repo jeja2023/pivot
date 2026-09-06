@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const {
     getUserConfigPath,
     loadDesktopConfig,
+    mergeDesktopConfigs,
     normalizeRemoteUrl,
     saveUserDesktopConfig
 } = require('../desktop/config');
@@ -117,3 +118,30 @@ test('Desktop Server Config: 服务端健康探测与签名握手', async () => 
         server.close();
     }
 });
+
+test('Desktop Server Config: 企业锁定 lockServerConfig 策略继承与防降级', () => {
+    const baseConfig = {
+        mode: 'remote',
+        remoteUrl: 'http://192.168.10.20:3000',
+        stealthSecret: 'enterprise-secret-123',
+        lockServerConfig: true
+    };
+    const userOverride = {
+        mode: 'remote',
+        remoteUrl: 'http://127.0.0.1:3000',
+        lockServerConfig: false
+    };
+
+    const merged = mergeDesktopConfigs(baseConfig, userOverride);
+    assert.equal(merged.lockServerConfig, true);
+    assert.equal(merged.stealthSecret, 'enterprise-secret-123');
+
+    const unmanagedBase = {
+        mode: 'remote',
+        remoteUrl: 'http://192.168.10.20:3000',
+        lockServerConfig: false
+    };
+    const unmanagedMerged = mergeDesktopConfigs(unmanagedBase, userOverride);
+    assert.equal(unmanagedMerged.lockServerConfig, false);
+});
+

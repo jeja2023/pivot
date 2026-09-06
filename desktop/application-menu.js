@@ -30,7 +30,7 @@ function buildApplicationMenu(options = {}) {
                 { type: 'separator' },
                 { label: '关于 Pivot', click: () => options.showAboutDialog() },
                 { type: 'separator' },
-                { label: '退出客户端', click: () => options.quit() }
+                { label: '退出客户端', accelerator: 'CmdOrCtrl+Q', click: () => options.quit() }
             ]
         }
     ]);

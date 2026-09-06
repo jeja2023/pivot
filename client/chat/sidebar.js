@@ -395,7 +395,13 @@ const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
 const CHAT_SIDEBAR_DRAWER_STORAGE_KEY = 'pivot_chat_sidebar_drawer_open';
 
 function readChatSidebarDrawerState() {
-    try { return localStorage.getItem(CHAT_SIDEBAR_DRAWER_STORAGE_KEY) === 'true'; } catch (_) { return false; }
+    try {
+        const stored = localStorage.getItem(CHAT_SIDEBAR_DRAWER_STORAGE_KEY);
+        if (stored === null) return true;
+        return stored === 'true';
+    } catch (_) {
+        return true;
+    }
 }
 
 function setChatSidebarDrawerOpen(open, { persist = true } = {}) {
@@ -447,6 +453,7 @@ window.Pivot.exposeModule('chat.sidebar', {
     toggleSessionMenu,
     toggleSidebar,
     setChatSidebarDrawerOpen,
+    readChatSidebarDrawerState,
     setArchiveFilter,
     togglePinSession,
     toggleArchiveSession

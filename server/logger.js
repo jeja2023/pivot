@@ -89,12 +89,12 @@ if (consolePretty) {
     streams.push({ stream: process.stdout });
 }
 
-// 始终将结构化 JSON 日志异步写入文件
+// 始终将结构化 JSON 日志写入文件（同步写入避免进程快速退出或单例检测退出时 sonic-boom 尚未就绪导致异常）
 streams.push({ 
     level: 'info',
     stream: pino.destination({
         dest: path.join(logDir, 'pivot.log'),
-        sync: false, // 异步写入，提升性能
+        sync: true,
         mkdir: true
     })
 });

@@ -1,21 +1,23 @@
 {
   "mode": "remote",
   "environmentName": "",
-  "remoteUrl": "http://50.64.150.51:9006",
+  "remoteUrl": "http://127.0.0.1:3000",
   "stealthSecret": "5511e5a0441845d5e5ee28a99f71451daadc07effbf271a03bde850aeddbb19d",
   "partition": "persist:pivot-production",
   "windowTitle": "Pivot 智枢",
   "allowExternalOpen": true,
+  "lockServerConfig": true,
   "autoUpdate": {
     "enabled": true,
     "path": "/downloads/",
     "url": "",
     "checkOnStart": true,
+    "checkIntervalMinutes": 30,
     "autoDownload": true,
     "allowPrerelease": false,
     "allowInsecureHttp": true,
     "allowedOrigins": [
-      "http://50.64.150.51:9006"
+      "http://127.0.0.1:3000"
     ],
     "installOnQuit": true
   }

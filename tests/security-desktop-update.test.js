@@ -8,7 +8,14 @@ const {
     normalizeOriginList,
     normalizeUpdateFeedUrl
 } = require('../desktop/update-policy');
-const { normalizeAutoUpdate, normalizeConfig, normalizeUpdatePath, resolveUpdateUrlFromRemote } = require('../desktop/config');
+const {
+    mergeDesktopConfigs,
+    normalizeAutoUpdate,
+    normalizeConfig,
+    normalizeUpdatePath,
+    resolveUpdateUrlFromRemote
+} = require('../desktop/config');
+const { setupAutoUpdater } = require('../desktop/updater');
 const { resolveInitializedServer } = require('../desktop/local-server');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
 const { isTrustedExternalNavigation, normalizeTrustedExternalOrigins } = require('../desktop/external-navigation-policy');
@@ -192,3 +199,73 @@ test('desktop external navigation requires explicit origin-scoped trust', () => 
     }), false);
     assert.equal(normalizeConfig({ mode: 'remote', remoteUrl: 'https://pivot.example.com', allowExternalOpen: true }, {}, {}).allowExternalOpen, false);
 });
+
+test('desktop autoUpdate supports configurable checkIntervalMinutes', () => {
+    const defaultAutoUpdate = normalizeAutoUpdate({});
+    assert.equal(defaultAutoUpdate.checkIntervalMinutes, 30);
+
+    const customAutoUpdate = normalizeAutoUpdate({ checkIntervalMinutes: 45 });
+    assert.equal(customAutoUpdate.checkIntervalMinutes, 45);
+
+    const disabledInterval = normalizeAutoUpdate({ checkIntervalMinutes: 0 });
+    assert.equal(disabledInterval.checkIntervalMinutes, 0);
+
+    const stringInterval = normalizeAutoUpdate({ checkIntervalMinutes: '60' });
+    assert.equal(stringInterval.checkIntervalMinutes, 60);
+});
+
+test('mergeDesktopConfigs preserves bundled autoUpdate when user-config overrides remoteUrl', () => {
+    const base = {
+        mode: 'remote',
+        remoteUrl: 'http://50.64.150.51:9006',
+        autoUpdate: {
+            enabled: true,
+            path: '/downloads/',
+            url: '',
+            checkOnStart: true,
+            checkIntervalMinutes: 30,
+            allowInsecureHttp: true,
+            allowedOrigins: ['http://50.64.150.51:9006']
+        }
+    };
+    const user = {
+        mode: 'remote',
+        remoteUrl: 'http://192.168.1.99:3000',
+        stealthSecret: 'custom-secret'
+    };
+    const merged = mergeDesktopConfigs(base, user);
+    assert.equal(merged.remoteUrl, 'http://192.168.1.99:3000');
+    assert.equal(merged.autoUpdate.enabled, true);
+    assert.equal(merged.autoUpdate.path, '/downloads/');
+    assert.equal(merged.autoUpdate.checkIntervalMinutes, 30);
+    assert.equal(merged.autoUpdate.allowedOrigins.includes('http://192.168.1.99:3000'), true);
+    assert.equal(merged.stealthSecret, 'custom-secret');
+});
+
+test('setupAutoUpdater provides lifecycle controls and initial state', () => {
+    const mockApp = {
+        getVersion: () => '0.1.85',
+        isPackaged: false
+    };
+    const mockConfig = {
+        autoUpdate: {
+            enabled: false,
+            checkIntervalMinutes: 30
+        }
+    };
+    const controller = setupAutoUpdater({
+        app: mockApp,
+        mainWindow: null,
+        config: mockConfig,
+        authorizeIpc: () => true
+    });
+    assert.equal(typeof controller.getState, 'function');
+    assert.equal(typeof controller.checkForUpdates, 'function');
+    assert.equal(typeof controller.destroy, 'function');
+    const state = controller.getState();
+    assert.equal(state.enabled, false);
+    assert.equal(state.status, 'disabled');
+    assert.equal(state.checkIntervalMinutes, 30);
+    controller.destroy();
+});
+

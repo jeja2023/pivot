@@ -823,6 +823,13 @@ window.Pivot.legacy.showMainWorkspace = function(view = 'personal') {
     chatContainer?.setAttribute('data-active-workspace', target);
     document.body?.setAttribute('data-active-workspace', target);
     document.body?.classList.toggle('is-main-workspace-full', isFullWorkspace);
+    if (target === 'chat' && !window.matchMedia('(max-width: 720px)').matches) {
+        const drawerState = window.Pivot.legacy.readChatSidebarDrawerState
+            ? window.Pivot.legacy.readChatSidebarDrawerState()
+            : true;
+        const shouldOpen = current === 'personal' ? (drawerState !== false) : drawerState;
+        window.Pivot.legacy.setChatSidebarDrawerOpen?.(shouldOpen, { persist: false });
+    }
     if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
     if (target === 'manual') window.Pivot.legacy.ensureManualFrameLoaded?.();
     if (target === 'personal') window.Pivot.legacy.loadPersonalWorkbench?.({ silent: true });

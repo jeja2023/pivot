@@ -169,7 +169,11 @@ const bind = (id, fn, event = 'click') => document.getElementById(id)?.addEventL
 const sidebarViewportMedia = window.matchMedia('(max-width: 720px)');
 const syncSidebarForViewport = (media = sidebarViewportMedia) => {
     const storedOpen = !media.matches && (() => {
-        try { return localStorage.getItem('pivot_chat_sidebar_drawer_open') === 'true'; } catch (_) { return false; }
+        try {
+            const stored = localStorage.getItem('pivot_chat_sidebar_drawer_open');
+            if (stored === null) return true;
+            return stored === 'true';
+        } catch (_) { return true; }
     })();
     if (window.Pivot.legacy.setChatSidebarDrawerOpen) {
         window.Pivot.legacy.setChatSidebarDrawerOpen(storedOpen, { persist: false });

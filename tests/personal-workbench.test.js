@@ -55,3 +55,29 @@ test('工作台作为系统主入口，关闭二级页面时回到来源工作�
     assert.match(apps, /returnFromWorkspace/);
     assert.match(auth, /showMainWorkspace(?:\?\.)?\('personal'\)/);
 });
+
+test('从个人工作台打开对话时，侧边栏会话列表默认保持展开状态', () => {
+    const sidebar = read('client/chat/sidebar.js');
+    const main = read('client/chat/app/main.js');
+    const workspace = read('client/chat/app-workspaces.js');
+    const personal = read('client/chat/personal-workbench.js');
+
+    // 侧边栏与主流程在无本地缓存时默认展开
+    assert.match(sidebar, /function readChatSidebarDrawerState\(\)\s*\{[\s\S]*?stored === null\)\s*return true;/);
+    assert.match(main, /syncSidebarForViewport[\s\S]*?stored === null\)\s*return true;/);
+
+    // 工作台切换到对话视图时同步侧边栏展开状态
+    assert.match(workspace, /target === 'chat'[\s\S]*?readChatSidebarDrawerState/);
+    assert.match(workspace, /setChatSidebarDrawerOpen\?\.\(shouldOpen/);
+
+    // 个人工作台主要打开对话的动作确保侧边栏抽屉打开
+    assert.match(personal, /openShortcut\(key\)[\s\S]*?key === 'chat'[\s\S]*?setChatSidebarDrawerOpen\?\.\(true\)/);
+    assert.match(personal, /handleRecentWork[\s\S]*?kind === 'session'[\s\S]*?setChatSidebarDrawerOpen\?\.\(true\)/);
+    assert.match(personal, /action === 'open-history'[\s\S]*?setChatSidebarDrawerOpen\?\.\(true\)/);
+});
+
+test('从个人工作台打开自动化时，默认跳转到任务列表页面', () => {
+    const personal = read('client/chat/personal-workbench.js');
+    assert.match(personal, /action === 'open-automation'[\s\S]*?openAgentWorkbench\?\.\(\{\s*tab:\s*'tasks'\s*\}\)/);
+});
+

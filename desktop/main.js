@@ -23,7 +23,7 @@ const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { isTrustedExternalNavigation } = require('./external-navigation-policy');
 const { setupAutoUpdater } = require('./updater');
-const { runDesktopWorker } = require('./agent-runtime');
+const { runDesktopWorker } = require('./agent-runtime/broker');
 const { createDesktopDeliveryController } = require('./delivery/controller');
 const { createLazyLocalMcpController } = require('./local-mcp-controller');
 const { chooseLocalBrowserAuthorization, sanitizeLocalBrowserGrant } = require('./local-browser-authorization');
@@ -228,7 +228,7 @@ function showServerConfigDialog() {
     }
     serverConfigWindow = new BrowserWindow({
         width: 520,
-        height: 480,
+        height: 560,
         resizable: false,
         maximizable: false,
         minimizable: false,
@@ -261,24 +261,14 @@ function runWindowAction(action) {
     if (!mainWindow || mainWindow.isDestroyed()) return false;
     const webContents = mainWindow.webContents;
     switch (action) {
-        case 'zoom-reset':
-            webContents.setZoomLevel(0);
-            return true;
-        case 'zoom-in':
-            webContents.setZoomLevel(Math.min(webContents.getZoomLevel() + 0.5, 6));
-            return true;
-        case 'zoom-out':
-            webContents.setZoomLevel(Math.max(webContents.getZoomLevel() - 0.5, -6));
-            return true;
-        case 'toggle-fullscreen':
-            mainWindow.setFullScreen(!mainWindow.isFullScreen());
-            return true;
-        case 'about':
-            showAboutDialog();
-            return true;
-        case 'server-config':
-            showServerConfigDialog();
-            return true;
+        case 'zoom-reset': webContents.setZoomLevel(0); return true;
+        case 'zoom-in': webContents.setZoomLevel(Math.min(webContents.getZoomLevel() + 0.5, 6)); return true;
+        case 'zoom-out': webContents.setZoomLevel(Math.max(webContents.getZoomLevel() - 0.5, -6)); return true;
+        case 'toggle-fullscreen': mainWindow.setFullScreen(!mainWindow.isFullScreen()); return true;
+        case 'about': showAboutDialog(); return true;
+        case 'server-config': showServerConfigDialog(); return true;
+        case 'configure-delivery': void getDeliveryController().configureDirectoryFromMenu(); return true;
+        case 'delivery-status': void getDeliveryController().showStatusFromMenu(); return true;
         default:
             return false;
     }
@@ -839,10 +829,12 @@ ipcMain.handle('pivot-server-config:close', async (event) => {
 
 ipcMain.handle('pivot-desktop:get-server-config', async (event) => {
     assertTrustedIpcSender(event);
+    const secret = process.env.PIVOT_STEALTH_SECRET || runtimeConfig?.stealthSecret || '';
     return {
         mode: runtimeConfig?.mode || 'local',
         remoteUrl: runtimeConfig?.remoteUrl || '',
-        stealthSecret: process.env.PIVOT_STEALTH_SECRET || runtimeConfig?.stealthSecret || '',
+        hasStealthSecret: Boolean(secret),
+        lockServerConfig: runtimeConfig?.lockServerConfig === true,
         allowExternalOpen: runtimeConfig?.allowExternalOpen === true,
         allowedExternalOrigins: runtimeConfig?.allowedExternalOrigins || [],
         environmentName: runtimeConfig?.environmentName || ''
@@ -891,6 +883,9 @@ ipcMain.handle('pivot-desktop:test-server-connection', async (event, payload = {
 
 ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) => {
     assertTrustedIpcSender(event);
+    if (runtimeConfig?.lockServerConfig === true) {
+        return { success: false, error: '当前客户端配置已由管理员统一定制锁定。' };
+    }
     const mode = payload.mode === 'local' ? 'local' : 'remote';
     let remoteUrl = '';
     if (mode === 'remote') {
@@ -900,7 +895,8 @@ ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) =>
             return { success: false, error: err.message || '远程服务器地址无效' };
         }
     }
-    const stealthSecret = typeof payload.stealthSecret === 'string' ? payload.stealthSecret.trim() : undefined;
+    const rawSecret = typeof payload.stealthSecret === 'string' ? payload.stealthSecret.trim() : '';
+    const stealthSecret = rawSecret ? rawSecret : undefined;
     const allowExternalOpen = payload.allowExternalOpen === true;
     let allowedExternalOrigins;
     try {
@@ -986,7 +982,7 @@ if (!gotLock) {
     });
 
     app.on('before-quit', (event) => {
-        try { deliveryController?.stop?.(); } catch (_) {}
+        try { updaterController?.destroy?.(); deliveryController?.stop?.(); } catch (_) {}
         try { getLocalMcpConnector().stop(); } catch (_) {}
         if (!pivotServer) return;
         event.preventDefault();

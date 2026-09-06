@@ -8,6 +8,7 @@ const DEFAULT_AUTO_UPDATE = {
     url: '',
     path: '/downloads/',
     checkOnStart: true,
+    checkIntervalMinutes: 30,
     autoDownload: true,
     allowPrerelease: false,
     allowInsecureHttp: false,
@@ -24,6 +25,7 @@ const DEFAULT_CONFIG = {
     allowExternalOpen: false,
     allowedExternalOrigins: [],
     sandbox: true,
+    lockServerConfig: false,
     autoUpdate: DEFAULT_AUTO_UPDATE
 };
 
@@ -167,17 +169,49 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
     const allowInsecureHttp = merged.allowInsecureHttp === true;
     const explicitUrl = String(merged.url || '').trim();
     const derivedUrl = explicitUrl || (enabled ? resolveUpdateUrlFromRemote(options.remoteUrl, updatePath) : '');
+    const checkIntervalMinutes = Number.isFinite(Number(merged.checkIntervalMinutes))
+        ? Math.max(0, Math.floor(Number(merged.checkIntervalMinutes)))
+        : DEFAULT_AUTO_UPDATE.checkIntervalMinutes;
     return {
         enabled,
         url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env, allowInsecureHttp),
         path: updatePath,
         checkOnStart: merged.checkOnStart !== false,
+        checkIntervalMinutes,
         autoDownload: merged.autoDownload !== false,
         allowPrerelease: merged.allowPrerelease === true,
         allowInsecureHttp,
         installOnQuit: merged.installOnQuit !== false,
         allowedOrigins
     };
+}
+
+function mergeDesktopConfigs(base = {}, override = {}) {
+    const merged = { ...base, ...override };
+    if (base.autoUpdate && typeof base.autoUpdate === 'object') {
+        const userAutoUpdate = override.autoUpdate && typeof override.autoUpdate === 'object' ? override.autoUpdate : {};
+        const mergedAutoUpdate = {
+            ...base.autoUpdate,
+            ...userAutoUpdate
+        };
+        if (override.remoteUrl && !mergedAutoUpdate.url) {
+            try {
+                const userOrigin = new URL(override.remoteUrl).origin;
+                const existingOrigins = Array.isArray(mergedAutoUpdate.allowedOrigins)
+                    ? [...mergedAutoUpdate.allowedOrigins]
+                    : [];
+                if (!existingOrigins.includes(userOrigin)) {
+                    existingOrigins.push(userOrigin);
+                }
+                mergedAutoUpdate.allowedOrigins = existingOrigins;
+            } catch (_) {}
+        }
+        merged.autoUpdate = mergedAutoUpdate;
+    }
+    if (base.lockServerConfig === true) {
+        merged.lockServerConfig = true;
+    }
+    return merged;
 }
 
 function normalizeConfig(raw, meta = {}, env = process.env) {
@@ -199,6 +233,7 @@ function normalizeConfig(raw, meta = {}, env = process.env) {
         allowedExternalOrigins: normalizeTrustedExternalOrigins(merged.allowedExternalOrigins),
         sandbox: merged.sandbox !== false,
         stealthSecret: typeof merged.stealthSecret === 'string' ? merged.stealthSecret.trim() : (env.PIVOT_STEALTH_SECRET || ''),
+        lockServerConfig: merged.lockServerConfig === true,
         autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl }),
         source: meta.source || 'default',
         path: meta.path || ''
@@ -209,6 +244,25 @@ function loadDesktopConfig(app, argv = process.argv, env = process.env) {
     const candidates = candidateConfigPaths(app, argv, env);
     const selected = candidates.find(item => existingFile(item.path));
     if (!selected) return normalizeConfig(DEFAULT_CONFIG, { source: 'default', path: '' }, env);
+
+    if (selected.source === 'user') {
+        const bundledCandidate = candidates.find(item => (item.source === 'executable' || item.source === 'resources') && existingFile(item.path));
+        let baseRaw = {};
+        if (bundledCandidate) {
+            try {
+                baseRaw = readJsonFile(bundledCandidate.path);
+            } catch (_) {
+                baseRaw = {};
+            }
+        }
+        const userRaw = readJsonFile(selected.path);
+        const mergedRaw = mergeDesktopConfigs(baseRaw, userRaw);
+        return normalizeConfig(mergedRaw, {
+            ...selected,
+            basePath: bundledCandidate?.path || ''
+        }, env);
+    }
+
     const raw = readJsonFile(selected.path);
     return normalizeConfig(raw, selected, env);
 }
@@ -219,6 +273,7 @@ module.exports = {
     candidateConfigPaths,
     getUserConfigPath,
     loadDesktopConfig,
+    mergeDesktopConfigs,
     normalizeAutoUpdate,
     normalizeConfig,
     normalizeRemoteUrl,

@@ -412,6 +412,7 @@
 
     async function openShortcut(key) {
         if (key === 'chat') {
+            window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
             const sessions = window.Pivot.moduleApi?.('chat.sessions');
             const session = await sessions?.createSession?.('新对话');
             if (session) await sessions.selectSession?.(session.id, session.title, { refreshSidebar: true });
@@ -550,9 +551,13 @@
     async function handleRecentWork(button) {
         const kind = button.dataset.personalRecentKind;
         const id = button.dataset.personalRecentId;
-        if (kind === 'session' && id) return window.Pivot.moduleApi?.('chat.sessions')?.selectSession?.(id, undefined, { refreshSidebar: true });
+        if (kind === 'session' && id) {
+            window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
+            return window.Pivot.moduleApi?.('chat.sessions')?.selectSession?.(id, undefined, { refreshSidebar: true });
+        }
         if (kind === 'run' && id) return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', query: id });
         if (kind === 'artifact') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
+        window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
         return window.Pivot.legacy.showMainWorkspace?.('chat');
     }
 
@@ -560,7 +565,18 @@
         const action = event.target.closest('[data-personal-action]')?.dataset.personalAction;
         if (action) {
             if (action === 'refresh') return loadPersonalWorkbench();
-            if (action === 'open-chat' || action === 'new-chat') return openShortcut('chat');
+            if (action === 'open-chat') {
+                window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
+                const activeSessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
+                if (activeSessionId && window.Pivot.legacy.selectSession) {
+                    return window.Pivot.legacy.selectSession(activeSessionId, undefined, { refreshSidebar: true });
+                }
+                return openShortcut('chat');
+            }
+            if (action === 'new-chat') {
+                window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
+                return openShortcut('chat');
+            }
             if (action === 'open-knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');
@@ -572,7 +588,10 @@
                 return document.getElementById('session-search-open')?.click();
             }
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
-            if (action === 'open-automation' || action === 'open-goals') {
+            if (action === 'open-automation') {
+                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+            }
+            if (action === 'open-goals') {
                 return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals', subview: 'goals' });
             }
             if (action === 'open-completed-tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
@@ -588,7 +607,10 @@
             if (action === 'open-inbox') {
                 return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
             }
-            if (action === 'open-history') return window.Pivot.legacy.showMainWorkspace?.('chat');
+            if (action === 'open-history') {
+                window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
+                return window.Pivot.legacy.showMainWorkspace?.('chat');
+            }
             if (action === 'edit-shortcuts') return openShortcutEditor();
         }
         const shortcut = event.target.closest('[data-personal-shortcut]')?.dataset.personalShortcut;

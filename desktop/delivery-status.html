@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>受控文档交付状态</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --surface: #f8fafc;
+            --surface-hover: #f1f5f9;
+            --card-bg: #ffffff;
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --muted: #64748b;
+            --line: #e2e8f0;
+            --brand: #059669;
+            --brand-hover: #047857;
+            --brand-light: #ecfdf5;
+            --brand-border: rgba(16, 185, 129, 0.3);
+            --danger: #ef4444;
+            --danger-light: #fef2f2;
+            --danger-border: rgba(239, 68, 68, 0.25);
+            --warning: #d97706;
+            --warning-light: #fffbeb;
+            --warning-border: rgba(245, 158, 11, 0.3);
+            --info: #0284c7;
+            --info-light: #f0f9ff;
+            --info-border: rgba(56, 189, 248, 0.3);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f172a;
+                --surface: #1e293b;
+                --surface-hover: #334155;
+                --card-bg: #1e293b;
+                --text: #f8fafc;
+                --text-secondary: #cbd5e1;
+                --muted: #94a3b8;
+                --line: #334155;
+                --brand: #10b981;
+                --brand-hover: #059669;
+                --brand-light: rgba(16, 185, 129, 0.15);
+                --brand-border: rgba(16, 185, 129, 0.35);
+                --danger: #f87171;
+                --danger-light: rgba(239, 68, 68, 0.15);
+                --danger-border: rgba(239, 68, 68, 0.35);
+                --warning: #fbbf24;
+                --warning-light: rgba(245, 158, 11, 0.15);
+                --warning-border: rgba(245, 158, 11, 0.35);
+                --info: #38bdf8;
+                --info-light: rgba(56, 189, 248, 0.15);
+                --info-border: rgba(56, 189, 248, 0.35);
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            color: var(--text);
+            background: var(--bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .dialog {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--line);
+            background: var(--bg);
+            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.2);
+        }
+
+        .titlebar {
+            flex: 0 0 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px 0 16px;
+            border-bottom: 1px solid var(--line);
+            background: var(--surface);
+            -webkit-app-region: drag;
+        }
+
+        .titlebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .titlebar-icon {
+            width: 18px;
+            height: 18px;
+            color: var(--brand);
+            flex-shrink: 0;
+        }
+
+        .titlebar-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: var(--brand-light);
+            color: var(--brand);
+            border: 1px solid var(--brand-border);
+        }
+
+        .close-btn {
+            width: 30px;
+            height: 30px;
+            border: 0;
+            border-radius: 6px;
+            color: var(--muted);
+            background: transparent;
+            font-size: 18px;
+            cursor: pointer;
+            -webkit-app-region: no-drag;
+            display: grid;
+            place-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .close-btn:hover {
+            color: #ffffff;
+            background: var(--danger);
+        }
+
+        .content {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .content::-webkit-scrollbar {
+            display: none;
+            width: 0;
+            height: 0;
+        }
+
+        /* Hero Status Card */
+        .hero-card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+
+        .status-pulse-wrapper {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+        }
+
+        .status-pulse-wrapper.is-running {
+            background: var(--brand-light);
+            color: var(--brand);
+        }
+
+        .status-pulse-wrapper.is-warning {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .status-pulse-wrapper.is-stopped {
+            background: var(--surface-hover);
+            color: var(--muted);
+        }
+
+        .status-pulse-icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        .hero-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .hero-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .hero-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text);
+            margin: 0;
+        }
+
+        .hero-subtitle {
+            font-size: 12px;
+            color: var(--muted);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .stat-item {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-tag {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .stat-tag.tag-idle {
+            background: var(--brand-light);
+            color: var(--brand);
+        }
+
+        .stat-tag.tag-other {
+            background: var(--surface-hover);
+            color: var(--muted);
+        }
+
+        /* Detail Section */
+        .section-card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .device-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--card-bg);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 6px 10px;
+        }
+
+        .device-id-text {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            color: var(--text);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .btn-copy {
+            border: 0;
+            background: var(--surface);
+            color: var(--muted);
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-copy:hover {
+            color: var(--text);
+            background: var(--surface-hover);
+        }
+
+        .btn-copy.copied {
+            color: var(--brand);
+            background: var(--brand-light);
+        }
+
+        /* Grants List */
+        .grants-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .grant-item {
+            background: var(--card-bg);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .grant-hint {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .grant-meta {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .empty-grants {
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.5;
+            background: var(--card-bg);
+            border: 1px dashed var(--line);
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+
+        /* Notice / Error Banner */
+        .alert-banner {
+            border-radius: 8px;
+            padding: 12px 14px;
+            display: none;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .alert-banner.warning {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            background: var(--warning-light);
+            border: 1px solid var(--warning-border);
+            color: var(--warning);
+        }
+
+        .alert-banner-header {
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .alert-banner-detail {
+            color: var(--text);
+            font-size: 11.5px;
+        }
+
+        .alert-banner-tip {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        /* Footer */
+        .footer {
+            flex: 0 0 auto;
+            padding: 12px 20px;
+            border-top: 1px solid var(--line);
+            background: var(--surface);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn {
+            height: 34px;
+            padding: 0 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-secondary {
+            border: 1px solid var(--line);
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+        }
+
+        .btn-primary {
+            border: 0;
+            background: var(--brand);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: var(--brand-hover);
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog">
+        <div class="titlebar">
+            <div class="titlebar-brand">
+                <svg class="titlebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <path d="M12 18v-6"></path>
+                    <path d="M9 15l3 3 3-3"></path>
+                </svg>
+                <span>受控文档交付状态</span>
+                <span class="titlebar-badge">企业受控通道</span>
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- Hero Status Card -->
+            <div class="hero-card">
+                <div class="status-pulse-wrapper is-running" id="hero-status-icon-wrap">
+                    <svg class="status-pulse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="hero-body">
+                    <div class="hero-title-row">
+                        <h2 class="hero-title" id="hero-title">文档交付轮询运行中</h2>
+                    </div>
+                    <p class="hero-subtitle" id="hero-subtitle">客户端后台守护中，已就绪接收并安全归档由 Web 端明确下发的受控文档。</p>
+                </div>
+            </div>
+
+            <!-- Stats 4-Grid -->
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-label">运行状态</span>
+                    <div class="stat-value">
+                        <span id="stat-status-text">idle</span>
+                        <span class="stat-tag tag-idle" id="stat-status-tag">就绪</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">目录授权</span>
+                    <div class="stat-value"><span id="stat-grants-count">0</span> 个</div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">已完成交付</span>
+                    <div class="stat-value"><span id="stat-delivered-count">0</span> 篇</div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">交付异常</span>
+                    <div class="stat-value"><span id="stat-failed-count">0</span> 次</div>
+                </div>
+            </div>
+
+            <!-- Device Identifier -->
+            <div class="section-card">
+                <div class="section-header">
+                    <span class="section-title">本机受控设备标识 (Device ID)</span>
+                </div>
+                <div class="device-row">
+                    <span class="device-id-text" id="device-id-value">未初始化</span>
+                    <button type="button" class="btn-copy" id="btn-copy-device-id" title="复制设备 ID">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span id="copy-btn-text">复制</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Authorized Directories -->
+            <div class="section-card">
+                <div class="section-header">
+                    <span class="section-title">已授权输出目录</span>
+                </div>
+                <div id="grants-container">
+                    <div class="empty-grants" id="empty-grants-tip">
+                        当前暂无授权目录。交付仅在 Web 端操作“保存到本机”时生效，需先在客户端授权目标输出目录。
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notice / Error Banner -->
+            <div class="alert-banner warning" id="alert-banner">
+                <div class="alert-banner-header">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <span>最近通信异常提示</span>
+                </div>
+                <div class="alert-banner-detail" id="alert-banner-detail">CSRF 校验失败</div>
+                <div class="alert-banner-tip" id="alert-banner-tip">说明：当前客户端可能尚未登录，或网络连接未就绪。请在客户端主界面完成登录后将自动恢复正常通信。</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <button type="button" class="btn btn-secondary" id="btn-configure-dir">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    <line x1="12" y1="11" x2="12" y2="17"></line>
+                    <line x1="9" y1="14" x2="15" y2="14"></line>
+                </svg>
+                配置交付目录...
+            </button>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-secondary" id="btn-refresh">刷新</button>
+                <button type="button" class="btn btn-primary" id="btn-close">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const elHeroIcon = document.getElementById('hero-status-icon-wrap');
+            const elHeroTitle = document.getElementById('hero-title');
+            const elHeroSubtitle = document.getElementById('hero-subtitle');
+            const elStatStatusText = document.getElementById('stat-status-text');
+            const elStatStatusTag = document.getElementById('stat-status-tag');
+            const elStatGrantsCount = document.getElementById('stat-grants-count');
+            const elStatDeliveredCount = document.getElementById('stat-delivered-count');
+            const elStatFailedCount = document.getElementById('stat-failed-count');
+            const elDeviceId = document.getElementById('device-id-value');
+            const elGrantsContainer = document.getElementById('grants-container');
+            const elAlertBanner = document.getElementById('alert-banner');
+            const elAlertDetail = document.getElementById('alert-banner-detail');
+            const elAlertTip = document.getElementById('alert-banner-tip');
+            const elBtnCopy = document.getElementById('btn-copy-device-id');
+            const elCopyText = document.getElementById('copy-btn-text');
+
+            let currentDeviceId = '';
+
+            function renderStatus(state) {
+                if (!state) return;
+                currentDeviceId = state.deviceId || '';
+                elDeviceId.textContent = currentDeviceId || '未分配设备标识';
+
+                const isRunning = state.running === true;
+                const isAvailable = state.available !== false;
+
+                elHeroIcon.className = 'status-pulse-wrapper ' + (isRunning ? 'is-running' : (isAvailable ? 'is-stopped' : 'is-warning'));
+                if (!isAvailable) {
+                    elHeroTitle.textContent = '文档交付当前不可用';
+                    elHeroSubtitle.textContent = state.reason || '当前环境未启用受控文档交付模块。';
+                } else if (isRunning) {
+                    elHeroTitle.textContent = '文档交付轮询运行中';
+                    elHeroSubtitle.textContent = '受控客户端后台守护中，已就绪接收并安全写入由 Web 端下发的交付文档。';
+                } else {
+                    elHeroTitle.textContent = '文档交付轮询已停止';
+                    elHeroSubtitle.textContent = '后台交付轮询未运行，可通过配置目录重新唤醒连接。';
+                }
+
+                const statusText = state.lastStatus || (isRunning ? 'idle' : 'stopped');
+                elStatStatusText.textContent = statusText;
+                if (statusText === 'idle') {
+                    elStatStatusTag.textContent = '空闲待命';
+                    elStatStatusTag.className = 'stat-tag tag-idle';
+                } else if (statusText === 'polling') {
+                    elStatStatusTag.textContent = '轮询中';
+                    elStatStatusTag.className = 'stat-tag tag-idle';
+                } else {
+                    elStatStatusTag.textContent = statusText;
+                    elStatStatusTag.className = 'stat-tag tag-other';
+                }
+
+                const grants = Array.isArray(state.grants) ? state.grants : [];
+                elStatGrantsCount.textContent = String(grants.length);
+                elStatDeliveredCount.textContent = String(state.deliveredCount || 0);
+                elStatFailedCount.textContent = String(state.failedCount || 0);
+
+                // Grants list
+                elGrantsContainer.replaceChildren();
+                if (grants.length === 0) {
+                    const emptyTip = document.createElement('div');
+                    emptyTip.className = 'empty-grants';
+                    emptyTip.textContent = '当前暂无授权目录。交付仅在 Web 端操作“保存到本机”时生效，需先在客户端授权目标输出目录。';
+                    elGrantsContainer.appendChild(emptyTip);
+                } else {
+                    const listWrap = document.createElement('div');
+                    listWrap.className = 'grants-list';
+                    grants.forEach(grant => {
+                        const item = document.createElement('div');
+                        item.className = 'grant-item';
+                        const hint = document.createElement('span');
+                        hint.className = 'grant-hint';
+                        hint.textContent = grant.directoryName || grant.pathHint || grant.grantId || '已授权目录';
+                        const meta = document.createElement('span');
+                        meta.className = 'grant-meta';
+                        const formats = Array.isArray(grant.allowedFormats) && grant.allowedFormats.length ? grant.allowedFormats.join(', ') : '默认格式';
+                        meta.textContent = '支持: ' + formats;
+                        item.appendChild(hint);
+                        item.appendChild(meta);
+                        listWrap.appendChild(item);
+                    });
+                    elGrantsContainer.appendChild(listWrap);
+                }
+
+                // Error / Notice
+                if (state.lastError) {
+                    elAlertBanner.style.display = 'flex';
+                    elAlertDetail.textContent = state.lastError;
+                    if (state.lastError.includes('CSRF')) {
+                        elAlertTip.textContent = '说明：客户端主窗口可能处于未登录状态，登录后后台将自动同步安全 Token 并恢复正常通信。';
+                    } else {
+                        elAlertTip.textContent = '说明：受控交付后台在执行最近一次网络通信时遇到上述提示，将在下次轮询时自动重试。';
+                    }
+                } else {
+                    elAlertBanner.style.display = 'none';
+                }
+            }
+
+            async function refreshStatus() {
+                if (window.pivotDeliveryStatus?.getStatus) {
+                    try {
+                        const st = await window.pivotDeliveryStatus.getStatus();
+                        renderStatus(st);
+                    } catch (e) {
+                        console.warn('获取状态失败', e);
+                    }
+                }
+            }
+
+            // Initial query params fallback
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const rawJson = params.get('initialState');
+                if (rawJson) {
+                    renderStatus(JSON.parse(rawJson));
+                }
+            } catch (_) {}
+
+            refreshStatus();
+
+            function closeWindow() {
+                if (window.pivotDeliveryStatus?.close) {
+                    window.pivotDeliveryStatus.close();
+                } else {
+                    window.close();
+                }
+            }
+
+            document.getElementById('btn-close').addEventListener('click', closeWindow);
+            document.getElementById('btn-refresh').addEventListener('click', refreshStatus);
+
+            document.getElementById('btn-configure-dir').addEventListener('click', async () => {
+                if (window.pivotDeliveryStatus?.configureDirectory) {
+                    await window.pivotDeliveryStatus.configureDirectory();
+                    await refreshStatus();
+                }
+            });
+
+            elBtnCopy.addEventListener('click', async () => {
+                if (!currentDeviceId) return;
+                try {
+                    await navigator.clipboard.writeText(currentDeviceId);
+                    elCopyText.textContent = '已复制 √';
+                    elBtnCopy.classList.add('copied');
+                    setTimeout(() => {
+                        elCopyText.textContent = '复制';
+                        elBtnCopy.classList.remove('copied');
+                    }, 2000);
+                } catch (_) {
+                    elCopyText.textContent = '复制失败';
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeWindow();
+            });
+        })();
+    </script>
+</body>
+</html>

@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const { createDeliveryApiClient } = require('./api-client');
 const { createDeliveryExecutor } = require('./executor');
+const { openDeliveryStatusWindow } = require('./status-window');
 
 function createDesktopDeliveryController(options = {}) {
     const getTargetUrl = typeof options.getTargetUrl === 'function' ? options.getTargetUrl : () => '';
@@ -146,14 +147,23 @@ function createDesktopDeliveryController(options = {}) {
     }
 
     async function showStatusFromMenu() {
-        const state = status();
-        await showMessageBox(getParentWindow(), {
-            type: state.available === false ? 'warning' : 'info',
-            title: '受控文档交付状态',
-            message: state.available === false ? '文档交付当前不可用。' : (state.running ? '文档交付轮询运行中。' : '文档交付轮询已停止。'),
-            detail: `设备：${state.deviceId || '未初始化'}\n目录授权：${state.grants.length} 个\n已完成交付：${state.deliveredCount}\n最近状态：${state.lastStatus || '未知'}${state.lastError ? `\n最近错误：${state.lastError}` : ''}`,
-            buttons: ['确定'], noLink: true
-        });
+        try {
+            openDeliveryStatusWindow({
+                getStatus: () => status(),
+                getParentWindow,
+                onConfigureDirectory: () => configureDirectoryFromMenu()
+            });
+        } catch (err) {
+            logger.warn?.('[Pivot 交付] 打开受控交付状态弹窗失败，回退到原生消息框', err);
+            const state = status();
+            await showMessageBox(getParentWindow(), {
+                type: state.available === false ? 'warning' : 'info',
+                title: '受控文档交付状态',
+                message: state.available === false ? '文档交付当前不可用。' : (state.running ? '文档交付轮询运行中。' : '文档交付轮询已停止。'),
+                detail: `设备：${state.deviceId || '未初始化'}\n目录授权：${state.grants.length} 个\n已完成交付：${state.deliveredCount}\n最近状态：${state.lastStatus || '未知'}${state.lastError ? `\n最近错误：${state.lastError}` : ''}`,
+                buttons: ['确定'], noLink: true
+            });
+        }
     }
 
     return { authorizeDirectory, configureDirectoryFromMenu, request, revokeDirectory, showStatusFromMenu, start, status, stop };
