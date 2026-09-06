@@ -25,19 +25,27 @@
 }
 
 .personal-rail-brand {
-    width: 44px;
-    height: 44px;
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    border-radius: var(--radius-md, 10px);
-    box-shadow: var(--shadow-sm);
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    user-select: none;
 }
 
 .personal-rail-brand img {
     width: 100%;
     height: 100%;
     object-fit: contain;
+    display: block;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    filter: none;
 }
 
 .personal-rail-nav {
