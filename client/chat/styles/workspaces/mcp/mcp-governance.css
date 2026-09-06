@@ -241,7 +241,7 @@
 }
 
 .mcp-governance-panel .governance-list span::before {
-    content: '💡';
+    content: '•';
     margin-right: 5px;
 }
 

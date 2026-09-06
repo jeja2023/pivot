@@ -194,17 +194,17 @@
                     <span class="agent-goal-quick-title">推荐场景快速创建：</span>
                     <div class="agent-goal-template-chips">
                         <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="daily-check">
-                            <span class="chip-icon">⏰</span>
+                            <svg class="chip-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                             <span class="chip-name">每日晨间项目巡检</span>
                             <span class="chip-badge">每天 09:00</span>
                         </button>
                         <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="weekly-report">
-                            <span class="chip-icon">📊</span>
+                            <svg class="chip-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
                             <span class="chip-name">每周部门数据周报</span>
                             <span class="chip-badge">周五 17:30</span>
                         </button>
                         <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="data-monitor">
-                            <span class="chip-icon">⚡</span>
+                            <svg class="chip-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0 1.66 3.58 3 8 3s8-1.34 8-3-3.58-3-8-3-8 1.34-8 3"></path><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"></path><path d="M4 18c0 1.66 3.58 3 8 3s8-1.34 8-3"></path><path d="M4 6v12"></path><path d="M20 6v12"></path></svg>
                             <span class="chip-name">数据更新监控告警</span>
                             <span class="chip-badge">增量监控</span>
                         </button>

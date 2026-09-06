@@ -3692,8 +3692,17 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     transform: translateY(-1px);
 }
 
-.agent-goal-template-chip .chip-icon {
-    font-size: 0.88rem;
+.agent-goal-template-chip .chip-svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted, #64748b);
+    display: block;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+.agent-goal-template-chip:hover .chip-svg {
+    color: #10a37f;
 }
 
 .agent-goal-template-chip .chip-name {
