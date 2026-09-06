@@ -25,9 +25,7 @@
         regulations: { label: '法规查询', hint: '条文分级与制度检索', iconSvg: ICONS.regulations },
         ocr: { label: '文字识别', hint: '图片与扫描件高精提取', iconSvg: ICONS.ocr },
         'pdf-tools': { label: 'PDF 工具', hint: '快速拆合、重排与提取', iconSvg: ICONS['pdf-tools'] },
-        workflows: { label: '工作流', hint: '编排可复用自动化', iconSvg: ICONS.workflows },
-        knowledge: { label: '知识库', hint: '管理和检索资料', iconSvg: ICONS.knowledge },
-        chat: { label: '发起对话', hint: '向 AI 提问或执行任务', iconSvg: ICONS.chat }
+        workflows: { label: '工作流', hint: '编排可复用自动化', iconSvg: ICONS.workflows }
     };
 
     const state = { dashboard: null, loading: false, requestId: 0 };
@@ -561,7 +559,8 @@
         const action = event.target.closest('[data-personal-action]')?.dataset.personalAction;
         if (action) {
             if (action === 'refresh') return loadPersonalWorkbench();
-            if (action === 'new-chat') return openShortcut('chat');
+            if (action === 'open-chat' || action === 'new-chat') return openShortcut('chat');
+            if (action === 'open-knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');
                 return document.getElementById('official-writing-create-doc-btn')?.click();

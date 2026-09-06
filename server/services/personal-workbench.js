@@ -8,7 +8,7 @@ const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settin
 
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
 const DEFAULT_SHORTCUTS = ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
-const ALLOWED_SHORTCUTS = new Set([...DEFAULT_SHORTCUTS, 'chat', 'knowledge', 'workflows']);
+const ALLOWED_SHORTCUTS = new Set([...DEFAULT_SHORTCUTS, 'workflows']);
 
 function normalizeShortcuts(value) {
     const input = Array.isArray(value) ? value : (() => {
