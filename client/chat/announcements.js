@@ -65,10 +65,19 @@
 
     function mountAnnouncementBell() {
         const bell = document.getElementById('announcement-bell');
+        if (!bell) return;
         const brand = document.querySelector('.app-brand-mini');
-        const brandText = brand?.querySelector('.brand-text-mini');
-        if (!bell || !brand || bell.parentElement === brand) return;
-        brand.insertBefore(bell, brandText?.nextSibling || null);
+        if (brand) {
+            const brandText = brand.querySelector('.brand-text-mini');
+            if (bell.parentElement !== brand) {
+                brand.insertBefore(bell, brandText?.nextSibling || null);
+            }
+            return;
+        }
+        const targetContainer = document.querySelector('.sidebar-tools') || document.querySelector('.sidebar-header');
+        if (targetContainer && bell.parentElement !== targetContainer) {
+            targetContainer.appendChild(bell);
+        }
     }
 
     function ensureShell() {

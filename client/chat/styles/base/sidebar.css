@@ -17,26 +17,16 @@
     margin-left: calc(var(--sidebar-width) * -1);
 }
 .sidebar-header { 
-    padding: 16px 16px 12px;
-    display: flex; flex-direction: column; gap: 12px;
+    padding: 14px 14px 10px;
+    display: flex; flex-direction: column; gap: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.1);
     background: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
-.header-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 4px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-}
-.sidebar-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
+.sidebar-header-mobile-bar {
+    display: none;
+    justify-content: flex-end;
 }
 .sidebar-mobile-close-btn {
     width: 32px;
@@ -646,6 +636,9 @@ body.pivot-desktop-runtime .desktop-app-menu {
 @media (max-width: 720px) {
     .sidebar {
         --sidebar-width: min(336px, calc(100vw - 48px));
+    }
+    .sidebar-header-mobile-bar {
+        display: flex;
     }
     .sidebar-mobile-close-btn {
         display: inline-flex;

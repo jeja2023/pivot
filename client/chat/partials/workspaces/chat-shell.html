@@ -1,29 +1,13 @@
 <div id="app" class="hidden">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="header-top">
-                    <div class="app-brand-mini" aria-label="Pivot 智枢">
-                        <img src="/common/logo.png" alt="Pivot 智枢 Logo" class="brand-logo-mini">
-                        <span class="brand-text-mini">
-                            <span class="brand-text-pivot">Pivot</span>
-                            <span class="brand-text-cn">智枢</span>
-                        </span>
-                    </div>
-                    <div class="sidebar-header-actions">
-                        <button id="new-chat-btn" class="new-chat-circle-btn" title="发起新对话">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="3">
-                                <line x1="12" y1="5" x2="12" y2="19" />
-                                <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                        </button>
-                        <button id="sidebar-mobile-close-btn" class="sidebar-mobile-close-btn" type="button" title="收起侧边栏" aria-label="收起侧边栏">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                                <path d="M6 6l12 12"></path>
-                                <path d="M18 6L6 18"></path>
-                            </svg>
-                        </button>
-                    </div>
+                <div class="sidebar-header-mobile-bar">
+                    <button id="sidebar-mobile-close-btn" class="sidebar-mobile-close-btn" type="button" title="收起侧边栏" aria-label="收起侧边栏">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                            <path d="M6 6l12 12"></path>
+                            <path d="M18 6L6 18"></path>
+                        </svg>
+                    </button>
                 </div>
                 <div class="sidebar-tools">
                     <button id="personal-workbench-btn" class="sidebar-tool-btn" data-workspace-view="personal" title="个人工作台">
@@ -33,6 +17,13 @@
                             <path d="M9 20v-6h6v6"></path>
                         </svg>
                         <span>返回工作台</span>
+                    </button>
+                    <button id="new-chat-btn" class="sidebar-tool-btn sidebar-new-chat-btn" type="button" title="发起新对话">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        <span>新对话</span>
                     </button>
                     <button id="session-search-open" class="sidebar-tool-btn sidebar-search-trigger" type="button" title="搜索会话 (⌘K)">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
