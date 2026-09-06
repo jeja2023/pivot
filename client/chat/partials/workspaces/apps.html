@@ -15,6 +15,32 @@
                 <div id="apps-workbench-state" class="apps-workbench-state" role="status" aria-live="polite" aria-atomic="true" hidden></div>
                 <div id="apps-home-view" class="apps-home-view">
                     <div class="workspace-panel apps-panel">
+                        <div class="apps-home-header">
+                            <div class="apps-home-hero">
+                                <div class="apps-home-hero-badge">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
+                                    <span>企业级场景套件</span>
+                                </div>
+                                <h2 class="apps-home-title">专属业务场景工作台</h2>
+                                <p class="apps-home-subtitle">聚焦公文规范起草、数据洞察、法规检索与文档处理的高效工作套件，沉淀专业能力，开箱即用。</p>
+                            </div>
+                            <div class="apps-home-toolbar">
+                                <div class="apps-category-tabs" id="apps-category-tabs" role="tablist" aria-label="应用分类">
+                                    <button type="button" class="apps-tab-btn active" data-category="all" role="tab" aria-selected="true">全部 <span class="apps-tab-count">5</span></button>
+                                    <button type="button" class="apps-tab-btn" data-category="办公写作" role="tab" aria-selected="false">办公写作 <span class="apps-tab-count">1</span></button>
+                                    <button type="button" class="apps-tab-btn" data-category="数据工具" role="tab" aria-selected="false">数据工具 <span class="apps-tab-count">1</span></button>
+                                    <button type="button" class="apps-tab-btn" data-category="法规检索" role="tab" aria-selected="false">法规检索 <span class="apps-tab-count">1</span></button>
+                                    <button type="button" class="apps-tab-btn" data-category="文档处理" role="tab" aria-selected="false">文档处理 <span class="apps-tab-count">2</span></button>
+                                </div>
+                                <div class="apps-search-wrap">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input type="search" id="apps-search-input" class="apps-search-input" placeholder="搜索应用名称、能力或标签..." aria-label="搜索应用">
+                                </div>
+                            </div>
+                        </div>
                         <div id="apps-grid" class="apps-grid" aria-live="polite"></div>
                         <div id="apps-empty" class="apps-empty hidden">暂无可用应用</div>
                     </div>
