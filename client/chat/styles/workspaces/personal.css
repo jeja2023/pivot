@@ -653,14 +653,70 @@
 }
 
 .personal-empty {
-    display: grid;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     min-height: 180px;
-    place-items: center;
-    padding: 18px;
+    padding: 24px 18px;
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     line-height: 1.6;
     text-align: center;
+}
+
+.personal-empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    opacity: 0.6;
+    margin-bottom: 2px;
+}
+
+.personal-empty-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.personal-empty-text {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.personal-empty-action {
+    margin-top: 6px;
+    height: 30px;
+    padding: 0 14px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border-radius: 8px;
+    color: var(--text-main);
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+
+.personal-empty-action:hover {
+    background: #f1f5f9;
+    border-color: rgba(203, 213, 225, 1);
+    color: var(--primary, #059669);
+}
+
+body.dark-mode .personal-empty-action,
+.dark-mode .personal-empty-action {
+    background: rgba(51, 65, 85, 0.6);
+    border-color: rgba(148, 163, 184, 0.2);
+    color: #cbd5e1;
+}
+
+body.dark-mode .personal-empty-action:hover,
+.dark-mode .personal-empty-action:hover {
+    background: rgba(51, 65, 85, 0.9);
+    color: #34d399;
 }
 
 /* 常用入口 6 宫格 */

@@ -30,84 +30,6 @@
         chat: { label: '发起对话', hint: '向 AI 提问或执行任务', iconSvg: ICONS.chat }
     };
 
-    const DEMO_ATTENTION = [
-        {
-            title: '季度经营分析报告等待最终审批',
-            body: '数席分析 Agent · 12 分钟前 · 需要确认 2 项结论',
-            risk: 'high',
-            badgeText: '高优先级',
-            sourceType: 'approval'
-        },
-        {
-            title: '“每日项目风险巡检”发现 3 个异常',
-            body: '持续目标 · 今天 09:30 · 已生成风险摘要',
-            risk: 'medium',
-            badgeText: '待查看',
-            sourceType: 'run'
-        },
-        {
-            title: '知识库更新完成，建议复核新增制度',
-            body: '知识助手 · 昨天 18:42 · 4 份文档已完成索引',
-            risk: 'low',
-            badgeText: '已完成',
-            sourceType: 'evolution'
-        }
-    ];
-
-    const DEMO_GOALS = [
-        {
-            title: '每日晨间项目风险与待办巡检',
-            meta: '下次运行：明天 08:30',
-            statusText: '运行中',
-            statusClass: 'status-active',
-            iconBoxClass: 'icon-box-purple',
-            iconSvg: ICONS.clock
-        },
-        {
-            title: '每周五生成部门周报',
-            meta: '下次运行：周五 17:30',
-            statusText: '运行中',
-            statusClass: 'status-active',
-            iconBoxClass: 'icon-box-green',
-            iconSvg: ICONS.calendar
-        },
-        {
-            title: '会议纪要自动整理与分发',
-            meta: '最近运行：今天 10:12',
-            statusText: '已完成',
-            statusClass: 'status-done',
-            iconBoxClass: 'icon-box-blue',
-            iconSvg: ICONS.fileText
-        }
-    ];
-
-    const DEMO_RECENT = [
-        {
-            title: '2026 年第三季度经营分析报告',
-            meta: '公文写作 · 还有 2 个段落待润色',
-            timeText: '8 分钟前',
-            iconBoxClass: 'icon-box-blue',
-            iconSvg: ICONS.fileText,
-            kind: 'artifact'
-        },
-        {
-            title: '关于研发项目排期的讨论',
-            meta: '对话 · 19 条消息 · 已置顶',
-            timeText: '昨天',
-            iconBoxClass: 'icon-box-green',
-            iconSvg: ICONS.chat,
-            kind: 'session'
-        },
-        {
-            title: '华东区域客户反馈数据集',
-            meta: '数据分析 · 最近更新了 128 行',
-            timeText: '周四',
-            iconBoxClass: 'icon-box-amber',
-            iconSvg: ICONS.dataset,
-            kind: 'run'
-        }
-    ];
-
     const state = { dashboard: null, loading: false, requestId: 0 };
 
     function formatRelativeTime(value) {
@@ -139,10 +61,27 @@
         return `今天是${now.getFullYear()}年 ${now.getMonth() + 1} 月 ${now.getDate()} 日，${weekdays[now.getDay()]}`;
     }
 
-    function createEmpty(message) {
+    function createEmpty(message, options = {}) {
         const node = document.createElement('div');
         node.className = 'personal-empty';
-        node.textContent = message;
+        if (options.iconSvg) {
+            const iconWrap = document.createElement('span');
+            iconWrap.className = 'personal-empty-icon';
+            PivotSafeHtml.setHtml(iconWrap, options.iconSvg);
+            node.appendChild(iconWrap);
+        }
+        const text = document.createElement('p');
+        text.className = 'personal-empty-text';
+        text.textContent = message;
+        node.appendChild(text);
+        if (options.actionText && typeof options.onAction === 'function') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn-secondary personal-empty-action';
+            btn.textContent = options.actionText;
+            btn.addEventListener('click', options.onAction);
+            node.appendChild(btn);
+        }
         return node;
     }
 
@@ -163,27 +102,27 @@
         if (!container) return;
         clear(container);
 
-        const attentionCount = stats.attention !== undefined && stats.attention > 0 ? stats.attention : 7;
-        const automationCount = stats.automations !== undefined && stats.automations > 0 ? stats.automations : 3;
-        const artifactCount = stats.completedArtifacts !== undefined && stats.completedArtifacts > 0
-            ? stats.completedArtifacts
-            : (stats.artifactsThisWeek !== undefined && stats.artifactsThisWeek > 0 ? stats.artifactsThisWeek : 12);
+        const attentionCount = Number.isFinite(Number(stats.attention)) ? Math.max(0, Number(stats.attention)) : 0;
+        const automationCount = Number.isFinite(Number(stats.automations)) ? Math.max(0, Number(stats.automations)) : 0;
+        const artifactCount = Number.isFinite(Number(stats.completedArtifacts))
+            ? Math.max(0, Number(stats.completedArtifacts))
+            : (Number.isFinite(Number(stats.artifactsThisWeek)) ? Math.max(0, Number(stats.artifactsThisWeek)) : 0);
 
         const statConfigs = [
             {
                 type: 'attention',
                 label: '需要我处理',
                 value: String(attentionCount),
-                subtext: '↓ 2 较昨日',
-                subtextClass: 'personal-stat-trend-good',
+                subtext: attentionCount === 0 ? '全部已处理' : '项待处理',
+                subtextClass: attentionCount === 0 ? 'personal-stat-trend-good' : 'personal-stat-subtext-info',
                 iconSvg: ICONS.check
             },
             {
                 type: 'automation',
                 label: '自动化运行中',
                 value: String(automationCount),
-                subtext: '· 1 个待审批',
-                subtextClass: 'personal-stat-subtext-info',
+                subtext: automationCount === 0 ? '暂无运行中任务' : '持续目标运行中',
+                subtextClass: automationCount === 0 ? '' : 'personal-stat-trend-good',
                 iconSvg: ICONS.arrowUpRight
             },
             {
@@ -244,8 +183,14 @@
         if (!container) return;
         clear(container);
 
-        const list = items.length ? items : DEMO_ATTENTION;
-        if (!list.length) return container.appendChild(createEmpty('暂时没有需要处理的事项，继续保持。'));
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) {
+            return container.appendChild(createEmpty('暂时没有需要处理的事项，所有任务已就绪。', {
+                iconSvg: ICONS.check,
+                actionText: '查看待办中心',
+                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox' })
+            }));
+        }
 
         list.forEach(item => {
             const row = document.createElement('button');
@@ -288,8 +233,14 @@
         if (!container) return;
         clear(container);
 
-        const list = goals.length ? goals : DEMO_GOALS;
-        if (!list.length) return container.appendChild(createEmpty('还没有自动目标。把重复工作交给 Agent 吧。'));
+        const list = Array.isArray(goals) ? goals : [];
+        if (!list.length) {
+            return container.appendChild(createEmpty('还没有运行中的自动化目标，把重复工作交给 Agent 吧。', {
+                iconSvg: ICONS.clock,
+                actionText: '新建自动化目标',
+                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals' })
+            }));
+        }
 
         list.forEach((goal, index) => {
             const row = document.createElement('button');
@@ -305,12 +256,12 @@
 
             const copy = document.createElement('span');
             copy.className = 'personal-row-copy';
-            appendText(copy, 'strong', 'personal-row-title', goal.title || '未命名自动目标');
+            appendText(copy, 'strong', 'personal-row-title', goal.title || goal.goal || '未命名自动目标');
 
-            const metaText = goal.meta || (goal.nextRunAt ? `下次运行：${formatScheduledTime(goal.nextRunAt)}` : '等待外部事件触发');
+            const metaText = goal.meta || (goal.nextRunAt ? `下次运行：${formatScheduledTime(goal.nextRunAt)}` : (goal.status === 'active' ? '持续运行中' : '等待事件触发'));
             appendText(copy, 'span', 'personal-row-meta', metaText);
 
-            const statusText = goal.statusText || '运行中';
+            const statusText = goal.statusText || (goal.status === 'active' ? '运行中' : goal.status === 'completed' ? '已完成' : '已暂停');
             const statusClass = goal.statusClass || (statusText === '运行中' ? 'status-active' : 'status-done');
             appendText(row, 'span', `personal-status-text ${statusClass}`, statusText);
 
@@ -324,8 +275,14 @@
         if (!container) return;
         clear(container);
 
-        const list = items.length ? items : DEMO_RECENT;
-        if (!list.length) return container.appendChild(createEmpty('还没有可继续的工作。发起一次对话或运行任务即可在这里看到它。'));
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) {
+            return container.appendChild(createEmpty('还没有可继续的工作。发起一次对话或运行任务即可在这里看到它。', {
+                iconSvg: ICONS.chat,
+                actionText: '发起新对话',
+                onAction: () => openShortcut('chat')
+            }));
+        }
 
         list.forEach(item => {
             const row = document.createElement('button');
