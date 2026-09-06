@@ -881,23 +881,21 @@
         if (!rows.length || !columns.length) {
             PivotSafeHtml.setHtml(content, '<div class="data-analysis-empty">暂无预览数据</div>');
         } else {
+            const maxSeq = Math.max(startIndex + rows.length, Number(total) || 0);
+            const seqColWidth = Math.max(58, 42 + String(maxSeq).length * 8);
             PivotSafeHtml.setHtml(content, `
                 <table class="data-table compact-table data-analysis-result-table">
                     <thead>
                         <tr>
-                            <th style="width: 40px; min-width: 40px; text-align: center;">#</th>
+                            <th class="data-analysis-seq-col" style="width: ${seqColWidth}px; min-width: ${seqColWidth}px; text-align: center;">序号</th>
                             ${columns.map(column => `<th>${esc(column.name)}</th>`).join('')}
                         </tr>
                     </thead>
                     <tbody>
                         ${rows.map((row, idx) => `
                             <tr>
-                                <td style="text-align: center; color: #94a3b8; font-size: 0.70rem;">${startIndex + idx + 1}</td>
-                                ${columns.map(column => {
-                                    const val = row[column.key] ?? '';
-                                    const strVal = String(val);
-                                    return `<td data-cell-full="${esc(strVal)}">${esc(strVal)}</td>`;
-                                }).join('')}
+                                <td class="data-analysis-seq-col" style="width: ${seqColWidth}px; min-width: ${seqColWidth}px; text-align: center;">${startIndex + idx + 1}</td>
+                                ${columns.map(column => `<td data-cell-full="${esc(String(row[column.key] ?? ''))}">${esc(String(row[column.key] ?? ''))}</td>`).join('')}
                             </tr>
                         `).join('')}
                     </tbody>

@@ -6,13 +6,13 @@ process.env.DATA_ANALYSIS_MAX_ROWS = '1000';
 
 const {
     assert,
-    db,
     fs,
     path,
     removeTestPath,
     test,
     uploadRoot
 } = require('./security-helpers');
+const { db } = require('../server/db');
 const Sqlite = require('better-sqlite3');
 
 

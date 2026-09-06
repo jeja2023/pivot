@@ -117,18 +117,20 @@
     // 通用表渲染：columns 为列名字符串数组，rows 为按列名取值的对象数组。
     function buildTableFromRows(columns = [], rows = [], startIndex = 0) {
         if (!columns.length) return '<div class="data-analysis-empty">无结果</div>';
+        const maxSeq = startIndex + rows.length;
+        const seqColWidth = Math.max(58, 42 + String(maxSeq).length * 8);
         return `
             <table class="data-table compact-table data-analysis-result-table">
                 <thead>
                     <tr>
-                        <th style="width: 54px; min-width: 54px; text-align: center;">#</th>
+                        <th class="data-analysis-seq-col" style="width: ${seqColWidth}px; min-width: ${seqColWidth}px; text-align: center;">序号</th>
                         ${columns.map(name => `<th>${esc(name)}</th>`).join('')}
                     </tr>
                 </thead>
                 <tbody>
                     ${rows.length === 0 ? `<tr><td colspan="${columns.length + 1}" class="text-center data-analysis-empty-cell">暂无数据</td></tr>` : rows.map((row, idx) => `
                         <tr>
-                            <td class="text-center data-analysis-row-index">${startIndex + idx + 1}</td>
+                            <td class="text-center data-analysis-row-index data-analysis-seq-col" style="width: ${seqColWidth}px; min-width: ${seqColWidth}px;">${startIndex + idx + 1}</td>
                             ${columns.map(name => {
                                 const val = row[name] ?? '';
                                 const strVal = String(val);

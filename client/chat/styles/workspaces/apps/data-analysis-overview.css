@@ -770,6 +770,20 @@
     text-overflow: ellipsis;
 }
 
+.data-analysis-query-table .data-analysis-result-table th.data-analysis-seq-col,
+.data-analysis-query-table .data-analysis-result-table td.data-analysis-seq-col {
+    text-align: center;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+.data-analysis-query-table .data-analysis-result-table td.data-analysis-seq-col {
+    font-variant-numeric: tabular-nums;
+}
+
 .data-analysis-query-pagination {
     display: flex;
     align-items: center;

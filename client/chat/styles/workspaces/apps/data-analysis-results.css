@@ -199,6 +199,22 @@
     background: #f8fafc;
 }
 
+.data-analysis-preview .data-analysis-result-table th.data-analysis-seq-col,
+.data-analysis-preview .data-analysis-result-table td.data-analysis-seq-col {
+    text-align: center;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+.data-analysis-preview .data-analysis-result-table td.data-analysis-seq-col {
+    color: #94a3b8;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
 /* 自定义浮层气泡查看完整单元格内容（替代浏览器原生 title 提示） */
 .data-analysis-cell-tooltip {
     position: fixed;
