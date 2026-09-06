@@ -463,37 +463,14 @@ function getAppIconSvg(icon) {
     `;
 }
 
-let currentAppCategoryFilter = 'all';
-let currentAppSearchQuery = '';
-
-function getFilteredApps() {
-    const query = (currentAppSearchQuery || '').trim().toLowerCase();
-    return PIVOT_APP_REGISTRY.filter(app => {
-        const matchesCategory = currentAppCategoryFilter === 'all' || app.category === currentAppCategoryFilter;
-        if (!matchesCategory) return false;
-        if (!query) return true;
-        const nameMatch = (app.name || '').toLowerCase().includes(query);
-        const descMatch = (app.description || '').toLowerCase().includes(query);
-        const catMatch = (app.category || '').toLowerCase().includes(query);
-        const tagMatch = Array.isArray(app.tags) && app.tags.some(t => t.toLowerCase().includes(query));
-        return nameMatch || descMatch || catMatch || tagMatch;
-    });
-}
-
 function renderAppsGrid() {
     const grid = document.getElementById('apps-grid');
     const empty = document.getElementById('apps-empty');
     if (!grid || !empty) return;
-    const apps = getFilteredApps();
+    const apps = PIVOT_APP_REGISTRY;
     empty.classList.toggle('hidden', apps.length > 0);
     if (apps.length === 0) {
-        PivotSafeHtml.setHtml(empty, `
-            <div class="apps-empty-inner">
-                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" class="apps-empty-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <p>未找到与 "<strong>${escapeAppsHtml(currentAppSearchQuery)}</strong>" 匹配的应用</p>
-                <button type="button" class="btn-secondary apps-reset-filter-btn" id="apps-reset-filter-btn">重置筛选条件</button>
-            </div>
-        `);
+        PivotSafeHtml.setHtml(empty, '暂无可用应用');
         PivotSafeHtml.setHtml(grid, '');
         return;
     }
@@ -525,45 +502,6 @@ function renderAppsGrid() {
     `).join(''));
 }
 
-function bindAppsHomeEvents() {
-    const homeView = document.getElementById('apps-home-view');
-    if (!homeView || homeView.dataset.homeEventsBound === '1') return;
-    homeView.dataset.homeEventsBound = '1';
-
-    const tabsContainer = document.getElementById('apps-category-tabs');
-    tabsContainer?.addEventListener('click', event => {
-        const btn = event.target.closest('.apps-tab-btn');
-        if (!btn) return;
-        currentAppCategoryFilter = btn.dataset.category || 'all';
-        tabsContainer.querySelectorAll('.apps-tab-btn').forEach(b => {
-            const isActive = b === btn;
-            b.classList.toggle('active', isActive);
-            b.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        });
-        renderAppsGrid();
-    });
-
-    const searchInput = document.getElementById('apps-search-input');
-    searchInput?.addEventListener('input', () => {
-        currentAppSearchQuery = searchInput.value || '';
-        renderAppsGrid();
-    });
-
-    homeView.addEventListener('click', event => {
-        if (event.target.closest('#apps-reset-filter-btn')) {
-            currentAppCategoryFilter = 'all';
-            currentAppSearchQuery = '';
-            if (searchInput) searchInput.value = '';
-            tabsContainer?.querySelectorAll('.apps-tab-btn').forEach(b => {
-                const isAll = (b.dataset.category || 'all') === 'all';
-                b.classList.toggle('active', isAll);
-                b.setAttribute('aria-selected', isAll ? 'true' : 'false');
-            });
-            renderAppsGrid();
-        }
-    });
-}
-
 function setAppsTitle(title, desc) {
     const titleEl = document.getElementById('apps-workspace-title');
     const descEl = document.getElementById('apps-workspace-desc');
@@ -591,7 +529,6 @@ function showAppsHome() {
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
     setAppsWorkbenchState();
-    bindAppsHomeEvents();
     renderAppsGrid();
 }
 
