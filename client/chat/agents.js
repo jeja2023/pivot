@@ -198,7 +198,9 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
 
     const queryInput = document.getElementById('agent-filter-query');
     const runTypeInput = document.getElementById('agent-filter-run-type');
+    const statusInput = document.getElementById('agent-filter-status');
     agentScheduleFilterId = Object.hasOwn(options, 'scheduleId') ? String(options.scheduleId || '') : '';
+    if (statusInput && Object.hasOwn(options, 'status')) statusInput.value = String(options.status || '');
     if (queryInput && Object.hasOwn(options, 'query')) queryInput.value = String(options.query || '');
     if (runTypeInput && Object.hasOwn(options, 'runType')) runTypeInput.value = String(options.runType || '');
     panel.querySelectorAll('.admin-root-only').forEach(el => {

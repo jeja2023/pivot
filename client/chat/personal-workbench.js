@@ -208,10 +208,10 @@
                 card.setAttribute('tabindex', '0');
                 card.setAttribute('title', '查看待处理事项');
             } else if (cfg.type === 'artifact') {
-                card.dataset.personalAction = 'open-apps';
+                card.dataset.personalAction = 'open-completed-tasks';
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '查看应用成果');
+                card.setAttribute('title', '查看已完成任务与成果');
             }
 
             const copy = document.createElement('div');
@@ -594,7 +594,7 @@
         const id = button.dataset.personalRecentId;
         if (kind === 'session' && id) return window.Pivot.moduleApi?.('chat.sessions')?.selectSession?.(id, undefined, { refreshSidebar: true });
         if (kind === 'run' && id) return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', query: id });
-        if (kind === 'artifact') return window.Pivot.legacy.openAppsWorkbench?.();
+        if (kind === 'artifact') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
         return window.Pivot.legacy.showMainWorkspace?.('chat');
     }
 
@@ -614,6 +614,7 @@
             }
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
             if (action === 'open-automation') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+            if (action === 'open-completed-tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
             if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
             if (action === 'open-user-profile') return openUserProfileModal();
