@@ -3628,19 +3628,21 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     margin-bottom: 12px;
 }
 
-.agent-goal-empty-hero strong {
+.agent-goal-empty-hero > strong,
+.agent-goal-empty-hero-title {
     font-size: 0.92rem;
     font-weight: 650;
     color: var(--text-main, #0f172a);
     margin-bottom: 6px;
 }
 
-.agent-goal-empty-hero span {
+.agent-goal-empty-hero > p,
+.agent-goal-empty-desc {
     font-size: 0.75rem;
     color: var(--text-muted, #64748b);
     max-width: 480px;
     line-height: 1.5;
-    margin-bottom: 16px;
+    margin: 0 0 16px;
 }
 
 .agent-goal-empty-actions {
@@ -3675,6 +3677,8 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     appearance: none;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    vertical-align: middle;
     gap: 6px;
     padding: 6px 12px;
     border-radius: 6px;
@@ -3682,6 +3686,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     background: #f8fafc;
     color: var(--text-main, #0f172a);
     font-size: 0.74rem;
+    line-height: 1;
     cursor: pointer;
     transition: all 0.15s ease;
 }
@@ -3698,6 +3703,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     color: var(--text-muted, #64748b);
     display: block;
     flex-shrink: 0;
+    margin: 0;
     transition: color 0.15s ease;
 }
 
@@ -3708,14 +3714,23 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 .agent-goal-template-chip .chip-name {
     font-weight: 600;
     color: var(--text-main, #0f172a);
+    line-height: 1;
+    margin: 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
 }
 
 .agent-goal-template-chip .chip-badge {
     font-size: 0.68rem;
-    padding: 1px 6px;
+    line-height: 1;
+    padding: 2px 6px;
     border-radius: 4px;
     background: rgba(148, 163, 184, 0.16);
     color: var(--text-muted, #64748b);
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
 }
 
 /* 暗色模式适配 */

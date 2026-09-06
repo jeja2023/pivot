@@ -185,8 +185,8 @@
                 <div class="agent-goal-empty-icon">
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                 </div>
-                <strong>还没有运行中的自动化目标</strong>
-                <span>把定时巡检、报表汇总与数据监控交给 Agent，持续在后台稳定运行。</span>
+                <strong class="agent-goal-empty-hero-title">还没有运行中的自动化目标</strong>
+                <p class="agent-goal-empty-desc">把定时巡检、报表汇总与数据监控交给 Agent，持续在后台稳定运行。</p>
                 <div class="agent-goal-empty-actions">
                     <button type="button" class="btn-primary btn-sm" data-agent-goal-create>+ 新建自动化目标</button>
                 </div>
