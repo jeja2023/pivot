@@ -3557,3 +3557,200 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
         grid-template-columns: 1fr 1fr;
     }
 }
+
+/* 待办中心分类筛选胶囊 */
+.agent-inbox-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.agent-inbox-filter-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.agent-inbox-filter-pill {
+    appearance: none;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: #f8fafc;
+    color: var(--text-secondary, #475569);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1.4;
+}
+
+.agent-inbox-filter-pill:hover {
+    background: #f1f5f9;
+    color: var(--text-main, #0f172a);
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.agent-inbox-filter-pill.active {
+    background: rgba(16, 163, 127, 0.12);
+    border-color: rgba(16, 163, 127, 0.45);
+    color: #0d8a6a;
+    font-weight: 650;
+}
+
+/* 自动目标空白引导与场景推荐 */
+.agent-goal-empty-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 44px 24px;
+    text-align: center;
+    background: #ffffff;
+    border: 1px dashed rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    margin-top: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.agent-goal-empty-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: rgba(16, 163, 127, 0.08);
+    color: #10a37f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+}
+
+.agent-goal-empty-hero strong {
+    font-size: 0.92rem;
+    font-weight: 650;
+    color: var(--text-main, #0f172a);
+    margin-bottom: 6px;
+}
+
+.agent-goal-empty-hero span {
+    font-size: 0.75rem;
+    color: var(--text-muted, #64748b);
+    max-width: 480px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.agent-goal-empty-actions {
+    margin-bottom: 22px;
+}
+
+.agent-goal-quick-templates {
+    width: 100%;
+    max-width: 660px;
+    border-top: 1px solid rgba(148, 163, 184, 0.15);
+    padding-top: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.agent-goal-quick-title {
+    font-size: 0.72rem;
+    color: var(--text-muted, #64748b);
+    font-weight: 500;
+}
+
+.agent-goal-template-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.agent-goal-template-chip {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: #f8fafc;
+    color: var(--text-main, #0f172a);
+    font-size: 0.74rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.agent-goal-template-chip:hover {
+    border-color: rgba(16, 163, 127, 0.45);
+    background: rgba(16, 163, 127, 0.05);
+    transform: translateY(-1px);
+}
+
+.agent-goal-template-chip .chip-icon {
+    font-size: 0.88rem;
+}
+
+.agent-goal-template-chip .chip-name {
+    font-weight: 600;
+    color: var(--text-main, #0f172a);
+}
+
+.agent-goal-template-chip .chip-badge {
+    font-size: 0.68rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(148, 163, 184, 0.16);
+    color: var(--text-muted, #64748b);
+}
+
+/* 暗色模式适配 */
+body.dark-mode .agent-inbox-filter-pill,
+.dark-mode .agent-inbox-filter-pill {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.18);
+    color: #94a3b8;
+}
+
+body.dark-mode .agent-inbox-filter-pill:hover,
+.dark-mode .agent-inbox-filter-pill:hover {
+    background: #334155;
+    color: #f1f5f9;
+}
+
+body.dark-mode .agent-inbox-filter-pill.active,
+.dark-mode .agent-inbox-filter-pill.active {
+    background: rgba(16, 163, 127, 0.2);
+    border-color: rgba(16, 163, 127, 0.6);
+    color: #34d399;
+}
+
+body.dark-mode .agent-goal-empty-hero,
+.dark-mode .agent-goal-empty-hero {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.16);
+}
+
+body.dark-mode .agent-goal-template-chip,
+.dark-mode .agent-goal-template-chip {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.18);
+    color: #e2e8f0;
+}
+
+body.dark-mode .agent-goal-template-chip:hover,
+.dark-mode .agent-goal-template-chip:hover {
+    background: rgba(16, 163, 127, 0.15);
+    border-color: rgba(16, 163, 127, 0.5);
+}
+
+body.dark-mode .agent-goal-template-chip .chip-name,
+.dark-mode .agent-goal-template-chip .chip-name {
+    color: #f8fafc;
+}
+

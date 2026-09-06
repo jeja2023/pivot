@@ -73,7 +73,7 @@
         return '手动触发';
     };
 
-    function openGoalModal(goal = null) {
+    function openGoalModal(goal = null, defaults = null) {
         const modal = document.getElementById('agent-goal-modal');
         if (!modal) return;
         modal.classList.remove('hidden');
@@ -120,9 +120,20 @@
             if (submitBtn) submitBtn.textContent = '保存持续目标';
             document.getElementById('agent-goal-editor')?.reset();
             const triggerSelect = document.getElementById('agent-goal-trigger');
+            const titleInput = document.getElementById('agent-goal-title');
+            const goalInput = document.getElementById('agent-goal-goal');
+            const targetType = defaults?.triggerType || defaults?.triggerSpec?.type || 'timer';
             if (triggerSelect) {
-                triggerSelect.value = 'timer';
+                triggerSelect.value = targetType;
                 triggerSelect.dispatchEvent(new Event('change'));
+            }
+            if (defaults) {
+                if (defaults.title && titleInput) titleInput.value = defaults.title;
+                if (defaults.goal && goalInput) goalInput.value = defaults.goal;
+                if (targetType === 'timer' && defaults.time) {
+                    const timeInput = document.getElementById('agent-goal-time');
+                    if (timeInput) timeInput.value = defaults.time;
+                }
             }
         }
 
@@ -170,9 +181,40 @@
                 if (status === 'paused') return `<span class="agent-inbox-type-badge badge-event">○ 已暂停</span>`;
                 return `<span class="agent-inbox-type-badge badge-event">${escape(status)}</span>`;
             };
+            const goalEmptyHero = `<div class="agent-goal-empty-hero">
+                <div class="agent-goal-empty-icon">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                </div>
+                <strong>还没有运行中的自动化目标</strong>
+                <span>把定时巡检、报表汇总与数据监控交给 Agent，持续在后台稳定运行。</span>
+                <div class="agent-goal-empty-actions">
+                    <button type="button" class="btn-primary btn-sm" data-agent-goal-create>+ 新建自动化目标</button>
+                </div>
+                <div class="agent-goal-quick-templates">
+                    <span class="agent-goal-quick-title">推荐场景快速创建：</span>
+                    <div class="agent-goal-template-chips">
+                        <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="daily-check">
+                            <span class="chip-icon">⏰</span>
+                            <span class="chip-name">每日晨间项目巡检</span>
+                            <span class="chip-badge">每天 09:00</span>
+                        </button>
+                        <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="weekly-report">
+                            <span class="chip-icon">📊</span>
+                            <span class="chip-name">每周部门数据周报</span>
+                            <span class="chip-badge">周五 17:30</span>
+                        </button>
+                        <button type="button" class="agent-goal-template-chip" data-agent-quick-goal="data-monitor">
+                            <span class="chip-icon">⚡</span>
+                            <span class="chip-name">数据更新监控告警</span>
+                            <span class="chip-badge">增量监控</span>
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+
             setMarkup(goalsPanel, state.goals.length
                 ? `<div class="agent-goal-table-wrap"><table class="agent-goal-table"><thead><tr><th style="width:52px" class="text-center">序号</th><th style="width:90px" class="text-center">状态</th><th style="width:170px">目标名称</th><th style="width:120px">触发方式</th><th>目标内容</th><th style="width:170px" class="text-center">操作</th></tr></thead><tbody>${pageGoals.map((goal, index) => `<tr><td class="text-center">${startIndex + index + 1}</td><td class="text-center">${goalStatusBadge(goal.status)}</td><td title="${escapeAttr(goal.title)}">${escape(shortText(goal.title, 24))}</td><td>${escape(formatGoalTrigger(goal.triggerSpec))}</td><td title="${escapeAttr(goal.goal || '')}">${escape(shortText(goal.goal || '-', 80))}</td><td class="text-center"><div class="agent-goal-table-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="edit" data-agent-goal-id="${escapeAttr(goal.id)}">编辑</button><button type="button" class="btn-danger btn-xs" data-agent-goal-action="delete" data-agent-goal-id="${escapeAttr(goal.id)}">删除</button></div></td></tr>`).join('')}</tbody></table></div>`
-                : '<div class="agent-harness-empty-card"><strong>暂无持续目标</strong><span>点击右上角「新建持续目标」，可设置由定时或事件触发的自主智能体目标</span></div>');
+                : goalEmptyHero);
             const paginationContainer = document.getElementById('agent-goals-pagination');
             if (paginationContainer) {
                 if (window.Pivot.legacy.renderWorkspacePagination) {
@@ -191,19 +233,40 @@
             }
         }
         if (inboxPanel) {
+            const currentFilter = state.inboxFilter || 'all';
+            const allItems = state.inbox;
+            const approvalItems = allItems.filter(i => i.sourceType === 'approval');
+            const runItems = allItems.filter(i => i.sourceType === 'run' || i.sourceType === 'notification');
+            const evolutionItems = allItems.filter(i => i.sourceType === 'evolution');
+            const filteredItems = currentFilter === 'approval' ? approvalItems
+                : currentFilter === 'notification' ? runItems
+                : currentFilter === 'evolution' ? evolutionItems
+                : allItems;
+
             const page = Math.max(1, Number(state.inboxPage || 1));
             const limit = Math.max(1, Number(state.inboxLimit || 20));
-            const total = state.inbox.length;
+            const total = filteredItems.length;
             const totalPages = Math.max(1, Math.ceil(total / limit));
             const currentPage = Math.min(page, totalPages);
             state.inboxPage = currentPage;
             const startIndex = (currentPage - 1) * limit;
-            const pageItems = state.inbox.slice(startIndex, startIndex + limit);
+            const pageItems = filteredItems.slice(startIndex, startIndex + limit);
 
-            setMarkup(inboxPanel, state.inbox.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 50px;">序号</th><th class="text-center" style="width: 96px;">类型</th><th style="width: 200px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${pageItems.map((item, index) => {
+            const filterBar = `<div class="agent-inbox-header-bar">
+                <div class="agent-inbox-filter-pills" role="tablist">
+                    <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'all' ? 'active' : ''}" data-agent-inbox-filter="all">全部 (${allItems.length})</button>
+                    <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'approval' ? 'active' : ''}" data-agent-inbox-filter="approval">待审批 (${approvalItems.length})</button>
+                    <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'notification' ? 'active' : ''}" data-agent-inbox-filter="notification">运行通知 (${runItems.length})</button>
+                    <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'evolution' ? 'active' : ''}" data-agent-inbox-filter="evolution">进化提案 (${evolutionItems.length})</button>
+                </div>
+            </div>`;
+
+            const tableHtml = pageItems.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 50px;">序号</th><th class="text-center" style="width: 96px;">类型</th><th style="width: 200px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${pageItems.map((item, index) => {
                 const meta = getInboxTypeMeta(item.sourceType);
                 return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center">${startIndex + index + 1}</td><td class="text-center agent-inbox-type-col"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${escape(item.title || '')}">${escape(formatInboxTitle(item))}</strong></td><td><span class="agent-inbox-table-desc" title="${escape(item.body || '')}">${escape(shortText(item.body || '-', 120))}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}" data-agent-inbox-type="${escapeAttr(item.sourceType)}" data-agent-inbox-id="${escapeAttr(item.sourceId)}" data-agent-inbox-unread="${item.unread ? '1' : '0'}">详情</button>` : ''}</div></td></tr>`;
-            }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>任务运行结果、人工审批请求与智能体进化提醒将在此实时汇聚</span></div>');
+            }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>所有事项均已处理完毕，新事项将在此实时汇聚</span></div>';
+
+            setMarkup(inboxPanel, `${filterBar}${tableHtml}`);
 
             const paginationContainer = document.getElementById('agent-inbox-pagination');
             if (paginationContainer) {
@@ -928,8 +991,33 @@
         });
     }
 
+    function updateCpHeaderMeta(subview) {
+        const panel = document.getElementById('agent-workbench-modal');
+        if (!panel) return;
+        const title = panel.querySelector('.agent-modal-header h3');
+        const subtitle = panel.querySelector('.agent-modal-header p');
+        if (!title || !subtitle) return;
+        if (subview === 'inbox') {
+            title.textContent = '待办中心';
+            subtitle.textContent = '集中处理审批请求、异常告警与运行通知，确保业务流程畅通。';
+        } else if (subview === 'goals') {
+            title.textContent = '我的自动化';
+            subtitle.textContent = '管理常驻自主 Agent 目标、定时调度计划与事件触发自动化。';
+        } else if (subview === 'governance') {
+            title.textContent = '技能与助手';
+            subtitle.textContent = '管理智能体技能库、系统预设助手、自进化提案与记忆策略。';
+        } else if (subview === 'channels') {
+            title.textContent = '通知设置';
+            subtitle.textContent = '配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与审批。';
+        } else if (subview === 'quality') {
+            title.textContent = '运行质量与运维指标';
+            subtitle.textContent = '近 30 天自主任务完成率、人工审批中位数耗时与工具可靠性。';
+        }
+    }
+
     function switchAgentCpSubview(subview = 'inbox') {
         try { sessionStorage.setItem('pivot.agent.cp_subview', subview); } catch (_) { }
+        updateCpHeaderMeta(subview);
         document.querySelectorAll('[data-agent-cp-subview]').forEach(t => {
             const active = t.dataset.agentCpSubview === subview;
             t.classList.toggle('active', active);
@@ -1049,7 +1137,34 @@
             document.getElementById('agent-goal-directory-field')?.classList.toggle('hidden', type !== 'file');
             document.getElementById('agent-goal-query-field')?.classList.toggle('hidden', type !== 'database');
         });
+        document.getElementById('agent-inbox-read-all')?.addEventListener('click', async () => {
+            const unreadItems = state.inbox.filter(item => item.unread);
+            if (!unreadItems.length) {
+                if (typeof showToast === 'function') showToast('当前暂无未读事项', 'info');
+                return;
+            }
+            try {
+                await Promise.all(unreadItems.map(item => {
+                    const isNotification = item.sourceType === 'notification';
+                    const url = isNotification
+                        ? `${API_BASE}/agents/inbox/notification/${encodeURIComponent(item.sourceId)}/read`
+                        : `${API_BASE}/agents/inbox/${encodeURIComponent(item.sourceType)}/${encodeURIComponent(item.sourceId)}/read`;
+                    return apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+                }));
+                if (typeof showToast === 'function') showToast('已全部标记为已读', 'success');
+                await loadControlPlane();
+            } catch (error) {
+                if (typeof showToast === 'function') showToast(error.message || '标记已读失败', 'error');
+            }
+        });
         document.getElementById('agent-inbox-panel')?.addEventListener('click', event => {
+            const filterBtn = event.target.closest('[data-agent-inbox-filter]');
+            if (filterBtn) {
+                state.inboxFilter = filterBtn.dataset.agentInboxFilter || 'all';
+                state.inboxPage = 1;
+                renderAgentControlPlane();
+                return;
+            }
             const openRun = event.target.closest('[data-agent-inbox-open-run]');
             if (openRun) {
                 const runId = openRun.dataset.agentInboxOpenRun;
@@ -1087,6 +1202,18 @@
             }
         });
         document.getElementById('agent-goals-panel')?.addEventListener('click', event => {
+            const quickGoal = event.target.closest('[data-agent-quick-goal]');
+            if (quickGoal) {
+                const key = quickGoal.dataset.agentQuickGoal;
+                if (key === 'daily-check') {
+                    openGoalModal(null, { title: '每日晨间项目巡检', goal: '每日 09:00 自动检查项目进度、未完成事项与风险告警，生成待办清单。', triggerType: 'timer', time: '09:00' });
+                } else if (key === 'weekly-report') {
+                    openGoalModal(null, { title: '每周部门数据周报', goal: '每周五 17:30 自动汇集各模块运行成果与核心指标，整理部门工作周报。', triggerType: 'timer', time: '17:30' });
+                } else if (key === 'data-monitor') {
+                    openGoalModal(null, { title: '数据更新监控告警', goal: '监控关键业务数据表或文件的增量更新状态，出现写入停滞或报错时及时告警。', triggerType: 'database' });
+                }
+                return;
+            }
             const button = event.target.closest('[data-agent-goal-action]');
             if (!button) return;
             const action = button.dataset.agentGoalAction;
@@ -1109,12 +1236,16 @@
         loadControlPlane().catch(() => { });
     }
 
+    window.Pivot.legacy.openGoalModal = openGoalModal;
+    window.Pivot.legacy.switchAgentCpSubview = switchAgentCpSubview;
+
     window.Pivot?.exposeModule?.('agent.harness', {
         loadAgentHarnessManagement: loadHarnessManagement, loadAgentControlPlane: loadControlPlane,
         bindAgentRunHarnessDiagnostics: bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: diagnosticTabMarkup,
         loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || '',
-        switchAgentCpSubview
-    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId', 'switchAgentCpSubview']);
+        switchAgentCpSubview,
+        openGoalModal
+    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId', 'switchAgentCpSubview', 'openGoalModal']);
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindManagement, { once: true });
     else bindManagement();

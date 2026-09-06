@@ -139,10 +139,10 @@
             const card = document.createElement('div');
             card.className = `personal-stat personal-stat-${cfg.type}`;
             if (cfg.type === 'automation') {
-                card.dataset.personalAction = 'open-automation';
+                card.dataset.personalAction = 'open-goals';
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '查看自动化任务');
+                card.setAttribute('title', '管理自动化目标');
             } else if (cfg.type === 'attention') {
                 card.dataset.personalAction = 'open-inbox';
                 card.setAttribute('role', 'button');
@@ -188,7 +188,7 @@
             return container.appendChild(createEmpty('暂时没有需要处理的事项，所有任务已就绪。', {
                 iconSvg: ICONS.check,
                 actionText: '查看待办中心',
-                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox' })
+                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
             }));
         }
 
@@ -238,7 +238,7 @@
             return container.appendChild(createEmpty('还没有运行中的自动化目标，把重复工作交给 Agent 吧。', {
                 iconSvg: ICONS.clock,
                 actionText: '新建自动化目标',
-                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals' })
+                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals', subview: 'goals', create: true })
             }));
         }
 
@@ -572,7 +572,9 @@
                 return document.getElementById('session-search-open')?.click();
             }
             if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
-            if (action === 'open-automation') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+            if (action === 'open-automation' || action === 'open-goals') {
+                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals', subview: 'goals' });
+            }
             if (action === 'open-completed-tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
             if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
             if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
@@ -584,12 +586,7 @@
             }
             if (action === 'logout') return window.Pivot.legacy.logout?.();
             if (action === 'open-inbox') {
-                await window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
-                return document.querySelector('[data-agent-cp-subview="inbox"]')?.click();
-            }
-            if (action === 'open-goals') {
-                await window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
-                return document.querySelector('[data-agent-cp-subview="goals"]')?.click();
+                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
             }
             if (action === 'open-history') return window.Pivot.legacy.showMainWorkspace?.('chat');
             if (action === 'edit-shortcuts') return openShortcutEditor();
@@ -599,7 +596,13 @@
         const recent = event.target.closest('[data-personal-recent-id]');
         if (recent) await handleRecentWork(recent);
         const attention = event.target.closest('[data-personal-item-type]');
-        if (attention) await window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+        if (attention) {
+            const runId = attention.dataset.personalRunId;
+            if (runId && typeof window.Pivot.legacy.openAgentRun === 'function') {
+                return window.Pivot.legacy.openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+            }
+            return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
+        }
     });
 
     document.getElementById('personal-user-modal')?.addEventListener('click', event => {

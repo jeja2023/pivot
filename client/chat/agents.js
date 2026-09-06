@@ -169,8 +169,22 @@ window.Pivot.legacy.bindAgentWorkbenchShortcuts = function() {
 
 window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     window.Pivot.legacy.showMainWorkspace?.('agent');
-    const tab = options.tab || 'tasks';
+    let tab = options.tab || 'tasks';
+    let subview = options.subview || '';
+    if (tab === 'inbox') {
+        tab = 'workbench';
+        subview = 'inbox';
+    } else if (tab === 'goals') {
+        tab = 'workbench';
+        subview = 'goals';
+    } else if (tab === 'workbench' && !subview) {
+        try { subview = sessionStorage.getItem('pivot.agent.cp_subview') || 'inbox'; } catch (_) { subview = 'inbox'; }
+    }
+
     try { sessionStorage.setItem('pivot.agent.active_tab', tab); } catch (_) {}
+    if (subview) {
+        try { sessionStorage.setItem('pivot.agent.cp_subview', subview); } catch (_) {}
+    }
     window.Pivot.legacy.syncAutomationPrimaryTabs(tab);
     const panel = document.getElementById('agent-workbench-modal');
     if (!panel) return;
@@ -179,6 +193,7 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     const controlPlaneView = document.getElementById('agent-control-plane');
     const newTaskBtn = document.getElementById('task-create-open-btn');
     const newGoalTopBtn = document.getElementById('agent-goal-create-top-btn');
+    const title = panel.querySelector('.agent-modal-header h3');
     const subtitle = panel.querySelector('.agent-modal-header p');
 
     if (tab === 'workbench') {
@@ -186,14 +201,47 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
         if (controlPlaneView) controlPlaneView.classList.remove('hidden');
         if (newTaskBtn) newTaskBtn.classList.add('hidden');
         if (newGoalTopBtn) newGoalTopBtn.classList.remove('hidden');
-        if (subtitle) subtitle.textContent = '智能体工作台：技能与助手、待办、自动目标、通知设置与运行质量。';
-        window.Pivot?.moduleApi?.('agent.harness')?.loadAgentControlPlane?.();
+
+        if (subview === 'inbox') {
+            if (title) title.textContent = '待办中心';
+            if (subtitle) subtitle.textContent = '集中处理审批请求、异常告警与运行通知，确保业务流程畅通。';
+        } else if (subview === 'goals') {
+            if (title) title.textContent = '我的自动化';
+            if (subtitle) subtitle.textContent = '管理常驻自主 Agent 目标、定时调度计划与事件触发自动化。';
+        } else if (subview === 'governance') {
+            if (title) title.textContent = '技能与助手';
+            if (subtitle) subtitle.textContent = '管理智能体技能库、系统预设助手、自进化提案与记忆策略。';
+        } else if (subview === 'channels') {
+            if (title) title.textContent = '通知设置';
+            if (subtitle) subtitle.textContent = '配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与审批。';
+        } else if (subview === 'quality') {
+            if (title) title.textContent = '运行质量与运维指标';
+            if (subtitle) subtitle.textContent = '近 30 天自主任务完成率、人工审批中位数耗时与工具可靠性。';
+        } else {
+            if (title) title.textContent = 'Agent 控制台';
+            if (subtitle) subtitle.textContent = '智能体工作台：技能与助手、待办、自动目标、通知设置与运行质量。';
+        }
+
+        const harnessApi = window.Pivot?.moduleApi?.('agent.harness');
+        if (subview) {
+            harnessApi?.switchAgentCpSubview?.(subview) || window.Pivot.legacy?.switchAgentCpSubview?.(subview);
+            panel.querySelector(`[data-agent-cp-subview="${subview}"]`)?.click();
+        }
+        await (harnessApi?.loadAgentControlPlane?.() || window.Pivot.legacy?.loadAgentControlPlane?.());
+        if (options.create && subview === 'goals') {
+            setTimeout(() => {
+                harnessApi?.openGoalModal?.() || window.Pivot.legacy?.openGoalModal?.() || document.getElementById('agent-goal-create-top-btn')?.click();
+            }, 80);
+        }
     } else {
         if (tasksView) tasksView.classList.remove('hidden');
         if (controlPlaneView) controlPlaneView.classList.add('hidden');
         if (newTaskBtn) newTaskBtn.classList.remove('hidden');
         if (newGoalTopBtn) newGoalTopBtn.classList.add('hidden');
-        if (subtitle) subtitle.textContent = '集中创建、运行与审计一次性后台任务、工作流任务与计划执行。';
+        if (title) title.textContent = options.status === 'completed' ? '已完成成果' : '自动化任务';
+        if (subtitle) subtitle.textContent = options.status === 'completed'
+            ? '查看已成功完成的智能体任务、产出成果与执行日志归档。'
+            : '集中创建、运行与审计一次性后台任务、工作流任务与计划执行。';
     }
 
     const queryInput = document.getElementById('agent-filter-query');
@@ -206,7 +254,9 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    window.Pivot.legacy.setTaskComposerOpen(Boolean(options.create));
+    if (tab === 'tasks') {
+        window.Pivot.legacy.setTaskComposerOpen(Boolean(options.create));
+    }
     // 智能体工作区脚本按需加载，在数据请求前优先绑定交互与选项卡切换事件
     window.Pivot.legacy.bindAgentGoalTemplates?.();
     window.Pivot.legacy.bindAgentFilters?.();
