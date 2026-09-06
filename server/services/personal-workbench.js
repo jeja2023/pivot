@@ -3,6 +3,7 @@ const { getBeijingTimestamp } = require('../time');
 const { listAgentInbox } = require('./agent-inbox');
 const { listAgentGoals } = require('./agent-goals');
 const { listAgentArtifacts } = require('./agent-artifacts');
+const { listRuns } = require('./agent-runs');
 const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
 
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
@@ -70,12 +71,12 @@ async function getPersonalWorkbench(user) {
             LIMIT 4
         `, [user.id]), []),
         safe(async () => {
-            const [artifactRow, runRow] = await Promise.all([
+            const [artifactRow, runResult] = await Promise.all([
                 queryOne('SELECT COUNT(*) AS count FROM agent_artifacts WHERE user_id = ?', [user.id]),
-                queryOne("SELECT COUNT(*) AS count FROM agent_runs WHERE user_id = ? AND status = 'completed' AND deleted_at IS NULL", [user.id])
+                listRuns(user, { status: 'completed', limit: 1 })
             ]);
             const a = Number(artifactRow?.count || 0);
-            const r = Number(runRow?.count || 0);
+            const r = Number(runResult?.total || 0);
             return Math.max(a, r);
         }, 0),
         safe(() => getUserSettingValueAsync(user.id, SHORTCUT_SETTING_KEY), '')
