@@ -316,7 +316,7 @@
         clear(container);
 
         const activeShortcuts = shortcuts.length ? shortcuts : ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
-        const validShortcuts = activeShortcuts.filter(key => shortcutCatalog[key]).slice(0, 5);
+        const validShortcuts = activeShortcuts.filter(key => shortcutCatalog[key]).slice(0, 6);
 
         validShortcuts.forEach(key => {
             const shortcut = shortcutCatalog[key];
@@ -336,22 +336,24 @@
             container.appendChild(button);
         });
 
-        // 第 6 个快捷卡片固定为“+ 增加入口”
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'btn-secondary personal-shortcut personal-shortcut-add';
-        addBtn.dataset.personalAction = 'edit-shortcuts';
-        addBtn.setAttribute('aria-label', '增加入口');
+        // 选中的入口不足 6 个时在末尾展示“+ 增加入口”卡片；满 6 个时填满 6 宫格，由标题右侧“自定义”按钮调起设置
+        if (validShortcuts.length < 6) {
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'btn-secondary personal-shortcut personal-shortcut-add';
+            addBtn.dataset.personalAction = 'edit-shortcuts';
+            addBtn.setAttribute('aria-label', '增加入口');
 
-        const addIcon = document.createElement('span');
-        addIcon.className = 'personal-shortcut-icon';
-        PivotSafeHtml.setHtml(addIcon, ICONS.plus);
-        addIcon.setAttribute('aria-hidden', 'true');
+            const addIcon = document.createElement('span');
+            addIcon.className = 'personal-shortcut-icon';
+            PivotSafeHtml.setHtml(addIcon, ICONS.plus);
+            addIcon.setAttribute('aria-hidden', 'true');
 
-        addBtn.appendChild(addIcon);
-        appendText(addBtn, 'strong', 'personal-shortcut-title', '增加入口');
-        appendText(addBtn, 'span', 'personal-shortcut-hint', '自定义常用入口');
-        container.appendChild(addBtn);
+            addBtn.appendChild(addIcon);
+            appendText(addBtn, 'strong', 'personal-shortcut-title', '增加入口');
+            appendText(addBtn, 'span', 'personal-shortcut-hint', '自定义常用入口');
+            container.appendChild(addBtn);
+        }
     }
 
     function renderDashboard(dashboard = {}) {
@@ -463,10 +465,9 @@
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || '常用入口保存失败');
-        if (state.dashboard) {
-            state.dashboard.shortcuts = data.shortcuts || shortcuts;
-            renderShortcuts(state.dashboard.shortcuts);
-        }
+        state.dashboard = state.dashboard || {};
+        state.dashboard.shortcuts = data.shortcuts || shortcuts;
+        renderShortcuts(state.dashboard.shortcuts);
         closeShortcutEditor();
         window.Pivot.legacy.showToast?.('常用入口已保存');
     }

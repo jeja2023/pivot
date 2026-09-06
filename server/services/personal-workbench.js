@@ -9,13 +9,14 @@ const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settin
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
 const DEFAULT_SHORTCUTS = ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
 const ALLOWED_SHORTCUTS = new Set([...DEFAULT_SHORTCUTS, 'workflows']);
+const MAX_SHORTCUTS = 6;
 
 function normalizeShortcuts(value) {
     const input = Array.isArray(value) ? value : (() => {
         try { return JSON.parse(String(value || '[]')); } catch (_) { return []; }
     })();
     const shortcuts = [...new Set(input.map(item => String(item || '').trim()).filter(item => ALLOWED_SHORTCUTS.has(item)))];
-    return shortcuts.length ? shortcuts.slice(0, DEFAULT_SHORTCUTS.length) : [...DEFAULT_SHORTCUTS];
+    return shortcuts.length ? shortcuts.slice(0, MAX_SHORTCUTS) : [...DEFAULT_SHORTCUTS];
 }
 
 async function safe(action, fallback) {

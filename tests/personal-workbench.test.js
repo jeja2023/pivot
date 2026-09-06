@@ -10,6 +10,10 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 test('个人工作台仅保存受支持的常用入口，并为空配置回退默认入口', () => {
     assert.deepEqual(normalizeShortcuts(['workflows', 'unknown', 'ocr', 'workflows']), ['workflows', 'ocr']);
     assert.deepEqual(normalizeShortcuts(['knowledge', 'chat']), ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools']);
+    assert.deepEqual(
+        normalizeShortcuts(['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools', 'workflows']),
+        ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools', 'workflows']
+    );
     assert.deepEqual(normalizeShortcuts('[]'), ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools']);
 });
 
