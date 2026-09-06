@@ -50,8 +50,7 @@ function toRecentWork(kind, record) {
 }
 
 async function getPersonalWorkbench(user) {
-    const weekStart = getBeijingTimestamp(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
-    const [inbox, goals, artifacts, sessions, runs, weeklyArtifactCount, shortcutSetting] = await Promise.all([
+    const [inbox, goals, artifacts, sessions, runs, completedArtifactCount, shortcutSetting] = await Promise.all([
         safe(() => listAgentInbox(user, { limit: 4 }), { data: [], unread: 0, total: 0 }),
         safe(() => listAgentGoals(user, { status: 'active', limit: 3 }), []),
         safe(() => listAgentArtifacts(user, 4), []),
@@ -70,11 +69,15 @@ async function getPersonalWorkbench(user) {
             ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
             LIMIT 4
         `, [user.id]), []),
-        safe(async () => Number((await queryOne(`
-            SELECT COUNT(*) AS count
-            FROM agent_artifacts
-            WHERE user_id = ? AND COALESCE(updated_at, created_at) >= ?
-        `, [user.id, weekStart]))?.count || 0), 0),
+        safe(async () => {
+            const [artifactRow, runRow] = await Promise.all([
+                queryOne('SELECT COUNT(*) AS count FROM agent_artifacts WHERE user_id = ?', [user.id]),
+                queryOne("SELECT COUNT(*) AS count FROM agent_runs WHERE user_id = ? AND status = 'completed' AND deleted_at IS NULL", [user.id])
+            ]);
+            const a = Number(artifactRow?.count || 0);
+            const r = Number(runRow?.count || 0);
+            return Math.max(a, r);
+        }, 0),
         safe(() => getUserSettingValueAsync(user.id, SHORTCUT_SETTING_KEY), '')
     ]);
     const actionableInbox = (inbox.data || []).filter(item => (
@@ -92,7 +95,8 @@ async function getPersonalWorkbench(user) {
         stats: {
             attention: actionableInbox.length,
             automations: goals.length,
-            artifactsThisWeek: weeklyArtifactCount
+            artifactsThisWeek: completedArtifactCount,
+            completedArtifacts: completedArtifactCount
         },
         inbox: actionableInbox.slice(0, 3),
         goals: goals.slice(0, 3),

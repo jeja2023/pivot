@@ -165,7 +165,9 @@
 
         const attentionCount = stats.attention !== undefined && stats.attention > 0 ? stats.attention : 7;
         const automationCount = stats.automations !== undefined && stats.automations > 0 ? stats.automations : 3;
-        const artifactCount = stats.artifactsThisWeek !== undefined && stats.artifactsThisWeek > 0 ? stats.artifactsThisWeek : 12;
+        const artifactCount = stats.completedArtifacts !== undefined && stats.completedArtifacts > 0
+            ? stats.completedArtifacts
+            : (stats.artifactsThisWeek !== undefined && stats.artifactsThisWeek > 0 ? stats.artifactsThisWeek : 12);
 
         const statConfigs = [
             {
@@ -186,9 +188,9 @@
             },
             {
                 type: 'artifact',
-                label: '本周已完成成果',
+                label: '已完成成果',
                 value: String(artifactCount),
-                subtext: '↑ 28%',
+                subtext: '累计完成',
                 subtextClass: 'personal-stat-trend-good',
                 iconSvg: ICONS.sparkle
             }
@@ -211,7 +213,7 @@
                 card.dataset.personalAction = 'open-completed-tasks';
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '查看已完成任务与成果');
+                card.setAttribute('title', '查看已完成成果');
             }
 
             const copy = document.createElement('div');
