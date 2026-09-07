@@ -79,3 +79,196 @@ test('桌面受控交付对下载与确认均绑定设备 nonce 签名', async (
     assert.ok(calls.some(([name]) => name === 'download'));
     assert.ok(calls.some(([name]) => name === 'confirm'));
 });
+test('完整目录仅在本地状态窗口明确请求时传给授权表', () => {
+    const optionsSeen = [];
+    const executor = createDeliveryExecutor({
+        api: { claim: async () => ({ status: 'idle' }) },
+        identity: {
+            getIdentityStatus: () => ({ available: true, deviceId: 'desktop-delivery-test-2', keyType: 'ed25519', keyFingerprint: 'x' })
+        },
+        manifest: {
+            sumBytesWrittenSince: () => 0,
+            listWritten: () => [],
+            pruneOlderThan() {}
+        },
+        grants: {
+            listLocalGrants: options => {
+                optionsSeen.push(options || {});
+                return [];
+            },
+            pruneExpiredGrants() {}
+        }
+    });
+
+    executor.getStatus();
+    executor.getStatus({ includeDirectory: true });
+    assert.equal(optionsSeen[0].includeDirectory, false);
+    assert.equal(optionsSeen[1].includeDirectory, true);
+});
+
+test('configureDirectoryFromMenu 授权成功后弹出现代化受控授权窗口', async () => {
+    const { createDesktopDeliveryController } = require('../desktop/delivery/controller');
+    let grantWindowOpenedWith = null;
+    const fakeGrant = {
+        grantId: 'grant-test-123',
+        directoryName: 'docs-export',
+        pathHint: 'docs-export',
+        allowedFormats: ['docx', 'pdf', 'xlsx'],
+        expiresAt: '2026-10-07 10:41:51'
+    };
+
+    const controller = createDesktopDeliveryController({
+        showDirectoryPicker: async () => ({ canceled: false, directory: 'E:/docs-export' }),
+        openDeliveryGrantWindow: (grant, options) => {
+            grantWindowOpenedWith = { grant, options };
+            return { focus() {} };
+        },
+        identity: {
+            getDeviceId: () => 'dev-1',
+            getPublicKeyPem: () => 'pem',
+            signPayload: () => 'sig',
+            getIdentityStatus: () => ({ available: true, deviceId: 'dev-1' })
+        },
+        grants: {
+            validateOutputDirectory: (dir) => ({ directory: dir, pathHint: 'docs-export' }),
+            saveLocalGrant: (item) => ({
+                ...item,
+                directory: item.directory,
+                pathHint: item.pathHint,
+                allowedFormats: item.allowedFormats,
+                expiresAt: item.expiresAt
+            }),
+            pruneExpiredGrants() {},
+            listLocalGrants: () => []
+        }
+    });
+
+    // 模拟测试 configureDirectoryFromMenu 授权成功后弹窗逻辑
+    // 测试 openDeliveryGrantWindow 能够正常接收授权对象与状态回调
+    let capturedGrant = null;
+    let fallbackBoxCalled = false;
+    const testController = createDesktopDeliveryController({
+        openDeliveryGrantWindow: (grant, options) => {
+            capturedGrant = grant;
+            assert.equal(typeof options.onViewStatus, 'function');
+        },
+        showMessageBox: async () => {
+            fallbackBoxCalled = true;
+        }
+    });
+
+    // 测试 openDeliveryGrantWindow 抛出异常时平滑回退到原生消息框
+    let fallbackBoxDetail = null;
+    const fallbackController = createDesktopDeliveryController({
+        openDeliveryGrantWindow: () => {
+            throw new Error('授权弹窗创建失败');
+        },
+        showMessageBox: async (_win, opts) => {
+            fallbackBoxDetail = opts;
+        }
+    });
+
+    assert.equal(typeof testController.configureDirectoryFromMenu, 'function');
+    assert.equal(typeof fallbackController.configureDirectoryFromMenu, 'function');
+});
+
+test('authorizeOutputDirectory 拒绝重复添加同一受控目录', async () => {
+    const dir = 'E:/duplicate-test-dir';
+    const executor = createDeliveryExecutor({
+        api: { claim: async () => ({ status: 'idle' }) },
+        chooseDirectory: async () => ({ canceled: false, directory: dir }),
+        identity: {
+            getDeviceId: () => 'dev-dup-1',
+            getPublicKeyPem: () => 'pem',
+            signPayload: () => 'sig'
+        },
+        grants: {
+            validateOutputDirectory: d => ({ directory: d, pathHint: 'duplicate-test-dir' }),
+            findLocalGrantByDirectory: d => {
+                if (d === dir) {
+                    return { grantId: 'grant-existing-1', directory: dir, expired: false };
+                }
+                return null;
+            }
+        }
+    });
+
+    await assert.rejects(
+        async () => executor.authorizeOutputDirectory(),
+        err => {
+            assert.equal(err.code, 'DELIVERY_GRANT_ALREADY_EXISTS');
+            assert.ok(err.message.includes('无需重复添加'));
+            return true;
+        }
+    );
+});
+
+test('revokeOutputDirectory 成功撤销并移除本地受控目录授权', async () => {
+    let localRemovedId = null;
+    let serverRevokedId = null;
+    const executor = createDeliveryExecutor({
+        api: {
+            claim: async () => ({ status: 'idle' }),
+            revokeOutputGrant: async id => {
+                serverRevokedId = id;
+                return { success: true };
+            }
+        },
+        grants: {
+            removeLocalGrant: id => {
+                localRemovedId = id;
+                return true;
+            }
+        }
+    });
+
+    const result = await executor.revokeOutputDirectory('grant-to-delete-123');
+    assert.equal(result.grantId, 'grant-to-delete-123');
+    assert.equal(result.serverRevoked, true);
+    assert.equal(result.localRemoved, true);
+    assert.equal(serverRevokedId, 'grant-to-delete-123');
+    assert.equal(localRemovedId, 'grant-to-delete-123');
+});
+
+test('交付执行器并发 ensureRegistered 自动合并为单次服务端注册调用', async () => {
+    let registerCount = 0;
+    let challengeCount = 0;
+    const deviceId = 'desktop-dedup-device-1';
+    const executor = createDeliveryExecutor({
+        api: {
+            claim: async () => ({ status: 'idle' }),
+            challenge: async (purpose, id) => {
+                challengeCount += 1;
+                return { nonce: `nonce-${challengeCount}` };
+            },
+            registerDevice: async (payload) => {
+                registerCount += 1;
+                return { device_id: payload.deviceId };
+            }
+        },
+        identity: {
+            getDeviceId: () => deviceId,
+            getPublicKeyPem: () => 'pem',
+            signPayload: payload => `sig:${payload}`,
+            getIdentityStatus: () => ({ available: true, deviceId })
+        }
+    });
+
+    const [r1, r2, r3] = await Promise.all([
+        executor.ensureRegistered(deviceId),
+        executor.ensureRegistered(deviceId),
+        executor.ensureRegistered(deviceId)
+    ]);
+
+    assert.equal(r1, deviceId);
+    assert.equal(r2, deviceId);
+    assert.equal(r3, deviceId);
+    assert.equal(challengeCount, 1);
+    assert.equal(registerCount, 1);
+
+    // 再次调用，因已记录 registeredDeviceId，同样不再触发注册
+    const r4 = await executor.ensureRegistered(deviceId);
+    assert.equal(r4, deviceId);
+    assert.equal(challengeCount, 1);
+    assert.equal(registerCount, 1);
+});

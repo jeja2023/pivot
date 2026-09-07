@@ -7,7 +7,7 @@ const { clampText, compactToolOutputForModel, executeToolByName, findAgentToolBy
 const { runAgentDag, upsertDagNode } = require('../agent-dag-runtime');
 const { isStreamingToolsEnabled, tryRunAgentStreaming } = require('../agent-streaming-runtime');
 const { createAgentQueue } = require('../agent-queue');
-const { callModelText, recordAgentModelUsage, AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
+const { callModelText, recordAgentModelUsage, resolveAgentPlanningThinking, resolveAgentRequestTimeoutMs, AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
 const { normalizeToolInput } = require('../agent-policy');
 const { publishUserEvent } = require('../realtime-events');
 const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('../model-router');
@@ -93,6 +93,9 @@ const {
 const {
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
+    AGENT_AUTO_CONTINUE_ON_TIMEOUT,
+    AGENT_MAX_AUTO_CONTINUATIONS,
+    AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_STALE_RUNNING_MINUTES,
     AGENT_QUEUE_LOCK_MS,
     AGENT_INSTANCE_ID,
@@ -354,7 +357,9 @@ const { runAgent } = createAgentRunner({
     activeRunControllers,
     taskBudgetsBySignal,
     assertRunNotCancelled: runId => {
-        if (activeRunControllers.get(runId)?.signal?.aborted !== true) return;
+        const controller = activeRunControllers.get(runId);
+        if (controller?.signal?.aborted !== true) return;
+        if (controller.signal.reason instanceof Error) throw controller.signal.reason;
         const error = new Error('任务已停止。');
         error.code = 'AGENT_RUN_CANCELLED';
         throw error;
@@ -363,6 +368,9 @@ const { runAgent } = createAgentRunner({
     assertRunUserActive,
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
+    AGENT_AUTO_CONTINUE_ON_TIMEOUT,
+    AGENT_MAX_AUTO_CONTINUATIONS,
+    AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_ANSWER_MIN_MAX_TOKENS,
     getRunForUser,
     getRunUser,
@@ -376,6 +384,8 @@ const { runAgent } = createAgentRunner({
     isStreamingToolsEnabled,
     tryRunAgentStreaming,
     callModelText,
+    resolveAgentPlanningThinking,
+    resolveAgentRequestTimeoutMs,
     recordAgentModelUsage,
     normalizeToolInput,
     publishUserEvent,

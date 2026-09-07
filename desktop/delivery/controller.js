@@ -1,5 +1,5 @@
 /**
- * Desktop 受控文档交付控制器。
+ * Desktop 受控文件交付控制器。
  *
  * 保持网络会话、设备密钥、目录授权和原子写入都在 Electron 主进程；渲染页只能拿到
  * 经过脱敏的状态和明确的 IPC 操作，不能读取 Cookie、私钥或本机绝对目录。
@@ -7,9 +7,12 @@
 const crypto = require('crypto');
 const { createDeliveryApiClient } = require('./api-client');
 const { createDeliveryExecutor } = require('./executor');
-const { openDeliveryStatusWindow } = require('./status-window');
+const { openDeliveryStatusWindow, openDeliveryGrantWindow } = require('./status-window');
 
 function createDesktopDeliveryController(options = {}) {
+    const openDeliveryGrant = typeof options.openDeliveryGrantWindow === 'function'
+        ? options.openDeliveryGrantWindow
+        : openDeliveryGrantWindow;
     const getTargetUrl = typeof options.getTargetUrl === 'function' ? options.getTargetUrl : () => '';
     const getSession = typeof options.getSession === 'function' ? options.getSession : () => null;
     const getStealthSecret = typeof options.getStealthSecret === 'function' ? options.getStealthSecret : () => '';
@@ -78,7 +81,8 @@ function createDesktopDeliveryController(options = {}) {
         return executor;
     }
 
-    function publicStatus(status = {}) {
+    function publicStatus(status = {}, options = {}) {
+        const includeDirectory = options.includeDirectory === true;
         return {
             available: status.available === true,
             reason: status.reason || '',
@@ -97,7 +101,8 @@ function createDesktopDeliveryController(options = {}) {
                 grantId: grant.grantId || grant.id || '',
                 pathHint: grant.pathHint || '',
                 allowedFormats: Array.isArray(grant.allowedFormats) ? grant.allowedFormats : [],
-                expiresAt: grant.expiresAt || ''
+                expiresAt: grant.expiresAt || '',
+                ...(includeDirectory && grant.directory ? { directory: grant.directory } : {})
             }))
         };
     }
@@ -119,6 +124,14 @@ function createDesktopDeliveryController(options = {}) {
         return publicStatus(executor ? executor.getStatus() : { available: false, running: false, lastStatus: 'not-started' });
     }
 
+    /** 完整路径只交给本地 file:// 状态窗口，远程 Web 渲染页始终只能拿到目录提示。 */
+    function localStatus() {
+        return publicStatus(
+            executor ? executor.getStatus({ includeDirectory: true }) : { available: false, running: false, lastStatus: 'not-started' },
+            { includeDirectory: true }
+        );
+    }
+
     async function authorizeDirectory(input = {}) {
         return await ensureExecutor().authorizeOutputDirectory(input);
     }
@@ -132,16 +145,32 @@ function createDesktopDeliveryController(options = {}) {
             const result = await authorizeDirectory();
             if (result?.canceled) return;
             const grant = result?.grant || {};
-            await showMessageBox(getParentWindow(), {
-                type: 'info',
-                title: '文档交付目录已授权',
-                message: `已授权目录：${grant.directoryName || grant.pathHint || '已选择目录'}`,
-                detail: `格式：${Array.isArray(grant.allowedFormats) && grant.allowedFormats.length ? grant.allowedFormats.join('、') : '默认格式'}\n到期时间：${grant.expiresAt || '按服务端策略'}\n\n交付仅在你于 Web 端明确选择“保存到本机”后才会写入该目录。`,
-                buttons: ['确定'], noLink: true
-            });
+            try {
+                openDeliveryGrant(grant, {
+                    getParentWindow,
+                    onViewStatus: () => showStatusFromMenu()
+                });
+            } catch (winErr) {
+                logger.warn?.('[Pivot 交付] 打开受控目录授权弹窗失败，回退到原生消息框', winErr);
+                const formats = Array.isArray(grant.allowedFormats) && grant.allowedFormats.length
+                    ? (grant.allowedFormats.length > 8 ? `${grant.allowedFormats.slice(0, 8).join('、')} 等 ${grant.allowedFormats.length} 种格式` : grant.allowedFormats.join('、'))
+                    : '默认格式';
+                await showMessageBox(getParentWindow(), {
+                    type: 'info',
+                    title: '文件交付目录已授权',
+                    message: `已授权目录：${grant.directoryName || grant.pathHint || '已选择目录'}`,
+                    detail: `格式：${formats}\n到期时间：${grant.expiresAt || '按服务端策略'}\n\n交付仅在你于 Web 端明确选择“保存到本机”后才会写入该目录。`,
+                    buttons: ['确定'], noLink: true
+                });
+            }
         } catch (error) {
+            const isDuplicate = error?.code === 'DELIVERY_GRANT_ALREADY_EXISTS';
             await showMessageBox(getParentWindow(), {
-                type: 'error', title: '文档交付目录授权失败', message: error?.message || '无法授权文档交付目录。', buttons: ['确定'], noLink: true
+                type: isDuplicate ? 'info' : 'error',
+                title: isDuplicate ? '受控目录已存在' : '文件交付目录授权失败',
+                message: error?.message || '无法授权文件交付目录。',
+                buttons: ['确定'],
+                noLink: true
             });
         }
     }
@@ -149,24 +178,31 @@ function createDesktopDeliveryController(options = {}) {
     async function showStatusFromMenu() {
         try {
             openDeliveryStatusWindow({
-                getStatus: () => status(),
+                getStatus: () => localStatus(),
                 getParentWindow,
-                onConfigureDirectory: () => configureDirectoryFromMenu()
+                onConfigureDirectory: () => configureDirectoryFromMenu(),
+                onRevokeDirectory: async (grantId) => {
+                    return await revokeDirectory(grantId);
+                }
             });
         } catch (err) {
             logger.warn?.('[Pivot 交付] 打开受控交付状态弹窗失败，回退到原生消息框', err);
             const state = status();
             await showMessageBox(getParentWindow(), {
                 type: state.available === false ? 'warning' : 'info',
-                title: '受控文档交付状态',
-                message: state.available === false ? '文档交付当前不可用。' : (state.running ? '文档交付轮询运行中。' : '文档交付轮询已停止。'),
+                title: '受控文件交付状态',
+                message: state.available === false ? '文件交付当前不可用。' : (state.running ? '文件交付轮询运行中。' : '文件交付轮询已停止。'),
                 detail: `设备：${state.deviceId || '未初始化'}\n目录授权：${state.grants.length} 个\n已完成交付：${state.deliveredCount}\n最近状态：${state.lastStatus || '未知'}${state.lastError ? `\n最近错误：${state.lastError}` : ''}`,
                 buttons: ['确定'], noLink: true
             });
         }
     }
 
-    return { authorizeDirectory, configureDirectoryFromMenu, request, revokeDirectory, showStatusFromMenu, start, status, stop };
+    async function ensureRegistered(deviceId) {
+        return await ensureExecutor().ensureRegistered(deviceId);
+    }
+
+    return { authorizeDirectory, configureDirectoryFromMenu, ensureRegistered, request, revokeDirectory, showStatusFromMenu, start, status, stop };
 }
 
 module.exports = { createDesktopDeliveryController };

@@ -6,7 +6,7 @@ const ACTIVE_POLL_INTERVAL_MS = 5000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_BACKOFF_MS = 60000;
 
-function createLocalMcpConnector({ request, getLocalAuthorizationStatus, executeLocalTool, identity: customIdentity, logger = console } = {}) {
+function createLocalMcpConnector({ request, getLocalAuthorizationStatus, executeLocalTool, identity: customIdentity, ensureRegistered: customEnsureRegistered, logger = console } = {}) {
     if (typeof request !== 'function' || typeof getLocalAuthorizationStatus !== 'function' || typeof executeLocalTool !== 'function') {
         throw new Error('本机连接器缺少受控依赖。');
     }
@@ -14,6 +14,7 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     let running = false;
     let timer = null;
     let registered = false;
+    let registeringPromise = null;
     let lastHeartbeatAt = 0;
     let consecutiveErrors = 0;
 
@@ -29,15 +30,27 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     }
     async function ensureRegistered(deviceId) {
         if (registered) return;
-        const nonce = await call('POST', '/api/agents/local-devices/challenge', { purpose: 'register', deviceId });
-        await call('POST', '/api/agents/local-devices', {
-            deviceId,
-            deviceName: getLocalAuthorizationStatus().deviceName || '我的电脑',
-            publicKeyPem: identity.getPublicKeyPem(),
-            nonce: nonce.nonce,
-            signature: identity.signPayload(`register:${nonce.nonce}:${deviceId}`)
-        });
-        registered = true;
+        if (registeringPromise) return registeringPromise;
+        registeringPromise = (async () => {
+            try {
+                if (typeof customEnsureRegistered === 'function') {
+                    await customEnsureRegistered(deviceId);
+                } else {
+                    const nonce = await call('POST', '/api/agents/local-devices/challenge', { purpose: 'register', deviceId });
+                    await call('POST', '/api/agents/local-devices', {
+                        deviceId,
+                        deviceName: getLocalAuthorizationStatus().deviceName || '我的电脑',
+                        publicKeyPem: identity.getPublicKeyPem(),
+                        nonce: nonce.nonce,
+                        signature: identity.signPayload(`register:${nonce.nonce}:${deviceId}`)
+                    });
+                }
+                registered = true;
+            } finally {
+                registeringPromise = null;
+            }
+        })();
+        return registeringPromise;
     }
     async function heartbeat() {
         const status = getLocalAuthorizationStatus();

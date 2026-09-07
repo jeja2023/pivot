@@ -53,7 +53,6 @@ test('本机连接器在无授权工具时待机，不发起任务认领', async
     assert.equal(secondResult.status, 'idle');
     assert.equal(requests.length, reqCountBefore);
 });
-
 test('本机连接器在存在授权工具时正常发起任务认领并执行工具', async () => {
     const requests = [];
     let toolExecuted = false;
@@ -106,4 +105,42 @@ test('本机连接器在存在授权工具时正常发起任务认领并执行�
 
     assert.ok(requests.some(r => r.path === '/api/mcp/local-device/connector/tasks/claim'));
     assert.ok(requests.some(r => r.path.includes('/result')));
+});
+
+test('本机连接器优先使用注入的 ensureRegistered 并支持并发防重', async () => {
+    let customRegisterCount = 0;
+    const requests = [];
+    const connector = createLocalMcpConnector({
+        identity: mockIdentity,
+        ensureRegistered: async (deviceId) => {
+            customRegisterCount += 1;
+            assert.equal(deviceId, 'desktop-test-device');
+        },
+        request: async ({ method, path, body }) => {
+            requests.push({ method, path, body });
+            if (path === '/api/agents/local-devices/challenge') {
+                return { status: 201, data: { nonce: 'nonce-789' } };
+            }
+            if (path === '/api/mcp/local-device/connector/heartbeat') {
+                return { status: 200, data: { success: true } };
+            }
+            return { status: 200, data: {} };
+        },
+        getLocalAuthorizationStatus: () => ({
+            deviceName: '测试电脑',
+            grants: {}
+        }),
+        executeLocalTool: async () => {}
+    });
+
+    const [r1, r2] = await Promise.all([
+        connector.runOnce(),
+        connector.runOnce()
+    ]);
+
+    assert.equal(r1.status, 'idle');
+    assert.equal(r2.status, 'idle');
+    assert.equal(customRegisterCount, 1);
+    // 确认未再发出 /api/agents/local-devices 请求（已委托给外部并完成）
+    assert.equal(requests.some(r => r.path === '/api/agents/local-devices'), false);
 });

@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>受控文件交付目录已授权</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --surface: #f8fafc;
+            --surface-hover: #f1f5f9;
+            --card-bg: #ffffff;
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --muted: #64748b;
+            --line: #e2e8f0;
+            --brand: #059669;
+            --brand-hover: #047857;
+            --brand-light: #ecfdf5;
+            --brand-border: rgba(16, 185, 129, 0.3);
+            --brand-glow: rgba(16, 185, 129, 0.25);
+            --info-light: #f0f9ff;
+            --info-border: rgba(56, 189, 248, 0.3);
+            --info-text: #0369a1;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f172a;
+                --surface: #1e293b;
+                --surface-hover: #334155;
+                --card-bg: #1e293b;
+                --text: #f8fafc;
+                --text-secondary: #cbd5e1;
+                --muted: #94a3b8;
+                --line: #334155;
+                --brand: #10b981;
+                --brand-hover: #059669;
+                --brand-light: rgba(16, 185, 129, 0.15);
+                --brand-border: rgba(16, 185, 129, 0.35);
+                --brand-glow: rgba(16, 185, 129, 0.2);
+                --info-light: rgba(56, 189, 248, 0.12);
+                --info-border: rgba(56, 189, 248, 0.3);
+                --info-text: #38bdf8;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            color: var(--text);
+            background: var(--bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .dialog {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--line);
+            background: var(--bg);
+        }
+
+        .titlebar {
+            flex: 0 0 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px 0 16px;
+            border-bottom: 1px solid var(--line);
+            background: var(--surface);
+            -webkit-app-region: drag;
+        }
+
+        .titlebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .titlebar-brand svg {
+            color: var(--brand);
+        }
+
+        .btn-close-titlebar {
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            border: 0;
+            border-radius: 6px;
+            color: var(--muted);
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.14s ease;
+            -webkit-app-region: no-drag;
+        }
+
+        .btn-close-titlebar:hover {
+            color: #ffffff;
+            background: #ef4444;
+        }
+
+        .content {
+            flex: 1;
+            padding: 20px 22px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        .hero-banner {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 4px 0;
+        }
+
+        .hero-icon-wrap {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
+            display: grid;
+            place-items: center;
+            box-shadow: 0 6px 18px var(--brand-glow);
+            flex-shrink: 0;
+            animation: pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes pop-in {
+            from { transform: scale(0.7); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .hero-titles {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+        }
+
+        .hero-title {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.01em;
+        }
+
+        .hero-subtitle {
+            margin: 0;
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.4;
+        }
+
+        .detail-card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 11px;
+        }
+
+        .detail-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 12.5px;
+        }
+
+        .detail-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--muted);
+            font-weight: 500;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .detail-value {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 6px;
+            text-align: right;
+            color: var(--text);
+            font-weight: 600;
+            min-width: 0;
+        }
+
+        .dir-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 6px;
+            background: var(--brand-light);
+            border: 1px solid var(--brand-border);
+            color: var(--brand);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .badge-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 1px 6px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.4;
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--brand);
+        }
+
+        .format-chips-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 4px;
+            max-width: 320px;
+        }
+
+        .format-chip {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: var(--bg);
+            border: 1px solid var(--line);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-family: monospace;
+            font-weight: 500;
+        }
+
+        .format-more-chip {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: var(--surface-hover);
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .tip-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: var(--info-light);
+            border: 1px solid var(--info-border);
+            color: var(--info-text);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .tip-banner svg {
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .footer {
+            flex: 0 0 54px;
+            height: 54px;
+            padding: 0 20px;
+            border-top: 1px solid var(--line);
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn {
+            height: 34px;
+            padding: 0 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            outline: none;
+            border: 1px solid transparent;
+        }
+
+        .btn-secondary {
+            color: var(--text-secondary);
+            background: var(--bg);
+            border-color: var(--line);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .btn-primary {
+            background: var(--brand);
+            color: #ffffff;
+            box-shadow: 0 2px 6px var(--brand-glow);
+        }
+
+        .btn-primary:hover {
+            background: var(--brand-hover);
+        }
+
+        .btn-primary:focus-visible {
+            box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--brand);
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog">
+        <div class="titlebar">
+            <div class="titlebar-brand">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>受控目录授权</span>
+            </div>
+            <button type="button" class="btn-close-titlebar" id="btn-title-close" aria-label="关闭" title="关闭 (Esc)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div class="content">
+            <div class="hero-banner">
+                <div class="hero-icon-wrap">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <div class="hero-titles">
+                    <h2 class="hero-title">文件交付目录已授权</h2>
+                    <p class="hero-subtitle">本机受控通道已就绪，已建立安全原子落盘保障</p>
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        已授权目录
+                    </span>
+                    <div class="detail-value">
+                        <span class="dir-pill" id="val-dir-name">pivot</span>
+                        <span class="badge-tag">受控写入</span>
+                    </div>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        授权有效期
+                    </span>
+                    <div class="detail-value" id="val-expires-at">
+                        2026-10-07 10:41:51
+                    </div>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        支持文件格式
+                    </span>
+                    <div class="detail-value">
+                        <div class="format-chips-wrap" id="val-formats-wrap">
+                            <span class="format-chip">docx</span>
+                            <span class="format-chip">pdf</span>
+                            <span class="format-chip">xlsx</span>
+                            <span class="format-chip">md</span>
+                            <span class="format-chip">py</span>
+                            <span class="format-chip">js</span>
+                            <span class="format-more-chip">+26 种</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tip-banner">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span>安全提示：交付仅在您于 Web 端界面明确选择“保存到本机”后才会写入该目录，主进程自动校验文件格式与设备数字签名。</span>
+            </div>
+        </div>
+
+        <div class="footer">
+            <button type="button" class="btn btn-secondary" id="btn-view-status">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                查看交付状态
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-confirm">确定</button>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const elDirName = document.getElementById('val-dir-name');
+            const elExpiresAt = document.getElementById('val-expires-at');
+            const elFormatsWrap = document.getElementById('val-formats-wrap');
+            const btnCloseTitlebar = document.getElementById('btn-title-close');
+            const btnConfirm = document.getElementById('btn-confirm');
+            const btnViewStatus = document.getElementById('btn-view-status');
+
+            function applyGrant(grant = {}) {
+                if (!grant || typeof grant !== 'object') return;
+                const dirName = grant.directoryName || grant.pathHint || grant.directory || '已选择目录';
+                elDirName.textContent = dirName;
+                elDirName.title = grant.directory || dirName;
+
+                elExpiresAt.textContent = grant.expiresAt || '按服务端策略有效（约 30 天）';
+
+                const formats = Array.isArray(grant.allowedFormats) && grant.allowedFormats.length ? grant.allowedFormats : [];
+                elFormatsWrap.innerHTML = '';
+                if (!formats.length) {
+                    const span = document.createElement('span');
+                    span.className = 'format-chip';
+                    span.textContent = '通用受控格式';
+                    elFormatsWrap.appendChild(span);
+                } else {
+                    const previewList = ['docx', 'pdf', 'xlsx', 'md', 'py', 'js', 'json', 'sql'];
+                    const shown = formats.filter(f => previewList.includes(f));
+                    const displayChips = shown.length >= 3 ? shown.slice(0, 6) : formats.slice(0, 6);
+                    displayChips.forEach(f => {
+                        const chip = document.createElement('span');
+                        chip.className = 'format-chip';
+                        chip.textContent = f;
+                        elFormatsWrap.appendChild(chip);
+                    });
+                    const remaining = formats.length - displayChips.length;
+                    if (remaining > 0) {
+                        const more = document.createElement('span');
+                        more.className = 'format-more-chip';
+                        more.textContent = `+${remaining} 种格式`;
+                        more.title = formats.join('、');
+                        elFormatsWrap.appendChild(more);
+                    }
+                }
+            }
+
+            // 从窗口桥接或 URL 查询参数中读取授权信息
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const queryRaw = params.get('grant');
+                if (queryRaw) applyGrant(JSON.parse(queryRaw));
+            } catch (_) {}
+
+            if (window.pivotDeliveryGrant?.getData) {
+                window.pivotDeliveryGrant.getData().then(grant => {
+                    if (grant && Object.keys(grant).length) applyGrant(grant);
+                }).catch(() => {});
+            }
+
+            function doClose() {
+                if (window.pivotDeliveryGrant?.close) {
+                    window.pivotDeliveryGrant.close();
+                } else {
+                    window.close();
+                }
+            }
+
+            function doViewStatus() {
+                if (window.pivotDeliveryGrant?.viewStatus) {
+                    window.pivotDeliveryGrant.viewStatus();
+                } else {
+                    doClose();
+                }
+            }
+
+            btnCloseTitlebar.addEventListener('click', doClose);
+            btnConfirm.addEventListener('click', doClose);
+            btnViewStatus.addEventListener('click', doViewStatus);
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    e.preventDefault();
+                    doClose();
+                }
+            });
+
+            setTimeout(() => btnConfirm.focus(), 80);
+        })();
+    </script>
+</body>
+</html>

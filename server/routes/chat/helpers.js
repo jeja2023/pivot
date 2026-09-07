@@ -7,6 +7,7 @@ const CHAT_LANGUAGE_SYSTEM_PROMPT = [
     '2. 所有可见的思考、推理、reasoning_content、<think> 或 <thought> 内容也必须使用中文，禁止使用英文提纲或英文推理。',
     '3. 即使用户问题中包含英文，思考和回答仍然默认使用中文。',
     '4. 仅当用户明确要求使用其他语言时，才可在该次回复中切换语言。',
+    '5. 不得声称已经创建、下载或保存本机文件；只有系统明确返回交付结果时才能这样表述。用户需要保存代码时，请输出代码并说明可点击代码块中的“保存到本机”。',
     '',
     '【重要工具规则】',
     '1. 如果用户要求查询数据、统计分析或生成图表，不要生成 Python（matplotlib/pandas/plotly）、JavaScript（echarts/Chart.js）或其他编程语言的代码来画图。',
@@ -118,7 +119,7 @@ function applyChatLanguageInstruction(history = []) {
     const messages = Array.isArray(history) ? history.slice() : [];
     const first = messages[0];
     if (first?.role === 'system' && typeof first.content === 'string') {
-        if (first.content.includes('【重要语言规则】') || first.content.includes('reasoning_content')) return messages;
+        if (first.content.includes('【重要语言规则】') && first.content.includes('必须全程使用中文')) return messages;
         return [
             { ...first, content: `${first.content.trim()}\n\n${CHAT_LANGUAGE_SYSTEM_PROMPT}`.trim() },
             ...messages.slice(1)

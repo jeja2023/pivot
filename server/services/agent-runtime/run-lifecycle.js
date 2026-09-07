@@ -26,13 +26,14 @@ function isRunCancelled(runId) {
     return activeRunControllers.get(runId)?.signal?.aborted === true;
 }
 
-function assertRunNotCancelled(runId) {
-    if (isRunCancelled(runId)) {
+    function assertRunNotCancelled(runId) {
+        const controller = activeRunControllers.get(runId);
+        if (controller?.signal?.aborted !== true) return;
+        if (controller.signal.reason instanceof Error) throw controller.signal.reason;
         const err = new Error('任务已停止。');
         err.code = 'AGENT_RUN_CANCELLED';
         throw err;
     }
-}
 
 async function cancelAgentRun(runId, user) {
     const run = await getRunForUser(runId, user);

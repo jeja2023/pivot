@@ -3,6 +3,7 @@ const { normalizeContextConfig, normalizeRunMode } = require('../agent-validator
 const { fitMessagesToContextBudget } = require('../context-budget');
 const { logger } = require('../../logger');
 const { AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
+const { sanitizeUserVisibleText } = require('../../llm');
 
 const AGENT_CONTEXT_FALLBACK_TOKENS = Math.max(
     Number.parseInt(process.env.AGENT_CONTEXT_WINDOW_TOKENS || '32768', 10) || 32768,
@@ -102,6 +103,8 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
                 '你是 Pivot Agent。请仔细规划，在需要时调用工具，并返回简洁的结果。',
                 '选择操作时只返回 JSON；仅在最终答案中使用 Markdown。',
                 '【重要语言规则】你的思考（thought）、推理和最终答案必须使用中文。禁止使用英文提纲或英文推理过程。',
+                '不得声称已经把文件写入用户电脑；只有用户明确点击保存并收到交付结果后，才能说明文件已保存。生成代码时请输出代码，并提示用户使用代码块中的“保存到本机”。',
+                '运行中收到的 PIVOT_AGENT_CONTROL 消息代表用户最新的明确指令，必须在不违反安全策略和既有审批边界的前提下优先执行；不要重复已经完成的工作。',
                 'Schema: {"thought":"简短推理（中文）","action":"tool|final","tool":"tool.name","input":{},"answer":"最终答案（中文）"}',
                 `运行模式：${runModeLabel}。`,
                 '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
@@ -153,7 +156,8 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         user,
         signal: options.signal || null,
         usageRef,
-        minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS
+        minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS,
+        timeoutMs: options.timeoutMs
     });
     if (usageRef.truncated) {
         logger.warn({
@@ -168,7 +172,7 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         usageRef,
         allowBudgetExceeded: options.allowBudgetExceeded === true
     });
-    return content || '未能生成最终答案。';
+    return sanitizeUserVisibleText(content) || '未能生成最终答案。';
 }
 
 function isMissingFinalAnswer(value) {

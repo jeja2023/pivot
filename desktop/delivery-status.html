@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>受控文档交付状态</title>
+    <title>受控文件交付状态</title>
     <style>
         :root {
             --bg: #ffffff;
@@ -250,25 +250,36 @@
             color: var(--text);
             display: flex;
             align-items: center;
+            white-space: nowrap;
+            overflow: hidden;
             gap: 4px;
         }
 
         .stat-tag {
-            font-size: 10px;
+            font-size: 11.5px;
             font-weight: 600;
-            padding: 1px 5px;
+            padding: 2px 7px;
             border-radius: 4px;
-            text-transform: uppercase;
+            white-space: nowrap;
+            line-height: 1.3;
         }
 
         .stat-tag.tag-idle {
             background: var(--brand-light);
             color: var(--brand);
+            border: 1px solid var(--brand-border);
+        }
+
+        .stat-tag.tag-stopped {
+            background: var(--surface-hover);
+            color: var(--muted);
+            border: 1px solid var(--line);
         }
 
         .stat-tag.tag-other {
-            background: var(--surface-hover);
-            color: var(--muted);
+            background: var(--danger-light);
+            color: var(--danger);
+            border: 1px solid var(--danger-border);
         }
 
         /* Detail Section */
@@ -353,22 +364,70 @@
             background: var(--card-bg);
             border: 1px solid var(--line);
             border-radius: 6px;
-            padding: 8px 10px;
+            padding: 10px 12px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 8px;
+            gap: 12px;
             font-size: 12px;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+
+        .grant-main {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+            flex: 1;
         }
 
         .grant-hint {
             font-weight: 600;
             color: var(--text);
+            overflow-wrap: anywhere;
+            font-size: 12.5px;
         }
 
         .grant-meta {
             font-size: 11px;
             color: var(--muted);
+        }
+
+        .btn-revoke-grant {
+            flex-shrink: 0;
+            height: 28px;
+            padding: 0 10px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: 4px;
+            border: 1px solid var(--danger-border);
+            background: var(--danger-light);
+            color: var(--danger);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+            outline: none;
+            white-space: nowrap;
+        }
+
+        .btn-revoke-grant:hover {
+            background: var(--danger);
+            color: #ffffff;
+            border-color: var(--danger);
+        }
+
+        .btn-revoke-grant.is-confirming {
+            background: var(--danger);
+            color: #ffffff;
+            font-weight: 600;
+            border-color: var(--danger);
+        }
+
+        .btn-revoke-grant:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .empty-grants {
@@ -473,9 +532,11 @@
                     <path d="M12 18v-6"></path>
                     <path d="M9 15l3 3 3-3"></path>
                 </svg>
-                <span>受控文档交付状态</span>
-                <span class="titlebar-badge">企业受控通道</span>
+                <span>受控文件交付状态</span>
             </div>
+            <button type="button" class="close-btn" id="btn-title-close" aria-label="关闭" title="关闭 (Esc)">
+                &times;
+            </button>
         </div>
 
         <div class="content">
@@ -489,9 +550,9 @@
                 </div>
                 <div class="hero-body">
                     <div class="hero-title-row">
-                        <h2 class="hero-title" id="hero-title">文档交付轮询运行中</h2>
+                        <h2 class="hero-title" id="hero-title">文件交付轮询运行中</h2>
                     </div>
-                    <p class="hero-subtitle" id="hero-subtitle">客户端后台守护中，已就绪接收并安全归档由 Web 端明确下发的受控文档。</p>
+                    <p class="hero-subtitle" id="hero-subtitle">客户端后台守护中，已就绪接收并安全写入由 Web 端明确下发的受控文件。</p>
                 </div>
             </div>
 
@@ -500,8 +561,7 @@
                 <div class="stat-item">
                     <span class="stat-label">运行状态</span>
                     <div class="stat-value">
-                        <span id="stat-status-text">idle</span>
-                        <span class="stat-tag tag-idle" id="stat-status-tag">就绪</span>
+                        <span class="stat-tag tag-idle" id="stat-status-tag">空闲待命</span>
                     </div>
                 </div>
                 <div class="stat-item">
@@ -510,7 +570,7 @@
                 </div>
                 <div class="stat-item">
                     <span class="stat-label">已完成交付</span>
-                    <div class="stat-value"><span id="stat-delivered-count">0</span> 篇</div>
+                    <div class="stat-value"><span id="stat-delivered-count">0</span> 个</div>
                 </div>
                 <div class="stat-item">
                     <span class="stat-label">交付异常</span>
@@ -608,27 +668,35 @@
 
                 elHeroIcon.className = 'status-pulse-wrapper ' + (isRunning ? 'is-running' : (isAvailable ? 'is-stopped' : 'is-warning'));
                 if (!isAvailable) {
-                    elHeroTitle.textContent = '文档交付当前不可用';
-                    elHeroSubtitle.textContent = state.reason || '当前环境未启用受控文档交付模块。';
+                    elHeroTitle.textContent = '文件交付当前不可用';
+                    elHeroSubtitle.textContent = state.reason || '当前环境未启用受控文件交付模块。';
                 } else if (isRunning) {
-                    elHeroTitle.textContent = '文档交付轮询运行中';
-                    elHeroSubtitle.textContent = '受控客户端后台守护中，已就绪接收并安全写入由 Web 端下发的交付文档。';
+                    elHeroTitle.textContent = '文件交付轮询运行中';
+                    elHeroSubtitle.textContent = '受控客户端后台守护中，已就绪接收并安全写入由 Web 端下发的交付文件。';
                 } else {
-                    elHeroTitle.textContent = '文档交付轮询已停止';
+                    elHeroTitle.textContent = '文件交付轮询已停止';
                     elHeroSubtitle.textContent = '后台交付轮询未运行，可通过配置目录重新唤醒连接。';
                 }
 
                 const statusText = state.lastStatus || (isRunning ? 'idle' : 'stopped');
-                elStatStatusText.textContent = statusText;
-                if (statusText === 'idle') {
-                    elStatStatusTag.textContent = '空闲待命';
-                    elStatStatusTag.className = 'stat-tag tag-idle';
-                } else if (statusText === 'polling') {
-                    elStatStatusTag.textContent = '轮询中';
-                    elStatStatusTag.className = 'stat-tag tag-idle';
-                } else {
-                    elStatStatusTag.textContent = statusText;
-                    elStatStatusTag.className = 'stat-tag tag-other';
+                const statusLabels = {
+                    idle: '空闲待命', starting: '正在启动', stopped: '已停止', polling: '正在轮询',
+                    claimed: '正在写入', delivered: '已完成', reused: '已完成', failed: '交付失败',
+                    error: '交付异常', unavailable: '不可用', grant_invalid: '授权已失效'
+                };
+                if (elStatStatusText) {
+                    elStatStatusText.textContent = '';
+                    elStatStatusText.style.display = 'none';
+                }
+                if (elStatStatusTag) {
+                    elStatStatusTag.textContent = statusLabels[statusText] || '正在处理';
+                    if (statusText === 'idle' || statusText === 'polling' || statusText === 'delivered' || statusText === 'reused') {
+                        elStatStatusTag.className = 'stat-tag tag-idle';
+                    } else if (statusText === 'stopped') {
+                        elStatStatusTag.className = 'stat-tag tag-stopped';
+                    } else {
+                        elStatStatusTag.className = 'stat-tag tag-other';
+                    }
                 }
 
                 const grants = Array.isArray(state.grants) ? state.grants : [];
@@ -649,15 +717,78 @@
                     grants.forEach(grant => {
                         const item = document.createElement('div');
                         item.className = 'grant-item';
+
+                        const main = document.createElement('div');
+                        main.className = 'grant-main';
+
                         const hint = document.createElement('span');
                         hint.className = 'grant-hint';
-                        hint.textContent = grant.directoryName || grant.pathHint || grant.grantId || '已授权目录';
+                        hint.textContent = grant.directory || grant.directoryName || grant.pathHint || grant.grantId || '已授权目录';
+
                         const meta = document.createElement('span');
                         meta.className = 'grant-meta';
-                        const formats = Array.isArray(grant.allowedFormats) && grant.allowedFormats.length ? grant.allowedFormats.join(', ') : '默认格式';
-                        meta.textContent = '支持: ' + formats;
-                        item.appendChild(hint);
-                        item.appendChild(meta);
+                        const formats = Array.isArray(grant.allowedFormats) && grant.allowedFormats.length ? grant.allowedFormats : [];
+                        const hasSourceFormats = formats.some(format => ['py', 'js', 'ts', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'swift', 'kt', 'sh', 'sql'].includes(format));
+                        const formatText = !formats.length ? '默认格式' : (hasSourceFormats ? '办公文档、文本与源码' : formats.join(', '));
+                        meta.textContent = '允许格式：' + formatText;
+                        meta.title = formats.join(', ');
+
+                        main.appendChild(hint);
+                        main.appendChild(meta);
+                        item.appendChild(main);
+
+                        if (grant.grantId) {
+                            const btnRevoke = document.createElement('button');
+                            btnRevoke.type = 'button';
+                            btnRevoke.className = 'btn-revoke-grant';
+                            btnRevoke.innerHTML = `
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>删除</span>
+                            `;
+                            btnRevoke.title = '删除此受控目录授权';
+
+                            let confirmTimer = null;
+                            btnRevoke.addEventListener('click', async (e) => {
+                                e.stopPropagation();
+                                if (!btnRevoke.classList.contains('is-confirming')) {
+                                    btnRevoke.classList.add('is-confirming');
+                                    btnRevoke.innerHTML = `<span>确认删除？</span>`;
+                                    confirmTimer = setTimeout(() => {
+                                        btnRevoke.classList.remove('is-confirming');
+                                        btnRevoke.innerHTML = `
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="3 6 5 6 21 6"></polyline>
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                            </svg>
+                                            <span>删除</span>
+                                        `;
+                                    }, 3500);
+                                    return;
+                                }
+
+                                if (confirmTimer) clearTimeout(confirmTimer);
+                                btnRevoke.disabled = true;
+                                btnRevoke.innerHTML = `<span>删除中...</span>`;
+
+                                try {
+                                    if (window.pivotDeliveryStatus?.revokeDirectory) {
+                                        await window.pivotDeliveryStatus.revokeDirectory(grant.grantId);
+                                    }
+                                    await refreshStatus();
+                                } catch (err) {
+                                    btnRevoke.disabled = false;
+                                    btnRevoke.classList.remove('is-confirming');
+                                    btnRevoke.innerHTML = `<span>删除失败</span>`;
+                                    setTimeout(() => refreshStatus(), 1500);
+                                }
+                            });
+
+                            item.appendChild(btnRevoke);
+                        }
+
                         listWrap.appendChild(item);
                     });
                     elGrantsContainer.appendChild(listWrap);
@@ -708,6 +839,7 @@
             }
 
             document.getElementById('btn-close').addEventListener('click', closeWindow);
+            document.getElementById('btn-title-close')?.addEventListener('click', closeWindow);
             document.getElementById('btn-refresh').addEventListener('click', refreshStatus);
 
             document.getElementById('btn-configure-dir').addEventListener('click', async () => {

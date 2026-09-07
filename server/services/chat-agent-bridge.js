@@ -215,11 +215,11 @@ async function persistAgentRunChatResult(runId) {
     const user = await queryOne('SELECT * FROM users WHERE id = ?', [userId]).catch(() => ({ id: userId }));
     const modelCfg = await getRunnableModelForUserAsync(run.chosen_model_id || run.model_id, user).catch(() => null);
     const modelId = Number(run.chosen_model_id || run.model_id || 0) || null;
+    // 消息内容的估算 Token 仅供后续会话上下文裁剪，不能当成 Agent 实际模型输出。
     const tokenCount = estimateTokens(content);
     const startedAt = Date.parse(String(run.started_at || run.created_at || '')) || Date.now();
     const completedAt = Date.parse(String(run.completed_at || '')) || Date.now();
     const costTime = Math.max((completedAt - startedAt) / 1000, 0.001);
-    const tps = tokenCount > 0 ? tokenCount / costTime : 0;
     let result;
     try {
         result = await saveAssistantMessage({
@@ -245,7 +245,9 @@ async function persistAgentRunChatResult(runId) {
     }
     const messageId = Number(result?.lastInsertRowid || 0) || null;
     if (messageId) {
-        await updateAssistantStats({ messageId, costTime, tps });
+        // Agent 的总耗时包含排队、上下文构建、多个模型回合、工具调用和续跑；
+        // 用最终提示文本除以总耗时会伪造出“模型很慢”的 t/s，因此明确不写吞吐率。
+        await updateAssistantStats({ messageId, costTime, tps: null });
         await touchSession(sessionId);
         if (modelCfg) {
             await scheduleMemoryExtraction({

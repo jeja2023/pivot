@@ -14,7 +14,11 @@
  */
 const os = require('os');
 const path = require('path');
-const { buildDeliveryFilename } = require('../../server/services/agent-path-safety');
+const {
+    buildDeliveryFilename,
+    DELIVERY_EXTENSION_BY_FORMAT,
+    LEGACY_DEFAULT_DELIVERY_FORMATS
+} = require('../../server/services/agent-path-safety');
 const defaultIdentity = require('./device-identity');
 const defaultManifest = require('./written-manifest');
 const defaultGrants = require('./output-grants');
@@ -52,13 +56,23 @@ function startOfDay(nowMs) {
 }
 
 function parseAllowedFormats(value) {
-    if (Array.isArray(value)) return value.map(item => String(item).toLowerCase());
+    if (Array.isArray(value)) return normalizeAllowedFormats(value);
     try {
         const parsed = JSON.parse(String(value || '[]'));
-        return Array.isArray(parsed) ? parsed.map(item => String(item).toLowerCase()) : [];
+        return normalizeAllowedFormats(Array.isArray(parsed) ? parsed : []);
     } catch (_) {
         return [];
     }
+}
+
+function normalizeAllowedFormats(value) {
+    const allowed = (Array.isArray(value) ? value : [])
+        .map(item => String(item || '').trim().toLowerCase())
+        .filter(item => Object.prototype.hasOwnProperty.call(DELIVERY_EXTENSION_BY_FORMAT, item));
+    const legacyDefault = allowed.length === LEGACY_DEFAULT_DELIVERY_FORMATS.length
+        && LEGACY_DEFAULT_DELIVERY_FORMATS.every(format => allowed.includes(format));
+    if (legacyDefault) return Object.keys(DELIVERY_EXTENSION_BY_FORMAT);
+    return [...new Set(allowed)];
 }
 
 /**
@@ -113,20 +127,29 @@ function createDeliveryExecutor(options = {}) {
         return signChallenge('ack', deviceId, `${intentId}:${claimToken}`);
     }
 
+    let registeringPromise = null;
     /** 首次配对或进程重启后重新登记设备；服务端按设备标识幂等更新公钥与状态。 */
     async function ensureRegistered(deviceId) {
         if (state.registeredDeviceId === deviceId) return state.registeredDeviceId;
-        const { nonce, signature } = await signChallenge('register', deviceId);
-        await api.registerDevice({
-            deviceId,
-            deviceName,
-            publicKeyPem: identity.getPublicKeyPem(),
-            nonce,
-            signature
-        });
-        state.registeredDeviceId = deviceId;
-        state.lastAttestAt = now();
-        return deviceId;
+        if (registeringPromise) return registeringPromise;
+        registeringPromise = (async () => {
+            try {
+                const { nonce, signature } = await signChallenge('register', deviceId);
+                await api.registerDevice({
+                    deviceId,
+                    deviceName,
+                    publicKeyPem: identity.getPublicKeyPem(),
+                    nonce,
+                    signature
+                });
+                state.registeredDeviceId = deviceId;
+                state.lastAttestAt = now();
+                return deviceId;
+            } finally {
+                registeringPromise = null;
+            }
+        })();
+        return registeringPromise;
     }
 
     /** 周期心跳：让服务端确认设备在线且确实持有私钥（§7.7 第 2 个条件）。 */
@@ -204,7 +227,7 @@ function createDeliveryExecutor(options = {}) {
         }
         const allowedFormats = parseAllowedFormats(localGrant.allowedFormats);
         if (allowedFormats.length && !allowedFormats.includes(format)) {
-            return reportFailure(intent.id, claimToken, 'format_not_allowed', '该授权目录不允许写入当前文档格式，已拒绝写入。');
+            return reportFailure(intent.id, claimToken, 'format_not_allowed', '该授权目录不允许写入当前文件格式，已拒绝写入。');
         }
 
         const grantMaxBytes = Number(claim.grant && claim.grant.maxBytes) || 0;
@@ -309,6 +332,12 @@ function createDeliveryExecutor(options = {}) {
         const chosen = await chooseDirectory();
         if (!chosen || chosen.canceled || !chosen.directory) return { canceled: true };
         const validated = grants.validateOutputDirectory(chosen.directory);
+        const existing = typeof grants.findLocalGrantByDirectory === 'function'
+            ? grants.findLocalGrantByDirectory(validated.directory)
+            : null;
+        if (existing && !existing.expired) {
+            throw executorError(`目录“${validated.directory}”已在受控列表中，无需重复添加。如需重新配置请先删除已有授权。`, 'DELIVERY_GRANT_ALREADY_EXISTS');
+        }
         await ensureRegistered(deviceId);
         const { nonce, signature } = await signChallenge('grant', deviceId, validated.pathHint);
         const grant = await api.registerOutputGrant(deviceId, {
@@ -403,7 +432,7 @@ function createDeliveryExecutor(options = {}) {
         }
     }
 
-    function getStatus() {
+    function getStatus(options = {}) {
         const identityStatus = typeof identity.getIdentityStatus === 'function'
             ? identity.getIdentityStatus()
             : { available: false, reason: '设备身份模块不可用。' };
@@ -428,7 +457,7 @@ function createDeliveryExecutor(options = {}) {
                 attestIntervalMs: limits.attestIntervalMs
             },
             usedTodayBytes: safeCall(() => manifest.sumBytesWrittenSince(startOfDay(now())), 0),
-            grants: safeCall(() => grants.listLocalGrants(), []),
+            grants: safeCall(() => grants.listLocalGrants({ includeDirectory: options.includeDirectory === true }), []),
             recentWrites: safeCall(() => manifest.listWritten(10), [])
         };
     }

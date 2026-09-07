@@ -5,6 +5,8 @@ function createLocalMcpController(options = {}) {
         request: options.request,
         getLocalAuthorizationStatus: options.getLocalAuthorizationStatus,
         executeLocalTool: options.executeLocalTool,
+        identity: options.identity,
+        ensureRegistered: options.ensureRegistered,
         logger: options.logger || console
     });
 }

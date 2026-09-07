@@ -19,14 +19,47 @@ const WINDOWS_RESERVED_NAMES = new Set([
     'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
 ]);
 
-/** 交付允许的文档扩展名。服务端按 rendition.format 决定，不接受交付端或 IR 指定。 */
+/**
+ * 交付允许的扩展名。代码文件仍然是纯文本产物，只能通过受控 Rendition
+ * 进入交付链；这里不包含二进制可执行文件格式，也不允许交付端自定义扩展名。
+ */
 const DELIVERY_EXTENSION_BY_FORMAT = Object.freeze({
     docx: '.docx',
     pdf: '.pdf',
     xlsx: '.xlsx',
     html: '.html',
-    md: '.md'
+    md: '.md',
+    txt: '.txt',
+    json: '.json',
+    yaml: '.yaml',
+    yml: '.yml',
+    xml: '.xml',
+    css: '.css',
+    scss: '.scss',
+    py: '.py',
+    js: '.js',
+    ts: '.ts',
+    jsx: '.jsx',
+    tsx: '.tsx',
+    java: '.java',
+    c: '.c',
+    h: '.h',
+    cpp: '.cpp',
+    hpp: '.hpp',
+    cs: '.cs',
+    go: '.go',
+    rs: '.rs',
+    php: '.php',
+    rb: '.rb',
+    swift: '.swift',
+    kt: '.kt',
+    kts: '.kts',
+    sh: '.sh',
+    sql: '.sql'
 });
+
+/** 旧版本“默认全部格式”授权的格式集合，用于平滑升级已有桌面授权。 */
+const LEGACY_DEFAULT_DELIVERY_FORMATS = Object.freeze(['docx', 'pdf', 'xlsx', 'html', 'md']);
 
 const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f]/;
 
@@ -167,6 +200,7 @@ function resolveNonConflictingPath(directory, filename, { exists = fs.existsSync
 
 module.exports = {
     DELIVERY_EXTENSION_BY_FORMAT,
+    LEGACY_DEFAULT_DELIVERY_FORMATS,
     WINDOWS_RESERVED_NAMES,
     assertRealPathInside,
     buildDeliveryFilename,

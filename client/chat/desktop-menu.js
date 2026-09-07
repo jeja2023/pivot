@@ -110,7 +110,7 @@
                 header.className = 'desktop-app-menu-section-header';
                 let headerText = item.header;
                 if (headerText === '客户端与连接' && isServerConfigLocked) {
-                    headerText = '受控文档交付';
+                    headerText = '受控文件交付';
                 }
                 header.textContent = headerText;
                 popover.appendChild(header);

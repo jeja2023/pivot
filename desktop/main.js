@@ -45,8 +45,11 @@ let aboutWindow = null;
 let serverConfigWindow = null;
 let deliveryController = null;
 const getLocalMcpConnector = createLazyLocalMcpController({
-    request: options => getDeliveryController().request(options), getLocalAuthorizationStatus: buildLocalAuthorizationStatus,
-    executeLocalTool: executeLocalMcpTool, logger: console
+    request: options => getDeliveryController().request(options),
+    ensureRegistered: deviceId => getDeliveryController().ensureRegistered(deviceId),
+    getLocalAuthorizationStatus: buildLocalAuthorizationStatus,
+    executeLocalTool: executeLocalMcpTool,
+    logger: console
 });
 const workerApprovals = createWorkerApprovalStore();
 
@@ -507,7 +510,7 @@ function getDeliveryController() {
         getSession: () => mainWindow?.webContents?.session || session.defaultSession,
         getStealthSecret: targetUrl => resolveStealthSecret(runtimeConfig, targetUrl),
         showDirectoryPicker: async () => {
-            const result = await showLocalAuthorizationDialog({ title: '选择 Pivot 文档输出目录', properties: ['openDirectory', 'createDirectory'] });
+            const result = await showLocalAuthorizationDialog({ title: '选择 Pivot 文件输出目录', properties: ['openDirectory', 'createDirectory'] });
             return result?.canceled || !result?.filePaths?.[0] ? { canceled: true } : { directory: result.filePaths[0] };
         },
         showMessageBox: (parent, config) => dialog.showMessageBox(parent, config),

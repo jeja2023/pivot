@@ -385,6 +385,30 @@ function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, toke
     footerEl?.classList.remove('hover-time-only');
 }
 
+function renderAgentTaskStats(statsEl, { modelName = '', costTime = 0, outputTokens = 0, status = '' } = {}) {
+    if (!statsEl) return;
+    const normalizedModelName = String(modelName || statsEl.dataset.modelName || '').trim();
+    if (normalizedModelName) statsEl.dataset.modelName = normalizedModelName;
+    const currentModelName = String(statsEl.dataset.modelName || '').trim();
+    const modelHtml = currentModelName
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}${escapeChatStatusHtml(currentModelName)}</span>`
+        : '';
+    const safeCostTime = Number.isFinite(Number(costTime)) ? Math.max(Number(costTime), 0) : 0;
+    const safeOutputTokens = Number.isFinite(Number(outputTokens)) ? Math.max(Math.round(Number(outputTokens)), 0) : 0;
+    const isTimeout = String(status || '').toLowerCase() === 'completed_with_errors';
+    const outputHtml = safeOutputTokens > 0
+        ? `<span class="stat-item">累计模型输出 ${safeOutputTokens} Tokens</span>`
+        : `<span class="stat-item">${isTimeout ? '模型未返回可计量输出' : '连续任务'}</span>`;
+    PivotSafeHtml.setHtml(statsEl, `
+        ${modelHtml}
+        <span class="stat-item">${ICONS.time}${safeCostTime.toFixed(1)}s</span>
+        ${outputHtml}
+    `);
+    const footerEl = statsEl.closest('.message-footer');
+    footerEl?.classList.remove('hidden');
+    footerEl?.classList.remove('hover-time-only');
+}
+
 function isMessageContainerNearBottom(threshold = 160) {
     const container = document.getElementById('message-container');
     if (!container) return false;
@@ -447,6 +471,7 @@ window.Pivot.exposeModule('chat.streaming', {
     createBrowserSseParser,
     renderStreamingAssistantContent,
     renderFinalAssistantStats,
+    renderAgentTaskStats,
     isMessageContainerNearBottom,
     keepMessageContainerPinnedToBottom,
     keepLatestCodeBlockPinned,

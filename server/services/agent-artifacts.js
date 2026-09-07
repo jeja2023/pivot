@@ -140,7 +140,9 @@ async function createStandaloneArtifact(user, body = {}) {
     }
     const safeType = String(body.type || 'document').trim().slice(0, 40) || 'document';
     const safeTitle = String(body.title || '未命名文档').trim().slice(0, 120) || '未命名文档';
-    const safeContent = String(body.content || '').trim();
+    // 普通文档沿用 trim；代码产物必须保留首尾空格和换行，否则会改变可运行性。
+    const rawContent = String(body.content ?? '');
+    const safeContent = body.preserveWhitespace === true ? rawContent : rawContent.trim();
     const safeNote = String(body.note || '用户文档保存').trim().slice(0, 500);
     if (!safeContent) {
         const err = new Error('独立产物内容不能为空。');

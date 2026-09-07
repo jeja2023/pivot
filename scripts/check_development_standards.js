@@ -204,7 +204,7 @@ function hasLatinWord(text) {
 function isAllowedTechnicalLiteral(value) {
     const text = String(value || '').trim();
     if (!text) return true;
-    if (/^(API|URL|URI|HTTP|HTTPS|JSON|HTML|CSS|JS|SQL|PDF|OCR|ID|UUID|JWT|MCP|CSV|TXT|DOCX|GET|POST|PUT|PATCH|DELETE)$/i.test(text)) return true;
+    if (/^(API|URL|URI|HTTP|HTTPS|JSON|HTML|CSS|JS|SQL|PDF|OCR|ID|UUID|JWT|MCP|CSV|TXT|DOCX|GET|POST|PUT|PATCH|DELETE|ERROR|WARN|WARNING|INFO|SUCCESS|DEBUG|TRACE)$/i.test(text)) return true;
     if (/^[-_.:/\\@?#&=%\w]+$/.test(text) && /[-_.:/\\@?#&=%]/.test(text)) return true;
     return false;
 }
@@ -230,7 +230,7 @@ function extractStringLiterals(line) {
 
 function extractHumanComment(line) {
     const trimmed = line.trim();
-    if (/eslint|stylelint|prettier|istanbul|sourceMappingURL|@ts-|<reference/i.test(trimmed)) return '';
+    if (/eslint|stylelint|prettier|istanbul|sourceMappingURL|@ts-|<reference|\bglobal\b/i.test(trimmed)) return '';
     if (trimmed.startsWith('//')) return trimmed.slice(2).trim();
     if (trimmed.startsWith('/*')) return trimmed.replace(/^\/\*+/, '').replace(/\*+\/$/, '').trim();
     if (trimmed.startsWith('*')) return trimmed.replace(/^\*+/, '').replace(/\*+\/$/, '').trim();

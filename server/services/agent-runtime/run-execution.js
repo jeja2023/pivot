@@ -1,3 +1,5 @@
+const { sanitizeUserVisibleText } = require('../../llm');
+
 function createAgentRunner(deps = {}) {
 const {
     activeRunControllers,
@@ -7,6 +9,9 @@ const {
     isRunCancelled,
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
+    AGENT_AUTO_CONTINUE_ON_TIMEOUT,
+    AGENT_MAX_AUTO_CONTINUATIONS,
+    AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_ANSWER_MIN_MAX_TOKENS,
     getRunForUser,
     getRunUser,
@@ -18,6 +23,8 @@ const {
     isStreamingToolsEnabled,
     tryRunAgentStreaming,
     callModelText,
+    resolveAgentPlanningThinking,
+    resolveAgentRequestTimeoutMs,
     recordAgentModelUsage,
     normalizeToolInput,
     chooseModel,
@@ -74,7 +81,76 @@ const {
     getBeijingTimestamp,
 } = deps;
 
-async function runAgent(runId, user) {
+    function runStartedAtMs(run = {}) {
+        const parsed = Date.parse(String(run.started_at || run.created_at || '').replace(' ', 'T'));
+        return Number.isFinite(parsed) ? parsed : Date.now();
+    }
+
+    function autoContinuationState(run = {}) {
+        const value = getRunMetadata(run).autoContinuation;
+        return value && typeof value === 'object' ? value : {};
+    }
+
+    async function continueTimedOutRun({ run, runId, user, error }) {
+        if (!AGENT_AUTO_CONTINUE_ON_TIMEOUT || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
+        const prior = autoContinuationState(run);
+        const count = Math.max(Number.parseInt(prior.count, 10) || 0, 0);
+        const elapsedMs = Math.max(Date.now() - runStartedAtMs(run), 0);
+        if (count >= AGENT_MAX_AUTO_CONTINUATIONS || elapsedMs >= AGENT_MAX_TOTAL_RUNTIME_MS) return false;
+
+        const currentStatus = await getRunStatus(runId);
+        if (TERMINAL_STATUSES.has(currentStatus)) return false;
+        // 工具尚未提交时不能立刻续跑：底层进程可能仍在收尾，直接再次执行会制造
+        // 重复副作用。幂等工具可由既有恢复机制重放，非幂等工具必须走人工审批。
+        const pendingTool = await queryOne(`
+            SELECT checkpoint_id FROM agent_run_checkpoints
+            WHERE run_id = ? AND checkpoint_type = 'tool' AND status = 'pending'
+            ORDER BY step_index DESC, id DESC LIMIT 1
+        `, [runId]);
+        if (pendingTool) return false;
+        const resumeContext = await buildAgentResumeContext(runId);
+        const nextCount = count + 1;
+        const resumeFromStep = Math.max(
+            Number(run.resume_from_step || 0),
+            Number(resumeContext.latestStepIndex || 0),
+            0
+        );
+        const now = getBeijingTimestamp();
+        await setRunMetadata(runId, {
+            resumeContext,
+            autoContinuation: {
+                count: nextCount,
+                max: AGENT_MAX_AUTO_CONTINUATIONS,
+                totalRuntimeMs: elapsedMs,
+                totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS,
+                lastReason: String(error?.message || '任务时间片结束').slice(0, 1000),
+                lastAt: now
+            }
+        });
+        await updateRun(runId, {
+            status: 'queued',
+            error_message: '',
+            resume_from_step: resumeFromStep,
+            last_heartbeat_at: now,
+            updated_at: now
+        });
+        await insertStep(runId, (await listSteps(runId)).length + 1, {
+            type: 'control',
+            title: `任务时间片结束，自动续跑：${nextCount}/${AGENT_MAX_AUTO_CONTINUATIONS}`,
+            output: {
+                reason: String(error?.message || ''),
+                resumeFromStep,
+                checkpointCount: Number(resumeContext.checkpointCount || 0),
+                elapsedMs,
+                totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS
+            }
+        });
+        await createAgentNotification(user.id, runId, 'info', '任务将从安全检查点继续', `已完成第 ${nextCount} 次自动续跑准备。`);
+        enqueueAgentRun(runId, user);
+        return true;
+    }
+
+    async function runAgent(runId, user) {
     const runController = new AbortController();
     activeRunControllers.set(runId, runController);
     let deadlineTimer = null;
@@ -108,6 +184,10 @@ async function runAgent(runId, user) {
             ? Number(normalizedBudget.max_runtime_seconds) * 1000
             : Infinity;
         const deadline = Date.now() + Math.min(normalizedRunTimeout, configuredRuntimeMs);
+        const remainingModelRequestMs = () => Math.min(
+            resolveAgentRequestTimeoutMs(),
+            Math.max(deadline - Date.now(), 1_000)
+        );
         taskBudget = new TaskBudget(normalizedBudget, {
             startedAt: Date.now(),
             enabled: true
@@ -398,7 +478,15 @@ async function runAgent(runId, user) {
                 const usageRef = {};
                 // 规划一步可能直接内联 {"action":"final","answer":"…"} 给出完整答案，
                 // 那段 answer 同样受本次调用的输出预算限制，因此按最终答案的下限给足。
-                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, { user, signal, usageRef, minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), '智能体规划', { signal: runController.signal });
+                const modelRequestTimeoutMs = remainingModelRequestMs();
+                plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, {
+                    user,
+                    signal,
+                    usageRef,
+                    minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS,
+                    enableThinking: resolveAgentPlanningThinking(modelCfg),
+                    timeoutMs: modelRequestTimeoutMs
+                }), modelRequestTimeoutMs, '智能体规划', { signal: runController.signal });
                 plannedTextUsageRef = usageRef;
                 if (usageRef.truncated) {
                     logger.warn({
@@ -462,7 +550,7 @@ async function runAgent(runId, user) {
             });
 
             if (plannedUsageResult?.budgetExceeded) {
-                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                const answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     signal: runController.signal,
                     budget: taskBudget,
                     allowBudgetExceeded: true,
@@ -482,7 +570,7 @@ async function runAgent(runId, user) {
             }
 
             if (plan.action === 'final' || !plan.tool) {
-                const answer = plan.answer || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                const answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     signal: runController.signal,
                     budget: taskBudget,
                     ...plannerChatContext
@@ -677,12 +765,14 @@ async function runAgent(runId, user) {
         });
         let answer;
         try {
+            const finalSummaryTimeoutMs = remainingModelRequestMs();
             answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                 signal,
                 budget: taskBudget,
                 allowBudgetExceeded: true,
+                timeoutMs: finalSummaryTimeoutMs,
                 ...plannerChatContext
-            }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'final summary', { signal: runController.signal });
+            }), finalSummaryTimeoutMs, 'final summary', { signal: runController.signal });
             await finishAgentTraceSpan(summarySpanId, {
                 output: { responseLength: String(answer || '').length },
                 durationMs: Date.now() - summaryStartedAt
@@ -716,12 +806,14 @@ async function runAgent(runId, user) {
                         await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
                             modelCfg.id, getBeijingTimestamp(), runId
                         ]);
+                        const escalatedSummaryTimeoutMs = remainingModelRequestMs();
                         answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                             signal,
                             budget: taskBudget,
                             allowBudgetExceeded: true,
+                            timeoutMs: escalatedSummaryTimeoutMs,
                             ...plannerChatContext
-                        }), Math.min(180000, Math.max(deadline - Date.now(), 1000)), 'escalated final summary', { signal: runController.signal });
+                        }), escalatedSummaryTimeoutMs, 'escalated final summary', { signal: runController.signal });
                     }
                 } catch (escErr) {
                     logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
@@ -763,8 +855,14 @@ async function runAgent(runId, user) {
             return;
         }
         if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
+            if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueTimedOutRun({ run: runForSummary, runId, user, error: e })) {
+                return;
+            }
+            const isModelRequestTimeout = /(?:智能体规划|流式工具规划|final summary|escalated final summary)执行超时/i.test(String(e.message || ''));
             const reason = e.code === 'AGENT_TIMEOUT'
-                ? '任务已达到运行时间上限，以下为已完成的部分结果。'
+                ? (isModelRequestTimeout
+                    ? '模型响应超过单次调用时限，以下为已完成的部分结果。'
+                    : '任务已达到运行时间上限，以下为已完成的部分结果。')
                 : '任务已达到预算上限，以下为已完成的部分结果。';
             let answer = '';
             if (modelCfgForSummary && runForSummary) {

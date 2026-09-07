@@ -188,7 +188,8 @@ async function selectSession(id, title, options = {}) {
                 costTime: m.cost_time,
                 tps: m.tokens_per_sec,
                 tokenCount: m.token_count,
-                modelName: m.model_name || m.model_api_name || ''
+                modelName: m.model_name || m.model_api_name || '',
+                agentRunId: m.agent_run_id || ''
             }, { target: fragment, deferRender: true });
             if (m.role === 'assistant' && contentEl) assistantContentNodes.push(contentEl);
         });

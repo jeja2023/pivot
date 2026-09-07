@@ -3,6 +3,12 @@ const { getAgentConcurrencyConfig } = require('../runtime-settings');
 
 const AGENT_DEFAULT_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_RUN_TIMEOUT_MS || '600000', 10) || 600000, 60000);
 const AGENT_TOOL_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AGENT_TOOL_TIMEOUT_MS || '120000', 10) || 120000, 30000);
+const AGENT_AUTO_CONTINUE_ON_TIMEOUT = !['0', 'false', 'off', 'disabled'].includes(String(process.env.AGENT_AUTO_CONTINUE_ON_TIMEOUT || 'true').trim().toLowerCase());
+const AGENT_MAX_AUTO_CONTINUATIONS = Math.max(0, Math.min(Number.parseInt(process.env.AGENT_MAX_AUTO_CONTINUATIONS || '12', 10) || 0, 100));
+const AGENT_MAX_TOTAL_RUNTIME_MS = Math.max(
+    AGENT_DEFAULT_TIMEOUT_MS,
+    Math.min(Number.parseInt(process.env.AGENT_MAX_TOTAL_RUNTIME_MS || `${2 * 60 * 60 * 1000}`, 10) || (2 * 60 * 60 * 1000), 24 * 60 * 60 * 1000)
+);
 const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_STALE_RUNNING_MINUTES || '30', 10) || 30, 5);
 const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
 const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
@@ -65,6 +71,9 @@ function withTimeout(operation, timeoutMs, label = 'operation', options = {}) {
 module.exports = {
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
+    AGENT_AUTO_CONTINUE_ON_TIMEOUT,
+    AGENT_MAX_AUTO_CONTINUATIONS,
+    AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_STALE_RUNNING_MINUTES,
     AGENT_QUEUE_LOCK_MS,
     AGENT_INSTANCE_ID,

@@ -9,7 +9,8 @@
  */
 const express = require('express');
 const { asyncHandler } = require('../http');
-const { getAgentArtifactForUser } = require('../services/agent-artifacts');
+const { createStandaloneArtifact, getAgentArtifactForUser } = require('../services/agent-artifacts');
+const { createCodeRendition, normalizeCodeFile } = require('../services/agent-code-renditions');
 const {
     createRendition,
     consumeDownloadToken,
@@ -67,6 +68,38 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
     }));
 
     // ── 渲染产物 ────────────────────────────────────────────────────────────
+    router.post('/agents/code-renditions', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const body = req.body || {};
+        // 代码文件由用户在代码块工具栏点击保存时创建；模型不能调用此接口创建交付意图。
+        const normalized = normalizeCodeFile({
+            filename: body.filename,
+            language: body.language,
+            content: body.content
+        });
+        const artifact = await createStandaloneArtifact(req.user, {
+            type: 'code',
+            title: normalized.filename,
+            content: normalized.content,
+            preserveWhitespace: true,
+            note: '用户从代码块发起的受控文件保存'
+        });
+        const result = await createCodeRendition({
+            user: req.user,
+            artifactId: artifact.id,
+            filename: normalized.filename,
+            language: normalized.format,
+            content: normalized.content,
+            toolCallId: `user:${req.user.id}:code:${artifact.id}`
+        });
+        writeLog(req, '创建受控代码文件产物', `产物ID: ${artifact.id}，格式: ${normalized.format}`);
+        res.status(result.reused ? 200 : 201).json({
+            success: true,
+            artifact: { id: artifact.id, title: normalized.filename, type: 'code' },
+            rendition: result.rendition,
+            reused: result.reused
+        });
+    }));
+
     router.get('/agents/artifacts/:id/renditions', authMiddleware, asyncHandler(async (req, res) => {
         const rows = await listRenditionsForArtifact(req.params.id, req.user);
         if (!rows) return res.status(404).json({ error: '产物不存在或无权访问。' });
@@ -154,8 +187,14 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
 
     router.post('/agents/local-devices', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const device = await registerLocalDevice(req.user, req.body || {});
-        writeLog(req, '注册本机交付设备', `设备: ${device.device_id}，密钥指纹: ${device.key_fingerprint}`);
-        res.status(201).json({ success: true, device });
+        if (device.registration_type === 'created' || device.is_new) {
+            writeLog(req, '注册本机交付设备', `设备: ${device.device_id}，密钥指纹: ${device.key_fingerprint}`);
+        } else if (device.registration_type === 'rotated') {
+            writeLog(req, '轮换本机交付设备密钥', `设备: ${device.device_id}，密钥指纹: ${device.key_fingerprint}`);
+        } else if (device.registration_type === 'reactivated') {
+            writeLog(req, '重新启用本机交付设备', `设备: ${device.device_id}，密钥指纹: ${device.key_fingerprint}`);
+        }
+        res.status(device.is_new ? 201 : 200).json({ success: true, device });
     }));
 
     router.post('/agents/local-devices/:deviceId/attest', authMiddleware, asyncHandler(async (req, res) => {

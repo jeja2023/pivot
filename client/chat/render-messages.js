@@ -96,8 +96,12 @@ function buildAssistantStatsHtml(stats = {}) {
     }
     if (stats && stats.costTime !== undefined) {
         items.push(`<span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>`);
-        items.push(`<span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>`);
-        items.push(`<span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>`);
+        if (stats.agentRunId) {
+            items.push('<span class="stat-item">连续任务</span>');
+        } else {
+            items.push(`<span class="stat-item">${ICONS.token}${stats.tokenCount || 0} Tokens</span>`);
+            items.push(`<span class="stat-item">${ICONS.speed}${Number(stats.tps).toFixed(1)} t/s</span>`);
+        }
     }
     if (!items.length) return '';
     return `<div class="message-stats"${modelName ? ` data-model-name="${escapeAttrValue(modelName)}"` : ''}>${items.join('')}</div>`;
@@ -457,6 +461,12 @@ function restoreThoughtStateAfterRender(root, state) {
 
 // --- 代码块复制功能实现 ---
 document.addEventListener('click', async (e) => {
+    const saveCodeButton = e.target.closest('.code-save-local-btn');
+    if (saveCodeButton) {
+        e.preventDefault();
+        await window.Pivot.moduleApi('chat.codeDelivery').saveCodeBlockToDesktop(saveCodeButton);
+        return;
+    }
     const btn = e.target.closest('.code-copy-btn');
     if (!btn) return;
 

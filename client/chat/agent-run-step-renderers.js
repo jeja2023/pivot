@@ -783,7 +783,12 @@ function stripAgentWorkflowReportHeading(text) {
 function agentStepRawDetail(step, preview) {
     const payload = step.output || step.input;
     if (payload === undefined || payload === null) return '';
-    const raw = typeof payload === 'string' ? payload.trim() : JSON.stringify(payload, null, 2);
+    const raw = (typeof payload === 'string' ? payload.trim() : JSON.stringify(payload, null, 2))
+        .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END/gi, '')
+        .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
+        .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
     if (!raw || raw === preview) return '';
     return raw.length > 5000 ? `${raw.slice(0, 5000)}\n...` : raw;
 }

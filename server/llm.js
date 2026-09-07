@@ -88,6 +88,76 @@ function stripThoughtContent(text = '') {
     return value.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const INTERNAL_AGENT_BLOCK_PATTERN = /PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END[ \t]*(?:\r?\n)?/gi;
+const INTERNAL_AGENT_UNTERMINATED_PATTERN = /PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi;
+const INTERNAL_AGENT_MARKER_PATTERN = /^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim;
+
+/** 删除只供模型使用的 Agent 上下文，防止世界状态、工具结果标记进入用户正文。 */
+function stripInternalAgentScaffolding(text = '') {
+    return String(text || '')
+        .replace(INTERNAL_AGENT_BLOCK_PATTERN, '')
+        .replace(INTERNAL_AGENT_UNTERMINATED_PATTERN, '')
+        .replace(INTERNAL_AGENT_MARKER_PATTERN, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/** 用户可见文本统一清洗入口；代码块中的英文语法不翻译，只清除内部控制内容。 */
+function sanitizeUserVisibleText(text = '') {
+    return stripVisibleReasoningScaffold(stripInternalAgentScaffolding(String(text || '')));
+}
+
+/** 流式删除跨 chunk 的内部 Agent 区块，避免最终答案干净但过程仍泄漏。 */
+function createInternalAgentScaffoldStreamFilter() {
+    let buffer = '';
+    let dropping = '';
+    const starts = /PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN\b/i;
+
+    function drain() {
+        let output = '';
+        while (true) {
+            if (dropping) {
+                const end = new RegExp(`PIVOT_${dropping}_END\\b`, 'i');
+                const match = end.exec(buffer);
+                if (!match) {
+                    buffer = buffer.slice(-48);
+                    return output;
+                }
+                buffer = buffer.slice(match.index + match[0].length);
+                dropping = '';
+                continue;
+            }
+            const match = starts.exec(buffer);
+            if (!match) {
+                // 保留足够的尾部，以识别被拆到下一个流片段的标记。
+                const keep = 48;
+                if (buffer.length <= keep) return output;
+                output += buffer.slice(0, -keep);
+                buffer = buffer.slice(-keep);
+                return output;
+            }
+            output += buffer.slice(0, match.index);
+            buffer = buffer.slice(match.index + match[0].length);
+            dropping = match[1].toUpperCase();
+        }
+    }
+
+    return {
+        push(chunk = '') {
+            buffer += String(chunk || '');
+            return drain();
+        },
+        finish(fallback = '') {
+            buffer += String(fallback || '');
+            const output = drain() + (dropping ? '' : stripInternalAgentScaffolding(buffer));
+            buffer = '';
+            dropping = '';
+            return output;
+        }
+    };
+}
+
 function stripVisibleReasoningScaffold(text = '') {
     let value = stripThoughtContent(text);
     const hasScaffold = [
@@ -634,8 +704,11 @@ module.exports = {
     getContext,
     getMemoryThreshold,
     createVisibleReasoningStreamFilter,
+    createInternalAgentScaffoldStreamFilter,
     syncMemoryCompressionConcurrency,
     stripThoughtContent,
+    stripInternalAgentScaffolding,
+    sanitizeUserVisibleText,
     stripVisibleReasoningScaffold,
     THRESHOLD
 };

@@ -5,7 +5,13 @@ const {
     detectUnsupportedCapability,
     buildCapabilityFallbackMessage
 } = require('../../capabilities');
-const { createVisibleReasoningStreamFilter, estimateTokens, stripVisibleReasoningScaffold } = require('../../llm');
+const {
+    createInternalAgentScaffoldStreamFilter,
+    createVisibleReasoningStreamFilter,
+    estimateTokens,
+    sanitizeUserVisibleText,
+    stripVisibleReasoningScaffold
+} = require('../../llm');
 const {
     modelSupportsVision,
     contentContainsVisionInput
@@ -582,17 +588,20 @@ function createChatRouter({
                 });
             };
             const visibleReasoningFilter = disableChatThinking ? createVisibleReasoningStreamFilter() : null;
+            const internalScaffoldFilter = createInternalAgentScaffoldStreamFilter();
             const providerState = createProviderEventStateMachine({ maxRecentEvents: 128 });
             const accumulator = createStreamAccumulator({
                 includeThoughtTags: !disableChatThinking,
                 includeThoughtContent: !disableChatThinking,
                 onContent(sendContent, _meta = {}) {
+                    const filteredInternal = internalScaffoldFilter.push(sendContent);
+                    if (!filteredInternal) return;
                     if (disableChatThinking) {
-                        const filteredContent = visibleReasoningFilter.push(sendContent);
+                        const filteredContent = visibleReasoningFilter.push(filteredInternal);
                         if (filteredContent) writeContentSse(filteredContent);
                         return;
                     }
-                    writeContentSse(sendContent);
+                    writeContentSse(filteredInternal);
                 }
             });
             const parser = createSseEventParser({
@@ -673,7 +682,7 @@ function createChatRouter({
                     if (!assistantContent.trim()) {
                         const fallback = extractModelTextFromRawResponse(rawStreamText);
                         if (fallback.content) {
-                            assistantContent = fallback.content;
+                            assistantContent = sanitizeUserVisibleText(fallback.content);
                             if (disableChatThinking) assistantContent = stripVisibleReasoningScaffold(assistantContent);
                             apiUsage = fallback.usage || apiUsage;
                             if (!disableChatThinking) writeContentSse(assistantContent);
@@ -690,6 +699,16 @@ function createChatRouter({
                         }
                         assistantContent = stripVisibleReasoningScaffold(assistantContent);
                     }
+                    // internalScaffoldFilter 已经消费过整个流，只需把最后暂存的尾片段补发，
+                    // 不能再次把完整 assistantContent 作为 fallback，否则会重复正文。
+                    const internalTail = internalScaffoldFilter.finish();
+                    if (internalTail) {
+                        const visibleTail = disableChatThinking
+                            ? visibleReasoningFilter.push(internalTail)
+                            : internalTail;
+                        if (visibleTail) writeContentSse(visibleTail);
+                    }
+                    assistantContent = sanitizeUserVisibleText(assistantContent);
                     const endedAt = Date.now();
                     const stats = buildAssistantSpeedStats({
                         assistantContent,

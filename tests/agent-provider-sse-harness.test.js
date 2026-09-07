@@ -121,6 +121,9 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             )
         ]);
         assert.equal(boundaryResult.content, '边界已验证');
+        assert.ok(boundaryResult.timing.firstByteAt);
+        assert.ok(boundaryResult.timing.firstFrameAt);
+        assert.ok(boundaryResult.timing.bytesReceived > 0);
         assert.equal(Object.hasOwn(received[0].body.messages[0], 'metadata'), false);
         assert.equal(Object.hasOwn(received[0].body.messages[0], 'contextHash'), false);
 
@@ -229,6 +232,50 @@ test('mock SSE harness propagates provider disconnect and cancellation', async (
         const pending = callModelStreamingWithTools(modelCfg, [{ role: 'user', content: 'cancel' }], [], { signal: controller.signal });
         setTimeout(() => controller.abort(), 20);
         await assert.rejects(pending, error => Boolean(error));
+    } finally {
+        await closeServer(server);
+    }
+});
+
+test('Agent 流建立后长期无新数据会按无进展策略中止', async () => {
+    const server = http.createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive' });
+            res.flushHeaders();
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const modelCfg = { id: 9, name: 'mock-idle', model_name: 'mock-idle', url: `http://127.0.0.1:${port}`, api_key: '' };
+    try {
+        await assert.rejects(
+            () => callModelStreamingWithTools(modelCfg, [{ role: 'user', content: 'idle' }], [], {
+                firstResponseTimeoutMs: 1_000,
+                streamIdleTimeoutMs: 1_000
+            }),
+            error => error?.code === 'AGENT_MODEL_STREAM_IDLE'
+        );
+    } finally {
+        await closeServer(server);
+    }
+});
+
+test('Agent 模型在首响应时限内未开始响应会给出可诊断错误码', async () => {
+    const server = http.createServer(req => {
+        req.resume();
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const modelCfg = { id: 10, name: 'mock-first-response', model_name: 'mock-first-response', url: `http://127.0.0.1:${port}`, api_key: '' };
+    try {
+        await assert.rejects(
+            () => callModelStreamingWithTools(modelCfg, [{ role: 'user', content: 'first-response' }], [], {
+                firstResponseTimeoutMs: 1_000,
+                streamIdleTimeoutMs: 1_000
+            }),
+            error => error?.code === 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT' && error.agentModelTiming?.firstByteAt === null
+        );
     } finally {
         await closeServer(server);
     }

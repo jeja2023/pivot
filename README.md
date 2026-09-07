@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.86-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.89-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,9 +11,9 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.86
+## 最新版本：0.1.89
 
-（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本桌面端企业级管控加固与工作台极简交互深度优化说明请参阅 [v0.1.86 发布记录](docs/releases/v0.1.86-桌面端企业级管控加固与工作台极简交互深度优化.md)。）
+（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本 Agent 持久执行与智能体交互升级说明请参阅 [v0.1.89 发布记录](docs/releases/v0.1.89-Agent持久执行与智能体交互升级.md)。）
 
 国产化桌面客户端当前正式支持 Linux AMD64 和 ARM64 的 UOS/Debian 构建；构建命令、离线依赖、原生模块验收和 LoongArch64 限制见 [统信 UOS 与龙芯客户端打包指南](docs/统信UOS与龙芯3A6000客户端打包指南.md)。龙芯 LoongArch64 当前不会生成正式安装包。
 
@@ -331,7 +331,16 @@ AGENT_MAX_CONCURRENT_RUNS=2
 # 是否允许聊天选择 Agent 执行模式：1 允许，0 禁止；普通回答模式始终可用
 CHAT_AGENT_EXECUTION_ENABLED=1
 AGENT_DAG_NODE_CONCURRENCY=4
+# 任务总时限与单轮模型调用时限。后者受前者的剩余时间约束，不再固定为 180 秒。
 AGENT_RUN_TIMEOUT_MS=600000
+AGENT_MODEL_REQUEST_TIMEOUT_MS=600000
+# 连续 Agent 的调用链看门狗与自动续跑总边界。
+AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS=300000
+AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS=120000
+AGENT_TOOL_PLANNING_THINKING=false
+AGENT_AUTO_CONTINUE_ON_TIMEOUT=true
+AGENT_MAX_AUTO_CONTINUATIONS=12
+AGENT_MAX_TOTAL_RUNTIME_MS=7200000
 AGENT_TOOL_TIMEOUT_MS=120000
 # 模型未配置上下文窗口时的 Agent 回退窗口（Token）
 AGENT_CONTEXT_WINDOW_TOKENS=32768
@@ -511,4 +520,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.86
+**当前版本**：v0.1.89

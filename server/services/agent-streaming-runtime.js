@@ -1,5 +1,5 @@
 const { getBeijingTimestamp } = require('../time');
-const { callModelStreamingWithTools, recordAgentModelUsage } = require('./agent-model');
+const { callModelStreamingWithTools, recordAgentModelUsage, resolveAgentPlanningThinking, resolveAgentRequestTimeoutMs } = require('./agent-model');
 const { buildAgentToolSchemas } = require('./agent-tool-catalog');
 const { normalizeMaxSteps, normalizePositiveInt } = require('./agent-validators');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
@@ -9,6 +9,7 @@ const { recordAgentToolCall } = require('./agent-tool-audit');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { executeToolCallsInOrder } = require('./agent-tool-scheduler');
 const { fitMessagesToContextBudget } = require('./context-budget');
+const { sanitizeUserVisibleText } = require('../llm');
 const {
     classifyNativeToolCallError,
     recordNativeToolCallCapability,
@@ -112,7 +113,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
 
 需要时使用 tool_calls 调用工具；否则提供最终答案。返回结构化的工具输入 JSON。
 
-【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。`;
+【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。
+不得声称已经把文件写入用户电脑；只有用户明确点击保存并收到交付结果后，才能说明文件已保存。生成代码时请输出代码，并提示用户使用代码块中的“保存到本机”。`;
 
         const history = Array.isArray(chatContext.chatHistory)
             ? chatContext.chatHistory
@@ -188,6 +190,15 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         payload: message.payload || {}
                     })}\nPIVOT_AGENT_CONTROL_END`
                 }));
+                if (controlMessages.length) {
+                    deps.publishUserEvent(user.id, 'agent.streaming', {
+                        runId,
+                        step,
+                        content: '',
+                        partialToolCalls: [],
+                        controlMessage: '已接收你的新指令，正在调整后续执行。'
+                    });
+                }
             }
             const stepContext = await deps.captureStepContext?.({
                 run,
@@ -218,6 +229,16 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             };
             await deps.updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const stepStart = Date.now();
+            let lastStreamingHeartbeatAt = stepStart;
+            const touchStreamingHeartbeat = () => {
+                const now = Date.now();
+                if (now - lastStreamingHeartbeatAt < 10_000) return;
+                lastStreamingHeartbeatAt = now;
+                Promise.resolve(deps.updateRun(runId, {
+                    last_heartbeat_at: getBeijingTimestamp(),
+                    updated_at: getBeijingTimestamp()
+                })).catch(() => {});
+            };
             const modelSpanId = await deps.startAgentTraceSpan?.(runId, {
                 type: 'model',
                 name: `流式规划模型调用 #${step}`,
@@ -267,12 +288,13 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             };
             const emitDelta = (snapshot) => {
                 if (!snapshot) return;
+                touchStreamingHeartbeat();
                 if (!snapshotSampler.sampleUi(snapshot)) return;
                 recordDelta(snapshot);
                 deps.publishUserEvent(user.id, 'agent.streaming', {
                     runId,
                     step,
-                    content: snapshot.content || '',
+                    content: sanitizeUserVisibleText(snapshot.content || ''),
                     partialToolCalls: snapshot.partialToolCalls || [],
                     finishReason: snapshot.finishReason || null
                 });
@@ -286,6 +308,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             }
             conversationForModel = conversationForModel.messages;
             const providerEvents = [];
+            const remainingModelMs = Math.max(deadline - Date.now(), 1_000);
+            const modelRequestTimeoutMs = Math.min(resolveAgentRequestTimeoutMs(), remainingModelMs);
             try {
                 try {
                     await deps.recordAgentEvent?.({
@@ -301,6 +325,23 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 result = await deps.withTimeout(
                     signal => callStreamingModel(modelCfg, conversationForModel, tools, {
                         temperature: 0.2,
+                        enableThinking: resolveAgentPlanningThinking(modelCfg),
+                        timeoutMs: modelRequestTimeoutMs,
+                        onProgress: ({ phase, timing }) => {
+                            Promise.resolve(deps.recordAgentEvent?.({
+                                runId,
+                                userId: user.id,
+                                turnId: stepContext?.turnId || `${runId}:turn:${step}`,
+                                stepIndex: step,
+                                type: 'model.progress',
+                                payload: {
+                                    ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_progress' }),
+                                    phase,
+                                    timing
+                                },
+                                eventKey: `model:${stepContext?.contextHash || step}:progress:${phase}`
+                            })).catch(() => {});
+                        },
                         onDelta: emitDelta,
                         onProviderEvent: event => {
                             if (providerEvents.length < 256) providerEvents.push(event);
@@ -308,7 +349,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         user,
                         signal
                     }),
-                    Math.min(180000, Math.max(deadline - Date.now(), 1000)),
+                    modelRequestTimeoutMs,
                     '流式工具规划',
                     { signal: deps.signal || null }
                 );
@@ -346,20 +387,26 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                             responseLength: String(result?.content || '').length,
                             toolCallCount: result?.toolCalls?.length || 0,
                             contextHash: stepContext?.contextHash || '',
-                            provider: result?.provider ? {
-                                status: result.provider.status,
-                                protocol: result.provider.protocol,
-                                responseId: result.provider.responseId,
-                                eventCount: result.provider.eventCount,
-                                finishReason: result.provider.finishReason,
-                                usage: result.provider.usage
-                            } : null
-                        },
+                             provider: result?.provider ? {
+                                 status: result.provider.status,
+                                 protocol: result.provider.protocol,
+                                 responseId: result.provider.responseId,
+                                 eventCount: result.provider.eventCount,
+                                 finishReason: result.provider.finishReason,
+                                 usage: result.provider.usage
+                             } : null,
+                             timing: result?.timing || null
+                         },
                         eventKey: `model:${stepContext?.contextHash || step}:completed`
                     });
                 } catch (_) {}
                 await deps.finishAgentTraceSpan?.(modelSpanId, {
-                    output: { responseLength: String(result?.content || '').length, toolCallCount: result?.toolCalls?.length || 0, finishReason: result?.finishReason || '' },
+                    output: {
+                        responseLength: String(result?.content || '').length,
+                        toolCallCount: result?.toolCalls?.length || 0,
+                        finishReason: result?.finishReason || '',
+                        timing: result?.timing || null
+                    },
                     durationMs: Date.now() - stepStart,
                     contextHash: stepContext?.contextHash || ''
                 });
@@ -371,7 +418,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                         turnId: stepContext?.turnId || `${runId}:turn:${step}`,
                         stepIndex: step,
                         type: 'model.failed',
-                        payload: { ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_failed' }), errorCode: modelError.code || '', errorMessage: modelError.message },
+                        payload: {
+                            ...buildAgentAuditFields(stepContext || {}, { entrypoint: 'agent', purpose: 'agent_streaming_failed' }),
+                            errorCode: modelError.code || '',
+                            errorMessage: modelError.message,
+                            timing: modelError.agentModelTiming || null
+                        },
                         eventKey: `model:${stepContext?.contextHash || step}:failed`
                     });
                 } catch (_) {}
@@ -379,7 +431,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     status: 'error',
                     errorMessage: modelError.message,
                     durationMs: Date.now() - stepStart,
-                    contextHash: stepContext?.contextHash || ''
+                    contextHash: stepContext?.contextHash || '',
+                    output: { timing: modelError.agentModelTiming || null }
                 });
                 throw modelError;
             }
@@ -393,7 +446,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             deps.publishUserEvent(user.id, 'agent.streaming', {
                 runId,
                 step,
-                content: result?.content || '',
+                content: sanitizeUserVisibleText(result?.content || ''),
                 partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
                 finishReason: result?.finishReason || null,
                 completed: true
@@ -409,7 +462,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                 title: result?.hasToolCalls ? `流式工具计划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '工具'}` : '流式最终答案',
                 input: { goal: run.goal },
                 output: {
-                    content: result?.content || '',
+                    content: sanitizeUserVisibleText(result?.content || ''),
                     toolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, arguments: c.arguments || c.argumentsRaw })),
                     finishReason: result?.finishReason || ''
                 },
@@ -418,7 +471,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             });
 
             if (!result?.hasToolCalls) {
-                const answer = result?.content || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                const answer = sanitizeUserVisibleText(result?.content || '') || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     budget: deps.taskBudget,
                     allowBudgetExceeded: true
                 });
@@ -620,7 +673,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
         return { completed: false, roundsUsed };
     } catch (streamErr) {
-        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED'].includes(streamErr.code)) throw streamErr;
+        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);
         try {
             await (deps.recordNativeToolCallCapability || recordNativeToolCallCapability)(modelCfg, fallback);

@@ -23,8 +23,8 @@ function buildApplicationMenu(options = {}) {
             label: '客户端',
             submenu: [
                 { label: '服务器连接配置...', accelerator: 'CmdOrCtrl+,', click: () => options.showServerConfigDialog() },
-                { label: '配置文档交付目录...', click: () => { void options.configureDeliveryDirectory(); } },
-                { label: '查看文档交付状态', click: () => { void options.showDeliveryStatus(); } },
+                { label: '配置文件交付目录...', click: () => { void options.configureDeliveryDirectory(); } },
+                { label: '查看文件交付状态', click: () => { void options.showDeliveryStatus(); } },
                 { type: 'separator' },
                 { label: '检查客户端更新', click: () => options.checkForUpdates() },
                 { type: 'separator' },

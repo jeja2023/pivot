@@ -165,11 +165,15 @@ function agentRunDurationLabel(value) {
 
 function agentRunFriendlySummary(run = {}, progress = {}) {
     const status = String(run.status || '').toLowerCase();
+    const continuation = agentRunMetadata(run).autoContinuation || {};
     const records = Number(progress.stepCount || 0);
     const rounds = Number(progress.roundCount || 0);
     const maxSteps = Number(progress.maxSteps || run.max_steps || 0);
     const isDag = String(run.run_mode || '') === 'dag';
     const limitMessage = String(run.error_message || '').trim();
+    if (status === 'queued' && Number(continuation.count || 0) > 0) {
+        return `上一时间片已结束，正在从安全检查点自动续跑（第 ${Number(continuation.count)}/${Number(continuation.max || 0)} 次）。`;
+    }
     if (status === 'queued') return '任务已进入队列，稍后将自动开始。';
     if (status === 'running') {
         if (isDag) return `工作流正在运行，当前已有 ${records} 条执行记录。`;
@@ -189,6 +193,7 @@ function agentRunActionMarkup(run = {}, options = {}) {
         canCreateWorkflowDraft = false, checkpoints = {}, isActive = false } = options;
     const actions = [];
     if (canCancel) actions.push(`<button type="button" class="btn-danger-outline" data-agent-cancel="${agentEscape(run.id)}">停止任务</button>`);
+    if (isActive) actions.push(`<button type="button" class="btn-secondary" data-agent-steer="${agentEscape(run.id)}">调整方向</button>`);
     if (canApprove) actions.push(`<button type="button" class="btn-primary" data-agent-approve="${agentEscape(run.id)}">批准并继续</button>`);
     if (canApprove) actions.push(`<button type="button" class="btn-danger-outline" data-agent-reject="${agentEscape(run.id)}">拒绝工具</button>`);
     if (canRerun) actions.push(`<button type="button" class="btn-primary" data-agent-rerun="${agentEscape(run.id)}">重新运行</button>`);
@@ -493,6 +498,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, false));
     container.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.Pivot.legacy.rerunAgentRun(run.id));
     container.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.Pivot.legacy.resumeAgentRun(run.id));
+    container.querySelector('[data-agent-steer]')?.addEventListener('click', () => window.Pivot.legacy.steerAgentRun(run.id));
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.Pivot.legacy.createWorkflowDraftFromAgentRun(run.id));
     container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
     container.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {

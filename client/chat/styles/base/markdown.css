@@ -296,6 +296,11 @@
     background: #1e293b;
     border-bottom: 1px solid rgba(148, 163, 184, 0.15);
 }
+.code-toolbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
 .code-language {
     color: #94a3b8;
     font-size: 0.7rem;
@@ -313,7 +318,8 @@
     border-radius: 50%;
     box-shadow: 0 0 8px #10b981;
 }
-.code-copy-btn {
+.code-copy-btn,
+.code-save-local-btn {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -328,7 +334,8 @@
     cursor: pointer;
     transition: 0.2s;
 }
-.code-copy-btn:hover {
+.code-copy-btn:hover,
+.code-save-local-btn:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: #10b981;
     color: #10b981;

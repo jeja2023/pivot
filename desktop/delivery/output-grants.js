@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { assertWritableDirectory } = require('./atomic-write');
+const { DELIVERY_EXTENSION_BY_FORMAT, LEGACY_DEFAULT_DELIVERY_FORMATS } = require('../../server/services/agent-path-safety');
 
 const GRANT_DIR_NAME = 'agent-delivery';
 const GRANT_FILE_NAME = 'output-grants.json';
@@ -136,8 +137,32 @@ function readGrantStore() {
     if (grantCache) return grantCache;
     try {
         const parsed = JSON.parse(fs.readFileSync(grantFilePath(), 'utf8'));
-        const grants = parsed && typeof parsed.grants === 'object' && parsed.grants ? parsed.grants : {};
-        grantCache = { version: 1, grants };
+        const rawGrants = parsed && typeof parsed.grants === 'object' && parsed.grants ? parsed.grants : {};
+        const platform = currentPlatform();
+        const seen = new Map();
+        const deduped = {};
+        let hasDuplicates = false;
+        const records = Object.values(rawGrants).sort((a, b) => {
+            const timeA = Date.parse(String(a.createdAt || a.expiresAt || 0).replace(' ', 'T')) || 0;
+            const timeB = Date.parse(String(b.createdAt || b.expiresAt || 0).replace(' ', 'T')) || 0;
+            return timeB - timeA;
+        });
+        for (const record of records) {
+            if (!record || !record.grantId || !record.directory) continue;
+            const key = comparablePath(record.directory, platform);
+            if (!seen.has(key)) {
+                seen.set(key, record.grantId);
+                deduped[record.grantId] = record;
+            } else {
+                hasDuplicates = true;
+            }
+        }
+        grantCache = { version: 1, grants: deduped };
+        if (hasDuplicates) {
+            try {
+                persistGrantStore(grantCache);
+            } catch (_) {}
+        }
     } catch (_) {
         grantCache = { version: 1, grants: {} };
     }
@@ -169,6 +194,33 @@ function isExpired(grant, nowMs = Date.now()) {
     return expiresAt <= nowMs;
 }
 
+function normalizeLocalAllowedFormats(value) {
+    const allowed = (Array.isArray(value) ? value : [])
+        .map(item => String(item || '').trim().toLowerCase())
+        .filter(item => Object.prototype.hasOwnProperty.call(DELIVERY_EXTENSION_BY_FORMAT, item));
+    const legacyDefault = allowed.length === LEGACY_DEFAULT_DELIVERY_FORMATS.length
+        && LEGACY_DEFAULT_DELIVERY_FORMATS.every(format => allowed.includes(format));
+    if (legacyDefault) return Object.keys(DELIVERY_EXTENSION_BY_FORMAT);
+    return [...new Set(allowed)];
+}
+
+function findLocalGrantByDirectory(directory, options = {}) {
+    const targetDir = path.resolve(String(directory || ''));
+    const platform = currentPlatform(options);
+    const store = readGrantStore();
+    const nowMs = typeof options.nowMs === 'number' ? options.nowMs : Date.now();
+    for (const record of Object.values(store.grants)) {
+        if (record && record.directory && isSamePath(record.directory, targetDir, platform)) {
+            return {
+                ...record,
+                allowedFormats: normalizeLocalAllowedFormats(record.allowedFormats),
+                expired: isExpired(record, nowMs)
+            };
+        }
+    }
+    return null;
+}
+
 /** 登记服务端签发的授权 id 与本机绝对路径的映射。 */
 function saveLocalGrant(grant = {}) {
     const grantId = String(grant.grantId || grant.id || '').trim();
@@ -180,13 +232,22 @@ function saveLocalGrant(grant = {}) {
         deviceId: String(grant.deviceId || ''),
         directory,
         pathHint: String(grant.pathHint || buildPathHint(directory)),
-        allowedFormats: Array.isArray(grant.allowedFormats) ? grant.allowedFormats.map(item => String(item).toLowerCase()) : [],
+        allowedFormats: normalizeLocalAllowedFormats(grant.allowedFormats),
         expiresAt: String(grant.expiresAt || ''),
         createdAt: String(grant.createdAt || new Date().toISOString())
     };
     const store = readGrantStore();
-    persistGrantStore({ version: 1, grants: { ...store.grants, [grantId]: record } });
-    return record;
+    const platform = currentPlatform();
+    const updatedGrants = {};
+    Object.entries(store.grants).forEach(([id, item]) => {
+        if (id !== grantId && item && item.directory && isSamePath(item.directory, directory, platform)) {
+            return;
+        }
+        updatedGrants[id] = item;
+    });
+    updatedGrants[grantId] = record;
+    persistGrantStore({ version: 1, grants: updatedGrants });
+    return { ...record, allowedFormats: normalizeLocalAllowedFormats(record.allowedFormats) };
 }
 
 /** 读取本机授权；不存在或已过期返回 null，交付执行器据此 fail-closed。 */
@@ -196,7 +257,7 @@ function getLocalGrant(grantId, nowMs = Date.now()) {
     const record = readGrantStore().grants[key];
     if (!record || typeof record !== 'object') return null;
     if (isExpired(record, nowMs)) return null;
-    return record;
+    return { ...record, allowedFormats: normalizeLocalAllowedFormats(record.allowedFormats) };
 }
 
 function removeLocalGrant(grantId) {
@@ -236,7 +297,7 @@ function listLocalGrants(options = {}) {
         deviceId: record.deviceId,
         pathHint: record.pathHint,
         directoryName: path.basename(String(record.directory || '')),
-        allowedFormats: Array.isArray(record.allowedFormats) ? record.allowedFormats : [],
+        allowedFormats: normalizeLocalAllowedFormats(record.allowedFormats),
         expiresAt: record.expiresAt,
         createdAt: record.createdAt,
         expired: isExpired(record),
@@ -253,10 +314,12 @@ function resetForTests() {
 module.exports = {
     buildPathHint,
     configureOutputGrants,
+    findLocalGrantByDirectory,
     getLocalGrant,
     grantFilePath,
     isInside,
     listLocalGrants,
+    normalizeLocalAllowedFormats,
     pruneExpiredGrants,
     removeLocalGrant,
     resetForTests,

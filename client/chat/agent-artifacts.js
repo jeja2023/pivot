@@ -86,35 +86,9 @@ async function downloadAgentArtifactRendition(rendition) {
 }
 
 async function saveAgentArtifactRenditionToDesktop(rendition) {
-    if (!window.pivotDesktop?.getDeliveryStatus) return showToast('请在 Pivot 桌面客户端中使用“保存到本机”。', 'warning');
-    let status = await window.pivotDesktop.getDeliveryStatus();
-    if (!status.available) return showToast(status.reason || '本机交付设备不可用。', 'error');
-    if (!Array.isArray(status.grants) || !status.grants.length) {
-        const configured = await window.pivotDesktop.authorizeDeliveryDirectory();
-        if (configured?.canceled) return;
-        status = await window.pivotDesktop.getDeliveryStatus();
-    }
-    const grants = Array.isArray(status.grants) ? status.grants.filter(grant => grant.grantId) : [];
-    if (!grants.length) return showToast('请先在桌面端授权一个文档交付目录。', 'warning');
-    const choices = grants.map(grant => `${grant.grantId}  (${grant.pathHint || '已授权目录'})`).join('\n');
-    const selected = window.prompt(`请选择本次保存的授权目录：\n${choices}`, grants[0].grantId);
-    if (!selected) return;
-    const grant = grants.find(item => item.grantId === selected.trim());
-    if (!grant) return showToast('未选择有效的目录授权。', 'warning');
-    const intentRes = await apiFetch(`${API_BASE}/agents/deliveries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            renditionId: rendition.id,
-            channel: 'local_device',
-            deviceId: status.deviceId,
-            targetDirGrant: grant.grantId,
-            targetFilename: `产物-${rendition.id}`
-        })
-    });
-    const intentData = await intentRes.json().catch(() => ({}));
-    if (!intentRes.ok) return showToast(intentData.error || '创建本机交付意图失败', 'error');
-    showToast(intentData.reused ? '该文档已在该目录的交付队列中。' : '已加入本机交付队列，桌面端将安全写入授权目录。', 'success');
+    const sharedQueue = window.Pivot.moduleApi('chat.codeDelivery').queueRenditionToDesktop;
+    if (typeof sharedQueue === 'function') return sharedQueue(rendition, `产物-${rendition.id}`);
+    return showToast('本机交付模块尚未加载，请刷新页面后重试。', 'error');
 }
 
 async function loadAgentArtifactRenditions(modal, artifactId) {

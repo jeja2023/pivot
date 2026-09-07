@@ -195,6 +195,20 @@ async function cancelChatAgentRun(runId) {
     return result;
 }
 
+async function steerChatAgentRun(runId) {
+    if (!runId) return null;
+    const instruction = window.prompt('请输入新的执行方向。该指令会在下一轮规划前生效：', '');
+    const text = String(instruction || '').trim();
+    if (!text) return null;
+    if (text.length > 4000) throw new Error('新的执行方向不能超过 4000 个字符。');
+    await postChatAgentControl(runId, '/control-messages', {
+        type: 'steer',
+        payload: { instruction: text }
+    });
+    showToast('已发送新指令，Agent 将在下一轮调整执行方向。', 'success');
+    return true;
+}
+
 async function openChatAgentRunDetail(runId) {
     if (!runId) return null;
     if (typeof window.Pivot.legacy.openAgentRun !== 'function') {
@@ -221,6 +235,13 @@ function parseChatAgentStepPayload(value) {
 
 function chatAgentProgressText(detail = {}, status = '') {
     const normalizedStatus = String(status || detail?.run?.status || '').toLowerCase();
+    const metadata = typeof detail?.run?.metadata === 'string'
+        ? (() => { try { return JSON.parse(detail.run.metadata); } catch (_) { return {}; } })()
+        : (detail?.run?.metadata || {});
+    const continuation = metadata?.autoContinuation || {};
+    if (normalizedStatus === 'queued' && Number(continuation.count || 0) > 0) {
+        return `连续 Agent 正在从安全检查点续跑（第 ${Number(continuation.count)}/${Number(continuation.max || 0)} 次）`;
+    }
     const base = normalizedStatus === 'queued'
         ? '连续 Agent 正在排队'
         : ['approval_required', 'waiting_approval', 'awaiting_approval'].includes(normalizedStatus)
@@ -279,6 +300,7 @@ function attachChatAgentControls(messageContent, runId, status = '') {
         controls.appendChild(button);
     };
     addButton('详情', 'btn-secondary', '查看连续 Agent 任务详情', () => openChatAgentRunDetail(runId));
+    if (!isTerminal) addButton('调整方向', 'btn-secondary', '向正在运行的 Agent 发送新的执行方向', () => steerChatAgentRun(runId));
     if (!isTerminal) addButton('停止', 'btn-danger-outline', '停止连续 Agent 任务', () => cancelChatAgentRun(runId));
     if (['approval_required', 'waiting_approval', 'awaiting_approval'].includes(normalizedStatus)) {
         addButton('批准', 'btn-primary', '批准工具调用并继续任务', () => postChatAgentControl(runId, '/approval', { approve: true }));
@@ -312,9 +334,9 @@ function handleChatAgentStreamingEvent(payload = {}) {
     if (!target || String(currentSessionId || '') !== target.sessionId) return;
     const step = Number(payload.step || 0);
     const hasTools = Array.isArray(payload.partialToolCalls) && payload.partialToolCalls.length > 0;
-    const status = payload.completed
+    const status = payload.controlMessage || (payload.completed
         ? (hasTools ? `连续 Agent 第 ${step || 1} 步工具调用已完成` : `连续 Agent 第 ${step || 1} 步规划已完成`)
-        : (hasTools ? `连续 Agent 正在处理第 ${step || 1} 步工具调用` : `连续 Agent 正在生成第 ${step || 1} 步计划`);
+        : (hasTools ? `连续 Agent 正在处理第 ${step || 1} 步工具调用` : `连续 Agent 正在生成第 ${step || 1} 步计划`));
     const textBody = target.element?.querySelector?.('.text-body');
     if (textBody) PivotSafeHtml.setHtml(textBody, `<div class="queue-detail">${escapeChatStatusHtml(status)}</div>`);
 }
@@ -331,6 +353,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
     attachChatAgentControls,
     cancelCurrentChatAgent,
     openChatAgentRunDetail,
+    steerChatAgentRun,
     chatAgentProgressText,
     registerChatAgentStreamingTarget,
     unregisterChatAgentStreamingTarget,
@@ -339,6 +362,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
     'attachChatAgentControls',
     'cancelCurrentChatAgent',
     'openChatAgentRunDetail',
+    'steerChatAgentRun',
     'chatAgentProgressText',
     'registerChatAgentStreamingTarget',
     'unregisterChatAgentStreamingTarget',
@@ -653,13 +677,20 @@ async function runSendMessage(shouldRegenerate) {
                         unregisterChatAgentStreamingTarget(runId);
                         attachChatAgentControls(aiMsgEl, runId, status);
                         if (isViewingRequestSession()) {
-                            const elapsed = Math.max((Date.now() - startTime) / 1000, 0.001);
-                            renderFinalAssistantStats(statsEl, {
-                                modelName: run?.model_name || assistantModelName,
-                                costTime: elapsed,
-                                tokenCount: estimateStreamingTokenCount(answer),
-                                tps: answer ? estimateStreamingTokenCount(answer) / elapsed : 0
-                            });
+                            const runStartedAt = Date.parse(String(run?.started_at || ''));
+                            const runCompletedAt = Date.parse(String(run?.completed_at || ''));
+                            const elapsed = Number.isFinite(runStartedAt) && Number.isFinite(runCompletedAt)
+                                ? Math.max((runCompletedAt - runStartedAt) / 1000, 0.001)
+                                : Math.max((Date.now() - startTime) / 1000, 0.001);
+                            const renderAgentStats = window.Pivot.moduleApi('chat.streaming').renderAgentTaskStats;
+                            if (typeof renderAgentStats === 'function') {
+                                renderAgentStats(statsEl, {
+                                    modelName: run?.model_name || assistantModelName,
+                                    costTime: elapsed,
+                                    outputTokens: run?.output_tokens,
+                                    status
+                                });
+                            }
                             window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                             window.Pivot.legacy.scrollMessagesToBottom?.();
                         } else {

@@ -14,7 +14,7 @@ const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { assertTenantContext } = require('./agent-tenant-context');
-const { DELIVERY_EXTENSION_BY_FORMAT } = require('./agent-path-safety');
+const { DELIVERY_EXTENSION_BY_FORMAT, LEGACY_DEFAULT_DELIVERY_FORMATS } = require('./agent-path-safety');
 
 const NONCE_PURPOSES = Object.freeze(['register', 'attest', 'claim', 'grant', 'download', 'ack', 'connector']);
 const NONCE_TTL_SECONDS = 120;
@@ -147,10 +147,14 @@ async function registerLocalDevice(user, input = {}) {
     const now = getBeijingTimestamp();
     const deviceName = String(input.deviceName || input.device_name || '我的电脑').slice(0, 128);
     const provider = String(input.provider || 'desktop').slice(0, 32);
+    let registrationType = 'created';
     if (existing) {
-        const keyVersion = fingerprint === existing.key_fingerprint
-            ? Number(existing.key_version || 1)
-            : Number(existing.key_version || 1) + 1;
+        const isKeyRotated = fingerprint !== existing.key_fingerprint;
+        const isReactivated = existing.status !== 'active' || Boolean(existing.revoked_at);
+        registrationType = isKeyRotated ? 'rotated' : (isReactivated ? 'reactivated' : 'reconnected');
+        const keyVersion = isKeyRotated
+            ? Number(existing.key_version || 1) + 1
+            : Number(existing.key_version || 1);
         await execute(`
             UPDATE agent_local_devices
             SET tenant_id = ?, device_name = ?, provider = ?, public_key_pem = ?, key_fingerprint = ?,
@@ -168,6 +172,7 @@ async function registerLocalDevice(user, input = {}) {
             ON CONFLICT (device_id) DO NOTHING
         `, [deviceId, tenant.tenantId, user.id, deviceName, provider, publicKeyPem, fingerprint, now, now, now, now]);
         if (!inserted) {
+            registrationType = 'reconnected';
             const concurrent = await queryOne('SELECT * FROM agent_local_devices WHERE device_id = ?', [deviceId]);
             if (!concurrent || Number(concurrent.user_id) !== Number(user.id)) {
                 throw deviceError('该设备标识已被其他用户注册。', 'AGENT_DEVICE_CONFLICT', 409);
@@ -185,7 +190,12 @@ async function registerLocalDevice(user, input = {}) {
             `, [tenant.tenantId, deviceName, provider, now, now, now, deviceId, user.id, fingerprint]);
         }
     }
-    return await getLocalDeviceForUser(user, deviceId);
+    const device = await getLocalDeviceForUser(user, deviceId);
+    return {
+        ...device,
+        registration_type: registrationType,
+        is_new: registrationType === 'created'
+    };
 }
 
 async function getLocalDeviceForUser(user, deviceId) {
@@ -274,6 +284,11 @@ function normalizeAllowedFormats(value) {
     const allowed = source
         .map(item => String(item || '').trim().toLowerCase())
         .filter(item => Object.prototype.hasOwnProperty.call(DELIVERY_EXTENSION_BY_FORMAT, item));
+    // 旧版本桌面端没有代码格式。旧授权没有“格式选择”界面，保存的完整旧集合
+    // 实际语义就是“默认全部格式”；升级后自动扩展，避免用户必须重新选择同一目录。
+    const legacyDefault = allowed.length === LEGACY_DEFAULT_DELIVERY_FORMATS.length
+        && LEGACY_DEFAULT_DELIVERY_FORMATS.every(format => allowed.includes(format));
+    if (legacyDefault) return Object.keys(DELIVERY_EXTENSION_BY_FORMAT);
     return [...new Set(allowed.length ? allowed : Object.keys(DELIVERY_EXTENSION_BY_FORMAT))];
 }
 

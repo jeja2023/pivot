@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('pivotDeliveryStatus', {
     },
     getStatus() {
         return ipcRenderer.invoke('pivot-delivery-status:get-status');
+    },
+    revokeDirectory(grantId) {
+        return ipcRenderer.invoke('pivot-delivery-status:revoke-directory', grantId);
     }
 });

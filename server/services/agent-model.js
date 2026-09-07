@@ -29,6 +29,23 @@ const AGENT_THINKING_MIN_MAX_TOKENS = Math.max(2048, Math.min(16384, Number.pars
 // 答案直接截断。规划调用同样需要这个下限——模型经常在第一步就用
 // {"action":"final","answer":"…"} 内联完整答案，那段 answer 同样受本次调用的预算限制。
 const AGENT_ANSWER_MIN_MAX_TOKENS = Math.max(1024, Math.min(32768, Number.parseInt(process.env.AGENT_ANSWER_MIN_MAX_TOKENS || '4096', 10) || 4096));
+// 单次模型调用不能再固定为 180 秒：运行总时限另有控制，慢模型应在剩余预算内完成。
+const AGENT_MODEL_REQUEST_TIMEOUT_MS = Math.max(
+    30_000,
+    Math.min(Number.parseInt(process.env.AGENT_MODEL_REQUEST_TIMEOUT_MS || '600000', 10) || 600000, 60 * 60 * 1000)
+);
+// 等待上游真正开始响应与已建立流后的无进展时间分别约束。它们不会限制持续输出的长任务。
+const AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = Math.max(
+    30_000,
+    Math.min(Number.parseInt(process.env.AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS || '300000', 10) || 300000, AGENT_MODEL_REQUEST_TIMEOUT_MS)
+);
+const AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS = Math.max(
+    10_000,
+    Math.min(Number.parseInt(process.env.AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS || '120000', 10) || 120000, AGENT_MODEL_REQUEST_TIMEOUT_MS)
+);
+// 工具规划需要稳定的 JSON 与低延迟；默认不把思维链预算消耗在选择工具这一步。
+// 最终总结仍沿用用户为模型配置的思考策略。
+const AGENT_TOOL_PLANNING_THINKING = ['1', 'true', 'on', 'enabled'].includes(String(process.env.AGENT_TOOL_PLANNING_THINKING || 'false').trim().toLowerCase());
 
 /**
  * 判断本次 Agent 调用是否保留思维链。
@@ -44,6 +61,11 @@ function agentThinkingKept(modelCfg, options = {}) {
     return isChatThinkingEnabled(modelCfg);
 }
 
+function resolveAgentPlanningThinking(modelCfg, options = {}) {
+    if (typeof options.enableThinking === 'boolean') return options.enableThinking;
+    return AGENT_TOOL_PLANNING_THINKING && agentThinkingKept(modelCfg);
+}
+
 function resolveAgentMaxTokens(modelCfg, options = {}) {
     if (typeof options.maxTokens === 'number') return options.maxTokens;
     const configured = Number(modelCfg?.max_tokens);
@@ -53,6 +75,24 @@ function resolveAgentMaxTokens(modelCfg, options = {}) {
     const floors = [Number.parseInt(options.minMaxTokens, 10) || 0];
     if (agentThinkingKept(modelCfg, options)) floors.push(AGENT_THINKING_MIN_MAX_TOKENS);
     return Math.max(base, ...floors);
+}
+
+function resolveAgentRequestTimeoutMs(options = {}) {
+    const requested = Number.parseInt(options.timeoutMs, 10);
+    const source = Number.isFinite(requested) && requested > 0 ? requested : AGENT_MODEL_REQUEST_TIMEOUT_MS;
+    return Math.max(1_000, Math.min(source, 60 * 60 * 1000));
+}
+
+function resolveAgentFirstResponseTimeoutMs(options = {}) {
+    const requested = Number.parseInt(options.firstResponseTimeoutMs, 10);
+    const source = Number.isFinite(requested) && requested > 0 ? requested : AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    return Math.max(1_000, Math.min(source, resolveAgentRequestTimeoutMs(options)));
+}
+
+function resolveAgentStreamIdleTimeoutMs(options = {}) {
+    const requested = Number.parseInt(options.streamIdleTimeoutMs, 10);
+    const source = Number.isFinite(requested) && requested > 0 ? requested : AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS;
+    return Math.max(1_000, Math.min(source, resolveAgentRequestTimeoutMs(options)));
 }
 
 function applyAgentThinkingControls(data, modelCfg, options = {}) {
@@ -104,7 +144,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
             url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             data,
-            timeout: 180000,
+            timeout: resolveAgentFirstResponseTimeoutMs(options),
             signal: options.signal || null
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
@@ -141,6 +181,27 @@ async function callModelText(modelCfg, messages, options = {}) {
  */
 async function callModelStreamingWithTools(modelCfg, messages, tools = [], options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
+        const timing = {
+            requestedAt: Date.now(),
+            firstByteAt: 0,
+            firstFrameAt: 0,
+            completedAt: 0,
+            bytesReceived: 0
+        };
+        const snapshotTiming = () => ({
+            requestedAt: timing.requestedAt,
+            firstByteAt: timing.firstByteAt || null,
+            firstFrameAt: timing.firstFrameAt || null,
+            completedAt: timing.completedAt || null,
+            bytesReceived: timing.bytesReceived,
+            timeToFirstByteMs: timing.firstByteAt ? Math.max(timing.firstByteAt - timing.requestedAt, 0) : null,
+            timeToFirstFrameMs: timing.firstFrameAt ? Math.max(timing.firstFrameAt - timing.requestedAt, 0) : null,
+            durationMs: Math.max((timing.completedAt || Date.now()) - timing.requestedAt, 0)
+        });
+        const publishProgress = phase => {
+            try { options.onProgress?.({ phase, timing: snapshotTiming() }); } catch (_) {}
+        };
+        try {
         const providerMessages = toProviderInput(messages);
         assertProviderSafe(providerMessages);
         const accumulator = createToolCallAccumulator();
@@ -167,7 +228,13 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
                 } catch (e) {
                     return; // 非 JSON 帧忽略，避免被注释/心跳行污染
                 }
-                if (frame && typeof frame === 'object') accumulator.ingest(frame);
+                if (frame && typeof frame === 'object') {
+                    if (!timing.firstFrameAt) {
+                        timing.firstFrameAt = Date.now();
+                        publishProgress('first_frame');
+                    }
+                    accumulator.ingest(frame);
+                }
                 if (frame && typeof frame === 'object') providerState.ingest(frame);
                 if (typeof options.onDelta === 'function') {
                     try {
@@ -186,29 +253,64 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
             data: payload,
             stream: true,
-            timeout: 180000,
+            timeout: resolveAgentFirstResponseTimeoutMs(options),
             signal: options.signal || null
         });
         await new Promise((resolve, reject) => {
+            let settled = false;
+            const idleTimeoutMs = resolveAgentStreamIdleTimeoutMs(options);
+            let idleTimer = null;
+            const finish = (callback, value) => {
+                if (settled) return;
+                settled = true;
+                if (idleTimer) clearTimeout(idleTimer);
+                callback(value);
+            };
+            const armIdleTimer = () => {
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    const error = new Error(`模型流在 ${Math.ceil(idleTimeoutMs / 1000)} 秒内没有收到新数据。`);
+                    error.code = 'AGENT_MODEL_STREAM_IDLE';
+                    try { response.data.destroy(error); } catch (_) {}
+                    finish(reject, error);
+                }, idleTimeoutMs);
+                idleTimer.unref?.();
+            };
+            armIdleTimer();
             response.data.on('data', chunk => {
                 try {
+                    if (!timing.firstByteAt) {
+                        timing.firstByteAt = Date.now();
+                        publishProgress('first_byte');
+                    }
+                    timing.bytesReceived += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk || ''), 'utf8');
+                    armIdleTimer();
                     sseParser.write(chunk);
                 } catch (parseErr) {
-                    reject(parseErr);
+                    finish(reject, parseErr);
                 }
             });
             response.data.on('end', () => {
                 try { sseParser.end(); } catch (e) {}
-                resolve();
+                finish(resolve);
             });
-            response.data.on('error', reject);
+            response.data.on('error', error => finish(reject, error));
         });
         const result = accumulator.finalize();
         const provider = providerState.finalize();
+        timing.completedAt = Date.now();
         if (provider.usage && typeof options.onUsage === 'function') {
             try { options.onUsage(provider.usage.raw || provider.usage); } catch (_) {}
         }
-        return { ...result, provider };
+        return { ...result, provider, timing: snapshotTiming() };
+        } catch (error) {
+            if (error?.code === 'ECONNABORTED' && !timing.firstByteAt) {
+                error.code = 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT';
+                error.message = `模型在 ${Math.ceil(resolveAgentFirstResponseTimeoutMs(options) / 1000)} 秒内未开始响应。`;
+            }
+            if (error && typeof error === 'object') error.agentModelTiming = snapshotTiming();
+            throw error;
+        }
     });
 }
 
@@ -285,7 +387,15 @@ module.exports = {
     recordAgentModelUsage,
     withAgentModelConcurrency,
     resolveAgentMaxTokens,
+    resolveAgentRequestTimeoutMs,
+    resolveAgentFirstResponseTimeoutMs,
+    resolveAgentStreamIdleTimeoutMs,
     applyAgentThinkingControls,
     agentThinkingKept,
-    AGENT_ANSWER_MIN_MAX_TOKENS
+    resolveAgentPlanningThinking,
+    AGENT_ANSWER_MIN_MAX_TOKENS,
+    AGENT_MODEL_REQUEST_TIMEOUT_MS,
+    AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+    AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS,
+    AGENT_TOOL_PLANNING_THINKING
 };

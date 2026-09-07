@@ -130,6 +130,15 @@ function handleAgentStreamingEvent(event) {
     renderAgentStreamingPanel(payload);
 }
 
+function cleanAgentStreamingText(value) {
+    return String(value || '')
+        .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END[ \t]*(?:\r?\n)?/gi, '')
+        .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
+        .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function renderAgentStreamingPanel(payload) {
     const container = document.getElementById('agent-run-detail');
     if (!container) return;
@@ -150,7 +159,8 @@ function renderAgentStreamingPanel(payload) {
         ? agentEscape(finishReasonLabels[payload.finishReason] || payload.finishReason)
         : '—';
     const completed = Boolean(payload.completed);
-    const content = String(payload.content || '');
+    const content = cleanAgentStreamingText(payload.content);
+    const controlMessage = String(payload.controlMessage || '').trim();
     const partial = Array.isArray(payload.partialToolCalls) ? payload.partialToolCalls : [];
     const toolHtml = partial.length === 0
         ? '<div class="agent-streaming-empty">尚未发现工具调用增量</div>'
@@ -171,6 +181,7 @@ function renderAgentStreamingPanel(payload) {
             <span>第 ${step} 步 · ${finish}${completed ? ' · 已完成' : ''}</span>
         </header>
         <div class="agent-streaming-body">
+            ${controlMessage ? `<div class="agent-streaming-empty">${agentEscape(controlMessage)}</div>` : ''}
             <div class="agent-streaming-content">${agentEscape(content) || '<em>等待首段内容…</em>'}</div>
             <div class="agent-streaming-tools">${toolHtml}</div>
         </div>

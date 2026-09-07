@@ -13,7 +13,7 @@ function setAgentRunActionBusy(runId, selectors, busy) {
     const id = String(runId);
     document.querySelectorAll(selectors).forEach(button => {
         const buttonRunId = String(button.dataset.agentCancel || button.dataset.agentApprove || button.dataset.agentReject
-            || button.dataset.agentRerun || button.dataset.agentResume || button.dataset.agentDagRerunNode
+            || button.dataset.agentRerun || button.dataset.agentResume || button.dataset.agentSteer || button.dataset.agentDagRerunNode
             || button.dataset.agentCreateWorkflowDraft || button.dataset.agentRunDelete || '');
         const matchesCurrentDag = button.dataset.agentDagRerunNode && String(activeAgentRunId || '') === id;
         if (buttonRunId !== id && !matchesCurrentDag) return;
@@ -190,6 +190,25 @@ window.Pivot.legacy.resumeAgentRun = async function(runId) {
         await loadAgentRuns(1);
         await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '断点续跑失败');
+};
+
+window.Pivot.legacy.steerAgentRun = async function(runId) {
+    const instruction = window.prompt('请输入新的执行方向。该指令会在下一轮规划前生效：', '');
+    const text = String(instruction || '').trim();
+    if (!text) return null;
+    if (text.length > 4000) return showToast('新的执行方向不能超过 4000 个字符。', 'error');
+    return await runAgentActionOnce(`steer:${runId}`, runId, '[data-agent-steer]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/control-messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'steer', payload: { instruction: text } })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '发送执行方向失败');
+        showToast('已发送新指令，任务将在下一轮调整方向。', 'success');
+        await window.Pivot.legacy.openAgentRun(runId, { silent: true });
+        return data;
+    }, '发送执行方向失败');
 };
 
 window.Pivot.legacy.createWorkflowDraftFromAgentRun = async function(runId) {

@@ -259,10 +259,15 @@ customRenderer.code = (code, infostring, _escaped) => {
         <div class="code-block${wrapProseCode ? ' code-block-wrap' : ''}" data-code-language="${escapeAttrValue(normalizedLanguage || 'code')}">
             <div class="code-toolbar">
                 <span class="code-language">${escapeCodeHtml(languageLabel)}</span>
-                <button type="button" class="code-copy-btn" title="复制代码">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    <span>复制</span>
-                </button>
+                <div class="code-toolbar-actions">
+                    <button type="button" class="btn-secondary code-copy-btn" title="复制代码">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        <span>复制</span>
+                    </button>
+                    <button type="button" class="btn-secondary code-save-local-btn" title="保存到本机">
+                        <span>保存到本机</span>
+                    </button>
+                </div>
             </div>
             <pre><code class="hljs ${language ? `language-${escapeAttrValue(language)}` : ''}">${codeHtml}</code></pre>
         </div>
@@ -410,7 +415,12 @@ function renderMarkdown(content, options = {}) {
     const hasDeferOption = options && Object.prototype.hasOwnProperty.call(options, 'deferPivotCharts');
     const previousDefer = window.Pivot.legacy._deferPivotCharts;
     if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = Boolean(options.deferPivotCharts);
-    const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(content));
+    const safeContent = String(content || '')
+        .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END/gi, '\n')
+        .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
+        .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
+        .replace(/\n{3,}/g, '\n\n');
+    const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(safeContent));
     let rawHtml = marked.parse(normalizedContent, { renderer: customRenderer, breaks: true, gfm: true });
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
