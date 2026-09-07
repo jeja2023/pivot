@@ -95,7 +95,9 @@ async function listAgentInbox(user, options = {}) {
         body: row.body || '',
         eventType: row.event_type,
         runId: row.source_run_id || null,
-        sourceId: row.source_id || null,
+        // sourceId 专用于待办行主键 ID，已读/静音接口使用其更新 agent_inbox_events.id（bigint 类型）；
+        // 事件的业务来源标识（如 agent.browser）存放在 eventSourceId，避免污染路由参数。
+        eventSourceId: row.source_id || null,
         risk: row.risk_level || 'low',
         unread: row.status !== 'read',
         expiresAt: row.expires_at || null,
@@ -150,6 +152,7 @@ async function markInboxItem(user, sourceType, sourceId, action = 'read', value 
         return await queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
     }
     if (sourceType === 'event') {
+        if (!/^\d+$/.test(String(sourceId))) throw Object.assign(new Error('收件箱事件标识无效。'), { status: 400, statusCode: 400, code: 'INVALID_INBOX_EVENT_ID' });
         if (action === 'read') await execute("UPDATE agent_inbox_events SET status = 'read', updated_at = ? WHERE id = ? AND user_id = ?", [getBeijingTimestamp(), sourceId, user.id]);
         else if (action === 'snooze' || action === 'mute') await execute(`UPDATE agent_inbox_events SET ${action === 'snooze' ? 'snoozed_until' : 'muted_until'} = ?, updated_at = ? WHERE id = ? AND user_id = ?`, [value.until || null, getBeijingTimestamp(), sourceId, user.id]);
         else throw Object.assign(new Error('收件箱事件操作无效。'), { status: 400, statusCode: 400 });

@@ -1167,6 +1167,11 @@
                 const sourceType = openRun.dataset.agentInboxType;
                 const sourceId = openRun.dataset.agentInboxId;
                 const isUnread = openRun.dataset.agentInboxUnread === '1';
+
+                const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
+                if (runId && typeof openAgentRun === 'function') {
+                    openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+                }
                 if (isUnread && sourceId && sourceType) {
                     const targetItem = state.inbox.find(i => String(i.sourceId) === String(sourceId) && i.sourceType === sourceType);
                     if (targetItem && targetItem.unread) {
@@ -1177,11 +1182,7 @@
                     const url = isNotification
                         ? `${API_BASE}/agents/inbox/notification/${encodeURIComponent(sourceId)}/read`
                         : `${API_BASE}/agents/inbox/${encodeURIComponent(sourceType)}/${encodeURIComponent(sourceId)}/read`;
-                    apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
-                }
-                const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
-                if (runId && typeof openAgentRun === 'function') {
-                    openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+                    apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(error => console.warn('打开详情后标记待办已读失败：', error));
                 }
                 return;
             }

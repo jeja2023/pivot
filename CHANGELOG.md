@@ -1,3 +1,15 @@
+## [v0.1.90] - 2026-09-07
+
+### 个人工作台待办流转优化、任务状态全链路中文化与待办详情交互修复
+
+- **个人工作台“需要我处理”精准流转与已读闭环**：重构服务端待办过滤机制（`server/services/personal-workbench.js`），仅真正需要人工介入审批的任务（`waiting_approval` / `approval_required` / `awaiting_approval`）进入待办，彻底杜绝已完成、已失败或运行中的历史任务残留；前端绑定点击标记已读事件（`client/chat/personal-workbench.js`），点击查看后立即调用已读上报接口，服务端持久化已读标识至运行元数据（`agent_runs.metadata.inboxRead`），前端实时递减待处理徽标计数并平滑移除已处理条目。
+- **任务状态全链路规范中文化（杜绝裸英文状态）**：服务端新增标准状态字典 `AGENT_STATUS_LABELS` 与 `formatAgentStatus` 函数（`server/services/agent-validators.js`），全面覆盖 `running`、`completed`、`completed_with_errors`、`failed`、`error`、`waiting_approval`、`queued`、`paused`、`draft`、`timeout` 等状态；客户端（`agent-run-utils.js`、`agent-harness.js`、`personal-workbench.js`）全面统一接入，个人工作台、待办中心、执行记录列表与详情弹窗全量展示规范中文。
+- **待办中心「详情」按钮交互响应修复**：修复待办中心列表行内「详情」按钮因全局函数查找路径不一致导致点击无响应的问题；统一通过 `window.Pivot.legacy.openAgentRun` 调度模态框，点击后即刻唤起 Agent 运行详情弹窗与执行步骤面包屑。
+- **环境变量配置模板对齐**：全面梳理对齐 `.env` 与 `.env.example`，补齐 Agent 长任务超时、首响应与流空闲看门狗、规划思维链降耗等新增配置项与注释规范。
+- **质量门禁与全量自动化测试**：新增个人工作台待办流转、状态中文化映射与已读状态持久化专项单元测试（`tests/personal-workbench.test.js`）；通过全部 34 项回归单测，`npm run check` 架构与安全静态门禁保持全绿。
+
+详细发布记录见 [v0.1.90 发布记录](docs/releases/v0.1.90-个人工作台待办流转与任务状态全中文化及待办交互修复.md)。
+
 ## [v0.1.89] - 2026-09-07
 
 ### Agent 持久执行、智能体交互与长任务可靠性升级

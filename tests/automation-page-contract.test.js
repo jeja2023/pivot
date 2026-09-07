@@ -311,6 +311,21 @@ test('Agent控制台各模块具备分页控件且收件箱点击详情自动标
     assert.match(css, /\.agent-harness-pack-pagination/);
 });
 
+test('Agent收件箱事件保留bigint主键，避免来源标识污染详情已读接口', () => {
+    const inboxService = read('server/services/agent-inbox.js');
+    const harnessJs = read('client/chat/agent-harness.js');
+
+    // 事件来源（例如 agent.browser）不能覆盖用于更新数据库行的 sourceId。
+    assert.match(inboxService, /item\('event', row\.id, \{[\s\S]*eventSourceId:\s*row\.source_id/);
+    assert.doesNotMatch(inboxService, /item\('event', row\.id, \{[\s\S]*sourceId:\s*row\.source_id/);
+    assert.ok(inboxService.includes("if (sourceType === 'event')") && inboxService.includes("!/^\\d+$/.test(String(sourceId))"));
+
+    // 打开详情不依赖“标记已读”请求成功；读取失败也只能记录日志。
+    assert.match(harnessJs, /const openAgentRun = window\.Pivot\?\.legacy\?\.openAgentRun/);
+    assert.match(harnessJs, /openAgentRun\(runId, \{ returnTab: 'workbench', returnSubview: 'inbox'/);
+    assert.match(harnessJs, /打开详情后标记待办已读失败：/);
+});
+
 test('Agent统一收件箱和评测中心查看详情支持返回原页面原选项卡', () => {
     const harnessJs = read('client/chat/agent-harness.js');
     const evalJs = read('client/chat/agent-evaluations.js');
