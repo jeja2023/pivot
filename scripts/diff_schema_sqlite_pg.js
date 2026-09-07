@@ -25,7 +25,8 @@ const { Pool } = require('pg');
 const { PG_JSONB_COLUMNS, PG_VECTOR_COLUMNS } = require('../server/db/schema/pg');
 
 const sqlitePath = process.env.SQLITE_DB_PATH || path.resolve(__dirname, '../data/chat.db');
-const pgUrl = process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot';
+const pgUrl = String(process.env.DATABASE_URL || '').trim();
+if (!pgUrl) throw new Error('请通过 DATABASE_URL 显式提供 PostgreSQL 连接串，禁止使用内置默认凭据。');
 
 // SQLite FTS5 影子表在 PG 侧由 pg_trgm GIN 索引替代，不参与对账
 const IGNORED_TABLE_PATTERNS = [

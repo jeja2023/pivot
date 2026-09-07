@@ -100,6 +100,17 @@ function hasPermissionCapability(user, capability) {
     return getPermissionCapabilities(user)[capability] === true;
 }
 
+function requireCapability(capability) {
+    return (req, res, next) => {
+        if (hasPermissionCapability(req.user, capability)) return next();
+        return res.status(403).json({
+            error: '权限不足',
+            code: 'PERMISSION_CAPABILITY_REQUIRED',
+            capability
+        });
+    };
+}
+
 function withPermissionFlags(user) {
     if (!user) return user;
     const normalized = {
@@ -142,6 +153,7 @@ module.exports = {
     getPermissionLabel,
     isAdmin,
     hasPermissionCapability,
+    requireCapability,
     isSuperAdmin,
     normalizeRole,
     withPermissionFlags

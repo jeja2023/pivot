@@ -1,7 +1,8 @@
 const { Client } = require('pg');
 
 async function fixOwnership() {
-    const postgresUrl = 'postgresql://postgres:123456@localhost:5432/pivot';
+    const postgresUrl = String(process.env.DATABASE_URL || '').trim();
+    if (!postgresUrl) throw new Error('请通过 DATABASE_URL 显式提供 PostgreSQL 连接串，禁止使用内置默认凭据。');
     const client = new Client({ connectionString: postgresUrl });
     try {
         await client.connect();

@@ -132,6 +132,9 @@ async function withPostgres(connection, handler, signal) {
     };
     try {
         await client.connect();
+        // 只读查询不能只依赖应用层关键字过滤；把每个连接的默认事务设为只读，
+        // 让 PostgreSQL 在引擎层拒绝 SELECT INTO、DDL 和 DML。
+        await client.query('SET default_transaction_read_only = on');
         connected = true;
         throwIfAborted(signal);
         signal?.addEventListener('abort', abort, { once: true });
@@ -165,6 +168,9 @@ async function withMysql(connection, handler, signal) {
     });
     let abort;
     try {
+        // 该设置会令后续事务以 READ ONLY 启动。INTO OUTFILE 等非事务写入
+        // 仍由 sql-governance 的语句级拒绝负责。
+        await client.query('SET SESSION TRANSACTION READ ONLY');
         abort = () => { try { client.destroy(); } catch (e) { /* best effort */ } };
         throwIfAborted(signal);
         signal?.addEventListener('abort', abort, { once: true });
@@ -586,6 +592,11 @@ function validateDatabaseConnectionPayload(payload, user) {
     } else {
         if (!host || !databaseName) throw createDatabaseMcpError('请填写数据库主机和数据库名。', 'DB_HOST_OR_NAME_REQUIRED', 400);
         if (!username && type !== 'mongodb') throw createDatabaseMcpError('请填写数据库用户名。', 'DB_USERNAME_REQUIRED', 400);
+        // 数据库驱动的 host 字段只接受主机名或裸 IP。拒绝 Unix socket 路径、
+        // [IPv6] 形式、host:port 和空白，避免绕过出站主机策略。
+        if (/[\s\[\]\\/]/.test(host) || (host.includes(':') && require('net').isIP(host) !== 6)) {
+            throw createDatabaseMcpError('数据库主机必须是合法主机名或裸 IP 地址，不能包含端口、方括号、路径或空白。', 'DB_HOST_INVALID', 400);
+        }
         const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
         // 字面量主机名的快速拦截（无需 DNS、同步）：普通用户禁配内网/本机地址。
         // 真正的 DNS 解析后 IP 校验（防把内网/loopback/云元数据藏在域名背后的 SSRF，并防 TOCTOU/DNS-rebinding）
@@ -620,6 +631,17 @@ function validateDatabaseConnectionPayload(payload, user) {
     };
 }
 
+function assertDatabaseConnectionSharingPolicy(connection, { shared = false } = {}) {
+    if (!shared) return connection;
+    const tableAllowlist = Array.isArray(connection?.options?.tableAllowlist)
+        ? connection.options.tableAllowlist
+        : [];
+    if (tableAllowlist.length === 0) {
+        throw createDatabaseMcpError('共享数据库连接必须配置表白名单，不能使用完全开放的默认治理范围。', 'DB_SHARED_TABLE_ALLOWLIST_REQUIRED', 400);
+    }
+    return connection;
+}
+
 module.exports = {
     DEFAULT_PORTS,
     executeDatabaseMcpTool,
@@ -632,5 +654,6 @@ module.exports = {
     normalizeDatabaseType,
     normalizeDatabaseConnectionError,
     testDatabaseConnection,
-    validateDatabaseConnectionPayload
+    validateDatabaseConnectionPayload,
+    assertDatabaseConnectionSharingPolicy
 };

@@ -1,7 +1,7 @@
 const { db } = require('../connection');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
 const { enterpriseTablesSql, enterpriseIndexesSql } = require('./enterprise');
-
+const { hotspotIndexesSql } = require('./hotspot-indexes');
 /**
  * 建表 DDL（SQLite 方言，权威单一数据源）
  *
@@ -1437,6 +1437,7 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_dataset ON analysis_semantic_jobs(dataset_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_jobs_due ON analysis_semantic_jobs(status, next_run_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_analysis_semantic_batches_job_status ON analysis_semantic_batches(job_id, status, batch_index);
+        ${hotspotIndexesSql()}
         CREATE INDEX IF NOT EXISTS idx_kg_relations_source_chunk ON knowledge_relations(source_chunk_id);
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描
@@ -1452,7 +1453,6 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_created ON knowledge_docs(created_at);
         CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
         CREATE INDEX IF NOT EXISTS idx_prompts_created ON prompts(created_at);
-
         CREATE INDEX IF NOT EXISTS idx_regulation_documents_status ON regulation_documents(status, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_regulation_documents_category ON regulation_documents(category, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_regulation_documents_jurisdiction ON regulation_documents(jurisdiction, deleted_at, updated_at);

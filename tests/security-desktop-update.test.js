@@ -147,18 +147,21 @@ test('desktop config can derive LAN HTTP downloads feed when explicitly allowed'
     assert.equal(config.autoUpdate.allowInsecureHttp, true);
 });
 
-test('bundled production desktop config enables only its allowlisted LAN update origin', () => {
-    const productionConfig = require('../config.json');
+test('bundled desktop config preserves remote bootstrap and update settings without a secret', () => {
+    const bundledConfig = require('../config.json');
     const packageManifest = require('../package.json');
-    const config = normalizeConfig(productionConfig, {}, {});
-    const remoteOrigin = new URL(config.remoteUrl).origin;
+    const config = normalizeConfig(bundledConfig, {}, {});
 
+    assert.equal(config.mode, 'remote');
+    assert.equal(config.remoteUrl, 'http://50.64.150.51:9006/');
+    assert.equal(config.stealthSecret, '');
     assert.equal(config.autoUpdate.enabled, true);
-    assert.equal(config.autoUpdate.url, `${remoteOrigin}/downloads/`);
+    assert.equal(config.autoUpdate.url, 'http://50.64.150.51:9006/downloads/');
     assert.equal(config.autoUpdate.allowInsecureHttp, true);
-    assert.deepEqual(config.autoUpdate.allowedOrigins, [remoteOrigin]);
+    assert.deepEqual(config.autoUpdate.allowedOrigins, ['http://50.64.150.51:9006']);
     assert.equal(packageManifest.build.extraResources.some(item => item.from === 'config.json' && item.to === 'config.json'), true);
-    assert.equal(packageManifest.build.extraFiles.some(item => item.from === 'config.json' && item.to === 'config.json'), true);
+    assert.equal(packageManifest.build.extraFiles.some(item => item.from === 'config.json' && item.to === 'config.json'), false);
+    assert.equal(packageManifest.build.extraResources.some(item => item.from === 'config.example.json' && item.to === 'config.example.json'), true);
 });
 
 test('desktop renderer policy supports LAN HTTP origins without trusting redirects', () => {
@@ -268,4 +271,3 @@ test('setupAutoUpdater provides lifecycle controls and initial state', () => {
     assert.equal(state.checkIntervalMinutes, 30);
     controller.destroy();
 });
-

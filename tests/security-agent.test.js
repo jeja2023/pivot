@@ -199,7 +199,10 @@ test('agent execution rounds support automatic mode defaults and mode-specific c
     const streamingSource = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
     const taskEditor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'partials', 'workspaces', 'agent.html'), 'utf8');
     assert.match(streamingSource, /roundsUsed\s*=\s*(?:step|lastStep|\w+)/);
-    assert.match(executionSource, /for \(let step = roundsUsed \+ 1; step <= maxSteps; step \+= 1\)/);
+    // v0.1.97 将 maxSteps 定义为单个执行时间片上限；续跑时从
+    // roundsUsed 继续计数，因此循环终点是 sliceEndStep，而不是旧的 maxSteps。
+    assert.match(executionSource, /const sliceEndStep = stopReason \? roundsUsed : roundsUsed \+ maxSteps/);
+    assert.match(executionSource, /for \(let step = roundsUsed \+ 1; step <= sliceEndStep; step \+= 1\)/);
     assert.match(executionSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
     assert.match(taskEditor, /最大执行轮次/);
     assert.match(taskEditor, /id="agent-max-steps"[^>]*placeholder="自动"/);

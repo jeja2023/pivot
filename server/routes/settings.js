@@ -42,7 +42,7 @@ const { syncAgentRuntimeConcurrency } = require('../services/agent-runtime');
 const { syncKnowledgeDocumentIndexConcurrency } = require('../services/rag-documents');
 const { syncMemoryCompressionConcurrency } = require('../llm');
 const { getDeploymentProfile } = require('../services/deployment-profile');
-const { getPermissionCapabilities, isAdmin, isSuperAdmin } = require('../permissions');
+const { getPermissionCapabilities, isAdmin, isSuperAdmin, requireCapability } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
 const { invalidateMonitorSummaryCache } = require('./admin-stats');
 const { getStealthConfig, setStealthConfigAsync } = require('../services/stealth-service');
@@ -288,7 +288,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ success: true, personalDefaultModelId: parsedModelId });
     }));
 
-    router.put('/admin/settings/memory', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.put('/admin/settings/memory', authMiddleware, requireCapability('manageGlobalSettings'), asyncHandler(async (req, res) => {
         const value = toMemorySettingValue(MEMORY_CONFIG_KEYS.threshold, req.body?.memory_threshold ?? req.body?.threshold);
         await setAppSettingAsync(MEMORY_CONFIG_KEYS.threshold, value, { updatedBy: req.user.id });
 
@@ -419,7 +419,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ success: true, message: '密码修改成功' });
     }));
 
-    router.get('/settings/stealth', authMiddleware, asyncHandler(async (req, res) => {
+    router.get('/settings/stealth', authMiddleware, requireCapability('manageGlobalSettings'), asyncHandler(async (req, res) => {
         if (!isAdmin(req.user)) {
             return res.status(403).json({ error: '需要管理员权限' });
         }
@@ -427,7 +427,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({ success: true, ...config });
     }));
 
-    router.put('/settings/stealth', authMiddleware, asyncHandler(async (req, res) => {
+    router.put('/settings/stealth', authMiddleware, requireCapability('manageGlobalSettings'), asyncHandler(async (req, res) => {
         if (!isAdmin(req.user)) {
             return res.status(403).json({ error: '需要管理员权限' });
         }

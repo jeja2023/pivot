@@ -1,6 +1,7 @@
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
 const {
     assertBuildHost,
     assertLinuxPackageMetadata,
@@ -53,6 +54,26 @@ function cleanBuildOutputs() {
         console.log(`> remove ${target}`);
         fs.rmSync(target, { recursive: true, force: true });
     }
+}
+
+function prepareBundledDesktopConfig() {
+    const configPath = path.join(root, 'config.json');
+    const original = fs.readFileSync(configPath, 'utf8');
+    const envFile = path.join(root, '.env');
+    const parsedEnv = fs.existsSync(envFile) ? dotenv.parse(fs.readFileSync(envFile, 'utf8')) : {};
+    const secret = String(
+        process.env.PIVOT_DISTRIBUTION_STEALTH_SECRET
+        || process.env.PIVOT_STEALTH_SECRET
+        || parsedEnv.PIVOT_STEALTH_SECRET
+        || ''
+    ).trim();
+    if (!secret) {
+        throw new Error('桌面发布包必须显式提供 PIVOT_DISTRIBUTION_STEALTH_SECRET 或 PIVOT_STEALTH_SECRET。');
+    }
+    const config = JSON.parse(original);
+    config.stealthSecret = secret;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+    return () => fs.writeFileSync(configPath, original, 'utf8');
 }
 
 function normalizeBuilderArgs(rawArgs) {
@@ -128,10 +149,12 @@ function copyReleaseArtifactsToDownloads(rawArgs, buildTarget) {
 
 const rawBuilderArgs = process.argv.slice(2);
 let runError = null;
+let restoreBundledDesktopConfig = () => {};
 
 try {
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
     const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    restoreBundledDesktopConfig = prepareBundledDesktopConfig();
     if (buildTarget.platform === 'linux') assertLinuxPackageMetadata(packageJson, root);
     ensureElectronInstalled();
     cleanBuildOutputs();
@@ -151,6 +174,13 @@ try {
     copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget);
 } catch (err) {
     runError = err;
+} finally {
+    try {
+        restoreBundledDesktopConfig();
+    } catch (restoreError) {
+        console.error('恢复仓库内桌面配置失败:', restoreError);
+        if (!runError) runError = restoreError;
+    }
 }
 
 if (runError) {

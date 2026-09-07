@@ -49,23 +49,68 @@ function decryptSecret(value) {
 
 function mappedIpv4Address(hostname) {
     const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-    const compactMatch = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-    if (compactMatch && net.isIP(compactMatch[1]) === 4) return compactMatch[1];
-
-    const hexMatch = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (hexMatch) {
-        const high = parseInt(hexMatch[1], 16);
-        const low = parseInt(hexMatch[2], 16);
-        return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
-    }
-
-    const fullMatch = host.match(/^(?:0{1,4}:){5}ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (fullMatch) {
-        const high = parseInt(fullMatch[1], 16);
-        const low = parseInt(fullMatch[2], 16);
-        return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
+    const bytes = parseIpv6Bytes(host);
+    if (bytes && bytes.slice(0, 10).every(byte => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff) {
+        return Array.from(bytes.slice(12)).join('.');
     }
     return '';
+}
+
+// Node 的 net.isIP() 只告诉我们输入是 IPv6，不会把压缩、全展开和 IPv4
+// 映射形式归一化。安全策略必须按地址的数值网段判断，不能依赖字符串前缀。
+function parseIpv6Bytes(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (net.isIP(host) !== 6) return null;
+    const sections = host.split('::');
+    if (sections.length > 2) return null;
+
+    const expand = value => {
+        if (!value) return [];
+        const tokens = value.split(':');
+        if (tokens.some(token => token === '')) return null;
+        const result = [];
+        tokens.forEach((token, index) => {
+            if (token.includes('.')) {
+                if (index !== tokens.length - 1 || net.isIP(token) !== 4) return;
+                const octets = token.split('.').map(Number);
+                result.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+                return;
+            }
+            if (!/^[0-9a-f]{1,4}$/.test(token)) return;
+            result.push(parseInt(token, 16));
+        });
+        return result;
+    };
+
+    const left = expand(sections[0]);
+    const right = expand(sections.length === 2 ? sections[1] : '');
+    if (!left || !right) return null;
+    const missing = sections.length === 2 ? 8 - left.length - right.length : 0;
+    if ((sections.length === 2 && missing < 1) || (sections.length === 1 && left.length !== 8)) return null;
+    const hextets = sections.length === 2
+        ? [...left, ...Array(missing).fill(0), ...right]
+        : left;
+    if (hextets.length !== 8) return null;
+    const bytes = Buffer.alloc(16);
+    hextets.forEach((value, index) => {
+        bytes[index * 2] = value >> 8;
+        bytes[index * 2 + 1] = value & 0xff;
+    });
+    return bytes;
+}
+
+function isIpv6LoopbackOrUnspecified(bytes) {
+    if (!bytes) return false;
+    const unspecified = bytes.every(byte => byte === 0);
+    const loopback = bytes.slice(0, 15).every(byte => byte === 0) && bytes[15] === 1;
+    return unspecified || loopback;
+}
+
+function isIpv6PrivateOrLinkLocal(bytes) {
+    if (!bytes) return false;
+    const uniqueLocal = (bytes[0] & 0xfe) === 0xfc; // fc00::/7
+    const linkLocal = bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80; // fe80::/10
+    return uniqueLocal || linkLocal;
 }
 
 function normalizeHostForPolicy(hostname) {
@@ -89,7 +134,7 @@ function isPrivateHost(hostname) {
             parts[0] === 0;
     }
     if (ipType === 6) {
-        return host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80');
+        return isIpv6LoopbackOrUnspecified(parseIpv6Bytes(host)) || isIpv6PrivateOrLinkLocal(parseIpv6Bytes(host));
     }
     return false;
 }
@@ -106,7 +151,8 @@ function isSensitiveOutboundHost(hostname) {
             (parts[0] === 169 && parts[1] === 254);
     }
     if (ipType === 6) {
-        return host === '::1' || host.startsWith('fe80');
+        const bytes = parseIpv6Bytes(host);
+        return isIpv6LoopbackOrUnspecified(bytes) || Boolean(bytes && bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80);
     }
     return false;
 }
@@ -118,6 +164,7 @@ function isLoopbackHost(hostname) {
         const parts = host.split('.').map(Number);
         return parts[0] === 127;
     }
+    if (net.isIP(host) === 6) return isIpv6LoopbackOrUnspecified(parseIpv6Bytes(host));
     return false;
 }
 

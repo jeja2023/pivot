@@ -18,6 +18,7 @@ dist-electron/
 dist-electron-remote/
 dist-electron-*/
 client/*.exe
+config.json
 
 # 下载目录中的大文件（不提交到 Git）
 downloads/*.exe

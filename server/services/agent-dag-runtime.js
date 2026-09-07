@@ -1,5 +1,6 @@
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { approvalInputHash } = require('./agent-runtime/approvals');
 const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
@@ -336,6 +337,12 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 durationMs: Date.now() - startedAt
             };
         } catch (e) {
+            if (e.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {
+                e.recoveryApprovalKey = e.recoveryApprovalKey || executionContext.approvalKey || `${node.tool}:${node.id}`;
+                e.recoveryApprovalInput = e.recoveryApprovalInput || resolvedInput;
+                e.recoveryApprovalTool = e.recoveryApprovalTool || node.tool;
+                throw e;
+            }
             if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
             lastError = e;
             if (e.code === 'AGENT_NODE_TIMEOUT') break;
@@ -468,13 +475,14 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
                 error.code = 'AGENT_APPROVAL_REQUIRED';
                 throw error;
             }
-            const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs);
+            const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs, selectedTool);
             const executionContext = {
                 dagInputs,
                 workflowApprovalResult,
                 workflowDelayResult,
                 budget: deps.taskBudget,
-                approvalGranted: true,
+                approvalKey,
+                approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
                 allowApproval: true,
                 executeSubworkflow: childInput => executeSubworkflowDag({
                     input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack
@@ -678,7 +686,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, inputContractIssues);
             validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, inputContractIssues);
             const outputDefinitionIssues = validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, []);
-            const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs);
+                const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs, selectedTool);
             const startedAtText = getBeijingTimestamp();
             const stepContext = await deps.captureStepContext?.({
                 run,
@@ -747,7 +755,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                         key: `${node.tool}:${node.id}`
                     });
                 }
-                if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, `${node.tool}:${node.id}`)) {
+                const approvalKey = `${node.tool}:${node.id}`;
+                if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
                     const approvalError = new Error('DAG 节点需要工具审批。');
                     approvalError.code = 'AGENT_APPROVAL_REQUIRED';
                     throw approvalError;
@@ -756,9 +765,10 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     dagInputs,
                     signal: batchSignal,
                     budget: deps.taskBudget,
+                    approvalKey,
                     // Reaching this point means the approval helper either found
                     // a prior grant or determined that this tool is safe to run.
-                    approvalGranted: true,
+                    approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
                     allowApproval: true,
                     stepContext,
                     contextHash: stepContext?.contextHash || '',
@@ -823,6 +833,35 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     deps.finishAgentTraceSpan?.(nodeSpanId, {
                         status: 'waiting',
                         details: { nodeId: node.id, toolName: node.tool, reason: 'approval_required' },
+                        errorMessage: e.message
+                    });
+                    throw e;
+                }
+                if (e.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {
+                    const now = getBeijingTimestamp();
+                    const recoveryKey = e.recoveryApprovalKey || `${node.tool}:${node.id}`;
+                    const recoveryInput = e.recoveryApprovalInput || resolvedInput;
+                    await deps.setRunMetadata(run.id, {
+                        pendingApproval: {
+                            tool: e.recoveryApprovalTool || node.tool,
+                            key: recoveryKey,
+                            input: recoveryInput,
+                            inputHash: approvalInputHash(recoveryInput),
+                            requestedAt: now,
+                            expiresAt: getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
+                            recovery: true
+                        }
+                    });
+                    await deps.updateRun(run.id, {
+                        status: 'approval_required',
+                        error_message: '检测到未完成的非幂等工具调用，需要重新审批。',
+                        updated_at: now,
+                        last_heartbeat_at: now
+                    });
+                    if (!batchController.signal.aborted) batchController.abort(e);
+                    deps.finishAgentTraceSpan?.(nodeSpanId, {
+                        status: 'waiting',
+                        details: { nodeId: node.id, toolName: node.tool, reason: 'recovery_approval_required' },
                         errorMessage: e.message
                     });
                     throw e;

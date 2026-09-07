@@ -13,13 +13,15 @@ function generateRandomSecret() {
 }
 
 function getStealthSecret() {
-    if (process.env.PIVOT_STEALTH_SECRET) {
-        return process.env.PIVOT_STEALTH_SECRET.trim();
-    }
     const dbValue = getAppSettingValue(STEALTH_SETTING_SECRET_KEY);
     if (dbValue && typeof dbValue === 'string' && dbValue.trim()) {
         cachedSecret = dbValue.trim();
         return cachedSecret;
+    }
+    // .env 只作为首次启动/迁移兼容来源；一旦管理员在全局参数页保存新密钥，
+    // app_settings 优先，避免旧环境变量把页面修改静默覆盖回去。
+    if (process.env.PIVOT_STEALTH_SECRET) {
+        return process.env.PIVOT_STEALTH_SECRET.trim();
     }
     if (cachedSecret) {
         return cachedSecret;

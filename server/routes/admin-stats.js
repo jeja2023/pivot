@@ -27,7 +27,7 @@ const {
     tokenUsageAggregateSubquery
 } = require('../services/admin-stats-cache');
 const { getBeijingTimestamp } = require('../time');
-const { isSuperAdmin } = require('../permissions');
+const { isSuperAdmin, requireCapability } = require('../permissions');
 const {
     getLocalHostnames,
     getRequestHostAliases,
@@ -429,11 +429,11 @@ function createAdminStatsRouter({
         res.json({ success: true, event });
     }));
 
-    router.get('/observability/settings', authMiddleware, adminMiddleware, asyncHandler(async (_req, res) => {
+    router.get('/observability/settings', authMiddleware, requireCapability('manageGlobalSettings'), asyncHandler(async (_req, res) => {
         res.json(getObservabilitySettings());
     }));
 
-    router.put('/observability/settings', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.put('/observability/settings', authMiddleware, requireCapability('manageGlobalSettings'), asyncHandler(async (req, res) => {
         const settings = await saveObservabilitySettings({
             webhookUrl: req.body?.webhookUrl,
             enabled: req.body?.enabled
@@ -633,7 +633,7 @@ function createAdminStatsRouter({
         res.json({ trend, byUser, byUnit, units });
     }));
 
-    router.get('/report/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/report/export', authMiddleware, requireCapability('exportAudit'), asyncHandler(async (req, res) => {
         const { unit, username, days = 30, start, end } = req.query;
         const innerConditions = [];
         const innerParams = [];

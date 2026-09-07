@@ -17,7 +17,8 @@ const {
     clickBrowserTarget,
     closeAgentBrowserContext,
     createAgentBrowserContext,
-    locateBrowserTarget
+    locateBrowserTarget,
+    isAgentBrowserRuntimeAvailable
 } = require('./agent-browser');
 const {
     normalizeJsonSchema,
@@ -87,7 +88,7 @@ function asJsonSchema(properties = {}, required = []) {
 
 function getBuiltInToolDefinitions(user) {
     const adminOnly = isSuperAdmin(user);
-    return [
+    const definitions = [
         {
             name: 'agent.llm',
             title: '大模型节点',
@@ -402,6 +403,9 @@ function getBuiltInToolDefinitions(user) {
         },
         ...getArtifactToolDefinitions()
     ].filter(tool => !tool.admin || adminOnly);
+    // Docker 服务镜像只携带 Playwright 包，不携带 Chromium；在工具目录层
+    // 隐藏不可用能力，避免模型规划后才触发审批再失败。
+    return definitions.filter(tool => tool.name !== 'agent.browser' || isAgentBrowserRuntimeAvailable());
 }
 
 async function getUserAccessibleModels(user) {

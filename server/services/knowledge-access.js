@@ -1,4 +1,5 @@
 const { isAdmin } = require('../permissions');
+const { exactCsvTokenSql } = require('./unit-visibility');
 
 function normalizeKnowledgeUser(userOrId) {
     if (userOrId && typeof userOrId === 'object') {
@@ -27,8 +28,8 @@ function buildAllowedTargetSql(alias, user) {
                     TRIM(COALESCE(${alias}.allowed_units, '')) = ''
                     AND TRIM(COALESCE(${alias}.allowed_user_ids, '')) = ''
                 )`}
-                OR (',' || replace(COALESCE(${alias}.allowed_units, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
-                OR (',' || replace(COALESCE(${alias}.allowed_user_ids, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
+                OR ${exactCsvTokenSql(`${alias}.allowed_units`)}
+                OR ${exactCsvTokenSql(`${alias}.allowed_user_ids`)}
             )
         )`,
         params: [normalized.unit, normalized.id]

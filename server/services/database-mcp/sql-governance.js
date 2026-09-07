@@ -14,10 +14,52 @@ function assertReadonlySql(sql) {
     if (!/^(select|with|show|describe|desc|explain)\b/i.test(withoutTrailingSemicolon)) {
         throw new Error('仅允许执行只读 SQL 查询语句。');
     }
-    if (/\b(insert|update|delete|drop|alter|create|truncate|merge|grant|revoke|replace|vacuum|attach|detach|copy|call|execute)\b/i.test(withoutTrailingSemicolon)) {
+    const scanText = maskSqlLiteralsAndComments(withoutTrailingSemicolon);
+    if (/\b(insert|update|delete|drop|alter|create|truncate|merge|grant|revoke|replace|vacuum|attach|detach|copy|call|execute|into|outfile|dumpfile|load_file|for\s+(?:update|share)|lock\s+table)\b/i.test(scanText)
+        || /\b(pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_export|lo_import|setval|nextval|dblink_exec|dblink_connect|pg_terminate_backend|pg_cancel_backend|pg_sleep)\s*\(/i.test(scanText)) {
         throw new Error('SQL 包含被禁止的写入或管理操作关键字。');
     }
     return withoutTrailingSemicolon;
+}
+
+// 只在 SQL 代码区检查危险词，避免字符串内容或注释中的普通文本触发误报。
+// 这不是 SQL 解析器；数据库会话级只读设置仍是纵深防御的主控制。
+function maskSqlLiteralsAndComments(sql) {
+    const source = String(sql || '');
+    let output = '';
+    let quote = '';
+    let i = 0;
+    while (i < source.length) {
+        const ch = source[i];
+        const next = source[i + 1] || '';
+        if (quote) {
+            if (ch === quote && source[i + 1] === quote) {
+                output += '  ';
+                i += 2;
+                continue;
+            }
+            if (ch === quote) quote = '';
+            output += ' ';
+            i += 1;
+            continue;
+        }
+        if ((ch === '-' && next === '-') || (ch === '/' && next === '*')) {
+            const end = ch === '-' ? source.indexOf('\n', i + 2) : source.indexOf('*/', i + 2);
+            const stop = end < 0 ? source.length : (ch === '-' ? end : end + 2);
+            output += source.slice(i, stop).replace(/[^\n]/g, ' ');
+            i = stop;
+            continue;
+        }
+        if (ch === "'" || ch === '"' || ch === '`') {
+            quote = ch;
+            output += ' ';
+            i += 1;
+            continue;
+        }
+        output += ch;
+        i += 1;
+    }
+    return output;
 }
 
 // 标识符合法性校验：阻断控制字符（换行、回车、制表、null 字节等）进入 SQL，
@@ -111,11 +153,22 @@ function buildGroupCountSql(input = {}, dialect = 'postgres', fallbackSchema = '
 function applySqlLimit(sql, limit, dialect) {
     const text = String(sql || '').trim();
     const boundedLimit = clampLimit(limit, 100);
-    if (
-        /\blimit\s+\d+\b/i.test(text)
-        || /^\s*select\s+top\s*(?:\(\s*\d+\s*\)|\d+\b)/i.test(text)
-        || /^\s*(show|describe|desc|explain)\b/i.test(text)
-    ) return text;
+    if (/^\s*(show|describe|desc|explain)\b/i.test(text)) return text;
+    const mysqlLimit = text.match(/\blimit\s+(\d+)\s*,\s*(\d+)\s*$/i);
+    if (mysqlLimit && dialect !== 'sqlserver') {
+        const bounded = Math.min(Number(mysqlLimit[2]), boundedLimit);
+        return `${text.slice(0, mysqlLimit.index)}LIMIT ${mysqlLimit[1]}, ${bounded}`;
+    }
+    const limitMatch = text.match(/\blimit\s+(\d+)(\s+offset\s+\d+)?\s*$/i);
+    if (limitMatch && dialect !== 'sqlserver') {
+        const bounded = Math.min(Number(limitMatch[1]), boundedLimit);
+        return `${text.slice(0, limitMatch.index)}LIMIT ${bounded}${limitMatch[2] || ''}`.trim();
+    }
+    const topMatch = text.match(/^(\s*select\s+top\s*)(?:\(\s*(\d+)\s*\)|(\d+\b))/i);
+    if (topMatch && dialect === 'sqlserver') {
+        const bounded = Math.min(Number(topMatch[2] || topMatch[3]), boundedLimit);
+        return `${topMatch[1]}(${bounded})${text.slice(topMatch[0].length)}`;
+    }
     if (dialect === 'sqlserver') {
         // SQL Server CTE 必须以分号/;WITH 开始，TOP 需要注入到 CTE 最终 SELECT。
         // 无法可靠定位最终 SELECT 时拒绝执行，避免绕过 max_rows。

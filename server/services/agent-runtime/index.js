@@ -333,6 +333,7 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         getAgentRunTitle,
         getRunMetadata,
         isApprovalGranted,
+        setRunMetadata,
         insertStep,
         isMissingFinalAnswer,
         listSteps,
@@ -463,14 +464,17 @@ async function recoverAgentRuns() {
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
     `, [cutoff]);
     for (const run of staleRunning) {
-        const pending = await queryOne(`
+        const pendingCheckpoints = await query(`
             SELECT tool_name, input_hash, idempotent, operation_key, state
             FROM agent_run_checkpoints
             WHERE run_id = ? AND status = 'pending'
-            ORDER BY step_index DESC, id DESC LIMIT 1
+            ORDER BY step_index DESC, id DESC
         `, [run.id]);
+        // 并发 DAG 可能留下多个 pending 检查点；不能只看最新一条，
+        // 否则幂等兄弟节点会掩盖仍需重新审批的非幂等节点。
+        const pending = pendingCheckpoints.find(checkpoint => !Boolean(checkpoint.idempotent)) || pendingCheckpoints[0] || null;
         const runMetadataRow = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [run.id]);
-        const safeResume = pending && Boolean(pending.idempotent);
+        const safeResume = pendingCheckpoints.length > 0 && !pendingCheckpoints.some(checkpoint => !Boolean(checkpoint.idempotent));
         const targetStatus = pending && !safeResume ? 'approval_required' : safeResume ? 'queued' : 'error';
         const recoveryFields = {
             status: targetStatus,

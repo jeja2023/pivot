@@ -38,7 +38,8 @@ const {
     DEFAULT_PORTS,
     normalizeDatabaseConnectionError,
     testDatabaseConnection,
-    validateDatabaseConnectionPayload
+    validateDatabaseConnectionPayload,
+    assertDatabaseConnectionSharingPolicy
 } = require('../../services/database-mcp');
 const {
     BUILTIN_MCP_PREFIXES,
@@ -183,6 +184,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         normalizeDatabaseConnectionError,
         testDatabaseConnection,
         validateDatabaseConnectionPayload,
+        assertDatabaseConnectionSharingPolicy,
         BUILTIN_MCP_PREFIXES,
         executeBuiltinMcpTool,
         getBuiltinServiceTypeFromUrl,

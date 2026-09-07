@@ -10,7 +10,7 @@ const MAX_DB_IMPORT_ROWS = Math.min(MAX_UPLOAD_ROWS, Math.max(1000, Number.parse
 async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit, name }) {
     // 延迟引入，避免与 mcp-client 之间形成模块加载环。
     const { getAccessibleMcpServer } = require('../mcp-client');
-    const { executeDatabaseMcpTool } = require('../database-mcp');
+    const { executeMcpTool } = require('../mcp-client');
 
     const serverId = Number(mcpServerId);
     if (!serverId) {
@@ -29,28 +29,29 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
     const trimmedSql = String(sql || '').trim();
     const trimmedTable = String(table || '').trim();
     if (trimmedSql) {
-        result = await executeDatabaseMcpTool(server, 'db.run_readonly_query', { sql: trimmedSql, limit: safeLimit });
+        result = await executeMcpTool(`mcp.${server.id}.db.run_readonly_query`, { sql: trimmedSql, limit: safeLimit }, user, { source: 'data-analysis' });
     } else if (trimmedTable) {
         // 无显式 SQL 时，对指定表做一次受限的全列 SELECT（由 db.run_readonly_query 内部治理与限行）。
         const safeIdent = `"${trimmedTable.replace(/"/g, '""')}"`;
         const qualified = schema ? `"${String(schema).replace(/"/g, '""')}".${safeIdent}` : safeIdent;
-        result = await executeDatabaseMcpTool(server, 'db.run_readonly_query', { sql: `SELECT * FROM ${qualified}`, limit: safeLimit });
+        result = await executeMcpTool(`mcp.${server.id}.db.run_readonly_query`, { sql: `SELECT * FROM ${qualified}`, limit: safeLimit }, user, { source: 'data-analysis' });
     } else {
         const err = new Error('请提供要导入的 SQL 查询或数据表名。');
         err.status = 400;
         throw err;
     }
-    const rows = Array.isArray(result?.rows) ? result.rows : (Array.isArray(result) ? result : []);
+    const payload = result?.structuredContent || result;
+    const rows = Array.isArray(payload?.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
     const datasetName = name || trimmedTable || `${server.name || '数据库'}导入`;
     return createDatasetFromRows({
         user,
         name: datasetName,
         rows,
         sourceType: 'database',
-        sourceRowCount: result?.total ?? result?.rowCount ?? rows.length,
+        sourceRowCount: payload?.total ?? payload?.rowCount ?? rows.length,
         sourceColumnCount: rows[0] && typeof rows[0] === 'object' ? Object.keys(rows[0]).length : 0,
-        truncated: result?.truncated === true,
-        truncationReason: result?.truncated ? `数据库查询达到导入上限 ${safeLimit} 行` : ''
+        truncated: payload?.truncated === true,
+        truncationReason: payload?.truncated ? `数据库查询达到导入上限 ${safeLimit} 行` : ''
     });
 }
 

@@ -4,8 +4,11 @@
  */
 require('dotenv').config();
 const { Pool } = require('pg');
+if (!String(process.env.DATABASE_URL || '').trim()) {
+    throw new Error('请通过 DATABASE_URL 显式提供 PostgreSQL 连接串，禁止使用内置默认凭据。');
+}
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot'
+    connectionString: process.env.DATABASE_URL
 });
 
 async function main() {

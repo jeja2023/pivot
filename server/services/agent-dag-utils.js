@@ -247,15 +247,17 @@ function dagConditionSatisfied(condition, dependencyStatuses = []) {
     return dependencyStatuses.every(status => ['completed', 'continued_error'].includes(status));
 }
 
-function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs) {
+function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs, tool = null) {
     const defaultTimeout = normalizePositiveInt(
         run.tool_timeout_ms,
         defaultToolTimeoutMs,
         30000,
         10 * 60 * 1000
     );
+    const requestedRetryLimit = normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5);
+    const unsafeReplay = tool?.side_effect === true && tool?.idempotent !== true;
     return {
-        retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
+        retryLimit: unsafeReplay ? 0 : requestedRetryLimit,
         timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000) || defaultTimeout,
         onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
             ? String(node.onError || node.on_error || 'skip_dependents')

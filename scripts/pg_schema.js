@@ -6,7 +6,8 @@
 const { Pool } = require('pg');
 const { buildPgSchemaStatements, normalizeLegacyResidualColumnTypes } = require('../server/db/schema/pg');
 
-const pgUrl = process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot';
+const pgUrl = String(process.env.DATABASE_URL || '').trim();
+if (!pgUrl) throw new Error('请通过 DATABASE_URL 显式提供 PostgreSQL 连接串，禁止使用内置默认凭据。');
 const pool = new Pool({
     connectionString: pgUrl,
     connectionTimeoutMillis: 10000

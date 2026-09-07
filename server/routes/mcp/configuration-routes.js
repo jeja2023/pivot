@@ -20,6 +20,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
         normalizeDatabaseConnectionError,
         testDatabaseConnection,
         validateDatabaseConnectionPayload,
+        assertDatabaseConnectionSharingPolicy,
         BUILTIN_MCP_PREFIXES,
         executeBuiltinMcpTool,
         getBuiltinServiceTypeFromUrl,
@@ -122,6 +123,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
             if (!name) return res.status(400).json({ error: '请填写连接名称。' });
 
             const connection = validateDatabaseConnectionPayload(req.body, req.user);
+            assertDatabaseConnectionSharingPolicy(connection, { shared });
             const now = getBeijingTimestamp();
             const userId = shared ? null : req.user.id;
             let serverId = 0;
@@ -286,6 +288,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                     ? decryptExistingDatabasePassword(dbConnectionRow)
                     : req.body?.password
             }, req.user);
+            assertDatabaseConnectionSharingPolicy(connection, { shared: existing.user_id === null });
             const now = getBeijingTimestamp();
             await transaction(async trx => {
                 await trx.execute(`

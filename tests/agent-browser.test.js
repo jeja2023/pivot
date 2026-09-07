@@ -14,7 +14,8 @@ const {
     createAgentBrowserContext,
     createControlledLoginFlow,
     locateBrowserTarget,
-    resolveChromiumExecutable
+    resolveChromiumExecutable,
+    isAgentBrowserRuntimeAvailable
 } = require('../server/services/agent-browser');
 
 function startFixture() {
@@ -26,6 +27,10 @@ function startFixture() {
 }
 
 const hasChromium = Boolean(resolveChromiumExecutable(chromium));
+
+test('browser runtime availability follows the actual executable probe', () => {
+    assert.equal(isAgentBrowserRuntimeAvailable(), hasChromium);
+});
 
 test('browser context enforces isolated profile and DOM/visual interaction', { skip: !hasChromium && '未检测到可用的 Chromium 可执行文件，跳过浏览器交互测试' }, async () => {
     const fixture = await startFixture();

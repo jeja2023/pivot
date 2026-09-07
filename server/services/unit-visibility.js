@@ -55,6 +55,14 @@ function serializeAllowedUserIds(value) {
     return parseAllowedUserIds(value).join(',');
 }
 
+// PostgreSQL 兼容的逗号分隔白名单精确匹配 SQL 片段。
+// 避免使用 LIKE，确保包含 % 或 _ 的单位名称作为字面量匹配而非通配符。
+function exactCsvTokenSql(column, placeholder = '?') {
+    const expression = String(column || '').trim();
+    if (!expression) throw new Error('CSV 白名单列不能为空。');
+    return `strpos(',' || replace(COALESCE(${expression}, ''), ' ', '') || ',', ',' || replace(${placeholder}, ' ', '') || ',') > 0`;
+}
+
 // 判断用户所属单位是否命中共享范围；范围为空表示全单位可见
 function matchesAllowedUnits(value, user) {
     const units = parseAllowedUnits(value);
@@ -144,6 +152,7 @@ module.exports = {
     SHARE_SCOPE_PERSONAL,
     SHARE_SCOPE_SHARED,
     canAccessSharedResource,
+    exactCsvTokenSql,
     isOwnUnitOnly,
     matchesAllowedUnits,
     matchesAllowedUserIds,

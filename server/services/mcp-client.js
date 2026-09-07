@@ -39,6 +39,7 @@ const { localBrowserToolDefinitions } = require('./local-browser-connector-tools
 const { isSuperAdmin } = require('../permissions');
 const {
     canAccessSharedResource,
+    exactCsvTokenSql,
     normalizeShareSettings
 } = require('./unit-visibility');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
@@ -475,8 +476,8 @@ async function getAccessibleMcpServer(serverId, user) {
                           TRIM(COALESCE(allowed_units, '')) = ''
                           AND TRIM(COALESCE(allowed_user_ids, '')) = ''
                       )
-                      OR (',' || replace(COALESCE(allowed_units, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
-                      OR (',' || replace(COALESCE(allowed_user_ids, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
+                      OR ${exactCsvTokenSql('allowed_units')}
+                      OR ${exactCsvTokenSql('allowed_user_ids')}
                   )
               )
           )
@@ -510,8 +511,8 @@ async function listMcpServers(user) {
                           TRIM(COALESCE(s.allowed_units, '')) = ''
                           AND TRIM(COALESCE(s.allowed_user_ids, '')) = ''
                       )
-                      OR (',' || replace(COALESCE(s.allowed_units, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
-                      OR (',' || replace(COALESCE(s.allowed_user_ids, ''), ' ', '') || ',') LIKE ('%,' || ? || ',%')
+                      OR ${exactCsvTokenSql('s.allowed_units')}
+                      OR ${exactCsvTokenSql('s.allowed_user_ids')}
                   )
               )
           )

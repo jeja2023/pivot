@@ -46,6 +46,15 @@ function resolveChromiumExecutable(chromium, options = {}) {
     return candidates.find(item => fs.existsSync(item)) || '';
 }
 
+function isAgentBrowserRuntimeAvailable() {
+    try {
+        const playwright = require('playwright');
+        return Boolean(resolveChromiumExecutable(playwright.chromium));
+    } catch (_) {
+        return false;
+    }
+}
+
 function loadPlaywrightBrowser(engine = 'chromium') {
     let playwright;
     try { playwright = require('playwright'); } catch (error) {
@@ -215,5 +224,6 @@ module.exports = {
     attachBrowserNetworkGuards,
     evaluateSafe,
     locateBrowserTarget,
-    resolveChromiumExecutable
+    resolveChromiumExecutable,
+    isAgentBrowserRuntimeAvailable
 };

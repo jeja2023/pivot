@@ -72,6 +72,13 @@ test('知识库资源判定与 SQL 过滤器绑定用户和单位范围', () => 
     assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id]);
 });
 
+test('单位白名单 SQL 使用精确 token 匹配，不把 % 和 _ 当作通配符', () => {
+    const filter = buildCollectionAccessFilter({ id: 20, role: 'user', unit: '%' }, 'c');
+    assert.doesNotMatch(filter.sql, /LIKE/);
+    assert.match(filter.sql, /strpos\(/i);
+    assert.deepEqual(filter.params, [20, '%', 20]);
+});
+
 test('Graph-RAG 汇总接受完整用户上下文以应用共享单位范围', () => {
     assert.doesNotThrow(() => getGraphSummary(sameUnit));
 });

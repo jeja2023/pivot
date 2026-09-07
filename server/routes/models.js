@@ -24,6 +24,7 @@ const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
+const { exactCsvTokenSql } = require('../services/unit-visibility');
 
 async function clearModelDefaultReferences(modelId) {
     const id = String(modelId || '').trim();
@@ -283,7 +284,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let filterParams = [];
 
         if (!isAdmin(req.user)) {
-            const unitCheck = "(COALESCE(m.allowed_units, '') = '' OR (',' || COALESCE(m.allowed_units, '') || ',') LIKE ('%,' || ? || ',%'))";
+            const unitCheck = `(COALESCE(m.allowed_units, '') = '' OR ${exactCsvTokenSql('m.allowed_units')})`;
             where = `WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND ${unitCheck}))`;
             filterParams = [req.user.id, (req.user.unit || '').trim()];
         } else {

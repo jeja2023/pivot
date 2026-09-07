@@ -25,6 +25,7 @@ const {
     getPermissionLabel,
     getPermissionTier,
     isSuperAdmin,
+    requireCapability,
     normalizeRole,
     withPermissionFlags
 } = require('../permissions');
@@ -230,7 +231,7 @@ function createAdminUsersRouter({
 
     // 审计写入是异步队列，读取接口只读已提交数据并允许最多一个刷新周期的最终一致性。
     // 这里不能等待 flushAllWrites：单条坏连接/慢写入不应阻塞管理员查看历史日志。
-    router.get('/admin/logs/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/admin/logs/export', authMiddleware, requireCapability('exportAudit'), asyncHandler(async (req, res) => {
         const { username, action, details, ip, start, end } = req.query;
         let conditions = [];
         let params = [];
@@ -266,7 +267,7 @@ function createAdminUsersRouter({
         res.send(csv);
     }));
 
-    router.get('/admin/compliance/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/admin/compliance/export', authMiddleware, requireCapability('exportAudit'), asyncHandler(async (req, res) => {
         const start = String(req.query.start || '').trim();
         const end = String(req.query.end || '').trim();
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
@@ -281,7 +282,7 @@ function createAdminUsersRouter({
         res.send(packageBuffer);
     }));
 
-    router.get('/admin/users/export', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/admin/users/export', authMiddleware, requireCapability('exportAudit'), asyncHandler(async (req, res) => {
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
         const users = await query(`
             SELECT id, COALESCE(NULLIF(deleted_username, ''), username) AS username,

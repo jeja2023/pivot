@@ -6,13 +6,16 @@ const Database = require('better-sqlite3');
 const { Pool } = require('pg');
 const crypto = require('crypto');
 const path = require('path');
+if (!String(process.env.DATABASE_URL || '').trim()) {
+    throw new Error('请通过 DATABASE_URL 显式提供 PostgreSQL 连接串，禁止使用内置默认凭据。');
+}
 
 const sqlite = new Database(
     process.env.SQLITE_DB_PATH || path.resolve(__dirname, '../data/chat.db'),
     { readonly: true }
 );
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:123456@localhost:5432/pivot',
+    connectionString: process.env.DATABASE_URL,
     options: `-c timezone=${process.env.SQLITE_TIMEZONE || 'Asia/Shanghai'}`
 });
 

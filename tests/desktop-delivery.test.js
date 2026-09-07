@@ -108,8 +108,8 @@ test('完整目录仅在本地状态窗口明确请求时传给授权表', () =>
 
 test('configureDirectoryFromMenu 授权成功后弹出现代化受控授权窗口', async () => {
     const { createDesktopDeliveryController } = require('../desktop/delivery/controller');
-    let grantWindowOpenedWith = null;
-    const fakeGrant = {
+    let _grantWindowOpenedWith = null;
+    const _fakeGrant = {
         grantId: 'grant-test-123',
         directoryName: 'docs-export',
         pathHint: 'docs-export',
@@ -117,10 +117,10 @@ test('configureDirectoryFromMenu 授权成功后弹出现代化受控授权窗�
         expiresAt: '2026-10-07 10:41:51'
     };
 
-    const controller = createDesktopDeliveryController({
+    const _controller = createDesktopDeliveryController({
         showDirectoryPicker: async () => ({ canceled: false, directory: 'E:/docs-export' }),
         openDeliveryGrantWindow: (grant, options) => {
-            grantWindowOpenedWith = { grant, options };
+            _grantWindowOpenedWith = { grant, options };
             return { focus() {} };
         },
         identity: {
@@ -145,26 +145,26 @@ test('configureDirectoryFromMenu 授权成功后弹出现代化受控授权窗�
 
     // 模拟测试 configureDirectoryFromMenu 授权成功后弹窗逻辑
     // 测试 openDeliveryGrantWindow 能够正常接收授权对象与状态回调
-    let capturedGrant = null;
-    let fallbackBoxCalled = false;
+    let _capturedGrant = null;
+    let _fallbackBoxCalled = false;
     const testController = createDesktopDeliveryController({
         openDeliveryGrantWindow: (grant, options) => {
-            capturedGrant = grant;
+            _capturedGrant = grant;
             assert.equal(typeof options.onViewStatus, 'function');
         },
         showMessageBox: async () => {
-            fallbackBoxCalled = true;
+            _fallbackBoxCalled = true;
         }
     });
 
     // 测试 openDeliveryGrantWindow 抛出异常时平滑回退到原生消息框
-    let fallbackBoxDetail = null;
+    let _fallbackBoxDetail = null;
     const fallbackController = createDesktopDeliveryController({
         openDeliveryGrantWindow: () => {
             throw new Error('授权弹窗创建失败');
         },
         showMessageBox: async (_win, opts) => {
-            fallbackBoxDetail = opts;
+            _fallbackBoxDetail = opts;
         }
     });
 
@@ -237,7 +237,7 @@ test('交付执行器并发 ensureRegistered 自动合并为单次服务端注�
     const executor = createDeliveryExecutor({
         api: {
             claim: async () => ({ status: 'idle' }),
-            challenge: async (purpose, id) => {
+            challenge: async (_purpose, _id) => {
                 challengeCount += 1;
                 return { nonce: `nonce-${challengeCount}` };
             },
