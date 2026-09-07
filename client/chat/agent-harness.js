@@ -53,16 +53,19 @@
         notification: { label: '运行通知', badgeClass: 'badge-notification' }
     }[t] || { label: '系统事件', badgeClass: 'badge-event' });
 
+    const INBOX_TITLE_MAP = {
+        'dag run completed': '工作流执行完成', 'dag run failed': '工作流执行异常', 'dag run error': '工作流执行异常',
+        'run completed': '自主任务执行完成', 'agent run completed': '自主任务执行完成', 'run failed': '自主任务运行失败', 'agent run failed': '自主任务运行失败',
+        'run cancelled': '自主任务已停止', 'agent run cancelled': '自主任务已停止', 'task completed with errors': '任务执行完成（含局部告警）',
+        'task completed': '任务执行完成', 'task failed': '任务运行失败', 'approval required': '任务需要人工审批确认', '任务需要审批': '任务需要人工审批确认',
+        'evolution proposal': '智能体自进化提案', '智能体进化提案': '智能体自进化提案', 'memory consolidated': '智能体知识与记忆沉淀', '智能体结果已沉淀': '智能体知识与记忆沉淀'
+    };
     const formatInboxTitle = item => {
         const raw = String(item.title || item.sourceType || '').trim();
-        if (raw === 'DAG run completed' || raw.startsWith('DAG run')) return '工作流执行完成';
-        if (raw === 'Run completed' || raw === 'Agent run completed') return '自主任务执行完成';
-        if (raw === 'Task completed with errors') return '任务执行完成（含局部告警）';
-        if (raw === 'Approval required' || raw === '任务需要审批') return '任务需要人工审批确认';
-        if (raw === 'Evolution proposal' || raw === '智能体进化提案') return '智能体自进化提案';
-        if (raw === 'Memory consolidated' || raw === '智能体结果已沉淀') return '智能体知识与记忆沉淀';
-        return raw || '未命名通知';
+        return INBOX_TITLE_MAP[raw.toLowerCase()] || INBOX_TITLE_MAP[raw] || raw || '未命名通知';
     };
+    const formatInboxBody = text => String(text || '-').replace(/任务状态：\s*([a-zA-Z_]+)/g, (_, s) => `任务状态：${window.Pivot?.legacy?.agentStatusLabel?.(s) || s}`);
+
 
     const formatGoalTrigger = (spec = {}) => {
         const type = spec?.type || spec?.trigger_type || 'timer';
@@ -91,7 +94,6 @@
             if (descEl) descEl.textContent = '修改自主 Agent 持续目标的目标描述与触发参数';
             if (editIdInput) editIdInput.value = goal.id;
             if (submitBtn) submitBtn.textContent = '保存修改';
-
             const titleInput = document.getElementById('agent-goal-title');
             const goalInput = document.getElementById('agent-goal-goal');
             const triggerSelect = document.getElementById('agent-goal-trigger');
@@ -99,20 +101,10 @@
             if (goalInput) goalInput.value = goal.goal || '';
             const spec = goal.triggerSpec || {};
             const type = spec.type || spec.trigger_type || 'timer';
-            if (triggerSelect) {
-                triggerSelect.value = type;
-                triggerSelect.dispatchEvent(new Event('change'));
-            }
-            if (type === 'timer') {
-                const timeInput = document.getElementById('agent-goal-time');
-                if (timeInput) timeInput.value = spec.timeOfDay || spec.time || '09:00';
-            } else if (type === 'file') {
-                const dirInput = document.getElementById('agent-goal-directory');
-                if (dirInput) dirInput.value = spec.directory || '';
-            } else if (type === 'database') {
-                const queryInput = document.getElementById('agent-goal-query');
-                if (queryInput) queryInput.value = spec.query || '';
-            }
+            if (triggerSelect) { triggerSelect.value = type; triggerSelect.dispatchEvent(new Event('change')); }
+            if (type === 'timer') { const el = document.getElementById('agent-goal-time'); if (el) el.value = spec.timeOfDay || spec.time || '09:00'; }
+            else if (type === 'file') { const el = document.getElementById('agent-goal-directory'); if (el) el.value = spec.directory || ''; }
+            else if (type === 'database') { const el = document.getElementById('agent-goal-query'); if (el) el.value = spec.query || ''; }
         } else {
             if (titleEl) titleEl.textContent = '新建持续目标';
             if (descEl) descEl.textContent = '配置由定时调度或外部事件源自动触发的自主 Agent 持续目标';
@@ -263,7 +255,11 @@
 
             const tableHtml = pageItems.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 50px;">序号</th><th class="text-center" style="width: 96px;">类型</th><th style="width: 200px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${pageItems.map((item, index) => {
                 const meta = getInboxTypeMeta(item.sourceType);
-                return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center">${startIndex + index + 1}</td><td class="text-center agent-inbox-type-col"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${escape(item.title || '')}">${escape(formatInboxTitle(item))}</strong></td><td><span class="agent-inbox-table-desc" title="${escape(item.body || '')}">${escape(shortText(item.body || '-', 120))}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}" data-agent-inbox-type="${escapeAttr(item.sourceType)}" data-agent-inbox-id="${escapeAttr(item.sourceId)}" data-agent-inbox-unread="${item.unread ? '1' : '0'}">详情</button>` : ''}</div></td></tr>`;
+                const titleText = escape(formatInboxTitle(item));
+                const fullTitle = escape(item.title || item.sourceType || '事项通知');
+                const bodyText = escape(formatInboxBody(item.body));
+                const shortDesc = escape(shortText(formatInboxBody(item.body), 120));
+                return `<tr class="${item.unread ? 'is-unread' : 'is-read'}"><td class="text-center">${startIndex + index + 1}</td><td class="text-center agent-inbox-type-col"><span class="agent-inbox-type-badge ${meta.badgeClass}">${meta.label}</span></td><td><strong class="agent-inbox-table-title" title="${fullTitle}">${titleText}</strong></td><td><span class="agent-inbox-table-desc" title="${bodyText}">${shortDesc}</span></td><td class="text-center agent-inbox-table-time">${escape(formatDate(item.createdAt))}</td><td class="text-center"><div class="agent-inbox-table-actions">${item.sourceType === 'approval' ? `<button type="button" class="btn-primary btn-xs" data-agent-inbox-action="approve" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">批准</button><button type="button" class="btn-danger btn-xs" data-agent-inbox-action="reject" data-agent-inbox-type="approval" data-agent-inbox-id="${escapeAttr(item.sourceId)}">拒绝</button>` : ''}${item.sourceType === 'evolution' ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="validate" data-agent-inbox-type="evolution" data-agent-inbox-id="${escapeAttr(item.sourceId)}">验证</button>` : ''}${item.sourceType === 'notification' && item.unread ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-action="read" data-agent-inbox-type="notification" data-agent-inbox-id="${escapeAttr(item.sourceId)}">已读</button>` : ''}${item.runId ? `<button type="button" class="btn-secondary btn-xs" data-agent-inbox-open-run="${escapeAttr(item.runId)}" data-agent-inbox-type="${escapeAttr(item.sourceType)}" data-agent-inbox-id="${escapeAttr(item.sourceId)}" data-agent-inbox-unread="${item.unread ? '1' : '0'}">详情</button>` : ''}</div></td></tr>`;
             }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>所有事项均已处理完毕，新事项将在此实时汇聚</span></div>';
 
             setMarkup(inboxPanel, `${filterBar}${tableHtml}`);
@@ -1183,8 +1179,9 @@
                         : `${API_BASE}/agents/inbox/${encodeURIComponent(sourceType)}/${encodeURIComponent(sourceId)}/read`;
                     apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
                 }
-                if (runId && typeof globalThis['openAgentRun'] === 'function') {
-                    globalThis['openAgentRun'](runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+                const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
+                if (runId && typeof openAgentRun === 'function') {
+                    openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
                 }
                 return;
             }

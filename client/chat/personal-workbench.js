@@ -196,6 +196,8 @@
             row.className = 'personal-row personal-attention-row';
             row.dataset.personalItemType = item.sourceType || '';
             row.dataset.personalRunId = item.runId || '';
+            row.dataset.personalItemId = item.sourceId || item.id || '';
+            row.dataset.personalUnread = item.unread ? '1' : '0';
 
             const dot = document.createElement('span');
             const riskClass = item.risk === 'high' ? 'personal-dot-danger' : item.risk === 'medium' ? 'personal-dot-warning' : 'personal-dot-success';
@@ -206,15 +208,28 @@
             copy.className = 'personal-row-copy';
             appendText(copy, 'strong', 'personal-row-title', item.title || '待处理事项');
 
-            const metaText = item.body
-                ? (item.body.includes('·') ? item.body : `${item.body} · ${formatRelativeTime(item.updatedAt || item.createdAt)}`)
+            let bodyText = String(item.body || '').trim();
+            bodyText = bodyText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
+                const statusLabel = window.Pivot?.legacy?.agentStatusLabel?.(s);
+                return statusLabel ? `任务状态：${statusLabel}` : match;
+            });
+
+            const metaText = bodyText
+                ? (bodyText.includes('·') ? bodyText : `${bodyText} · ${formatRelativeTime(item.updatedAt || item.createdAt)}`)
                 : `等待处理 · ${formatRelativeTime(item.updatedAt || item.createdAt)}`;
             appendText(copy, 'span', 'personal-row-meta', metaText);
 
-            const badgeText = item.badgeText || (item.sourceType === 'approval' ? '待审批' : item.risk === 'high' ? '高优先级' : item.unread ? '待查看' : '已完成');
+            const badgeText = item.badgeText || (
+                item.sourceType === 'approval' ? '待审批'
+                : item.sourceType === 'evolution' ? '待审核'
+                : ['waiting_approval', 'approval_required', 'awaiting_approval'].includes(item.status) ? '待审批'
+                : item.risk === 'high' ? '高优先级'
+                : item.unread ? '待查看'
+                : '待处理'
+            );
             const pillColorClass = item.risk === 'high' || badgeText === '高优先级'
                 ? 'personal-pill-danger'
-                : (item.risk === 'medium' || badgeText === '待查看' || badgeText === '待审批')
+                : (item.risk === 'medium' || badgeText === '待查看' || badgeText === '待审批' || badgeText === '待审核')
                     ? 'personal-pill-warning'
                     : 'personal-pill-success';
 
@@ -299,7 +314,12 @@
             const copy = document.createElement('span');
             copy.className = 'personal-row-copy';
             appendText(copy, 'strong', 'personal-row-title', item.title || '未命名工作');
-            appendText(copy, 'span', 'personal-row-meta', item.meta || '最近更新');
+            let metaText = String(item.meta || '最近更新');
+            metaText = metaText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
+                const statusLabel = window.Pivot?.legacy?.agentStatusLabel?.(s);
+                return statusLabel ? `任务状态：${statusLabel}` : match;
+            });
+            appendText(copy, 'span', 'personal-row-meta', metaText);
 
             const timeStr = item.timeText || formatRelativeTime(item.updatedAt);
             const time = appendText(row, 'time', 'personal-row-time', timeStr);
@@ -561,6 +581,40 @@
         return window.Pivot.legacy.showMainWorkspace?.('chat');
     }
 
+    function markAttentionItemRead(rowEl, sourceType, sourceId) {
+        const isNotification = sourceType === 'notification';
+        const url = isNotification
+            ? `${API_BASE}/agents/inbox/notification/${encodeURIComponent(sourceId)}/read`
+            : `${API_BASE}/agents/inbox/${encodeURIComponent(sourceType)}/${encodeURIComponent(sourceId)}/read`;
+        apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+
+        const statCard = document.querySelector('.personal-stat-attention');
+        if (statCard) {
+            const valEl = statCard.querySelector('.personal-stat-value');
+            const subtextEl = statCard.querySelector('.personal-stat-subtext');
+            if (valEl) {
+                const cur = Math.max(0, (parseInt(valEl.textContent, 10) || 1) - 1);
+                valEl.textContent = String(cur);
+                if (subtextEl) {
+                    subtextEl.textContent = cur === 0 ? '全部已处理' : '项待处理';
+                    subtextEl.className = `personal-stat-subtext ${cur === 0 ? 'personal-stat-trend-good' : 'personal-stat-subtext-info'}`;
+                }
+            }
+        }
+
+        if (rowEl && rowEl.parentElement) {
+            const parent = rowEl.parentElement;
+            rowEl.remove();
+            if (!parent.children.length) {
+                parent.appendChild(createEmpty('暂时没有需要处理的事项，所有任务已就绪。', {
+                    iconSvg: ICONS.check,
+                    actionText: '查看待办中心',
+                    onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
+                }));
+            }
+        }
+    }
+
     document.addEventListener('click', async event => {
         const action = event.target.closest('[data-personal-action]')?.dataset.personalAction;
         if (action) {
@@ -620,8 +674,21 @@
         const attention = event.target.closest('[data-personal-item-type]');
         if (attention) {
             const runId = attention.dataset.personalRunId;
-            if (runId && typeof window.Pivot.legacy.openAgentRun === 'function') {
-                return window.Pivot.legacy.openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+            const sourceType = attention.dataset.personalItemType;
+            const sourceId = attention.dataset.personalItemId;
+            const isUnread = attention.dataset.personalUnread === '1';
+
+            if (isUnread && sourceType && sourceId) {
+                attention.dataset.personalUnread = '0';
+                markAttentionItemRead(attention, sourceType, sourceId);
+            }
+
+            const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
+            if (runId && typeof openAgentRun === 'function') {
+                return openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
+            }
+            if (sourceType === 'approval' || sourceType === 'evolution') {
+                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: sourceType === 'approval' ? 'approvals' : 'proposals' });
             }
             return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
         }

@@ -81,3 +81,34 @@ test('从个人工作台打开自动化时，默认跳转到任务列表页面',
     assert.match(personal, /action === 'open-automation'[\s\S]*?openAgentWorkbench\?\.\(\{\s*tab:\s*'tasks'\s*\}\)/);
 });
 
+test('任务状态全面中文化且需要我处理精准过滤非审批任务', () => {
+    const { formatAgentStatus } = require('../server/services/agent-validators');
+    assert.strictEqual(formatAgentStatus('running'), '运行中');
+    assert.strictEqual(formatAgentStatus('completed'), '已完成');
+    assert.strictEqual(formatAgentStatus('completed_with_errors'), '完成（含部分异常）');
+    assert.strictEqual(formatAgentStatus('failed'), '已失败');
+    assert.strictEqual(formatAgentStatus('error'), '运行异常');
+    assert.strictEqual(formatAgentStatus('waiting_approval'), '待审批');
+    assert.strictEqual(formatAgentStatus('awaiting_approval'), '等待审批');
+    assert.strictEqual(formatAgentStatus('queued'), '排队中');
+    assert.strictEqual(formatAgentStatus('active'), '运行中');
+    assert.strictEqual(formatAgentStatus('paused'), '已暂停');
+
+    const personalServer = read('server/services/personal-workbench.js');
+    const personalClient = read('client/chat/personal-workbench.js');
+    const harnessClient = read('client/chat/agent-harness.js');
+
+    // 服务端最近工作与待办均中文化任务状态
+    assert.match(personalServer, /formatAgentStatus\(record\.status\)/);
+    assert.match(personalServer, /waiting_approval/);
+
+    // 客户端待处理条目支持标记已读与属性挂载
+    assert.match(personalClient, /personalItemId/);
+    assert.match(personalClient, /personalUnread/);
+    assert.match(personalClient, /markAttentionItemRead/);
+
+    // 待办中心详情按钮调用 openAgentRun
+    assert.match(harnessClient, /openAgentRun.*returnTab:\s*'workbench'.*returnSubview:\s*'inbox'/);
+});
+
+

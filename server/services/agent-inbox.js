@@ -1,5 +1,6 @@
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { formatAgentStatus } = require('./agent-validators');
 
 function parseJson(value, fallback = {}) {
     if (value && typeof value === 'object') return value;
@@ -62,14 +63,18 @@ async function listAgentInbox(user, options = {}) {
     runs.forEach(row => {
         const metadata = parseJson(row.metadata, {});
         const isFailure = ['failed', 'error'].includes(String(row.status));
+        const isRead = Boolean(metadata.inboxRead || metadata.inboxReadAt);
+        const requiresApproval = ['waiting_approval', 'approval_required', 'awaiting_approval'].includes(String(row.status));
+        const statusLabel = formatAgentStatus(row.status);
         items.push(item('run', row.id, {
             title: row.title || row.goal || 'Agent 任务',
-            body: isFailure ? row.error_message || '任务运行失败' : `任务状态：${row.status}`,
+            body: isFailure ? (row.error_message || '任务运行失败') : `任务状态：${statusLabel}`,
             status: row.status,
+            statusText: statusLabel,
             runId: row.id,
             goalId: metadata.goalId || null,
-            risk: isFailure ? 'medium' : 'low',
-            unread: isFailure,
+            risk: isFailure ? 'medium' : requiresApproval ? 'high' : 'low',
+            unread: requiresApproval ? true : isFailure ? !isRead : false,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             actions: ['open_run', ...(isFailure ? ['retry'] : [])]
@@ -133,7 +138,17 @@ async function markInboxItem(user, sourceType, sourceId, action = 'read', value 
         if (action === 'publish') return publishEvolutionProposal(user, sourceId);
         return queryOne('SELECT id, status FROM agent_evolution_proposals WHERE id = ? AND user_id = ?', [sourceId, user.id]);
     }
-    if (sourceType === 'run') return await queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
+    if (sourceType === 'run') {
+        const run = await queryOne('SELECT id, metadata, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
+        if (!run) return null;
+        if (action === 'read') {
+            const meta = parseJson(run.metadata, {});
+            meta.inboxRead = true;
+            meta.inboxReadAt = getBeijingTimestamp();
+            await execute('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ? AND user_id = ?', [JSON.stringify(meta), getBeijingTimestamp(), sourceId, user.id]);
+        }
+        return await queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
+    }
     if (sourceType === 'event') {
         if (action === 'read') await execute("UPDATE agent_inbox_events SET status = 'read', updated_at = ? WHERE id = ? AND user_id = ?", [getBeijingTimestamp(), sourceId, user.id]);
         else if (action === 'snooze' || action === 'mute') await execute(`UPDATE agent_inbox_events SET ${action === 'snooze' ? 'snoozed_until' : 'muted_until'} = ?, updated_at = ? WHERE id = ? AND user_id = ?`, [value.until || null, getBeijingTimestamp(), sourceId, user.id]);

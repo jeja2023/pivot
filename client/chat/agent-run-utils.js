@@ -113,11 +113,25 @@ function agentStatusLabel(status) {
         error: '失败',
         failed: '失败',
         cancelled: '已停止',
+        canceled: '已停止',
         skipped: '已跳过',
-        deleted: '已删除'
+        deleted: '已删除',
+        timeout: '运行超时',
+        paused: '已暂停',
+        active: '运行中',
+        draft: '草稿',
+        validating: '验证中',
+        validated: '已验证',
+        published: '已发布',
+        rejected: '已拒绝'
     };
     return map[String(status || '').trim().toLowerCase()] || status || '-';
 }
+
+if (typeof window !== 'undefined' && window.Pivot?.legacy) {
+    window.Pivot.legacy.agentStatusLabel = agentStatusLabel;
+}
+
 
 const AGENT_ACTIVE_STATUS_SET = new Set([
     'queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming',

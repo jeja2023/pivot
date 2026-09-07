@@ -5,6 +5,7 @@ const { listAgentGoals } = require('./agent-goals');
 const { listAgentArtifacts } = require('./agent-artifacts');
 const { listRuns } = require('./agent-runs');
 const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
+const { formatAgentStatus } = require('./agent-validators');
 
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
 const DEFAULT_SHORTCUTS = ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
@@ -46,7 +47,9 @@ function toRecentWork(kind, record) {
         id: record.id,
         kind,
         title: record.title || record.goal || 'Agent 任务',
-        meta: `任务状态：${record.status || '未知'}`,
+        meta: `任务状态：${formatAgentStatus(record.status)}`,
+        statusText: formatAgentStatus(record.status),
+        status: record.status,
         updatedAt: record.updated_at || record.created_at || null
     };
 }
@@ -82,9 +85,17 @@ async function getPersonalWorkbench(user) {
         }, 0),
         safe(() => getUserSettingValueAsync(user.id, SHORTCUT_SETTING_KEY), '')
     ]);
-    const actionableInbox = (inbox.data || []).filter(item => (
-        item.unread || ['approval', 'run', 'evolution'].includes(String(item.sourceType || ''))
-    ));
+    const actionableInbox = (inbox.data || []).filter(item => {
+        if (!item) return false;
+        // 待审批事项与待审核提议必须人工确认
+        if (item.sourceType === 'approval' || item.sourceType === 'evolution') return true;
+        // 智能体运行仅在需要人工审批时才属于需要处理事项；已完成、已失败或运行中非审批任务不可在此滞留
+        if (item.sourceType === 'run') {
+            return ['waiting_approval', 'approval_required', 'awaiting_approval'].includes(String(item.status || ''));
+        }
+        // 系统通知与事件仅未读事项需要用户处理
+        return Boolean(item.unread);
+    });
     const recentWork = [
         ...sessions.map(record => toRecentWork('session', record)),
         ...artifacts.map(record => toRecentWork('artifact', record)),

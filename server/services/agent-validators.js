@@ -25,6 +25,48 @@ const ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
     'running', 'approval_required', 'awaiting_approval', 'waiting_approval', 'resuming'
 ]);
+// 统一智能体与工作流任务状态中文映射字典
+const AGENT_STATUS_LABELS = Object.freeze({
+    awaiting_approval: '等待审批',
+    approval_required: '待审批',
+    waiting_approval: '待审批',
+    queued: '排队中',
+    planning: '规划中',
+    executing: '执行中',
+    observing: '观察中',
+    diagnosing: '诊断中',
+    replanning: '重规划中',
+    resuming: '恢复中',
+    pending: '待执行',
+    running: '运行中',
+    completed: '已完成',
+    completed_with_errors: '完成（含部分异常）',
+    continued_error: '失败后继续',
+    issues_found: '存在问题',
+    passed: '未发现问题',
+    incomplete: '未完整处理',
+    success: '成功',
+    error: '运行异常',
+    failed: '已失败',
+    cancelled: '已停止',
+    canceled: '已停止',
+    skipped: '已跳过',
+    deleted: '已删除',
+    timeout: '运行超时',
+    paused: '已暂停',
+    active: '运行中',
+    draft: '草稿',
+    validating: '验证中',
+    validated: '已验证',
+    published: '已发布',
+    rejected: '已拒绝'
+});
+
+function formatAgentStatus(status) {
+    const key = String(status || '').trim().toLowerCase();
+    return AGENT_STATUS_LABELS[key] || status || '未知';
+}
+
 const MAX_GOAL_LENGTH = 2000;
 const MAX_DAG_NODES = 100;
 const MAX_DAG_DEPENDENCIES = 50;
@@ -419,5 +461,7 @@ module.exports = {
     serializeToolAllowlist,
     normalizeAgentGoal,
     looksLikeCorruptTitle,
-    normalizeAgentTitle
+    normalizeAgentTitle,
+    AGENT_STATUS_LABELS,
+    formatAgentStatus
 };
