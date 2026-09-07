@@ -249,9 +249,8 @@ document.addEventListener('click', async (event) => {
             const targetTab = activeAgentRunReturnContext.tab;
             const targetSubview = activeAgentRunReturnContext.subview;
             activeAgentRunReturnContext = null;
-            if (typeof globalThis['openAgentWorkbench'] === 'function') {
-                globalThis['openAgentWorkbench']({ tab: targetTab });
-            }
+            const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+            if (typeof openWorkbench === 'function') openWorkbench({ tab: targetTab });
             if (targetTab === 'workbench' && targetSubview) {
                 window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.(targetSubview);
             }
@@ -366,9 +365,8 @@ function closeAgentRunDetailModal() {
         const targetTab = activeAgentRunReturnContext.tab;
         const targetSubview = activeAgentRunReturnContext.subview;
         activeAgentRunReturnContext = null;
-        if (typeof globalThis['openAgentWorkbench'] === 'function') {
-            globalThis['openAgentWorkbench']({ tab: targetTab });
-        }
+        const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+        if (typeof openWorkbench === 'function') openWorkbench({ tab: targetTab });
         if (targetTab === 'workbench' && targetSubview) {
             window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.(targetSubview);
         }
@@ -454,9 +452,8 @@ function bindAgentRunSubtabs() {
                 const targetTab = activeAgentRunReturnContext.tab;
                 const targetSubview = activeAgentRunReturnContext.subview;
                 activeAgentRunReturnContext = null;
-                if (typeof globalThis['openAgentWorkbench'] === 'function') {
-                    globalThis['openAgentWorkbench']({ tab: targetTab });
-                }
+                const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+                if (typeof openWorkbench === 'function') openWorkbench({ tab: targetTab });
                 if (targetTab === 'workbench' && targetSubview) {
                     window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.(targetSubview);
                 }
@@ -561,9 +558,8 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
     const isTasksViewVisible = Boolean(tasksView && !tasksView.classList.contains('hidden'));
 
     if (activeWorkspace === 'agent' && workbenchDetailContainer && !options.workflowPreview && !isTasksViewVisible) {
-        if (typeof globalThis['openAgentWorkbench'] === 'function') {
-            await globalThis['openAgentWorkbench']({ tab: 'tasks' });
-        }
+        const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+        if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'tasks' });
     }
 
     const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');

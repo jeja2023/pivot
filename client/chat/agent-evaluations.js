@@ -481,9 +481,8 @@ function bindAgentEvaluationCenter() {
 
 async function openAgentEvaluationForRun(run) {
     window.Pivot.legacy.closeAgentRunDetailModal();
-    if (typeof globalThis['openAgentWorkbench'] === 'function') {
-        await globalThis['openAgentWorkbench']({ tab: 'workbench' });
-    }
+    const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+    if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'workbench' });
     window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
     bindAgentEvaluationCenter();
     if (!agentEvalSuitesCache.length) {

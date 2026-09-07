@@ -380,7 +380,7 @@ function closeAgentConfigModal() {
 
 function openAgentConfigSection(sectionKey) {
     if (sectionKey === 'evaluations') {
-        globalThis['openAgentWorkbench']?.({ tab: 'workbench' });
+        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
         window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
         const evaluations = agentEvaluationsApi();
         evaluations.bind?.();
@@ -388,18 +388,18 @@ function openAgentConfigSection(sectionKey) {
         return;
     }
     if (sectionKey === 'harness') {
-        globalThis['openAgentWorkbench']?.({ tab: 'workbench' });
+        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
         window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('governance');
         window.Pivot.legacy.loadAgentHarnessManagement?.();
         return;
     }
     if (sectionKey === 'templates') {
-        globalThis['openAgentWorkbench']?.({ tab: 'tasks' });
+        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
         window.Pivot.legacy.setTaskComposerOpen(true);
         return;
     }
     if (sectionKey === 'results') {
-        globalThis['openAgentWorkbench']?.({ tab: 'tasks' });
+        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
         return;
     }
     const section = document.querySelector(`[data-agent-config-section="${CSS.escape(sectionKey)}"]`);

@@ -1168,10 +1168,9 @@
                 const sourceId = openRun.dataset.agentInboxId;
                 const isUnread = openRun.dataset.agentInboxUnread === '1';
 
-                const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
-                if (runId && typeof openAgentRun === 'function') {
-                    openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
-                }
+                const openAgentRun = window.Pivot?.legacy?.openAgentRun || window.Pivot?.moduleApi?.('chat.agentBridge')?.openAgentRunDetail || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
+                if (runId && typeof openAgentRun === 'function') openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' }).catch(error => showToast?.(error.message || '任务详情加载失败', 'error'));
+                else if (runId) showToast?.('任务详情模块尚未加载，请刷新页面后重试。', 'error');
                 if (isUnread && sourceId && sourceType) {
                     const targetItem = state.inbox.find(i => String(i.sourceId) === String(sourceId) && i.sourceType === sourceType);
                     if (targetItem && targetItem.unread) {

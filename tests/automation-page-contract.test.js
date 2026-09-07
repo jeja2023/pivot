@@ -323,6 +323,7 @@ test('Agent收件箱事件保留bigint主键，避免来源标识污染详情已
     // 打开详情不依赖“标记已读”请求成功；读取失败也只能记录日志。
     assert.match(harnessJs, /const openAgentRun = window\.Pivot\?\.legacy\?\.openAgentRun/);
     assert.match(harnessJs, /openAgentRun\(runId, \{ returnTab: 'workbench', returnSubview: 'inbox'/);
+    assert.match(harnessJs, /任务详情模块尚未加载，请刷新页面后重试/);
     assert.match(harnessJs, /打开详情后标记待办已读失败：/);
 });
 
@@ -338,7 +339,9 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
 
     // 2. 详情逻辑保存与恢复 returnContext
     assert.match(detailJs, /activeAgentRunReturnContext/);
-    assert.match(detailJs, /openAgentWorkbench.*tab:\s*targetTab/);
+    assert.match(detailJs, /window\.Pivot\?\.legacy\?\.openAgentWorkbench \|\| globalThis\['openAgentWorkbench'\]/);
+    assert.match(harnessJs, /window\.Pivot\?\.legacy\?\.openAgentRun/);
+    assert.match(detailJs, /openWorkbench\(\{ tab: targetTab \}\)/);
     assert.match(detailJs, /switchAgentCpSubview.*targetSubview/);
 
     // 3. 面包屑包含父级和返回按钮定制标识
