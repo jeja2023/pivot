@@ -559,7 +559,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
 
     if (activeWorkspace === 'agent' && workbenchDetailContainer && !options.workflowPreview && !isTasksViewVisible) {
         const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
-        if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'tasks' });
+        if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'tasks', skipAutoOpen: true });
     }
 
     const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');
@@ -670,7 +670,10 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             if (backBtn) backBtn.title = '返回任务列表';
         }
         const topActions = document.getElementById('agent-detail-header-actions');
-        if (topActions) PivotSafeHtml.setHtml(topActions, actionMarkup);
+        if (topActions) {
+            PivotSafeHtml.setHtml(topActions, actionMarkup);
+            bindAgentRunDetailDomEvents(topActions, run, isPreview);
+        }
 
         // Subtab Badges
         const stepsBadge = document.getElementById('agent-run-tab-steps-count');

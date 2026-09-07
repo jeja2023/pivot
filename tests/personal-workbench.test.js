@@ -76,6 +76,18 @@ test('从个人工作台打开对话时，侧边栏会话列表默认保持展�
     assert.match(personal, /action === 'open-history'[\s\S]*?setChatSidebarDrawerOpen\?\.\(true\)/);
 });
 
+test('从个人工作台进入对话默认不创建或恢复会话记录', () => {
+    const personal = read('client/chat/personal-workbench.js');
+    const sessions = read('client/chat/engine-sessions.js');
+
+    assert.match(personal, /key === 'chat'[\s\S]*?clearActiveChatSession/);
+    assert.doesNotMatch(personal, /key === 'chat'[\s\S]*?createSession\?\.\('新对话'\)/);
+    assert.doesNotMatch(personal, /action === 'open-chat'[\s\S]*?getStoredActiveChatSession/);
+    assert.match(personal, /action === 'open-history'[\s\S]*?clearActiveChatSession/);
+    assert.match(sessions, /function clearActiveChatSession\(\)/);
+    assert.match(sessions, /persistActiveChatSession\?\.\(''\)/);
+});
+
 test('从个人工作台打开自动化时，默认跳转到任务列表页面', () => {
     const personal = read('client/chat/personal-workbench.js');
     assert.match(personal, /action === 'open-automation'[\s\S]*?openAgentWorkbench\?\.\(\{\s*tab:\s*'tasks'\s*\}\)/);
@@ -110,5 +122,4 @@ test('任务状态全面中文化且需要我处理精准过滤非审批任务',
     // 待办中心详情按钮调用 openAgentRun
     assert.match(harnessClient, /openAgentRun.*returnTab:\s*'workbench'.*returnSubview:\s*'inbox'/);
 });
-
 

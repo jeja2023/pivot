@@ -197,7 +197,18 @@ async function cancelChatAgentRun(runId) {
 
 async function steerChatAgentRun(runId) {
     if (!runId) return null;
-    const instruction = window.prompt('请输入新的执行方向。该指令会在下一轮规划前生效：', '');
+    const promptFn = window.Pivot?.legacy?.showInputPrompt;
+    if (typeof promptFn !== 'function') {
+        showToast('输入窗口尚未加载，请刷新页面后重试。', 'error');
+        return null;
+    }
+    const instruction = await promptFn({
+        title: '调整 Agent 执行方向',
+        message: '请输入新的执行方向，该指令会在下一轮规划前生效。',
+        placeholder: '例如：优先检查 agent.code 失败原因，不要重复执行已失败步骤。',
+        requiredMessage: '请输入新的执行方向。',
+        width: 520
+    });
     const text = String(instruction || '').trim();
     if (!text) return null;
     if (text.length > 4000) throw new Error('新的执行方向不能超过 4000 个字符。');

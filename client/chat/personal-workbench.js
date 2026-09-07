@@ -433,10 +433,8 @@
     async function openShortcut(key) {
         if (key === 'chat') {
             window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
-            const sessions = window.Pivot.moduleApi?.('chat.sessions');
-            const session = await sessions?.createSession?.('新对话');
-            if (session) await sessions.selectSession?.(session.id, session.title, { refreshSidebar: true });
-            return;
+            window.Pivot.moduleApi?.('chat.sessions')?.clearActiveChatSession?.();
+            return window.Pivot.legacy.showMainWorkspace?.('chat');
         }
         if (key === 'automation' || key === 'tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
         if (key === 'apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
@@ -621,10 +619,6 @@
             if (action === 'refresh') return loadPersonalWorkbench();
             if (action === 'open-chat') {
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
-                const activeSessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
-                if (activeSessionId && window.Pivot.legacy.selectSession) {
-                    return window.Pivot.legacy.selectSession(activeSessionId, undefined, { refreshSidebar: true });
-                }
                 return openShortcut('chat');
             }
             if (action === 'new-chat') {
@@ -663,6 +657,7 @@
             }
             if (action === 'open-history') {
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
+                window.Pivot.moduleApi?.('chat.sessions')?.clearActiveChatSession?.();
                 return window.Pivot.legacy.showMainWorkspace?.('chat');
             }
             if (action === 'edit-shortcuts') return openShortcutEditor();

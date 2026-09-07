@@ -36,5 +36,9 @@ test('聊天 Agent 任务不再将最终提示文本长度伪装为模型吞吐�
     const runActions = fs.readFileSync(path.join(root, 'client', 'chat', 'agent-run-actions.js'), 'utf8');
     const runDetail = fs.readFileSync(path.join(root, 'client', 'chat', 'agent-run-detail.js'), 'utf8');
     assert.match(runActions, /steerAgentRun/);
+    assert.match(engine, /showInputPrompt/);
+    assert.doesNotMatch(engine, /steerChatAgentRun[\s\S]*window\.prompt/);
+    assert.match(runActions, /showInputPrompt/);
+    assert.doesNotMatch(runActions, /steerAgentRun[\s\S]*window\.prompt/);
     assert.match(runDetail, /data-agent-steer/);
 });

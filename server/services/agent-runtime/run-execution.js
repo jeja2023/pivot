@@ -10,6 +10,7 @@ const {
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
     AGENT_AUTO_CONTINUE_ON_TIMEOUT,
+    AGENT_AUTO_CONTINUE_ON_STEP_LIMIT,
     AGENT_MAX_AUTO_CONTINUATIONS,
     AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_ANSWER_MIN_MAX_TOKENS,
@@ -91,8 +92,9 @@ const {
         return value && typeof value === 'object' ? value : {};
     }
 
-    async function continueTimedOutRun({ run, runId, user, error }) {
-        if (!AGENT_AUTO_CONTINUE_ON_TIMEOUT || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
+    async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'timeout' }) {
+        const enabled = reason === 'step_limit' ? AGENT_AUTO_CONTINUE_ON_STEP_LIMIT : AGENT_AUTO_CONTINUE_ON_TIMEOUT;
+        if (!enabled || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
         const prior = autoContinuationState(run);
         const count = Math.max(Number.parseInt(prior.count, 10) || 0, 0);
         const elapsedMs = Math.max(Date.now() - runStartedAtMs(run), 0);
@@ -109,6 +111,7 @@ const {
         `, [runId]);
         if (pendingTool) return false;
         const resumeContext = await buildAgentResumeContext(runId);
+        if (reason === 'step_limit' && Number(resumeContext.latestStepIndex || 0) <= 0) return false;
         const nextCount = count + 1;
         const resumeFromStep = Math.max(
             Number(run.resume_from_step || 0),
@@ -123,6 +126,7 @@ const {
                 max: AGENT_MAX_AUTO_CONTINUATIONS,
                 totalRuntimeMs: elapsedMs,
                 totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS,
+                reason,
                 lastReason: String(error?.message || '任务时间片结束').slice(0, 1000),
                 lastAt: now
             }
@@ -134,9 +138,10 @@ const {
             last_heartbeat_at: now,
             updated_at: now
         });
+        const title = reason === 'step_limit' ? '当前时间片达到轮次上限，自动续跑' : '任务时间片结束，自动续跑';
         await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'control',
-            title: `任务时间片结束，自动续跑：${nextCount}/${AGENT_MAX_AUTO_CONTINUATIONS}`,
+            title: `${title}：${nextCount}/${AGENT_MAX_AUTO_CONTINUATIONS}`,
             output: {
                 reason: String(error?.message || ''),
                 resumeFromStep,
@@ -145,7 +150,7 @@ const {
                 totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS
             }
         });
-        await createAgentNotification(user.id, runId, 'info', '任务将从安全检查点继续', `已完成第 ${nextCount} 次自动续跑准备。`);
+        await createAgentNotification(user.id, runId, 'info', '任务将从安全检查点继续', `${title}，已准备第 ${nextCount} 次自动续跑。`);
         enqueueAgentRun(runId, user);
         return true;
     }
@@ -354,6 +359,7 @@ const {
             Number(resumeContext.latestStepIndex || 0) || 0,
             0
         );
+        let stopReason = '';
         if (isStreamingToolsEnabled(modelCfg)) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
             if (chatBridge) {
@@ -377,15 +383,22 @@ const {
                 chatContext: plannerChatContext
             }, streamingDeps);
             if (streamingResult?.completed) return;
-            roundsUsed = Math.min(Math.max(Number(streamingResult?.roundsUsed || 0), 0), maxSteps);
+            roundsUsed = Math.max(Number(streamingResult?.roundsUsed || 0), roundsUsed, 0);
+            if (streamingResult?.stepLimitReached) {
+                const stepLimitError = Object.assign(new Error(`当前时间片已执行 ${maxSteps} 轮`), { code: 'AGENT_STEP_LIMIT' });
+                if (await continueRunFromCheckpoint({ run, runId, user, error: stepLimitError, reason: 'step_limit' })) return;
+                stopReason = stepLimitError.message;
+            }
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
         let previousWorldState = null;
         let lastOperationSignature = '';
         let stagnantRounds = 0;
-        let stopReason = '';
-        for (let step = roundsUsed + 1; step <= maxSteps; step += 1) {
+        const sliceEndStep = stopReason ? roundsUsed : roundsUsed + maxSteps;
+        let lastExecutedStep = roundsUsed;
+        for (let step = roundsUsed + 1; step <= sliceEndStep; step += 1) {
+            lastExecutedStep = step;
             taskBudget.consumeStep();
             await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
             assertRunWithinBudget();
@@ -742,12 +755,16 @@ const {
                     auditError.cause = toolErr;
                     throw auditError;
                 }
-                if (step < maxSteps) await updateRun(runId, { status: 'replanning', updated_at: getBeijingTimestamp() });
+                if (step < sliceEndStep) await updateRun(runId, { status: 'replanning', updated_at: getBeijingTimestamp() });
             }
         }
 
         assertRunNotCancelled(runId);
         assertRunWithinBudget();
+        if (!stopReason && lastExecutedStep >= sliceEndStep) {
+            const stepLimitError = Object.assign(new Error(`当前时间片已执行 ${maxSteps} 轮`), { code: 'AGENT_STEP_LIMIT' });
+            if (await continueRunFromCheckpoint({ run, runId, user, error: stepLimitError, reason: 'step_limit' })) return;
+        }
         const limitMessage = stopReason || `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
         await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'control',
@@ -855,7 +872,7 @@ const {
             return;
         }
         if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
-            if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueTimedOutRun({ run: runForSummary, runId, user, error: e })) {
+            if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, error: e, reason: 'timeout' })) {
                 return;
             }
             const isModelRequestTimeout = /(?:智能体规划|流式工具规划|final summary|escalated final summary)执行超时/i.test(String(e.message || ''));

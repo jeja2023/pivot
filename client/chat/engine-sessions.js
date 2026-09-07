@@ -108,6 +108,18 @@ async function createSession(title) {
     }
 }
 
+function clearActiveChatSession() {
+    sessionSelectionSequence += 1;
+    currentSessionId = null;
+    window.Pivot.legacy.persistActiveChatSession?.('');
+    window.Pivot.legacy.markActiveSessionInList?.('');
+    window.Pivot?.moduleApi?.('chat.attachments')?.clearPendingAttachments?.();
+    window.Pivot?.moduleApi?.('chat.messageVirtualizer')?.stop?.();
+    document.getElementById('current-title')?.replaceChildren(document.createTextNode('请选择或新建对话'));
+    window.Pivot?.legacy.PivotSafeHtml?.setHtml?.(document.getElementById('message-container'), '');
+    window.Pivot?.moduleApi?.('chat.ui')?.updateContextUsage?.(null);
+}
+
 async function selectSession(id, title, options = {}) {
     const selectionSequence = ++sessionSelectionSequence;
     const requestedSessionId = String(id || '');
@@ -203,7 +215,10 @@ async function selectSession(id, title, options = {}) {
 
 
 window.Pivot.exposeModule('chat.sessions', {
+    clearActiveChatSession,
     createSession,
     selectSession,
     attachChatAgentRunsForSession
-}, ['createSession', 'selectSession', 'attachChatAgentRunsForSession']);
+}, ['clearActiveChatSession', 'createSession', 'selectSession', 'attachChatAgentRunsForSession']);
+
+window.Pivot.legacy.clearActiveChatSession = clearActiveChatSession;

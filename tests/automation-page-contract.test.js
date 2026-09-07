@@ -331,6 +331,7 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
     const harnessJs = read('client/chat/agent-harness.js');
     const evalJs = read('client/chat/agent-evaluations.js');
     const detailJs = read('client/chat/agent-run-detail.js');
+    const agentsJs = read('client/chat/agents.js');
     const html = read('client/chat/partials/workspaces/agent.html');
 
     // 1. 收件箱与评测中心在 openAgentRun 时传递 returnTab 上下文
@@ -343,6 +344,11 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
     assert.match(harnessJs, /window\.Pivot\?\.legacy\?\.openAgentRun/);
     assert.match(detailJs, /openWorkbench\(\{ tab: targetTab \}\)/);
     assert.match(detailJs, /switchAgentCpSubview.*targetSubview/);
+    assert.match(detailJs, /openWorkbench\(\{ tab: 'tasks', skipAutoOpen: true \}\)/);
+    assert.match(agentsJs, /loadAgentRuns\(undefined, \{ skipAutoOpen: options\.skipAutoOpen === true \}\)/);
+    assert.match(detailJs, /bindAgentRunDetailDomEvents\(topActions, run, isPreview\)/);
+    assert.match(detailJs, /data-agent-rerun/);
+    assert.match(detailJs, /data-agent-resume/);
 
     // 3. 面包屑包含父级和返回按钮定制标识
     assert.match(html, /id="agent-breadcrumb-back-label"/);

@@ -150,6 +150,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         const lastStep = Math.max(Number(run.resume_from_step || 0) || 0, 0);
         let previousWorldState = null;
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
+        const sliceEndStep = lastStep + maxSteps;
         roundsUsed = lastStep;
         let lastOperationSignature = '';
         let stagnantRounds = 0;
@@ -175,7 +176,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             await deps.createAgentNotification(user.id, runId, 'warning', '任务已生成部分结果', reason);
             return { completed: true, roundsUsed, partial: true };
         };
-        for (let step = lastStep + 1; step <= maxSteps; step += 1) {
+        for (let step = lastStep + 1; step <= sliceEndStep; step += 1) {
             if (taskBudget) taskBudget.consumeStep();
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
@@ -671,7 +672,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             }
         }
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
-        return { completed: false, roundsUsed };
+        return { completed: false, roundsUsed, stepLimitReached: roundsUsed >= sliceEndStep };
     } catch (streamErr) {
         if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);

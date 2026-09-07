@@ -85,13 +85,13 @@ function agentPreviewDisplayTitle(value) {
     return text || '预览运行';
 }
 
-window.Pivot.legacy.loadAgentWorkbench = async function() {
+window.Pivot.legacy.loadAgentWorkbench = async function(options = {}) {
     try {
         await loadAgentModels();
         await Promise.all([
             loadAgentModelRouters(),
             loadAgentTools(),
-            loadAgentRuns(),
+            loadAgentRuns(undefined, { skipAutoOpen: options.skipAutoOpen === true }),
             loadAgentRuntimeStatus(),
             loadAgentMetrics(),
             loadAgentTemplates(),
@@ -268,7 +268,7 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     // 在脚本就绪后补建 SSE，确保新任务的状态和执行步骤无需手动刷新即可显示。
     window.Pivot.legacy.initAgentRealtime?.();
     if (tab === 'tasks') {
-        await window.Pivot.legacy.loadAgentWorkbench();
+        await window.Pivot.legacy.loadAgentWorkbench({ skipAutoOpen: options.skipAutoOpen === true });
     }
 };
 

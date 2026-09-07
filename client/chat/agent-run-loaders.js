@@ -287,7 +287,7 @@ function renderAgentRunsPagination(page = agentRunsPage, total = agentRunsTotal,
     });
 }
 
-async function loadAgentRuns(page = agentRunsPage) {
+async function loadAgentRuns(page = agentRunsPage, options = {}) {
     const list = document.getElementById('agent-runs-list');
     if (!list) return;
     const requestId = ++agentRunsLoadSequence;
@@ -316,7 +316,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     const pageSize = Number(data.limit || AGENT_RUNS_PAGE_SIZE);
     if (agentRunsCache.length === 0 && agentRunsTotal > 0 && agentRunsPage > 1) {
         const lastPage = Math.max(Math.ceil(agentRunsTotal / pageSize), 1);
-        return loadAgentRuns(Math.min(agentRunsPage - 1, lastPage));
+        return loadAgentRuns(Math.min(agentRunsPage - 1, lastPage), options);
     }
     updateAgentAutoRefresh();
     renderAgentRunsPagination(agentRunsPage, agentRunsTotal, pageSize);
@@ -430,7 +430,7 @@ async function loadAgentRuns(page = agentRunsPage) {
     });
     bindAgentRunTitleTooltip(list);
 
-    if (hasSelectedRun && activeAgentRunId && document.getElementById('agent-tasks-detail-container')) {
+    if (!options.skipAutoOpen && hasSelectedRun && activeAgentRunId && document.getElementById('agent-tasks-detail-container')) {
         window.Pivot.legacy.openAgentRun(activeAgentRunId, { silent: true });
     } else if (!hasSelectedRun) {
         document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
