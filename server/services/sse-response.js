@@ -1,6 +1,7 @@
 const DEFAULT_SSE_HEARTBEAT_MS = 15000;
 const MIN_SSE_HEARTBEAT_MS = 1000;
 const MAX_SSE_HEARTBEAT_MS = 60000;
+const MAX_PENDING_SSE_BYTES = 4 * 1024 * 1024;
 
 function normalizeSseHeartbeatMs(value = process.env.SSE_HEARTBEAT_MS) {
     if (value === 0 || value === '0') return 0;
@@ -40,6 +41,9 @@ function createSseResponseWriter(res, options = {}) {
     let lastActivityAt = Date.now();
     let closed = false;
     let timer = null;
+    let pendingBytes = 0;
+    const pendingChunks = [];
+    let draining = false;
 
     const isWritable = () => !closed && !res.writableEnded && !res.destroyed;
     const cleanup = () => {
@@ -47,6 +51,35 @@ function createSseResponseWriter(res, options = {}) {
         closed = true;
         if (timer) clearInterval(timer);
         timer = null;
+        pendingChunks.length = 0;
+        pendingBytes = 0;
+    };
+    const enqueue = chunk => {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+        if (pendingBytes + value.length > MAX_PENDING_SSE_BYTES) {
+            cleanup();
+            try { res.destroy?.(new Error('SSE 客户端背压超过缓冲上限。')); } catch (_) {}
+            return false;
+        }
+        pendingChunks.push(value);
+        pendingBytes += value.length;
+        return true;
+    };
+    const flushPending = () => {
+        if (draining || !isWritable() || res.writableNeedDrain) return;
+        draining = true;
+        try {
+            while (pendingChunks.length && isWritable()) {
+                const value = pendingChunks.shift();
+                pendingBytes -= value.length;
+                if (!res.write(value)) break;
+            }
+        } catch (error) {
+            cleanup();
+            options.onError?.(error);
+        } finally {
+            draining = false;
+        }
     };
     const writeRaw = chunk => {
         if (!isWritable()) {
@@ -54,11 +87,15 @@ function createSseResponseWriter(res, options = {}) {
             return false;
         }
         try {
-            res.write(chunk);
+            const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+            if (pendingChunks.length || res.writableNeedDrain) {
+                const accepted = enqueue(value);
+                flushPending();
+                return accepted;
+            }
+            if (!res.write(value)) res.once?.('drain', flushPending);
             lastActivityAt = Date.now();
             if (options.flush !== false) res.flush?.();
-            // Node.js response.write 返回 false 表示背压排队，而非连接断开
-            // 保持客户端注册状态；writableNeedDrain 会抑制空闲心跳
             return true;
         } catch (error) {
             cleanup();
@@ -72,6 +109,7 @@ function createSseResponseWriter(res, options = {}) {
     res.once?.('close', cleanup);
     res.once?.('finish', cleanup);
     res.once?.('error', cleanup);
+    res.on?.('drain', flushPending);
 
     if (heartbeatMs > 0) {
         timer = setInterval(() => {

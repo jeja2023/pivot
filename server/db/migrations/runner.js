@@ -82,9 +82,9 @@ async function runPgVersionedMigration(client, migration, options = {}) {
     if (!migration || !migration.id) {
         throw new Error('无效的版本化迁移配置：缺少 id 标识');
     }
-    const up = typeof migration.upPg === 'function' ? migration.upPg : migration.up;
+    const up = migration.upPg;
     if (typeof up !== 'function') {
-        throw new Error(`版本化迁移 [${migration.id}] 无效：缺少 up 或 upPg 执行函数`);
+        throw new Error(`PostgreSQL 迁移 [${migration.id}] 缺少 upPg(client)；SQLite up 不得在 PG 连接上执行`);
     }
     await ensurePgMigrationTable(client);
     if (await hasPgMigration(client, migration.id)) return false;

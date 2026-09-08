@@ -32,6 +32,11 @@ const {
 
 function registerDocumentRoutes(router, deps) {
     const { authMiddleware, logAction, uploadLimiter, upload } = deps;
+    // 必须在 multer 落盘之前完成法规管理员鉴权；否则普通登录用户可用大 multipart
+    // 请求占满临时磁盘，即便后续业务处理会返回 403。
+    const requireRegulationsAdminBeforeUpload = (req, res, next) => {
+        if (requireRegulationsAdmin(req, res)) next();
+    };
 
     router.get('/documents', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
@@ -146,7 +151,7 @@ function registerDocumentRoutes(router, deps) {
             res.download(filePath, currentVer.source_name || `${detail.document.title}.txt`);
         }));
     
-        router.post('/documents/batch', authMiddleware, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
+        router.post('/documents/batch', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
                 await cleanupTempUploads(req.files);
                 return;
@@ -191,7 +196,7 @@ function registerDocumentRoutes(router, deps) {
             });
         }));
     
-        router.post('/documents', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        router.post('/documents', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
                 await cleanupTempUpload(req.file);
                 return;
@@ -223,7 +228,7 @@ function registerDocumentRoutes(router, deps) {
         }));
     
         // #7 导入前预览：只解析不落库，返回切出的条文列表供管理员校正
-        router.post('/documents/preview', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        router.post('/documents/preview', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
                 await cleanupTempUpload(req.file);
                 return;
@@ -250,7 +255,7 @@ function registerDocumentRoutes(router, deps) {
             }
         }));
     
-        router.post('/documents/:id/versions', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+        router.post('/documents/:id/versions', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) {
                 await cleanupTempUpload(req.file);
                 return;

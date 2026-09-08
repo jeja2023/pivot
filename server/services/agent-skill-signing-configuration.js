@@ -14,6 +14,19 @@ const KEYRING_VERSION = 1;
 const MAX_KEYRING_KEYS = 8;
 const KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
+function generateRsaKeyPairAsync() {
+    return new Promise((resolve, reject) => {
+        crypto.generateKeyPair('rsa', {
+            modulusLength: 3072,
+            publicKeyEncoding: { type: 'spki', format: 'pem' },
+            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+        }, (error, publicKey, privateKey) => {
+            if (error) reject(error);
+            else resolve({ publicKey, privateKey });
+        });
+    });
+}
+
 function signingConfigurationError(message, code = 'SKILL_SIGNING_CONFIGURATION_INVALID', status = 422) {
     const error = new Error(message);
     error.code = code;
@@ -80,7 +93,7 @@ function emptyKeyring() {
 function parseManagedKeyring(raw = getAppSettingValue(ORGANIZATION_SIGNING_KEYRING_SETTING)) {
     if (!raw) return emptyKeyring();
     try {
-        const decrypted = decryptSecret(raw);
+        const decrypted = decryptSecret(raw, 'app_settings.agent_skill_organization_signing_keyring');
         const parsed = JSON.parse(decrypted);
         if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.keys)) {
             throw new Error('密钥环格式不正确');
@@ -180,7 +193,7 @@ async function saveManagedKeyring(keyring, userId) {
     }
     await setAppSettingAsync(
         ORGANIZATION_SIGNING_KEYRING_SETTING,
-        encryptSecret(serializeKeyring(keyring)),
+        encryptSecret(serializeKeyring(keyring), 'app_settings.agent_skill_organization_signing_keyring'),
         { updatedBy: userId || null }
     );
 }
@@ -230,11 +243,8 @@ function getOrganizationSigningConfigStatus(env = process.env) {
 
 async function generateManagedOrganizationSigningKey({ keyId = '', userId } = {}) {
     const keyring = ensureManagedConfigurationAvailable();
-    const pair = crypto.generateKeyPairSync('rsa', {
-        modulusLength: 3072,
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-    });
+    // 密钥生成在 libuv worker 中执行，不能在 HTTP 请求线程同步阻塞数百毫秒。
+    const pair = await generateRsaKeyPairAsync();
     const next = normalizeKeyPair({ privateKey: pair.privateKey, publicKey: pair.publicKey, keyId });
     if (keyring.keys.some(key => key.keyId === next.keyId)) {
         throw signingConfigurationError('组织签名密钥标识已存在，请使用其他标识。', 'SKILL_SIGNING_KEY_ID_CONFLICT', 409);

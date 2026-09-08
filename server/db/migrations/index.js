@@ -1,6 +1,5 @@
 const crypto = require('crypto');
-const { buildRagSearchContent } = require('../../services/rag-tokenizer');
-const regulationsMigrations = require('./regulations');
+const { buildRagSearchContent } = require('../../services/rag-tokenizer'); const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
 const personalAgentMigrations = require('./personal-agent');
 const personalAgentControlPlaneMigrations = require('./personal-agent-control-plane');
@@ -17,7 +16,17 @@ const agentContextAuditContractMigrations = require('./agent-context-audit-contr
 const modelToolCallCapabilityMigrations = require('./model-tool-call-capabilities');
 const ragOperationsObservabilityMigrations = require('./rag-operations-observability');
 const ragPrecisionSignalMigrations = require('./rag-precision-signals');
-
+const apiKeyScopeExpiryMigrations = require('./api-key-scope-expiry');
+const agentStepUniqueIndexMigrations = require('./agent-step-unique-index');
+const ragChunkLocationMigrations = require('./rag-chunk-locations');
+const agentRunRetryScheduleMigrations = require('./agent-run-retry-schedule');
+const refreshTokenReuseDetectionMigrations = require('./refresh-token-reuse-detection');
+const authTokenVersionMigrations = require('./auth-token-version');
+const approvalCallbackBindingMigrations = require('./approval-callback-binding');
+const redundantLogIndexMigrations = require('./drop-redundant-log-indexes');
+const refreshTokenDeviceBindingMigrations = require('./refresh-token-device-binding');
+const messageContextTokenCountMigrations = require('./message-context-token-count');
+const agentChannelDeliveryClaimMigrations = require('./agent-channel-delivery-claims');
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
     if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return false;
@@ -25,23 +34,19 @@ function archiveDeletedUsernameInSqlite(database, userId) {
         'SELECT id, username, deleted_username, deleted_at FROM users WHERE id = ?'
     ).get(normalizedUserId);
     if (!user || !user.deleted_at) return false;
-
     const deletedUsername = String(user.deleted_username || user.username || '').trim();
     const base = `@deleted:${normalizedUserId}`;
     let candidate = base;
     let suffix = 0;
-
     while (database.prepare('SELECT COUNT(*) AS count FROM users WHERE username = ? AND id != ?').get(candidate, normalizedUserId)?.count > 0) {
         suffix += 1;
         candidate = `${base}:${suffix}`;
     }
-
     const result = database.prepare(
         'UPDATE users SET username = ?, deleted_username = ? WHERE id = ? AND deleted_at IS NOT NULL'
     ).run(candidate, deletedUsername, normalizedUserId);
     return Number(result?.changes || 0) > 0;
 }
-
 const migrations = [
     {
         id: '202606260001_rag_search_content_backfill',
@@ -84,13 +89,11 @@ const migrations = [
         up(db) {
             const usersTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
             if (!usersTable) return;
-
             const columns = db.prepare('PRAGMA table_info(users)').all();
             if (!columns.some(column => column.name === 'deleted_username')) {
                 db.exec('ALTER TABLE users ADD COLUMN deleted_username TEXT');
             }
             if (!columns.some(column => column.name === 'deleted_at')) return;
-
             const deletedUsers = db.prepare(`
                 SELECT id
                 FROM users
@@ -386,6 +389,26 @@ const migrations = [
                       WHERE status = 'pending'
                       GROUP BY run_id, request_type, approval_key
                   );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_requests_pending_key
+                    ON agent_approval_requests(run_id, request_type, approval_key)
+                    WHERE status = 'pending';
+            `);
+        },
+        async upPg(client) {
+            await client.query(`
+                WITH duplicates AS (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY run_id, request_type, approval_key
+                               ORDER BY created_at DESC NULLS LAST, id DESC
+                           ) AS row_number
+                    FROM agent_approval_requests
+                    WHERE status = 'pending'
+                )
+                UPDATE agent_approval_requests AS requests
+                SET status = 'cancelled', updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                FROM duplicates
+                WHERE requests.id = duplicates.id AND duplicates.row_number > 1;
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_requests_pending_key
                     ON agent_approval_requests(run_id, request_type, approval_key)
                     WHERE status = 'pending';
@@ -944,7 +967,18 @@ const migrations = [
     ...modelToolCallCapabilityMigrations,
     ...ragOperationsObservabilityMigrations,
     ...ragPrecisionSignalMigrations,
-    ...regulationsMigrations
+    ...regulationsMigrations,
+    ...authTokenVersionMigrations,
+    ...approvalCallbackBindingMigrations,
+    ...apiKeyScopeExpiryMigrations,
+    ...agentStepUniqueIndexMigrations,
+    ...ragChunkLocationMigrations,
+    ...agentRunRetryScheduleMigrations,
+    ...redundantLogIndexMigrations,
+    ...refreshTokenDeviceBindingMigrations,
+    ...messageContextTokenCountMigrations,
+    ...agentChannelDeliveryClaimMigrations,
+    ...refreshTokenReuseDetectionMigrations
 ];
 
 module.exports = migrations;

@@ -5,8 +5,7 @@ const { isAdmin } = require('../../permissions');
 
 const {
     DEFAULT_PORTS,
-    assertSafeDatabaseHost,
-    databaseSafeLookup,
+    resolveSafeDatabaseHost,
     getConnectionOwnerAsync,
     createDatabaseMcpError,
     databaseConnectionDiagnostics,
@@ -106,14 +105,14 @@ function withOperationTimeout(promise, timeoutMs, connection, phase, options = {
 }
 
 async function withPostgres(connection, handler, signal) {
-    const { Client } = optionalRequire('pg', 'Install it with npm install pg.');
+    const { Client } = optionalRequire('pg', '当前运行包缺少 PostgreSQL 驱动，请检查服务镜像完整性。');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // 连接前再次解析校验，缓解配置入库后 DNS 被改写（rebinding）的 SSRF。
     const outboundOptions = getDatabaseProbeOutboundOptions(connection);
-    await assertSafeDatabaseHost(connection.host, owner, outboundOptions);
+    const safeHost = await resolveSafeDatabaseHost(connection.host, owner, outboundOptions);
     const client = new Client({
-        host: connection.host,
+        host: safeHost,
         port: connection.port || DEFAULT_PORTS.postgres,
         database: connection.database_name,
         user: connection.username,
@@ -121,8 +120,7 @@ async function withPostgres(connection, handler, signal) {
         // 默认校验证书防止 MITM；仅当用户显式信任自签名时才放行
         ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : false,
         connectionTimeoutMillis: timeoutMs,
-        // 握手阶段对解析出的 IP 再次校验，关闭 DNS rebinding。
-        lookup: databaseSafeLookup(owner, outboundOptions)
+        // 连接前已将 DNS 解析结果固定为已校验 IP，避免驱动忽略 lookup 钩子。
     });
     let connected = false;
     const abort = () => {
@@ -151,13 +149,13 @@ async function withPostgres(connection, handler, signal) {
 }
 
 async function withMysql(connection, handler, signal) {
-    const mysql = optionalRequire('mysql2/promise', 'Install it with npm install mysql2.');
+    const mysql = optionalRequire('mysql2/promise', '当前运行包未包含 MySQL 驱动。请由管理员以 PIVOT_DB_CONNECTORS=mysql 重新构建服务镜像。');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // mysql2 不支持自定义 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
+    const safeHost = await resolveSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
     const client = await mysql.createConnection({
-        host: connection.host,
+        host: safeHost,
         port: connection.port || DEFAULT_PORTS.mysql,
         database: connection.database_name,
         user: connection.username,
@@ -187,13 +185,13 @@ async function withMysql(connection, handler, signal) {
 }
 
 async function withSqlServer(connection, handler, signal) {
-    const sql = optionalRequire('mssql', 'Install it with npm install mssql.');
+    const sql = optionalRequire('mssql', '当前运行包未包含 SQL Server 驱动。请由管理员以 PIVOT_DB_CONNECTORS=mssql 重新构建服务镜像。');
     const timeoutMs = getConnectionTimeoutMs(connection);
     const owner = await getConnectionOwnerAsync(connection);
     // mssql/tedious 不便注入 dns lookup 钩子，连接前再次解析校验以缓解 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
+    const safeHost = await resolveSafeDatabaseHost(connection.host, owner, getDatabaseProbeOutboundOptions(connection));
     const pool = new sql.ConnectionPool({
-        server: connection.host,
+        server: safeHost,
         port: connection.port || DEFAULT_PORTS.sqlserver,
         database: connection.database_name,
         user: connection.username,
@@ -411,14 +409,14 @@ async function executeSqlTool(connection, name, input = {}) {
 }
 
 async function executeMongoTool(connection, name, input = {}) {
-    const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
+    const { MongoClient } = optionalRequire('mongodb', '当前运行包未包含 MongoDB 驱动。请由管理员以 PIVOT_DB_CONNECTORS=mongodb 重新构建服务镜像。');
     const cfg = connection;
     // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-    await assertSafeDatabaseHost(connection.host, await getConnectionOwnerAsync(connection), getDatabaseProbeOutboundOptions(connection));
+    const safeHost = await resolveSafeDatabaseHost(connection.host, await getConnectionOwnerAsync(connection), getDatabaseProbeOutboundOptions(connection));
     const auth = connection.username
         ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(connection.password || '')}@`
         : '';
-    const uri = `mongodb://${auth}${connection.host}:${connection.port || DEFAULT_PORTS.mongodb}`;
+    const uri = `mongodb://${auth}${safeHost}:${connection.port || DEFAULT_PORTS.mongodb}`;
     const timeoutMs = getConnectionTimeoutMs(connection);
     const client = new MongoClient(uri, {
         // 默认校验证书防 MITM；仅当用户显式信任自签名时才放行
@@ -518,9 +516,9 @@ async function testDatabaseConnection(connection, { allowLoopbackForAdminProbe =
         return withOperationTimeout(run, timeoutMs, testConnection, 'SQL Server connection test', { onTimeout: () => controller.abort() });
     }
     if (testConnection.database_type === 'mongodb') {
-        const { MongoClient } = optionalRequire('mongodb', 'Install it with npm install mongodb.');
+        const { MongoClient } = optionalRequire('mongodb', '当前运行包未包含 MongoDB 驱动。请由管理员以 PIVOT_DB_CONNECTORS=mongodb 重新构建服务镜像。');
         // 连接前再次解析校验，拦截内网/loopback/云元数据 SSRF 与 DNS rebinding。
-        await assertSafeDatabaseHost(
+        const safeHost = await resolveSafeDatabaseHost(
             testConnection.host,
             await getConnectionOwnerAsync(testConnection),
             getDatabaseProbeOutboundOptions(testConnection)
@@ -528,7 +526,7 @@ async function testDatabaseConnection(connection, { allowLoopbackForAdminProbe =
         const auth = testConnection.username
             ? `${encodeURIComponent(testConnection.username)}:${encodeURIComponent(testConnection.password || '')}@`
             : '';
-        const uri = `mongodb://${auth}${testConnection.host}:${testConnection.port || DEFAULT_PORTS.mongodb}`;
+        const uri = `mongodb://${auth}${safeHost}:${testConnection.port || DEFAULT_PORTS.mongodb}`;
         const client = new MongoClient(uri, {
             // 默认校验证书防 MITM；仅当用户显式信任自签名时才放行
             tls: Boolean(testConnection.ssl),
@@ -600,7 +598,7 @@ function validateDatabaseConnectionPayload(payload, user) {
         const restrictPrivateHostsToAdmin = process.env.MCP_RESTRICT_PRIVATE_DATABASE_HOSTS_TO_ADMIN !== 'false';
         // 字面量主机名的快速拦截（无需 DNS、同步）：普通用户禁配内网/本机地址。
         // 真正的 DNS 解析后 IP 校验（防把内网/loopback/云元数据藏在域名背后的 SSRF，并防 TOCTOU/DNS-rebinding）
-        // 在连接时由各驱动助手统一执行（assertSafeDatabaseHost / databaseSafeLookup），此处保持同步契约。
+        // 在连接时由各驱动助手统一执行已校验主机解析，此处保持同步契约。
         if (restrictPrivateHostsToAdmin && isPrivateHost(host) && !isAdmin(user)) {
             throw createDatabaseMcpError('普通用户不能配置内网或本机数据库地址。', 'MCP_PRIVATE_HOST_RESTRICTED', 403);
         }

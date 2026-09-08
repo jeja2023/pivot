@@ -317,7 +317,7 @@ async function runAgentScheduleLegacy(scheduleId) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '计划运行失败', 'error');
     showToast('计划任务已入队', 'success');
-    await window.Pivot.legacy.openAgentWorkbench?.();
+    await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.();
     await window.Pivot.legacy.openAgentRun(data.run.id);
 }
 
@@ -346,7 +346,7 @@ async function runAgentSchedule(scheduleId) {
         document.getElementById('agent-schedule-editor-modal')?.classList.add('hidden');
         document.getElementById('agent-workflow-schedule-modal')?.classList.add('hidden');
         agentScheduleFilterId = '';
-        await window.Pivot.legacy.openAgentWorkbench?.();
+        await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.();
         await window.Pivot.legacy.openAgentRun(data.run.id);
     } catch (error) {
         showToast(error.message || '计划运行失败', 'error');
@@ -409,7 +409,7 @@ async function toggleAgentSchedule(scheduleId) {
 async function openAgentScheduleRuns(scheduleId) {
     const schedule = agentSchedulesCache.find(item => String(item.id) === String(scheduleId));
     if (!schedule) return;
-    await window.Pivot.legacy.openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
+    await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ scheduleId, runType: 'scheduled' });
 }
 
 function deleteAgentSchedule(scheduleId) {

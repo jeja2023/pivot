@@ -577,8 +577,8 @@ function bindAppsWorkbenchEvents() {
     });
 }
 
-window.Pivot.legacy.openAppsWorkbench = function(options = {}) {
-    window.Pivot.legacy.showMainWorkspace?.('apps');
+function openAppsWorkbench(options = {}) {
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('apps');
     window.Pivot.legacy.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
     if (options?.home) {
@@ -608,7 +608,8 @@ window.Pivot.legacy.closeAppsWorkbench = function() {
     setStoredAppsActiveApp('');
     showAppsHome();
     window.Pivot.legacy.setAppsWorkbenchVisibility?.(false);
-    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
-};
+    window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
+}
+window.Pivot.exposeModule('workspaces.implementations', { openAppsWorkbench });
 
 window.Pivot.legacy.PIVOT_APP_REGISTRY = PIVOT_APP_REGISTRY;

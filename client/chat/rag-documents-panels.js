@@ -106,7 +106,7 @@ function enableChatToolFromWorkspace(tool, message) {
     } catch (e) {
         // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
     }
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     window.Pivot.legacy.syncChatToolToggles?.();
     document.getElementById('user-input')?.focus();
     if (message) showToast(message, 'success');

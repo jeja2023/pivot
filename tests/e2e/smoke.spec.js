@@ -10,6 +10,26 @@ if (process.env.PIVOT_E2E_DEBUG === 'true') {
     });
 }
 
+async function ensureBrowserSession(page) {
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    const app = page.locator('#app');
+    try {
+        await expect(app).toBeVisible({ timeout: 8_000 });
+        return;
+    } catch (_) {
+        // Cookie 登录失败或未完成时，回退到真实登录表单。
+    }
+    await expect(page.locator('#username')).toBeVisible({ timeout: 8_000 });
+    if (await page.locator('#username').isVisible()) {
+        await page.locator('#username').fill('admin');
+        await page.locator('#password').fill(process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123');
+        await page.locator('#auth-submit').click();
+    }
+    await expect(page.locator('#auth-container')).toBeHidden({ timeout: 15_000 });
+    await expect(app).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+}
+
 test.describe('Pivot browser smoke', () => {
     test('login form establishes a browser session and reveals the authenticated workspace', async ({ page }) => {
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
@@ -23,17 +43,14 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
-        const login = await page.request.post('/api/auth/login', {
-            data: {
-                username: 'admin',
-                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
-            }
-        });
-        expect(login.ok()).toBeTruthy();
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
-        await page.locator('#automation-workbench-btn').click();
+        await ensureBrowserSession(page);
+        await expect(page.locator('#agent-workbench-modal')).toHaveCount(0);
+        const workspaceResponse = page.waitForResponse(response => response.url().endsWith('/chat/workspaces/agent'));
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.());
+        await expect((await workspaceResponse).status()).toBe(200);
         await page.locator('#agent-workbench-modal [data-automation-section="workbench"]').click();
         await expect(page.locator('#agent-control-plane')).toBeVisible();
+        await page.locator('[data-agent-cp-subview="governance"]').click();
         await expect(page.locator('[data-agent-cp-pane="governance"]')).toBeVisible();
         await page.locator('[data-agent-cp-subview="inbox"]').click();
         await expect(page.locator('#agent-inbox-panel')).toBeVisible();
@@ -53,6 +70,23 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#agent-goals-panel')).toContainText('E2E 临时目标');
     });
 
+    test('应用、知识库、工具库和设置工作区均在首次打开时按需挂载', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const workspaces = [
+            ['apps', 'apps-workbench-modal', () => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.()],
+            ['knowledge', 'knowledge-workbench-modal', () => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.()],
+            ['mcp', 'mcp-workbench-modal', () => window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.()],
+            ['settings', 'admin-container', () => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true })]
+        ];
+        for (const [name, panelId, open] of workspaces) {
+            await expect(page.locator(`#${panelId}`)).toHaveCount(0);
+            const responsePromise = page.waitForResponse(response => response.url().endsWith(`/chat/workspaces/${name}`));
+            await page.evaluate(open);
+            await expect((await responsePromise).status()).toBe(200);
+            await expect(page.locator(`#${panelId}`)).toBeVisible({ timeout: 15_000 });
+        }
+    });
+
     test('chat shell loads safe HTML and Pivot module namespace', async ({ page }) => {
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await expect(page.locator('body')).toBeVisible();
@@ -60,6 +94,18 @@ test.describe('Pivot browser smoke', () => {
         await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.ui"])');
         await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.attachments"])');
         await page.waitForFunction('() => Boolean(window.Pivot.modules["chat.messageVirtualizer"])');
+    });
+
+    test('Markdown code and formula vendors load only when a rendered message needs them', async ({ page }) => {
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction('() => Boolean(window.Pivot && window.renderMarkdown)');
+        await expect(page.locator('script[src*="highlight.min.js"]')).toHaveCount(0);
+        await expect(page.locator('script[src*="katex.min.js"]')).toHaveCount(0);
+        await page.evaluate(() => window.renderMarkdown('```js\nconst value = 1;\n```\n\n$x^2$'));
+        await page.waitForFunction('() => Boolean(window.hljs && window.katex)', null, { timeout: 10_000 });
+        await expect(page.locator('script[src*="highlight.min.js"]')).toHaveCount(1);
+        await expect(page.locator('script[src*="katex.min.js"]')).toHaveCount(1);
+        await expect(page.locator('link[href*="katex.min.css"]')).toHaveCount(1);
     });
 
     test('knowledge workspace exposes RAG debug controls', async ({ page }) => {
@@ -138,14 +184,7 @@ test.describe('Pivot browser smoke', () => {
                 ]
             })
         }));
-        const login = await page.request.post('/api/auth/login', {
-            data: {
-                username: 'admin',
-                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
-            }
-        });
-        expect(login.ok()).toBeTruthy();
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await ensureBrowserSession(page);
 
         await page.locator('#chat-tools-menu-btn').click();
         await page.locator('[data-chat-tool-config="rag"]').click();
@@ -222,16 +261,9 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('usage audit workspace switches between statistics, details and report', async ({ page }) => {
-        const login = await page.request.post('/api/auth/login', {
-            data: {
-                username: 'admin',
-                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
-            }
-        });
-        expect(login.ok()).toBeTruthy();
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await ensureBrowserSession(page);
 
-        await page.locator('#admin-panel-btn').click();
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
         await expect(page.locator('#admin-container')).toBeVisible();
         await page.locator('#tab-usage').click();
 
@@ -255,15 +287,8 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('system monitor renders RAG diagnostics and embedding latency state', async ({ page }) => {
-        const login = await page.request.post('/api/auth/login', {
-            data: {
-                username: 'admin',
-                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
-            }
-        });
-        expect(login.ok()).toBeTruthy();
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
-        await page.locator('#admin-panel-btn').click();
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
         await page.locator('#tab-monitor').click();
 
         await expect(page.locator('#tab-content-monitor')).toBeVisible();
@@ -273,21 +298,14 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('model configuration sends the native tool-call mode selected by an administrator', async ({ page }) => {
-        const login = await page.request.post('/api/auth/login', {
-            data: {
-                username: 'admin',
-                password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'
-            }
-        });
-        expect(login.ok()).toBeTruthy();
         let savedPayload = null;
         await page.route('**/api/models', async route => {
             if (route.request().method() !== 'POST') return route.continue();
             savedPayload = route.request().postDataJSON();
             return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true }) });
         });
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
-        await page.locator('#admin-panel-btn').click();
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
         await page.locator('#tab-models').click();
         await page.locator('#model-add-btn').click();
         await expect(page.locator('#m-tool-call-mode')).toHaveValue('auto');
@@ -305,29 +323,34 @@ test.describe('Pivot browser smoke', () => {
             data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
         });
         expect(login.ok()).toBeTruthy();
-        let requestPayload = null;
-        await page.route('**/api/chat', async route => {
-            requestPayload = route.request().postDataJSON();
-            return route.fulfill({
-                status: 200,
-                contentType: 'text/event-stream; charset=utf-8',
-                body: [
-                    'data: {"content":"E2E 流式回答"}',
-                    '',
-                    'data: {"type":"message_saved","role":"assistant","messageId":999,"content":"E2E 流式回答","tokenCount":6,"costTime":0.1,"tps":60}',
-                    '',
-                    'data: [DONE]',
-                    ''
-                ].join('\n')
-            });
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const modelName = `E2E real model ${Date.now()}`;
+        const created = await page.request.post('/api/models', {
+            headers: { 'x-csrf-token': csrf },
+            data: { name: modelName, url: process.env.E2E_MODEL_URL, model_name: 'e2e-real-model' }
         });
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        expect(created.ok()).toBeTruthy();
+        const modelsResponse = await page.request.get('/api/models?limit=100');
+        expect(modelsResponse.ok()).toBeTruthy();
+        const modelsBody = await modelsResponse.json();
+        const model = (modelsBody.data || []).find(item => item.name === modelName);
+        expect(model).toBeTruthy();
+        const defaultResponse = await page.request.put('/api/settings/default-model', {
+            headers: { 'x-csrf-token': csrf },
+            data: { default_model_id: model.id }
+        });
+        expect(defaultResponse.ok()).toBeTruthy();
+        await ensureBrowserSession(page);
+        await expect(page.locator(`#model-dropdown-list .model-item[data-id="${model.id}"]`)).toHaveCount(1, { timeout: 15_000 });
+        await expect(page.locator('#model-selector')).toHaveValue(String(model.id));
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await expect(page.locator('#user-input')).toBeVisible({ timeout: 10_000 });
         await page.locator('#user-input').fill('请返回一段 E2E 流式文本');
+        const chatResponsePromise = page.waitForResponse(response => response.url().endsWith('/api/chat'));
         await page.locator('#send-btn').click();
-        await expect(page.locator('#message-container')).toContainText('E2E 流式回答');
-        await expect.poll(() => requestPayload).not.toBeNull();
-        expect(requestPayload.content).toContain('E2E 流式文本');
-        expect(requestPayload.sessionId).toBeTruthy();
+        const chatResponse = await chatResponsePromise;
+        expect(chatResponse.ok()).toBeTruthy();
+        await expect(page.locator('#message-container')).toContainText('真实 E2E 流式回答', { timeout: 20_000 });
     });
 
     test('knowledge upload queue accepts a selected file and sends it through the guarded upload route', async ({ page }) => {
@@ -335,13 +358,9 @@ test.describe('Pivot browser smoke', () => {
             data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
         });
         expect(login.ok()).toBeTruthy();
-        let uploadObserved = false;
-        await page.route('**/api/rag/upload', async route => {
-            uploadObserved = route.request().method() === 'POST';
-            return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, docId: 987, message: '后台处理中' }) });
-        });
-        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
-        await page.locator('#knowledge-workbench-btn').click();
+        await ensureBrowserSession(page);
+        await page.evaluate(async () => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench());
+        await expect(page.locator('#knowledge-workbench-modal')).toBeVisible({ timeout: 15_000 });
         await page.locator('#rag-upload-btn').click();
         await expect(page.locator('#knowledge-upload-modal')).toBeVisible();
         await page.locator('#rag-upload-input').setInputFiles({
@@ -351,8 +370,12 @@ test.describe('Pivot browser smoke', () => {
         });
         await expect(page.locator('#knowledge-upload-list')).toContainText('e2e-knowledge.md');
         await expect(page.locator('#knowledge-upload-submit-btn')).toBeEnabled();
+        const uploadResponsePromise = page.waitForResponse(response => response.url().includes('/api/rag/upload') && response.request().method() === 'POST');
         await page.locator('#knowledge-upload-submit-btn').click();
-        await expect.poll(() => uploadObserved).toBe(true);
+        const uploadResponse = await uploadResponsePromise;
+        expect(uploadResponse.ok()).toBeTruthy();
+        const uploadBody = await uploadResponse.json();
+        expect(Number(uploadBody.docId)).toBeGreaterThan(0);
         await expect(page.locator('#knowledge-upload-modal')).toBeHidden();
     });
 });

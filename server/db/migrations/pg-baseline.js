@@ -1,0 +1,19 @@
+// 仅保留已验证由 schema/base.js 或 PG 专属初始化完整覆盖的历史 SQLite 迁移。
+// 新迁移不得加入这里；必须提供 upPg(client)。
+const PG_SCHEMA_BASELINE = new Set([
+    '202606260001_rag_search_content_backfill', '202606260002_regulations_library',
+    '202606290001_regulation_date_columns', '202606290002_regulation_article_links',
+    '202606300001_regulation_aliases', '202606300002_regulation_article_status',
+    '202606300003_regulation_article_annotations', '202606300004_regulation_access_and_visibility',
+    '202606300005_regulation_article_embedding', '202606300006_regulation_saved_searches',
+    '202607010001_drop_regulation_date_fields', '202607030001_rag_debug_enterprise_contracts',
+    '202607150001_release_deleted_usernames', '202607310001_hash_refresh_tokens',
+    '202608040001_workflow_unit_visibility', '202608040002_schedule_cron_expression',
+    '202608040003_workflow_triggers', '202608040004_workflow_credentials',
+    '202608050001_agent_approval_requests', '202608050002_agent_approval_request_callback_nonce',
+    '202608060001_knowledge_and_tool_unit_visibility', '202608060002_schedule_interval_minutes',
+    '202608070001_resource_user_visibility', '202608070002_workflow_dependency_bindings',
+    '202608120001_agent_runtime_concurrency_guards'
+]);
+
+module.exports = { PG_SCHEMA_BASELINE };

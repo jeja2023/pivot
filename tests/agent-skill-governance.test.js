@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -90,6 +91,31 @@ test('Capability Worker 只接受固定摘要镜像并在未启用时 fail-close
         () => runCapabilityWorker(spec, {}, { env: { PIVOT_CAPABILITY_WORKER_ENABLED: 'false' } }),
         error => error.code === 'CAPABILITY_WORKER_DISABLED'
     );
+    let launched = null;
+    const output = await runCapabilityWorker(spec, { ok: true }, {
+        env: { PIVOT_CAPABILITY_WORKER_ENABLED: 'true', PIVOT_CAPABILITY_WORKER_DOCKER: 'docker-test' },
+        spawn(command, args) {
+            launched = { command, args };
+            const child = new EventEmitter();
+            child.stdout = new EventEmitter();
+            child.stderr = new EventEmitter();
+            child.kill = () => {};
+            child.stdin = {
+                end() {
+                    process.nextTick(() => {
+                        child.stdout.emit('data', '{"ok":true}');
+                        child.emit('close', 0);
+                    });
+                }
+            };
+            return child;
+        }
+    });
+    assert.deepEqual(output, { ok: true });
+    assert.equal(launched.command, 'docker-test');
+    const nameIndex = launched.args.indexOf('--name');
+    assert.match(launched.args[nameIndex + 1], /^pivot-capability-[a-f0-9]{32}$/);
+    assert.equal(launched.args.includes(spec.image), true);
 });
 
 test('工具能力由登记表解析，名称关键字不再放大能力', () => {

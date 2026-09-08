@@ -173,7 +173,7 @@ function coerceSimpleChartSpec(input) {
 }
 
 function buildEchartsOptionFromPivotSpec(spec) {
-    if (spec.echartsOption && typeof spec.echartsOption === 'object') return polishEchartsLayoutOption(spec.echartsOption);
+    if (spec.echartsOption && typeof spec.echartsOption === 'object') return polishEchartsLayoutOption(sanitizeEchartsOption(spec.echartsOption));
     const chartType = spec.chartType === 'area' ? 'line' : spec.chartType;
     const baseTitle = { text: spec.title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } };
     if (chartType === 'pie') {
@@ -283,13 +283,50 @@ function polishEchartsLayoutOption(option) {
     };
 }
 
+const livePivotCharts = new Set();
+let pivotChartResizeBound = false;
+
+function bindPivotChartResize() {
+    if (pivotChartResizeBound || typeof window === 'undefined') return;
+    pivotChartResizeBound = true;
+    const resize = () => livePivotCharts.forEach(chart => {
+        try { chart.resize(); } catch (_error) { /* 实例可能刚被销毁 */ }
+    });
+    const throttled = window.Pivot?.debounce ? window.Pivot.debounce(resize, 120) : resize;
+    window.addEventListener('resize', throttled, { passive: true });
+}
+
+// 图表选项可能来自模型或导入数据。ECharts 的 HTML tooltip formatter 会直接
+// 写入 DOM，不能把字符串 formatter 当作安全的展示文案；保留数值和轴配置，
+// 并强制使用 richText 渲染。
+function sanitizeEchartsOption(option) {
+    let safe;
+    try {
+        safe = JSON.parse(JSON.stringify(option));
+    } catch (_error) {
+        return {};
+    }
+    const sanitizeTooltip = tooltip => {
+        if (!tooltip || typeof tooltip !== 'object') return tooltip;
+        const next = { ...tooltip, renderMode: 'richText' };
+        delete next.formatter;
+        delete next.valueFormatter;
+        return next;
+    };
+    safe.tooltip = Array.isArray(safe.tooltip)
+        ? safe.tooltip.map(sanitizeTooltip)
+        : sanitizeTooltip(safe.tooltip);
+    if (safe.axisPointer?.label && typeof safe.axisPointer.label === 'object') {
+        safe.axisPointer = { ...safe.axisPointer, label: { ...safe.axisPointer.label } };
+        delete safe.axisPointer.label.formatter;
+    }
+    return safe;
+}
+
 function disposePivotEchart(block) {
     if (!block) return;
-    if (typeof block._pivotEchartResize === 'function') {
-        window.removeEventListener('resize', block._pivotEchartResize);
-        block._pivotEchartResize = null;
-    }
     if (block._pivotEchart) {
+        livePivotCharts.delete(block._pivotEchart);
         try { block._pivotEchart.dispose(); } catch (_error) { /* noop */ }
         block._pivotEchart = null;
     }
@@ -322,10 +359,9 @@ function renderEcharts(block, spec) {
     try {
         const chart = window.echarts.init(mount, null, { renderer: 'canvas' });
         chart.setOption(buildEchartsOptionFromPivotSpec(spec), true);
-        const onResize = () => chart.resize();
-        window.addEventListener('resize', onResize, { passive: true });
+        bindPivotChartResize();
+        livePivotCharts.add(chart);
         block._pivotEchart = chart;
-        block._pivotEchartResize = onResize;
         return true;
     } catch (_error) {
         mount.hidden = true;

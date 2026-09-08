@@ -146,9 +146,9 @@ window.Pivot.legacy.bindUnifiedAutomationTabs = function() {
                     const confirmed = await confirmAgentWorkflowDiscard('切换自动化功能会放弃当前画布中尚未保存的修改，确定继续吗？');
                     if (!confirmed) return;
                 }
-                if (section === 'tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
-                if (section === 'workbench') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
-                return window.Pivot.legacy.openAgentDagWorkbench?.({ tab: section });
+                if (section === 'tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' });
+                if (section === 'workbench') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'workbench' });
+                return window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ tab: section });
             } catch (error) {
                 showToast(error.message || '自动化页面加载失败', 'error');
             }
@@ -162,13 +162,13 @@ window.Pivot.legacy.bindAgentWorkbenchShortcuts = function() {
         if (btn.dataset.boundAutomationJump === '1') return;
         btn.dataset.boundAutomationJump = '1';
         btn.addEventListener('click', () => {
-            window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+            window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'workbench' });
         });
     });
 };
 
-window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
-    window.Pivot.legacy.showMainWorkspace?.('agent');
+async function openAgentWorkbench(options = {}) {
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('agent');
     let tab = options.tab || 'tasks';
     let subview = options.subview || '';
     if (tab === 'inbox') {
@@ -270,13 +270,15 @@ window.Pivot.legacy.openAgentWorkbench = async function(options = {}) {
     if (tab === 'tasks') {
         await window.Pivot.legacy.loadAgentWorkbench({ skipAutoOpen: options.skipAutoOpen === true });
     }
-};
+}
+
+window.Pivot.exposeModule('workspaces.implementations', { openAgentWorkbench });
 
 window.Pivot.legacy.closeAgentWorkbench = function() {
     closeAgentConfigModal();
     window.Pivot.legacy.closeAgentRunDetailModal();
     window.Pivot.legacy.setTaskComposerOpen(false);
-    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
+    window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
     updateAgentAutoRefresh();
 };
 
@@ -380,7 +382,7 @@ function closeAgentConfigModal() {
 
 function openAgentConfigSection(sectionKey) {
     if (sectionKey === 'evaluations') {
-        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+        openAgentWorkbench({ tab: 'workbench' });
         window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
         const evaluations = agentEvaluationsApi();
         evaluations.bind?.();
@@ -388,18 +390,18 @@ function openAgentConfigSection(sectionKey) {
         return;
     }
     if (sectionKey === 'harness') {
-        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'workbench' });
+        openAgentWorkbench({ tab: 'workbench' });
         window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('governance');
         window.Pivot.legacy.loadAgentHarnessManagement?.();
         return;
     }
     if (sectionKey === 'templates') {
-        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+        openAgentWorkbench({ tab: 'tasks' });
         window.Pivot.legacy.setTaskComposerOpen(true);
         return;
     }
     if (sectionKey === 'results') {
-        window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+        openAgentWorkbench({ tab: 'tasks' });
         return;
     }
     const section = document.querySelector(`[data-agent-config-section="${CSS.escape(sectionKey)}"]`);

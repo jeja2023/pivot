@@ -15,7 +15,7 @@ const {
     saveRuntimeConfigAsync
 } = require('../../server/services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../../server/services/concurrency');
-const { syncAgentRuntimeConcurrency } = require('../../server/services/agent-runtime');
+const { monitoring: { syncAgentRuntimeConcurrency } } = require('../../server/services/agent-runtime');
 const {
     deleteAppSettingAsync,
     getAppSettingRow,

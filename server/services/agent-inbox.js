@@ -1,6 +1,7 @@
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { formatAgentStatus } = require('./agent-validators');
+const { patchAgentRunMetadata } = require('./agent-run-metadata-patch');
 
 function parseJson(value, fallback = {}) {
     if (value && typeof value === 'object') return value;
@@ -141,13 +142,13 @@ async function markInboxItem(user, sourceType, sourceId, action = 'read', value 
         return queryOne('SELECT id, status FROM agent_evolution_proposals WHERE id = ? AND user_id = ?', [sourceId, user.id]);
     }
     if (sourceType === 'run') {
-        const run = await queryOne('SELECT id, metadata, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
+        const run = await queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
         if (!run) return null;
         if (action === 'read') {
-            const meta = parseJson(run.metadata, {});
-            meta.inboxRead = true;
-            meta.inboxReadAt = getBeijingTimestamp();
-            await execute('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ? AND user_id = ?', [JSON.stringify(meta), getBeijingTimestamp(), sourceId, user.id]);
+            await patchAgentRunMetadata(sourceId, {
+                inboxRead: true,
+                inboxReadAt: getBeijingTimestamp()
+            }, { userId: user.id });
         }
         return await queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ?', [sourceId, user.id]);
     }

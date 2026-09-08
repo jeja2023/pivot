@@ -15,7 +15,6 @@
     "checkIntervalMinutes": 30,
     "autoDownload": true,
     "allowPrerelease": false,
-    "allowInsecureHttp": false,
     "allowedOrigins": [],
     "installOnQuit": true
   }

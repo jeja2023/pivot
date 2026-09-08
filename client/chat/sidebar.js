@@ -203,7 +203,7 @@ document.addEventListener('click', async (event) => {
     if (taskSearchResult) {
         const runId = taskSearchResult.dataset.globalSearchTaskId;
         getSidebarSearchApi().close?.();
-        await window.Pivot.legacy.openAgentWorkbench?.();
+        await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.();
         await window.Pivot.legacy.openAgentRun?.(runId);
         return;
     }
@@ -212,7 +212,7 @@ document.addEventListener('click', async (event) => {
     if (workflowSearchResult) {
         const workflowId = workflowSearchResult.dataset.globalSearchWorkflowId;
         getSidebarSearchApi().close?.();
-        await window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId, editor: true });
+        await window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ workflowId, editor: true });
         return;
     }
 

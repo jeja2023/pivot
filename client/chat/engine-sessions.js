@@ -127,7 +127,7 @@ async function selectSession(id, title, options = {}) {
         selectionSequence === sessionSelectionSequence
         && String(currentSessionId || '') === requestedSessionId
     );
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     if (String(currentSessionId || '') !== requestedSessionId) {
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
     }

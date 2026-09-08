@@ -263,9 +263,9 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     updateAgentWorkflowRunUi();
 }
 
-window.Pivot.legacy.openAgentDagWorkbench = async function(options = {}) {
+async function openAgentDagWorkbench(options = {}) {
     window.Pivot.legacy.closeAgentConfigModal();
-    window.Pivot.legacy.showMainWorkspace?.('agent-dag');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('agent-dag');
     window.Pivot.legacy.initAgentRealtime?.();
     const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;
@@ -304,14 +304,14 @@ window.Pivot.legacy.openAgentDagWorkbench = async function(options = {}) {
     }
     window.Pivot.legacy.bindAgentDagWorkbench?.();
     window.Pivot.legacy.updateAgentAutoRefresh?.();
-};
+}
 
 window.Pivot.legacy.closeAgentDagWorkbench = async function() {
     const confirmed = await confirmAgentWorkflowDiscard('关闭工作流编排会放弃当前画布中尚未保存的修改，确定继续吗？');
     if (!confirmed) return;
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
-    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
+    window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
     window.Pivot.legacy.updateAgentAutoRefresh?.();
 };
 
@@ -559,3 +559,4 @@ window.Pivot.exposeModule('agent.automation', {
     listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),
     currentWorkflowId: () => String(activeAgentWorkflowId || '')
 });
+window.Pivot.exposeModule('workspaces.implementations', { openAgentDagWorkbench });

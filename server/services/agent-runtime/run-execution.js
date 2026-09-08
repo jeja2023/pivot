@@ -73,6 +73,7 @@ const {
     stableWorkflowDelayKey,
     setRunMetadata,
     recordRunRetryReason,
+    calculateAgentRetryDelayMs,
     enqueueAgentRun,
     startAgentTraceSpan,
     finishAgentTraceSpan,
@@ -921,17 +922,23 @@ const {
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
         if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
             const resumeContext = await buildAgentResumeContext(runId);
+            const retryAttempt = retryCount + 1;
+            const retryDelayMs = calculateAgentRetryDelayMs(retryAttempt);
+            const retryAfter = getBeijingTimestamp(new Date(Date.now() + retryDelayMs));
             await setRunMetadata(runId, { resumeContext });
             await recordRunRetryReason(runId, {
-                attempt: retryCount + 1,
+                attempt: retryAttempt,
                 limit: retryLimit,
                 code: e.code || '',
-                error: e.message
+                error: e.message,
+                retryAfter,
+                retryDelayMs
             });
             await updateRun(runId, {
                 status: 'queued',
                 error_message: e.message,
-                retry_count: retryCount + 1,
+                retry_count: retryAttempt,
+                retry_after: retryAfter,
                 resume_from_step: Number(resumeContext.latestStepIndex || 0),
                 updated_at: getBeijingTimestamp()
             });
@@ -941,7 +948,7 @@ const {
                 output: { error: e.message }
             });
             // 重新拉取用户，避免复用运行开始时捕获的过期用户对象（运行中用户可能被禁用或修改）
-            enqueueAgentRun(runId, (await getRunUser(runId)) || user);
+            enqueueAgentRun(runId, (await getRunUser(runId)) || user, { retryAfter });
             return;
         }
         const currentStatus = await getRunStatus(runId);

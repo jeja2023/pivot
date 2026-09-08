@@ -94,6 +94,13 @@ test('permission helpers expose admin, manager, and user tiers', () => {
     assert.equal(normalUser.permissionLabel, '用户');
 });
 
+test('password policy requires mixed-case non-common passwords', () => {
+    const { getPasswordValidationMessage } = require('../server/auth');
+    assert.match(getPasswordValidationMessage('Password123'), /常见口令/);
+    assert.match(getPasswordValidationMessage('lowercase123'), /大写字母/);
+    assert.equal(getPasswordValidationMessage('StrongPivot123'), '');
+});
+
 test('resolveUploadUrlPath accepts normal and encoded upload URLs', () => {
     const target = resolveUploadUrlPath('/uploads/1/session/file.png?token=abc');
     assert.equal(target, path.resolve(uploadRoot, '1', 'session', 'file.png'));
@@ -751,7 +758,7 @@ test('visible global models can be tested by admins but not regular users', asyn
 
 test('model ownership boundaries protect personal model secrets from admins', async () => {
     const suffix = Date.now().toString(36);
-    const password = 'Password123';
+    const password = 'AuthFixture123';
     const passwordHash = require('bcryptjs').hashSync(password, 4);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -933,7 +940,7 @@ test('deleting a user releases the username without reviving the old identity', 
 
         const createRes = makeRes();
         await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
-            body: { username, password: 'Password123', nickname: 'New Identity', unit: 'QA', role: 'user' }
+            body: { username, password: 'AuthFixture123', nickname: 'New Identity', unit: 'QA', role: 'user' }
         }, createRes);
         assert.equal(createRes.statusCode, 200);
         assert.equal(createRes.body.success, true);
@@ -983,7 +990,7 @@ test('non-root admin cannot manage administrator accounts', async () => {
 
     try {
         const createReq = {
-            body: { username: `new_admin_${suffix}`, password: 'Password123', nickname: 'New Admin', unit: 'QA', role: 'admin' },
+            body: { username: `new_admin_${suffix}`, password: 'AuthFixture123', nickname: 'New Admin', unit: 'QA', role: 'admin' },
             user: adminUser
         };
         const createRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
@@ -1158,9 +1165,12 @@ test('refresh tokens are hashed at rest and rotated once', async () => {
         assert.notEqual(stored.token, signedIn.refreshToken);
 
         const rotated = await refreshTokens(signedIn.refreshToken);
-        assert.equal(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken)), undefined);
+        const consumed = db.prepare('SELECT token, consumed_at FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken));
+        assert.ok(consumed);
+        assert.ok(consumed.consumed_at);
         assert.ok(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(rotated.refreshToken)));
         await assert.rejects(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM refresh_tokens WHERE user_id = ?').get(user.id).count, 0);
 
         const concurrentSession = await login(username, password);
         const concurrent = await Promise.allSettled([
@@ -1169,6 +1179,14 @@ test('refresh tokens are hashed at rest and rotated once', async () => {
         ]);
         assert.equal(concurrent.filter(item => item.status === 'fulfilled').length, 1);
         assert.equal(concurrent.filter(item => item.status === 'rejected').length, 1);
+
+        const boundDeviceId = 'd'.repeat(24);
+        const otherDeviceId = 'e'.repeat(24);
+        const boundSession = await login(username, password, { deviceId: boundDeviceId });
+        await assert.rejects(
+            () => refreshTokens(boundSession.refreshToken, { deviceId: otherDeviceId }),
+            /设备绑定|重新登录/
+        );
     } finally {
         db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);

@@ -11,6 +11,20 @@ const MAX_OUTPUT_BYTES = Math.max(
 );
 
 let cachedCanUnshare = null;
+const activeSandboxProcesses = new Set();
+
+function terminateSandboxChild(child) {
+    if (!child || child.exitCode !== null || child.killed) return;
+    if (process.platform !== 'win32') {
+        try { process.kill(-child.pid, 'SIGKILL'); return; } catch (_) {}
+    }
+    try { child.kill('SIGKILL'); } catch (_) {}
+}
+
+function shutdownSandboxProcesses() {
+    for (const child of [...activeSandboxProcesses]) terminateSandboxChild(child);
+    return activeSandboxProcesses.size;
+}
 function canUseUnshare(unsharePath) {
     if (cachedCanUnshare !== null) return cachedCanUnshare;
     try {
@@ -128,6 +142,7 @@ function runSandboxedProcess(command, args = [], options = {}) {
             windowsHide: true,
             stdio: ['pipe', 'pipe', 'pipe']
         });
+        activeSandboxProcesses.add(child);
         const stdout = [];
         const stderr = [];
         let stdoutBytes = 0;
@@ -142,13 +157,7 @@ function runSandboxedProcess(command, args = [], options = {}) {
             if (remaining > 0) target.push(buffer.subarray(0, remaining));
             return buffer.length;
         };
-        const terminateChild = () => {
-            if (process.platform !== 'win32') {
-                try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { try { child.kill('SIGKILL'); } catch (_) {} }
-            } else {
-                try { child.kill('SIGKILL'); } catch (_) {}
-            }
-        };
+        const terminateChild = () => terminateSandboxChild(child);
         const triggerOutputLimit = (streamName, totalBytes) => {
             if (outputLimitTriggered || settled) return;
             outputLimitTriggered = true;
@@ -167,6 +176,7 @@ function runSandboxedProcess(command, args = [], options = {}) {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            activeSandboxProcesses.delete(child);
             try { isolationHelper?.kill(); } catch (_) {}
             isolation.cleanup();
             if (error && outputLimitTriggered) {
@@ -223,4 +233,4 @@ function runSandboxedProcess(command, args = [], options = {}) {
     });
 }
 
-module.exports = { createWorkspaceJail, runSandboxedProcess, sanitizeTaskId };
+module.exports = { createWorkspaceJail, runSandboxedProcess, sanitizeTaskId, shutdownSandboxProcesses };

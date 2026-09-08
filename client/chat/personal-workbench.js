@@ -186,7 +186,7 @@
             return container.appendChild(createEmpty('暂时没有需要处理的事项，所有任务已就绪。', {
                 iconSvg: ICONS.check,
                 actionText: '查看待办中心',
-                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
+                onAction: () => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
             }));
         }
 
@@ -210,7 +210,7 @@
 
             let bodyText = String(item.body || '').trim();
             bodyText = bodyText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
-                const statusLabel = window.Pivot?.legacy?.agentStatusLabel?.(s);
+                const statusLabel = window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s);
                 return statusLabel ? `任务状态：${statusLabel}` : match;
             });
 
@@ -251,7 +251,7 @@
             return container.appendChild(createEmpty('还没有运行中的自动化目标，把重复工作交给 Agent 吧。', {
                 iconSvg: ICONS.clock,
                 actionText: '新建自动化目标',
-                onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals', subview: 'goals', create: true })
+                onAction: () => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'goals', subview: 'goals', create: true })
             }));
         }
 
@@ -316,7 +316,7 @@
             appendText(copy, 'strong', 'personal-row-title', item.title || '未命名工作');
             let metaText = String(item.meta || '最近更新');
             metaText = metaText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
-                const statusLabel = window.Pivot?.legacy?.agentStatusLabel?.(s);
+                const statusLabel = window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s);
                 return statusLabel ? `任务状态：${statusLabel}` : match;
             });
             appendText(copy, 'span', 'personal-row-meta', metaText);
@@ -426,7 +426,7 @@
     }
 
     async function openPersonalWorkbench() {
-        window.Pivot.legacy.showMainWorkspace?.('personal');
+        window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('personal');
         await loadPersonalWorkbench({ silent: Boolean(state.dashboard) });
     }
 
@@ -434,13 +434,13 @@
         if (key === 'chat') {
             window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
             window.Pivot.moduleApi?.('chat.sessions')?.clearActiveChatSession?.();
-            return window.Pivot.legacy.showMainWorkspace?.('chat');
+            return window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
         }
-        if (key === 'automation' || key === 'tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
-        if (key === 'apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
-        if (key === 'knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
-        if (key === 'workflows') return window.Pivot.legacy.openAgentDagWorkbench?.({ tab: 'workflows' });
-        await window.Pivot.legacy.openAppsWorkbench?.();
+        if (key === 'automation' || key === 'tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' });
+        if (key === 'apps') return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ home: true });
+        if (key === 'knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
+        if (key === 'workflows') return window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ tab: 'workflows' });
+        await window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.();
         const appId = key === 'official-writing' ? 'official-writing' : key;
         document.querySelector(`[data-app-id="${appId}"]`)?.click();
     }
@@ -573,10 +573,10 @@
             window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
             return window.Pivot.moduleApi?.('chat.sessions')?.selectSession?.(id, undefined, { refreshSidebar: true });
         }
-        if (kind === 'run' && id) return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', query: id });
-        if (kind === 'artifact') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
+        if (kind === 'run' && id) return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', query: id });
+        if (kind === 'artifact') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
         window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
-        return window.Pivot.legacy.showMainWorkspace?.('chat');
+        return window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     }
 
     function markAttentionItemRead(rowEl, sourceType, sourceId) {
@@ -607,7 +607,7 @@
                 parent.appendChild(createEmpty('暂时没有需要处理的事项，所有任务已就绪。', {
                     iconSvg: ICONS.check,
                     actionText: '查看待办中心',
-                    onAction: () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
+                    onAction: () => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' })
                 }));
             }
         }
@@ -625,7 +625,7 @@
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
                 return openShortcut('chat');
             }
-            if (action === 'open-knowledge') return window.Pivot.legacy.openKnowledgeWorkbench?.();
+            if (action === 'open-knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');
                 return document.getElementById('official-writing-create-doc-btn')?.click();
@@ -635,30 +635,30 @@
                 if (searchApi?.open) return searchApi.open('', { scope: 'global' });
                 return document.getElementById('session-search-open')?.click();
             }
-            if (action === 'open-apps') return window.Pivot.legacy.openAppsWorkbench?.({ home: true });
+            if (action === 'open-apps') return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ home: true });
             if (action === 'open-automation') {
-                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' });
+                return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' });
             }
             if (action === 'open-goals') {
-                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'goals', subview: 'goals' });
+                return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'goals', subview: 'goals' });
             }
-            if (action === 'open-completed-tasks') return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
-            if (action === 'open-tools') return window.Pivot.legacy.openMcpWorkbench?.();
-            if (action === 'open-settings') return window.Pivot.legacy.openAdminPanel?.();
+            if (action === 'open-completed-tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
+            if (action === 'open-tools') return window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
+            if (action === 'open-settings') return window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.();
             if (action === 'open-user-profile') return openUserProfileModal();
             if (action === 'close-user-modal') return closeUserProfileModal();
             if (action === 'user-to-settings') {
                 closeUserProfileModal();
-                return window.Pivot.legacy.openAdminPanel?.();
+                return window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.();
             }
             if (action === 'logout') return window.Pivot.legacy.logout?.();
             if (action === 'open-inbox') {
-                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
+                return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
             }
             if (action === 'open-history') {
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
                 window.Pivot.moduleApi?.('chat.sessions')?.clearActiveChatSession?.();
-                return window.Pivot.legacy.showMainWorkspace?.('chat');
+                return window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
             }
             if (action === 'edit-shortcuts') return openShortcutEditor();
         }
@@ -683,9 +683,9 @@
                 return openAgentRun(runId, { returnTab: 'workbench', returnSubview: 'inbox', returnLabel: '待办中心' });
             }
             if (sourceType === 'approval' || sourceType === 'evolution') {
-                return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: sourceType === 'approval' ? 'approvals' : 'proposals' });
+                return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'inbox', subview: sourceType === 'approval' ? 'approvals' : 'proposals' });
             }
-            return window.Pivot.legacy.openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
+            return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'inbox', subview: 'inbox' });
         }
     });
 
@@ -707,8 +707,6 @@
         saveShortcuts().catch(error => window.Pivot.legacy.showToast?.(error.message || '常用入口保存失败', 'error'));
     });
 
-    window.Pivot?.exposeModule?.('workspaces.personal', { openPersonalWorkbench, loadPersonalWorkbench }, [
-        'openPersonalWorkbench',
-        'loadPersonalWorkbench'
-    ]);
+    window.Pivot?.exposeModule?.('workspaces.personal', { loadPersonalWorkbench });
+    window.Pivot?.exposeModule?.('workspaces.implementations', { openPersonalWorkbench });
 })();

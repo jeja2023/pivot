@@ -7,6 +7,7 @@ const { createModelItemEnvelope } = require('../server/services/agent-provider-e
 const { createStreamingSnapshotSampler, tryRunAgentStreaming } = require('../server/services/agent-streaming-runtime');
 const { createAgentStepContext } = require('../server/services/agent-step-context');
 const { TaskBudget } = require('../server/services/agent-budget');
+const NETWORK_TIMEOUT_DRILL_MS = 2_000;
 
 test('streaming sampler merges UI updates and reserves one audit snapshot for completion', () => {
     const sampler = createStreamingSnapshotSampler({ maxAuditSnapshots: 4, uiIntervalMs: 100, auditIntervalMs: 1000, auditMinGrowth: 3 });
@@ -72,6 +73,9 @@ function startMockProvider(received) {
 }
 
 function closeServer(server) {
+    // 流式超时演练会刻意保留一个无结束帧的 keep-alive socket；Node 的
+    // server.close() 会等待该连接自然结束，导致断言完成后测试仍悬挂。
+    server.closeAllConnections?.();
     return new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }
 
@@ -251,8 +255,8 @@ test('Agent 流建立后长期无新数据会按无进展策略中止', async ()
     try {
         await assert.rejects(
             () => callModelStreamingWithTools(modelCfg, [{ role: 'user', content: 'idle' }], [], {
-                firstResponseTimeoutMs: 1_000,
-                streamIdleTimeoutMs: 1_000
+                firstResponseTimeoutMs: NETWORK_TIMEOUT_DRILL_MS,
+                streamIdleTimeoutMs: NETWORK_TIMEOUT_DRILL_MS
             }),
             error => error?.code === 'AGENT_MODEL_STREAM_IDLE'
         );
@@ -271,8 +275,8 @@ test('Agent 模型在首响应时限内未开始响应会给出可诊断错误�
     try {
         await assert.rejects(
             () => callModelStreamingWithTools(modelCfg, [{ role: 'user', content: 'first-response' }], [], {
-                firstResponseTimeoutMs: 1_000,
-                streamIdleTimeoutMs: 1_000
+                firstResponseTimeoutMs: NETWORK_TIMEOUT_DRILL_MS,
+                streamIdleTimeoutMs: NETWORK_TIMEOUT_DRILL_MS
             }),
             error => error?.code === 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT' && error.agentModelTiming?.firstByteAt === null
         );

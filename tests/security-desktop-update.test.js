@@ -16,6 +16,7 @@ const {
     resolveUpdateUrlFromRemote
 } = require('../desktop/config');
 const { setupAutoUpdater } = require('../desktop/updater');
+const { hardenWindowsAutoUpdater, verifyWindowsUpdateSigningConfig } = require('../desktop/updater');
 const { resolveInitializedServer } = require('../desktop/local-server');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
 const { isTrustedExternalNavigation, normalizeTrustedExternalOrigins } = require('../desktop/external-navigation-policy');
@@ -46,15 +47,11 @@ test('desktop update policy requires https for remote feeds', () => {
     );
 });
 
-test('desktop update policy allows explicit loopback dev feeds only', () => {
-    assert.equal(
-        assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases', {
+test('desktop update policy rejects HTTP feeds including local development loopback', () => {
+    assert.throws(
+        () => assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases', {
             env: { PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED: 'true' }
         }),
-        'http://127.0.0.1:9000/releases/'
-    );
-    assert.throws(
-        () => assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases'),
         /must use https|必须使用 HTTPS/
     );
 });
@@ -107,44 +104,39 @@ test('desktop update path rejects full URLs', () => {
     );
 });
 
-test('desktop update policy allows explicit LAN HTTP feeds with origin whitelist', () => {
-    assert.equal(
-        assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
-            allowInsecureHttp: true,
-            allowedOrigins: ['http://pivot.lan:3000']
-        }),
-        'http://pivot.lan:3000/downloads/'
-    );
+test('desktop update policy rejects LAN HTTP feeds even if an old configuration requests it', () => {
     assert.throws(
         () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
             allowInsecureHttp: true
         }),
-        /allowedOrigins is required|必须配置 allowedOrigins/
-    );
-    assert.throws(
-        () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
-            allowInsecureHttp: true,
-            allowedOrigins: ['http://other.lan:3000']
-        }),
-        /not in config\.autoUpdate\.allowedOrigins|未在 allowedOrigins 允许列表中|不在配置的自动更新来源白名单/
+        /must use https|必须使用 HTTPS/
     );
 });
 
-test('desktop config can derive LAN HTTP downloads feed when explicitly allowed', () => {
-    const config = normalizeConfig({
-        mode: 'remote',
-        remoteUrl: 'http://192.168.10.20:3000/',
-        autoUpdate: {
-            enabled: true,
-            path: '/downloads/',
-            url: '',
-            allowInsecureHttp: true,
-            allowedOrigins: ['http://192.168.10.20:3000']
-        }
-    }, {}, {});
+test('Windows 更新仅接受与打包 app-update.yml 绑定的签名发布者，并禁止降级和 web installer', () => {
+    const root = require('node:fs').mkdtempSync(require('node:os').tmpdir() + path.sep + 'pivot-update-signing-');
+    try {
+        require('node:fs').writeFileSync(path.join(root, 'app-update.yml'), 'publisherName: Pivot Release Signing\n');
+        const config = { publisherName: 'Pivot Release Signing' };
+        assert.equal(verifyWindowsUpdateSigningConfig(config, { platform: 'win32', resourcesPath: root }), true);
+        const updater = { verifyUpdateCodeSignature() {}, disableWebInstaller: false, allowDowngrade: true };
+        assert.equal(hardenWindowsAutoUpdater(updater, config, { platform: 'win32', resourcesPath: root }), true);
+        assert.equal(updater.disableWebInstaller, true);
+        assert.equal(updater.allowDowngrade, false);
+        assert.throws(
+            () => hardenWindowsAutoUpdater(updater, { publisherName: 'Unexpected Publisher' }, { platform: 'win32', resourcesPath: root }),
+            /发布者与客户端配置不一致/
+        );
+    } finally {
+        require('node:fs').rmSync(root, { recursive: true, force: true });
+    }
+});
 
-    assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');
-    assert.equal(config.autoUpdate.allowInsecureHttp, true);
+test('desktop config rejects legacy allowInsecureHttp when automatic updates are enabled', () => {
+    assert.throws(() => normalizeConfig({
+        mode: 'remote', remoteUrl: 'http://192.168.10.20:3000/',
+        autoUpdate: { enabled: true, allowInsecureHttp: true }
+    }, {}, {}), /allowInsecureHttp 已不再受支持/);
 });
 
 test('bundled desktop config preserves remote bootstrap and update settings without a secret', () => {
@@ -153,12 +145,14 @@ test('bundled desktop config preserves remote bootstrap and update settings with
     const config = normalizeConfig(bundledConfig, {}, {});
 
     assert.equal(config.mode, 'remote');
-    assert.equal(config.remoteUrl, 'http://50.64.150.51:9006/');
+    assert.equal(config.environmentName, 'Development machine');
+    assert.equal(config.remoteUrl, 'http://127.0.0.1:3000/');
+    assert.equal(config.partition, 'persist:pivot-development');
     assert.equal(config.stealthSecret, '');
-    assert.equal(config.autoUpdate.enabled, true);
-    assert.equal(config.autoUpdate.url, 'http://50.64.150.51:9006/downloads/');
-    assert.equal(config.autoUpdate.allowInsecureHttp, true);
-    assert.deepEqual(config.autoUpdate.allowedOrigins, ['http://50.64.150.51:9006']);
+    assert.equal(config.autoUpdate.enabled, false);
+    assert.equal(config.autoUpdate.url, '');
+    assert.equal(config.autoUpdate.allowInsecureHttp, false);
+    assert.deepEqual(config.autoUpdate.allowedOrigins, []);
     assert.equal(packageManifest.build.extraResources.some(item => item.from === 'config.json' && item.to === 'config.json'), true);
     assert.equal(packageManifest.build.extraFiles.some(item => item.from === 'config.json' && item.to === 'config.json'), false);
     assert.equal(packageManifest.build.extraResources.some(item => item.from === 'config.example.json' && item.to === 'config.example.json'), true);
@@ -217,18 +211,17 @@ test('desktop autoUpdate supports configurable checkIntervalMinutes', () => {
     assert.equal(stringInterval.checkIntervalMinutes, 60);
 });
 
-test('mergeDesktopConfigs preserves bundled autoUpdate when user-config overrides remoteUrl', () => {
+test('mergeDesktopConfigs preserves HTTPS update policy without promoting an HTTP business origin', () => {
     const base = {
         mode: 'remote',
-        remoteUrl: 'http://50.64.150.51:9006',
+        remoteUrl: 'https://updates.example.com',
         autoUpdate: {
             enabled: true,
-            path: '/downloads/',
-            url: '',
+            path: '/pivot/',
+            url: 'https://updates.example.com/pivot/',
             checkOnStart: true,
             checkIntervalMinutes: 30,
-            allowInsecureHttp: true,
-            allowedOrigins: ['http://50.64.150.51:9006']
+            allowedOrigins: ['https://updates.example.com']
         }
     };
     const user = {
@@ -239,9 +232,9 @@ test('mergeDesktopConfigs preserves bundled autoUpdate when user-config override
     const merged = mergeDesktopConfigs(base, user);
     assert.equal(merged.remoteUrl, 'http://192.168.1.99:3000');
     assert.equal(merged.autoUpdate.enabled, true);
-    assert.equal(merged.autoUpdate.path, '/downloads/');
+    assert.equal(merged.autoUpdate.path, '/pivot/');
     assert.equal(merged.autoUpdate.checkIntervalMinutes, 30);
-    assert.equal(merged.autoUpdate.allowedOrigins.includes('http://192.168.1.99:3000'), true);
+    assert.equal(merged.autoUpdate.allowedOrigins.includes('http://192.168.1.99:3000'), false);
     assert.equal(merged.stealthSecret, 'custom-secret');
 });
 

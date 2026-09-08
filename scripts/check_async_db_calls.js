@@ -221,7 +221,13 @@ if (jsonMode) {
 }
 
 if (enforceMode) {
-    const { isAllowedFinding } = require('./async-db-calls-allowlist');
+    const { isAllowedFinding, validateAllowlist } = require('./async-db-calls-allowlist');
+    const staleAllowlist = validateAllowlist(targetFiles.map(file => path.relative(path.resolve(__dirname, '..'), file)));
+    if (staleAllowlist.length) {
+        console.error(`异步/数据库调用白名单检查失败：${staleAllowlist.length} 条失效或脱靶登记。`);
+        staleAllowlist.forEach(item => console.error(`  ${item}`));
+        process.exit(1);
+    }
     const unexpected = findings.filter(finding => !isAllowedFinding(finding));
     if (unexpected.length) {
         console.error(`异步/数据库调用检查失败：发现 ${unexpected.length} 项未进入白名单的调用。`);

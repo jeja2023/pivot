@@ -10,6 +10,10 @@ const { recoverDocumentProcessingJobs } = require('./services/document-processin
 const { assertDeploymentReady } = require('./services/deployment-profile');
 
 const { initPostgresDatabase } = require('./db');
+const { closePgPool } = require('./db/pg-connection');
+const { closeRealtimeEventClients } = require('./services/realtime-events');
+const { shutdownSandboxProcesses } = require('./services/agent-sandbox');
+const { shutdownCapabilityWorkers } = require('./services/agent-capability-worker');
 
 registerProcessErrorHandlers({ logger, flushAllWrites });
 
@@ -34,7 +38,11 @@ async function init() {
         logger,
         version: appVersion,
         scheduleMaintenanceTasks,
-        flushAllWrites
+        flushAllWrites,
+        closePgPool,
+        closeRealtimeClients: closeRealtimeEventClients,
+        terminateSandboxProcesses: shutdownSandboxProcesses,
+        terminateCapabilityWorkers: shutdownCapabilityWorkers
     });
 
     return { server };

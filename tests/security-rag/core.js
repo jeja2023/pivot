@@ -539,6 +539,9 @@ test('HTTP 指标暴露准确路由均值和 Prometheus 直方图桶', async () 
     assert.equal(bucketValue(0.1), 1);
     assert.equal(bucketValue(0.25), 2);
     assert.equal(bucketValue('+Inf'), 2);
+    assert.match(metrics, /pivot_event_loop_delay_milliseconds/);
+    assert.match(metrics, /pivot_pg_pool_connections/);
+    assert.match(metrics, /pivot_db_write_queue_dropped_total/);
 });
 
 test('监控知识分块数只包含当前可用的已索引分块', async () => {
@@ -654,6 +657,7 @@ test('上下文预算将注入的用户角色 RAG 上下文视为生成的知识
     assert.ok(result.metadata.droppedMessages > 0);
     assert.equal(ragMessage?.role, 'user');
     assert.match(ragMessage.content, /PIVOT_RAG_CONTEXT_BEGIN/);
+    assert.match(ragMessage.content, /PIVOT_RAG_CONTEXT_END/);
 });
 
 test('上下文预算遵守已配置的大模型输入窗口', () => {

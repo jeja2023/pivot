@@ -41,7 +41,7 @@ This document records optimization work that is intentionally staged instead of 
 - ✅ Agent StepContext 统一审计契约：数据库迁移 `202609050003_agent_context_audit_contract.js`，为 `agent_tool_calls` 表增加 `context_snapshot`（JSONB）和 `contextHash` 索引；建立 `SCHEMA_VERSION = 1` 协议，统一 Chat、Agent 工作台与 Desktop 桌面端审计快照标准。
 - ✅ Agent 流式双轨采样器与终态保全：在 `agent-streaming-runtime.js` 引入 `createStreamingSnapshotSampler`，实现前端 UI 渲染与审计写库双轨隔离，并在 `finishReason` / 完成态时强制保全完整快照落盘。
 - ✅ 前端 HTML 资产 AST 标签平衡性静态校验：升级 `scripts/check_chat_assets.js`，基于 Parse5 与 Acorn AST 深度扫描静态 HTML 片段与 JS 模板字符串（`TemplateLiteral`）中的标签栈配对，杜绝未闭合或多闭合标签。
-- ✅ 异步与数据库调用强制门禁升级：升级 `scripts/check_async_db_calls.js` 支持 `--enforce` 阻断模式与白名单机制，接入 `npm run check` 自动拦截未处理的悬挂调用。
+- ✅ 异步与数据库调用强制门禁升级：`scripts/check_async_db_calls.js --enforce` 仅允许当前扫描范围内、源码签名仍有效的最小白名单；任何新增未处理调用或失效登记都会阻断 `npm run check`。
 
 ## 2026-09-05 动态代码沙箱收口与多节点持续调度及检索下沉优化（v0.1.81）
 

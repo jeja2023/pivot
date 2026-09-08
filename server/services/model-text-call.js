@@ -8,8 +8,9 @@ const {
 } = require('./model-runtime');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
-const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch, buildThinkingControlPayload } = require('../routes/apps/helpers');
+const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch, buildThinkingControlPayload } = require('./model-response');
 const { fitMessagesToContextBudget } = require('./context-budget');
+const { recordSlowModelResponse } = require('./observability');
 
 /**
  * 非流式文本模型调用的公共实现。数据分析、文档审查等后台任务都复用这里，
@@ -29,9 +30,9 @@ async function callModelTextWithBudget({ modelCfg, user, messages, source = 'ai'
     let globalAcquired = false;
     const startedAt = Date.now();
     try {
-        await aiSemaphore.acquire();
+        await aiSemaphore.acquire({ signal });
         globalAcquired = true;
-        endpointRelease = await acquireModelSlot(modelCfg);
+        endpointRelease = await acquireModelSlot(modelCfg, { signal });
         const response = await forwardChatCompletion({
             modelCfg,
             user,
@@ -50,6 +51,7 @@ async function callModelTextWithBudget({ modelCfg, user, messages, source = 'ai'
             timeout
         });
         const content = extractCompletionContent(response.data);
+        recordSlowModelResponse(modelCfg, Date.now() - startedAt, { source });
         const inputTokens = response.data?.usage?.prompt_tokens || estimateTokens(JSON.stringify(fitted.messages));
         const outputUsed = response.data?.usage?.completion_tokens || estimateTokens(content);
         const usage = {

@@ -13,36 +13,69 @@ const dnsPromises = dns.promises;
 
 const projectRoot = path.resolve(__dirname, '..');
 const encryptedPrefix = 'enc:v1:';
+const encryptedV2Prefix = 'enc:v2:';
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
     : path.join(projectRoot, 'uploads');
 
 function getEncryptionKey() {
-    const source = process.env.DATA_ENCRYPTION_KEY || process.env.JWT_SECRET;
+    const source = process.env.DATA_ENCRYPTION_KEY;
+    if (!String(source || '').trim()) throw new Error('DATA_ENCRYPTION_KEY 未配置，拒绝使用 JWT_SECRET 作为数据加密密钥。');
     return crypto.createHash('sha256').update(source || '').digest();
 }
 
-function encryptSecret(value) {
-    if (!value || String(value).startsWith(encryptedPrefix)) return value || '';
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
-    const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return `${encryptedPrefix}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+function assertPlainSecretInput(value) {
+    if (String(value || '').startsWith(encryptedPrefix) || String(value || '').startsWith(encryptedV2Prefix)) {
+        const error = new Error('凭据字段不得直接提交已加密密文。');
+        error.status = 400;
+        error.code = 'ENCRYPTED_SECRET_INPUT_REJECTED';
+        throw error;
+    }
 }
 
-function decryptSecret(value) {
-    if (!value || !String(value).startsWith(encryptedPrefix)) return value || '';
+function encryptSecret(value, context = 'pivot.secret') {
+    if (!value) return '';
+    assertPlainSecretInput(value);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
+    cipher.setAAD(Buffer.from(String(context || 'pivot.secret'), 'utf8'));
+    const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${encryptedV2Prefix}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+function preserveEncryptedSecret(value, context = 'pivot.secret') {
+    if (!value) return '';
+    if (String(value).startsWith(encryptedPrefix) || String(value).startsWith(encryptedV2Prefix)) return String(value);
+    return encryptSecret(value, context);
+}
+
+function decryptSecret(value, context = 'pivot.secret') {
+    if (!value || (!String(value).startsWith(encryptedPrefix) && !String(value).startsWith(encryptedV2Prefix))) return value || '';
     try {
-        const payload = String(value).slice(encryptedPrefix.length);
+        const raw = String(value);
+        const isV2 = raw.startsWith(encryptedV2Prefix);
+        const payload = raw.slice(isV2 ? encryptedV2Prefix.length : encryptedPrefix.length);
         const [ivText, tagText, encryptedText] = payload.split('.');
         const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), Buffer.from(ivText, 'base64url'));
+        if (isV2) decipher.setAAD(Buffer.from(String(context || 'pivot.secret'), 'utf8'));
         decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
         return Buffer.concat([
             decipher.update(Buffer.from(encryptedText, 'base64url')),
             decipher.final()
         ]).toString('utf8');
     } catch (e) {
+        // 兼容早期调用方用默认上下文生成的 v2 密文；明确绑定到业务字段
+        // 的密文不会匹配此回退，因此仍不能跨字段复制。
+        if (String(value).startsWith(encryptedV2Prefix) && String(context || 'pivot.secret') !== 'pivot.secret') {
+            try {
+                const [ivText, tagText, encryptedText] = String(value).slice(encryptedV2Prefix.length).split('.');
+                const fallback = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), Buffer.from(ivText, 'base64url'));
+                fallback.setAAD(Buffer.from('pivot.secret', 'utf8'));
+                fallback.setAuthTag(Buffer.from(tagText, 'base64url'));
+                return Buffer.concat([fallback.update(Buffer.from(encryptedText, 'base64url')), fallback.final()]).toString('utf8');
+            } catch (_) {}
+        }
         throw new Error('密钥解密失败，请检查 DATA_ENCRYPTION_KEY 或 JWT_SECRET 是否一致。');
     }
 }
@@ -248,20 +281,26 @@ function deriveEncryptionKey(source) {
     return crypto.createHash('sha256').update(String(source || '')).digest();
 }
 
-function encryptSecretWithKey(value, source) {
-    if (!value || String(value).startsWith(encryptedPrefix)) return value || '';
+function encryptSecretWithKey(value, source, context = 'pivot.encryption-rotation') {
+    if (!value) return '';
+    assertPlainSecretInput(value);
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', deriveEncryptionKey(source), iv);
+    cipher.setAAD(Buffer.from(String(context || 'pivot.encryption-rotation'), 'utf8'));
     const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
-    return `${encryptedPrefix}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+    return `${encryptedV2Prefix}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
-function decryptSecretWithKey(value, source) {
-    if (!value || !String(value).startsWith(encryptedPrefix)) return value || '';
-    const payload = String(value).slice(encryptedPrefix.length);
+function decryptSecretWithKey(value, source, context = 'pivot.encryption-rotation') {
+    if (!value || (!String(value).startsWith(encryptedPrefix) && !String(value).startsWith(encryptedV2Prefix))) return value || '';
+    const raw = String(value);
+    const isV2 = raw.startsWith(encryptedV2Prefix);
+    const payload = raw.slice(isV2 ? encryptedV2Prefix.length : encryptedPrefix.length);
     const [ivText, tagText, encryptedText] = payload.split('.');
     const decipher = crypto.createDecipheriv('aes-256-gcm', deriveEncryptionKey(source), Buffer.from(ivText, 'base64url'));
+    // 旧轮转密文为 v1；新轮转结果绑定固定的轮转用途 AAD。
+    if (isV2) decipher.setAAD(Buffer.from(String(context || 'pivot.encryption-rotation'), 'utf8'));
     decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
     return Buffer.concat([decipher.update(Buffer.from(encryptedText, 'base64url')), decipher.final()]).toString('utf8');
 }
@@ -292,6 +331,11 @@ async function assertSafeOutboundHost(hostname, options = {}) {
     try {
         records = await dnsPromises.lookup(hostname, { all: true, verbatim: true });
     } catch (e) {
+        if (options.failClosedDns === true) {
+            const error = new Error(`主机 ${hostname} 无法解析。`);
+            error.code = e.code || 'ENOTFOUND';
+            throw error;
+        }
         return;
     }
 
@@ -477,6 +521,47 @@ function removeAttachmentFiles(attachments) {
     return results;
 }
 
+async function removeAttachmentFilesAsync(attachments) {
+    const results = [];
+    let changed = false;
+    for (const attachment of attachments || []) {
+        const filePath = attachment.file_path;
+        const result = { id: attachment.id, filePath, ok: true, removed: false, skipped: false, error: '' };
+        results.push(result);
+        if (!filePath) continue;
+        const relativePath = String(filePath).replace(/\\/g, '/').replace(/^\/+/, '');
+        const target = relativePath.startsWith('uploads/')
+            ? path.resolve(uploadRoot, relativePath.slice('uploads/'.length))
+            : path.resolve(projectRoot, relativePath);
+        if (target === uploadRoot || !isPathInsideUploadRoot(target)) {
+            result.skipped = true;
+            logger.warn({ filePath }, '附件清理已跳过不安全路径');
+            continue;
+        }
+        try {
+            await fs.promises.rm(target, { force: true, maxRetries: 5, retryDelay: 80 });
+            result.removed = true;
+            changed = true;
+            let dir = path.dirname(target);
+            while (dir.startsWith(uploadRoot + path.sep) && dir !== uploadRoot) {
+                try {
+                    const entries = await fs.promises.readdir(dir);
+                    if (entries.length !== 0) break;
+                    await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+                    changed = true;
+                } catch (_) { break; }
+                dir = path.dirname(dir);
+            }
+        } catch (e) {
+            result.ok = false;
+            result.error = e.message;
+            logger.warn({ filePath, err: e.message }, '附件清理删除文件失败');
+        }
+    }
+    if (changed) clearDirSizeCache();
+    return results;
+}
+
 function isPathInsideUploadRoot(targetPath) {
     const target = path.resolve(targetPath);
     return target === uploadRoot || target.startsWith(uploadRoot + path.sep);
@@ -535,6 +620,7 @@ const SECRET_VALUE_PATTERNS = [
     /sk-[a-zA-Z0-9_-]{16,}/g,
     /(Bearer\s+)[a-zA-Z0-9_\-\.]{16,}/gi,
     /enc:v1:[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
+    /enc:v2:[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
     /eyJ[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{5,}/g
 ];
 
@@ -548,6 +634,7 @@ function maskSecretString(text) {
             return SECRET_PLACEHOLDER;
         });
     }
+    output = output.replace(/([?&](?:token|access_token|api_key|apikey|key|signature|sig|secret|password)=)[^&\s]+/gi, '$1[REDACTED]');
     return output;
 }
 
@@ -563,7 +650,9 @@ function redactSecrets(value, depth = 0) {
     const result = {};
     for (const [key, val] of Object.entries(value)) {
         const lowered = String(key).toLowerCase();
-        if (SECRET_FIELD_NAMES.has(lowered) || lowered.includes('secret') || lowered.includes('token') || lowered.endsWith('_key')) {
+        if (lowered === 'stack' || lowered === 'stacktrace' || lowered === 'error_stack') {
+            result[key] = val ? '[STACK_OMITTED]' : val;
+        } else if (SECRET_FIELD_NAMES.has(lowered) || lowered.includes('secret') || lowered.includes('token') || lowered.endsWith('_key')) {
             result[key] = val ? SECRET_PLACEHOLDER : val;
         } else {
             result[key] = redactSecrets(val, depth + 1);
@@ -572,8 +661,26 @@ function redactSecrets(value, depth = 0) {
     return result;
 }
 
+function redactAuditDetails(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') return JSON.stringify(redactSecrets(value));
+    const text = String(value);
+    try {
+        const parsed = JSON.parse(text);
+        const redacted = redactSecrets(parsed);
+        if (redacted && typeof redacted === 'object' && !Array.isArray(redacted) && typeof redacted.url === 'string') {
+            redacted.url = redacted.url.replace(/([?&](?:token|access_token|api_key|apikey|key|signature|sig|secret|password)=)[^&\s]+/gi, '$1[REDACTED]');
+        }
+        return JSON.stringify(redacted);
+    } catch (_) {
+        return maskSecretString(text)
+            .replace(/([?&](?:token|access_token|api_key|apikey|key|signature|sig|secret|password)=)[^&\s]+/gi, '$1[REDACTED]');
+    }
+}
+
 module.exports = {
     encryptSecret,
+    preserveEncryptedSecret,
     hasSecretEncryptionKey,
     encryptSecretWithKey,
     decryptSecret,
@@ -594,10 +701,12 @@ module.exports = {
     escapeCsvCell,
     parseCsvLine,
     removeAttachmentFiles,
+    removeAttachmentFilesAsync,
     encodeAttachmentUrl,
     resolveUploadUrlPath,
     toProjectRelativePath,
     isPathInsideUploadRoot,
     redactSecrets,
+    redactAuditDetails,
     maskSecretString
 };

@@ -61,7 +61,7 @@ const { createObservabilityTrace, withObservabilitySpan } = require('../../servi
 const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
 const { assembleChatContext } = require('../../services/chat-context-assembler');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
-const { createAgentRun } = require('../../services/agent-runtime');
+const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
 const {
     buildChatAgentMetadata,
@@ -501,6 +501,7 @@ function createChatRouter({
         let queuedAtGlobalGate = false;
         try {
             await aiSemaphore.acquire({
+                signal: abortController.signal,
                 onQueued(info) {
                     queuedAtGlobalGate = true;
                     writeQueueNotice('global', info);
@@ -509,6 +510,7 @@ function createChatRouter({
             globalSlotAcquired = true;
             if (queuedAtGlobalGate) writeQueueNotice('global', { status: 'ready', active: aiSemaphore.getStatus().active, max: aiSemaphore.getStatus().max });
         } catch (e) {
+            if (e.code === 'REQUEST_ABORTED') return res.end();
             const message = e.message || '模型服务当前繁忙，请稍后重试。';
             logAction(req, '模型服务繁忙', `${message} 会话: ${sessionId}`);
             await writeChatErrorSse({
@@ -528,6 +530,7 @@ function createChatRouter({
         let queuedAtEndpointGate = false;
         try {
             endpointRelease = await acquireModelSlot(modelCfg, {
+                signal: abortController.signal,
                 onQueued(info) {
                     queuedAtEndpointGate = true;
                     writeQueueNotice('endpoint', info);
@@ -538,6 +541,10 @@ function createChatRouter({
                 writeQueueNotice('endpoint', { status: 'ready', active: status.active, max: status.max });
             }
         } catch (e) {
+            if (e.code === 'REQUEST_ABORTED') {
+                releaseSemaphore();
+                return res.end();
+            }
             releaseSemaphore();
             const message = e.message || '模型端点当前繁忙，请稍后重试。';
             logAction(req, '模型端点繁忙', `${message} 会话: ${sessionId}`);
@@ -608,16 +615,21 @@ function createChatRouter({
                 onData(payload) {
                     try {
                         const frame = JSON.parse(payload);
+                        sawSsePayload = true;
                         providerState.ingest(frame);
+                        accumulator.pushJson(frame);
                     } catch (_) {}
-                    accumulator.pushPayload(payload);
                 },
                 onDone() {}
             });
 
             let rawStreamText = '';
             let rawStreamCaptureTruncated = false;
+            let sawSsePayload = false;
             const captureRawStreamChunk = (chunk) => {
+                // SSE 正常解析后不再累积一份无用的原始流；仅为兼容非 SSE
+                // 上游保留回退材料，避免正常长回答额外占用 2MB 内存。
+                if (sawSsePayload) return;
                 if (rawStreamCaptureTruncated || rawStreamText.length >= MAX_STREAM_FALLBACK_CAPTURE_CHARS) return;
                 const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
                 const remaining = MAX_STREAM_FALLBACK_CAPTURE_CHARS - rawStreamText.length;

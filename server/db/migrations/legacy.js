@@ -498,7 +498,7 @@ function runMigrations() {
     ensureColumn('api_keys', 'key_hash', 'TEXT');
     ensureColumn('api_keys', 'key_preview', 'TEXT');
     ensureColumn('api_keys', 'key', 'TEXT');
-    ensureColumn('api_keys', 'status', "TEXT DEFAULT 'active'");
+    ensureColumn('api_keys', 'status', "TEXT DEFAULT 'active'"); ensureColumn('api_keys', 'scopes', "TEXT DEFAULT 'openai'"); ensureColumn('api_keys', 'expires_at', 'DATETIME');
     ensureColumn('api_keys', 'usage_tokens', "INTEGER DEFAULT 0");
     ensureColumn('api_keys', 'input_tokens', "INTEGER DEFAULT 0");
     ensureColumn('api_keys', 'output_tokens', "INTEGER DEFAULT 0");

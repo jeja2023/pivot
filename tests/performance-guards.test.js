@@ -29,6 +29,7 @@ const {
     encodeSseData
 } = require('../server/services/sse-response');
 const {
+    calculateDagRetryDelayMs,
     executeDagNodeWithPolicy
 } = require('../server/services/agent-dag-runtime');
 const { withTimeout } = require('../server/services/agent-runtime/runtime-env');
@@ -108,6 +109,28 @@ test('SSE frame encoders handle multiline values without producing malformed fra
     assert.equal(encodeSseData('one\ntwo', 'delta'), 'event: delta\ndata: one\ndata: two\n\n');
 });
 
+test('SSE writer queues frames during backpressure and flushes after drain', () => {
+    const res = new FakeSseResponse();
+    let writes = 0;
+    res.write = function write(chunk) {
+        this.chunks.push(String(chunk));
+        writes += 1;
+        if (writes === 1) {
+            this.writableNeedDrain = true;
+            return false;
+        }
+        return true;
+    };
+    const writer = createSseResponseWriter(res, { heartbeatMs: 0 });
+    writer.writeRaw('first');
+    writer.writeRaw('second');
+    assert.deepEqual(res.chunks, ['first']);
+    res.writableNeedDrain = false;
+    res.emit('drain');
+    assert.deepEqual(res.chunks, ['first', 'second']);
+    writer.cleanup();
+});
+
 test('Embedding batches obey count and byte budgets while preserving input order', () => {
     assert.deepEqual(
         buildEmbeddingInputBatches(['a', 'b', 'c', 'd', 'e'], { maxInputs: 2 }),
@@ -175,6 +198,12 @@ test('DAG node watchdog uses a node-specific timeout and does not retry a timed-
     assert.equal(result.attempt, 1);
     assert.equal(result.error.code, 'AGENT_NODE_TIMEOUT');
     assert.equal(retrySteps, 0);
+});
+
+test('DAG node retries use bounded exponential backoff instead of immediate replay', () => {
+    assert.ok(calculateDagRetryDelayMs(1) >= 250);
+    assert.ok(calculateDagRetryDelayMs(2) > calculateDagRetryDelayMs(1));
+    assert.ok(calculateDagRetryDelayMs(99) <= 15000);
 });
 
 test('withTimeout aborts work with the requested error code', async () => {

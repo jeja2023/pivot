@@ -219,7 +219,7 @@ async function openMcpDataAnalysisImport(options = {}) {
         const payload = typeof options === 'string'
             ? { datasetId: options, tab: 'overview' }
             : { tab: 'overview', ...(options || {}) };
-        const workspaces = window.Pivot?.moduleApi?.('workspaces.apps', {}) || {};
+        const workspaces = window.Pivot?.moduleApi?.('workspaces.navigation', {}) || {};
         if (typeof workspaces.openAppsWorkbench === 'function') await workspaces.openAppsWorkbench();
         let dataAnalysis = window.Pivot?.moduleApi?.('apps.dataAnalysis', {}) || {};
         if (typeof dataAnalysis.showDataAnalysisApp !== 'function') {
@@ -384,7 +384,7 @@ async function loadMcpServers() {
         container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.deleteMcpServer(btn.dataset.mcpDelete, btn)));
         container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
             btn.addEventListener('click', async () => {
-                await window.Pivot.legacy.openAdminPanel?.({ restore: false });
+                await window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false });
                 await window.Pivot.legacy.switchTab?.('tool-policy');
             });
         });

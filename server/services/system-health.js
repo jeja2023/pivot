@@ -21,6 +21,23 @@ function checkDatabase() {
     }
 }
 
+async function checkDatabaseAsync(timeoutMs = 2000) {
+    try {
+        const { getPgPool } = require('../db/pg-connection');
+        const pool = getPgPool();
+        if (!pool) return { status: 'error', message: 'PostgreSQL 数据库连接池未初始化' };
+        const result = await Promise.race([
+            pool.query('SELECT 1 AS ok'),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('数据库健康探针超时')), timeoutMs))
+        ]);
+        return result?.rows?.[0]?.ok === 1
+            ? { status: 'ok', message: 'PostgreSQL 查询探针正常' }
+            : { status: 'error', message: 'PostgreSQL 查询探针返回异常' };
+    } catch (e) {
+        return { status: 'error', message: e.message };
+    }
+}
+
 // 可写性探针文件名必须是「固定」的：早期实现用 pid+时间戳命名，一旦 unlinkSync 因
 // 磁盘瞬时异常失败，残留文件就永久堆积（生产已实测 data/ 残留 73 个、uploads/ 残留
 // 333 个 .pivot-health-*.tmp），使目录条目数单调增长并拖慢目录遍历类操作。
@@ -144,6 +161,20 @@ function checkDeployment() {
     }
 }
 
+function checkAgentBrowser() {
+    try {
+        const { isAgentBrowserRuntimeAvailable } = require('./agent-browser');
+        const available = isAgentBrowserRuntimeAvailable();
+        return {
+            status: available ? 'ok' : 'degraded',
+            available,
+            message: available ? 'Chromium 浏览器运行时可用' : '未发现 Chromium，浏览器 Agent 能力已安全下线'
+        };
+    } catch (error) {
+        return { status: 'degraded', available: false, message: error.message };
+    }
+}
+
 function overallStatus(checks) {
     const statuses = checks.map(item => item.status);
     if (statuses.includes('error')) return 'error';
@@ -151,15 +182,9 @@ function overallStatus(checks) {
     return 'ok';
 }
 
-function getPublicSystemHealthSnapshot() {
+async function getPublicSystemHealthSnapshot() {
     const checks = [];
-    try {
-        const { getPgPool } = require('../db/pg-connection');
-        if (!getPgPool()) throw new Error('PostgreSQL 数据库连接池未初始化');
-        checks.push({ name: 'database', status: 'ok' });
-    } catch (_error) {
-        checks.push({ name: 'database', status: 'error' });
-    }
+    checks.push({ name: 'database', ...(await checkDatabaseAsync()) });
     const memory = checkMemory();
     checks.push({ name: 'memory', status: memory.status });
     return {
@@ -169,7 +194,7 @@ function getPublicSystemHealthSnapshot() {
     };
 }
 
-function getSystemHealthSnapshot(options = {}) {
+async function getSystemHealthSnapshot(options = {}) {
     if (options.public === true) return getPublicSystemHealthSnapshot();
     return getDetailedSystemHealthSnapshot(options);
 }
@@ -191,13 +216,14 @@ async function getDetailedSystemHealthSnapshot(options = {}) {
             checkDiskUsage(dataDir)
         ]);
         const checks = [
-            { name: 'database', ...checkDatabase() },
+            { name: 'database', ...(await checkDatabaseAsync()) },
             { name: 'dataDir', ...dataDirCheck },
             { name: 'uploadsDir', ...uploadsDirCheck },
             { name: 'memory', ...checkMemory() },
             { name: 'disk', ...diskCheck },
             { name: 'writeQueue', ...checkWriteQueue() },
-            { name: 'deployment', ...checkDeployment() }
+            { name: 'deployment', ...checkDeployment() },
+            { name: 'agentBrowser', ...checkAgentBrowser() }
         ];
         const snapshot = {
             status: overallStatus(checks),
@@ -218,6 +244,7 @@ async function getDetailedSystemHealthSnapshot(options = {}) {
 
 module.exports = {
     checkDatabase,
+    checkDatabaseAsync,
     checkDeployment,
     checkDiskUsage,
     checkMemory,

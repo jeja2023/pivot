@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { canonicalJson } = require('./agent-skills');
+const { canonicalJson } = require('./canonical-json');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
 const {
     getOrganizationSigningKey,

@@ -1,5 +1,6 @@
 
 const fs = require('fs');
+const { pipeline } = require('node:stream/promises');
 const XLSX = require('@e965/xlsx');
 const {
     exportRoot,
@@ -42,15 +43,10 @@ async function duckCopyToCsv(parquetPath, columns, targetPath) {
 }
 
 function prependBomStream(sourcePath, targetPath) {
-    return new Promise((resolve, reject) => {
-        const out = fs.createWriteStream(targetPath, { encoding: 'utf8' });
-        out.on('error', reject);
-        out.on('finish', resolve);
-        out.write('\uFEFF');
-        const input = fs.createReadStream(sourcePath);
-        input.on('error', reject);
-        input.pipe(out);
-    });
+    const input = fs.createReadStream(sourcePath);
+    const out = fs.createWriteStream(targetPath, { encoding: 'utf8' });
+    out.write('\uFEFF');
+    return pipeline(input, out);
 }
 
 // 直接把整张数据集的 parquet 拷贝为新的 parquet 导出文件，全程在 DuckDB 内完成。

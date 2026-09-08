@@ -89,4 +89,4 @@ function createApprovalHelpers({
     return { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval };
 }
 
-module.exports = { createApprovalHelpers };
+module.exports = { approvalInputHash, createApprovalHelpers };

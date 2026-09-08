@@ -80,7 +80,7 @@ test('托管组织签名密钥加密保存、轮换后仍可复验历史签名�
         assert.equal(JSON.stringify(generated).includes('PRIVATE KEY'), false, '状态接口不得包含私钥');
 
         const stored = await getAppSettingRowAsync(ORGANIZATION_SIGNING_KEYRING_SETTING);
-        assert.match(String(stored?.value || ''), /^enc:v1:/, '托管私钥必须以加密形式保存');
+    assert.match(String(stored?.value || ''), /^enc:v2:/, '托管私钥必须以带上下文认证的加密形式保存');
         assert.equal(String(stored?.value || '').includes('PRIVATE KEY'), false, '数据库密文不得包含 PEM 明文');
 
         const active = getOrganizationSigningKey();

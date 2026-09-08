@@ -17,9 +17,7 @@
     box-shadow: none;
 }
 
-.regulations-main,
-.regulations-detail-section,
-.regulations-assistant-section {
+.regulations-main {
     min-width: 0;
     min-height: 0;
 }
@@ -28,28 +26,11 @@
     padding: 12px 14px 10px;
 }
 
-.regulations-searchbar {
-    flex: 0 0 auto;
-    display: grid;
-    gap: 8px;
-    padding: 10px 12px;
-    margin: 0;
-    border-bottom: 1px solid var(--border);
-}
-
-.regulations-search-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-}
-
-.regulations-filter-row,
 .regulations-admin-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
 }
-.regulations-searchbar .form-input,
 .regulations-toolbar .form-input,
 .regulations-admin-form .form-input,
 .regulations-inline-form .form-input,
@@ -93,17 +74,12 @@
     height: 32px;
 }
 
-.regulations-searchbar .btn-primary,
 .regulations-toolbar .btn-primary,
 .regulations-toolbar .btn-secondary,
-.regulations-toolbar-actions .btn-primary,
-.regulations-toolbar-actions .btn-secondary,
 .regulations-ai-actions .btn-primary,
 .regulations-ai-actions .btn-secondary,
 .regulations-admin-actions .btn-primary,
-.regulations-admin-actions .btn-secondary,
-.regulations-document-actions .btn-secondary,
-.regulations-document-actions .btn-danger-outline {
+.regulations-admin-actions .btn-secondary {
     height: 32px;
     min-width: 64px;
     padding: 0 12px;
@@ -122,11 +98,8 @@
     font-weight: 700;
 }
 
-.regulations-list-head,
 .regulations-section-head,
 .regulations-toolbar,
-.regulations-document-head,
-.regulations-article-head,
 .regulations-ai-actions,
 .regulations-admin-actions {
     display: flex;
@@ -141,25 +114,13 @@
     justify-content: flex-end;
 }
 
-.regulations-list-head {
-    flex: 0 0 auto;
-    min-height: 42px;
-    padding: 9px 12px;
-    color: var(--text-main);
-    border-bottom: 1px solid var(--border);
-}
-
-.regulations-list-head strong,
 .regulations-section-head strong {
     color: var(--text-main);
     font-size: 0.86rem;
 }
 
-.regulations-list-head span,
 .regulations-section-head span,
-.regulations-toolbar span,
-.regulations-document-head span,
-.regulations-version-strip span {
+.regulations-toolbar span {
     color: var(--text-muted);
     font-size: 0.74rem;
 }
@@ -203,12 +164,6 @@
     min-width: 1320px;
 }
 
-.regulations-doc-name {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-}
-
 .regulations-doc-title {
     display: block;
     min-width: 0;
@@ -216,16 +171,6 @@
     color: var(--text-main);
     font-size: 0.78rem;
     font-weight: 800;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.regulations-doc-summary {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-muted);
-    font-size: 0.68rem;
-    font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -344,65 +289,16 @@
     flex: 0 1 132px;
 }
 
-.regulations-toolbar h4,
-.regulations-document-card h4 {
+.regulations-toolbar h4 {
     margin: 0 0 3px;
     color: var(--text-main);
     font-size: 1rem;
-}
-
-.regulations-toolbar-actions,
-.regulations-document-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-}
-
-.regulations-content-grid {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
-    gap: 10px;
-    padding: 10px;
-    overflow: hidden;
-}
-
-.regulations-detail-section,
-.regulations-assistant-section {
-    overflow: hidden;
-    padding: 0;
-}
-
-.regulations-detail-section {
-    display: flex;
-    flex-direction: column;
-}
-
-#regulations-detail-body {
-    min-height: 0;
-}
-
-.regulations-assistant-section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 12px;
-}
-
-.regulations-assistant-section .workspace-section-head,
-.regulations-assistant-section .regulations-section-head {
-    padding-bottom: 10px;
-    margin-bottom: 0;
 }
 
 .regulations-section-head.compact {
     align-items: baseline;
 }
 
-.regulations-document-card,
 .regulations-ai-card {
     padding: 12px;
     border: 1px solid rgba(148, 163, 184, 0.16);
@@ -410,7 +306,6 @@
     background: #fff;
 }
 
-.regulations-document-card p,
 .regulations-ai-card p,
 .regulations-match p,
 .regulations-article p {
@@ -420,36 +315,6 @@
     word-break: break-word;
 }
 
-.regulations-document-card p {
-    margin-top: 10px;
-    color: var(--text-muted);
-}
-
-.regulations-version-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.regulations-version-chip {
-    min-height: 28px;
-    padding: 0 9px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 8px;
-    background: #fff;
-    color: var(--text-main);
-    font-size: 0.74rem;
-    cursor: pointer;
-}
-
-.regulations-version-chip.active {
-    border-color: rgba(16, 163, 127, 0.32);
-    background: rgba(16, 163, 127, 0.08);
-    color: var(--primary);
-    font-weight: 800;
-}
-
 .regulations-original-document {
     padding: 14px;
     border: 1px solid rgba(148, 163, 184, 0.14);
@@ -457,31 +322,11 @@
     background: #fff;
 }
 
-.regulations-article-list {
-    display: grid;
-    gap: 10px;
-    margin-top: 12px;
-}
-
 .regulations-article {
     padding: 12px;
     border: 1px solid rgba(148, 163, 184, 0.14);
     border-radius: 8px;
     background: #fff;
-}
-
-.regulations-article-head {
-    justify-content: flex-start;
-    margin-bottom: 8px;
-}
-
-.regulations-article-head strong {
-    color: var(--primary);
-}
-
-.regulations-article-head span {
-    color: var(--text-main);
-    font-weight: 700;
 }
 
 /* 条文与 AI 回答正文的 Markdown 排版 */
@@ -902,10 +747,6 @@
     line-height: 1.55;
 }
 
-.regulations-dialog-close {
-    flex: 0 0 auto;
-}
-
 #regulations-detail-admin-actions {
     display: inline-flex;
     flex-wrap: wrap;
@@ -1020,10 +861,6 @@
 }
 
 @media (max-width: 1100px) {
-    .regulations-content-grid {
-        grid-template-columns: 1fr;
-    }
-
     .regulations-query-input,
     .regulations-filter-input {
         flex: 1 1 180px;
@@ -1032,8 +869,6 @@
 }
 
 @media (max-width: 720px) {
-    .regulations-search-row,
-    .regulations-filter-row,
     .regulations-admin-grid {
         grid-template-columns: 1fr;
     }
@@ -1044,7 +879,6 @@
     }
 
     .regulations-toolbar,
-    .regulations-document-head,
     .regulations-ai-actions,
     .regulations-admin-actions {
         align-items: stretch;
@@ -1057,10 +891,6 @@
         width: 100%;
     }
 
-    .regulations-toolbar-actions,
-    .regulations-document-actions {
-        justify-content: flex-start;
-    }
 }
 
 .regulations-file-hint {
@@ -1152,29 +982,6 @@
 .regulations-ai-card {
     align-self: flex-start;
     max-width: 85%;
-}
-
-/* 条文操作按钮行 */
-.regulations-article-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-light, #f0f0f0);
-}
-
-.regulations-article-actions .btn-text {
-    padding: 4px 8px;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: color 0.15s ease;
-}
-
-.regulations-article-actions .btn-text:hover {
-    color: var(--primary);
 }
 
 /* 导入结果面板 */
@@ -1993,7 +1800,6 @@
     display: none;
 }
 
-.regulations-main-search-results,
 .regulations-search-modal-results,
 .regulations-ai-search-results {
     display: grid;
@@ -2005,12 +1811,6 @@
     scrollbar-gutter: stable;
 }
 
-.regulations-main-search-results {
-    flex: 0 0 auto;
-    max-height: min(280px, 32vh);
-    margin: -2px 0 8px;
-}
-
 .regulations-search-modal-results {
     max-height: min(420px, 46vh);
     margin-top: 10px;
@@ -2020,7 +1820,6 @@
     max-height: 280px;
 }
 
-.regulations-main-search-results .regulations-section-head,
 .regulations-search-modal-results .regulations-section-head,
 .regulations-ai-search-results .regulations-section-head {
     min-height: 22px;
@@ -2271,7 +2070,6 @@
         max-width: min(100%, 280px);
     }
 
-    .regulations-main-search-results,
     .regulations-search-modal-results,
     .regulations-ai-search-results {
         max-height: 42vh;

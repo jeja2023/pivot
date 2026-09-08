@@ -59,8 +59,8 @@ function getEmbeddingConfig(userId = null) {
     };
     let apiKey = '';
     try {
-        apiKey = userKey ? decryptSecret(userKey)
-            : storedKey ? decryptSecret(storedKey)
+        apiKey = userKey ? decryptSecret(userKey, 'rag.embedding_api_key')
+            : storedKey ? decryptSecret(storedKey, 'rag.embedding_api_key')
             : (process.env.EMBEDDING_API_KEY || '');
     } catch (_) {
         apiKey = '';
@@ -150,6 +150,7 @@ function getHybridRetrievalConfig() {
         rrfK: clampInteger(process.env.RAG_RRF_K, 60, 1, 1000),
         wDense: clampNumber(process.env.RAG_RRF_W_DENSE, 1.0, 0, 10),
         wFts: clampNumber(process.env.RAG_RRF_W_FTS, 0.6, 0, 10),
+        wGraph: clampNumber(process.env.RAG_RRF_W_GRAPH, 0.8, 0, 10),
         mmrLambda: clampNumber(process.env.RAG_MMR_LAMBDA, 0.7, 0, 1),
         ftsRankFloor: clampInteger(process.env.RAG_FTS_RANK_FLOOR, 5, 0, 100)
     };
@@ -206,7 +207,7 @@ function toRagSettingValue(key, value) {
         return String(value || '').trim() || 'nomic-embed-text';
     }
     if (key === RAG_CONFIG_KEYS.embeddingApiKey) {
-        return encryptSecret(String(value || '').trim());
+        return encryptSecret(String(value || '').trim(), 'rag.embedding_api_key');
     }
     return String(value ?? '');
 }

@@ -26,6 +26,49 @@ function listMessages(sessionId, userId) {
     `, [sessionId, userId]);
 }
 
+async function getMessageContextTokenState(sessionId, userId) {
+    const totals = await queryOne(`
+        SELECT
+            SUM(CASE WHEN COALESCE(context_archived, 0) <> 0 THEN 1 ELSE 0 END) AS archived_count,
+            SUM(CASE WHEN COALESCE(context_archived, 0) = 0 AND COALESCE(is_summary, 0) <> 0 THEN 1 ELSE 0 END) AS summary_count,
+            SUM(CASE WHEN COALESCE(context_archived, 0) = 0 AND COALESCE(is_summary, 0) = 0 THEN 1 ELSE 0 END) AS active_count,
+            SUM(CASE WHEN COALESCE(context_archived, 0) = 0 AND COALESCE(is_summary, 0) = 0
+                THEN COALESCE(context_token_count, 0) ELSE 0 END) AS active_tokens,
+            SUM(CASE WHEN COALESCE(context_archived, 0) = 0 AND COALESCE(is_summary, 0) <> 0
+                THEN COALESCE(context_token_count, 0) ELSE 0 END) AS summary_tokens
+        FROM messages
+        WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL
+    `, [sessionId, userId]);
+    const pending = await query(`
+        SELECT id, role, content, token_count, is_summary, context_archived
+        FROM messages
+        WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL
+          AND context_token_count IS NULL
+        ORDER BY id ASC
+    `, [sessionId, userId]);
+    return { totals: totals || {}, pending };
+}
+
+async function updateMessageContextTokenCounts(rows = []) {
+    const pending = rows
+        .filter(row => Number.isSafeInteger(Number(row?.id)) && Number.isFinite(Number(row?.contextTokenCount)))
+        .map(row => ({
+            id: Number(row.id),
+            contextTokenCount: Math.max(0, Math.round(Number(row.contextTokenCount)))
+        }));
+    for (let offset = 0; offset < pending.length; offset += 200) {
+        const batch = pending.slice(offset, offset + 200);
+        const cases = batch.map(() => 'WHEN ? THEN ?').join(' ');
+        const ids = batch.map(() => '?').join(', ');
+        await execute(
+            `UPDATE messages
+             SET context_token_count = CASE id ${cases} ELSE context_token_count END
+             WHERE id IN (${ids}) AND context_token_count IS NULL`,
+            [...batch.flatMap(row => [row.id, row.contextTokenCount]), ...batch.map(row => row.id)]
+        );
+    }
+}
+
 async function listMessagePage(sessionId, userId, { beforeId = null, limit = 60 } = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 60, 1), 100);
     const normalizedBeforeId = Number.parseInt(beforeId, 10);
@@ -94,22 +137,22 @@ function getSessionTitle(sessionId, userId) {
 
 function updateSessionTitle(sessionId, userId, title) {
     return execute(
-        'UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?',
+        'UPDATE sessions SET title = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
         [title, sessionId, userId]
     );
 }
 
-async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, agentRunId = null, createdAt }) {
+async function insertMessage({ sessionId, userId, role, content, tokenCount, contextTokenCount = null, modelId, agentRunId = null, createdAt }) {
     const row = await queryOne(`
-        INSERT INTO messages (session_id, user_id, role, content, token_count, model_id, agent_run_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, model_id, agent_run_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
-    `, [sessionId, userId, role, content, tokenCount, modelId || null, agentRunId || null, createdAt]);
+    `, [sessionId, userId, role, content, tokenCount, contextTokenCount, modelId || null, agentRunId || null, createdAt]);
     return { changes: 1, lastInsertRowid: row ? row.id : null };
 }
 
 function touchSession(sessionId, timestamp) {
-    return execute('UPDATE sessions SET updated_at = ? WHERE id = ?', [timestamp, sessionId]);
+    return execute('UPDATE sessions SET updated_at = ? WHERE id = ? AND deleted_at IS NULL', [timestamp, sessionId]);
 }
 
 function getLastAssistantMessage(sessionId, userId) {
@@ -139,6 +182,7 @@ async function countVisibleConversationMessages(sessionId, userId) {
 module.exports = {
     getSessionById,
     listMessages,
+    getMessageContextTokenState,
     listMessagePage,
     listAttachmentTokens,
     createSession,
@@ -148,6 +192,7 @@ module.exports = {
     updateSessionTitle,
     insertMessage,
     touchSession,
+    updateMessageContextTokenCounts,
     getLastAssistantMessage,
     updateMessageStats,
     countVisibleConversationMessages

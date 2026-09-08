@@ -793,10 +793,9 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         setKnowledgeWorkbenchState('error', e.message || '知识库加载失败，请重试。', { retry: true });
     }
 };
-
-window.Pivot.legacy.openKnowledgeWorkbench = async function () {
+async function openKnowledgeWorkbench() {
     await window.Pivot.legacy.ensureWorkspaceScripts?.('knowledge');
-    window.Pivot.legacy.showMainWorkspace?.('knowledge');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('knowledge');
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
     panel.setAttribute('aria-hidden', 'false');
@@ -839,8 +838,9 @@ window.Pivot.legacy.openKnowledgeWorkbench = async function () {
 window.Pivot.legacy.closeKnowledgeWorkbench = function () {
     closeKnowledgeGraphModal();
     document.getElementById('knowledge-workbench-modal')?.setAttribute('aria-hidden', 'true');
-    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
-};
+    window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
+}
+window.Pivot.exposeModule('workspaces.implementations', { openKnowledgeWorkbench });
 
 function ensureKnowledgeUploadModal() {
     let modal = document.getElementById('knowledge-upload-modal');

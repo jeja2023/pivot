@@ -219,7 +219,7 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
 
     try {
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, d.name,
+            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
                    ${lexicalScore} AS lexical_score
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
@@ -245,7 +245,7 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
         logger.warn({ err: e.message }, 'RAG 词法相关度排序下推失败，回退基础文本检索');
         try {
             return await query(`
-                SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+                SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
                 FROM knowledge_chunks c
                 JOIN knowledge_docs d ON c.doc_id = d.id
                 ${scopeFilter.accessJoin}
@@ -275,7 +275,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
     const scopeParams = user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params];
     try {
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, d.name,
+            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
                    ${lexicalScore} AS lexical_score
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
@@ -292,7 +292,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
     } catch (error) {
         logger.warn({ err: error.message }, 'RAG LIKE 相关度排序下推失败，回退基础文本检索');
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
@@ -368,14 +368,28 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
         // 兼容旧库、pgvector 版本差异或异常混合维度数据：只在下推路径失败时
         // 回退到原有访问过滤，不能因性能优化让知识库完全不可用。
         logger.warn({ err: error.message }, 'RAG 向量排序下推失败，回退到应用层计算');
-        chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({ userId, scopeFilter, user })) || [];
+        chunks = (await knowledgeRepository.iterateAccessibleChunkEmbeddings({
+            userId,
+            scopeFilter,
+            user,
+            limit: Math.min(Math.max(Number(limit) * 4, 100), 5000)
+        })) || [];
     }
     for (const chunk of chunks) {
-        const entry = getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length);
-        if (!entry) continue;
-        const denseScore = cosineSimilarityCached(queryVector, queryNorm, entry);
+        const entry = chunk.embedding ? getChunkEmbedding(chunk.id, chunk.embedding, queryVector.length) : null;
+        const denseScore = Number.isFinite(Number(chunk.dense_score))
+            ? Number(chunk.dense_score)
+            : entry ? cosineSimilarityCached(queryVector, queryNorm, entry) : null;
         if (!Number.isFinite(denseScore) || denseScore <= 0) continue;
         insertDenseCandidate(top, { ...chunk, __denseScore: denseScore, __entry: entry }, limit);
+    }
+    if (top.length && typeof knowledgeRepository.listChunkEmbeddingsByIds === 'function') {
+        const embeddings = await knowledgeRepository.listChunkEmbeddingsByIds(top.map(chunk => chunk.id));
+        const byId = new Map(embeddings.map(row => [Number(row.id), row.embedding]));
+        top.forEach(chunk => {
+            const embedding = byId.get(Number(chunk.id));
+            if (embedding) chunk.__entry = getChunkEmbedding(chunk.id, embedding, queryVector.length);
+        });
     }
     top.forEach((chunk, idx) => { chunk.__denseRank = idx; });
     return top;
@@ -391,7 +405,7 @@ function mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCan
     };
     lexicalCandidates.forEach(add);
     denseCandidates.forEach(add);
-    graphCandidates.forEach(add);
+    graphCandidates.forEach((chunk, index) => add({ ...chunk, __graphRank: index }));
     return [...merged.values()];
 }
 
@@ -402,7 +416,7 @@ async function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = nul
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     return await query(`
-        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+        SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
@@ -447,9 +461,13 @@ function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
             source: chunk.name,
             documentName: chunk.name,
             headingPath: chunk.heading_path || '',
+            chunkIndex: Number(chunk.chunk_index || 0),
+            charStart: chunk.char_start != null && Number.isInteger(Number(chunk.char_start)) ? Number(chunk.char_start) : null,
+            charEnd: chunk.char_end != null && Number.isInteger(Number(chunk.char_end)) ? Number(chunk.char_end) : null,
             denseScore,
             denseRank: Number.isInteger(chunk.__denseRank) ? chunk.__denseRank : null,
             ftsRank: Number.isInteger(chunk.__ftsRank) ? chunk.__ftsRank : null,
+            graphRank: Number.isInteger(chunk.__graphRank) ? chunk.__graphRank : null,
             entry
         };
     });
@@ -458,6 +476,7 @@ function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
         let fused = 0;
         if (item.denseRank != null) fused += hybrid.wDense / (hybrid.rrfK + item.denseRank + 1);
         if (item.ftsRank != null) fused += hybrid.wFts / (hybrid.rrfK + item.ftsRank + 1);
+        if (item.graphRank != null) fused += hybrid.wGraph / (hybrid.rrfK + item.graphRank + 1);
         item.fused = fused;
     });
 
@@ -469,7 +488,8 @@ function scoreCandidatesHybrid(chunks, queryVector, hybrid) {
 function gateHybridPool(scored, hybrid, scoreThreshold) {
     return scored.filter(item =>
         (item.denseScore != null && item.denseScore > scoreThreshold) ||
-        (item.ftsRank != null && item.ftsRank < hybrid.ftsRankFloor)
+        (item.ftsRank != null && item.ftsRank < hybrid.ftsRankFloor) ||
+        (item.graphRank != null && item.graphRank < hybrid.ftsRankFloor)
     );
 }
 
@@ -526,6 +546,9 @@ function scoreKeywordChunks(chunks, query, minScore = KEYWORD_FALLBACK_MIN_SCORE
             source: chunk.name,
             documentName: chunk.name,
             headingPath: chunk.heading_path || '',
+            chunkIndex: Number(chunk.chunk_index || 0),
+            charStart: chunk.char_start != null && Number.isInteger(Number(chunk.char_start)) ? Number(chunk.char_start) : null,
+            charEnd: chunk.char_end != null && Number.isInteger(Number(chunk.char_end)) ? Number(chunk.char_end) : null,
             score
         };
     }).filter(Boolean);
@@ -558,9 +581,12 @@ async function debugRetrieveContext(userId, query, {
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
-    const graphContext = await getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user });
-    const lexicalCandidates = await selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user);
-    if (!(await hasAccessibleChunks(userId, normalizedScope, user)) && !graphContext.context) {
+    const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
+        getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user }),
+        selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
+        hasAccessibleChunks(userId, normalizedScope, user)
+    ]);
+    if (!corpusAvailable && !graphContext.context) {
         return {
             query: normalizedQuery,
             keywords,
@@ -576,22 +602,27 @@ async function debugRetrieveContext(userId, query, {
         };
     }
     const hybrid = getHybridRetrievalConfig();
-    const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
     let candidates = lexicalCandidates;
     let scored = [];
     let gated = [];
     let usedKeywordFallback = false;
     try {
-        const vector = Array.isArray(queryVector) ? queryVector : await generateEmbedding(normalizedQuery, null, null, userId, { user });
+        const [vector, graphCandidates, feedbackSignals] = await Promise.all([
+            Array.isArray(queryVector) ? Promise.resolve(queryVector) : generateEmbedding(normalizedQuery, null, null, userId, { user }),
+            selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user),
+            loadRagFeedbackSignals(userId, normalizedQuery)
+        ]);
         const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
-        const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
         scored = applyFeedbackRanking(scoreCandidatesHybrid(candidates, vector, hybrid), feedbackSignals);
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
     } catch (e) {
         usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
-        const graphCandidates = await selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user);
+        const [graphCandidates, fallbackFeedbackSignals] = await Promise.all([
+            selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user),
+            loadRagFeedbackSignals(userId, normalizedQuery)
+        ]);
         candidates = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
         scored = applyFeedbackRanking(scoreKeywordChunks(candidates, normalizedQuery)
             .sort((a, b) => b.score - a.score)
@@ -605,7 +636,7 @@ async function debugRetrieveContext(userId, query, {
                 fused: chunk.score,
                 ftsRank: null,
                 entry: null
-            })), feedbackSignals);
+            })), fallbackFeedbackSignals);
         gated = scored.filter(item => item.denseScore > config.scoreThreshold);
     }
     // matches 展示全部候选评分（便于调参）；注入上下文只取门控+MMR 结果。
@@ -666,15 +697,11 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     }
 
     try {
-        const graphContext = await getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null });
-        const lexicalCandidates = await selectLexicalCandidates(
-            userId,
-            normalizedQuery,
-            config.candidateLimit,
-            retrievalScope,
-            options.user || null
-        );
-        const corpusAvailable = await hasAccessibleChunks(userId, retrievalScope, options.user || null);
+        const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
+            getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null }),
+            selectLexicalCandidates(userId, normalizedQuery, config.candidateLimit, retrievalScope, options.user || null),
+            hasAccessibleChunks(userId, retrievalScope, options.user || null)
+        ]);
 
         if (!corpusAvailable && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
@@ -700,7 +727,11 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         let usedKeywordFallback = false;
         let chunks = lexicalCandidates;
         try {
-            const queryVector = await generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null });
+            const [queryVector, graphCandidates, feedbackSignals] = await Promise.all([
+                Array.isArray(options.queryVector) ? Promise.resolve(options.queryVector) : generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null }),
+                selectChunksByIds(userId, graphContext.chunkIds, config.candidateLimit, retrievalScope, options.user || null),
+                loadRagFeedbackSignals(userId, normalizedQuery)
+            ]);
             const denseCandidates = await selectDenseCandidates(
                 userId,
                 queryVector,
@@ -708,15 +739,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 retrievalScope,
                 options.user || null
             );
-            const graphCandidates = await selectChunksByIds(
-                userId,
-                graphContext.chunkIds,
-                config.candidateLimit,
-                retrievalScope,
-                options.user || null
-            );
             chunks = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
-            const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
             const scored = applyFeedbackRanking(scoreCandidatesHybrid(chunks, queryVector, hybrid), feedbackSignals);
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);
             // 软门控筛选后做 MMR 去重，取最终 topK。
@@ -725,15 +748,11 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         } catch (e) {
             usedKeywordFallback = true;
             logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
-            const graphCandidates = await selectChunksByIds(
-                userId,
-                graphContext.chunkIds,
-                config.candidateLimit,
-                retrievalScope,
-                options.user || null
-            );
+            const [graphCandidates, feedbackSignals] = await Promise.all([
+                selectChunksByIds(userId, graphContext.chunkIds, config.candidateLimit, retrievalScope, options.user || null),
+                loadRagFeedbackSignals(userId, normalizedQuery)
+            ]);
             chunks = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
-            const feedbackSignals = await loadRagFeedbackSignals(userId, normalizedQuery);
             topChunks = applyFeedbackRanking(scoreKeywordChunks(chunks, normalizedQuery)
                 .sort((a, b) => b.score - a.score)
                 .slice(0, config.topK), feedbackSignals);
@@ -820,28 +839,32 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             const results = batch.map((chunk, index) => ({
                 content: chunk.content,
                 headingPath: chunk.headingPath || '',
+                chunkIndex: Number(chunk.chunkIndex || 0),
+                charStart: Number.isInteger(chunk.charStart) ? chunk.charStart : null,
+                charEnd: Number.isInteger(chunk.charEnd) ? chunk.charEnd : null,
                 enriched: enrichedBatch[index],
                 vector: Array.isArray(vectors) ? vectors[index] : null
             }));
 
-            const insertedChunks = [];
-            for (const item of results) {
-                const embedding = Array.isArray(item.vector) ? JSON.stringify(item.vector) : null;
-                const inserted = await queryOne(`
-                    INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, embedding)
-                    VALUES (?, ?, ?, ?, ?)
-                    RETURNING id
-                `, [
-                    docId,
-                    item.content,
-                    buildRagSearchContent(item.enriched),
-                    item.headingPath || null,
-                    embedding
-                ]);
-                if (inserted?.id) {
-                    insertedChunks.push({ chunkId: inserted.id, content: item.content });
-                }
-            }
+            // 一个 embedding 批次只提交一次数据库写入，避免几百个 chunk
+            // 逐条往返造成事务放大与图谱索引滞后。
+            const insertedRows = await query(`
+                INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, chunk_index, char_start, char_end, embedding)
+                VALUES ${results.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+                RETURNING id, content
+            `, results.flatMap(item => [
+                docId,
+                item.content,
+                buildRagSearchContent(item.enriched),
+                item.headingPath || null,
+                item.chunkIndex,
+                item.charStart,
+                item.charEnd,
+                Array.isArray(item.vector) ? JSON.stringify(item.vector) : null
+            ]));
+            const insertedChunks = insertedRows
+                .filter(item => item?.id)
+                .map(item => ({ chunkId: item.id, content: item.content }));
             await safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             indexed += batch.length;
             if (typeof onProgress === 'function') {

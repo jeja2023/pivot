@@ -1,0 +1,34 @@
+{
+  "allowed": [
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Apache-2.0",
+    "0BSD",
+    "Python-2.0",
+    "BlueOak-1.0.0"
+  ],
+  "exceptions": {
+    "jszip": {
+      "selectedLicense": "MIT",
+      "reason": "上游提供 MIT 或 GPL-3.0-or-later 双许可；本项目选择 MIT 分支。",
+      "expiresOn": "2026-12-31"
+    },
+    "pako": {
+      "selectedLicense": "MIT",
+      "reason": "上游声明 MIT AND Zlib；按 MIT 条款分发。",
+      "expiresOn": "2026-12-31"
+    },
+    "@img/sharp-*": {
+      "selectedLicense": "LGPL-3.0-or-later",
+      "reason": "sharp 预编译动态链接 libvips；发行包随附 LGPL-3.0 文本和替换说明。",
+      "expiresOn": "2026-12-31"
+    },
+    "@img/sharp-libvips-*": {
+      "selectedLicense": "LGPL-3.0-or-later",
+      "reason": "libvips 动态库；发行包随附 LGPL-3.0 文本和替换说明。",
+      "expiresOn": "2026-12-31"
+    }
+  }
+}

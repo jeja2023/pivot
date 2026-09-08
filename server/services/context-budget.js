@@ -179,6 +179,24 @@ function truncateTextToTokens(text, maxTokens, suffix) {
     return `${source.slice(0, low).trimEnd()}${suffix}`;
 }
 
+function truncateTextKeepingTail(text, maxTokens) {
+    const source = String(text || '');
+    if (maxTokens <= 0 || estimateTokens(source) <= maxTokens) return source;
+    const marker = '\n\n[系统提示：中间引用片段已按上下文预算省略，仍须遵守末尾引用与事实约束。]\n\n';
+    const tailBudget = Math.max(48, Math.floor(maxTokens * 0.4));
+    let low = 0;
+    let high = source.length;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (estimateTokens(source.slice(-mid)) <= tailBudget) low = mid;
+        else high = mid - 1;
+    }
+    const tail = source.slice(-low);
+    const remaining = Math.max(1, maxTokens - estimateTokens(tail) - estimateTokens(marker));
+    const head = truncateTextToTokens(source.slice(0, Math.max(0, source.length - low)), remaining, '');
+    return `${head.trimEnd()}${marker}${tail.trimStart()}`;
+}
+
 function truncateContentToTokens(content, maxTokens, suffix) {
     if (typeof content === 'string') return truncateTextToTokens(content, maxTokens, suffix);
     if (!Array.isArray(content)) {
@@ -209,17 +227,19 @@ function truncateContentToTokens(content, maxTokens, suffix) {
     return truncated ? nextContent : content;
 }
 
-function trimGeneratedContextMessages(messages, predicate, maxTokensPerMessage, metadataKey, metadata) {
+function trimGeneratedContextMessages(messages, predicate, maxTokensPerMessage, metadataKey, metadata, options = {}) {
     let changed = false;
     for (const message of messages) {
         if (!predicate(message)) continue;
         const currentTokens = estimateContentTokens(message.content);
         if (currentTokens <= maxTokensPerMessage) continue;
-        message.content = truncateContentToTokens(
-            message.content,
-            maxTokensPerMessage,
-            '\n\n[系统提示：为避免超过模型上下文长度，以上内容已自动截断。]'
-        );
+        message.content = options.preserveTail && typeof message.content === 'string'
+            ? truncateTextKeepingTail(message.content, maxTokensPerMessage)
+            : truncateContentToTokens(
+                message.content,
+                maxTokensPerMessage,
+                '\n\n[系统提示：为避免超过模型上下文长度，以上内容已自动截断。]'
+            );
         metadata[metadataKey] += 1;
         changed = true;
     }
@@ -279,13 +299,14 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
     }
 
     const ragBudgetPercent = Math.max(5, Math.min(70, getRagLimits().contextBudgetPercent || 25));
-    const ragCap = Math.max(512, Math.floor(budget.inputBudget * (ragBudgetPercent / 100)));
-    const memoryCap = Math.max(256, Math.floor(budget.inputBudget * 0.08));
-    const mcpCap = Math.max(768, Math.floor(budget.inputBudget * 0.20));
+    // 小窗口模型不能让生成上下文的“最小保留量”反过来超过总预算。
+    const ragCap = Math.max(64, Math.min(Math.floor(budget.inputBudget * 0.40), Math.floor(budget.inputBudget * (ragBudgetPercent / 100))));
+    const memoryCap = Math.max(32, Math.min(256, Math.floor(budget.inputBudget * 0.08)));
+    const mcpCap = Math.max(96, Math.min(768, Math.floor(budget.inputBudget * 0.20)));
     if (trimGeneratedContextMessages(working, isLongTermMemoryMessage, memoryCap, 'trimmedMemoryContexts', metadata)) {
         total = estimateMessagesTokens(working);
     }
-    if (trimGeneratedContextMessages(working, isRagMessage, ragCap, 'trimmedRagContexts', metadata)) {
+    if (trimGeneratedContextMessages(working, isRagMessage, ragCap, 'trimmedRagContexts', metadata, { preserveTail: true })) {
         total = estimateMessagesTokens(working);
     }
     if (total > budget.inputBudget && trimGeneratedContextMessages(working, isMcpMessage, mcpCap, 'trimmedMcpContexts', metadata)) {
@@ -319,16 +340,6 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         total -= estimateMessageTokens(working[i]);
         working.splice(i, 1);
         metadata.droppedMemoryContexts += 1;
-    }
-
-    for (let i = 0; i < working.length && total > budget.inputBudget;) {
-        if (!isRagMessage(working[i])) {
-            i += 1;
-            continue;
-        }
-        total -= estimateMessageTokens(working[i]);
-        working.splice(i, 1);
-        metadata.droppedRagContexts += 1;
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {

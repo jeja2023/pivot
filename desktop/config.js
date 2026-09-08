@@ -11,7 +11,7 @@ const DEFAULT_AUTO_UPDATE = {
     checkIntervalMinutes: 30,
     autoDownload: true,
     allowPrerelease: false,
-    allowInsecureHttp: false,
+    publisherName: '',
     installOnQuit: true,
     allowedOrigins: []
 };
@@ -80,8 +80,13 @@ function saveUserDesktopConfig(app, overrides = {}) {
         }
     }
     const merged = { ...existing, ...overrides };
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), 'utf8');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
+    const tempPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(merged, null, 2), { encoding: 'utf8', mode: 0o600 });
+    try { fs.chmodSync(tempPath, 0o600); } catch (_) {}
+    try { fs.rmSync(configPath, { force: true }); } catch (_) {}
+    fs.renameSync(tempPath, configPath);
+    try { fs.chmodSync(configPath, 0o600); } catch (_) {}
     return merged;
 }
 
@@ -135,11 +140,10 @@ function normalizeRemoteUrl(value) {
     return normalizeHttpUrl(value, 'config.remoteUrl', true);
 }
 
-function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env, allowInsecureHttp = false) {
+function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env) {
     return normalizeUpdateFeedUrl(value, {
         required,
         allowedOrigins,
-        allowInsecureHttp,
         env
     });
 }
@@ -166,7 +170,9 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
     const enabled = merged.enabled === true;
     const allowedOrigins = normalizeOriginList(merged.allowedOrigins);
     const updatePath = normalizeUpdatePath(merged.path);
-    const allowInsecureHttp = merged.allowInsecureHttp === true;
+    if (enabled && merged.allowInsecureHttp === true) {
+        throw new Error('allowInsecureHttp 已不再受支持；自动更新必须配置 HTTPS URL。');
+    }
     const explicitUrl = String(merged.url || '').trim();
     const derivedUrl = explicitUrl || (enabled ? resolveUpdateUrlFromRemote(options.remoteUrl, updatePath) : '');
     const checkIntervalMinutes = Number.isFinite(Number(merged.checkIntervalMinutes))
@@ -174,13 +180,14 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
         : DEFAULT_AUTO_UPDATE.checkIntervalMinutes;
     return {
         enabled,
-        url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env, allowInsecureHttp),
+        url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env),
         path: updatePath,
         checkOnStart: merged.checkOnStart !== false,
         checkIntervalMinutes,
         autoDownload: merged.autoDownload !== false,
         allowPrerelease: merged.allowPrerelease === true,
-        allowInsecureHttp,
+        publisherName: typeof merged.publisherName === 'string' ? merged.publisherName.trim().replace(/\s+/g, ' ').slice(0, 256) : '',
+        allowInsecureHttp: false,
         installOnQuit: merged.installOnQuit !== false,
         allowedOrigins
     };
@@ -196,14 +203,18 @@ function mergeDesktopConfigs(base = {}, override = {}) {
         };
         if (override.remoteUrl && !mergedAutoUpdate.url) {
             try {
-                const userOrigin = new URL(override.remoteUrl).origin;
-                const existingOrigins = Array.isArray(mergedAutoUpdate.allowedOrigins)
-                    ? [...mergedAutoUpdate.allowedOrigins]
-                    : [];
-                if (!existingOrigins.includes(userOrigin)) {
-                    existingOrigins.push(userOrigin);
+                const userUrl = new URL(override.remoteUrl);
+                // 业务服务可以是 HTTP，但它绝不能被顺带提升为自动更新白名单。
+                if (userUrl.protocol === 'https:') {
+                    const userOrigin = userUrl.origin;
+                    const existingOrigins = Array.isArray(mergedAutoUpdate.allowedOrigins)
+                        ? [...mergedAutoUpdate.allowedOrigins]
+                        : [];
+                    if (!existingOrigins.includes(userOrigin)) {
+                        existingOrigins.push(userOrigin);
+                    }
+                    mergedAutoUpdate.allowedOrigins = existingOrigins;
                 }
-                mergedAutoUpdate.allowedOrigins = existingOrigins;
             } catch (_) {}
         }
         merged.autoUpdate = mergedAutoUpdate;

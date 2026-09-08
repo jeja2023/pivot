@@ -9,6 +9,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       TZ: Asia/Shanghai
       PG_TIMEZONE: Asia/Shanghai
@@ -31,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -48,8 +51,16 @@ jobs:
       - name: Project checks
         run: npm run check
 
+      - name: Changed-file development standards
+        run: npm run check:standards:changed
+
       - name: Lint
         run: npm run lint
+
+      # 浏览器运行时必须在单元测试之前准备好；否则 agent-browser 测试会被错误跳过
+      # 而 CI 仍显示绿色。
+      - name: Install Playwright Chromium
+        run: npx --no-install playwright install --with-deps chromium
 
       # 顺序运行全部测试套件，与本地 npm test 口径保持一致
       - name: All test suites
@@ -58,8 +69,12 @@ jobs:
           DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
         run: npm run test:all
 
-      - name: Install Playwright Chromium
-        run: npx --no-install playwright install --with-deps chromium
+      # 原生 V8 覆盖率阈值防止测试退化为只读取源码文本而不执行关键分支。
+      - name: Node test coverage threshold
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+          DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+        run: npm run test:coverage
 
       - name: Browser end-to-end tests
         env:

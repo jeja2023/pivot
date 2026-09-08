@@ -340,7 +340,7 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
 
     // 2. 详情逻辑保存与恢复 returnContext
     assert.match(detailJs, /activeAgentRunReturnContext/);
-    assert.match(detailJs, /window\.Pivot\?\.legacy\?\.openAgentWorkbench \|\| globalThis\['openAgentWorkbench'\]/);
+    assert.match(detailJs, /window\.Pivot\?\.moduleApi\?\.\('workspaces\.navigation'\)\?\.openAgentWorkbench/);
     assert.match(harnessJs, /window\.Pivot\?\.legacy\?\.openAgentRun/);
     assert.match(detailJs, /openWorkbench\(\{ tab: targetTab \}\)/);
     assert.match(detailJs, /switchAgentCpSubview.*targetSubview/);
@@ -358,7 +358,7 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
 test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {
     const ragJs = read('client/chat/rag.js');
     const graphControllerJs = read('client/chat/rag-graph-controller.js');
-    const ragServerJs = read('server/rag.js');
+    const ragServerJs = read('server/routes/rag.js');
     const kgServiceJs = require('fs').readFileSync('server/services/knowledge-graph.js', 'utf8');
 
     // 1. 前端列表行按钮传入对应文档 docId，顶部入口传入全局（无 docId）
@@ -611,4 +611,19 @@ test('数据分析历史记录数据表格具备全局统一分页控件与行�
     assert.match(overviewCss, /\.data-analysis-history-table td\s*\{[\s\S]*?height:\s*38px;/);
     assert.match(overviewCss, /\.data-analysis-history-table td\s*\{[\s\S]*?padding:\s*6px 8px;/);
     assert.match(overviewCss, /\.data-analysis-history-pagination\s*\{[\s\S]*?display:\s*flex;/);
+});
+
+test('已下线会话、法规与数据分析布局不保留无引用样式选择器', () => {
+    const styles = [
+        read('client/chat/styles/sessions-prompts.css'),
+        read('client/chat/styles/workspaces/apps/regulations.css'),
+        read('client/chat/styles/workspaces/apps/data-analysis-overview.css')
+    ].join('\n');
+    [
+        'session-tag-head', 'prompt-library-toolbar', 'prompt-apply-modal', 'lab-card',
+        'regulations-searchbar', 'regulations-content-grid', 'regulations-version-chip', 'regulations-article-actions',
+        'data-analysis-upload-drop', 'data-analysis-pivot-controls', 'data-analysis-section', 'data-analysis-history-type'
+    ].forEach(selector => {
+        assert.doesNotMatch(styles, new RegExp(`\\.${selector}(?:[\\s.:#,{]|$)`), `已下线选择器不得回流：${selector}`);
+    });
 });

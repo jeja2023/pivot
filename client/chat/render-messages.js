@@ -150,6 +150,19 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
     target.appendChild(div);
     if (!mountOptions?.disableImagePinning) attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
+    // 首次出现代码或公式时按需加载 vendor；加载后只重绘当前消息，避免全页刷新。
+    const optionalVendorLoad = typeof window.Pivot.moduleApi?.('chat.markdownVendors')?.ensureOptionalMarkdownVendors === 'function'
+        ? window.Pivot.moduleApi('chat.markdownVendors').ensureOptionalMarkdownVendors(displayContent)
+        : Promise.resolve(false);
+    optionalVendorLoad.then(loaded => {
+        if (!loaded || !div.isConnected) return;
+        const body = div.querySelector('.text-body');
+        if (!body) return;
+        const html = role === 'assistant' ? renderAiMessage(displayContent, false) : buildUserMessageHtml(displayContent, stats);
+        PivotSafeHtml.setHtml(body, html);
+        attachMessageImageLoadPinning(body);
+        if (role === 'assistant') window.Pivot.legacy.renderPivotCharts?.(body);
+    }).catch(() => {});
     if (!deferRender) {
         if (role === 'assistant') window.Pivot.legacy.renderPivotCharts(div);
         window.Pivot.legacy.scrollMessagesToBottom?.();

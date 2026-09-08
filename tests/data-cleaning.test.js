@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const os = require('node:os');
 
 const {
     normalizeRules,
@@ -29,13 +30,17 @@ const {
 } = require('../server/services/data-analysis');
 const { queryOne, execute } = require('../server/db/client');
 
-const testRoot = path.resolve(__dirname, '..', 'artifacts', `data-cleaning-test-${process.pid}-${Date.now()}`);
+const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-data-cleaning-'));
 const columns = [
     { key: 'c_1', name: '编号', index: 0 },
     { key: 'c_2', name: '名称', index: 1 },
     { key: 'c_3', name: '金额', index: 2 },
     { key: 'c_4', name: '日期', index: 3 }
 ];
+
+test.after(() => {
+    fs.rmSync(testRoot, { recursive: true, force: true });
+});
 
 test('数据清洗规则会验证字段、保持顺序并生成安全的 DuckDB 清洗计划', async () => {
     fs.mkdirSync(testRoot, { recursive: true });
@@ -154,6 +159,7 @@ test('数据清洗路由包含质量、预览、应用、记录和重放接口',
     assert.match(route, /datasets\/:id\/cleaning\/runs/);
     assert.match(route, /cleaning\/runs\/:runId\/replay/);
     assert.equal(sqlLiteral("a'b"), "'a''b'");
+    assert.equal(sqlLiteral(String.raw`C:\\temp\\name`), String.raw`'C:\\temp\\name'`);
     assert.throws(() => fromProjectRelative('@analysis/../../outside.parquet'), /不安全/);
 });
 

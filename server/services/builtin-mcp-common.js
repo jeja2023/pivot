@@ -167,7 +167,7 @@ function normalizeBuiltinConfigRow(row, { includeSecret = false } = {}) {
         service_type: serviceType,
         config,
         has_secret: Boolean(row.secret),
-        secret: includeSecret && row.secret ? decryptSecret(row.secret) : undefined,
+        secret: includeSecret && row.secret ? decryptSecret(row.secret, 'mcp_builtin_configs.secret') : undefined,
         status: row.status || 'active',
         updated_at: row.updated_at || ''
     };

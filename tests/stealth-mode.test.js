@@ -144,7 +144,7 @@ test('Stealth Middleware: 未授权连接物理掐断 (Socket Destroy)', async (
 test('Stealth Routes: API 权限与配置修改', async () => {
     const router = createSettingsRouter({
         authMiddleware: (req, res, next) => {
-            req.user = { id: 1, role: 'admin' };
+            req.user = { id: 1, username: 'admin', role: 'admin' };
             next();
         },
         adminMiddleware: (req, res, next) => next(),

@@ -28,8 +28,7 @@
     box-shadow: none;
 }
 
-.data-analysis-main,
-.data-analysis-section {
+.data-analysis-main {
     min-width: 0;
     min-height: 0;
     border: 1px solid rgba(148, 163, 184, 0.2);
@@ -60,27 +59,9 @@
     background: rgba(248, 250, 252, 0.5);
 }
 
-.data-analysis-upload strong,
-.data-analysis-section-head strong {
+.data-analysis-upload strong {
     color: var(--text-main);
     font-size: 0.86rem;
-}
-
-.data-analysis-upload-drop {
-    min-height: 58px;
-    display: grid;
-    place-items: center;
-    border: 1px dashed rgba(37, 99, 235, 0.38);
-    border-radius: 8px;
-    background: rgba(37, 99, 235, 0.05);
-    color: #2563eb;
-    font-size: 0.8rem;
-    font-weight: 800;
-    cursor: pointer;
-}
-
-.data-analysis-upload-drop input {
-    display: none;
 }
 
 .data-analysis-meta,
@@ -112,19 +93,6 @@
     font-size: 1rem;
 }
 
-.data-analysis-pivot-controls {
-    align-items: end;
-}
-
-.data-analysis-pivot-control-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-width: 210px;
-}
-
-.data-analysis-pivot-control-actions .btn-secondary,
-.data-analysis-pivot-control-actions .btn-primary,
 .data-analysis-pivot-actions .btn-secondary {
     height: 34px;
     padding: 0 12px;
@@ -922,18 +890,6 @@
     justify-content: center;
 }
 
-.data-analysis-toolbar-actions .data-analysis-export-format {
-    height: 32px;
-    width: 90px;
-    padding: 0 24px 0 10px;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin: 0;
-    box-sizing: border-box;
-}
-
 .data-analysis-form-grid .btn-primary {
     height: 32px;
     padding: 0 11px;
@@ -1195,89 +1151,6 @@
     display: none;
 }
 
-.data-analysis-kpis,
-.data-analysis-compare-kpis {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.data-analysis-kpi,
-.data-analysis-compare-kpis div {
-    display: grid;
-    gap: 4px;
-    padding: 10px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 8px;
-    background: #f8fafc;
-}
-
-.data-analysis-kpi span,
-.data-analysis-compare-kpis span {
-    color: #64748b;
-    font-size: 0.68rem;
-    font-weight: 800;
-}
-
-.data-analysis-kpi strong,
-.data-analysis-compare-kpis strong {
-    color: var(--text-main);
-    font-size: 0.96rem;
-}
-
-.data-analysis-split {
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
-    gap: 10px;
-}
-
-.data-analysis-section {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.data-analysis-section-head {
-    min-height: 38px;
-    display: flex;
-    align-items: center;
-    padding: 8px 10px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-    background: #f8fafc;
-}
-
-.data-analysis-profile {
-    overflow: auto;
-    padding: 8px;
-}
-
-.data-analysis-profile-row {
-    display: grid;
-    gap: 4px;
-    padding: 8px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.data-analysis-profile-row strong {
-    color: var(--text-main);
-    font-size: 0.78rem;
-}
-
-.data-analysis-profile-row span,
-.data-analysis-profile-row em {
-    color: #64748b;
-    font-size: 0.7rem;
-    font-style: normal;
-}
-
-.data-analysis-profile-stats {
-    color: #0f766e;
-    font-size: 0.68rem;
-    font-style: normal;
-}
-
 /* 历史 Tab */
 .data-analysis-history-table-wrap {
     flex: 1 1 auto;
@@ -1323,47 +1196,4 @@
 
 .data-analysis-history-pagination:empty {
     display: none;
-}
-
-/* 类型徽标 */
-.data-analysis-history-type {
-    display: inline-block;
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, 0.18);
-    color: #475569;
-    font-size: 0.66rem;
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.data-analysis-history-type-chart {
-    background: rgba(15, 118, 110, 0.14);
-    color: #0f766e;
-}
-
-.data-analysis-history-type-comparison {
-    background: rgba(37, 99, 235, 0.14);
-    color: #2563eb;
-}
-
-.data-analysis-history-type-export {
-    background: rgba(217, 119, 6, 0.16);
-    color: #b45309;
-}
-
-.data-analysis-history-type-query {
-    background: rgba(124, 58, 237, 0.14);
-    color: #7c3aed;
-}
-
-.data-analysis-history-type-pivot {
-    background: rgba(8, 145, 178, 0.14);
-    color: #0891b2;
-}
-
-.data-analysis-history-type-ai_analysis,
-.data-analysis-history-type-ai_full_text_analysis {
-    background: rgba(234, 88, 12, 0.12);
-    color: #c2410c;
 }

@@ -4,6 +4,7 @@ const {
     createSafeLookup,
     getSafeOutboundOptionsForUser
 } = require('../../security');
+const net = require('net');
 const { isAdmin } = require('../../permissions');
 
 // 数据库出站 SSRF 守卫：解析 DNS 后校验真实 IP，拦截 loopback / link-local / 云元数据等敏感目标，
@@ -15,12 +16,15 @@ function databaseOutboundOptions(user, { allowExplicitLoopbackForAdmin = false }
     const allowExplicitLoopback = Boolean(allowExplicitLoopbackForAdmin && isAdmin(user));
     if (!restrictPrivateHostsToAdmin) {
         // 关闭内网限制后，仍需拦截 loopback / link-local / 云元数据等敏感目标。
-        return { blockPrivate: false, allowExplicitLoopback };
+        return { blockPrivate: false, allowExplicitLoopback, failClosedDns: true };
     }
-    return getSafeOutboundOptionsForUser(user, {
+    return {
+        ...getSafeOutboundOptionsForUser(user, {
         allowPrivateEnv: 'ALLOW_PRIVATE_DATABASE_HOSTS',
         allowExplicitLoopbackForAdmin: allowExplicitLoopback
-    });
+        }),
+        failClosedDns: true
+    };
 }
 
 // 连接前再次解析并校验主机，缓解 TOCTOU / DNS rebinding。校验失败抛出 403 风格错误。
@@ -38,6 +42,18 @@ async function assertSafeDatabaseHost(host, user, options = {}) {
 // 为关系型驱动构造安全 lookup 钩子，连接握手阶段对解析出的 IP 再次校验，阻断 DNS rebinding。
 function databaseSafeLookup(user, options = {}) {
     return createSafeLookup(databaseOutboundOptions(user, options));
+}
+
+async function resolveSafeDatabaseHost(host, user, options = {}) {
+    const raw = String(host || '').trim();
+    if (net.isIP(raw)) {
+        await assertSafeDatabaseHost(raw, user, options);
+        return raw;
+    }
+    const lookup = databaseSafeLookup(user, options);
+    return await new Promise((resolve, reject) => {
+        lookup(raw, { all: false }, (error, address) => error ? reject(error) : resolve(address));
+    });
 }
 
 async function getConnectionOwnerAsync(connection = {}) {
@@ -308,7 +324,7 @@ function normalizeDatabaseConnection(row, { includeSecret = false } = {}) {
         has_password: Boolean(row.password),
         created_at: row.created_at,
         updated_at: row.updated_at,
-        ...(includeSecret ? { password: decryptSecret(row.password || '') } : {})
+        ...(includeSecret ? { password: decryptSecret(row.password || '', 'mcp_database_connections.password') } : {})
     };
 }
 
@@ -319,6 +335,7 @@ module.exports = {
     databaseOutboundOptions,
     assertSafeDatabaseHost,
     databaseSafeLookup,
+    resolveSafeDatabaseHost,
     getConnectionOwnerAsync,
     createDatabaseMcpError,
     databaseConnectionDiagnostics,

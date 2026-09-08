@@ -1,5 +1,7 @@
 /* 系统配置校验模块 System Config Validation */
 const crypto = require('crypto');
+const { logger } = require('./logger');
+const { getPasswordValidationMessage } = require('./password-policy');
 
 const weakSecrets = new Set([
     'lite-chat-secret-key-123',
@@ -38,26 +40,46 @@ function validateSecret(name, value, { required = true } = {}) {
     }
 }
 
+function validateDatabaseUrl(value, { enforce = process.env.NODE_ENV === 'production' && !process.env.PG_TEST_SCHEMA } = {}) {
+    const text = String(value || '').trim();
+    if (!text) return 'DATABASE_URL 未配置';
+    let parsed;
+    try {
+        parsed = new URL(text);
+    } catch (_) {
+        return 'DATABASE_URL 格式无效，请使用 PostgreSQL 连接 URL（用户名、密码、主机和数据库名均不可缺失）';
+    }
+    if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) return 'DATABASE_URL 必须使用 postgres 或 postgresql 协议';
+    // PostgreSQL 密码策略由数据库、网络边界和运维流程负责；应用只校验
+    // 连接串格式，不因既有账户密码复杂度阻断启动，避免升级后无法启动旧环境。
+    void enforce;
+    return '';
+}
+
 function validateConfig() {
-    validateSecret('JWT_SECRET', process.env.JWT_SECRET);
-    validateSecret('DATA_ENCRYPTION_KEY', process.env.DATA_ENCRYPTION_KEY, { required: false });
+    const configurationErrors = [];
+    try { validateSecret('JWT_SECRET', process.env.JWT_SECRET); } catch (error) { configurationErrors.push(error.message); }
+    try { validateSecret('DATA_ENCRYPTION_KEY', process.env.DATA_ENCRYPTION_KEY); } catch (error) { configurationErrors.push(error.message); }
+    if (process.env.JWT_SECRET && process.env.DATA_ENCRYPTION_KEY && process.env.JWT_SECRET === process.env.DATA_ENCRYPTION_KEY) {
+        configurationErrors.push('JWT_SECRET 与 DATA_ENCRYPTION_KEY 必须使用不同的随机密钥');
+    }
+    const databaseError = validateDatabaseUrl(process.env.DATABASE_URL);
+    if (databaseError) configurationErrors.push(databaseError);
+    if (configurationErrors.length) throw new Error(`启动配置无效：\n- ${configurationErrors.join('\n- ')}`);
 
     const port = parsePort(process.env.PORT);
     const cookieSecure = process.env.COOKIE_SECURE === 'true';
 
-    const { logger } = require('./logger');
     if (process.env.NODE_ENV === 'production' && !cookieSecure) {
         logger.warn('配置提醒: 当前使用 HTTP Cookie；仅适用于访问受控的隔离局域网，请通过防火墙限制服务端口');
-    }
-    if (!process.env.DATA_ENCRYPTION_KEY) {
-        logger.warn('配置提醒: 未配置 DATA_ENCRYPTION_KEY，将从 JWT_SECRET 派生加密密钥');
     }
     if (!process.env.METRICS_TOKEN && process.env.METRICS_ALLOW_UNAUTHENTICATED_LAN !== 'true') {
         logger.warn('配置提醒: 未配置 METRICS_TOKEN，/api/metrics 将保持关闭');
     }
     const configuredAdminPassword = String(process.env.DEFAULT_ADMIN_PASSWORD || '').trim();
-    if (configuredAdminPassword && (configuredAdminPassword.length < 8 || !/[A-Za-z]/.test(configuredAdminPassword) || !/[0-9]/.test(configuredAdminPassword))) {
-        throw new Error('DEFAULT_ADMIN_PASSWORD 必须至少 8 位且同时包含字母和数字');
+    const initialPasswordError = getPasswordValidationMessage(configuredAdminPassword);
+    if (configuredAdminPassword && initialPasswordError) {
+        throw new Error(`DEFAULT_ADMIN_PASSWORD ${initialPasswordError}`);
     }
     if (configuredAdminPassword) {
         logger.warn('配置提醒: DEFAULT_ADMIN_PASSWORD 仅用于空数据库首次初始化；初始化后请删除该配置并在界面中轮换管理员密码');
@@ -75,4 +97,4 @@ function validateConfig() {
     };
 }
 
-module.exports = { validateConfig, weakSecrets };
+module.exports = { validateConfig, validateDatabaseUrl, weakSecrets };

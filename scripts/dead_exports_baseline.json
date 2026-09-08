@@ -1,0 +1,2246 @@
+{
+  "description": "Baseline for server exports with no static external reference. New dead exports are forbidden; existing entries must only decrease after review.",
+  "total": 560,
+  "entries": [
+    {
+      "file": "server/audit-actions.js",
+      "name": "AUDIT_ACTION_LABELS"
+    },
+    {
+      "file": "server/auth.js",
+      "name": "generateRefreshToken"
+    },
+    {
+      "file": "server/auth.js",
+      "name": "LEGACY_REFRESH_COOKIE_OPTIONS"
+    },
+    {
+      "file": "server/auth.js",
+      "name": "rotateRefreshToken"
+    },
+    {
+      "file": "server/auth.js",
+      "name": "UserInputError"
+    },
+    {
+      "file": "server/chat-template.js",
+      "name": "chatPartialsDir"
+    },
+    {
+      "file": "server/chat-template.js",
+      "name": "chatTemplatePath"
+    },
+    {
+      "file": "server/db/client.js",
+      "name": "pgExecute"
+    },
+    {
+      "file": "server/db/client.js",
+      "name": "pgQuery"
+    },
+    {
+      "file": "server/db/client.js",
+      "name": "pgQueryOne"
+    },
+    {
+      "file": "server/db/client.js",
+      "name": "pgTransaction"
+    },
+    {
+      "file": "server/db/dialect.js",
+      "name": "getDialect"
+    },
+    {
+      "file": "server/db/dialect.js",
+      "name": "POSTGRES_DIALECT"
+    },
+    {
+      "file": "server/db/dialect.js",
+      "name": "SQLITE_DIALECT"
+    },
+    {
+      "file": "server/db/migrations/runner.js",
+      "name": "runPgVersionedMigration"
+    },
+    {
+      "file": "server/db/migrations/runner.js",
+      "name": "runPgVersionedMigrations"
+    },
+    {
+      "file": "server/db/migrations/runner.js",
+      "name": "runVersionedMigration"
+    },
+    {
+      "file": "server/db/pg-connection.js",
+      "name": "applyPgTypeParsers"
+    },
+    {
+      "file": "server/db/pg-connection.js",
+      "name": "checkPgConnection"
+    },
+    {
+      "file": "server/db/schema/comments.js",
+      "name": "COLUMN_COMMENTS"
+    },
+    {
+      "file": "server/db/schema/comments.js",
+      "name": "TABLE_COMMENTS"
+    },
+    {
+      "file": "server/db/schema/pg.js",
+      "name": "convertColumnTypes"
+    },
+    {
+      "file": "server/db/schema/pg.js",
+      "name": "convertJsonbColumnTypes"
+    },
+    {
+      "file": "server/db/schema/pg.js",
+      "name": "convertVectorColumnTypes"
+    },
+    {
+      "file": "server/db/schema/pg.js",
+      "name": "PG_NOW"
+    },
+    {
+      "file": "server/db/schema/pg.js",
+      "name": "stripForeignKeys"
+    },
+    {
+      "file": "server/db/seed.js",
+      "name": "createInitialAdminAccount"
+    },
+    {
+      "file": "server/db/seed.js",
+      "name": "runSeeds"
+    },
+    {
+      "file": "server/db/statements.js",
+      "name": "clearStatementCache"
+    },
+    {
+      "file": "server/db/statements.js",
+      "name": "createStatementCache"
+    },
+    {
+      "file": "server/document-text.js",
+      "name": "MAX_DOCUMENT_BUFFER_BYTES"
+    },
+    {
+      "file": "server/http.js",
+      "name": "isTrustedProxyIp"
+    },
+    {
+      "file": "server/http.js",
+      "name": "normalizeIpAddress"
+    },
+    {
+      "file": "server/image-safety.js",
+      "name": "IMAGE_OUTPUT_SIZE"
+    },
+    {
+      "file": "server/image-safety.js",
+      "name": "MAX_IMAGE_CONTEXT_BYTES"
+    },
+    {
+      "file": "server/image-safety.js",
+      "name": "MAX_IMAGE_INPUT_PIXELS"
+    },
+    {
+      "file": "server/image-safety.js",
+      "name": "MAX_IMAGE_OUTPUT_BYTES"
+    },
+    {
+      "file": "server/image-safety.js",
+      "name": "MAX_IMAGE_UPLOAD_BYTES"
+    },
+    {
+      "file": "server/llm.js",
+      "name": "getMemoryThreshold"
+    },
+    {
+      "file": "server/number.js",
+      "name": "parseNonNegativeInt"
+    },
+    {
+      "file": "server/password-policy.js",
+      "name": "assertValidPassword"
+    },
+    {
+      "file": "server/password-policy.js",
+      "name": "COMMON_PASSWORDS"
+    },
+    {
+      "file": "server/password-policy.js",
+      "name": "MIN_PASSWORD_LENGTH"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "ADMIN_ROLE"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "DATA_CLASSIFICATION_LEVELS"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "PERMISSION_CAPABILITY_MATRIX"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "PERMISSION_LABELS"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "POLICY_OBJECT_TYPES"
+    },
+    {
+      "file": "server/permissions.js",
+      "name": "USER_ROLE"
+    },
+    {
+      "file": "server/repositories/knowledge.js",
+      "name": "listAccessibleChunkEmbeddings"
+    },
+    {
+      "file": "server/repositories/sessions.js",
+      "name": "getSessionIdForUser"
+    },
+    {
+      "file": "server/routes/announcements.js",
+      "name": "isTargetedToUser"
+    },
+    {
+      "file": "server/routes/announcements.js",
+      "name": "normalizeAnnouncementPayload"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "buildPromptStyleCompletionMessage"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "extractChatCompletionText"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "isChatCompletionResponse"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "isQwen3CompletionModel"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "isReasoningCompletionModel"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "normalizeCompletionText"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "normalizeEmbeddingInputItem"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "stringifyForAudit"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "stripCompletionThoughtContent"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "stripCompletionVisibleReasoning"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "toCompletionResponse"
+    },
+    {
+      "file": "server/routes/openai/helpers.js",
+      "name": "toCompletionStreamFrame"
+    },
+    {
+      "file": "server/routes/settings.js",
+      "name": "isSettingEnabled"
+    },
+    {
+      "file": "server/security.js",
+      "name": "parseCsvLine"
+    },
+    {
+      "file": "server/security.js",
+      "name": "removeAttachmentFiles"
+    },
+    {
+      "file": "server/services/admin-stats-cache.js",
+      "name": "GLOBAL_COUNTS_TTL_MS"
+    },
+    {
+      "file": "server/services/agent-approval-requests.js",
+      "name": "formatRequest"
+    },
+    {
+      "file": "server/services/agent-artifact-cas-store.js",
+      "name": "DIR_MODE"
+    },
+    {
+      "file": "server/services/agent-artifact-cas-store.js",
+      "name": "FILE_MODE"
+    },
+    {
+      "file": "server/services/agent-artifact-cas-store.js",
+      "name": "TEMP_DIR_NAME"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "CAS_REF_PREFIX"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "computeObjectId"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "expireOverdueObjects"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "KIND_EXPIRED"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "maxObjectBytes"
+    },
+    {
+      "file": "server/services/agent-artifact-cas.js",
+      "name": "putStream"
+    },
+    {
+      "file": "server/services/agent-artifact-delivery.js",
+      "name": "DELIVERY_CHANNELS"
+    },
+    {
+      "file": "server/services/agent-artifact-delivery.js",
+      "name": "DELIVERY_STATES"
+    },
+    {
+      "file": "server/services/agent-artifact-delivery.js",
+      "name": "deliveryError"
+    },
+    {
+      "file": "server/services/agent-artifact-delivery.js",
+      "name": "intentTtlSeconds"
+    },
+    {
+      "file": "server/services/agent-artifact-renditions.js",
+      "name": "downloadTokenTtlSeconds"
+    },
+    {
+      "file": "server/services/agent-artifact-renditions.js",
+      "name": "maxRenditionBytes"
+    },
+    {
+      "file": "server/services/agent-blob-store.js",
+      "name": "MAX_INLINE_BYTES"
+    },
+    {
+      "file": "server/services/agent-browser.js",
+      "name": "attachBrowserNetworkGuards"
+    },
+    {
+      "file": "server/services/agent-browser.js",
+      "name": "createIsolatedProfile"
+    },
+    {
+      "file": "server/services/agent-browser.js",
+      "name": "evaluateSafe"
+    },
+    {
+      "file": "server/services/agent-budget.js",
+      "name": "DEFAULT_BUDGET"
+    },
+    {
+      "file": "server/services/agent-capability-registry.js",
+      "name": "AGENT_CAPABILITY_DEFINITIONS"
+    },
+    {
+      "file": "server/services/agent-capability-registry.js",
+      "name": "getCapabilityDefinition"
+    },
+    {
+      "file": "server/services/agent-capability-registry.js",
+      "name": "listAgentCapabilities"
+    },
+    {
+      "file": "server/services/agent-capability-registry.js",
+      "name": "normalizeCapabilityId"
+    },
+    {
+      "file": "server/services/agent-capability-worker.js",
+      "name": "IMAGE_PATTERN"
+    },
+    {
+      "file": "server/services/agent-capability-worker.js",
+      "name": "isWorkerEnabled"
+    },
+    {
+      "file": "server/services/agent-channel-adapters.js",
+      "name": "deliverEmail"
+    },
+    {
+      "file": "server/services/agent-channel-adapters.js",
+      "name": "deliverIm"
+    },
+    {
+      "file": "server/services/agent-channel-adapters.js",
+      "name": "MAX_ATTACHMENT_BYTES"
+    },
+    {
+      "file": "server/services/agent-channel-adapters.js",
+      "name": "MAX_ATTEMPTS"
+    },
+    {
+      "file": "server/services/agent-channels.js",
+      "name": "CHANNEL_TYPES"
+    },
+    {
+      "file": "server/services/agent-channels.js",
+      "name": "normalizeBindingInput"
+    },
+    {
+      "file": "server/services/agent-channels.js",
+      "name": "serializeBinding"
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "name": "getLatestAgentCheckpoint"
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "name": "listAgentCheckpoints"
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "name": "parseCheckpointState"
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "name": "serializeCheckpointState"
+    },
+    {
+      "file": "server/services/agent-code-renditions.js",
+      "name": "CODE_FORMAT_ALIASES"
+    },
+    {
+      "file": "server/services/agent-code-renditions.js",
+      "name": "CODE_MIME_TYPES"
+    },
+    {
+      "file": "server/services/agent-code-renditions.js",
+      "name": "CODE_RENDERER_VERSION"
+    },
+    {
+      "file": "server/services/agent-code-renditions.js",
+      "name": "MAX_CODE_BYTES"
+    },
+    {
+      "file": "server/services/agent-content-review.js",
+      "name": "reviewInputMetadata"
+    },
+    {
+      "file": "server/services/agent-contracts.js",
+      "name": "inferCapabilities"
+    },
+    {
+      "file": "server/services/agent-contracts.js",
+      "name": "normalizeRisk"
+    },
+    {
+      "file": "server/services/agent-contracts.js",
+      "name": "RISK_NAMES"
+    },
+    {
+      "file": "server/services/agent-control-plane-state.js",
+      "name": "CONTROL_PLANE_DISABLED_CODE"
+    },
+    {
+      "file": "server/services/agent-control-plane-state.js",
+      "name": "controlPlaneDisabledError"
+    },
+    {
+      "file": "server/services/agent-control.js",
+      "name": "assertRelatedRuns"
+    },
+    {
+      "file": "server/services/agent-control.js",
+      "name": "MESSAGE_STATUSES"
+    },
+    {
+      "file": "server/services/agent-control.js",
+      "name": "MESSAGE_TYPES"
+    },
+    {
+      "file": "server/services/agent-control.js",
+      "name": "normalizeMessageType"
+    },
+    {
+      "file": "server/services/agent-dag-contracts.js",
+      "name": "summarizeSchema"
+    },
+    {
+      "file": "server/services/agent-dag-runtime.js",
+      "name": "buildDagFallbackFinalAnswer"
+    },
+    {
+      "file": "server/services/agent-dag-runtime.js",
+      "name": "extractReadableDagOutput"
+    },
+    {
+      "file": "server/services/agent-dag-utils.js",
+      "name": "DAG_WHEN_OPERATOR_LABELS"
+    },
+    {
+      "file": "server/services/agent-dag-utils.js",
+      "name": "resolveDagInputValue"
+    },
+    {
+      "file": "server/services/agent-data-adapter.js",
+      "name": "buildDuckDbReadExpression"
+    },
+    {
+      "file": "server/services/agent-data-adapter.js",
+      "name": "normalizeTabularRows"
+    },
+    {
+      "file": "server/services/agent-diagnosis.js",
+      "name": "CATEGORIES"
+    },
+    {
+      "file": "server/services/agent-diagnosis.js",
+      "name": "normalizeError"
+    },
+    {
+      "file": "server/services/agent-evaluations.js",
+      "name": "listAgentEvalRuns"
+    },
+    {
+      "file": "server/services/agent-evaluations.js",
+      "name": "normalizeAssertions"
+    },
+    {
+      "file": "server/services/agent-evaluations.js",
+      "name": "reconcileAgentEvalRun"
+    },
+    {
+      "file": "server/services/agent-event-outbox.js",
+      "name": "claimAgentEventOutbox"
+    },
+    {
+      "file": "server/services/agent-evolution.js",
+      "name": "PROPOSAL_KINDS"
+    },
+    {
+      "file": "server/services/agent-evolution.js",
+      "name": "PROPOSAL_STATUSES"
+    },
+    {
+      "file": "server/services/agent-evolution.js",
+      "name": "serializeProposal"
+    },
+    {
+      "file": "server/services/agent-feedback.js",
+      "name": "normalizeOutcome"
+    },
+    {
+      "file": "server/services/agent-feedback.js",
+      "name": "OUTCOMES"
+    },
+    {
+      "file": "server/services/agent-goals.js",
+      "name": "generateGoalToken"
+    },
+    {
+      "file": "server/services/agent-goals.js",
+      "name": "GOAL_STATUSES"
+    },
+    {
+      "file": "server/services/agent-goals.js",
+      "name": "GOAL_TRIGGER_TYPES"
+    },
+    {
+      "file": "server/services/agent-goals.js",
+      "name": "hashGoalToken"
+    },
+    {
+      "file": "server/services/agent-governance-metrics.js",
+      "name": "recordSandboxLimitHit"
+    },
+    {
+      "file": "server/services/agent-learning.js",
+      "name": "ARCHIVE_AFTER_DAYS"
+    },
+    {
+      "file": "server/services/agent-learning.js",
+      "name": "SETTINGS_KEY"
+    },
+    {
+      "file": "server/services/agent-learning.js",
+      "name": "startAgentLearningRunner"
+    },
+    {
+      "file": "server/services/agent-learning.js",
+      "name": "TRIGGERS"
+    },
+    {
+      "file": "server/services/agent-local-connector.js",
+      "name": "reclaimConnectorTasks"
+    },
+    {
+      "file": "server/services/agent-local-connector.js",
+      "name": "resolveConnectorDeviceForTool"
+    },
+    {
+      "file": "server/services/agent-local-connector.js",
+      "name": "resolveConnectorDeviceId"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "consumeDeviceNonce"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "DEVICE_ONLINE_WINDOW_MS"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "deviceError"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "getLocalDeviceForUser"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "grantDailyQuota"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "NONCE_PURPOSES"
+    },
+    {
+      "file": "server/services/agent-local-devices.js",
+      "name": "NONCE_TTL_SECONDS"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "AGENT_MODEL_STREAM_IDLE_TIMEOUT_MS"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "callModelJson"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "resolveAgentFirstResponseTimeoutMs"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "resolveAgentStreamIdleTimeoutMs"
+    },
+    {
+      "file": "server/services/agent-model.js",
+      "name": "withAgentModelConcurrency"
+    },
+    {
+      "file": "server/services/agent-network-policy.js",
+      "name": "DEFAULT_NETWORK_POLICY"
+    },
+    {
+      "file": "server/services/agent-os-isolation.js",
+      "name": "buildIsolationSpec"
+    },
+    {
+      "file": "server/services/agent-path-safety.js",
+      "name": "hasAlternateDataStream"
+    },
+    {
+      "file": "server/services/agent-path-safety.js",
+      "name": "hasTrailingDotOrSpace"
+    },
+    {
+      "file": "server/services/agent-path-safety.js",
+      "name": "pathError"
+    },
+    {
+      "file": "server/services/agent-path-safety.js",
+      "name": "WINDOWS_RESERVED_NAMES"
+    },
+    {
+      "file": "server/services/agent-policy.js",
+      "name": "normalizeAllowlist"
+    },
+    {
+      "file": "server/services/agent-policy.js",
+      "name": "normalizeModelReference"
+    },
+    {
+      "file": "server/services/agent-profile.js",
+      "name": "DEFAULT_AGENT_PROFILE"
+    },
+    {
+      "file": "server/services/agent-provider-envelope.js",
+      "name": "sanitizeProviderMessage"
+    },
+    {
+      "file": "server/services/agent-provider-envelope.js",
+      "name": "sanitizeProviderTool"
+    },
+    {
+      "file": "server/services/agent-releases.js",
+      "name": "scanInstalledPackage"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "DEFAULT_IDLE_TTL_MS"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "DEFAULT_LEASE_MS"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "DEFAULT_MAX_ENTRIES"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "normalizeResidencyRow"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "normalizeResidentKey"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "normalizeResidentState"
+    },
+    {
+      "file": "server/services/agent-residency.js",
+      "name": "RESIDENT_STATUSES"
+    },
+    {
+      "file": "server/services/agent-run-resources.js",
+      "name": "DEFAULT_CHILD_LIMIT"
+    },
+    {
+      "file": "server/services/agent-run-resources.js",
+      "name": "normalizeChildLimit"
+    },
+    {
+      "file": "server/services/agent-runtime-packs.js",
+      "name": "MAX_PACK_BYTES"
+    },
+    {
+      "file": "server/services/agent-runtime-packs.js",
+      "name": "normalizeRuntimePackManifest"
+    },
+    {
+      "file": "server/services/agent-runtime-packs.js",
+      "name": "PACK_TYPES"
+    },
+    {
+      "file": "server/services/agent-runtime/planner.js",
+      "name": "observationMessages"
+    },
+    {
+      "file": "server/services/agent-runtime/retry-policy.js",
+      "name": "INITIAL_RETRY_DELAY_MS"
+    },
+    {
+      "file": "server/services/agent-runtime/state-machine.js",
+      "name": "normalizeRunStatus"
+    },
+    {
+      "file": "server/services/agent-runtime/state-machine.js",
+      "name": "RUN_STATUSES"
+    },
+    {
+      "file": "server/services/agent-runtime/state-machine.js",
+      "name": "TRANSITIONS"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "actionSatisfies"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "assertSkillVersionAccess"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "normalizePermissionInput"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "SKILL_RELEASE_ACTIONS"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "SKILL_RELEASE_RESOURCE_TYPE"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "name": "SKILL_VERSION_RESOURCE_TYPE"
+    },
+    {
+      "file": "server/services/agent-skill-authoring.js",
+      "name": "getPublishedVersionForName"
+    },
+    {
+      "file": "server/services/agent-skill-breaker.js",
+      "name": "collectReleaseMetrics"
+    },
+    {
+      "file": "server/services/agent-skill-breaker.js",
+      "name": "DEFAULT_INTERVAL_MS"
+    },
+    {
+      "file": "server/services/agent-skill-breaker.js",
+      "name": "DEFAULT_WINDOW_MINUTES"
+    },
+    {
+      "file": "server/services/agent-skill-packages.js",
+      "name": "MAX_PACKAGE_BYTES"
+    },
+    {
+      "file": "server/services/agent-skill-packages.js",
+      "name": "MAX_PACKAGE_FILES"
+    },
+    {
+      "file": "server/services/agent-skill-packages.js",
+      "name": "MAX_UNPACKED_BYTES"
+    },
+    {
+      "file": "server/services/agent-skill-rollout.js",
+      "name": "DEFAULT_BREAKER_THRESHOLDS"
+    },
+    {
+      "file": "server/services/agent-skill-scope.js",
+      "name": "isSharedOwnerKey"
+    },
+    {
+      "file": "server/services/agent-skill-scope.js",
+      "name": "LEGACY_SCOPE_TO_RELEASE"
+    },
+    {
+      "file": "server/services/agent-skill-scope.js",
+      "name": "RELEASE_SCOPE_TO_LEGACY"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "fingerprintPublicKey"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "getEnvironmentSigningKey"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "getManagedActiveSigningKey"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "hasEnvironmentPrivateKey"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "KEYRING_VERSION"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "MAX_KEYRING_KEYS"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "normalizeKeyId"
+    },
+    {
+      "file": "server/services/agent-skill-signing-configuration.js",
+      "name": "parseManagedKeyring"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "buildSignaturePayload"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "DEFAULT_ALGORITHM"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "getSigningEnvelopeById"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "isSignatureRequired"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "normalizeSignatureForm"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "resolveOrganizationSigningKeyId"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "resolveOrganizationSigningPrivateKey"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "revokeSigningEnvelope"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "SIGNATURE_FORMS"
+    },
+    {
+      "file": "server/services/agent-skill-signing.js",
+      "name": "signingError"
+    },
+    {
+      "file": "server/services/agent-skill-source.js",
+      "name": "ALLOWED_FRONTMATTER_FIELDS"
+    },
+    {
+      "file": "server/services/agent-skill-source.js",
+      "name": "MAX_FRONTMATTER_BYTES"
+    },
+    {
+      "file": "server/services/agent-skill-source.js",
+      "name": "MAX_INSTRUCTIONS_BYTES"
+    },
+    {
+      "file": "server/services/agent-skill-source.js",
+      "name": "REJECTED_FRONTMATTER_FIELDS"
+    },
+    {
+      "file": "server/services/agent-skill-supply-chain.js",
+      "name": "EXECUTABLE_ENTRY_PATTERNS"
+    },
+    {
+      "file": "server/services/agent-skill-supply-chain.js",
+      "name": "LOCK_FILES"
+    },
+    {
+      "file": "server/services/agent-skill-supply-chain.js",
+      "name": "MAX_ENTRY_COMPRESSION_RATIO"
+    },
+    {
+      "file": "server/services/agent-skill-supply-chain.js",
+      "name": "NPM_LIFECYCLE_HOOKS"
+    },
+    {
+      "file": "server/services/agent-skill-supply-chain.js",
+      "name": "SENSITIVE_ENTRY_PATTERNS"
+    },
+    {
+      "file": "server/services/agent-skills.js",
+      "name": "registerAgentSkill"
+    },
+    {
+      "file": "server/services/agent-step-context.js",
+      "name": "AGENT_STEP_CONTEXT_SCHEMA_VERSION"
+    },
+    {
+      "file": "server/services/agent-step-context.js",
+      "name": "diffWorldState"
+    },
+    {
+      "file": "server/services/agent-step-context.js",
+      "name": "freezeDeep"
+    },
+    {
+      "file": "server/services/agent-step-context.js",
+      "name": "normalizeEntrypoint"
+    },
+    {
+      "file": "server/services/agent-step-context.js",
+      "name": "normalizeToolSnapshot"
+    },
+    {
+      "file": "server/services/agent-tenant-context.js",
+      "name": "TENANT_UNRESOLVED_CODE"
+    },
+    {
+      "file": "server/services/agent-tool-capabilities.js",
+      "name": "BUILTIN_TOOL_CAPABILITIES"
+    },
+    {
+      "file": "server/services/agent-tool-capabilities.js",
+      "name": "TOOL_PREFIX_CAPABILITIES"
+    },
+    {
+      "file": "server/services/agent-tool-execution-plan.js",
+      "name": "extractNetworkUrl"
+    },
+    {
+      "file": "server/services/agent-tool-execution-plan.js",
+      "name": "sandboxChoice"
+    },
+    {
+      "file": "server/services/agent-tool-reliability.js",
+      "name": "DEFAULT_WINDOW_DAYS"
+    },
+    {
+      "file": "server/services/agent-tool-reliability.js",
+      "name": "MIN_SAMPLE_COUNT"
+    },
+    {
+      "file": "server/services/agent-tool-reliability.js",
+      "name": "queryToolSignals"
+    },
+    {
+      "file": "server/services/agent-tool-scheduler.js",
+      "name": "DEFAULT_READ_CONCURRENCY"
+    },
+    {
+      "file": "server/services/agent-tools-workflow-nodes.js",
+      "name": "coerceWorkflowInput"
+    },
+    {
+      "file": "server/services/agent-tools.js",
+      "name": "executeAgentBrowser"
+    },
+    {
+      "file": "server/services/agent-tools.js",
+      "name": "executeAgentDelegate"
+    },
+    {
+      "file": "server/services/agent-trace-compiler.js",
+      "name": "extractSemanticSteps"
+    },
+    {
+      "file": "server/services/agent-trace-compiler.js",
+      "name": "parameterize"
+    },
+    {
+      "file": "server/services/agent-traces.js",
+      "name": "serializeTraceValue"
+    },
+    {
+      "file": "server/services/agent-triggers.js",
+      "name": "hashTriggerToken"
+    },
+    {
+      "file": "server/services/agent-triggers.js",
+      "name": "MAX_TRIGGERS_PER_USER"
+    },
+    {
+      "file": "server/services/agent-triggers.js",
+      "name": "pollFileTrigger"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "AGENT_STATUS_LABELS"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "APPROVAL_POLICIES"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "AUTO_STEPS_BY_RUN_MODE"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "DEFAULT_STEPS"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "defaultMaxStepsForRunMode"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "MAX_DAG_DEPENDENCIES"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "MAX_STEPS"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "MAX_STEPS_BY_RUN_MODE"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "maxStepsLimitForRunMode"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "normalizeDagWhen"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "normalizeScheduleFrequency"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "RUN_MODES"
+    },
+    {
+      "file": "server/services/agent-validators.js",
+      "name": "TOOL_POLICIES"
+    },
+    {
+      "file": "server/services/agent-workflow-dependencies.js",
+      "name": "BOUND_CREDENTIAL_PREFIX"
+    },
+    {
+      "file": "server/services/agent-workflow-dependencies.js",
+      "name": "MANAGED_CREDENTIAL_PREFIX"
+    },
+    {
+      "file": "server/services/agent-world-state-store.js",
+      "name": "determineFullRefreshReason"
+    },
+    {
+      "file": "server/services/agent-world-state-store.js",
+      "name": "FULL_REFRESH_REASONS"
+    },
+    {
+      "file": "server/services/agent-world-state-store.js",
+      "name": "getLatestWorldStateSnapshot"
+    },
+    {
+      "file": "server/services/agent-world-state-store.js",
+      "name": "normalizeRefreshReason"
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "name": "ensureAppSetting"
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "name": "getAppSettingRows"
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "name": "getAppSettingsMapAsync"
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "name": "isAppSettingsConflictTargetError"
+    },
+    {
+      "file": "server/services/builtin-mcp-common.js",
+      "name": "DEFAULT_MAX_MESSAGE_LENGTH"
+    },
+    {
+      "file": "server/services/builtin-mcp-common.js",
+      "name": "DEFAULT_REPORT_EXTENSIONS"
+    },
+    {
+      "file": "server/services/builtin-mcp-common.js",
+      "name": "normalizeImConfig"
+    },
+    {
+      "file": "server/services/builtin-mcp-common.js",
+      "name": "normalizeServiceType"
+    },
+    {
+      "file": "server/services/builtin-mcp-common.js",
+      "name": "SUPPORTED_REPORT_EXTENSIONS"
+    },
+    {
+      "file": "server/services/builtin-mcp-format.js",
+      "name": "findJsonCandidate"
+    },
+    {
+      "file": "server/services/builtin-mcp-im.js",
+      "name": "renderTemplateValue"
+    },
+    {
+      "file": "server/services/builtin-mcp-reports.js",
+      "name": "listReportFiles"
+    },
+    {
+      "file": "server/services/builtin-mcp-reports.js",
+      "name": "queryReportTable"
+    },
+    {
+      "file": "server/services/builtin-mcp-reports.js",
+      "name": "readTextPreview"
+    },
+    {
+      "file": "server/services/builtin-mcp-reports.js",
+      "name": "readWorkbookRows"
+    },
+    {
+      "file": "server/services/builtin-mcp-reports.js",
+      "name": "resolveReportFile"
+    },
+    {
+      "file": "server/services/builtin-mcp-visualization.js",
+      "name": "buildEchartsOption"
+    },
+    {
+      "file": "server/services/builtin-mcp-visualization.js",
+      "name": "chartBlockMarkdown"
+    },
+    {
+      "file": "server/services/builtin-mcp-visualization.js",
+      "name": "composeReportSection"
+    },
+    {
+      "file": "server/services/builtin-mcp-visualization.js",
+      "name": "validateReportSections"
+    },
+    {
+      "file": "server/services/capability-market.js",
+      "name": "getCapabilityPackage"
+    },
+    {
+      "file": "server/services/capability-market.js",
+      "name": "listCapabilityPackages"
+    },
+    {
+      "file": "server/services/capability-market.js",
+      "name": "setCapabilityPackageStatus"
+    },
+    {
+      "file": "server/services/capability-market.js",
+      "name": "syncCapabilityPackages"
+    },
+    {
+      "file": "server/services/chat-agent-bridge.js",
+      "name": "CHAT_AGENT_BRIDGE_VERSION"
+    },
+    {
+      "file": "server/services/chat-agent-bridge.js",
+      "name": "CHAT_AGENT_HISTORY_LIMIT"
+    },
+    {
+      "file": "server/services/chat-agent-bridge.js",
+      "name": "getChatBridgeMetadata"
+    },
+    {
+      "file": "server/services/chat-agent-bridge.js",
+      "name": "normalizeChatContent"
+    },
+    {
+      "file": "server/services/chat-context-assembler.js",
+      "name": "buildMcpFollowupInstruction"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "appendNoThinkDirective"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "appendNoThinkToContent"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "chartSpecToMarkdown"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "contentIncludesRenderableChart"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "estimateVisibleAnswerTokensForSpeed"
+    },
+    {
+      "file": "server/services/chat-helpers.js",
+      "name": "serializeChartSpec"
+    },
+    {
+      "file": "server/services/chat-title.js",
+      "name": "generateTitle"
+    },
+    {
+      "file": "server/services/chat-title.js",
+      "name": "stripTitleSourceText"
+    },
+    {
+      "file": "server/services/context-budget.js",
+      "name": "estimateContentTokens"
+    },
+    {
+      "file": "server/services/cron-expression.js",
+      "name": "CRON_EXPRESSION_MAX_LENGTH"
+    },
+    {
+      "file": "server/services/data-analysis/chart-summary.js",
+      "name": "buildChartOption"
+    },
+    {
+      "file": "server/services/data-analysis/cleaning.js",
+      "name": "CLEANING_OPERATIONS"
+    },
+    {
+      "file": "server/services/data-analysis/cleaning.js",
+      "name": "RULE_LABELS"
+    },
+    {
+      "file": "server/services/data-analysis/datasets.js",
+      "name": "purgeDatasetArtifacts"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-analysis.js",
+      "name": "SEMANTIC_BATCH_STATUS"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-analysis.js",
+      "name": "SEMANTIC_JOB_STATUS"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-analysis.js",
+      "name": "triggerSemanticAnalysisWorker"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-batching.js",
+      "name": "DEFAULT_BATCH_CONCURRENCY"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-batching.js",
+      "name": "MAX_BATCH_CONCURRENCY"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-batching.js",
+      "name": "MAX_BATCH_SEGMENTS"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-batching.js",
+      "name": "MAX_BATCH_TOKEN_BUDGET"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-quota.js",
+      "name": "getInflightQuota"
+    },
+    {
+      "file": "server/services/data-analysis/semantic-quota.js",
+      "name": "reserveInflightQuota"
+    },
+    {
+      "file": "server/services/data-analysis/shared.js",
+      "name": "DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT"
+    },
+    {
+      "file": "server/services/data-analysis/shared.js",
+      "name": "isSensitiveAnalysisField"
+    },
+    {
+      "file": "server/services/data-analysis/shared.js",
+      "name": "redactAnalysisValue"
+    },
+    {
+      "file": "server/services/database-mcp/connection-builders.js",
+      "name": "allowedSqliteRoots"
+    },
+    {
+      "file": "server/services/database-mcp/connection-policy.js",
+      "name": "databaseOutboundOptions"
+    },
+    {
+      "file": "server/services/database-mcp/connection-policy.js",
+      "name": "databaseSafeLookup"
+    },
+    {
+      "file": "server/services/database-mcp/connection-policy.js",
+      "name": "parseOptions"
+    },
+    {
+      "file": "server/services/database-mcp/connection-policy.js",
+      "name": "splitPolicyList"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "allowedFieldsForTable"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "assertSafeIdentifier"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "buildQualifiedTableName"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "defaultSqlAlias"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "extractSelectFieldRefs"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "extractSelectFields"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "extractSqlTableRefs"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "extractSqlTables"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "getColumnNameFromRow"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "getTableNameFromRow"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "hasFieldAllowlist"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "hasTableAllowlist"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "isSensitiveField"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "normalizeSqlAlias"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "quoteSqlIdentifier"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "quoteSqlIdentifierPart"
+    },
+    {
+      "file": "server/services/database-mcp/sql-governance.js",
+      "name": "splitTopLevelCsv"
+    },
+    {
+      "file": "server/services/deployment-profile.js",
+      "name": "getSharedStorageLayout"
+    },
+    {
+      "file": "server/services/deployment-profile.js",
+      "name": "isDeploymentReadinessRequired"
+    },
+    {
+      "file": "server/services/deployment-providers.js",
+      "name": "PROVIDER_REGISTRY"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "ALIGNMENTS"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "BLOCK_TYPES"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "DOC_TYPE_RULES"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "GENERAL_PAGE_DEFAULT"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "IR_VERSION"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "MAX_BLOCKS"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "MAX_TABLE_CELLS"
+    },
+    {
+      "file": "server/services/document-ir.js",
+      "name": "SECURITY_LEVELS"
+    },
+    {
+      "file": "server/services/document-processing/constants.js",
+      "name": "OFFICE_EXTENSIONS"
+    },
+    {
+      "file": "server/services/document-processing/constants.js",
+      "name": "PDF_EXTENSIONS"
+    },
+    {
+      "file": "server/services/document-processing/constants.js",
+      "name": "TEXT_LIKE_EXTENSIONS"
+    },
+    {
+      "file": "server/services/document-processing/exporters/index.js",
+      "name": "buildHtml"
+    },
+    {
+      "file": "server/services/document-processing/exporters/index.js",
+      "name": "buildJson"
+    },
+    {
+      "file": "server/services/document-processing/exporters/index.js",
+      "name": "buildMarkdown"
+    },
+    {
+      "file": "server/services/document-processing/exporters/index.js",
+      "name": "outputTypeMeta"
+    },
+    {
+      "file": "server/services/document-processing/files.js",
+      "name": "detectDocumentKind"
+    },
+    {
+      "file": "server/services/document-processing/jobs.js",
+      "name": "enqueueJob"
+    },
+    {
+      "file": "server/services/document-processing/jobs.js",
+      "name": "processJob"
+    },
+    {
+      "file": "server/services/document-processing/ocr/adapters/http.js",
+      "name": "getMaxImageBytes"
+    },
+    {
+      "file": "server/services/document-processing/ocr/adapters/http.js",
+      "name": "getServiceUrl"
+    },
+    {
+      "file": "server/services/document-processing/ocr/adapters/http.js",
+      "name": "normalizeHttpError"
+    },
+    {
+      "file": "server/services/document-processing/ocr/adapters/shared.js",
+      "name": "normalizeBlock"
+    },
+    {
+      "file": "server/services/document-processing/paths.js",
+      "name": "ensureDocumentProcessingDirs"
+    },
+    {
+      "file": "server/services/document-processing/paths.js",
+      "name": "fileExists"
+    },
+    {
+      "file": "server/services/document-processing/pdf/index.js",
+      "name": "parsePageOrder"
+    },
+    {
+      "file": "server/services/document-processing/pdf/index.js",
+      "name": "parsePageSelection"
+    },
+    {
+      "file": "server/services/document-processing/text-extraction.js",
+      "name": "isImageDocument"
+    },
+    {
+      "file": "server/services/document-processing/text-extraction.js",
+      "name": "ocrImageFile"
+    },
+    {
+      "file": "server/services/document-processing/text-extraction.js",
+      "name": "ocrPdfFile"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "ALLOWED_FONT_EXTENSIONS"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "DEFAULT_FONT_DIR"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "FONT_ENV_KEYS"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "FONT_FACE_ENV_KEY"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "getCjkFontFaceName"
+    },
+    {
+      "file": "server/services/document-rendering/cjk-fonts.js",
+      "name": "MAX_FONT_BYTES"
+    },
+    {
+      "file": "server/services/document-rendering/docx-package.js",
+      "name": "buildDeterministicZip"
+    },
+    {
+      "file": "server/services/document-rendering/docx-package.js",
+      "name": "CORE_PROPERTIES_PATH"
+    },
+    {
+      "file": "server/services/document-rendering/docx-package.js",
+      "name": "FIXED_DOS_DATE"
+    },
+    {
+      "file": "server/services/document-rendering/docx-package.js",
+      "name": "FIXED_DOS_TIME"
+    },
+    {
+      "file": "server/services/document-rendering/docx-package.js",
+      "name": "orderEntries"
+    },
+    {
+      "file": "server/services/document-rendering/docx-renderer.js",
+      "name": "detectImageSize"
+    },
+    {
+      "file": "server/services/document-rendering/docx-renderer.js",
+      "name": "detectImageType"
+    },
+    {
+      "file": "server/services/document-rendering/docx-renderer.js",
+      "name": "distributeColumnWidths"
+    },
+    {
+      "file": "server/services/document-rendering/index.js",
+      "name": "normalizeFormat"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "GENERAL_PROFILE"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "LINE_SPACING_BASE"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "MM_PER_INCH"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "OFFICIAL_PROFILE"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "OFFICIAL_RED"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "PAGE_SIZE_TWIP"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "PIXEL_PER_INCH"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "RED_LINE_BORDER"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "TWIP_PER_INCH"
+    },
+    {
+      "file": "server/services/document-rendering/official-styles.js",
+      "name": "VERSION_RECORD_BORDER"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "CJK_PATTERN"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "isCjkChar"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "MM_TO_PT"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "NO_LINE_END"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "NO_LINE_START"
+    },
+    {
+      "file": "server/services/document-rendering/pdf-text-layout.js",
+      "name": "PAGE_SIZE_PT"
+    },
+    {
+      "file": "server/services/document-rendering/xlsx-renderer.js",
+      "name": "NOTES_SHEET_HEADER"
+    },
+    {
+      "file": "server/services/document-rendering/xlsx-renderer.js",
+      "name": "NOTES_SHEET_NAME"
+    },
+    {
+      "file": "server/services/enterprise-access.js",
+      "name": "listResourcePermissions"
+    },
+    {
+      "file": "server/services/enterprise-access.js",
+      "name": "RESOURCE_ACTIONS"
+    },
+    {
+      "file": "server/services/host-classifier.js",
+      "name": "addHostAlias"
+    },
+    {
+      "file": "server/services/host-classifier.js",
+      "name": "addResolvedHostAliases"
+    },
+    {
+      "file": "server/services/host-classifier.js",
+      "name": "isLikelyContainerRuntime"
+    },
+    {
+      "file": "server/services/knowledge-graph-extraction.js",
+      "name": "inferEntityType"
+    },
+    {
+      "file": "server/services/knowledge-graph-extraction.js",
+      "name": "isUsefulEntityName"
+    },
+    {
+      "file": "server/services/knowledge-graph-extraction.js",
+      "name": "relationPatternsForDocType"
+    },
+    {
+      "file": "server/services/knowledge-graph.js",
+      "name": "findQueryEntities"
+    },
+    {
+      "file": "server/services/knowledge-graph.js",
+      "name": "formatGraphContext"
+    },
+    {
+      "file": "server/services/knowledge-graph.js",
+      "name": "GRAPH_EXTRACTION_MODE"
+    },
+    {
+      "file": "server/services/knowledge-graph.js",
+      "name": "GRAPH_QUALITY_NOTICE"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "BROWSER_ID_RE"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "LOCAL_BROWSER_TOOL_NAMES"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "localBrowserError"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "normalizeAllowedOrigins"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "normalizeBrowserId"
+    },
+    {
+      "file": "server/services/local-browser-connector-tools.js",
+      "name": "normalizeGrantedBrowsers"
+    },
+    {
+      "file": "server/services/local-device-bridge.js",
+      "name": "listBridgeLocalDeviceMcpTools"
+    },
+    {
+      "file": "server/services/local-device-mcp.js",
+      "name": "isLocalDeviceExecutorEnabled"
+    },
+    {
+      "file": "server/services/long-term-memory/index.js",
+      "name": "enqueueMemoryExtractionJob"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "buildCandidate"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "classifyLine"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "extractModelMessageText"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "normalizeExtractorCandidates"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "parseExtractorJson"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-extraction.js",
+      "name": "splitMeaningfulLines"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-merge.js",
+      "name": "characterNgramDice"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-merge.js",
+      "name": "memoryPairSimilarity"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-merge.js",
+      "name": "tokenSetForSimilarity"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-utils.js",
+      "name": "MAX_MEMORY_CONTENT_CHARS"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "buildPgDumpEnvironment"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "cleanupSoftDeletedStorageJob"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getApiCallLogRetentionDays"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getAuditLogRetentionDays"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getBackupDir"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getBackupMaxVersions"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getBackupRetentionDays"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getPgDumpBin"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getPgDumpTimeoutMs"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "getStorageGcRetentionDays"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "runPgDump"
+    },
+    {
+      "file": "server/services/maintenance.js",
+      "name": "sweepAgentResidency"
+    },
+    {
+      "file": "server/services/mcp-client.js",
+      "name": "listPersistentLocalConnectorTools"
+    },
+    {
+      "file": "server/services/mcp-client.js",
+      "name": "normalizeServerRow"
+    },
+    {
+      "file": "server/services/mcp-conformance.js",
+      "name": "assertJsonRpcEnvelope"
+    },
+    {
+      "file": "server/services/mcp-conformance.js",
+      "name": "MCP_PROTOCOL_VERSION"
+    },
+    {
+      "file": "server/services/memory-config.js",
+      "name": "MAX_MEMORY_THRESHOLD"
+    },
+    {
+      "file": "server/services/memory-config.js",
+      "name": "MIN_MEMORY_THRESHOLD"
+    },
+    {
+      "file": "server/services/memory-governance.js",
+      "name": "buildMemoryGovernanceContext"
+    },
+    {
+      "file": "server/services/memory-governance.js",
+      "name": "DEFAULT_MEMORY_POLICY"
+    },
+    {
+      "file": "server/services/memory-governance.js",
+      "name": "evaluateMemoryCapture"
+    },
+    {
+      "file": "server/services/memory-governance.js",
+      "name": "MEMORY_CATEGORIES"
+    },
+    {
+      "file": "server/services/memory-governance.js",
+      "name": "MEMORY_POLICY_KEY"
+    },
+    {
+      "file": "server/services/model-adapter.js",
+      "name": "isLocalDevUrl"
+    },
+    {
+      "file": "server/services/model-router.js",
+      "name": "DEFAULT_STRATEGY"
+    },
+    {
+      "file": "server/services/model-router.js",
+      "name": "STRATEGIES"
+    },
+    {
+      "file": "server/services/model-tool-call-capabilities.js",
+      "name": "normalizeToolCallProbeStatus"
+    },
+    {
+      "file": "server/services/model-tool-call-capabilities.js",
+      "name": "TOOL_CALL_MODES"
+    },
+    {
+      "file": "server/services/model-tool-call-capabilities.js",
+      "name": "TOOL_CALL_PROBE_STATUSES"
+    },
+    {
+      "file": "server/services/models.js",
+      "name": "getAccessibleModel"
+    },
+    {
+      "file": "server/services/models.js",
+      "name": "MAX_MODEL_TOKEN_LIMIT"
+    },
+    {
+      "file": "server/services/models.js",
+      "name": "modelListFields"
+    },
+    {
+      "file": "server/services/official-writing-documents.js",
+      "name": "MAX_STATE_BYTES"
+    },
+    {
+      "file": "server/services/official-writing-documents.js",
+      "name": "normalizeClientId"
+    },
+    {
+      "file": "server/services/official-writing-documents.js",
+      "name": "normalizeState"
+    },
+    {
+      "file": "server/services/official-writing.js",
+      "name": "OFFICIAL_WRITING_SELECTION_INSTRUCTIONS"
+    },
+    {
+      "file": "server/services/password-hasher.js",
+      "name": "MAX_HASH_WORKERS"
+    },
+    {
+      "file": "server/services/provider-usage-calibration.js",
+      "name": "normalizeCalibrationRow"
+    },
+    {
+      "file": "server/services/provider-usage-calibration.js",
+      "name": "protocolFromUsage"
+    },
+    {
+      "file": "server/services/rag-cache.js",
+      "name": "normalizeCacheScope"
+    },
+    {
+      "file": "server/services/rag-documents.js",
+      "name": "getKnowledgeCollectionForUser"
+    },
+    {
+      "file": "server/services/rag-documents.js",
+      "name": "markKnowledgeDocumentError"
+    },
+    {
+      "file": "server/services/rag-documents.js",
+      "name": "markKnowledgeDocumentProcessing"
+    },
+    {
+      "file": "server/services/rag-documents.js",
+      "name": "markKnowledgeDocumentReady"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "embeddingResponseError"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "formatDurationMs"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "getEmbeddingBatchConfig"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "getEmbeddingMaxConcurrency"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "MAX_EMBEDDING_REQUEST_TIMEOUT_MS"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "normalizeVectorValues"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "usesUserEmbeddingConfig"
+    },
+    {
+      "file": "server/services/rag-index/embedding-client.js",
+      "name": "wrapEmbeddingRequestError"
+    },
+    {
+      "file": "server/services/rag-index/index.js",
+      "name": "normalizeRetrievalScope"
+    },
+    {
+      "file": "server/services/rag-operations-observability.js",
+      "name": "getEmbeddingLatencyTrend"
+    },
+    {
+      "file": "server/services/rag-operations-observability.js",
+      "name": "normalizeMetricStatus"
+    },
+    {
+      "file": "server/services/rag-tokenizer.js",
+      "name": "buildCjkNgrams"
+    },
+    {
+      "file": "server/services/rag-tokenizer.js",
+      "name": "buildSymbolicSearchTerms"
+    },
+    {
+      "file": "server/services/registration-settings.js",
+      "name": "PUBLIC_REGISTRATION_SETTING_KEY"
+    },
+    {
+      "file": "server/services/regulations/catalog.js",
+      "name": "countRegulationArticlesByVersionId"
+    },
+    {
+      "file": "server/services/regulations/links.js",
+      "name": "classifyCiteRelation"
+    },
+    {
+      "file": "server/services/regulations/links.js",
+      "name": "parseCrossLinkLabel"
+    },
+    {
+      "file": "server/services/regulations/parser.js",
+      "name": "deriveArticleTitle"
+    },
+    {
+      "file": "server/services/regulations/parser.js",
+      "name": "detectRegulationHeadingLine"
+    },
+    {
+      "file": "server/services/regulations/parser.js",
+      "name": "detectRegulationStructure"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "buildIsoDate"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "buildRegulationSourcePath"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "buildVersionLabelFromDate"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "deriveRegulationAliases"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "ensureRegulationsSourceRoot"
+    },
+    {
+      "file": "server/services/regulations/shared.js",
+      "name": "regulationsSourceRoot"
+    },
+    {
+      "file": "server/services/runtime-diagnostics.js",
+      "name": "getEventLoopDelay"
+    },
+    {
+      "file": "server/services/runtime-diagnostics.js",
+      "name": "getHeapSnapshot"
+    },
+    {
+      "file": "server/services/runtime-diagnostics.js",
+      "name": "resetEventLoopDelay"
+    },
+    {
+      "file": "server/services/runtime-diagnostics.js",
+      "name": "resolveWatchdogMs"
+    },
+    {
+      "file": "server/services/runtime-settings.js",
+      "name": "clearRuntimeConfigCache"
+    },
+    {
+      "file": "server/services/runtime-settings.js",
+      "name": "getRuntimeSettingValue"
+    },
+    {
+      "file": "server/services/runtime-settings.js",
+      "name": "saveRuntimeConfig"
+    },
+    {
+      "file": "server/services/sse-response.js",
+      "name": "DEFAULT_SSE_HEARTBEAT_MS"
+    },
+    {
+      "file": "server/services/sse-response.js",
+      "name": "normalizeSseHeartbeatMs"
+    },
+    {
+      "file": "server/services/stealth-service.js",
+      "name": "STEALTH_SETTING_ENABLED_KEY"
+    },
+    {
+      "file": "server/services/stealth-service.js",
+      "name": "STEALTH_SETTING_SECRET_KEY"
+    },
+    {
+      "file": "server/services/storage-gc.js",
+      "name": "normalizeRetentionDays"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkDatabase"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkDatabaseAsync"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkDeployment"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkDiskUsage"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkMemory"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "checkWriteQueue"
+    },
+    {
+      "file": "server/services/system-health.js",
+      "name": "getPublicSystemHealthSnapshot"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "isOwnUnitOnly"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "matchesAllowedUserIds"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "MAX_ALLOWED_UNITS_COUNT"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "MAX_ALLOWED_UNITS_LENGTH"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "MAX_ALLOWED_USER_IDS_COUNT"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "SHARE_SCOPE_PERSONAL"
+    },
+    {
+      "file": "server/services/unit-visibility.js",
+      "name": "SHARE_SCOPE_SHARED"
+    },
+    {
+      "file": "server/services/user-identity.js",
+      "name": "allocateDeletedUsername"
+    },
+    {
+      "file": "server/services/user-identity.js",
+      "name": "DELETED_USERNAME_PREFIX"
+    },
+    {
+      "file": "server/services/user-settings.js",
+      "name": "getUserSettingRow"
+    },
+    {
+      "file": "server/services/user-settings.js",
+      "name": "getUserSettingRowAsync"
+    },
+    {
+      "file": "server/services/workflow-credentials.js",
+      "name": "formatCredential"
+    },
+    {
+      "file": "server/services/workflow-credentials.js",
+      "name": "MAX_CREDENTIALS_PER_USER"
+    },
+    {
+      "file": "server/services/workflow-credentials.js",
+      "name": "ROTATION_GRACE_MS"
+    },
+    {
+      "file": "server/streaming.js",
+      "name": "classifyProviderStreamEvent"
+    },
+    {
+      "file": "server/version.js",
+      "name": "extractAppVersionFromChangelog"
+    }
+  ]
+}

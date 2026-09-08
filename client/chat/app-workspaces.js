@@ -649,8 +649,8 @@ document.addEventListener('click', (event) => {
     if (!action) return;
     event.preventDefault();
     const tool = action.dataset.chatToolStatusAction;
-    if (tool === 'rag') window.Pivot.legacy.openKnowledgeWorkbench?.();
-    if (tool === 'mcp') window.Pivot.legacy.openMcpWorkbench?.();
+    if (tool === 'rag') window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
+    if (tool === 'mcp') window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
 });
 document.addEventListener('change', async (event) => {
     if (event.target?.id === 'chat-rag-collection-scope') {
@@ -704,13 +704,17 @@ const WORKSPACE_SCRIPT_GROUPS = {
     ],
     mcp: [
         '/chat/tool-policy.js', '/chat/mcp-workbench-common.js', '/chat/mcp-workbench-local-auth.js',
-        '/chat/mcp-workbench-credentials.js', '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-main.js'
+        '/chat/mcp-workbench-credentials.js', '/chat/agent-automation-resources.js',
+        '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-main.js'
     ]
 };
 
 const workspaceLoadPromises = {};
 
 async function ensureWorkspaceScripts(name) {
+    const ensureMarkup = window.Pivot.moduleApi?.('workspaces.templateLoader')?.ensureWorkspaceMarkup;
+    if (typeof ensureMarkup !== 'function') throw new Error('工作区模板加载器尚未就绪');
+    await ensureMarkup(name);
     if (!WORKSPACE_SCRIPT_GROUPS[name]) return;
     if (!workspaceLoadPromises[name]) {
         workspaceLoadPromises[name] = window.Pivot?.loadScripts
@@ -752,10 +756,10 @@ window.Pivot.legacy.getReturnWorkspace = function() {
     return ['personal', 'chat'].includes(stored) ? stored : 'personal';
 };
 
-window.Pivot.legacy.returnFromWorkspace = function(fallback = 'personal') {
+function returnFromWorkspace(fallback = 'personal') {
     const target = window.Pivot.legacy.getReturnWorkspace?.() || fallback;
-    return window.Pivot.legacy.showMainWorkspace?.(target);
-};
+    return showMainWorkspace(target);
+}
 
 window.Pivot.legacy.persistSettingsTab = function(tab) {
     if (tab) setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
@@ -783,7 +787,7 @@ window.Pivot.legacy.getStoredPrintWorkspaceSession = function() {
     return getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 };
 
-window.Pivot.legacy.showMainWorkspace = function(view = 'personal') {
+function showMainWorkspace(view = 'personal') {
     const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
     const current = document.body?.dataset.activeWorkspace;
     if (['personal', 'chat'].includes(target)) {
@@ -832,11 +836,11 @@ window.Pivot.legacy.showMainWorkspace = function(view = 'personal') {
     }
     if (RESTORABLE_WORKSPACES.has(target)) setStoredSessionValue(MAIN_WORKSPACE_STORAGE_KEY, target);
     if (target === 'manual') window.Pivot.legacy.ensureManualFrameLoaded?.();
-    if (target === 'personal') window.Pivot.legacy.loadPersonalWorkbench?.({ silent: true });
+    if (target === 'personal') window.Pivot.moduleApi?.('workspaces.personal')?.loadPersonalWorkbench?.({ silent: true });
     if (target !== 'agent' && target !== 'agent-dag') window.Pivot.legacy.updateAgentAutoRefresh?.();
     if (target === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     return target;
-};
+}
 
 let settingsWorkspaceScaleObserver = null, settingsWorkspaceScaleRaf = 0;
 let lastObservedSettingsWidth = 0, lastObservedSettingsHeight = 0;
@@ -904,7 +908,8 @@ function createLazyWorkspaceEntrypoint(group, functionName) {
     const loadedImplementation = typeof window.Pivot.legacy[functionName] === 'function' ? window.Pivot.legacy[functionName] : null;
     const lazyEntrypoint = async (...args) => {
         await ensureWorkspaceScripts(group);
-        const entrypoint = window.Pivot.legacy[functionName];
+        const entrypoint = window.Pivot.moduleApi?.('workspaces.implementations')?.[functionName]
+            || window.Pivot.legacy[functionName];
         const implementation = entrypoint === lazyEntrypoint ? loadedImplementation : entrypoint;
         if (typeof implementation !== 'function') {
             throw new Error(`${group} 工作区入口未就绪`);
@@ -914,25 +919,38 @@ function createLazyWorkspaceEntrypoint(group, functionName) {
     return lazyEntrypoint;
 }
 
+async function openPersonalWorkbenchEntrypoint(...args) {
+    const implementation = window.Pivot.moduleApi?.('workspaces.implementations')?.openPersonalWorkbench;
+    if (typeof implementation !== 'function') throw new Error('个人工作台入口未就绪');
+    return implementation(...args);
+}
 const openAppsWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
-window.Pivot.legacy.openAppsWorkbench = openAppsWorkbenchEntrypoint;
-window.Pivot.legacy.openAgentWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
-window.Pivot.legacy.openAgentDagWorkbench = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
-window.Pivot.legacy.openKnowledgeWorkbench = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
-window.Pivot.legacy.openMcpWorkbench = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
-window.Pivot?.exposeModule?.('workspaces.apps', {
-    openAppsWorkbench: openAppsWorkbenchEntrypoint
+const openAgentWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
+const openAgentDagWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
+const openKnowledgeWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
+const openMcpWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
+const openAdminPanelEntrypoint = createLazyWorkspaceEntrypoint('settings', 'openAdminPanel');
+window.Pivot?.exposeModule?.('workspaces.navigation', {
+    showMainWorkspace,
+    returnFromWorkspace,
+    openPersonalWorkbench: openPersonalWorkbenchEntrypoint,
+    openAppsWorkbench: openAppsWorkbenchEntrypoint,
+    openAgentWorkbench: openAgentWorkbenchEntrypoint,
+    openAgentDagWorkbench: openAgentDagWorkbenchEntrypoint,
+    openKnowledgeWorkbench: openKnowledgeWorkbenchEntrypoint,
+    openMcpWorkbench: openMcpWorkbenchEntrypoint,
+    openAdminPanel: openAdminPanelEntrypoint
 });
 
-const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) window.Pivot.legacy.returnFromWorkspace?.(); };
+const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) returnFromWorkspace(); };
 window.Pivot.legacy.closeAgentWorkbench = closeWs('agent');
 window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');
 window.Pivot.legacy.closeMcpWorkbench = closeWs('mcp');
-window.Pivot.legacy.closePersonalWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('chat');
+window.Pivot.legacy.closePersonalWorkbench = () => showMainWorkspace('chat');
 
 window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'personal';
-    const openers = { settings: () => window.Pivot.legacy.openAdminPanel?.({ restore: true }), personal: () => window.Pivot.legacy.openPersonalWorkbench?.(), apps: () => window.Pivot.legacy.openAppsWorkbench?.(), knowledge: () => window.Pivot.legacy.openKnowledgeWorkbench?.(), mcp: () => window.Pivot.legacy.openMcpWorkbench?.(), 'agent-dag': () => window.Pivot.legacy.openAgentDagWorkbench?.(), agent: () => window.Pivot.legacy.openAgentWorkbench?.(), manual: () => window.Pivot.legacy.showMainWorkspace?.('manual') };
+    const openers = { settings: () => openAdminPanelEntrypoint({ restore: true }), personal: () => openPersonalWorkbenchEntrypoint(), apps: () => openAppsWorkbenchEntrypoint(), knowledge: () => openKnowledgeWorkbenchEntrypoint(), mcp: () => openMcpWorkbenchEntrypoint(), 'agent-dag': () => openAgentDagWorkbenchEntrypoint(), agent: () => openAgentWorkbenchEntrypoint(), manual: () => showMainWorkspace('manual') };
     if (openers[view]) return openers[view]();
     if (view === 'print' && window.Pivot.legacy.openPrintWorkbench) {
         const sessionId = window.Pivot.legacy.getStoredPrintWorkspaceSession?.() || window.Pivot.legacy.getStoredActiveChatSession?.();
@@ -941,9 +959,11 @@ window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
     if (view === 'chat') {
         const sessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
         if (sessionId && window.Pivot.legacy.selectSession) return window.Pivot.legacy.selectSession(sessionId, undefined, { restore: true });
-        return window.Pivot.legacy.showMainWorkspace?.('chat');
+        return showMainWorkspace('chat');
     }
-    return window.Pivot.legacy.openPersonalWorkbench ? window.Pivot.legacy.openPersonalWorkbench() : window.Pivot.legacy.showMainWorkspace?.('personal');
+    return window.Pivot.moduleApi?.('workspaces.implementations')?.openPersonalWorkbench
+        ? openPersonalWorkbenchEntrypoint()
+        : showMainWorkspace('personal');
 };
 
 window.Pivot.legacy.ensureManualFrameLoaded = () => {
@@ -952,8 +972,8 @@ window.Pivot.legacy.ensureManualFrameLoaded = () => {
     frame.setAttribute('src', frame.dataset.src || '/manual?embed=1');
 };
 
-window.Pivot.legacy.openManualWorkbench = () => window.Pivot.legacy.showMainWorkspace?.('manual');
-window.Pivot.legacy.closeManualWorkbench = () => window.Pivot.legacy.returnFromWorkspace?.();
+window.Pivot.legacy.openManualWorkbench = () => showMainWorkspace('manual');
+window.Pivot.legacy.closeManualWorkbench = () => returnFromWorkspace();
 
 // 会话打印 / 导出 PDF 工作区：在主工作区内通过 iframe 加载嵌入视图
 window.Pivot.legacy.openPrintWorkbench = (sessionId) => {
@@ -964,6 +984,6 @@ window.Pivot.legacy.openPrintWorkbench = (sessionId) => {
         const nextSrc = `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/print?embed=1`;
         if (frame.getAttribute('src') !== nextSrc) frame.setAttribute('src', nextSrc);
     }
-    window.Pivot.legacy.showMainWorkspace?.('print');
+    showMainWorkspace('print');
 };
-window.Pivot.legacy.closePrintWorkbench = () => window.Pivot.legacy.returnFromWorkspace?.();
+window.Pivot.legacy.closePrintWorkbench = () => returnFromWorkspace();

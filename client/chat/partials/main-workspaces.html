@@ -9,18 +9,17 @@
 <!-- @include partials/workspaces/chat-shell.html -->
 
 <!-- @include partials/workspaces/personal.html -->
-<!-- @include partials/workspaces/apps.html -->
 
-<!-- @include partials/workspaces/agent.html -->
-
-<!-- @include partials/workspaces/agent-dag.html -->
-
-<!-- @include partials/workspaces/knowledge.html -->
-
-<!-- @include partials/workspaces/mcp.html -->
+<!-- 除默认聊天/个人工作台和轻量 iframe 容器外，工作区模板均在首次打开时按需请求，
+     避免首屏携带大体积隐藏 DOM。 -->
+<div id="workspace-lazy-slot-apps" data-workspace-lazy-slot="apps"></div>
+<div id="workspace-lazy-slot-agent" data-workspace-lazy-slot="agent"></div>
+<div id="workspace-lazy-slot-agent-dag" data-workspace-lazy-slot="agent-dag"></div>
+<div id="workspace-lazy-slot-knowledge" data-workspace-lazy-slot="knowledge"></div>
+<div id="workspace-lazy-slot-mcp" data-workspace-lazy-slot="mcp"></div>
 
 <!-- @include partials/workspaces/manual.html -->
 
 <!-- @include partials/workspaces/print.html -->
 
-<!-- @include partials/workspaces/settings.html -->
+<div id="workspace-lazy-slot-settings" data-workspace-lazy-slot="settings"></div>

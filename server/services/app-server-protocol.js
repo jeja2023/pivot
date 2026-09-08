@@ -1,7 +1,4 @@
-const {
-    cancelAgentRun,
-    createAgentRun
-} = require('./agent-runtime');
+const { runs: { cancelAgentRun, createAgentRun } } = require('./agent-runtime');
 const { replayAgentEventsForUser } = require('./agent-event-log');
 const { sendAgentControlMessage } = require('./agent-control');
 

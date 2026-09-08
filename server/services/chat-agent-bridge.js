@@ -1,4 +1,4 @@
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { estimateTokens } = require('../llm');
 const { getRunnableModelForUserAsync } = require('./models');
@@ -13,6 +13,7 @@ const { summarizeRagContextSources } = require('./chat-rag-context');
 const { getModelContextBudget } = require('./context-budget');
 const { MAX_CHAT_AGENT_GOAL_LENGTH, parseJsonObject } = require('./agent-validators');
 const { logger } = require('../logger');
+const { updateAgentRunMetadataWithRetry } = require('./agent-run-metadata-patch');
 
 const CHAT_AGENT_BRIDGE_VERSION = 1;
 const CHAT_AGENT_HISTORY_LIMIT = 24;
@@ -169,20 +170,15 @@ function isChatAgentRun(run) {
     return Boolean(getChatBridgeMetadata(run));
 }
 
-async function markChatBridgeMessage(runId, metadata, messageId) {
-    const nextMetadata = {
+async function markChatBridgeMessage(runId, _metadata, messageId) {
+    await updateAgentRunMetadataWithRetry(runId, metadata => ({
         ...metadata,
         chatBridge: {
             ...(metadata.chatBridge || {}),
             messageId: Number(messageId || 0) || null,
             persistedAt: getBeijingTimestamp()
         }
-    };
-    await execute('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ?', [
-        JSON.stringify(nextMetadata),
-        getBeijingTimestamp(),
-        runId
-    ]);
+    }));
 }
 
 async function persistAgentRunChatResult(runId) {
@@ -315,6 +311,8 @@ async function recoverChatAgentResults({ limit = 200 } = {}) {
         FROM agent_runs
         WHERE session_id IS NOT NULL AND deleted_at IS NULL
           AND status IN ('completed', 'completed_with_errors', 'error', 'failed', 'cancelled')
+          AND metadata::text LIKE '%"chatBridge"%'
+          AND metadata::text NOT LIKE '%"messageId":%'
         ORDER BY updated_at ASC
         LIMIT ?
     `, [Math.min(Math.max(Number(limit) || 200, 1), 500)]);

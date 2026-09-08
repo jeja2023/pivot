@@ -14,7 +14,7 @@
  * 因此规范化会补全默认值并按稳定顺序输出，再由 canonicalJson 计算 sha256。
  */
 const crypto = require('crypto');
-const { canonicalJson } = require('./agent-skills');
+const { canonicalJson } = require('./canonical-json');
 
 const IR_VERSION = '1';
 

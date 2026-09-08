@@ -3,6 +3,8 @@ const { logger } = require('../logger');
 const { createSseResponseWriter } = require('./sse-response');
 
 const clientsByUser = new Map();
+const MAX_REALTIME_CLIENTS_PER_USER = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS_PER_USER || '8', 10) || 8, 1);
+const MAX_REALTIME_CLIENTS = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS || '1000', 10) || 1000, MAX_REALTIME_CLIENTS_PER_USER);
 
 function normalizeUserId(userOrId) {
     const value = typeof userOrId === 'object' ? userOrId?.id : userOrId;
@@ -36,6 +38,17 @@ function subscribeUserEvents(user, res, options = {}) {
     const userId = normalizeUserId(user);
     if (!userId) {
         res.status(401).end();
+        return () => {};
+    }
+
+    // 必须在创建 writer 和登记客户端之前判定容量；否则被 429 拒绝的响应
+    // 会残留在 clientsByUser 中，反而使连接上限失效并造成内存泄漏。
+    const currentTotal = getRealtimeStats().clients;
+    const currentUserCount = clientsByUser.get(userId)?.size || 0;
+    if (currentUserCount >= MAX_REALTIME_CLIENTS_PER_USER || currentTotal >= MAX_REALTIME_CLIENTS) {
+        res.status?.(429);
+        res.json?.({ error: '实时事件连接数已达到上限，请关闭旧页面后重试', code: 'REALTIME_CONNECTION_LIMIT' });
+        res.end?.();
         return () => {};
     }
 
@@ -106,7 +119,23 @@ function getRealtimeStats() {
     };
 }
 
+function closeRealtimeEventClients({ reason = 'server_shutdown', retryAfterMs = 0 } = {}) {
+    let closed = 0;
+    for (const [userId, clients] of [...clientsByUser.entries()]) {
+        for (const client of [...clients]) {
+            try {
+                client.write?.('server.shutdown', { reason, retryAfterMs });
+            } catch (_) {}
+            try { client.res?.end?.(); } catch (_) {}
+            removeClient(userId, client);
+            closed += 1;
+        }
+    }
+    return closed;
+}
+
 module.exports = {
+    closeRealtimeEventClients,
     getRealtimeStats,
     publishUserEvent,
     subscribeUserEvents

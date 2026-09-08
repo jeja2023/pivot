@@ -23,6 +23,5 @@
   "202608060002_schedule_interval_minutes",
   "202608070001_resource_user_visibility",
   "202608070002_workflow_dependency_bindings",
-  "202608120001_agent_runtime_concurrency_guards",
-  "202608120002_agent_approval_request_dedupe"
+  "202608120001_agent_runtime_concurrency_guards"
 ]

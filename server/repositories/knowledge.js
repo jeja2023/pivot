@@ -104,7 +104,7 @@ async function listDocumentTags(docId, user) {
 
 function listDocumentChunks(docId, limit, offset) {
     return query(`
-        SELECT id, content, LENGTH(content) AS length
+        SELECT id, content, chunk_index, char_start, char_end, LENGTH(content) AS length
         FROM knowledge_chunks
         WHERE doc_id = ?
         ORDER BY id ASC
@@ -133,7 +133,7 @@ function listAllDocumentChunks(docId) {
  */
 function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null, queryVector = null, limit = null }) {
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
-    const params = user
+    const accessParams = user
         ? [...scopeFilter.params, ...scopeFilter.accessParams]
         : [userId, ...scopeFilter.params];
     // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
@@ -148,10 +148,15 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null, query
     const vectorFilter = vector ? ' AND vector_dims(c.embedding) = ?' : '';
     const orderLimit = vector
         ? ' ORDER BY c.embedding <=> ?::vector ASC, c.id ASC LIMIT ?'
-        : '';
-    if (vector) params.push(vector.length, JSON.stringify(vector), safeLimit);
+        : ' LIMIT ?';
+    const params = vector
+        ? [JSON.stringify(vector), ...accessParams, vector.length, JSON.stringify(vector), safeLimit]
+        : [...accessParams, safeLimit];
+    const selectedColumns = vector
+        ? 'c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name, (1 - (c.embedding <=> ?::vector)) AS dense_score'
+        : 'c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name';
     return query(`
-        SELECT c.id, c.content, c.embedding, c.heading_path, d.name
+        SELECT ${selectedColumns}
         FROM knowledge_chunks c
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
@@ -165,6 +170,12 @@ function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null, query
           ${vectorFilter}
           ${orderLimit}
     `, params);
+}
+
+function listChunkEmbeddingsByIds(ids = []) {
+    const safeIds = [...new Set(ids.map(value => Number.parseInt(value, 10)).filter(value => Number.isSafeInteger(value) && value > 0))].slice(0, 500);
+    if (!safeIds.length) return Promise.resolve([]);
+    return query(`SELECT id, embedding FROM knowledge_chunks WHERE id IN (${safeIds.map(() => '?').join(',')})`, safeIds);
 }
 
 async function getDocumentName(docId) {
@@ -236,6 +247,7 @@ module.exports = {
     countDocumentChunks,
     listAllDocumentChunks,
     listAccessibleChunkEmbeddings,
+    listChunkEmbeddingsByIds,
     iterateAccessibleChunkEmbeddings: listAccessibleChunkEmbeddings,
     getDocumentName,
     getDocumentQualityOverview,

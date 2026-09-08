@@ -7,7 +7,7 @@ const { dataDir } = require('../db');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { parsePositiveInt } = require('../number');
-const { cleanupSoftDeletedStorage } = require('./storage-gc');
+const { cleanupSoftDeletedStorage, reconcileUploadStorage } = require('./storage-gc');
 const { cleanupAnalysisWorkspace, processSemanticAnalysisJobs } = require('./data-analysis');
 const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing/cleanup');
 const { recoverDocumentProcessingJobs } = require('./document-processing/jobs');
@@ -249,7 +249,7 @@ async function cleanupApiCallLogs(days = getApiCallLogRetentionDays()) {
 async function cleanupExpiredRefreshTokens() {
     maintenanceState.refreshTokenCleanup.lastRunAt = getBeijingTimestamp();
     try {
-        const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai')");
+    const res = await execute("DELETE FROM refresh_tokens WHERE expires_at < (now() AT TIME ZONE 'Asia/Shanghai') OR (consumed_at IS NOT NULL AND consumed_at < (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '45 days'))");
         const changes = Number(res || 0);
         maintenanceState.refreshTokenCleanup.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.refreshTokenCleanup.lastError = '';
@@ -298,6 +298,15 @@ async function optimizeDatabase() {
         maintenanceState.optimize.lastError = e.message;
         logger.error({ err: e.message }, '数据库优化失败');
         return false;
+    }
+}
+
+async function reconcileUploadStorageJob(days = getStorageGcRetentionDays()) {
+    try {
+        return await reconcileUploadStorage({ retentionDays: days });
+    } catch (error) {
+        logger.warn({ err: error.message }, '上传目录孤儿文件对账失败');
+        return { deletedFiles: 0, deletedBytes: 0, error: error.message };
     }
 }
 
@@ -410,7 +419,8 @@ async function backupDatabase(options = {}) {
     maintenanceState.backup.backupDir = backupDir;
 
     try {
-        fs.mkdirSync(backupDir, { recursive: true });
+        fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+        try { fs.chmodSync(backupDir, 0o700); } catch (_) {}
         await dumpRunner({
             backupPath,
             databaseUrl: options.databaseUrl || process.env.DATABASE_URL,
@@ -419,6 +429,7 @@ async function backupDatabase(options = {}) {
         });
         const stat = fs.statSync(backupPath);
         if (!stat.isFile() || stat.size <= 0) throw new Error('pg_dump 未生成有效的备份文件');
+        try { fs.chmodSync(backupPath, 0o600); } catch (_) {}
 
         const cleanup = cleanupOldBackups({ backupDir, retentionDays, maxVersions });
         maintenanceState.backup.lastSuccessAt = getBeijingTimestamp();
@@ -503,6 +514,7 @@ function startMaintenanceTasks() {
     cleanupExpiredRefreshTokens().catch(() => {});
     cleanupRateLimitCounters().catch(() => {});
     cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
+    reconcileUploadStorageJob(storageGcRetentionDays).catch(() => {});
     runAnalysisWorkspaceCleanup().catch(() => {});
     runDocumentProcessingCleanup().catch(() => {});
     backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
@@ -529,6 +541,7 @@ function startMaintenanceTasks() {
         cleanupExpiredRefreshTokens().catch(() => {});
         cleanupRateLimitCounters().catch(() => {});
         cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
+        reconcileUploadStorageJob(storageGcRetentionDays).catch(() => {});
         runAnalysisWorkspaceCleanup().catch(() => {});
         runDocumentProcessingCleanup().catch(() => {});
         backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});

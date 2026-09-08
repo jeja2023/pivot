@@ -481,7 +481,7 @@ function bindAgentEvaluationCenter() {
 
 async function openAgentEvaluationForRun(run) {
     window.Pivot.legacy.closeAgentRunDetailModal();
-    const openWorkbench = window.Pivot?.legacy?.openAgentWorkbench || globalThis['openAgentWorkbench'];
+    const openWorkbench = window.Pivot?.moduleApi?.('workspaces.navigation')?.openAgentWorkbench;
     if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'workbench' });
     window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.('quality');
     bindAgentEvaluationCenter();

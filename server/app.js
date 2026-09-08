@@ -30,7 +30,7 @@ const {
 } = require('./http');
 const { validateConfig } = require('./config');
 const { applyAppVersionTemplate, getAppVersion } = require('./version');
-const { loadChatHtmlTemplate } = require('./chat-template');
+const { loadChatHtmlTemplate, loadChatWorkspaceTemplate } = require('./chat-template');
 const { MANUAL_PATH, renderManualHtml } = require('./manual-page');
 const {
     configureDirSizeCache,
@@ -51,6 +51,8 @@ configureDirSizeCache({
 
 const { authMiddleware, csrfMiddleware } = require('./auth');
 const { isAdmin } = require('./permissions');
+const { redactAuditDetails } = require('./security');
+const { runWithRequestContext } = require('./services/request-context');
 const {
     escapeCsvCell
 } = require('./security');
@@ -77,7 +79,7 @@ const { createMemoriesRouter } = require('./routes/memories');
 const { createAppServerRouter } = require('./routes/app-server');
 const { createAppServerProtocol } = require('./services/app-server-protocol');
 const { createAgentResidencyStore } = require('./services/agent-residency');
-const { ragRouter, retrieveContext } = require('./rag');
+const { ragRouter, retrieveContext } = require('./routes/rag');
 const {
     migrateModelSecrets
 } = require('./services/models');
@@ -96,15 +98,7 @@ const { stealthAccessGuard } = require('./middleware/stealth-guard');
 const logAction = (req, action, details) => {
     const userId = req.user ? req.user.id : null;
     const ip = getClientIp(req);
-    const serializedDetails = typeof details === 'string'
-        ? details
-        : (() => {
-            try {
-                return JSON.stringify(details);
-            } catch (err) {
-                return String(details ?? '');
-            }
-        })();
+    const serializedDetails = redactAuditDetails(details);
     enqueueAuditLog({
         userId,
         action: normalizeAuditAction(action),
@@ -124,6 +118,7 @@ app.use((req, res, next) => {
     next();
 });
 app.use(httpLogger); // 注入请求日志和请求 ID
+app.use((req, _res, next) => runWithRequestContext({ requestId: req.id }, next));
 app.use(metricsMiddleware);
 app.use(inFlightRequestMiddleware); // 统计在途请求，供 /api/health/details 定位「请求只进不出」
 app.use(apiRequestWatchdog);        // 接口悬挂兜底：超时返回 503 并留下现场，避免前端等满 30 秒
@@ -137,9 +132,19 @@ migrateModelSecrets();
 const loginLimiter = rateLimit({
     store: limiterStore('login'),
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: Math.max(10, Number.parseInt(process.env.PIVOT_LOGIN_RATE_LIMIT_MAX || '10', 10) || 10),
     keyGenerator: (req) => getClientIp(req), // 统一使用 getClientIp
     message: { error: '登录请求过于频繁，请15分钟后再试' }
+});
+
+const loginAccountLimiter = rateLimit({
+    store: limiterStore('login-account'),
+    windowMs: 15 * 60 * 1000,
+    max: Math.max(5, Number.parseInt(process.env.PIVOT_LOGIN_ACCOUNT_RATE_LIMIT_MAX || '10', 10) || 10),
+    // IP 限制挡单源爆破，账号维度限制挡分布式撞库；只记录失败登录，正常用户不会被消耗额度。
+    keyGenerator: req => `account:${String(req.body?.username || '').trim().toLowerCase().slice(0, 128) || 'anonymous'}`,
+    skipSuccessfulRequests: true,
+    message: { error: '该账号登录失败次数过多，请15分钟后再试' }
 });
 
 const registerLimiter = rateLimit({
@@ -240,6 +245,7 @@ const triggerLimiter = rateLimit({
 });
 
 app.locals.loginLimiter = loginLimiter;
+app.locals.loginAccountLimiter = loginAccountLimiter;
 app.locals.registerLimiter = registerLimiter;
 app.locals.chatLimiter = chatLimiter;
 app.locals.probeLimiter = probeLimiter;
@@ -255,17 +261,39 @@ if (corsOrigins.length > 0) {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+if (appConfig.compressionEnabled) {
+    try {
+        const compression = require('compression');
+        app.use(compression({
+            filter: (req, res) => {
+                // 显式跳过对话接口和流式内容，防止压缩导致缓冲（Buffering）
+                if (req.originalUrl && req.originalUrl.includes('/api/chat')) return false;
+                const contentType = res.getHeader('Content-Type');
+                if (contentType && contentType.includes('text/event-stream')) return false;
+                return compression.filter(req, res);
+            }
+        }));
+    } catch (e) {
+        logger.warn('性能提醒: compression 依赖未安装，已跳过响应压缩');
+    }
+}
+
 app.use('/api', csrfMiddleware);
 app.use('/v1', csrfMiddleware);
 
-app.get('/api/health', healthLimiter, (req, res) => {
-    const health = getSystemHealthSnapshot({ public: true });
+app.get('/api/health', healthLimiter, asyncHandler(async (req, res) => {
+    const health = await getSystemHealthSnapshot({ public: true });
+    const database = health.checks.find(check => check.name === 'database') || { status: 'error', message: '数据库健康探针未返回结果' };
+    health.checks = health.checks.map(check => check.name === 'database' ? { name: 'database', ...database } : check);
+    health.status = health.checks.some(check => check.status === 'error')
+        ? 'error'
+        : health.checks.some(check => check.status === 'degraded') ? 'degraded' : 'ok';
     return res.status(health.status === 'error' ? 503 : 200).json({
         service: 'pivot-ai',
         timestamp: getBeijingTimestamp(),
         ...health
     });
-});
+}));
 
 app.get('/api/health/details', healthLimiter, authMiddleware, asyncHandler(async (req, res) => {
     const health = await getSystemHealthSnapshot();
@@ -293,33 +321,47 @@ app.get('/api/metrics', metricsAuthMiddleware, asyncHandler(async (req, res) => 
 // --- 模型接口 ---
 app.use('/api', createModelsRouter({ authMiddleware, logAction, normalizePage, normalizeLimit, probeLimiter }));
 
-if (appConfig.compressionEnabled) {
-    try {
-        const compression = require('compression');
-        app.use(compression({
-            filter: (req, res) => {
-                // 显式跳过对话接口和流式内容，防止压缩导致缓冲（Buffering）
-                if (req.originalUrl && req.originalUrl.includes('/api/chat')) return false;
-                const contentType = res.getHeader('Content-Type');
-                if (contentType && contentType.includes('text/event-stream')) return false;
-                return compression.filter(req, res);
-            }
-        }));
-    } catch (e) {
-        logger.warn('性能提醒: compression 依赖未安装，已跳过响应压缩');
-    }
-}
-
 // 禁止缓存的响应头
 const noCacheHeaders = (res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 };
+const revalidateStaticHeaders = (res) => {
+    res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+};
 
 // 需要禁止缓存的路径前缀（业务代码，频繁更新）
 const noCachePrefixes = ['/chat/', '/common/styles/'];
 const noCacheExact = new Set(['/manifest.json', '/sw.js', '/version.json', '/pwa-manager.js']);
+const VENDOR_ROOT = path.join(__dirname, '../client/common/vendor');
+const SW_TEMPLATE_PATH = path.join(__dirname, '../client/sw.js');
+
+function walkFiles(root, files = []) {
+    if (!fs.existsSync(root)) return files;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        const target = path.join(root, entry.name);
+        if (entry.isDirectory()) walkFiles(target, files);
+        else if (entry.isFile()) files.push(target);
+    }
+    return files;
+}
+
+function getVendorRevision() {
+    const digest = crypto.createHash('sha256');
+    for (const file of walkFiles(VENDOR_ROOT).sort()) {
+        digest.update(path.relative(VENDOR_ROOT, file));
+        digest.update(fs.readFileSync(file));
+    }
+    return `vendor-${digest.digest('hex').slice(0, 16)}`;
+}
+
+function renderServiceWorker() {
+    const revision = getVendorRevision();
+    const source = fs.readFileSync(SW_TEMPLATE_PATH, 'utf8');
+    return { revision, source: source.replace('__PIVOT_VENDOR_REVISION__', revision) };
+}
 const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -405,11 +447,25 @@ app.get('/chat/chat.html', (req, res) => {
     res.redirect(302, '/chat');
 });
 
+// 大型工作区按需返回：名称由 chat-template 白名单约束，内容仍是项目内的
+// 静态模板片段。首屏不再为每个用户下发自动化/工作流的完整 DOM。
+app.get('/chat/workspaces/:name', (req, res) => {
+    try {
+        noCacheHeaders(res);
+        res.type('html').send(applyAppVersionTemplate(loadChatWorkspaceTemplate(req.params.name), appVersion));
+    } catch (error) {
+        if (error?.code === 'CHAT_WORKSPACE_TEMPLATE_NOT_FOUND') {
+            return res.status(404).type('text/plain').send('未找到工作区模板。');
+        }
+        throw error;
+    }
+});
+
 // sw.js 必须禁止缓存，否则浏览器无法检测到新版本
 app.get('/sw.js', (req, res) => {
     noCacheHeaders(res);
     res.type('application/javascript');
-    res.sendFile(path.join(__dirname, '../client/sw.js'));
+    res.send(renderServiceWorker().source);
 });
 
 // manifest.json 禁止缓存
@@ -420,9 +476,11 @@ app.get('/manifest.json', (req, res) => {
 
 app.get('/version.json', (req, res) => {
     noCacheHeaders(res);
+    const revision = getVendorRevision();
     res.json({
         version: appVersion,
-        build: `${appVersion}-vendor-only`,
+        build: `${appVersion}-${revision}`,
+        vendorRevision: revision,
         swPolicy: 'vendor-only',
         generatedAt: getBeijingTimestamp()
     });
@@ -454,9 +512,12 @@ const clientStaticMiddleware = express.static(path.join(__dirname, '../client'),
     maxAge: appConfig.staticMaxAge,
     setHeaders: (res, filePath) => {
         const urlPath = '/' + path.relative(path.join(__dirname, '../client'), filePath).replace(/\\/g, '/');
-        // 业务代码文件（JS/CSS/HTML）禁止缓存
-        if (noCacheExact.has(urlPath) || noCachePrefixes.some(p => urlPath.startsWith(p)) || /\/common\/styles\//.test(urlPath)) {
+        // 入口 HTML 必须始终新鲜；版本化或可条件校验的 JS/CSS 允许 304，
+        // 避免每次刷新重复传输并重新压缩完整资源。
+        if (noCacheExact.has(urlPath)) {
             noCacheHeaders(res);
+        } else if (noCachePrefixes.some(p => urlPath.startsWith(p)) || /\/common\/styles\//.test(urlPath)) {
+            revalidateStaticHeaders(res);
         }
     }
 });
@@ -505,6 +566,7 @@ app.get('/', (req, res) => {
 app.use('/api', createAuthRouter({
     authMiddleware,
     loginLimiter: app.locals.loginLimiter,
+    loginAccountLimiter: app.locals.loginAccountLimiter,
     registerLimiter: app.locals.registerLimiter,
     isPublicRegistrationEnabled,
     logAction,
@@ -654,10 +716,11 @@ app.use((err, req, res, _next) => {
     if (status >= 500) {
         try {
             logAction(req, '系统错误', JSON.stringify({
+                errorId: req.id || req.headers?.['x-request-id'] || '',
+                code: err.code || `HTTP_${status}`,
                 message: err.message,
                 url: req.originalUrl || req.url,
-                method: req.method,
-                stack: err.stack ? err.stack.split('\n').slice(0, 6).join('\n') : 'no-stack'
+                method: req.method
             }));
         } catch (logErr) {
             logger.error({ err: logErr }, '日志入库失败');

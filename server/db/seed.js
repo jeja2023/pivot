@@ -8,14 +8,11 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const fs = require('fs');
 const path = require('path');
+const { getPasswordValidationMessage } = require('../password-policy');
 
 function validateInitialPassword(password) {
-    if (!password || password.length < 8) {
-        throw new Error('默认管理员密码长度至少需要 8 位');
-    }
-    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-        throw new Error('默认管理员密码必须同时包含字母和数字');
-    }
+    const message = getPasswordValidationMessage(password);
+    if (message) throw new Error(`默认管理员${message}`);
 }
 
 function buildInitialAdminCredential() {

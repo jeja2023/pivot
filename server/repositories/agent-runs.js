@@ -162,7 +162,7 @@ async function listRuns(userId, options = {}) {
         WITH filtered_runs AS (
             SELECT r.id, r.session_id, r.model_id, r.chosen_model_id, r.title, r.goal, r.status, r.final_answer, r.error_message,
                    r.max_steps, r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.tool_allowlist,
-                   r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count,
+                   r.approval_policy, r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.retry_after,
                    r.max_token_budget, r.export_count, r.template_id, r.schedule_id, r.context_config, r.resume_from_step,
                    r.started_at, r.last_heartbeat_at, r.input_tokens, r.output_tokens, r.total_tokens,
                    r.cancelled_at, r.created_at, r.updated_at, r.completed_at, r.metadata,
@@ -204,7 +204,7 @@ async function listDeletedRunsForAdmin(limit = 100) {
         SELECT r.id, r.user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, r.session_id, r.model_id, r.chosen_model_id,
                COALESCE(cm.name, m.name) AS model_name, r.title, r.goal, r.status, r.error_message, r.max_steps,
                r.parent_run_id, r.priority, r.run_mode, r.tool_policy, r.approval_policy,
-               r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.max_token_budget, r.export_count,
+               r.timeout_ms, r.tool_timeout_ms, r.retry_limit, r.retry_count, r.retry_after, r.max_token_budget, r.export_count,
                r.started_at, r.last_heartbeat_at,
                r.input_tokens, r.output_tokens, r.total_tokens,
                r.cancelled_at, r.created_at, r.updated_at, r.completed_at,

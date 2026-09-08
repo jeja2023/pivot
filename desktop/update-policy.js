@@ -1,9 +1,5 @@
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-function normalizeBoolean(value) {
-    return String(value || '').trim().toLowerCase() === 'true';
-}
-
 function normalizeOriginList(value) {
     const items = Array.isArray(value) ? value : String(value || '').split(',');
     return items
@@ -31,20 +27,9 @@ function isOriginAllowed(url, allowedOrigins = []) {
     return allowed.some(item => item === origin || item === host);
 }
 
-function assertHttpUpdatePolicy(url, options = {}) {
+function assertHttpUpdatePolicy(url, _options = {}) {
     if (url.protocol !== 'http:') return;
-
-    const allowedOrigins = normalizeOriginList(options.allowedOrigins);
-    const allowConfiguredHttp = options.allowInsecureHttp === true;
-    const allowLoopbackDevHttp = normalizeBoolean(options.env?.PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED)
-        && isLoopbackUpdateUrl(url);
-
-    if (!allowConfiguredHttp && !allowLoopbackDevHttp) {
-        throw new Error('自动更新 URL 必须使用 HTTPS 协议，除非显式配置 allowInsecureHttp=true 或启用本地回环开发源。');
-    }
-    if (allowConfiguredHttp && !isLoopbackUpdateUrl(url) && allowedOrigins.length === 0) {
-        throw new Error('当对非回环地址启用 allowInsecureHttp=true 时，必须配置 allowedOrigins 来源白名单。');
-    }
+    throw new Error('自动更新 URL 必须使用 HTTPS 协议；HTTP 业务服务不能作为自动更新源。');
 }
 
 function normalizeUpdateFeedUrl(value, options = {}) {

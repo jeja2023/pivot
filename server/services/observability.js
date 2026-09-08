@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
-const { assertSafeOutboundUrl } = require('../security');
+const { assertSafeOutboundUrl, redactAuditDetails } = require('../security');
 const { safeJsonPost } = require('./safe-http-client');
 const { getAppSettingValue, setAppSetting } = require('./app-settings');
 
@@ -13,8 +13,10 @@ const SLOW_SQL_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '5
 const SLOW_MODEL_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_MODEL_MS || '30000', 10) || 30000, 1);
 const SLOW_RAG_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_RAG_MS || '3000', 10) || 3000, 1);
 const WEBHOOK_TIMEOUT_MS = Math.max(Number.parseInt(process.env.PIVOT_ALERT_WEBHOOK_TIMEOUT_MS || '5000', 10) || 5000, 1000);
+const ALERT_DEDUPE_MS = Math.min(Math.max(Number.parseInt(process.env.PIVOT_ALERT_DEDUPE_MS || '300000', 10) || 300000, 60 * 1000), 60 * 60 * 1000);
 
 let recordingSql = false;
+const alertDedupe = new Map();
 
 function safeJson(value) {
     try {
@@ -104,8 +106,26 @@ function normalizeSeverity(severity, durationMs, thresholdMs) {
 async function sendWebhookAlert(event) {
     const url = getSetting('observability_webhook_url') || process.env.PIVOT_ALERT_WEBHOOK_URL || '';
     if (!url) return;
+    const fingerprint = crypto.createHash('sha256')
+        .update([event.type, event.source, event.severity, event.message].join('\u0000'))
+        .digest('hex');
+    const nowMs = Date.now();
+    if (alertDedupe.size > 1000) {
+        for (const [key, expiresAt] of alertDedupe) {
+            if (expiresAt <= nowMs) alertDedupe.delete(key);
+        }
+    }
+    if ((alertDedupe.get(fingerprint) || 0) > nowMs) return;
+    alertDedupe.set(fingerprint, nowMs + ALERT_DEDUPE_MS);
     try {
         const guardUser = { username: 'admin', role: 'admin' };
+        const rawDetails = event.details ? (typeof event.details === 'object' ? event.details : JSON.parse(event.details)) : {};
+        const redactedDetails = JSON.parse(redactAuditDetails(rawDetails) || '{}');
+        // 告警只需要可定位的元信息；用户查询、SQL、模型输入输出等原文不外发。
+        const detailsSummary = {
+            keys: Object.keys(redactedDetails || {}).sort().slice(0, 30),
+            hash: crypto.createHash('sha256').update(JSON.stringify(redactedDetails || {})).digest('hex').slice(0, 16)
+        };
         await safeJsonPost(url, {
             source: 'pivot',
             type: event.type,
@@ -113,7 +133,7 @@ async function sendWebhookAlert(event) {
             title: event.message,
             durationMs: event.duration_ms,
             thresholdMs: event.threshold_ms,
-            details: event.details ? (typeof event.details === 'object' ? event.details : JSON.parse(event.details)) : null,
+            details: detailsSummary,
             createdAt: event.created_at
         }, {
             user: guardUser,
@@ -124,6 +144,7 @@ async function sendWebhookAlert(event) {
             getBeijingTimestamp(), event.id
         ]);
     } catch (e) {
+        alertDedupe.delete(fingerprint);
         logger.warn({ err: e.message, eventId: event.id }, '可观测性 Webhook 告警发送失败');
     }
 }
@@ -164,7 +185,7 @@ function recordSlowSql(sql, durationMs, params = []) {
     if (recordingSql || durationMs < SLOW_SQL_MS) return null;
     recordingSql = true;
     try {
-        return recordObservabilityEvent({
+        return Promise.resolve().then(() => recordObservabilityEvent({
             type: 'sql',
             source: 'postgresql',
             durationMs,
@@ -174,9 +195,14 @@ function recordSlowSql(sql, durationMs, params = []) {
                 sql: String(sql || '').replace(/\s+/g, ' ').trim().slice(0, 2000),
                 paramCount: Array.isArray(params) ? params.length : 0
             }
-        });
-    } finally {
+        })).finally(() => { recordingSql = false; });
+    } catch (error) {
         recordingSql = false;
+        logger.warn({ err: error.message }, '慢 SQL 观测记录启动失败');
+        return null;
+    } finally {
+        // recordObservabilityEvent is asynchronous; the guard is released by
+        // the promise settlement above, not at function-return time.
     }
 }
 

@@ -1,6 +1,8 @@
 const nodePath = require('node:path');
+const nodeFs = require('node:fs');
+const nodeOs = require('node:os');
 
-const analysisTestRoot = nodePath.resolve(__dirname, '..', 'artifacts', 'data-analysis-test-' + process.pid + '-' + Date.now());
+const analysisTestRoot = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'pivot-data-analysis-'));
 process.env.PIVOT_ANALYSIS_DIR = analysisTestRoot;
 process.env.DATA_ANALYSIS_MAX_ROWS = '1000';
 

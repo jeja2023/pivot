@@ -2,6 +2,18 @@
 let PivotSafeHtml;
 
 (function () {
+    // Markdown 渲染出的详情、数学 MathML 和受控 SVG 属性在所有安全插入点使用
+    // 同一份白名单，避免“先消毒一次、插入前又用另一份规则消毒”的语义分叉。
+    const MARKDOWN_SAFE_OPTIONS = Object.freeze({
+        ADD_TAGS: [
+            'details', 'summary', 'thought', 'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo',
+            'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot',
+            'mspace', 'mtext', 'mstyle', 'merror'
+        ],
+        ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel']
+    });
+
+    const sanitizeOptions = options => ({ ...MARKDOWN_SAFE_OPTIONS, ...options });
     const escapeHtml = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -14,7 +26,7 @@ let PivotSafeHtml;
     const sanitizeHtml = (html, options = {}) => {
         const raw = String(html ?? '');
         if (!window.DOMPurify) return escapeHtml(raw);
-        return DOMPurify.sanitize(raw, options);
+        return DOMPurify.sanitize(raw, sanitizeOptions(options));
     };
 
     function createContextElement(element) {
@@ -34,7 +46,7 @@ let PivotSafeHtml;
         }
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
-        DOMPurify.sanitize(scratch, { ...options, IN_PLACE: true });
+        DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
         element.replaceChildren(...Array.from(scratch.childNodes));
     };
 
@@ -47,7 +59,7 @@ let PivotSafeHtml;
         }
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
-        DOMPurify.sanitize(scratch, { ...options, IN_PLACE: true });
+        DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
         element.prepend(...Array.from(scratch.childNodes));
     };
 
@@ -56,7 +68,8 @@ let PivotSafeHtml;
         escapeAttr,
         sanitizeHtml,
         setHtml,
-        prependHtml
+        prependHtml,
+        markdownSafeOptions: MARKDOWN_SAFE_OPTIONS
     };
 
     PivotSafeHtml = api;

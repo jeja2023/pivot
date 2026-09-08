@@ -1,10 +1,3 @@
-const SQLITE_DIALECT = 'sqlite';
-const POSTGRES_DIALECT = 'postgres';
-
-function getDialect() {
-    return POSTGRES_DIALECT;
-}
-
 function isPostgres() {
     return true;
 }
@@ -50,13 +43,6 @@ function jsonExtract(column, path = '$') {
 }
 
 /**
- * JSON 合法性判定（PostgreSQL 下恒为 TRUE，因为 pivot_json_extract 已内建容错）。
- */
-function jsonValid(_column) {
-    return 'TRUE';
-}
-
-/**
  * 大小写不敏感的模糊匹配运算符（PostgreSQL ILIKE）。
  */
 function likeOperator() {
@@ -89,14 +75,10 @@ function groupConcat(column, separator = ',') {
 }
 
 module.exports = {
-    SQLITE_DIALECT,
-    POSTGRES_DIALECT,
-    getDialect,
     isPostgres,
     nowExpr,
     nowOffsetExpr,
     jsonExtract,
-    jsonValid,
     likeOperator,
     orderNocase,
     fullTextMatch,

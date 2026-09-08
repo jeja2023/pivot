@@ -88,7 +88,6 @@ const {
     normalizePositiveInt,
     normalizeDagSpec,
     normalizeToolAllowlist,
-    normalizeAgentGoal
 } = require('../agent-validators');
 const {
     AGENT_DEFAULT_TIMEOUT_MS,
@@ -154,6 +153,8 @@ const { createApprovalHelpers } = require('./approvals');
 const { createRunState } = require('./run-state');
 const { createRunLifecycle } = require('./run-lifecycle');
 const { createAgentRunner } = require('./run-execution');
+const { calculateAgentRetryDelayMs } = require('./retry-policy');
+const { updateAgentRunMetadataWithRetry } = require('../agent-run-metadata-patch');
 const { buildVisionHistory, limitVisionImages } = require('../chat-vision');
 const {
     isChatAgentRun,
@@ -191,7 +192,8 @@ const runState = createRunState({
     recordAgentEvent,
     crypto,
     publishUserEvent,
-    parseJsonObject
+    parseJsonObject,
+    updateAgentRunMetadataWithRetry
 });
 const {
     assertRunUserActive,
@@ -243,13 +245,14 @@ async function insertStep(runId, stepIndex, data = {}) {
         const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
         safeStepIndex = row?.next_index || 1;
     }
-    const changes = await execute(`
+    const insertStepSql = `
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
             status, duration_ms, started_at, completed_at, created_at, context_hash
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
+    `;
+    const insertStepParams = [
         runId,
         safeStepIndex,
         data.type || 'note',
@@ -264,7 +267,17 @@ async function insertStep(runId, stepIndex, data = {}) {
         data.completedAt || now,
         now,
         String(data.contextHash || '').slice(0, 64)
-    ]);
+    ];
+    let changes;
+    try {
+        changes = await execute(insertStepSql, insertStepParams);
+    } catch (error) {
+        if (!/unique|duplicate/i.test(String(error?.message || '')) || !/agent_steps|run_step|step_index/i.test(String(error?.constraint || error?.message || ''))) throw error;
+        const next = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
+        insertStepParams[1] = Number(next?.next_index || 1);
+        safeStepIndex = insertStepParams[1];
+        changes = await execute(insertStepSql, insertStepParams);
+    }
     if (changes > 0) {
         await recordAgentCheckpoint(runId, {
             stepIndex: safeStepIndex,
@@ -440,6 +453,7 @@ const { runAgent } = createAgentRunner({
     stableWorkflowDelayKey,
     setRunMetadata,
     recordRunRetryReason,
+    calculateAgentRetryDelayMs,
     enqueueAgentRun,
     startAgentTraceSpan,
     finishAgentTraceSpan,
@@ -450,8 +464,8 @@ const { runAgent } = createAgentRunner({
     crypto
 });
 
-function enqueueAgentRun(runId, _user) {
-    getAgentQueue().enqueueRun(runId);
+function enqueueAgentRun(runId, _user, options = {}) {
+    getAgentQueue().enqueueRun(runId, options);
 }
 
 async function recoverAgentRuns() {
@@ -624,7 +638,7 @@ async function approveAgentTool(runId, user, approve = true) {
 }
 
 async function getAgentRuntimeStatus(user = null) {
-    const queueStatus = await getAgentQueue().getStatus();
+    const queueStatus = await getAgentQueue().getStatusAsync();
     return await buildAgentRuntimeStatus({
         maxConcurrent: getAgentMaxConcurrentRuns(),
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
@@ -640,7 +654,7 @@ async function syncAgentRuntimeConcurrency() {
     if (processing && typeof processing.catch === 'function') {
         processing.catch(err => logger.warn({ err: err.message }, '智能体队列并发配置同步失败'));
     }
-    return await queue.getStatus();
+    return await queue.getStatusAsync();
 }
 
 const { createAgentRunFactory } = require('./run-creation');
@@ -733,81 +747,48 @@ configureAgentArtifacts({
     getRunDetailForUser: getRunDetailForUserHelper
 });
 
+// 新调用方按领域获取能力，避免继续把运行、工作流、产物和调度当作一个无边界平铺 API。
+// 保留下面的平铺导出，确保历史扩展和桌面兼容层不发生破坏性变更。
+const runs = {
+    approveAgentTool, cancelAgentRun, createAgentRun, rerunAgentDagFromNode,
+    rerunAgentRun, resumeAgentRun, runAgent, shouldPauseForApproval, softDeleteAgentRun,
+    recoverAgentRuns, startAgentRecoveryRunner
+};
+const schedules = {
+    computeNextScheduleRun, createAgentSchedule, deleteAgentSchedule, listAgentSchedules,
+    runAgentScheduleNow, runDueAgentSchedules, startAgentScheduleRunner, updateAgentSchedule
+};
+const templates = { createAgentTemplate, deleteAgentTemplate, listAgentTemplates, updateAgentTemplate };
+const workflows = {
+    createAgentWorkflow, deleteAgentWorkflow, diffAgentWorkflowVersions, getAgentWorkflowForUser,
+    listAgentWorkflowShareOptions, listAgentWorkflowVersions, listAgentWorkflows,
+    publishAgentWorkflowVersion, restoreAgentWorkflow, restoreAgentWorkflowVersion,
+    updateAgentWorkflow, updateAgentWorkflowMetadata, updateAgentWorkflowSharing
+};
+const triggers = {
+    createWorkflowTrigger, deleteWorkflowTrigger, listWorkflowTriggers, rotateWorkflowTriggerToken,
+    runDuePollingTriggers, updateWorkflowTrigger
+};
+const artifacts = {
+    createAgentArtifactVersion, createStandaloneArtifact, diffAgentArtifactVersions, exportAgentRun,
+    getAgentArtifactForUser, listAgentArtifactVersions, listAgentArtifacts, rollbackAgentArtifactVersion,
+    saveAgentRunArtifact
+};
+const goals = {
+    createAgentGoal, dispatchAgentGoalWebhook, getAgentGoal, listAgentGoals, recordAgentGoalRunOutcome,
+    runAgentGoalNow, runDueAgentGoals, setAgentGoalStatus, updateAgentGoal
+};
+const monitoring = { getAgentMetrics, getAgentQueue, getAgentRuntimeStatus, syncAgentRuntimeConcurrency };
+const notifications = { listAgentNotifications, markAgentNotificationRead };
+
 module.exports = {
-    createAgentRun,
-    createAgentArtifactVersion,
-    createStandaloneArtifact,
-    createAgentSchedule,
-    createAgentTemplate,
-    createAgentWorkflow,
-    cancelAgentRun,
-    computeNextScheduleRun,
-    deleteAgentSchedule,
-    deleteAgentTemplate,
-    deleteAgentWorkflow,
-    approveAgentTool,
-    diffAgentArtifactVersions,
-    diffAgentWorkflowVersions,
-    exportAgentRun,
-    formatToolList,
-    getAgentArtifactForUser,
-    getAgentWorkflowForUser,
-    listAgentArtifacts,
-    listAgentArtifactVersions,
-    listAgentNotifications,
-    listAgentSchedules,
-    listAgentTemplates,
-    listAgentWorkflowShareOptions,
-    listAgentWorkflowVersions,
-    listAgentWorkflows,
-    getAgentMetrics,
-    getAgentQueue,
-    getAgentRuntimeStatus,
-    syncAgentRuntimeConcurrency,
-    normalizeAgentGoal,
-    normalizeDagSpec,
-    normalizeRunMode,
-    normalizeApprovalPolicy,
-    normalizeToolAllowlist,
-    normalizeToolPolicy,
-    parseJsonObject,
-    publishAgentWorkflowVersion,
-    rerunAgentRun,
-    rerunAgentDagFromNode,
-    resumeAgentRun,
-    restoreAgentWorkflow,
-    restoreAgentWorkflowVersion,
-    recoverAgentRuns,
-    startAgentRecoveryRunner,
-    recordRunRetryReason,
-    runAgentScheduleNow,
-    runDueAgentSchedules,
-    runDuePollingTriggers,
-    createAgentGoal,
-    dispatchAgentGoalWebhook,
-    getAgentGoal,
-    listAgentGoals,
-    recordAgentGoalRunOutcome,
-    runAgentGoalNow,
-    runDueAgentGoals,
-    setAgentGoalStatus,
-    updateAgentGoal,
-    createWorkflowTrigger,
-    deleteWorkflowTrigger,
-    listWorkflowTriggers,
-    rotateWorkflowTriggerToken,
-    updateWorkflowTrigger,
-    runAgent,
-    rollbackAgentArtifactVersion,
-    saveAgentRunArtifact,
-    shouldPauseForApproval,
-    softDeleteAgentRun
-    ,
-    markAgentNotificationRead,
-    startAgentScheduleRunner,
-    updateAgentSchedule,
-    updateAgentTemplate,
-    updateAgentWorkflow,
-    updateAgentWorkflowMetadata,
-    updateAgentWorkflowSharing
+    artifacts,
+    goals,
+    monitoring,
+    notifications,
+    runs,
+    schedules,
+    templates,
+    triggers,
+    workflows
 };

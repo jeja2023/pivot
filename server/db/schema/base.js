@@ -1,7 +1,6 @@
-const { db } = require('../connection');
+const { db } = require('../connection'); const { hotspotIndexesSql } = require('./hotspot-indexes');
 const { applyLegacySchemaPreflight } = require('./legacy-preflight');
 const { enterpriseTablesSql, enterpriseIndexesSql } = require('./enterprise');
-const { hotspotIndexesSql } = require('./hotspot-indexes');
 /**
  * 建表 DDL（SQLite 方言，权威单一数据源）
  *
@@ -21,13 +20,11 @@ function baseTablesSql() {
             value TEXT,
             updated_at DATETIME
         );
-
         CREATE TABLE IF NOT EXISTS schema_migrations (
             id TEXT PRIMARY KEY,
             description TEXT,
             applied_at DATETIME DEFAULT (datetime('now', '+8 hours'))
         );
-
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -35,7 +32,6 @@ function baseTablesSql() {
             updated_by INTEGER,
             FOREIGN KEY (updated_by) REFERENCES users(id)
         );
-
         CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER NOT NULL,
             key TEXT NOT NULL,
@@ -44,7 +40,6 @@ function baseTablesSql() {
             PRIMARY KEY (user_id, key),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
@@ -89,6 +84,7 @@ function baseTablesSql() {
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             token_count INTEGER DEFAULT 0,
+            context_token_count INTEGER,
             is_summary INTEGER DEFAULT 0,
             context_archived INTEGER DEFAULT 0,
             compressed_at DATETIME,
@@ -102,7 +98,6 @@ function baseTablesSql() {
             FOREIGN KEY (session_id) REFERENCES sessions(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
-
         CREATE TABLE IF NOT EXISTS memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -224,6 +219,9 @@ function baseTablesSql() {
             content TEXT NOT NULL,
             search_content TEXT,
             heading_path TEXT,
+            chunk_index INTEGER DEFAULT 0,
+            char_start INTEGER,
+            char_end INTEGER,
             embedding TEXT,
             FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
         );
@@ -591,6 +589,9 @@ function baseTablesSql() {
             user_id INTEGER NOT NULL,
             token TEXT UNIQUE NOT NULL,
             expires_at DATETIME NOT NULL,
+            family_id TEXT DEFAULT '',
+            consumed_at DATETIME,
+            device_id TEXT DEFAULT '',
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
@@ -601,8 +602,7 @@ function baseTablesSql() {
             name TEXT NOT NULL,
             key_hash TEXT UNIQUE,
             key_preview TEXT,
-            key TEXT,
-            status TEXT DEFAULT 'active',
+            key TEXT, status TEXT DEFAULT 'active', scopes TEXT DEFAULT 'openai', expires_at DATETIME,
             usage_tokens INTEGER DEFAULT 0,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
@@ -666,6 +666,7 @@ function baseTablesSql() {
             tool_timeout_ms INTEGER DEFAULT 120000,
             retry_limit INTEGER DEFAULT 1,
             retry_count INTEGER DEFAULT 0,
+            retry_after DATETIME,
             max_token_budget INTEGER DEFAULT 0,
             budget_config TEXT DEFAULT '{}',
             usage_stats TEXT DEFAULT '{}',
@@ -1068,6 +1069,7 @@ function baseTablesSql() {
             callback_token_hint TEXT DEFAULT '',
             callback_nonce TEXT DEFAULT '',
             callback_credential_slug TEXT DEFAULT '',
+            callback_requirement_key TEXT DEFAULT '',
             callback_signature_required INTEGER DEFAULT 0,
             timeout_action TEXT DEFAULT 'reject',
             expires_at DATETIME,
@@ -1363,7 +1365,6 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
         CREATE INDEX IF NOT EXISTS idx_memories_user_status ON memories(user_id, status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, type, status);
         CREATE INDEX IF NOT EXISTS idx_memories_source_session ON memories(source_session_id);
@@ -1442,14 +1443,12 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_created ON rag_feedback(user_id, created_at);
         -- 质量报告按 (user_id, doc_name) 文本键聚合反馈，补充索引避免全表扫描
         CREATE INDEX IF NOT EXISTS idx_rag_feedback_user_doc ON rag_feedback(user_id, doc_name);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp_user ON audit_logs(timestamp, user_id);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_user_timestamp ON audit_logs(user_id, timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_user_deleted ON messages(user_id, deleted_at);
         CREATE INDEX IF NOT EXISTS idx_model_usage_created ON model_usage_events(created_at);
-        CREATE INDEX IF NOT EXISTS idx_api_call_logs_created_at ON api_call_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_knowledge_docs_created ON knowledge_docs(created_at);
         CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
         CREATE INDEX IF NOT EXISTS idx_prompts_created ON prompts(created_at);

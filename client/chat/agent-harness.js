@@ -64,7 +64,7 @@
         const raw = String(item.title || item.sourceType || '').trim();
         return INBOX_TITLE_MAP[raw.toLowerCase()] || INBOX_TITLE_MAP[raw] || raw || '未命名通知';
     };
-    const formatInboxBody = text => String(text || '-').replace(/任务状态：\s*([a-zA-Z_]+)/g, (_, s) => `任务状态：${window.Pivot?.legacy?.agentStatusLabel?.(s) || s}`);
+    const formatInboxBody = text => String(text || '-').replace(/任务状态：\s*([a-zA-Z_]+)/g, (_, s) => `任务状态：${window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s) || s}`);
 
 
     const formatGoalTrigger = (spec = {}) => {

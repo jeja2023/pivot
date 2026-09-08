@@ -10,7 +10,8 @@ const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig } = require('./rag-config');
-const { clearKnowledgeGraphForDocument, getGraphSummary } = require('./knowledge-graph');
+const { getGraphSummary } = require('./knowledge-graph');
+const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeIndexStage } = require('./rag-index-staging');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
 const knowledgeRepository = require('../repositories/knowledge');
@@ -74,23 +75,19 @@ function parseKnowledgeTags(value) {
         : String(value || '').split(/[,，;；\s\n]+/);
     return [...new Set(values.map(normalizeKnowledgeTag).filter(Boolean))].slice(0, 20);
 }
-
 async function upsertKnowledgeTags(userId, tags, now = getBeijingTimestamp()) {
     const safeTags = parseKnowledgeTags(tags);
     if (!safeTags.length) return [];
     return await knowledgeRepository.upsertTags(userId, safeTags, now);
 }
-
 function normalizeKnowledgeCollectionId(value) {
     return normalizeKnowledgeDocId(value);
 }
-
 async function getKnowledgeCollectionForUser(collectionId, user) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (!normalizedId) return null;
     return await knowledgeRepository.getCollectionForUser(normalizedId, user);
 }
-
 async function resolveKnowledgeCollectionId({ userId, user = null, collectionId = null } = {}) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (normalizedId) {
@@ -99,7 +96,6 @@ async function resolveKnowledgeCollectionId({ userId, user = null, collectionId 
     }
     return null;
 }
-
 async function listKnowledgeCollections(user) {
     const normalizedUser = normalizeKnowledgeUser(user);
     const rows = await knowledgeRepository.listCollections(normalizedUser);
@@ -113,7 +109,6 @@ async function listKnowledgeCollections(user) {
         read_only: Number(row.user_id) !== normalizedUser.id
     }));
 }
-
 async function createKnowledgeCollection({ userId, name, description = '' }) {
     const normalizedName = normalizeKnowledgeCollectionName(name);
     if (!normalizedName) return null;
@@ -128,7 +123,6 @@ async function createKnowledgeCollection({ userId, name, description = '' }) {
     `, [userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now]);
     return await getKnowledgeCollectionForUser(row?.id, userId);
 }
-
 async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
     const collection = await getKnowledgeCollectionForUser(collectionId, user);
     if (!collection) return null;
@@ -145,7 +139,6 @@ async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
         ...(await listShareTargets(user, { excludeUserId: collection.user_id }))
     };
 }
-
 async function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
     if (!normalizedId) return null;
@@ -164,14 +157,12 @@ async function updateKnowledgeCollectionSharing({ collectionId, user, body = {} 
     clearRagCacheForUser(normalizeKnowledgeUser(user).id);
     return await getKnowledgeCollectionForUser(normalizedId, user);
 }
-
 async function createKnowledgeTag({ userId, tag }) {
     const safeTags = await upsertKnowledgeTags(userId, [tag]);
     if (!safeTags.length) return null;
     const allTags = await listKnowledgeTags(userId);
     return allTags.find(item => item.tag === safeTags[0]) || { tag: safeTags[0], doc_count: 0 };
 }
-
 async function filterExistingKnowledgeTags(userId, tags = []) {
     const safeTags = parseKnowledgeTags(tags);
     if (!safeTags.length) return [];
@@ -185,7 +176,6 @@ async function filterExistingKnowledgeTags(userId, tags = []) {
     const existing = new Set(rows.map(row => row.tag));
     return safeTags.filter(tag => existing.has(tag));
 }
-
 async function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
@@ -207,13 +197,11 @@ async function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
     clearRagCacheForUser(userId);
     return safeTags;
 }
-
 async function getKnowledgeDocumentTags({ docId, userId }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return [];
     return await knowledgeRepository.listDocumentTags(normalizedDocId, userId);
 }
-
 function buildKnowledgeDocumentScopeFilter(scope = {}, docAlias = 'knowledge_docs') {
     const raw = scope && typeof scope === 'object' ? scope : {};
     const collectionId = normalizeKnowledgeCollectionId(raw.collectionId);
@@ -411,7 +399,6 @@ async function getKnowledgeDocumentAuditList({ limit = 100, offset = 0, includeA
     const total = Number(countRow?.count || 0);
     return { data, total, limit: safeLimit, offset: safeOffset };
 }
-
 async function markKnowledgeDocumentProcessing({ docId, userId }) {
     const now = getBeijingTimestamp();
     const result = await execute(`
@@ -421,7 +408,6 @@ async function markKnowledgeDocumentProcessing({ docId, userId }) {
     `, ['processing', now, docId, userId]);
     return Number(result || 0) > 0;
 }
-
 async function markKnowledgeDocumentReady({ docId, userId, chunkCount }) {
     const now = getBeijingTimestamp();
     const result = await execute(`
@@ -431,7 +417,6 @@ async function markKnowledgeDocumentReady({ docId, userId, chunkCount }) {
     `, ['ready', chunkCount, chunkCount, now, now, docId, userId]);
     return Number(result || 0) > 0;
 }
-
 async function markKnowledgeDocumentError({ docId, userId, error }) {
     const now = getBeijingTimestamp();
     const result = await execute(`
@@ -441,7 +426,15 @@ async function markKnowledgeDocumentError({ docId, userId, error }) {
     `, ['error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId]);
     return Number(result || 0) > 0;
 }
-
+async function markKnowledgeDocumentRebuildError({ docId, userId, error }) {
+    const now = getBeijingTimestamp();
+    const result = await execute(`
+        UPDATE knowledge_docs
+        SET status = 'ready', error_message = ?, processed_at = COALESCE(processed_at, ?), updated_at = ?
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `, [`重建失败，继续使用旧索引：${String(error?.message || error || '知识库索引失败').slice(0, 900)}`, now, now, docId, userId]);
+    return Number(result || 0) > 0;
+}
 async function processKnowledgeDocument({ docId, userId, user = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     const doc = normalizedDocId ? await getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
@@ -458,27 +451,23 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         throw error;
     }
 
+    let sourceHash = String(doc.source_hash || '').trim();
     try {
-        const sourceHash = await hashFileSha256(sourcePath);
-        if (sourceHash !== String(doc.source_hash || '').trim()) {
-            await execute(`
-                UPDATE knowledge_docs
-                SET source_hash = ?, updated_at = ?
-                WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-            `, [sourceHash, getBeijingTimestamp(), normalizedDocId, userId]);
+        sourceHash = await hashFileSha256(sourcePath);
+        if (sourceHash === String(doc.source_hash || '').trim() && doc.status === 'ready' && Number(doc.chunk_count || 0) > 0) {
+            return { docId: normalizedDocId, chunkCount: Number(doc.chunk_count), skipped: true };
         }
     } catch (error) {
         logger.warn({ err: error.message, docId: normalizedDocId }, '知识库重建时指纹计算失败');
     }
 
-    await markKnowledgeDocumentProcessing({ docId: normalizedDocId, userId });
-    clearRagCacheForUser(userId);
-    await clearKnowledgeGraphForDocument(normalizedDocId);
-    await execute('DELETE FROM knowledge_chunks WHERE doc_id = ?', [normalizedDocId]);
-
+    const stage = await createKnowledgeIndexStage({ doc, userId });
+    const stageId = Number(stage?.id || 0);
+    if (!stageId) throw new Error('无法创建知识库索引暂存记录');
+    const keepOldIndex = doc.status === 'ready' && Number(doc.chunk_count || 0) > 0;
     try {
         const text = await readKnowledgeDocumentFromPath(sourcePath, doc.name);
-        const chunkCount = await indexDocumentChunks(normalizedDocId, text, {
+        const chunkCount = await indexDocumentChunks(stageId, text, {
             userId,
             user,
             onProgress: async ({ indexed, total }) => {
@@ -488,16 +477,25 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
                     UPDATE knowledge_docs
                     SET indexed_chunks = ?, chunk_count = ?, progress = ?, updated_at = ?
                     WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-                `, [indexed, total, progress, now, normalizedDocId, userId]);
+                `, [indexed, total, progress, now, stageId, userId]);
             }
         });
-        await markKnowledgeDocumentReady({ docId: normalizedDocId, userId, chunkCount });
+        const coverage = await queryOne(`
+            SELECT COUNT(*) AS total, SUM(CASE WHEN embedding IS NULL OR TRIM(embedding) = '' THEN 1 ELSE 0 END) AS missing
+            FROM knowledge_chunks WHERE doc_id = ?
+        `, [stageId]);
+        if (Number(coverage?.missing || 0) > 0) {
+            const error = new Error(`Embedding 未完成：${Number(coverage.missing)} / ${Number(coverage.total)} 个分块缺少向量`);
+            error.code = 'RAG_EMBEDDING_INCOMPLETE';
+            throw error;
+        }
+        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash });
         clearRagCacheForUser(userId);
         return { docId: normalizedDocId, chunkCount };
     } catch (e) {
-        await execute('DELETE FROM knowledge_chunks WHERE doc_id = ?', [normalizedDocId]);
-        await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e });
-        clearRagCacheForUser(userId);
+        await discardKnowledgeIndexStage(stageId);
+        if (keepOldIndex) await markKnowledgeDocumentRebuildError({ docId: normalizedDocId, userId, error: e });
+        else await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e });
         throw e;
     }
 }

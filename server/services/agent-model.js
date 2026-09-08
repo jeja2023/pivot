@@ -95,6 +95,41 @@ function resolveAgentStreamIdleTimeoutMs(options = {}) {
     return Math.max(1_000, Math.min(source, resolveAgentRequestTimeoutMs(options)));
 }
 
+async function forwardStreamingWithFirstResponseDeadline(request, options = {}) {
+    const timeoutMs = resolveAgentFirstResponseTimeoutMs(options);
+    const controller = new AbortController();
+    const sourceSignal = options.signal || null;
+    const abortFromSource = () => controller.abort(sourceSignal?.reason);
+    if (sourceSignal?.aborted) abortFromSource();
+    else sourceSignal?.addEventListener?.('abort', abortFromSource, { once: true });
+
+    let timer = null;
+    const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        sourceSignal?.removeEventListener?.('abort', abortFromSource);
+    };
+    try {
+        const response = await Promise.race([
+            forwardChatCompletion({ ...request, stream: true, timeout: 0, signal: controller.signal }),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    const error = new Error(`模型在 ${Math.ceil(timeoutMs / 1000)} 秒内未开始响应。`);
+                    error.code = 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT';
+                    controller.abort(error);
+                    reject(error);
+                }, timeoutMs);
+            })
+        ]);
+        if (timer) clearTimeout(timer);
+        // 必须持续保留 sourceSignal -> controller 的桥接直到 SSE 结束；
+        // 否则首响应之后的用户取消无法中止已经建立的流。
+        return { response, cleanup };
+    } catch (error) {
+        cleanup();
+        throw error;
+    }
+}
+
 function applyAgentThinkingControls(data, modelCfg, options = {}) {
     if (agentThinkingKept(modelCfg, options)) return data;
     return Object.assign(data, buildThinkingControlPayload(modelCfg));
@@ -246,16 +281,14 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             }
         });
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
-        const response = await forwardChatCompletion({
+        const { response, cleanup: cleanupStreamingRequest } = await forwardStreamingWithFirstResponseDeadline({
             modelCfg,
             user: options.user || null,
             url: targetUrl,
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
             data: payload,
-            stream: true,
-            timeout: resolveAgentFirstResponseTimeoutMs(options),
-            signal: options.signal || null
-        });
+        }, options);
+        try {
         await new Promise((resolve, reject) => {
             let settled = false;
             const idleTimeoutMs = resolveAgentStreamIdleTimeoutMs(options);
@@ -271,8 +304,10 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
                 idleTimer = setTimeout(() => {
                     const error = new Error(`模型流在 ${Math.ceil(idleTimeoutMs / 1000)} 秒内没有收到新数据。`);
                     error.code = 'AGENT_MODEL_STREAM_IDLE';
-                    try { response.data.destroy(error); } catch (_) {}
+                    // 必须先固定领域错误；destroy() 可能同步触发底层 "aborted"
+                    // 事件，若顺序相反会掩盖超时诊断码并让恢复策略误判。
                     finish(reject, error);
+                    try { response.data.destroy(error); } catch (_) {}
                 }, idleTimeoutMs);
                 idleTimer.unref?.();
             };
@@ -296,6 +331,9 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             });
             response.data.on('error', error => finish(reject, error));
         });
+        } finally {
+            cleanupStreamingRequest();
+        }
         const result = accumulator.finalize();
         const provider = providerState.finalize();
         timing.completedAt = Date.now();

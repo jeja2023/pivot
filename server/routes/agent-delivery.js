@@ -168,11 +168,13 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Content-Digest', `sha256:${rendition.content_digest}`);
         res.setHeader('Cache-Control', 'no-store');
-        stream.on('error', () => {
+        const { pipeline } = require('node:stream/promises');
+        try {
+            await pipeline(stream, res);
+        } catch (error) {
             if (!res.headersSent) res.status(500).json({ error: '读取渲染产物失败。' });
-            else res.destroy();
-        });
-        stream.pipe(res);
+            else res.destroy(error);
+        }
     }));
 
     // ── 本机设备身份 ────────────────────────────────────────────────────────

@@ -47,9 +47,9 @@ function parseJson(value, fallback = {}) {
     }
 }
 
-function decryptQuiet(value) {
+function decryptQuiet(value, context = 'pivot.secret') {
     try {
-        return decryptSecret(value || '');
+        return decryptSecret(value || '', context);
     } catch (_) {
         return '';
     }
@@ -240,7 +240,7 @@ async function checkModelCatalogLive(model) {
             allowExplicitLoopbackForAdmin: true
         });
         const response = await axios.get(targetUrl, {
-            headers: model.api_key ? { Authorization: `Bearer ${decryptQuiet(model.api_key)}` } : undefined,
+            headers: model.api_key ? { Authorization: `Bearer ${decryptQuiet(model.api_key, 'models.api_key')}` } : undefined,
             timeout: timeoutMs,
             proxy: false,
             ...agents,
@@ -313,7 +313,7 @@ async function checkDatabaseLive(rows) {
             port: row.port,
             database_name: row.database_name,
             username: row.username,
-            password: decryptQuiet(row.password),
+            password: decryptQuiet(row.password, 'mcp_database_connections.password'),
             schema: options.schema,
             maxRows: options.maxRows ?? options.max_rows,
             tableAllowlist: options.tableAllowlist ?? options.table_allowlist ?? options.allowedTables,
@@ -360,7 +360,7 @@ async function main() {
     const embeddingUrl = settings.get('rag_embedding_api_url') || process.env.EMBEDDING_API_URL || '';
     const embeddingModel = settings.get('rag_embedding_model') || process.env.EMBEDDING_MODEL || 'nomic-embed-text';
     const embeddingApiKey = settings.has('rag_embedding_api_key')
-        ? decryptQuiet(settings.get('rag_embedding_api_key'))
+        ? decryptQuiet(settings.get('rag_embedding_api_key'), 'rag.embedding_api_key')
         : (process.env.EMBEDDING_API_KEY || '');
     add('Embedding', 'HTTP 配置', embeddingUrl ? 'ok' : 'warn', embeddingUrl ? `${embeddingModel} @ ${urlPreview(embeddingUrl)}` : '未配置 EMBEDDING_API_URL 或系统向量地址。');
 

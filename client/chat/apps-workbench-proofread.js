@@ -595,7 +595,7 @@ async function copyOfficialWritingPrompt() {
 
 function sendOfficialWritingToChat() {
     const prompt = buildOfficialWritingPrompt();
-    window.Pivot.legacy.showMainWorkspace?.('chat');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     const input = document.getElementById('user-input');
     if (!input) return;
     input.value = prompt;

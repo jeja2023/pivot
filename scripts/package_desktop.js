@@ -9,6 +9,11 @@ const {
     resolveBuildTarget,
     writePlatformChecksumManifest
 } = require('./desktop-build-support');
+const { prepareDesktopConnectorProfile } = require('./desktop_optional_database_connectors');
+const { prepareWindowsUpdateSigningProfile } = require('./desktop_update_signing');
+const { beginDesktopBuildTransaction, recoverPendingDesktopBuildTransaction } = require('./desktop_build_transaction');
+const { loadDistributionDesktopConfig } = require('./desktop_distribution_config');
+const { prepareDesktopRuntimeProfile } = require('./desktop_runtime_profile');
 
 const root = path.resolve(__dirname, '..');
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
@@ -56,7 +61,7 @@ function cleanBuildOutputs() {
     }
 }
 
-function prepareBundledDesktopConfig() {
+function prepareBundledDesktopConfig(options = {}) {
     const configPath = path.join(root, 'config.json');
     const original = fs.readFileSync(configPath, 'utf8');
     const envFile = path.join(root, '.env');
@@ -70,10 +75,27 @@ function prepareBundledDesktopConfig() {
     if (!secret) {
         throw new Error('桌面发布包必须显式提供 PIVOT_DISTRIBUTION_STEALTH_SECRET 或 PIVOT_STEALTH_SECRET。');
     }
-    const config = JSON.parse(original);
+    const distribution = loadDistributionDesktopConfig(root, process.env, {
+        required: options.requireDistributionConfig === true
+    });
+    const config = distribution.config || JSON.parse(original);
+    delete config.stealthSecret;
     config.stealthSecret = secret;
+    if (config.autoUpdate?.enabled === true && options.windowsTarget) {
+        if (options.windowsUpdatePublisher) {
+            config.autoUpdate.publisherName = options.windowsUpdatePublisher;
+        } else {
+            // --dir 冒烟包没有发布证书，不能在启动时走一条无法签名校验的更新链。
+            config.autoUpdate.enabled = false;
+            delete config.autoUpdate.publisherName;
+        }
+    }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
-    return () => fs.writeFileSync(configPath, original, 'utf8');
+    if (distribution.sourcePath) console.log(`[desktop-config] 使用受控分发配置：${distribution.sourcePath}`);
+    return {
+        config,
+        restore: () => fs.writeFileSync(configPath, original, 'utf8')
+    };
 }
 
 function normalizeBuilderArgs(rawArgs) {
@@ -150,25 +172,57 @@ function copyReleaseArtifactsToDownloads(rawArgs, buildTarget) {
 const rawBuilderArgs = process.argv.slice(2);
 let runError = null;
 let restoreBundledDesktopConfig = () => {};
+let restoreDesktopConnectorProfile = () => {};
+let restoreWindowsUpdateSigningProfile = () => {};
+let restoreDesktopRuntimeProfile = () => {};
+let restoreDesktopBuildTransaction = () => {};
 
 try {
+    recoverPendingDesktopBuildTransaction(root);
+    const desktopBuildTransaction = beginDesktopBuildTransaction(root);
+    restoreDesktopBuildTransaction = () => desktopBuildTransaction.restore();
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
+    const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
+    const windowsUpdateSigningProfile = prepareWindowsUpdateSigningProfile(root, {
+        env: process.env,
+        required: windowsRelease
+    });
+    restoreWindowsUpdateSigningProfile = () => windowsUpdateSigningProfile.restore();
+    const desktopConnectorProfile = prepareDesktopConnectorProfile(root);
+    restoreDesktopConnectorProfile = () => desktopConnectorProfile.restore();
+    const bundledDesktopConfig = prepareBundledDesktopConfig({
+        requireDistributionConfig: !rawBuilderArgs.includes('--dir'),
+        windowsTarget: buildTarget.platform === 'win32',
+        windowsUpdatePublisher: windowsUpdateSigningProfile.publisherName
+    });
+    restoreBundledDesktopConfig = bundledDesktopConfig.restore;
+    const desktopRuntimeProfile = prepareDesktopRuntimeProfile(root, {
+        config: bundledDesktopConfig.config
+    });
+    restoreDesktopRuntimeProfile = desktopRuntimeProfile.restore;
     const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-    restoreBundledDesktopConfig = prepareBundledDesktopConfig();
     if (buildTarget.platform === 'linux') assertLinuxPackageMetadata(packageJson, root);
     ensureElectronInstalled();
     cleanBuildOutputs();
     run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
-    run(process.execPath, [path.join('scripts', 'package_browser_runtime.js')]);
+    if (desktopRuntimeProfile.includesBrowserRuntime) {
+        run(process.execPath, [path.join('scripts', 'package_browser_runtime.js')]);
+    }
     run(process.execPath, [path.join('scripts', 'package_python_runtime.js')]);
-    assertRuntimeManifest(path.join(root, 'artifacts', 'agent-browser-pack', 'manifest.json'), buildTarget);
+    if (desktopRuntimeProfile.includesBrowserRuntime) {
+        assertRuntimeManifest(path.join(root, 'artifacts', 'agent-browser-pack', 'manifest.json'), buildTarget);
+    }
     assertRuntimeManifest(path.join(root, 'artifacts', 'agent-python-pack', 'manifest.json'), buildTarget, {
         requireBundled: buildTarget.platform === 'linux'
     });
     run(process.execPath, [electronBuilderInstallDeps]);
     const electronExecutable = require('electron');
     run(electronExecutable, [path.join('scripts', 'verify_desktop_runtime.js'), buildTarget.platform, buildTarget.arch], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+        env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
+            PIVOT_VERIFY_DESKTOP_BROWSER_RUNTIME: String(desktopRuntimeProfile.includesBrowserRuntime)
+        }
     });
     run(process.execPath, [electronBuilderCli, ...normalizeBuilderArgs(rawBuilderArgs)]);
     copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget);
@@ -179,6 +233,30 @@ try {
         restoreBundledDesktopConfig();
     } catch (restoreError) {
         console.error('恢复仓库内桌面配置失败:', restoreError);
+        if (!runError) runError = restoreError;
+    }
+    try {
+        restoreDesktopRuntimeProfile();
+    } catch (restoreError) {
+        console.error('恢复桌面运行时构建档位失败:', restoreError);
+        if (!runError) runError = restoreError;
+    }
+    try {
+        restoreDesktopConnectorProfile();
+    } catch (restoreError) {
+        console.error('恢复桌面数据库连接器构建配置失败:', restoreError);
+        if (!runError) runError = restoreError;
+    }
+    try {
+        restoreWindowsUpdateSigningProfile();
+    } catch (restoreError) {
+        console.error('恢复 Windows 更新签名构建配置失败:', restoreError);
+        if (!runError) runError = restoreError;
+    }
+    try {
+        restoreDesktopBuildTransaction();
+    } catch (restoreError) {
+        console.error('恢复桌面构建事务失败:', restoreError);
         if (!runError) runError = restoreError;
     }
 }

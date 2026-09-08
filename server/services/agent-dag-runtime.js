@@ -1,6 +1,8 @@
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { approvalInputHash } = require('./agent-runtime/approvals');
+const { calculateDagRetryDelayMs, waitForDagRetry } = require('./agent-dag-retry');
+const { resolveDagToolApproval, stableDagOperationKey } = require('./agent-dag-approval');
 const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
@@ -268,6 +270,8 @@ async function upsertDagNode(runId, node, patch = {}) {
 }
 
 async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex = 0, executionContext = {} }, deps) {
+    const executeDagTool = deps.executeToolByName || executeToolByName, recordToolCall = deps.recordAgentToolCall || recordAgentToolCall;
+    const listRunSteps = deps.listSteps || listSteps, waitForRetry = deps.waitForDagRetry || waitForDagRetry;
     const startedAt = Date.now();
     const startedAtText = getBeijingTimestamp();
     const stepContext = executionContext.stepContext || await deps.captureStepContext?.({
@@ -291,6 +295,8 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         executionContext.contextHash = stepContext.contextHash;
     }
     const contextHash = stepContext?.contextHash || executionContext.contextHash || '';
+    // 重试次数只能区分审计步骤，不能参与 checkpoint operation key。
+    executionContext.operationKey = executionContext.operationKey || stableDagOperationKey(run, node, resolvedInput);
     let lastError = null;
     let attempted = 0;
     const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
@@ -304,7 +310,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             const remainingRunMs = Math.max(deadline - Date.now(), 1);
             const nodeOwnsDeadline = policy.timeoutMs < remainingRunMs;
             const output = await deps.withTimeout(
-                signal => executeToolByName(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext, signal }),
+                signal => executeDagTool(node.tool, resolvedInput, user, toolList, { run, modelCfg, node, ...executionContext, signal }),
                 Math.min(policy.timeoutMs, Math.max(remainingRunMs, 1000)),
                 `执行 DAG 节点：${node.title || node.id}`,
                 {
@@ -313,7 +319,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 }
             );
             try {
-                await recordAgentToolCall({
+                await recordToolCall({
                     runId: run.id,
                     stepId: `${run.id}:${node.id}:${attempt}`,
                     toolName: node.tool,
@@ -346,7 +352,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
             lastError = e;
             if (e.code === 'AGENT_NODE_TIMEOUT') break;
-            await deps.insertStep(run.id, (await listSteps(run.id)).length + 1, {
+            await deps.insertStep(run.id, (await listRunSteps(run.id)).length + 1, {
                 type: 'dag',
                 title: `DAG 节点重试：${node.title || node.id}（${attempt}/${attempts}）`,
                 toolName: node.tool,
@@ -358,10 +364,12 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 contextHash
             });
             if (attempt >= attempts) break;
+            const retryDelayMs = calculateDagRetryDelayMs(attempt);
+            await waitForRetry(retryDelayMs, executionContext.signal || deps.signal || null);
         }
     }
     try {
-        await recordAgentToolCall({
+        await recordToolCall({
             runId: run.id,
             stepId: `${run.id}:${node.id}:${attempted || 1}`,
             toolName: node.tool,
@@ -686,7 +694,10 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, inputContractIssues);
             validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, inputContractIssues);
             const outputDefinitionIssues = validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, []);
-                const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs, selectedTool);
+            const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs, selectedTool);
+            const { approvalKey, approvalGranted } = resolveDagToolApproval({
+                run, node, selectedTool, input: resolvedInput, isApprovalGranted: deps.isApprovalGranted
+            });
             const startedAtText = getBeijingTimestamp();
             const stepContext = await deps.captureStepContext?.({
                 run,
@@ -698,7 +709,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 contextConfig: { mode: 'dag', nodeId: node.id, toolName: node.tool, inputs: dagInputs },
                 resumeContext: { nodeId: node.id, attempt: 0 },
                 policy,
-                approval: { granted: true, allowApproval: true },
+                approval: { granted: approvalGranted, allowApproval: true },
                 deadline,
                 signal: batchSignal
             });
@@ -755,7 +766,6 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                         key: `${node.tool}:${node.id}`
                     });
                 }
-                const approvalKey = `${node.tool}:${node.id}`;
                 if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
                     const approvalError = new Error('DAG 节点需要工具审批。');
                     approvalError.code = 'AGENT_APPROVAL_REQUIRED';
@@ -768,7 +778,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     approvalKey,
                     // Reaching this point means the approval helper either found
                     // a prior grant or determined that this tool is safe to run.
-                    approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
+                    approvalGranted,
                     allowApproval: true,
                     stepContext,
                     contextHash: stepContext?.contextHash || '',
@@ -978,6 +988,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
 }
 
 module.exports = {
+    calculateDagRetryDelayMs,
     buildDagFallbackFinalAnswer,
     buildIncompleteDagAnswer,
     executeDagNodeWithPolicy,

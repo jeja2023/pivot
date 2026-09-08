@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { getRequestId } = require('./request-context');
 
 const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled', 'deleted']);
 const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
@@ -47,7 +48,8 @@ async function ensureAgentTrace(run, metadata = {}) {
     const hasMetadata = metadata && typeof metadata === 'object'
         ? Object.keys(metadata).length > 0
         : Boolean(metadata);
-    const metadataText = hasMetadata ? serializeTraceValue(metadata) : '';
+    const traceMetadata = getRequestId() ? { ...(metadata || {}), requestId: getRequestId() } : metadata;
+    const metadataText = hasMetadata ? serializeTraceValue(traceMetadata) : '';
     try {
         await execute(`
             INSERT INTO agent_traces (run_id, user_id, status, metadata, started_at, created_at, updated_at)

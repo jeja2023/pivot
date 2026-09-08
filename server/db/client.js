@@ -135,7 +135,11 @@ function toPostgresParams(sql) {
  * @returns {Promise<any[]>}
  */
 async function query(sql, params = []) {
+    const startedAt = Date.now();
     const result = await getPgPool().query(toPostgresParams(sql), params);
+    if (Date.now() - startedAt > 0) {
+        try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {}
+    }
     return result.rows;
 }
 
@@ -157,7 +161,11 @@ async function queryOne(sql, params = []) {
  * @returns {Promise<number>}
  */
 async function execute(sql, params = []) {
+    const startedAt = Date.now();
     const result = await getPgPool().query(toPostgresParams(sql), params);
+    if (Date.now() - startedAt > 0) {
+        try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {}
+    }
     return result.rowCount ?? 0;
 }
 
@@ -173,15 +181,21 @@ async function transaction(fn) {
         await client.query('BEGIN');
         const trx = {
             query: async (sql, params = []) => {
+                const startedAt = Date.now();
                 const result = await client.query(toPostgresParams(sql), params);
+                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
                 return result.rows;
             },
             queryOne: async (sql, params = []) => {
+                const startedAt = Date.now();
                 const result = await client.query(toPostgresParams(sql), params);
+                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
                 return result.rows[0] ?? null;
             },
             execute: async (sql, params = []) => {
+                const startedAt = Date.now();
                 const result = await client.query(toPostgresParams(sql), params);
+                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
                 return result.rowCount ?? 0;
             },
         };

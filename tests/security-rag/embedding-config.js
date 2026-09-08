@@ -249,12 +249,9 @@ test('非 root 管理员会把嵌入配置保存为个人设置', async () => {
 });
 
 test('管理员无需 root 系统设置权限也可更新记忆阈值', async () => {
-    const suffix = Date.now().toString(36);
-    const userInfo = db.prepare(`
-        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(`memory_admin_${suffix}`, 'hash', 'Memory Admin', 'QA', 'admin', 'active');
-    const adminUser = { id: Number(userInfo.lastInsertRowid), username: `memory_admin_${suffix}`, role: 'admin', unit: 'QA' };
+    const existingAdmin = db.prepare("SELECT id, username, role, unit FROM users WHERE username = 'admin' AND deleted_at IS NULL").get();
+    assert.ok(existingAdmin, '测试库应提供内置 admin 账号');
+    const adminUser = { id: Number(existingAdmin.id), username: 'admin', role: 'admin', unit: existingAdmin.unit || 'QA' };
     const key = MEMORY_CONFIG_KEYS.threshold;
     const previousRow = db.prepare('SELECT key, value, updated_at, updated_by FROM app_settings WHERE key = ?').get(key);
     const router = createSettingsRouter({
@@ -288,7 +285,6 @@ test('管理员无需 root 系统设置权限也可更新记忆阈值', async ()
         } else {
             db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
         }
-        db.prepare('DELETE FROM users WHERE id = ?').run(adminUser.id);
     }
 });
 

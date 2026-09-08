@@ -12,6 +12,7 @@ const { buildImPayload, sendIm, validateImTarget } = require('./builtin-mcp-im')
 const MAX_ATTEMPTS = 6;
 const MAX_BODY_CHARS = 20000;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const DELIVERY_CLAIM_LEASE_MS = Math.max(30_000, Number.parseInt(process.env.AGENT_CHANNEL_DELIVERY_CLAIM_LEASE_MS || '60000', 10) || 60_000);
 
 function parseJson(value, fallback = {}) {
     if (value && typeof value === 'object') return value;
@@ -143,30 +144,72 @@ async function deliverIm(binding, delivery, user) {
     for (let index = 0; index < chunks.length; index += 1) await safeJsonRequest({ method: 'post', url: endpoint, data: { target: binding.channel_key, title: delivery.subject, message: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, interaction: parseJson(delivery.interaction, {}) }, user, assertUrl: assertSafeMcpOutboundUrl, createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), headers: config.headers || {}, timeout: 30000, validateStatus: status => status >= 200 && status < 300 });
 }
 
+async function reclaimExpiredChannelDeliveryClaims() {
+    const now = getBeijingTimestamp();
+    return await execute(`
+        UPDATE agent_channel_deliveries
+        SET status = 'queued', claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+        WHERE status = 'delivering' AND claim_expires_at IS NOT NULL AND claim_expires_at <= NOW()
+    `, [now]);
+}
+
+async function claimChannelDelivery(deliveryId, claimToken = crypto.randomUUID()) {
+    const token = String(claimToken || '').trim().slice(0, 128);
+    if (!token) throw new Error('渠道投递认领令牌不能为空。');
+    const now = getBeijingTimestamp();
+    return await queryOne(`
+        UPDATE agent_channel_deliveries
+        SET status = 'delivering', claim_token = ?, claim_expires_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'queued' AND next_attempt_at <= NOW()
+        RETURNING *
+    `, [token, getBeijingTimestamp(new Date(Date.now() + DELIVERY_CLAIM_LEASE_MS)), now, deliveryId]);
+}
+
 async function deliverChannelDelivery(deliveryId, options = {}) {
-    const delivery = await queryOne('SELECT d.*, b.channel_type, b.channel_key, b.config FROM agent_channel_deliveries d JOIN agent_channel_bindings b ON b.id = d.binding_id WHERE d.id = ?', [deliveryId]);
-    if (!delivery) return null;
-    const user = await queryOne('SELECT id, username, nickname, unit, role FROM users WHERE id = ?', [delivery.user_id]);
+    const claimToken = String(options.claimToken || crypto.randomUUID()).trim().slice(0, 128);
+    const claimed = await claimChannelDelivery(deliveryId, claimToken);
+    if (!claimed) return null;
+    const loadedDelivery = await queryOne('SELECT d.*, b.channel_type, b.channel_key, b.config FROM agent_channel_deliveries d JOIN agent_channel_bindings b ON b.id = d.binding_id WHERE d.id = ?', [claimed.id]);
+    // 外键正常情况下会保证 binding 存在；仍以认领行作为失败回写目标，避免
+    // 历史脏数据或人工删除关联记录时留下永不回收的 delivering 状态。
+    const delivery = loadedDelivery || claimed;
     try {
+        if (!loadedDelivery) throw Object.assign(new Error('渠道投递关联配置不存在。'), { code: 'CHANNEL_DELIVERY_BINDING_MISSING' });
+        const user = await queryOne('SELECT id, username, nickname, unit, role FROM users WHERE id = ?', [delivery.user_id]);
+        if (!user) throw Object.assign(new Error('渠道投递所属用户已不存在。'), { code: 'CHANNEL_DELIVERY_USER_MISSING' });
         if (delivery.channel_type === 'web') publishUserEvent(delivery.user_id, 'agent.channel', { deliveryId: delivery.id, eventType: delivery.event_type, subject: delivery.subject, body: delivery.body, attachments: parseJson(delivery.attachments, []), interaction: parseJson(delivery.interaction, {}) });
         else if (delivery.channel_type === 'webhook') await deliverWebhook(delivery, delivery, user);
         else if (delivery.channel_type === 'email') await deliverEmail(delivery, delivery, user);
         else if (delivery.channel_type === 'im') await deliverIm(delivery, delivery, user);
         else throw new Error(`暂不支持渠道类型：${delivery.channel_type}`);
-        await execute("UPDATE agent_channel_deliveries SET status = 'delivered', delivered_at = ?, updated_at = ? WHERE id = ?", [getBeijingTimestamp(), getBeijingTimestamp(), delivery.id]);
+        const delivered = await queryOne(`
+            UPDATE agent_channel_deliveries
+            SET status = 'delivered', delivered_at = ?, claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+            WHERE id = ? AND status = 'delivering' AND claim_token = ?
+            RETURNING *
+        `, [getBeijingTimestamp(), getBeijingTimestamp(), delivery.id, claimToken]);
+        return delivered || null;
     } catch (error) {
         const attempts = Number(delivery.attempts || 0) + 1;
         const dead = attempts >= MAX_ATTEMPTS;
-        await execute('UPDATE agent_channel_deliveries SET status = ?, attempts = ?, next_attempt_at = ?, last_error = ?, dead_lettered_at = CASE WHEN ? THEN ? ELSE dead_lettered_at END, updated_at = ? WHERE id = ?', [dead ? 'dead_letter' : 'queued', attempts, getBeijingTimestamp(new Date(Date.now() + backoff(attempts))), String(error.message || error).slice(0, 2000), dead, dead ? getBeijingTimestamp() : null, getBeijingTimestamp(), delivery.id]);
-        if (dead && typeof options.onDeadLetter === 'function') await options.onDeadLetter(delivery, error);
+        const settled = await queryOne(`
+            UPDATE agent_channel_deliveries
+            SET status = ?, attempts = ?, next_attempt_at = ?, last_error = ?,
+                dead_lettered_at = CASE WHEN ? THEN ? ELSE dead_lettered_at END,
+                claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+            WHERE id = ? AND status = 'delivering' AND claim_token = ?
+            RETURNING *
+        `, [dead ? 'dead_letter' : 'queued', attempts, getBeijingTimestamp(new Date(Date.now() + backoff(attempts))), String(error.message || error).slice(0, 2000), dead, dead ? getBeijingTimestamp() : null, getBeijingTimestamp(), delivery.id, claimToken]);
+        if (dead && settled && typeof options.onDeadLetter === 'function') await options.onDeadLetter(settled, error);
+        return settled || null;
     }
-    return queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [delivery.id]);
 }
 
 async function dispatchChannelDeliveries(limit = 50, options = {}) {
+    await reclaimExpiredChannelDeliveryClaims();
     const rows = await query("SELECT id FROM agent_channel_deliveries WHERE status = 'queued' AND next_attempt_at <= NOW() ORDER BY created_at ASC LIMIT ?", [Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200))]);
     for (const row of rows) await deliverChannelDelivery(row.id, options);
     return { processed: rows.length };
 }
 
-module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, chunkText, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, normalizeAttachments };
+module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, chunkText, claimChannelDelivery, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, normalizeAttachments, reclaimExpiredChannelDeliveryClaims };

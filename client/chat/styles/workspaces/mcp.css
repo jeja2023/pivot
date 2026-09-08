@@ -1,7 +1,0 @@
-/* MCP 工作区兼容入口。保持导入顺序稳定。 */
-@import url("./mcp/mcp-forms.css");
-@import url("./mcp/mcp-system-cards.css");
-@import url("./mcp/mcp-call-logs.css");
-@import url("./mcp/mcp-governance.css");
-@import url("./mcp/mcp-local-auth.css");
-@import url("./mcp/mcp-responsive.css");

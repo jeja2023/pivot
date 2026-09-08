@@ -154,7 +154,7 @@ fetch('/downloads/Pivot-Setup.exe', { method: 'HEAD' })
 - `Pivot Setup <version>.exe`
 - `Pivot Setup <version>.exe.blockmap`
 
-无 HTTPS 的离线局域网生产环境，可以在桌面端 `config.json` 中使用 HTTP 的 `remoteUrl`，并设置 `autoUpdate.enabled=true`、`autoUpdate.path=/downloads/`、`autoUpdate.url=""`、`autoUpdate.allowInsecureHttp=true`，同时把固定内网地址写入 `autoUpdate.allowedOrigins`。这样客户端会从同一个 Pivot 服务的 `/downloads/` 目录检查更新。
+业务 `remoteUrl` 可以是隔离局域网 HTTP 地址，但自动更新不允许复用 HTTP；需配置独立的 HTTPS 更新地址和 `allowedOrigins`，或保持 `autoUpdate.enabled=false` 并通过受控共享目录/离线介质分发。
 
 ## 多版本支持（可选）
 

@@ -1,52 +1,78 @@
-/** Test-only synchronous facade for legacy db.prepare() fixtures backed by PG. */
+/**
+ * Test-only synchronous facade for legacy db.prepare() fixtures backed by PG.
+ * Uses a SharedArrayBuffer Worker instead of temporary JSON files and polling.
+ */
 const path = require('node:path');
-const fs = require('node:fs');
-const os = require('node:os');
-const { spawn } = require('node:child_process');
+const { Worker } = require('node:worker_threads');
 
-const waitArray = new Int32Array(new SharedArrayBuffer(4));
+const REQUEST_TIMEOUT_MS = 30_000;
+const TRANSPORT_BYTES = 8 * 1024 * 1024;
+const IDLE = 0;
+const REQUEST = 1;
+const RESPONSE = 2;
+const READY = 4;
+const STOP = -1;
 
-function waitForFile(filePath, timeoutMs, description) {
-    const deadline = Date.now() + timeoutMs;
-    while (!fs.existsSync(filePath)) {
-        if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}`);
-        Atomics.wait(waitArray, 0, 0, 5);
+function transportError(message) {
+    const error = new Error(message);
+    error.code = 'PG_TEST_SYNC_TRANSPORT_ERROR';
+    return error;
+}
+
+function wait(control, expected, timeoutMs, label) {
+    if (Atomics.wait(control, 0, expected, timeoutMs) === 'timed-out') {
+        throw transportError(`等待 ${label} 超时。`);
     }
+}
+
+function encode(buffer, value) {
+    const bytes = Buffer.from(JSON.stringify(value), 'utf8');
+    if (bytes.length > buffer.length) throw transportError(`测试同步数据库请求超过 ${buffer.length} 字节限制。`);
+    bytes.copy(buffer);
+    return bytes.length;
+}
+
+function decode(buffer, length, label) {
+    if (!Number.isSafeInteger(length) || length < 0 || length > buffer.length) throw transportError(`${label} 长度无效。`);
+    try { return JSON.parse(buffer.subarray(0, length).toString('utf8')); } catch (error) { throw transportError(`${label} 无法解析：${error.message}`); }
 }
 
 function createWorker() {
-    const bridgeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-pg-sync-'));
-    const requestPath = path.join(bridgeDir, 'request.json');
-    const responsePath = path.join(bridgeDir, 'response.json');
-    const worker = spawn(process.execPath, [path.join(__dirname, 'test-sync-worker.js')], {
-        cwd: path.resolve(__dirname, '../..'),
-        env: { ...process.env, PIVOT_TEST_SYNC_BRIDGE_DIR: bridgeDir },
-        stdio: 'ignore',
-        windowsHide: true
+    const control = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2));
+    const payload = Buffer.from(new SharedArrayBuffer(TRANSPORT_BYTES));
+    const worker = new Worker(path.join(__dirname, 'test-sync-worker-thread.js'), {
+        workerData: { controlBuffer: control.buffer, payloadBuffer: payload.buffer }, env: process.env
     });
     worker.unref();
-    waitForFile(path.join(bridgeDir, 'ready'), 10000, 'PG test worker startup');
-
-    function close() {
-        try { worker.kill(); } catch (error) { /* process already closed */ }
-        fs.rmSync(bridgeDir, { recursive: true, force: true });
-    }
-
+    wait(control, IDLE, 10_000, 'PG 测试 Worker 启动');
+    if (Atomics.load(control, 0) !== READY) throw transportError(decode(payload, Atomics.load(control, 1), 'PG 测试 Worker 启动响应')?.error || 'PG 测试 Worker 未能启动。');
+    Atomics.store(control, 0, IDLE);
+    Atomics.notify(control, 0, 1);
+    let closed = false;
+    const close = () => {
+        if (closed) return;
+        closed = true;
+        Atomics.store(control, 0, STOP);
+        Atomics.notify(control, 0, 1);
+        void worker.terminate();
+    };
     process.once('exit', close);
-    return { bridgeDir, requestPath, responsePath, worker, close };
+    return { control, payload, close };
 }
 
-function request(worker, payload) {
-    fs.rmSync(worker.responsePath, { force: true });
-    const tempPath = path.join(worker.bridgeDir, `request.${process.pid}.tmp`);
-    fs.writeFileSync(tempPath, JSON.stringify(payload));
-    fs.renameSync(tempPath, worker.requestPath);
-    waitForFile(worker.responsePath, 30000, 'PG test query');
-    const response = JSON.parse(fs.readFileSync(worker.responsePath, 'utf8'));
-    fs.rmSync(worker.responsePath, { force: true });
-    if (!response.ok) {
-        const error = new Error(response.error || 'PG test query failed');
-        if (response.code) error.code = response.code;
+function request(worker, value) {
+    if (Atomics.load(worker.control, 0) !== IDLE) throw transportError('PG 测试同步 Worker 正忙，拒绝并发同步请求。');
+    Atomics.store(worker.control, 1, encode(worker.payload, value));
+    Atomics.store(worker.control, 0, REQUEST);
+    Atomics.notify(worker.control, 0, 1);
+    wait(worker.control, REQUEST, REQUEST_TIMEOUT_MS, 'PG 测试查询');
+    const state = Atomics.load(worker.control, 0);
+    const response = decode(worker.payload, Atomics.load(worker.control, 1), 'PG 测试查询响应');
+    Atomics.store(worker.control, 0, IDLE);
+    Atomics.notify(worker.control, 0, 1);
+    if (state !== RESPONSE || !response?.ok) {
+        const error = new Error(response?.error || 'PG test query failed');
+        if (response?.code) error.code = response.code;
         throw error;
     }
     return response;
@@ -65,9 +91,7 @@ function createTestDb() {
                 }
             };
         },
-        exec(sql) {
-            request(worker, { mode: 'run', sql, params: [] });
-        },
+        exec(sql) { request(worker, { mode: 'run', sql, params: [] }); },
         transaction(fn) {
             if (typeof fn !== 'function') throw new TypeError('transaction callback must be a function');
             return (...args) => {
@@ -82,9 +106,7 @@ function createTestDb() {
                 }
             };
         },
-        close() {
-            worker.close();
-        }
+        close: worker.close
     };
 }
 

@@ -4,7 +4,7 @@ const path = require('path');
 const vm = require('vm');
 const parse5 = require('parse5');
 const acorn = require('acorn');
-const { loadChatHtmlTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
+const { loadChatHtmlTemplate, loadChatWorkspaceTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
 const { renderManualHtml, stripVersionUpdateSections } = require('../server/manual-page');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -12,6 +12,7 @@ const chatDir = path.join(rootDir, 'client', 'chat');
 const cssEntryPath = path.join(chatDir, 'chat.css');
 const partialsDir = path.join(chatDir, 'partials');
 const stylesDir = path.join(chatDir, 'styles');
+const { buildChatCss, outputPath: chatBundlePath } = require('./build_chat_css');
 
 function fail(message) {
     console.error(`Chat asset check failed: ${message}`);
@@ -27,18 +28,6 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
 [
     'id="app"',
     'id="auth-container"',
-    'id="apps-workbench-modal"',
-    'id="official-writing-source"',
-    'id="official-writing-draft"',
-    'id="official-writing-export-text-btn"',
-    'id="official-writing-base-version"',
-    'id="official-writing-target-version"',
-    'id="official-writing-comments-list"',
-    'id="official-writing-diff-result"',
-    'id="agent-workbench-modal"',
-    'id="knowledge-workbench-modal"',
-    'id="mcp-workbench-modal"',
-    'id="admin-container"',
     'id="manual-workbench-modal"',
     'id="print-workbench-modal"',
     'id="print-frame"',
@@ -47,6 +36,7 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'data-workspace-view="apps"',
     'data-workspace-view="manual"',
     'data-src="/manual?embed=1"',
+    'src="/chat/workspace-template-loader.js?v=__APP_VERSION__"',
     'src="/chat/app-workspaces.js?v=__APP_VERSION__"',
     'src="/chat/app.js?v=__APP_VERSION__"'
 ].forEach(needle => {
@@ -65,6 +55,25 @@ if (!fs.existsSync(manualPath)) fail('使用帮助.md is required for the /manua
 const manualMarkdown = fs.readFileSync(manualPath, 'utf8');
 if (/适用版本：|^##\s+(?:\[?v?\d+\.\d+\.\d+\]?\s*)?(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)\s*$/im.test(manualMarkdown)) {
     fail('使用帮助.md must remain a version-free guide for ordinary users');
+}
+const renderJs = fs.readFileSync(path.join(chatDir, 'render.js'), 'utf8');
+if (!renderJs.includes('AUTO_HIGHLIGHT_LANGUAGES') || !renderJs.includes('highlightCache')) {
+    fail('render.js must bound automatic code highlighting and cache repeated streaming blocks');
+}
+if (!renderJs.includes("'/common/vendor/highlight.min.js'")
+    || !renderJs.includes("'/common/vendor/katex.min.js'")
+    || !renderJs.includes("'/common/vendor/katex.min.css'")) {
+    fail('render.js must lazy-load highlight.js and KaTeX when Markdown actually needs them');
+}
+if (/common\/vendor\/(?:highlight|katex)\.min\.(?:js|css)/.test(html)) {
+    fail('chat template must not eagerly load highlight.js or KaTeX');
+}
+if (/\.innerHTML\s*=\s*[^;\n]*renderMarkdown\s*\(/.test(renderJs)) {
+    fail('renderMarkdown output must only enter the DOM through PivotSafeHtml, never innerHTML directly');
+}
+const scriptTags = html.match(/<script\b[^>]*\bsrc=[^>]*>/gi) || [];
+if (scriptTags.some(tag => !/\bdefer\b/i.test(tag))) {
+    fail('all external chat scripts must use defer so they do not block document parsing');
 }
 const manualTechnicalMarkers = /\b(?:API|HTTP|HTTPS|JWT|SQLite|SSE|MCP|RAG|DAG|JSON|SQL|Token|Embedding)\b|环境变量|服务日志|接口路径|技术实现/i;
 if (manualTechnicalMarkers.test(manualMarkdown)) {
@@ -88,6 +97,27 @@ expectedSidebarLabels.forEach(label => {
         fail('使用帮助.md sidebar navigation order does not match the current homepage');
     }
     lastSidebarLabelIndex = index;
+});
+
+[
+    ['apps', 'id="workspace-lazy-slot-apps"', 'id="apps-workbench-modal"'],
+    ['agent', 'id="workspace-lazy-slot-agent"', 'id="agent-workbench-modal"'],
+    ['agent-dag', 'id="workspace-lazy-slot-agent-dag"', 'id="agent-dag-workbench-modal"'],
+    ['knowledge', 'id="workspace-lazy-slot-knowledge"', 'id="knowledge-workbench-modal"'],
+    ['mcp', 'id="workspace-lazy-slot-mcp"', 'id="mcp-workbench-modal"'],
+    ['settings', 'id="workspace-lazy-slot-settings"', 'id="admin-container"']
+].forEach(([name, slotNeedle, panelNeedle]) => {
+    if (!html.includes(slotNeedle)) fail(`assembled chat template is missing lazy ${name} workspace slot`);
+    const workspaceHtml = loadChatWorkspaceTemplate(name);
+    if (workspaceHtml.includes('@include')) fail(`lazy ${name} workspace template contains unresolved include directives`);
+    if (!workspaceHtml.includes(panelNeedle)) fail(`lazy ${name} workspace template is missing ${panelNeedle}`);
+});
+
+const workspacesJs = fs.readFileSync(path.join(chatDir, 'workspace-template-loader.js'), 'utf8');
+['apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'settings'].forEach(name => {
+    if (!workspacesJs.includes(`'/chat/workspaces/${name}'`)) {
+        fail(`${name} workspace must load HTML through the same-origin lazy workspace endpoint`);
+    }
 });
 const renderedManualHtml = renderManualHtml(manualMarkdown, { embedded: true });
 if (/<h2>(?:\[?v?\d+\.\d+\.\d+\]?\s*(?:更新提示|更新摘要|更新记录|更新日志|版本更新|版本更新记录)|(?:版本更新记录|版本更新|更新记录|更新日志))<\/h2>/i.test(renderedManualHtml)) {
@@ -253,6 +283,32 @@ imports.forEach(({ cssFile, importPath }) => {
     }
     if (!fs.existsSync(resolved)) fail(`missing stylesheet module: ${importPath}`);
 });
+
+function resolveStylesheetImports(entryPath, visited = new Set()) {
+    const absolute = path.resolve(entryPath);
+    if (visited.has(absolute)) return visited;
+    visited.add(absolute);
+    const text = fs.readFileSync(absolute, 'utf8');
+    for (const match of text.matchAll(/@import\s+url\("(.+?)"\);/g)) {
+        const target = path.resolve(path.dirname(absolute), match[1]);
+        if (!fs.existsSync(target)) fail(`stylesheet import is missing from reachable graph: ${relative(absolute)} -> ${match[1]}`);
+        resolveStylesheetImports(target, visited);
+    }
+    return visited;
+}
+
+const reachableCss = resolveStylesheetImports(cssEntryPath);
+const orphanCss = collectFiles(stylesDir, '.css').filter(file => !reachableCss.has(path.resolve(file)));
+if (orphanCss.length) {
+    fail(`unreachable chat stylesheet modules: ${orphanCss.map(relative).join(', ')}`);
+}
+if (!fs.existsSync(chatBundlePath)) fail('client/chat/chat.bundle.css is missing; run npm run build:chat-css');
+if (fs.readFileSync(chatBundlePath, 'utf8') !== buildChatCss()) {
+    fail('client/chat/chat.bundle.css is stale; run npm run build:chat-css and commit the generated bundle');
+}
+if (!html.includes('href="/chat/chat.bundle.css?v=__APP_VERSION__"')) {
+    fail('chat template must load the compiled CSS bundle instead of the @import entry file');
+}
 
 const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.css'), 'utf8');
 [

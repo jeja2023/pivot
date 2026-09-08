@@ -12,6 +12,8 @@ const {
     getRagMetricsSnapshot
 } = require('./services/rag-metrics');
 const { getAgentGovernanceMetricsSnapshot } = require('./services/agent-governance-metrics');
+const { getRuntimeDiagnostics } = require('./services/runtime-diagnostics');
+const { getQueueDiagnostics } = require('./services/db-write-queue');
 
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10);
@@ -25,6 +27,8 @@ function getBeijingDayBounds(date = new Date()) {
 const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const routeStats = new Map();
 const startedAt = Date.now();
+const TOKEN_METRICS_CACHE_TTL_MS = Math.max(Number.parseInt(process.env.METRICS_TOKEN_CACHE_TTL_MS || '15000', 10) || 15000, 1000);
+let tokenMetricsCache = { expiresAt: 0, all: [], today: [], error: '', loading: null };
 function normalizeRoute(req) {
     const routePath = req.route?.path;
     if (routePath) {
@@ -173,6 +177,26 @@ async function getTodayTokenRows() {
     `, [start, nextStart, start, nextStart]);
 }
 
+async function getTokenMetricsSnapshot() {
+    const now = Date.now();
+    if (tokenMetricsCache.expiresAt > now) return tokenMetricsCache;
+    if (tokenMetricsCache.loading) return tokenMetricsCache.loading;
+    tokenMetricsCache.loading = Promise.allSettled([getTokenRows(), getTodayTokenRows()]).then(results => {
+        const errors = results.filter(result => result.status === 'rejected').map(result => result.reason?.message || 'token aggregate failed');
+        tokenMetricsCache = {
+            expiresAt: Date.now() + TOKEN_METRICS_CACHE_TTL_MS,
+            all: results[0].status === 'fulfilled' ? (results[0].value || []) : tokenMetricsCache.all,
+            today: results[1].status === 'fulfilled' ? (results[1].value || []) : tokenMetricsCache.today,
+            error: errors.join('; '),
+            loading: null
+        };
+        return tokenMetricsCache;
+    }).finally(() => {
+        tokenMetricsCache.loading = null;
+    });
+    return tokenMetricsCache.loading;
+}
+
 /**
  * 技能治理、渲染与交付指标（落地方案 v1.2 §8.2 的必报指标）。
  * 计数器由 services/agent-governance-metrics.js 在热路径累积，此处只做文本渲染。
@@ -248,7 +272,8 @@ async function renderPrometheusMetrics() {
 
     lines.push('# HELP pivot_tokens_total Total persisted token usage by model and role.');
     lines.push('# TYPE pivot_tokens_total counter');
-    const tokenRows = (await getTokenRows()) || [];
+    const tokenSnapshot = await getTokenMetricsSnapshot();
+    const tokenRows = tokenSnapshot.all || [];
     tokenRows.forEach(row => {
         lines.push(line('pivot_tokens_total', {
             model_id: row.model_id,
@@ -259,7 +284,7 @@ async function renderPrometheusMetrics() {
 
     lines.push('# HELP pivot_tokens_today Total persisted token usage for current Beijing day.');
     lines.push('# TYPE pivot_tokens_today gauge');
-    const todayTokenRows = (await getTodayTokenRows()) || [];
+    const todayTokenRows = tokenSnapshot.today || [];
     todayTokenRows.forEach(row => {
         lines.push(line('pivot_tokens_today', {
             model_id: row.model_id,
@@ -267,6 +292,9 @@ async function renderPrometheusMetrics() {
             role: row.role
         }, row.tokens));
     });
+    lines.push('# HELP pivot_metrics_collection_error Whether a metrics subcollector failed during the latest refresh.');
+    lines.push('# TYPE pivot_metrics_collection_error gauge');
+    lines.push(line('pivot_metrics_collection_error', { collector: 'token_usage' }, tokenSnapshot.error ? 1 : 0));
 
     const rag = getRagMetricsSnapshot();
     appendAgentGovernanceMetrics(lines);
@@ -350,7 +378,33 @@ async function renderPrometheusMetrics() {
     lines.push('# TYPE pivot_ai_overloaded gauge');
     lines.push(line('pivot_ai_overloaded', {}, concurrency.rejectingNewRequests ? 1 : 0));
 
-    const gpu = getGpuMonitorStatus();
+    const runtime = getRuntimeDiagnostics();
+    lines.push('# HELP pivot_event_loop_delay_milliseconds Event loop delay measured by the runtime sampler.');
+    lines.push('# TYPE pivot_event_loop_delay_milliseconds gauge');
+    lines.push(line('pivot_event_loop_delay_milliseconds', { quantile: 'mean' }, runtime.eventLoop.meanMs));
+    lines.push(line('pivot_event_loop_delay_milliseconds', { quantile: 'p99' }, runtime.eventLoop.p99Ms));
+    lines.push(line('pivot_event_loop_delay_milliseconds', { quantile: 'max' }, runtime.eventLoop.maxMs));
+    lines.push('# HELP pivot_pg_pool_connections PostgreSQL pool occupancy and waiters.');
+    lines.push('# TYPE pivot_pg_pool_connections gauge');
+    ['max', 'total', 'idle', 'busy', 'waiting'].forEach(state => lines.push(line('pivot_pg_pool_connections', { state }, runtime.pgPool[state] || 0)));
+    lines.push('# HELP pivot_pg_pool_saturated Whether PostgreSQL has waiters while no connection is idle.');
+    lines.push('# TYPE pivot_pg_pool_saturated gauge');
+    lines.push(line('pivot_pg_pool_saturated', {}, runtime.pgPool.saturated ? 1 : 0));
+    const writeQueues = getQueueDiagnostics();
+    lines.push('# HELP pivot_db_write_queue_pending Pending database write queue entries.');
+    lines.push('# TYPE pivot_db_write_queue_pending gauge');
+    lines.push('# HELP pivot_db_write_queue_dropped_total Database write queue entries dropped under pressure.');
+    lines.push('# TYPE pivot_db_write_queue_dropped_total counter');
+    Object.entries(writeQueues).forEach(([queue, status]) => {
+        lines.push(line('pivot_db_write_queue_pending', { queue }, status.pending || 0));
+        lines.push(line('pivot_db_write_queue_dropped_total', { queue }, status.dropped || 0));
+    });
+
+    const gpu = (() => {
+        try { return getGpuMonitorStatus(); } catch (error) {
+            return { available: false, overloaded: false, gpus: [], error: error.message };
+        }
+    })();
     lines.push('# HELP pivot_gpu_available Whether NVIDIA GPU metrics are available.');
     lines.push('# TYPE pivot_gpu_available gauge');
     lines.push(line('pivot_gpu_available', {}, gpu.available ? 1 : 0));
@@ -371,7 +425,9 @@ async function renderPrometheusMetrics() {
     lines.push('# TYPE pivot_gpu_overloaded gauge');
     lines.push(line('pivot_gpu_overloaded', {}, gpu.overloaded ? 1 : 0));
 
-    const health = await getSystemHealthSnapshot();
+    const health = await getSystemHealthSnapshot().catch(error => ({
+        checks: [{ name: 'system_health_collector', status: 'error', message: error.message }]
+    }));
     lines.push('# HELP pivot_system_health_status System health status by component (1 ok, 0 degraded/error).');
     lines.push('# TYPE pivot_system_health_status gauge');
     health.checks.forEach(item => {
@@ -381,7 +437,11 @@ async function renderPrometheusMetrics() {
         }, item.status === 'ok' ? 1 : 0));
     });
 
-    const maintenance = getMaintenanceStatus();
+    const maintenance = (() => {
+        try { return getMaintenanceStatus(); } catch (error) {
+            return { auditCleanup: {}, apiCallLogCleanup: {}, refreshTokenCleanup: {}, backup: { error: error.message }, optimize: {} };
+        }
+    })();
     lines.push('# HELP pivot_maintenance_last_success_timestamp_seconds Last successful maintenance task timestamp.');
     lines.push('# TYPE pivot_maintenance_last_success_timestamp_seconds gauge');
     [

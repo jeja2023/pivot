@@ -36,6 +36,14 @@ class ConcurrencySemaphore {
 
     async acquire(options = {}) {
         const onQueued = typeof options.onQueued === 'function' ? options.onQueued : null;
+        const signal = options.signal || null;
+        const abortError = () => {
+            const error = new Error('请求已中止，已从模型等待队列移除。');
+            error.code = 'REQUEST_ABORTED';
+            error.statusCode = 499;
+            return error;
+        };
+        if (signal?.aborted) throw abortError();
 
         if (this.rejectingNewRequests) {
             throw new ConcurrencyLimitError(
@@ -61,12 +69,27 @@ class ConcurrencySemaphore {
                 resolve,
                 reject,
                 createdAt: Date.now(),
-                timer: null
+                timer: null,
+                onAbort: null,
+                signal
             };
+
+            const removeQueuedItem = () => {
+                const index = this.queue.indexOf(item);
+                if (index >= 0) this.queue.splice(index, 1);
+                clearTimeout(item.timer);
+                signal?.removeEventListener?.('abort', item.onAbort);
+            };
+            item.onAbort = () => {
+                removeQueuedItem();
+                reject(abortError());
+            };
+            signal?.addEventListener?.('abort', item.onAbort, { once: true });
 
             item.timer = setTimeout(() => {
                 const index = this.queue.indexOf(item);
                 if (index >= 0) this.queue.splice(index, 1);
+                signal?.removeEventListener?.('abort', item.onAbort);
                 reject(new ConcurrencyLimitError(
                     `模型服务排队超时，请稍后重试。超时时间 ${Math.round(this.queueTimeoutMs / 1000)} 秒`,
                     'AI_QUEUE_TIMEOUT'
@@ -99,7 +122,10 @@ class ConcurrencySemaphore {
     rejectQueuedRequests(reason, code = 'AI_OVERLOADED') {
         if (this.queue.length === 0) return 0;
         const queued = this.queue.splice(0);
-        queued.forEach(item => clearTimeout(item.timer));
+        queued.forEach(item => {
+            clearTimeout(item.timer);
+            item.signal?.removeEventListener?.('abort', item.onAbort);
+        });
         const error = new ConcurrencyLimitError(reason, code);
         queued.forEach(item => item.reject(error));
         logger.warn({
@@ -118,6 +144,7 @@ class ConcurrencySemaphore {
         while (!this.rejectingNewRequests && this.currentConcurrent < this.maxConcurrent && this.queue.length > 0) {
             const item = this.queue.shift();
             clearTimeout(item.timer);
+            item.signal?.removeEventListener?.('abort', item.onAbort);
             this.currentConcurrent += 1;
             item.resolve();
         }

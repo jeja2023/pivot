@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.99-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.100-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,9 +11,9 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.99
+## 最新版本：0.1.100
 
-（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本桌面发布包注入隐身通信密钥与测试告警清理说明请参阅 [v0.1.99 发布记录](docs/releases/v0.1.99-桌面发布包注入隐身通信密钥与测试告警清理.md)。）
+（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本审计整改与桌面交付优化说明请参阅 [v0.1.100 发布记录](docs/releases/v0.1.100-审计整改与桌面交付优化.md)。）
 
 国产化桌面客户端当前正式支持 Linux AMD64 和 ARM64 的 UOS/Debian 构建；构建命令、离线依赖、原生模块验收和 LoongArch64 限制见 [统信 UOS 与龙芯客户端打包指南](docs/统信UOS与龙芯3A6000客户端打包指南.md)。龙芯 LoongArch64 当前不会生成正式安装包。
 
@@ -290,21 +290,35 @@ npm start
 npm run dev
 ```
 
+开发过程中如需清理审计、打包校验和测试遗留物，先预览再确认执行：
+
+```bash
+npm run clean:workspace
+npm run clean:workspace -- --yes
+```
+
+该命令会清理 `.tmp`、`.codex-tmp` 和 `artifacts` 下的测试产物；会明确保护
+`artifacts/agent-browser-pack`、`artifacts/agent-python-pack` 与 `artifacts/release`，它们是桌面端打包输入和发布产物。
+
 默认访问：
 
 ```text
 http://localhost:3000
 ```
 
-首次初始化会确保内置 `admin` 用户存在。生产环境请务必修改默认密码，并配置强随机 `JWT_SECRET`。
+首次初始化会确保内置 `admin` 用户存在。生产环境请务必修改默认密码，并配置相互独立的强随机 `JWT_SECRET` 与 `DATA_ENCRYPTION_KEY`。
 
 ## 关键环境变量
+
+先按 `.env.example` 顶部的“最小启动集”配置 `DATABASE_URL`、`JWT_SECRET`、`DATA_ENCRYPTION_KEY` 与 `PORT`。以下运行时参数仅作为首次初始化 `app_settings` 的默认值；数据库已有对应配置后，后续 `.env` 修改不会覆盖管理台保存值，请在“系统设置 > 全局参数”中修改。
 
 ```env
 # 基础服务
 PORT=3000
 DATA_DIR=./data
-JWT_SECRET=change-me
+DATABASE_URL=postgresql://pivot:YOUR_CURRENT_PASSWORD@localhost:5432/pivot
+JWT_SECRET=替换为至少32位随机字符串
+DATA_ENCRYPTION_KEY=替换为另一条至少32位随机字符串
 
 # 登录态有效期
 ACCESS_TOKEN_EXPIRES_MINUTES=480
@@ -422,7 +436,7 @@ npm run check
 npm run lint
 ```
 
-全量自动化测试（573 项测试）：
+全量自动化测试：
 
 ```bash
 npm run test:all
@@ -522,4 +536,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.99
+**当前版本**：v0.1.100

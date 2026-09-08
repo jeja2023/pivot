@@ -37,7 +37,6 @@ test('dialect helpers produce valid PostgreSQL SQL expressions', () => {
         dialect.jsonExtract('metadata', '$.workflow.steps[0].name'),
         "pivot_json_extract(metadata::text, '{workflow,steps,0,name}')"
     );
-    assert.strictEqual(dialect.jsonValid('context_config'), 'TRUE');
     assert.strictEqual(dialect.orderNocase('t.tag'), 'lower(t.tag)');
     assert.strictEqual(dialect.likeOperator(), 'ILIKE');
     assert.strictEqual(

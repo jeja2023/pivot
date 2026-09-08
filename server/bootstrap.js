@@ -1,7 +1,10 @@
 const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
-const { recoverAgentRuns, startAgentRecoveryRunner, startAgentScheduleRunner } = require('./services/agent-runtime');
+const {
+    runs: { recoverAgentRuns, startAgentRecoveryRunner },
+    schedules: { startAgentScheduleRunner }
+} = require('./services/agent-runtime');
 const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
 const { createSkillReleaseBreakerRunner } = require('./services/agent-skill-breaker');
 const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
@@ -10,20 +13,18 @@ function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = pro
     let fatalExitScheduled = false;
 
     const fatalExit = (reason, err) => {
-        logger.fatal({ err }, reason);
-        try {
-            const flushResult = typeof flushAllWrites === 'function' ? flushAllWrites() : null;
-            if (flushResult && typeof flushResult.catch === 'function') {
-                flushResult.catch(flushErr => {
-                    logger.warn({ err: flushErr }, '致命退出时刷新写队列失败');
-                });
-            }
-        } catch (flushErr) {
-            logger.warn({ err: flushErr }, '致命退出时刷新写队列失败');
-        }
         if (fatalExitScheduled) return;
         fatalExitScheduled = true;
-        setTimeoutFn(() => processRef.exit(1), 250).unref();
+        logger.fatal({ err }, reason);
+        const flushResult = typeof flushAllWrites === 'function' ? flushAllWrites() : null;
+        const flushPromise = flushResult && typeof flushResult.then === 'function' ? flushResult : Promise.resolve();
+        Promise.race([
+            flushPromise.catch(flushErr => logger.warn({ err: flushErr }, '致命退出时刷新写队列失败')),
+            new Promise(resolve => {
+                const timer = setTimeoutFn(resolve, 5000);
+                timer?.unref?.();
+            })
+        ]).finally(() => processRef.exit(1));
     };
 
     processRef.on('uncaughtException', (err) => fatalExit('未捕获的全局异常', err));

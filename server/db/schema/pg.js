@@ -25,6 +25,26 @@ const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
+const PG_SCHEMA_VERSION = '20260908.4';
+const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
+
+async function isPgSchemaCurrent(pool) {
+    if (String(process.env[PG_SCHEMA_RECONCILE_ENV] || '').toLowerCase() === 'true') return false;
+    try {
+        const result = await pool.query('SELECT value FROM app_meta WHERE key = $1', ['pg_schema_version']);
+        return result.rows[0]?.value === PG_SCHEMA_VERSION;
+    } catch (_) {
+        return false;
+    }
+}
+
+async function markPgSchemaCurrent(client) {
+    await client.query(`
+        INSERT INTO app_meta (key, value, updated_at)
+        VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+    `, ['pg_schema_version', PG_SCHEMA_VERSION]);
+}
 
 // SQLite 将向量序列化为 TEXT；迁移后的 PostgreSQL 物理表使用 pgvector。
 // 保持显式白名单，避免把其他业务 TEXT 列误转换为 vector。
@@ -53,6 +73,7 @@ const PG_JSONB_COLUMNS = {
 const LEGACY_RESIDUAL_COLUMNS = [
     ['models', 'disable_chat_thinking', 'BIGINT DEFAULT 0'],
     ['analysis_datasets', 'active_version', 'BIGINT DEFAULT 1'],
+    ['users', 'token_version', 'BIGINT DEFAULT 0'],
 ];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -330,7 +351,9 @@ async function normalizeLegacyResidualColumnTypes(client) {
 
 async function applyPgSchemaComments() {
     const statements = buildPgCommentStatements();
-    const client = await getPgPool().connect();
+    const pool = getPgPool();
+    if (await isPgSchemaCurrent(pool)) return;
+    const client = await pool.connect();
     let applied = 0;
 
     try {
@@ -346,12 +369,20 @@ async function applyPgSchemaComments() {
         client.release();
     }
 
+    const markerClient = await pool.connect();
+    try { await markPgSchemaCurrent(markerClient); } finally { markerClient.release(); }
+
     logger.info({ applied, total: statements.length }, '[PG] 数据字典注释已应用');
 }
 
 async function initSchemaPg() {
+    const pool = getPgPool();
+    if (await isPgSchemaCurrent(pool)) {
+        logger.debug({ version: PG_SCHEMA_VERSION }, '[PG] Schema 已完成收敛，跳过重复 DDL');
+        return;
+    }
     const plan = buildPgSchemaStatements();
-    const client = await getPgPool().connect();
+    const client = await pool.connect();
 
     try {
         // pgvector 是 embedding 列的必需类型；pg_trgm 则允许降级为顺序扫描。

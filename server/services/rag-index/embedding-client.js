@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { safeJsonPost } = require('../safe-http-client');
 const { EMBEDDING_MODES, normalizeEmbeddingMode, getEmbeddingConfig } = require('../rag-config');
 const { getOrCreateEmbeddingUsageModel, recordModelTokenUsage } = require('../models');
@@ -17,6 +18,37 @@ const DEFAULT_EMBEDDING_BATCH_MAX_BYTES = 512 * 1024;
 
 let activeEmbeddingRequests = 0;
 const embeddingRequestWaiters = [];
+const queryEmbeddingCache = new Map();
+const queryEmbeddingInFlight = new Map();
+const QUERY_EMBEDDING_CACHE_TTL_MS = 30 * 1000;
+const QUERY_EMBEDDING_CACHE_MAX = 256;
+
+function queryEmbeddingCacheKey(text, userId, config, httpConfig) {
+    return crypto.createHash('sha256').update(JSON.stringify({
+        text: String(text || ''),
+        userId: Number(userId || 0),
+        url: httpConfig?.url || '',
+        model: httpConfig?.model || '',
+        key: config?.http?.apiKey || ''
+    })).digest('hex');
+}
+
+function readCachedQueryEmbedding(key) {
+    const cached = queryEmbeddingCache.get(key);
+    if (!cached) return null;
+    if (Date.now() - cached.at >= QUERY_EMBEDDING_CACHE_TTL_MS) {
+        queryEmbeddingCache.delete(key);
+        return null;
+    }
+    return cached.vector.slice();
+}
+
+function writeCachedQueryEmbedding(key, vector) {
+    while (queryEmbeddingCache.size >= QUERY_EMBEDDING_CACHE_MAX) {
+        queryEmbeddingCache.delete(queryEmbeddingCache.keys().next().value);
+    }
+    queryEmbeddingCache.set(key, { at: Date.now(), vector: vector.slice() });
+}
 
 function clampInteger(value, fallback, min, max) {
     const parsed = Number.parseInt(value, 10);
@@ -383,41 +415,47 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
 
     if (targetMode === EMBEDDING_MODES.http) {
         const targetHttpConfig = embeddingConfig || config.http || config.cloud;
-        const startedAt = Date.now();
-        let vector;
-        try {
-            vector = await requestEmbedding(text, targetHttpConfig, {
-                timeoutMs: options.timeoutMs,
-                user: getEmbeddingRuntimeGuardUser(config, options.user)
-            });
-            recordEmbeddingLatencyMetric({
-                model: targetHttpConfig?.model,
-                source: options.source || 'rag_embedding',
-                status: 'success',
-                durationMs: Date.now() - startedAt,
-                inputs: [text],
-                inputCount: 1,
-                vectorDimensions: vector.length
-            });
-        } catch (error) {
-            recordEmbeddingLatencyMetric({
-                model: targetHttpConfig?.model,
-                source: options.source || 'rag_embedding',
-                status: error?.code === 'EMBEDDING_TIMEOUT' ? 'timeout' : 'error',
-                durationMs: Date.now() - startedAt,
-                inputs: [text],
-                inputCount: 1
-            });
-            throw error;
-        }
-        recordEmbeddingUsage({
-            userId,
-            config,
-            httpConfig: targetHttpConfig,
-            inputs: [text],
-            source: options.source || 'rag_embedding'
-        }).catch(err => logger.warn({ err: err.message }, '异步记录 Embedding 用量异常'));
-        return vector;
+        const cacheKey = queryEmbeddingCacheKey(text, userId, config, targetHttpConfig);
+        const cached = readCachedQueryEmbedding(cacheKey);
+        if (cached) return cached;
+        const inFlight = queryEmbeddingInFlight.get(cacheKey);
+        if (inFlight) return (await inFlight).slice();
+        const request = (async () => {
+            const startedAt = Date.now();
+            try {
+                const vector = await requestEmbedding(text, targetHttpConfig, {
+                    timeoutMs: options.timeoutMs,
+                    user: getEmbeddingRuntimeGuardUser(config, options.user)
+                });
+                writeCachedQueryEmbedding(cacheKey, vector);
+                recordEmbeddingLatencyMetric({
+                    model: targetHttpConfig?.model,
+                    source: options.source || 'rag_embedding',
+                    status: 'success',
+                    durationMs: Date.now() - startedAt,
+                    inputs: [text],
+                    inputCount: 1,
+                    vectorDimensions: vector.length
+                });
+                recordEmbeddingUsage({ userId, config, httpConfig: targetHttpConfig, inputs: [text], source: options.source || 'rag_embedding' })
+                    .catch(err => logger.warn({ err: err.message }, '异步记录 Embedding 用量异常'));
+                return vector;
+            } catch (error) {
+                recordEmbeddingLatencyMetric({
+                    model: targetHttpConfig?.model,
+                    source: options.source || 'rag_embedding',
+                    status: error?.code === 'EMBEDDING_TIMEOUT' ? 'timeout' : 'error',
+                    durationMs: Date.now() - startedAt,
+                    inputs: [text],
+                    inputCount: 1
+                });
+                throw error;
+            } finally {
+                queryEmbeddingInFlight.delete(cacheKey);
+            }
+        })();
+        queryEmbeddingInFlight.set(cacheKey, request);
+        return (await request).slice();
     }
 
     throw new Error(`不支持的 Embedding 模式: ${targetMode}`);

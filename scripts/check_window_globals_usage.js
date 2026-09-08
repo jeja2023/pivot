@@ -6,11 +6,12 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const clientRoot = path.join(root, 'client', 'chat');
 const PIVOT_BOOTSTRAP_FILE = 'client/chat/pivot-core.js';
+const governanceBaseline = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'governance_baseline.json'), 'utf8'));
 const ALLOWED_WINDOW_PROPERTIES = new Set([
     'Pivot', 'DOMPurify', 'confirm', 'prompt', 'location', 'URL',
     'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
     'addEventListener', 'removeEventListener', 'requestAnimationFrame',
-    'cancelAnimationFrame', 'innerWidth', 'innerHeight', 'matchMedia',
+    'cancelAnimationFrame', 'innerWidth', 'innerHeight', 'matchMedia', 'CustomEvent',
     'getComputedStyle', 'ResizeObserver', 'EventSource', 'isSecureContext',
     'localStorage', 'sessionStorage', 'crypto', 'CSS', 'devicePixelRatio',
     'fetch', 'getSelection', 'navigator', 'electronAPI', 'pivotDesktop',
@@ -56,13 +57,29 @@ function directWindowProperty(node) {
     return node.property?.type === 'Identifier' ? node.property.name : null;
 }
 
+function legacyAssignmentProperty(node) {
+    if (node?.type !== 'MemberExpression') return null;
+    const legacy = node.object;
+    if (legacy?.type !== 'MemberExpression' || legacy.computed || legacy.property?.name !== 'legacy') return null;
+    const pivot = legacy.object;
+    if (pivot?.type !== 'MemberExpression' || pivot.computed || pivot.property?.name !== 'Pivot') return null;
+    if (pivot.object?.type !== 'Identifier' || pivot.object.name !== 'window') return null;
+    if (node.computed) return typeof node.property?.value === 'string' ? node.property.value : '[computed]';
+    return node.property?.name || null;
+}
+
 const violations = [];
+const legacyAssignments = new Set();
 for (const file of walk(clientRoot)) {
     const source = fs.readFileSync(file, 'utf8');
     const relative = path.relative(root, file).replace(/\\/g, '/');
     const lines = source.split(/\r?\n/);
     const ast = parse(source, file);
     walkAst(ast, (node, parent) => {
+        if (parent?.type === 'AssignmentExpression' && parent.left === node) {
+            const legacyProperty = legacyAssignmentProperty(node);
+            if (legacyProperty) legacyAssignments.add(legacyProperty);
+        }
         const property = directWindowProperty(node);
         if (!property) return;
         if (!ALLOWED_WINDOW_PROPERTIES.has(property)) {
@@ -76,6 +93,17 @@ for (const file of walk(clientRoot)) {
     });
 }
 
+const legacyBudget = Number(governanceBaseline.legacyWindowGlobalBudget || 0);
+if (legacyAssignments.size > legacyBudget) {
+    violations.push({
+        file: 'client/chat',
+        line: 0,
+        property: `${legacyAssignments.size}/${legacyBudget}`,
+        reason: 'legacy-budget',
+        code: '新增 window.Pivot.legacy 别名必须优先改为 Pivot.modules，并同步减少存量。'
+    });
+}
+
 if (violations.length) {
     console.error(`全局变量规范扫描失败：发现 ${violations.length} 个未命名空间化的 window 访问。`);
     violations.slice(0, 50).forEach(item => console.error(` - ${item.file}:${item.line} [${item.reason}] window.${item.property}: ${item.code}`));
@@ -83,4 +111,4 @@ if (violations.length) {
     process.exit(1);
 }
 
-console.log('全局变量规范扫描通过：业务 API 已收敛至 window.Pivot 命名空间，未发现自由 window.* 读写。');
+console.log(`全局变量规范扫描通过：业务 API 已收敛至 window.Pivot 命名空间，legacy 别名 ${legacyAssignments.size}/${legacyBudget}。`);

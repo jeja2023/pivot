@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const ragCache = new Map();
 
 const RAG_CACHE_TTL = Math.max(parseInt(process.env.RAG_CACHE_TTL_MS || String(5 * 60 * 1000), 10) || 0, 0);
@@ -8,7 +9,10 @@ function normalizeCacheQuery(query) {
 }
 
 function normalizeCacheScope(scope) {
-    return String(scope || '').trim().replace(/\s+/g, ' ').slice(0, 500);
+    const normalized = String(scope || '').trim().replace(/\s+/g, ' ');
+    if (normalized.length <= 500) return normalized;
+    // 版本位通常位于 scope 尾部；截断会丢掉权限/索引版本，导致共享文档撤权后命中旧缓存。
+    return `${normalized.slice(0, 180)}…scope-sha256:${crypto.createHash('sha256').update(normalized).digest('hex')}`;
 }
 
 function getCacheKey(userId, query, topK, scope = '') {

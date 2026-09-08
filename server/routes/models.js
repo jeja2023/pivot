@@ -79,7 +79,7 @@ async function getTestableModel(modelId, user) {
     }
     if (model.api_key) {
         try {
-            model.api_key = decryptSecret(model.api_key);
+            model.api_key = decryptSecret(model.api_key, 'models.api_key');
         } catch (e) {
             model.api_key = '';
             model.secret_error = e.message || '模型密钥解密失败';
@@ -366,7 +366,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         await execute(
             'INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [targetUserId, name, url, encryptSecret(api_key), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, 0, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency]
+            [targetUserId, name, url, encryptSecret(api_key, 'models.api_key'), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, 0, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency]
         );
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
@@ -382,7 +382,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const existing = await queryOne('SELECT * FROM models WHERE id = ?', [req.params.id]);
         if (!canManageModel(existing, req.user)) return res.status(403).json({ error: '无权操作或模型不存在' });
 
-        const nextApiKey = (api_key === '********') ? existing.api_key : encryptSecret(api_key);
+        const nextApiKey = (api_key === undefined || api_key === '********')
+            ? require('../security').preserveEncryptedSecret(existing.api_key, 'models.api_key')
+            : encryptSecret(api_key, 'models.api_key');
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
         const allowedUnits = isSuperAdmin(req.user) && existing.user_id === null
             ? normalizeTags(req.body.allowed_units)
@@ -451,7 +453,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         const bcrypt = require('bcryptjs');
         const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
-        if (!bcrypt.compareSync(password, user.password_hash)) {
+        if (!await bcrypt.compare(password, user.password_hash)) {
             logAction(req, '模型密钥查看失败', `密码验证失败，模型ID: ${req.params.id}`);
             return res.status(401).json({ error: '密码错误' });
         }

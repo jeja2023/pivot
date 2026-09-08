@@ -716,9 +716,10 @@ function updateRuntimeSettingsForm(runtimeConfig = {}) {
             input.dataset.settingsInitial = String(input.value ?? '');
         }
         const hint = getRuntimeItemHint(item);
+        const sourceHint = item.source === 'settings' ? `当前值已由系统设置保存，环境变量 ${Array.isArray(item.env) ? item.env.join(' / ') : item.env} 仅用于首次初始化` : `当前值来自环境变量 ${Array.isArray(item.env) ? item.env.join(' / ') : item.env} 或默认值`;
+        if (hintEl) hintEl.textContent = [hint, sourceHint].filter(Boolean).join('；');
         input.title = hint ? `${item.label}。${hint} 范围 ${item.min} - ${item.max}` : `${item.label}，范围 ${item.min} - ${item.max}`;
-    });
-    const updated = (runtimeConfig.items || []).map(item => item.updatedAt).filter(Boolean).sort().pop();
+    }); const updated = (runtimeConfig.items || []).map(item => item.updatedAt).filter(Boolean).sort().pop();
     updateRuntimeEditState();
     const readOnlyHint = !isSuperAdminUser() && runtimeConfig?.items?.length ? '仅 admin 权限层级可修改' : '';
     const updatedText = updated ? `最近保存：${updated}` : '';

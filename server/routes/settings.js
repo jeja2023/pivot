@@ -38,7 +38,7 @@ const {
 } = require('../services/runtime-settings');
 const { syncGlobalAiConcurrencySettings } = require('../services/concurrency');
 const { getModelEndpointRuntimeStatus, syncConfiguredRuntimes } = require('../services/model-runtime');
-const { syncAgentRuntimeConcurrency } = require('../services/agent-runtime');
+const { monitoring: { syncAgentRuntimeConcurrency } } = require('../services/agent-runtime');
 const { syncKnowledgeDocumentIndexConcurrency } = require('../services/rag-documents');
 const { syncMemoryCompressionConcurrency } = require('../llm');
 const { getDeploymentProfile } = require('../services/deployment-profile');
@@ -398,7 +398,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
         const bcrypt = require('bcryptjs');
-        if (!bcrypt.compareSync(oldPassword, user.password_hash)) {
+        if (!await bcrypt.compare(oldPassword, user.password_hash)) {
             return res.status(400).json({ error: '旧密码错误' });
         }
 
@@ -409,9 +409,9 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             return res.status(400).json({ error: e.message });
         }
 
-        const newHash = bcrypt.hashSync(newPassword, 10);
+        const newHash = await bcrypt.hash(newPassword, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
         await transaction(async (trx) => {
-            await trx.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, req.user.id]);
+            await trx.execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [newHash, req.user.id]);
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
         });
 

@@ -7,26 +7,32 @@ const {
     getCookie,
     AUTH_COOKIE_NAME,
     REFRESH_COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
+    DEVICE_COOKIE_OPTIONS,
     CLEAR_COOKIE_OPTIONS,
     CLEAR_REFRESH_COOKIE_OPTIONS,
+    CLEAR_DEVICE_COOKIE_OPTIONS,
     CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS,
     CLEAR_CSRF_COOKIE_OPTIONS,
     generateCsrfToken,
+    generateDeviceId,
     resolveAuthenticatedUserAsync,
     hashRefreshToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
-const { query, execute } = require('../db/client');
+const { query, execute, transaction } = require('../db/client');
 const crypto = require('crypto');
 const { hashApiKey, previewApiKey } = require('../auth');
 const { getApiAccessSetting } = require('../services/api-access-settings');
+const { getBeijingTimestamp } = require('../time');
 
 function createAuthRouter({
     authMiddleware,
     loginLimiter,
+    loginAccountLimiter,
     registerLimiter,
     isPublicRegistrationEnabled,
     logAction,
@@ -64,9 +70,12 @@ function createAuthRouter({
         });
     });
 
-    router.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
+    const effectiveLoginAccountLimiter = loginAccountLimiter || ((_req, _res, next) => next());
+
+    router.post('/auth/login', loginLimiter, effectiveLoginAccountLimiter, asyncHandler(async (req, res) => {
         try {
-            const data = await login(req.body.username, req.body.password);
+            const deviceId = getCookie(req, DEVICE_COOKIE_NAME) || generateDeviceId();
+            const data = await login(req.body.username, req.body.password, { deviceId });
             req.user = data.user;
             logAction(req, '用户登录', '登录成功');
             
@@ -74,6 +83,7 @@ function createAuthRouter({
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
+            res.cookie(DEVICE_COOKIE_NAME, deviceId, DEVICE_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
                 sameSite: 'lax',
@@ -99,10 +109,12 @@ function createAuthRouter({
         }
 
         try {
-            const data = await refreshTokens(refreshToken);
+            const deviceId = getCookie(req, DEVICE_COOKIE_NAME) || generateDeviceId();
+            const data = await refreshTokens(refreshToken, { deviceId });
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
+            res.cookie(DEVICE_COOKIE_NAME, deviceId, DEVICE_COOKIE_OPTIONS);
             const csrfToken = generateCsrfToken();
             res.cookie(CSRF_COOKIE_NAME, csrfToken, {
                 sameSite: 'lax',
@@ -114,6 +126,7 @@ function createAuthRouter({
         } catch (e) {
             res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
+            res.clearCookie(DEVICE_COOKIE_NAME, CLEAR_DEVICE_COOKIE_OPTIONS);
             res.status(401).json({ error: e.message, code: 'REFRESH_TOKEN_INVALID' });
         }
     }));
@@ -153,6 +166,21 @@ function createAuthRouter({
 
         res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
         res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
+        res.clearCookie(DEVICE_COOKIE_NAME, CLEAR_DEVICE_COOKIE_OPTIONS);
+        res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
+        res.clearCookie(CSRF_COOKIE_NAME, CLEAR_CSRF_COOKIE_OPTIONS);
+        res.json({ success: true });
+    }));
+
+    router.post('/auth/logout-all', authMiddleware, asyncHandler(async (req, res) => {
+        await transaction(async trx => {
+            await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [req.user.id]);
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
+        });
+        logAction(req, '退出所有设备', '已撤销当前账号的访问令牌和刷新令牌');
+        res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+        res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
+        res.clearCookie(DEVICE_COOKIE_NAME, CLEAR_DEVICE_COOKIE_OPTIONS);
         res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
         res.clearCookie(CSRF_COOKIE_NAME, CLEAR_CSRF_COOKIE_OPTIONS);
         res.json({ success: true });
@@ -163,6 +191,7 @@ function createAuthRouter({
         const maxOutputExpr = "GREATEST(COALESCE(output_tokens, 0), COALESCE(usage_tokens, 0) - COALESCE(input_tokens, 0))";
         const keys = await query(`
             SELECT id, name, key_preview, created_at, last_used_at, status, usage_tokens,
+                   scopes, expires_at,
                    COALESCE(input_tokens, 0) AS input_tokens,
                    ${maxOutputExpr} AS output_tokens
             FROM api_keys
@@ -180,12 +209,23 @@ function createAuthRouter({
             return res.status(403).json({ error: 'API 接入已由管理员关闭，暂不能创建新密钥' });
         }
         const { name } = req.body;
+        const expiresAtInput = req.body?.expiresAt ?? req.body?.expires_at;
+        let expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+        if (expiresAtInput) {
+            const parsed = new Date(expiresAtInput);
+            if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now() || parsed.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000) {
+                return res.status(400).json({ error: 'API Key 有效期必须在 1 到 365 天内' });
+            }
+            expiresAt = parsed;
+        }
         const key = 'sk-' + crypto.randomBytes(24).toString('hex');
-        await execute('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key) VALUES (?, ?, ?, ?, NULL)', [
+        await execute('INSERT INTO api_keys (user_id, name, key_hash, key_preview, key, scopes, expires_at) VALUES (?, ?, ?, ?, NULL, ?, ?)', [
             req.user.id,
             name || '未命名密钥',
             hashApiKey(key),
-            previewApiKey(key)
+            previewApiKey(key),
+            'openai',
+            getBeijingTimestamp(expiresAt)
         ]);
         logAction(req, '创建 API Key', `名称: ${name}`);
         res.json({ key, name });

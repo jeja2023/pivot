@@ -3,7 +3,9 @@
  * Policy: cache stable vendor assets only. App HTML/CSS/JS and API traffic always use network.
  */
 const SW_POLICY = 'vendor-only';
-const SW_VERSION = 'pivot-sw-vendor-only-v11';
+// 服务端在下发时将占位符替换成 vendor 内容摘要；任一 vendor 文件更新都会
+// 改变 Service Worker 脚本文本，从而触发浏览器更新并切换到新缓存。
+const SW_VERSION = '__PIVOT_VENDOR_REVISION__';
 const CACHE_PREFIX = 'pivot-';
 const VENDOR_CACHE = `${CACHE_PREFIX}vendor-${SW_VERSION}`;
 

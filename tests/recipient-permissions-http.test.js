@@ -69,7 +69,7 @@ function request(server, { method = 'GET', path, token, body } = {}) {
 async function createTestUser(label, unit) {
     const suffix = `${process.pid.toString(36)}${Date.now().toString(36).slice(-7)}${Math.random().toString(36).slice(2, 5)}`;
     const username = `http_${String(label).slice(0, 10)}_${suffix}`;
-    const password = 'Password123';
+    const password = 'RecipientPass123';
     const user = await register(username, password, `${label} HTTP user`, unit, 'user');
     const session = await login(username, password);
     return { ...user, accessToken: session.accessToken };

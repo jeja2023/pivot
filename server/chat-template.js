@@ -3,6 +3,14 @@ const path = require('path');
 
 const chatTemplatePath = path.join(__dirname, '../client/chat/chat.html');
 const chatPartialsDir = path.resolve(__dirname, '../client/chat/partials');
+const lazyWorkspaceTemplates = Object.freeze({
+    apps: 'workspaces/apps.html',
+    agent: 'workspaces/agent.html',
+    'agent-dag': 'workspaces/agent-dag.html',
+    knowledge: 'workspaces/knowledge.html',
+    mcp: 'workspaces/mcp.html',
+    settings: 'workspaces/settings.html'
+});
 
 function resolveChatHtmlIncludes(template, seen = new Set()) {
     return String(template || '').replace(/<!--\s*@include\s+([a-zA-Z0-9_./-]+)\s*-->/g, (match, includePath) => {
@@ -33,9 +41,25 @@ function loadChatHtmlTemplate() {
     return resolveChatHtmlIncludes(fs.readFileSync(chatTemplatePath, 'utf8'));
 }
 
+function loadChatWorkspaceTemplate(name) {
+    const relativePath = lazyWorkspaceTemplates[String(name || '')];
+    if (!relativePath) {
+        const error = new Error(`未知的聊天工作区模板：${name}`);
+        error.code = 'CHAT_WORKSPACE_TEMPLATE_NOT_FOUND';
+        throw error;
+    }
+    const absolutePath = path.resolve(chatPartialsDir, relativePath);
+    if (!absolutePath.startsWith(`${chatPartialsDir}${path.sep}`)) {
+        throw new Error(`聊天工作区模板路径越界：${name}`);
+    }
+    return resolveChatHtmlIncludes(fs.readFileSync(absolutePath, 'utf8'));
+}
+
 module.exports = {
     chatPartialsDir,
     chatTemplatePath,
+    lazyWorkspaceTemplates,
     loadChatHtmlTemplate,
+    loadChatWorkspaceTemplate,
     resolveChatHtmlIncludes
 };

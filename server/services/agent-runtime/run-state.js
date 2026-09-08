@@ -15,8 +15,24 @@ const {
     recordAgentRunOutcome,
     recordAgentEvent,
     publishUserEvent,
-    parseJsonObject
+    parseJsonObject,
+    updateAgentRunMetadataWithRetry: updateMetadata
 } = deps;
+
+async function finalizeTerminalRun(runId, targetStatus) {
+    if (!TERMINAL_STATUSES.has(targetStatus)) return;
+    try { await releaseChildRunReservation(runId); } catch (resourceError) {
+        logger.warn({ runId, err: resourceError.message }, 'Agent 子运行资源预留释放失败');
+    }
+    try { await persistAgentRunChatResult(runId); } catch (chatBridgeError) {
+        logger.error({ runId, err: chatBridgeError.message }, 'Agent 聊天结果回写失败');
+    }
+    if (targetStatus !== 'deleted') {
+        try { await recordAgentRunOutcome(runId, targetStatus); } catch (feedbackError) {
+            logger.warn({ runId, err: feedbackError.message }, 'Agent 结果反馈基线写入失败');
+        }
+    }
+}
 
 async function updateRun(runId, fields = {}, maxRetries = 3) {
     const allowed = [
@@ -82,21 +98,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                 } catch (eventError) {
                     logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
                 }
-                if (TERMINAL_STATUSES.has(targetStatus)) {
-                    try { await releaseChildRunReservation(runId); } catch (resourceError) {
-                        logger.warn({ runId, err: resourceError.message }, 'Agent 子运行资源预留释放失败');
-                    }
-                    try {
-                        await persistAgentRunChatResult(runId);
-                    } catch (chatBridgeError) {
-                        logger.error({ runId, err: chatBridgeError.message }, 'Agent 聊天结果回写失败');
-                    }
-                    if (targetStatus !== 'deleted') {
-                        try { await recordAgentRunOutcome(runId, targetStatus); } catch (feedbackError) {
-                            logger.warn({ runId, err: feedbackError.message }, 'Agent 结果反馈基线写入失败');
-                        }
-                    }
-                }
+                await finalizeTerminalRun(runId, targetStatus);
             }
             return changes;
         }
@@ -141,7 +143,22 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
     const set = entries.map(([key]) => `${key} = ?`).join(', ');
     const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`,
         [...entries.map(([, value]) => value), runId, ...allowedStatuses]);
-    if (changes) await publishAgentRunEvent(runId, 'updated');
+    if (changes) {
+        await publishAgentRunEvent(runId, 'updated');
+        if (fields.status) {
+            try {
+                await recordAgentEvent({
+                    runId,
+                    type: TERMINAL_STATUSES.has(fields.status) ? 'run.completed' : 'run.status_changed',
+                    payload: { from: currentStatus, to: fields.status },
+                    eventKey: `status:${currentStatus}->${fields.status}`
+                });
+            } catch (eventError) {
+                logger.warn({ runId, err: eventError.message }, 'Agent CAS 状态事件写入失败');
+            }
+            await finalizeTerminalRun(runId, fields.status);
+        }
+    }
     return changes;
 }
 
@@ -197,10 +214,31 @@ async function markRunError(runId, message) {
     });
 }
 
+    async function updateRunMetadataWithRetry(runId, transform, maxAttempts = 4) {
+        if (typeof updateMetadata === 'function') {
+            return updateMetadata(runId, transform, { maxAttempts });
+        }
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
+            const current = parseJsonObject(row.metadata) || {};
+            const next = transform(current);
+            const serializedCurrent = JSON.stringify(current);
+            const serializedNext = JSON.stringify(next);
+            const expectedCurrent = row.metadata == null ? '{}' : (typeof row.metadata === 'string' ? row.metadata : serializedCurrent);
+            const changes = await execute(`
+                UPDATE agent_runs
+                SET metadata = ?, updated_at = ?
+                WHERE id = ? AND COALESCE(metadata, '{}') = ?
+            `, [serializedNext, getBeijingTimestamp(), runId, expectedCurrent]);
+            if (Number(changes || 0) === 1) return next;
+        }
+        const error = new Error('Agent 运行元数据并发更新冲突，请重试。');
+        error.code = 'AGENT_METADATA_CONFLICT';
+        throw error;
+    }
+
     async function setRunMetadata(runId, patch = {}) {
-        const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
-        const current = parseJsonObject(row.metadata) || {};
-        await updateRun(runId, { metadata: JSON.stringify({ ...current, ...patch }), updated_at: getBeijingTimestamp() });
+        return updateRunMetadataWithRetry(runId, current => ({ ...current, ...patch }));
     }
 
     function stableWorkflowDelayKey(toolName, _step, input = {}) {
@@ -212,11 +250,11 @@ async function markRunError(runId, message) {
     }
 
     async function appendRunMetadataList(runId, key, item, limit = 20) {
-        const row = (await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId])) || {};
-        const current = parseJsonObject(row.metadata) || {};
-        const list = Array.isArray(current[key]) ? current[key].slice(-(limit - 1)) : [];
-        list.push(item);
-        await updateRun(runId, { metadata: JSON.stringify({ ...current, [key]: list }), updated_at: getBeijingTimestamp() });
+        return updateRunMetadataWithRetry(runId, current => {
+            const list = Array.isArray(current[key]) ? current[key].slice(-(limit - 1)) : [];
+            list.push(item);
+            return { ...current, [key]: list };
+        });
     }
 
     async function recordRunRetryReason(runId, input = {}) {
@@ -225,7 +263,9 @@ async function markRunError(runId, message) {
             attempt: input.attempt || null,
             limit: input.limit || null,
             code: input.code || '',
-            reason: input.reason || input.error || 'unknown_error'
+            reason: input.reason || input.error || 'unknown_error',
+            retryAfter: input.retryAfter || null,
+            retryDelayMs: Number(input.retryDelayMs || 0) || 0
         });
     }
 
@@ -238,6 +278,7 @@ async function markRunError(runId, message) {
         publishAgentRunEvent,
         recordRunRetryReason,
         setRunMetadata,
+        updateRunMetadataWithRetry,
         stableWorkflowDelayKey,
         updateRun,
         updateRunCas

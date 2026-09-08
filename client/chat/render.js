@@ -23,6 +23,62 @@ const PROSE_CODE_LANGUAGES = new Set([
     'text', 'txt', 'plain', 'plaintext', 'text/plain'
 ]);
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const highlightCache = new Map();
+const HIGHLIGHT_CACHE_LIMIT = 128;
+const AUTO_HIGHLIGHT_LANGUAGES = ['javascript', 'python', 'json', 'sql', 'bash', 'typescript', 'java', 'go', 'xml', 'yaml', 'ini', 'markdown'];
+const OPTIONAL_VENDOR_CODE_RE = /```|~~~/;
+const OPTIONAL_VENDOR_MATH_RE = /\$\$|\\\(|(?<!\\)\$[^$\n]+\$/;
+
+function ensureKatexStylesheet() {
+    const href = '/common/vendor/katex.min.css';
+    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+        .find(link => String(link.getAttribute('href') || '').includes('katex.min.css'));
+    if (existing) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.onload = resolve;
+        link.onerror = () => reject(new Error('KaTeX 样式加载失败。'));
+        document.head.appendChild(link);
+    });
+}
+
+function ensureOptionalMarkdownVendors(content) {
+    const source = String(content || '');
+    const loader = window.Pivot?.loadScriptOnce;
+    if (typeof loader !== 'function') return Promise.resolve(false);
+    const tasks = [];
+    if (OPTIONAL_VENDOR_CODE_RE.test(source) && typeof globalThis.hljs === 'undefined') {
+        tasks.push(loader('/common/vendor/highlight.min.js'));
+    }
+    if (OPTIONAL_VENDOR_MATH_RE.test(source)) {
+        tasks.push(ensureKatexStylesheet());
+        if (typeof globalThis.katex === 'undefined') tasks.push(loader('/common/vendor/katex.min.js'));
+    }
+    return tasks.length ? Promise.all(tasks).then(() => true).catch(() => false) : Promise.resolve(false);
+}
+
+window.Pivot?.exposeModule?.('chat.markdownVendors', { ensureOptionalMarkdownVendors });
+
+function cachedCodeHighlight(language, code) {
+    const normalized = String(language || '').toLowerCase();
+    const key = `${normalized}\n${code}`;
+    const cached = highlightCache.get(key);
+    if (cached) {
+        highlightCache.delete(key);
+        highlightCache.set(key, cached);
+        return cached;
+    }
+    let html = escapeCodeHtml(code);
+    try {
+        if (normalized && hljs.getLanguage(normalized)) html = hljs.highlight(code, { language: normalized }).value;
+        else if (code.length <= 4000) html = hljs.highlightAuto(code, AUTO_HIGHLIGHT_LANGUAGES).value;
+    } catch (_error) { /* 使用安全转义后的文本 */ }
+    if (highlightCache.size >= HIGHLIGHT_CACHE_LIMIT) highlightCache.delete(highlightCache.keys().next().value);
+    highlightCache.set(key, html);
+    return html;
+}
 
 function parseChatDateTime(value) {
     if (!value) return '';
@@ -249,10 +305,8 @@ customRenderer.code = (code, infostring, _escaped) => {
     const wrapProseCode = PROSE_CODE_LANGUAGES.has(normalizedLanguage);
     if (wrapProseCode) {
         codeHtml = escapeCodeHtml(code);
-    } else if (language && typeof hljs !== 'undefined' && hljs.getLanguage(language)) {
-        try { codeHtml = hljs.highlight(code, { language }).value; } catch (e) { codeHtml = escapeCodeHtml(code); }
     } else if (typeof hljs !== 'undefined') {
-        try { codeHtml = hljs.highlightAuto(code).value; } catch (e) { codeHtml = escapeCodeHtml(code); }
+        codeHtml = cachedCodeHighlight(language, code);
     } else { codeHtml = escapeCodeHtml(code); }
 
     return `
@@ -412,6 +466,7 @@ if (typeof marked !== 'undefined') {
 
 function renderMarkdown(content, options = {}) {
     if (!content) return '';
+    void ensureOptionalMarkdownVendors(content);
     const hasDeferOption = options && Object.prototype.hasOwnProperty.call(options, 'deferPivotCharts');
     const previousDefer = window.Pivot.legacy._deferPivotCharts;
     if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = Boolean(options.deferPivotCharts);
@@ -426,22 +481,8 @@ function renderMarkdown(content, options = {}) {
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
 
-    if (window.Pivot.legacy.PivotSafeHtml) {
-        const sanitizedHtml = window.Pivot.legacy.PivotSafeHtml.sanitizeHtml(rawHtml, {
-            ADD_TAGS: [
-                'details', 'summary', 'thought', 
-                'math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'msqrt', 'mroot', 'mspace', 'mtext', 'mstyle', 'merror'
-            ], 
-            ADD_ATTR: ['class', 'open', 'type', 'title', 'aria-label', 'encoding', 'display', 'viewBox', 'd', 'xmlns', 'src', 'alt', 'href', 'target', 'rel'] 
-        });
-        if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
-        return sanitizedHtml;
-    }
-    if (window.DOMPurify) {
-        const sanitizedHtml = DOMPurify.sanitize(rawHtml);
-        if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
-        return sanitizedHtml;
-    }
+    // 所有调用方通过 PivotSafeHtml.setHtml/prependHtml 写入 DOM；在那里只消毒
+    // 一次，且与 Markdown 的 MathML/详情白名单使用同一配置。
     if (hasDeferOption) window.Pivot.legacy._deferPivotCharts = previousDefer;
     return rawHtml;
 }

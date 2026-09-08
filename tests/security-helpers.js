@@ -325,35 +325,30 @@ const {
 } = require('../server/services/model-costs');
 
 const {
+    closeRealtimeEventClients,
     getRealtimeStats,
     publishUserEvent,
     subscribeUserEvents
 } = require('../server/services/realtime-events');
 
 const {
-    cancelAgentRun,
-    computeNextScheduleRun,
-    createAgentSchedule,
-    createAgentTemplate,
-    createAgentRun,
-    createAgentWorkflow,
-    listAgentArtifacts,
-    listAgentNotifications,
-    listAgentSchedules,
-    listAgentTemplates,
+    artifacts: { listAgentArtifacts, saveAgentRunArtifact },
+    notifications: { listAgentNotifications },
+    runs: {
+        cancelAgentRun, createAgentRun, rerunAgentRun, resumeAgentRun, runAgent,
+        shouldPauseForApproval, softDeleteAgentRun
+    },
+    schedules: { computeNextScheduleRun, createAgentSchedule, listAgentSchedules, runAgentScheduleNow },
+    templates: { createAgentTemplate, listAgentTemplates },
+    workflows: { createAgentWorkflow }
+} = require('../server/services/agent-runtime');
+const {
     normalizeApprovalPolicy,
     normalizeAgentGoal,
     normalizeToolAllowlist,
     normalizeToolPolicy,
-    parseJsonObject,
-    rerunAgentRun,
-    resumeAgentRun,
-    runAgent,
-    runAgentScheduleNow,
-    saveAgentRunArtifact,
-    shouldPauseForApproval,
-    softDeleteAgentRun
-} = require('../server/services/agent-runtime');
+    parseJsonObject
+} = require('../server/services/agent-validators');
 
 const { assertWorkflowLlmNodesConfigured } = require('../server/services/agent-workflows');
 
@@ -454,6 +449,15 @@ function createFakeSseResponse() {
             this.headers[name.toLowerCase()] = value;
         },
         flushHeaders() {},
+        statusCode: 200,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(payload) {
+            this.jsonBody = payload;
+            return this;
+        },
         write(chunk) {
             this.chunks.push(String(chunk));
         },
@@ -781,6 +785,7 @@ module.exports = {
     createChatRenderSandbox,
     createChatRouter,
     createFakeSseResponse,
+    closeRealtimeEventClients,
     createKnowledgeCollection,
     createKnowledgeTag,
     createKnowledgeDocumentFromUpload,

@@ -78,3 +78,38 @@ test('runtime manifest validation enforces target platform and architecture', ()
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
+
+test('desktop package excludes build-time scripts that have no runtime import path', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    assert.equal(pkg.build.files.includes('scripts/**'), false);
+    assert.equal(pkg.build.extraResources.some(item => item.from === 'artifacts/agent-browser-pack'), false);
+});
+
+test('desktop packaging applies the optional database connector profile before electron-builder runs', () => {
+    const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
+    const profile = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'desktop_optional_database_connectors.js'), 'utf8');
+    assert.match(script, /prepareDesktopConnectorProfile\(root\)/);
+    assert.match(profile, /PIVOT_DESKTOP_DB_CONNECTORS/);
+    assert.match(script, /restoreDesktopConnectorProfile\(\)/);
+});
+
+test('unpacked Windows smoke builds disable auto update unless a signed publisher profile is injected', () => {
+    const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
+    assert.match(script, /config\.autoUpdate\.enabled = false/);
+    assert.match(script, /windowsTarget: buildTarget\.platform === 'win32'/);
+    assert.match(script, /windowsUpdatePublisher: windowsUpdateSigningProfile\.publisherName/);
+});
+
+test('release desktop builds require a dedicated distribution configuration rather than the development config', () => {
+    const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
+    const distributionConfig = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'desktop_distribution_config.js'), 'utf8');
+    assert.match(script, /requireDistributionConfig: !rawBuilderArgs\.includes\('--dir'\)/);
+    assert.match(distributionConfig, /PIVOT_DISTRIBUTION_CONFIG/);
+});
+
+test('desktop packaging only assembles and verifies Chromium for the local runtime profile', () => {
+    const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
+    assert.match(script, /prepareDesktopRuntimeProfile\(root/);
+    assert.match(script, /if \(desktopRuntimeProfile\.includesBrowserRuntime\)/);
+    assert.match(script, /PIVOT_VERIFY_DESKTOP_BROWSER_RUNTIME/);
+});

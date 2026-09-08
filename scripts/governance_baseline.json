@@ -1,9 +1,8 @@
 {
   "version": 1,
   "largeFileThreshold": 1000,
-  "legacyWindowGlobalBudget": 299,
+  "legacyWindowGlobalBudget": 276,
   "files": {
-    "server/services/agent-runtime/index.js": 1942,
     "client/chat/rag-documents.js": 1659,
     "server/db/schema/base.js": 1549,
     "client/chat/mcp-workbench-main.js": 1463,
@@ -11,13 +10,9 @@
     "client/chat/admin-settings.js": 1335,
     "server/db/migrations/legacy.js": 1285,
     "server/db/schema/comments.js": 1230,
-    "server/services/agent-tools.js": 1170,
-    "server/services/document-processing/jobs.js": 1167,
+    "server/services/document-processing/jobs.js": 1069,
     "server/services/agent-approval-requests.js": 1156,
-    "client/chat/agent-run-step-renderers.js": 1152,
     "client/chat/agent-harness.js": 1253,
-    "server/services/knowledge-graph.js": 1054,
-    "server/routes/admin-stats.js": 1087,
-    "server/services/long-term-memory/index.js": 1029
+    "server/routes/admin-stats.js": 1087
   }
 }

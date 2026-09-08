@@ -262,7 +262,7 @@ window.Pivot.legacy.ensureAdminFeatureScripts = async () => {
     }
 };
 
-window.Pivot.legacy.openAdminPanel = async (options = {}) => {
+async function openAdminPanel(options = {}) {
     const openSequence = ++settingsPanelOpenSequence;
     try {
         await withSettingsTimeout(() => window.Pivot.legacy.ensureAdminFeatureScripts());
@@ -273,7 +273,7 @@ window.Pivot.legacy.openAdminPanel = async (options = {}) => {
         return;
     }
     const adminContainer = document.getElementById('admin-container');
-    window.Pivot.legacy.showMainWorkspace?.('settings');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
     adminContainer?.setAttribute('aria-hidden', 'false');
     const isAdmin = isAdminUser();
@@ -297,7 +297,8 @@ window.Pivot.legacy.openAdminPanel = async (options = {}) => {
     if (openSequence !== settingsPanelOpenSequence || loaded === false) return;
     const targetTab = options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab();
     await window.Pivot.legacy.switchTab(targetTab);
-};
+}
+window.Pivot.exposeModule('workspaces.implementations', { openAdminPanel });
 
 window.Pivot.legacy.closeModal = () => {
     window.Pivot.legacy.cancelSettingsLoad?.();
@@ -305,7 +306,7 @@ window.Pivot.legacy.closeModal = () => {
     window.Pivot.legacy.cancelMonitorSummaryLoad?.();
     window.Pivot.legacy.clearMonitorRefreshTimer?.();
     document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
-    return (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
+    return window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
 };
 
 window.Pivot.legacy.switchTab = async (tab, options = {}) => {

@@ -688,6 +688,9 @@ async function extractDocumentText(filePath, mimeType = '', originalName = '', o
         }
     }
     if (ext === '.xls' || ext === '.xlsx') {
+        // XLSX 是 ZIP 容器；先走带条目数、单条目和总解压体积限制的解析器，
+        // 禁止第三方 XLSX.read 在任何错误返回前无界解压压缩炸弹。
+        if (ext === '.xlsx') return extractXlsxText(filePath);
         try {
             return extractWorkbookText(filePath, options);
         } catch (err) {

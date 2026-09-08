@@ -145,6 +145,7 @@
     }
 
     const scriptLoadPromises = existingPivot._scriptLoadPromises || new Map();
+    const styleLoadPromises = existingPivot._styleLoadPromises || new Map();
     const modules = existingPivot.modules || Object.create(null);
     const legacy = existingPivot.legacy || Object.create(null);
     const SCRIPT_LOAD_TIMEOUT_MS = 15000;
@@ -246,6 +247,41 @@
         await Promise.all(scripts.map(src => loadScriptOnce(src)));
     }
 
+    function loadStyleOnce(href) {
+        const rawHref = String(href || '').trim();
+        if (!rawHref) return Promise.resolve();
+        const nextHref = versionedAssetUrl(rawHref);
+        if (styleLoadPromises.has(nextHref)) return styleLoadPromises.get(nextHref);
+        const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find(link => scriptMatches(link.getAttribute('href') || '', rawHref, nextHref));
+        if (existing?.dataset.loaded !== 'false') return Promise.resolve();
+        const promise = new Promise((resolve, reject) => {
+            const link = existing || document.createElement('link');
+            link.rel = 'stylesheet';
+            link.dataset.loaded = 'false';
+            const timer = setTimeout(() => {
+                styleLoadPromises.delete(nextHref);
+                if (link.dataset.loaded === 'false') link.remove();
+                reject(new Error(`加载样式超时（已等待 ${SCRIPT_LOAD_TIMEOUT_MS} 毫秒）: ${rawHref}`));
+            }, SCRIPT_LOAD_TIMEOUT_MS);
+            link.onload = () => {
+                clearTimeout(timer);
+                link.dataset.loaded = 'true';
+                resolve();
+            };
+            link.onerror = () => {
+                clearTimeout(timer);
+                styleLoadPromises.delete(nextHref);
+                reject(new Error(`加载样式失败: ${rawHref}`));
+            };
+            if (!existing) {
+                link.href = nextHref;
+                document.head.appendChild(link);
+            }
+        });
+        styleLoadPromises.set(nextHref, promise);
+        return promise;
+    }
+
     // 流式渲染节流策略：根据已积累内容长度自适应间隔
     // 思路：内容越长，每帧 marked.parse 越贵，应该降低刷新频率
     function chooseStreamInterval(contentLength) {
@@ -267,6 +303,7 @@
     existingPivot.versionedAssetUrl = versionedAssetUrl;
     existingPivot.loadScriptOnce = loadScriptOnce;
     existingPivot.loadScripts = loadScripts;
+    existingPivot.loadStyleOnce = loadStyleOnce;
     existingPivot.modules = modules;
     existingPivot.legacy = legacy;
     existingPivot.registerModule = registerModule;
@@ -274,6 +311,7 @@
     existingPivot.exposeModule = exposeModule;
     existingPivot.moduleApi = moduleApi;
     existingPivot._scriptLoadPromises = scriptLoadPromises;
+    existingPivot._styleLoadPromises = styleLoadPromises;
     existingPivot.chooseStreamInterval = chooseStreamInterval;
     existingPivot.html = existingPivot.legacy.PivotSafeHtml || existingPivot.html || null;
     window.Pivot = existingPivot;

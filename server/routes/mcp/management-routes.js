@@ -2,7 +2,7 @@ function mountMcpManagementRoutes(deps = {}) {
     const {
         router,
         authMiddleware,
-        adminMiddleware,
+        requireCapability,
         logAction,
         asyncHandler,
         query,
@@ -187,7 +187,7 @@ function mountMcpManagementRoutes(deps = {}) {
         return tools;
     }
 
-    router.get('/capabilities/packages', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/capabilities/packages', authMiddleware, requireCapability('manageGlobalMcp'), asyncHandler(async (req, res) => {
         const packages = await listGlobalCapabilityPackages(req.user);
         if (req.query?.include_tools === 'true' || req.query?.includeTools === 'true') {
             const enriched = await Promise.all(packages.map(async item => {
@@ -199,21 +199,21 @@ function mountMcpManagementRoutes(deps = {}) {
         res.json({ data: packages, scope: 'global' });
     }));
 
-    router.get('/capabilities/packages/:key/tools', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.get('/capabilities/packages/:key/tools', authMiddleware, requireCapability('manageGlobalMcp'), asyncHandler(async (req, res) => {
         const item = await getGlobalCapabilityPackage(req.params.key, req.user);
         if (!item) return res.status(404).json({ error: '工具包不存在。' });
         const tools = await resolvePackageTools(item, req.user);
         res.json({ item, tools });
     }));
 
-    router.put('/capabilities/packages/:key', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.put('/capabilities/packages/:key', authMiddleware, requireCapability('manageGlobalMcp'), asyncHandler(async (req, res) => {
         const item = await setGlobalCapabilityPackageStatus(req.params.key, req.user, req.body?.status || (req.body?.enabled === false ? 'disabled' : 'enabled'));
         if (!item) return res.status(404).json({ error: '工具包不存在。' });
         logAction(req, '更新工具包状态', `${item.package_key}: ${item.status}`);
         res.json({ success: true, item });
     }));
 
-    router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+    router.put('/capabilities/packages/:key/tools/:tool', authMiddleware, requireCapability('manageGlobalMcp'), asyncHandler(async (req, res) => {
         const item = await setGlobalCapabilityToolGovernance(req.params.key, req.user, req.params.tool, {
             enabled: parseBoolean(req.body?.enabled, true),
             riskLevel: req.body?.riskLevel || req.body?.risk_level,

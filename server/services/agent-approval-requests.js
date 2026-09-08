@@ -5,6 +5,8 @@ const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const { nowExpr } = require('../db/dialect');
 const { parseJsonObject } = require('./agent-validators');
+const { patchAgentRunMetadata, updateAgentRunMetadataWithRetry } = require('./agent-run-metadata-patch');
+const { insertPendingRequest } = require('./agent-approval-persistence');
 const { buildAgentResumeContext } = require('./agent-checkpoints');
 const { resolveCredentialSecret } = require('./workflow-credentials');
 const {
@@ -15,11 +17,9 @@ const {
     sendIm,
     validateImTarget
 } = require('./builtin-mcp-im');
-
 const CALLBACK_TOKEN_PATTERN = /^apr_[0-9a-f]{48}$/;
 const MAX_WAIT_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_ACTION = 'reject';
-
 const callbacks = {
     updateRun: null,
     updateRunCas: null,
@@ -31,19 +31,16 @@ const callbacks = {
     enqueueAgentRun: null,
     getAgentRunTitle: run => run?.title || run?.goal || run?.id || ''
 };
-
 function configureAgentApprovalRequests(next = {}) {
     Object.entries(next || {}).forEach(([key, value]) => {
         if (Object.hasOwn(callbacks, key) && typeof value === 'function') callbacks[key] = value;
     });
 }
-
 function invalid(message, status = 400) {
     const err = new Error(message);
     err.status = status;
     return err;
 }
-
 function parseJson(value, fallback = {}) {
     if (!value) return fallback;
     if (typeof value === 'object') return value;
@@ -198,10 +195,7 @@ async function mergeRunMetadata(runId, patch = {}) {
         await callbacks.setRunMetadata(runId, patch);
         return;
     }
-    const current = await getRunMetadataById(runId);
-    await execute('UPDATE agent_runs SET metadata = ?, updated_at = ? WHERE id = ?', [
-        JSON.stringify({ ...current, ...patch }), getBeijingTimestamp(), runId
-    ]);
+    await patchAgentRunMetadata(runId, patch);
 }
 
 async function refreshRunResumeContext(runId) {
@@ -505,25 +499,25 @@ function buildDelayOutput(row) {
 }
 
 async function persistWorkflowApproval(runId, key, value) {
-    const metadata = await getRunMetadataById(runId);
-    await mergeRunMetadata(runId, {
+    await updateAgentRunMetadataWithRetry(runId, metadata => ({
+        ...metadata,
         workflowApprovals: {
             ...(metadata.workflowApprovals && typeof metadata.workflowApprovals === 'object' ? metadata.workflowApprovals : {}),
             [key]: value
         },
         pendingWorkflowApproval: null
-    });
+    }));
 }
 
 async function persistWorkflowDelay(runId, key, value) {
-    const metadata = await getRunMetadataById(runId);
-    await mergeRunMetadata(runId, {
+    await updateAgentRunMetadataWithRetry(runId, metadata => ({
+        ...metadata,
         workflowDelays: {
             ...(metadata.workflowDelays && typeof metadata.workflowDelays === 'object' ? metadata.workflowDelays : {}),
             [key]: value
         },
         pendingWorkflowDelay: null
-    });
+    }));
 }
 
 async function maybeCompleteDagNode(row, output) {
@@ -579,10 +573,10 @@ async function markDagNodeWaiting(row, output) {
     `, [JSON.stringify(output), row.started_at || getBeijingTimestamp(), row.run_id, row.node_key]);
 }
 
-function signatureFor(secret, token, requestId, decision, nonce = '') {
+function signatureFor(secret, token, requestId, decision, nonce = '', requirementKey = '') {
     return `sha256=${crypto
         .createHmac('sha256', secret)
-        .update(`${token}.${requestId}.${decision}.${nonce}`)
+        .update(`${token}.${requestId}.${decision}.${nonce}.${requirementKey}`)
         .digest('hex')}`;
 }
 
@@ -599,7 +593,7 @@ async function buildCallbackActions(row, token) {
     const nonce = String(row.callback_nonce || '').trim();
     const build = decision => {
         const payload = { decision, requestId: row.id, approvalRequestId: row.id };
-        if (secret) payload.signature = signatureFor(secret, token, row.id, decision, nonce);
+        if (secret) payload.signature = signatureFor(secret, token, row.id, decision, nonce, row.callback_requirement_key || '');
         return payload;
     };
     return {
@@ -690,7 +684,6 @@ async function maybeSendApprovalIm(row, token, run, user) {
 async function createApprovalRequest({ run, user, node, input, key }) {
     const levels = await normalizeApprovalLevels(input, user);
     if (!levels.length) throw invalid('Approval node has no valid approver.', 400);
-    const token = createCallbackToken();
     const now = getBeijingTimestamp();
     const timeoutMs = resolveApprovalTimeoutMs(input);
     const expiresAt = timeoutMs ? getBeijingTimestamp(new Date(Date.now() + timeoutMs)) : null;
@@ -703,16 +696,19 @@ async function createApprovalRequest({ run, user, node, input, key }) {
     const summary = input.summary === undefined || input.summary === null
         ? ''
         : (typeof input.summary === 'string' ? input.summary : JSON.stringify(input.summary));
+    const firstLevel = levels[0] || {}; const firstRequirementKeys = levelRequirementKeys(firstLevel);
+    if (callbackSecret && (String(firstLevel.mode || 'any').toLowerCase() !== 'any' || firstRequirementKeys.length !== 1)) throw invalid('签名回调仅支持单一审批要求；多审批人或会签请使用站内审批。', 400);
+    const callbackToken = callbackSecret ? createCallbackToken() : '';
     const callbackNonce = callbackSecret ? createCallbackNonce() : '';
-    const changes = await execute(`
+    const pendingInsert = await insertPendingRequest({ execute, getRequestByRunKey, runId: run.id, requestType: 'approval', key, sql: `
         INSERT INTO agent_approval_requests (
             id, run_id, user_id, request_type, node_key, approval_key, title, summary, instructions,
             status, current_level, required_levels, levels_json, decisions_json, input_json,
-            callback_token_hash, callback_token_hint, callback_nonce, callback_credential_slug, callback_signature_required,
+            callback_token_hash, callback_token_hint, callback_nonce, callback_credential_slug, callback_requirement_key, callback_signature_required,
             timeout_action, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'approval', ?, ?, ?, ?, ?, 'pending', 1, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
-    `, [
+        `, params: [
         requestId,
         run.id,
         run.user_id,
@@ -724,24 +720,26 @@ async function createApprovalRequest({ run, user, node, input, key }) {
         levels.length,
         JSON.stringify(levels),
         JSON.stringify(input),
-        hashToken(token),
-        token.slice(-8),
+        callbackToken ? hashToken(callbackToken) : null,
+        callbackToken ? callbackToken.slice(-8) : '',
         callbackNonce,
         callbackCredential,
+        callbackSecret ? firstRequirementKeys[0] : '',
         callbackSecret ? 1 : 0,
         normalizeTimeoutAction(input.timeoutAction || input.timeout_action),
         expiresAt,
         now,
         now
-    ]);
+        ] });
+    const changes = pendingInsert.changes;
+    if (pendingInsert.existing) return { row: pendingInsert.existing, token: '', created: false };
     if (!changes) {
         const existing = await getRequestByRunKey(run.id, 'approval', key);
         if (existing) return { row: existing, token: '', created: false };
         throw invalid('Approval request could not be created.', 409);
     }
-    return { row: await getRequestById(requestId), token, created: true };
+    return { row: await getRequestById(requestId), token: callbackToken, created: true };
 }
-
 async function waitForWorkflowApproval({ run, user, node, input = {}, key = '' }) {
     const approvalKey = approvalKeyFor(node, input, key);
     const metadata = await getRunMetadataById(run.id);
@@ -797,14 +795,14 @@ async function createDelayRequest({ run, node, input, key }) {
     const now = getBeijingTimestamp();
     const expiresAt = getBeijingTimestamp(new Date(Date.now() + durationMs));
     const requestId = crypto.randomUUID();
-    const changes = await execute(`
+    const pendingInsert = await insertPendingRequest({ execute, getRequestByRunKey, runId: run.id, requestType: 'delay', key, sql: `
         INSERT INTO agent_approval_requests (
             id, run_id, user_id, request_type, node_key, approval_key, title, summary, instructions,
             status, current_level, required_levels, levels_json, decisions_json, input_json,
             timeout_action, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'delay', ?, ?, ?, ?, '', 'pending', 1, 1, '[]', '[]', ?, 'approve', ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
-    `, [
+        `, params: [
         requestId,
         run.id,
         run.user_id,
@@ -816,7 +814,9 @@ async function createDelayRequest({ run, node, input, key }) {
         expiresAt,
         now,
         now
-    ]);
+        ] });
+    const changes = pendingInsert.changes;
+    if (pendingInsert.existing) return { row: pendingInsert.existing, created: false };
     if (!changes) {
         const existing = await getRequestByRunKey(run.id, 'delay', key);
         if (existing) return { row: existing, created: false };
@@ -909,12 +909,8 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
     const requirementKeys = levelRequirementKeys(level);
     const levelMode = String(level.mode || 'any').trim().toLowerCase() === 'all' ? 'all' : 'any';
     const actorKeys = options.system && approve ? requirementKeys : actorRequirementKeys(actor, level);
-    let matchedKeys = options.system && approve
-        ? requirementKeys
-        : actorKeys.filter(key => requirementKeys.includes(key));
-    if (approve && !matchedKeys.length && options.tokenAuthenticated && levelMode === 'any' && requirementKeys.length) {
-        matchedKeys = [requirementKeys[0]];
-    }
+    let matchedKeys = options.system && approve ? requirementKeys : options.callbackRequirementKey ? [String(options.callbackRequirementKey)] : actorKeys.filter(key => requirementKeys.includes(key));
+    if (options.callbackRequirementKey && !requirementKeys.includes(String(options.callbackRequirementKey))) throw invalid('Approval callback is not bound to the current approval requirement.', 403);
     if (approve && !matchedKeys.length && !isSuperAdmin(actor) && !options.system) {
         throw invalid('Current user is not a designated approver for this level.', 403);
     }
@@ -971,12 +967,14 @@ async function applyApprovalDecision(row, actor, approve = true, comment = '', o
     }
     if (current < required) {
         const token = createCallbackToken();
+        const nextLevel = parseJson(row.levels_json, [])[current] || {}; const nextRequirementKeys = levelRequirementKeys(nextLevel);
+        if (row.callback_signature_required && (String(nextLevel.mode || 'any').toLowerCase() !== 'any' || nextRequirementKeys.length !== 1)) throw invalid('下一审批级别不支持单一签名回调，请改用站内审批。', 400);
         const changes = await execute(`
             UPDATE agent_approval_requests
             SET current_level = current_level + 1, decisions_json = ?, updated_at = ?,
-                callback_token_hash = ?, callback_token_hint = ?, callback_nonce = ?
+                callback_token_hash = ?, callback_token_hint = ?, callback_nonce = ?, callback_requirement_key = ?
             WHERE id = ? AND status = 'pending' AND current_level = ? AND updated_at IS NOT DISTINCT FROM ? AND COALESCE(decisions_json, '[]') = COALESCE(?, '[]')
-        `, [JSON.stringify(decisions), now, hashToken(token), token.slice(-8), createCallbackNonce(), row.id, current, row.updated_at, row.decisions_json]);
+        `, [JSON.stringify(decisions), now, row.callback_signature_required ? hashToken(token) : null, row.callback_signature_required ? token.slice(-8) : '', row.callback_signature_required ? createCallbackNonce() : '', row.callback_signature_required ? nextRequirementKeys[0] : '', row.id, current, row.updated_at, row.decisions_json]);
         if (!changes) return formatRequest(await getRequestById(row.id), actor);
         const updated = await getRequestById(row.id);
         await insertStep(row.run_id, {
@@ -1039,7 +1037,7 @@ async function verifyCallbackSignature(row, token, payload = {}, headers = {}) {
         payload.signature ||
         ''
     ).trim();
-    const expected = signatureFor(secret, token, row.id, decision, nonce);
+    const expected = signatureFor(secret, token, row.id, decision, nonce, row.callback_requirement_key || '');
     const left = Buffer.from(supplied);
     const right = Buffer.from(expected);
     if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) {
@@ -1070,14 +1068,14 @@ async function handleImApprovalCallback(token, payload = {}, headers = {}) {
     }
     await verifyCallbackSignature(row, safeToken, payload, headers);
     const decision = normalizeCallbackDecision(payload);
-    const actor = {
-        id: Number(payload.userId || payload.user_id || 0) || null,
-        username: String(payload.username || payload.approver || 'im-callback').slice(0, 120),
-        unit: String(payload.unit || payload.approverUnit || '').trim()
-    };
+    if (!row.callback_signature_required || !row.callback_requirement_key) {
+        throw invalid('该审批回调未绑定签名审批要求，请改用站内审批。', 403);
+    }
+    const actor = { id: null, username: 'im-callback', unit: '' };
     return await applyApprovalDecision(row, actor, decision === 'approve', payload.comment || payload.reason || '', {
         source: 'im-callback',
-        tokenAuthenticated: true
+        tokenAuthenticated: true,
+        callbackRequirementKey: row.callback_requirement_key
     });
 }
 

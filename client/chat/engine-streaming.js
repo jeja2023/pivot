@@ -222,8 +222,8 @@ function handleAssistantTraceAction(event) {
     if (!action) return;
     event.preventDefault();
     const target = action.dataset.chatTraceAction;
-    if (target === 'rag') window.Pivot.legacy.openKnowledgeWorkbench?.();
-    if (target === 'mcp') window.Pivot.legacy.openMcpWorkbench?.();
+    if (target === 'rag') window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
+    if (target === 'mcp') window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
 }
 
 document.addEventListener('click', handleAssistantTraceAction);

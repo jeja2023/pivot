@@ -28,7 +28,9 @@ const { createDesktopDeliveryController } = require('./delivery/controller');
 const { createLazyLocalMcpController } = require('./local-mcp-controller');
 const { chooseLocalBrowserAuthorization, sanitizeLocalBrowserGrant } = require('./local-browser-authorization');
 const { normalizeLocalMcpExecutionError } = require('./local-mcp-execution-error');
+const { writeJsonAtomic } = require('./atomic-json');
 const { buildApplicationMenu } = require('./application-menu');
+const { installRendererPermissionPolicy } = require('./renderer-permissions');
 const {
     createWorkerApprovalStore,
     isSecureWorkerRendererUrl,
@@ -65,10 +67,7 @@ function readJson(filePath) {
     }
 }
 
-function writeJson(filePath, value) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
-}
+const writeJson = writeJsonAtomic;
 
 function findAvailablePort() {
     return new Promise((resolve, reject) => {
@@ -458,6 +457,7 @@ function createMainWindow(config) {
         mainWindow.show();
     });
     const webSession = mainWindow.webContents.session;
+    installRendererPermissionPolicy(webSession);
     attachStealthHeaderInterceptor(webSession);
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
         if (shouldOpenExternal(targetUrl)) shell.openExternal(targetUrl);

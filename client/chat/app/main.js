@@ -186,7 +186,7 @@ sidebarViewportMedia.addEventListener?.('change', syncSidebarForViewport);
 
 // 会话管理
 bind('new-chat-btn', async () => {
-    window.Pivot.legacy.showMainWorkspace('chat');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat');
     const s = await createSession('新对话');
     if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
@@ -244,19 +244,90 @@ document.querySelectorAll('[data-usage-subtab]').forEach(button => {
     button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
 });
 bind('admin-modal-close', () => window.Pivot.legacy.closeModal());
-bind('apps-workbench-btn', () => window.Pivot.legacy.openAppsWorkbench?.());
-bind('personal-workbench-btn', () => window.Pivot.legacy.openPersonalWorkbench?.());
-bind('admin-panel-btn', () => window.Pivot.legacy.openAdminPanel());
-bind('automation-workbench-btn', () => window.Pivot.legacy.openAgentWorkbench?.({ tab: 'tasks' }));
-bind('agent-modal-close', () => window.Pivot.legacy.closeAgentWorkbench?.());
-bind('knowledge-workbench-btn', () => window.Pivot.legacy.openKnowledgeWorkbench?.());
+bind('apps-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+bind('personal-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openPersonalWorkbench?.());
+bind('admin-panel-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.());
+bind('automation-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' }));
+bind('knowledge-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
 bind('knowledge-modal-close', () => window.Pivot.legacy.closeKnowledgeWorkbench?.());
-bind('mcp-workbench-btn', () => window.Pivot.legacy.openMcpWorkbench?.());
+bind('mcp-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.());
 bind('mcp-modal-close', () => window.Pivot.legacy.closeMcpWorkbench?.());
 bind('manual-link-btn', () => window.Pivot.legacy.openManualWorkbench?.());
 bind('manual-modal-close', () => window.Pivot.legacy.closeManualWorkbench?.());
 bind('print-modal-close', () => window.Pivot.legacy.closePrintWorkbench?.());
 bind('logout-btn', () => window.Pivot.legacy.logout());
+
+function bindMountedWorkspaceControls(name) {
+    if (name === 'agent') {
+        bind('agent-modal-close', () => window.Pivot.legacy.closeAgentWorkbench?.());
+        bind('agent-refresh-btn', () => window.Pivot.legacy.loadAgentWorkbench?.());
+        bind('task-create-open-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(true));
+        bind('task-create-close-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(false));
+        bind('task-create-cancel-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(false));
+        bind('agent-run-btn', () => window.Pivot.legacy.createAgentRun?.());
+        bind('agent-audit-btn', () => window.Pivot.legacy.showAgentRunAudit?.());
+        return;
+    }
+    if (name === 'knowledge') {
+        bind('rag-upload-btn', () => window.Pivot.legacy.openKnowledgeUploadModal?.());
+        bind('rag-upload-input', () => window.Pivot.legacy.addKnowledgeUploadFiles?.(), 'change');
+        return;
+    }
+    if (name === 'mcp') {
+        bind('mcp-refresh-btn', () => window.Pivot.legacy.loadMcpWorkbench?.());
+        bind('mcp-save-btn', () => window.Pivot.legacy.saveMcpServer?.());
+        bind('mcp-reset-btn', () => window.Pivot.legacy.resetMcpForm?.());
+        bind('mcp-edit-cancel-btn', () => window.Pivot.legacy.closeMcpEditModal?.());
+        bind('mcp-edit-save-btn', () => window.Pivot.legacy.saveMcpServer?.('edit'));
+        return;
+    }
+    if (name !== 'settings') return;
+    bind('report-query-btn', () => window.Pivot.legacy.loadReport());
+    bind('report-days', () => window.Pivot.legacy.syncReportDateFilters?.(), 'change');
+    bind('api-call-log-search', () => {
+        clearTimeout(window.Pivot.legacy.apiCallLogSearchTimer);
+        window.Pivot.legacy.apiCallLogSearchTimer = setTimeout(() => window.Pivot.legacy.loadApiCallLogs?.(1), 300);
+    }, 'input');
+    bind('api-call-logs-open-btn', () => window.Pivot.legacy.openApiCallLogsModal?.());
+    bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
+    bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
+    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
+        bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
+    });
+    document.querySelectorAll('[data-usage-subtab]').forEach(button => {
+        button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
+    });
+    bind('admin-modal-close', () => window.Pivot.legacy.closeModal());
+    bind('ops-refresh-btn', () => window.Pivot.legacy.loadOpsSummary());
+    bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
+    bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');
+    bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
+    bind('rag-embedding-save-btn', () => window.Pivot.legacy.saveEmbeddingSettings());
+    bind('model-add-btn', () => window.Pivot.legacy.openModelModal());
+    bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
+    bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());
+    bind('m-submit-btn', () => window.Pivot.legacy.addModel());
+    bind('m-scope', () => window.Pivot.legacy.updateModelScopeControls?.(), 'change');
+    bind('user-add-btn', () => window.Pivot.legacy.openUserModal());
+    bind('modal-user-cancel', () => window.Pivot.legacy.closeUserModal());
+    bind('modal-user-save', () => window.Pivot.legacy.saveUser());
+    bind('user-template-btn', () => window.Pivot.legacy.downloadUserTemplate());
+    bind('user-import-btn', () => document.getElementById('user-import-input')?.click());
+    bind('user-import-input', () => window.Pivot.legacy.importUsers(), 'change');
+    bind('user-export-btn', () => window.Pivot.legacy.exportUsers());
+    bind('public-registration-toggle', () => window.Pivot.legacy.updatePublicRegistrationSetting?.(), 'change');
+    bind('api-access-toggle', () => window.Pivot.legacy.updateApiAccessSetting?.(), 'change');
+    bind('logs-export-btn', () => window.Pivot.legacy.exportLogs());
+    bind('report-export-btn', () => window.Pivot.legacy.exportReport?.());
+    bind('stats-export-btn', () => window.Pivot.legacy.exportStats());
+    bind('model-cost-export-btn', () => window.Pivot.legacy.exportModelCosts?.());
+    bind('compliance-export-btn', () => window.Pivot.legacy.exportCompliancePackage?.());
+    bind('details-export-btn', () => window.Pivot.legacy.exportDetails());
+}
+
+document.addEventListener('pivot:workspace-mounted', event => {
+    bindMountedWorkspaceControls(event.detail?.name);
+});
 
 document.addEventListener('click', async (event) => {
     const authToggle = event.target.closest('[data-auth-password-toggle]');
@@ -296,14 +367,6 @@ bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
 bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());
 bind('m-submit-btn', () => window.Pivot.legacy.addModel());
 bind('m-scope', () => window.Pivot.legacy.updateModelScopeControls?.(), 'change');
-bind('agent-refresh-btn', () => window.Pivot.legacy.loadAgentWorkbench?.());
-bind('task-create-open-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(true));
-bind('task-create-close-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(false));
-bind('task-create-cancel-btn', () => window.Pivot.legacy.setTaskComposerOpen?.(false));
-bind('agent-run-btn', () => window.Pivot.legacy.createAgentRun?.());
-bind('agent-audit-btn', () => window.Pivot.legacy.showAgentRunAudit?.());
-window.Pivot.legacy.bindAgentGoalTemplates?.();
-window.Pivot.legacy.bindAgentFilters?.();
 bind('mcp-refresh-btn', () => window.Pivot.legacy.loadMcpWorkbench?.());
 bind('mcp-save-btn', () => window.Pivot.legacy.saveMcpServer?.());
 bind('mcp-reset-btn', () => window.Pivot.legacy.resetMcpForm?.());

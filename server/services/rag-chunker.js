@@ -281,6 +281,27 @@ function chunkTable(text, { docTitle, chunkSize, overlap }) {
     return out;
 }
 
+function attachSourceOffsets(text, chunks) {
+    const source = String(text || '').replace(/\r\n?/g, '\n');
+    let cursor = 0;
+    return chunks.map((item, chunkIndex) => {
+        const content = String(item?.content || '').trim();
+        // 同一段在 overlap 或重复条款中可能出现多次；优先向前搜索，再允许
+        // 在近邻重叠区回看，给引用提供稳定的字符范围。表格序列化等无法对应
+        // 原文连续片段的情况保留 null，避免伪造定位信息。
+        let charStart = content ? source.indexOf(content, Math.max(0, cursor - 1024)) : -1;
+        if (charStart < 0 && content) charStart = source.indexOf(content);
+        const charEnd = charStart < 0 ? null : charStart + content.length;
+        if (charStart >= 0) cursor = Math.max(cursor, charStart + Math.max(1, content.length - 256));
+        return {
+            ...item,
+            chunkIndex,
+            charStart: charStart < 0 ? null : charStart,
+            charEnd
+        };
+    });
+}
+
 // ---------- 统一入口 ----------
 
 // chunkDocument：按文档类型路由切片，返回 [{ content, headingPath }]。
@@ -312,7 +333,7 @@ function chunkDocument(text, options = {}) {
     if (!Array.isArray(result) || result.length === 0) {
         result = chunkText(normalized, chunkSize, overlap).map(content => ({ content, headingPath: docTitle }));
     }
-    return result.filter(item => item && String(item.content || '').trim());
+    return attachSourceOffsets(normalized, result.filter(item => item && String(item.content || '').trim()));
 }
 
 module.exports = {

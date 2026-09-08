@@ -104,7 +104,9 @@ function jsonParse(value, fallback) {
 }
 
 function sqlLiteral(value) {
-    return `'${String(value ?? '').replace(/'/g, "''").replace(/\\/g, '/')}'`;
+    // DuckDB 支持 Windows 路径中的反斜杠作为字面数据；把它替换为斜杠会
+    // 改变正则表达式、转义符和用户实际文本，只有单引号需要 SQL 转义。
+    return `'${String(value ?? '').replace(/'/g, "''")}'`;
 }
 
 function sqlIdent(value) {

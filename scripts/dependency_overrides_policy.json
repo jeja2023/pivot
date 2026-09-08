@@ -1,0 +1,22 @@
+{
+  "@xmldom/xmldom": {
+    "reason": "electron-builder 的 plist 解析链需要修复后的 XML 解析器；仅影响桌面构建依赖。",
+    "scope": "dev",
+    "expiresOn": "2026-12-31"
+  },
+  "fast-uri": {
+    "reason": "MCP 与 electron-builder 的 Ajv 依赖链需要统一到已修复版本；仅影响构建和开发依赖。",
+    "scope": "dev",
+    "expiresOn": "2026-12-31"
+  },
+  "qs": {
+    "reason": "Express 运行时请求解析依赖，保留可自动接收补丁的安全版本范围。",
+    "scope": "production",
+    "expiresOn": "2026-12-31"
+  },
+  "debug": {
+    "reason": "统一旧版 compression 传递依赖，消除生产树重复 debug 副本。",
+    "scope": "production",
+    "expiresOn": "2026-12-31"
+  }
+}

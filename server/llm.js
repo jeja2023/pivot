@@ -66,8 +66,13 @@ function orderMessagesForContext(messages = []) {
 
 function estimateTokens(text) {
     if (!text) return 0;
-    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-    const otherChars = text.length - chineseChars;
+    const value = String(text);
+    let chineseChars = 0;
+    for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+        if (code >= 0x4e00 && code <= 0x9fa5) chineseChars += 1;
+    }
+    const otherChars = value.length - chineseChars;
     return Math.ceil(chineseChars * 2 + otherChars * 0.5);
 }
 
@@ -427,11 +432,34 @@ function getMessageTextForContext(message = {}) {
 }
 
 function getStoredMessageContextTokens(message = {}) {
+    if (message.context_token_count !== null && message.context_token_count !== undefined) {
+        const storedContextTokens = Number(message.context_token_count);
+        if (Number.isFinite(storedContextTokens) && storedContextTokens >= 0) return storedContextTokens;
+    }
     if (message.role === 'assistant') {
         return estimateTokens(getMessageTextForContext(message));
     }
     const storedTokens = Number(message.token_count || 0);
     return storedTokens > 0 ? storedTokens : estimateTokens(String(message.content || ''));
+}
+
+function buildContextMetaFromTotals({ activeTokens = 0, summaryTokens = 0, archivedCount = 0, summaryCount = 0, activeCount = 0 } = {}) {
+    const safeActiveTokens = Math.max(0, Number(activeTokens) || 0);
+    const safeSummaryTokens = Math.max(0, Number(summaryTokens) || 0);
+    const threshold = getMemoryThreshold();
+    const ratio = threshold > 0 ? safeActiveTokens / threshold : 0;
+    return {
+        threshold,
+        activeTokens: safeActiveTokens,
+        summaryTokens: safeSummaryTokens,
+        totalTokens: safeActiveTokens + safeSummaryTokens,
+        archivedCount: Math.max(0, Number(archivedCount) || 0),
+        summaryCount: Math.max(0, Number(summaryCount) || 0),
+        activeCount: Math.max(0, Number(activeCount) || 0),
+        ratio: Math.max(0, Math.min(1, ratio)),
+        percent: Math.min(999, Math.round(ratio * 100)),
+        status: ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'warn' : 'ok'
+    };
 }
 
 function getMemoryThreshold() {
@@ -464,21 +492,35 @@ function buildContextMeta(messages = []) {
     const archivedCount = messages.filter(m => Number(m.context_archived)).length;
     const activeTokens = activeMessages.reduce((sum, m) => sum + getStoredMessageContextTokens(m), 0);
     const summaryTokens = summaryMessages.reduce((sum, m) => sum + getStoredMessageContextTokens(m), 0);
-    const threshold = getMemoryThreshold();
-    const ratio = threshold > 0 ? activeTokens / threshold : 0;
-
-    return {
-        threshold,
+    return buildContextMetaFromTotals({
         activeTokens,
         summaryTokens,
-        totalTokens: activeTokens + summaryTokens,
         archivedCount,
         summaryCount: summaryMessages.length,
-        activeCount: activeMessages.length,
-        ratio: Math.max(0, Math.min(1, ratio)),
-        percent: Math.min(999, Math.round(ratio * 100)),
-        status: ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'warn' : 'ok'
-    };
+        activeCount: activeMessages.length
+    });
+}
+
+async function getSessionContextMeta(sessionId, userId) {
+    const sessionsRepository = require('./repositories/sessions');
+    const state = await sessionsRepository.getMessageContextTokenState(sessionId, userId);
+    let activeTokens = Number(state.totals.active_tokens || 0);
+    let summaryTokens = Number(state.totals.summary_tokens || 0);
+    const backfill = [];
+    for (const message of state.pending || []) {
+        const contextTokenCount = getStoredMessageContextTokens(message);
+        if (!Number(message.context_archived) && Number(message.is_summary)) summaryTokens += contextTokenCount;
+        if (!Number(message.context_archived) && !Number(message.is_summary)) activeTokens += contextTokenCount;
+        backfill.push({ id: message.id, contextTokenCount });
+    }
+    if (backfill.length) await sessionsRepository.updateMessageContextTokenCounts(backfill);
+    return buildContextMetaFromTotals({
+        activeTokens,
+        summaryTokens,
+        archivedCount: state.totals.archived_count,
+        summaryCount: state.totals.summary_count,
+        activeCount: state.totals.active_count
+    });
 }
 
 async function hydrateMessageContent(message, userId, sessionId, totalImageCounter, logger) {
@@ -686,9 +728,9 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
             await execute(`UPDATE messages SET context_archived = 1, compressed_at = ? WHERE id IN (${placeholders})`, [now, ...ids]);
         }
         await execute(`
-            INSERT INTO messages (session_id, user_id, role, content, token_count, is_summary, context_archived, model_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [sessionId, userId, 'system', summaryText, estimateTokens(summaryText), 1, 0, modelCfg.id, now]);
+            INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, is_summary, context_archived, model_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [sessionId, userId, 'system', summaryText, estimateTokens(summaryText), estimateTokens(summaryText), 1, 0, modelCfg.id, now]);
         return { compressed: true, summarizedCount: toSummarize.length, summaryTokens: estimateTokens(summaryText) };
     } catch (e) {
         const { logger } = require('./logger');
@@ -701,6 +743,8 @@ module.exports = {
     buildContextMeta,
     compactSessionMemory,
     estimateTokens,
+    getSessionContextMeta,
+    getStoredMessageContextTokens,
     getContext,
     getMemoryThreshold,
     createVisibleReasoningStreamFilter,

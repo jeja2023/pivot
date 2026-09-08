@@ -5,7 +5,7 @@ const { query, queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
 const { getBeijingTimestamp } = require('../time');
 const { buildFtsQuery } = require('../search');
-const { buildContextMeta, compactSessionMemory } = require('../llm');
+const { compactSessionMemory, getSessionContextMeta } = require('../llm');
 const { getAccessibleModelAsync } = require('../services/models');
 const { TimeoutError } = require('../services/concurrency');
 const { encodeAttachmentUrl } = require('../security');
@@ -96,13 +96,16 @@ async function appendAttachmentTokens(messages, userId, sessionId) {
                 ? [[plainUrl, tokenizedUrl], [encodedUrl, tokenizedUrl]]
                 : [[plainUrl, tokenizedUrl]];
         });
-    const tokenByUrl = new Map(tokenEntries);
+    // 每个附件 URL 的正则只编译一次；打开长会话时避免消息数 × 附件数重复构造。
+    const tokenByPattern = new Map(tokenEntries.map(([url, tokenizedUrl]) => [
+        new RegExp(`${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/?=&%.-])`, 'g'),
+        tokenizedUrl
+    ]));
 
     return (messages || []).map(message => {
         let content = String(message.content || '');
-        for (const [url, tokenizedUrl] of tokenByUrl.entries()) {
-            const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            content = content.replace(new RegExp(`${escapedUrl}(?![\\w/?=&%.-])`, 'g'), tokenizedUrl);
+        for (const [pattern, tokenizedUrl] of tokenByPattern.entries()) {
+            content = content.replace(pattern, tokenizedUrl);
         }
         return { ...message, content };
     });
@@ -303,19 +306,18 @@ function createSessionsRouter({
             const messages = await appendAttachmentTokens(pageResult.messages, req.user.id, req.params.id);
             const contextMeta = req.query.beforeMessageId
                 ? null
-                : buildContextMeta(await sessionsRepository.listMessages(req.params.id, req.user.id));
+                : await getSessionContextMeta(req.params.id, req.user.id);
             return res.json({ session, messages, page: pageResult.page, contextMeta });
         }
         const rawMessages = await sessionsRepository.listMessages(req.params.id, req.user.id);
         const messages = await appendAttachmentTokens(rawMessages, req.user.id, req.params.id);
-        res.json({ session, messages, contextMeta: buildContextMeta(rawMessages) });
+        res.json({ session, messages, contextMeta: await getSessionContextMeta(req.params.id, req.user.id) });
     }));
 
     router.get('/sessions/:id/context', authMiddleware, asyncHandler(async (req, res) => {
         const session = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!session) return res.status(404).json({ error: '会话不存在' });
-        const rawMessages = await sessionsRepository.listMessages(req.params.id, req.user.id);
-        res.json({ contextMeta: buildContextMeta(rawMessages) });
+        res.json({ contextMeta: await getSessionContextMeta(req.params.id, req.user.id) });
     }));
 
     router.get('/sessions/:id/context-windows', authMiddleware, asyncHandler(async (req, res) => {
@@ -372,7 +374,7 @@ function createSessionsRouter({
             inProgress: result.reason === 'duplicate',
             reason: result.reason || '',
             message,
-            contextMeta: result.after || result.before || buildContextMeta(await sessionsRepository.listMessages(req.params.id, req.user.id))
+            contextMeta: result.after || result.before || await getSessionContextMeta(req.params.id, req.user.id)
         });
     }));
 
@@ -407,7 +409,7 @@ function createSessionsRouter({
         const forkNote = String(req.body?.note || '').trim().slice(0, 500);
         const rootSessionId = source.fork_root_session_id || source.parent_session_id || source.id;
         const copiedMessages = await query(`
-            SELECT role, content, token_count, is_summary, context_archived, compressed_at, model_id, created_at
+            SELECT role, content, token_count, context_token_count, is_summary, context_archived, compressed_at, model_id, created_at
             FROM messages
             WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL AND id <= ?
             ORDER BY id ASC
@@ -436,15 +438,16 @@ function createSessionsRouter({
             for (const message of copiedMessages) {
                 await trx.execute(`
                     INSERT INTO messages (
-                        session_id, user_id, role, content, token_count, is_summary, context_archived,
+                        session_id, user_id, role, content, token_count, context_token_count, is_summary, context_archived,
                         compressed_at, model_id, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `, [
                     newSessionId,
                     req.user.id,
                     message.role,
                     message.content,
                     message.token_count || 0,
+                    message.context_token_count,
                     message.is_summary || 0,
                     message.context_archived || 0,
                     message.compressed_at || null,
@@ -631,7 +634,7 @@ function createSessionsRouter({
         const { title } = req.body;
         const safeTitle = String(title || '').trim().slice(0, 80);
         const changed = await execute(
-            'UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+            'UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
             [safeTitle, getBeijingTimestamp(), req.params.id, req.user.id]
         );
         if (changed > 0) logAction(req, '修改对话名称', `会话ID: ${req.params.id}，新名称: ${safeTitle}`);
@@ -641,14 +644,14 @@ function createSessionsRouter({
     router.put('/sessions/:id/pin', authMiddleware, asyncHandler(async (req, res) => {
         const { isPinned } = req.body;
         const pinVal = isPinned ? 1 : 0;
-        const pinChanged = await execute('UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ?', [pinVal, req.params.id, req.user.id]);
+        const pinChanged = await execute('UPDATE sessions SET is_pinned = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [pinVal, req.params.id, req.user.id]);
         if (pinChanged === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
     }));
 
     router.put('/sessions/:id/archive', authMiddleware, asyncHandler(async (req, res) => {
         const isArchived = req.body.isArchived ? 1 : 0;
-        const archiveChanged = await execute('UPDATE sessions SET is_archived = ? WHERE id = ? AND user_id = ?', [isArchived, req.params.id, req.user.id]);
+        const archiveChanged = await execute('UPDATE sessions SET is_archived = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [isArchived, req.params.id, req.user.id]);
         if (archiveChanged === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, isArchived ? '归档对话' : '恢复对话', `会话ID: ${req.params.id}`);
         res.json({ success: true });
@@ -656,7 +659,7 @@ function createSessionsRouter({
 
     router.put('/sessions/:id/tags', authMiddleware, asyncHandler(async (req, res) => {
         const tags = normalizeTags(req.body.tags);
-        const tagsChanged = await execute('UPDATE sessions SET tags = ? WHERE id = ? AND user_id = ?', [tags, req.params.id, req.user.id]);
+        const tagsChanged = await execute('UPDATE sessions SET tags = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [tags, req.params.id, req.user.id]);
         if (tagsChanged === 0) return res.status(404).json({ error: '会话不存在' });
         logAction(req, '更新对话标签', `会话ID: ${req.params.id}，标签: ${tags || '-'}`);
         res.json({ success: true, tags });
@@ -682,7 +685,7 @@ function createSessionsRouter({
         const now = getBeijingTimestamp();
         await transaction(async trx => {
             for (const row of rows) {
-                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
                     [applyTagOperation(row.tags, nextTags, operation), now, row.id, req.user.id]);
             }
         });
@@ -706,7 +709,7 @@ function createSessionsRouter({
         const now = getBeijingTimestamp();
         await transaction(async trx => {
             for (const row of rows) {
-                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
                     [renameTagValue(row.tags, fromTag, toTag), now, row.id, req.user.id]);
             }
         });
@@ -727,7 +730,7 @@ function createSessionsRouter({
         const now = getBeijingTimestamp();
         await transaction(async trx => {
             for (const row of rows) {
-                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+                await trx.execute('UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
                     [applyTagOperation(row.tags, [tag], 'remove'), now, row.id, req.user.id]);
             }
         });
@@ -737,7 +740,7 @@ function createSessionsRouter({
 
     router.put('/sessions/:id/system-prompt', authMiddleware, asyncHandler(async (req, res) => {
         const { systemPrompt } = req.body;
-        const spChanged = await execute('UPDATE sessions SET system_prompt = ? WHERE id = ? AND user_id = ?', [systemPrompt, req.params.id, req.user.id]);
+        const spChanged = await execute('UPDATE sessions SET system_prompt = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [systemPrompt, req.params.id, req.user.id]);
         if (spChanged === 0) return res.status(404).json({ error: '会话不存在' });
         res.json({ success: true });
     }));

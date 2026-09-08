@@ -482,7 +482,7 @@ async function getAccessibleMcpServer(serverId, user) {
               )
           )
     `, [serverId, user.id, isSuperAdmin(user) ? 1 : 0, String(user?.unit || '').trim(), String(user?.id || '')]);
-    if (row?.api_key) row.api_key = decryptSecret(row.api_key);
+    if (row?.api_key) row.api_key = decryptSecret(row.api_key, 'mcp_servers.api_key');
     return row || null;
 }
 

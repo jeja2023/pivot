@@ -280,11 +280,10 @@ test('editor dependency rules are independent from canvas direction', () => {
 
 test('visual SQL wizard styles are bundled with agent workspaces', () => {
     const workspaceCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces.css'), 'utf8');
-    const agentCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent.css'), 'utf8');
     const wizard = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard.js'), 'utf8');
 
     assert.match(workspaceCss, /agent-dag-query-builder\.css/);
-    assert.match(agentCss, /agent-dag-query-builder\.css/);
+    assert.doesNotMatch(workspaceCss, /workspaces\/agent\.css/);
     assert.match(wizard, /pivot-dag-wizard-form\$\{isVisualSqlQuery \? ' is-visual-sql' : ''\}/);
 });
 

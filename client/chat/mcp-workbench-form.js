@@ -352,7 +352,7 @@ function bindMcpToolsModalControls() {
     });
 }
 
-window.Pivot.legacy.openMcpWorkbench = async function(options = {}) {
+async function openMcpWorkbench(options = {}) {
     bindMcpModalAccessibility();
     const tabsApi = window.Pivot?.moduleApi?.('mcp.tabs', {}) || {};
     tabsApi.bindTabs?.();
@@ -360,7 +360,7 @@ window.Pivot.legacy.openMcpWorkbench = async function(options = {}) {
     try { savedTab = sessionStorage.getItem('pivot.mcp.active_tab'); } catch (_) {}
     const activeTab = options?.tab || savedTab || 'tools';
     tabsApi.setActiveTab?.(activeTab);
-    window.Pivot.legacy.showMainWorkspace?.('mcp');
+    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('mcp');
     const panel = document.getElementById('mcp-workbench-modal');
     if (!panel) return;
     bindMcpToolsModalControls();
@@ -371,10 +371,11 @@ window.Pivot.legacy.openMcpWorkbench = async function(options = {}) {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
     await window.Pivot.legacy.loadMcpWorkbench?.();
-};
+}
+window.Pivot.exposeModule('workspaces.implementations', { openMcpWorkbench });
 
 window.Pivot.legacy.closeMcpWorkbench = function() {
-    (window.Pivot.legacy.returnFromWorkspace || window.Pivot.legacy.showMainWorkspace)?.('personal');
+    window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
 };
 
 window.Pivot.legacy.closeMcpEditModal = function() {

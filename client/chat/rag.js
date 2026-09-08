@@ -187,7 +187,7 @@ document.addEventListener('click', async (event) => {
     if (debugChatBtn) {
         const query = debugChatBtn.dataset.ragDebugChat || document.getElementById('rag-debug-query')?.value || '';
         document.getElementById('rag-debug-modal')?.classList.add('hidden');
-        window.Pivot.legacy.showMainWorkspace?.('chat');
+        window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
         try {
             localStorage.setItem('pivot_chat_rag_enabled', 'true');
         } catch (e) {

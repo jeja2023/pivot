@@ -35,6 +35,27 @@ test('SQL read-only governance rejects write-like clauses and side-effect functi
     assert.equal(assertReadonlySql("SELECT 'into' AS value"), "SELECT 'into' AS value");
 });
 
+test('new secret envelopes bind their ciphertext to a context and reject ciphertext input', () => {
+    const plain = 'context-bound-secret';
+    const envelope = security.encryptSecret(plain, 'models.api_key');
+    assert.match(envelope, /^enc:v2:/);
+    assert.equal(security.decryptSecret(envelope, 'models.api_key'), plain);
+    assert.throws(() => security.decryptSecret(envelope, 'mcp_servers.api_key'), /密钥解密失败/);
+    assert.throws(() => security.encryptSecret(envelope), error => error.code === 'ENCRYPTED_SECRET_INPUT_REJECTED');
+    assert.equal(security.preserveEncryptedSecret(envelope, 'mcp_servers.api_key'), envelope);
+});
+
+test('audit details redact nested secrets, bearer tokens and query credentials', () => {
+    const details = security.redactAuditDetails({
+        url: '/api/test?access_token=secret-value&ok=1',
+        authorization: 'Bearer very-long-token-value-123456789',
+        nested: { api_key: 'plain-api-key' },
+        message: 'enc:v2:abc.def.ghi'
+    });
+    assert.doesNotMatch(details, /secret-value|plain-api-key|abc\.def\.ghi/);
+    assert.match(details, /REDACTED/);
+});
+
 test('SQL row limits clamp user-supplied LIMIT instead of trusting it', () => {
     assert.equal(
         applySqlLimit('SELECT * FROM users LIMIT 999999999', 101, 'postgres'),
@@ -132,4 +153,24 @@ test('DAG policy disables automatic retries for non-idempotent side effects', ()
     const run = { tool_timeout_ms: 1000 };
     assert.equal(normalizeDagNodePolicy(node, run, 30000, { side_effect: true, idempotent: false }).retryLimit, 0);
     assert.equal(normalizeDagNodePolicy(node, run, 30000, { side_effect: false, idempotent: true }).retryLimit, 3);
+});
+
+test('DAG execution records the actual scoped approval state before a tool can run', () => {
+    const { resolveDagToolApproval, stableDagOperationKey } = require('../server/services/agent-dag-approval');
+    const calls = [];
+    const result = resolveDagToolApproval({
+        run: { id: 'run-1' },
+        node: { id: 'node-1', tool: 'database.insert' },
+        selectedTool: { name: 'database.insert' },
+        input: { value: 7 },
+        isApprovalGranted(...args) { calls.push(args); return false; }
+    });
+    assert.equal(result.approvalKey, 'database.insert:node-1');
+    assert.equal(result.approvalGranted, false);
+    assert.deepEqual(calls[0], [{ id: 'run-1' }, 'database.insert', 'database.insert:node-1', { value: 7 }]);
+    assert.equal(resolveDagToolApproval({ node: { id: 'node-2', tool: 'filesystem.read' }, input: {} }).approvalGranted, false);
+    const stableKey = stableDagOperationKey({ id: 'run-1' }, { id: 'node-1' }, { value: 7 });
+    assert.equal(stableKey, stableDagOperationKey({ id: 'run-1' }, { id: 'node-1' }, { value: 7 }));
+    assert.notEqual(stableKey, stableDagOperationKey({ id: 'run-1' }, { id: 'node-1' }, { value: 8 }));
+    assert.doesNotMatch(stableKey, /:1$|:2$/);
 });

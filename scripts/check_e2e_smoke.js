@@ -18,6 +18,7 @@ function main() {
     const manifest = JSON.parse(read('package.json'));
     const requiredFiles = [
         'scripts/run_e2e_tests.js',
+        'scripts/e2e_fake_model.js',
         'tests/e2e/playwright.config.js',
         'tests/e2e/smoke.spec.js'
     ];
@@ -28,13 +29,20 @@ function main() {
     assertIncludes('tests/e2e/playwright.config.js', 'PIVOT_E2E_BASE_URL');
     assertIncludes('scripts/run_e2e_tests.js', "path.join('tests', 'e2e', 'playwright.config.js')");
     assertIncludes('scripts/run_e2e_tests.js', 'PIVOT_E2E_OUTPUT_DIR');
+    assertIncludes('scripts/run_e2e_tests.js', 'E2E_MODEL_URL');
+    assertIncludes('scripts/run_e2e_tests.js', 'e2e_fake_model.js');
     assertIncludes('tests/e2e/playwright.config.js', 'reuseExistingServer');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.ui"]');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.attachments"]');
     assertIncludes('tests/e2e/smoke.spec.js', '#rag-debug-history');
     assertIncludes('tests/e2e/smoke.spec.js', "tool_call_mode");
-    assertIncludes('tests/e2e/smoke.spec.js', "E2E 流式回答");
+    assertIncludes('tests/e2e/smoke.spec.js', "真实 E2E 流式回答");
     assertIncludes('tests/e2e/smoke.spec.js', "e2e-knowledge.md");
+    const smoke = read('tests/e2e/smoke.spec.js');
+    if (/page\.route\(['"]\*\*\/api\/(?:chat|rag\/upload)/.test(smoke)) {
+        throw new Error('聊天 SSE 与知识库上传 E2E 不得使用 page.route 全量打桩');
+    }
+    assertIncludes('tests/e2e/smoke.spec.js', "page.waitForResponse(response => response.url().includes('/api/rag/upload')");
     assertIncludes('client/chat/partials/scripts.html', '/chat/pivot-core.js');
     assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-history"');
     if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'node scripts/run_e2e_tests.js') {

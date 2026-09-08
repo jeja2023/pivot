@@ -5,6 +5,7 @@ const { getBeijingTimestamp } = require('../time');
 const { assertRegisteredCapabilities, normalizeCapabilityList } = require('./agent-capability-registry');
 const { toLegacyScope } = require('./agent-skill-scope');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
+const { canonicalJson } = require('./canonical-json');
 
 function parseSkillManifest(value) {
     if (value && typeof value === 'object') return JSON.parse(JSON.stringify(value));
@@ -17,12 +18,6 @@ function parseSkillManifest(value) {
         error.code = error.code || 'AGENT_SKILL_MANIFEST_PARSE_ERROR';
         throw error;
     }
-}
-
-function canonicalJson(value) {
-    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-    if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
-    return JSON.stringify(value);
 }
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }

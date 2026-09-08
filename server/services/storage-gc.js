@@ -1,6 +1,12 @@
 const { query, execute } = require('../db/client');
 const { logger } = require('../logger');
-const { removeAttachmentFiles } = require('../security');
+const { removeAttachmentFilesAsync } = require('../security');
+const fs = require('fs');
+const path = require('path');
+
+const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
+    ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
+    : path.resolve(__dirname, '../../uploads');
 
 function normalizeRetentionDays(days) {
     const value = Number.parseInt(days, 10);
@@ -65,6 +71,96 @@ function filterRowsWithRemovedFiles(rows, cleanupResults) {
     return rows.filter(row => !failedIds.has(row.id));
 }
 
+function isInside(parent, target) {
+    const relative = path.relative(path.resolve(parent), path.resolve(target));
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function storagePathKey(filePath) {
+    const resolved = path.resolve(filePath);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function resolveStoredUploadPath(value, root = uploadRoot) {
+    const raw = String(value || '').trim();
+    if (!raw || raw.includes('\0')) return '';
+    const candidate = path.isAbsolute(raw)
+        ? path.resolve(raw)
+        : raw.replace(/\\/g, '/').startsWith('uploads/')
+            ? path.resolve(path.dirname(root), raw)
+            : path.resolve(root, raw);
+    return isInside(root, candidate) ? candidate : '';
+}
+
+async function listReferencedUploadPaths(queryFn = query, root = uploadRoot) {
+    const sqls = [
+        "SELECT file_path AS path FROM attachments WHERE file_path IS NOT NULL AND file_path != ''",
+        "SELECT source_path AS path FROM knowledge_docs WHERE source_path IS NOT NULL AND source_path != ''",
+        "SELECT source_path AS path FROM regulation_versions WHERE source_path IS NOT NULL AND source_path != ''",
+        "SELECT file_path AS path FROM document_files WHERE file_path IS NOT NULL AND file_path != ''",
+        "SELECT image_path AS path FROM document_pages WHERE image_path IS NOT NULL AND image_path != ''",
+        "SELECT file_path AS path FROM document_outputs WHERE file_path IS NOT NULL AND file_path != ''"
+    ];
+    const rows = (await Promise.all(sqls.map(sql => queryFn(sql).catch(error => {
+        logger.warn({ err: error.message }, '存储孤儿对账读取引用路径失败');
+        return [];
+    })))).flat();
+    return new Set(rows.map(row => resolveStoredUploadPath(row.path, root)).filter(Boolean).map(storagePathKey));
+}
+
+async function listFilesRecursively(root, maxFiles = 10000) {
+    const files = [];
+    async function visit(directory) {
+        if (files.length >= maxFiles) return;
+        let entries = [];
+        try { entries = await fs.promises.readdir(directory, { withFileTypes: true }); } catch (_) { return; }
+        for (const entry of entries) {
+            if (files.length >= maxFiles || entry.isSymbolicLink()) continue;
+            const target = path.join(directory, entry.name);
+            if (entry.isDirectory()) await visit(target);
+            else if (entry.isFile()) files.push(target);
+        }
+    }
+    await visit(root);
+    return files;
+}
+
+async function reconcileUploadStorage(options = {}) {
+    const root = path.resolve(options.uploadDirectory || uploadRoot);
+    const retentionDays = normalizeRetentionDays(options.retentionDays ?? process.env.STORAGE_GC_RETENTION_DAYS);
+    const limit = normalizeBatchSize(options.limit ?? process.env.STORAGE_GC_ORPHAN_BATCH_SIZE);
+    const nowMs = Number(options.nowMs || Date.now());
+    const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1000;
+    const referenced = options.referencedPaths
+        ? new Set([...options.referencedPaths].map(item => resolveStoredUploadPath(item, root)).filter(Boolean).map(storagePathKey))
+        : await listReferencedUploadPaths(options.queryFn || query, root);
+    const files = await listFilesRecursively(root, Math.max(limit * 10, 1000));
+    const candidates = [];
+    for (const filePath of files) {
+        if (candidates.length >= limit || referenced.has(storagePathKey(filePath))) continue;
+        try {
+            const stat = await fs.promises.stat(filePath);
+            if (stat.mtimeMs < cutoffMs) candidates.push({ path: filePath, bytes: stat.size });
+        } catch (_) {}
+    }
+    let deletedFiles = 0;
+    let deletedBytes = 0;
+    if (options.remove !== false) {
+        for (const candidate of candidates) {
+            if (!isInside(root, candidate.path)) continue;
+            try {
+                await fs.promises.unlink(candidate.path);
+                deletedFiles += 1;
+                deletedBytes += candidate.bytes;
+            } catch (error) {
+                logger.warn({ err: error.message, filePath: candidate.path }, '存储孤儿文件清理失败');
+            }
+        }
+    }
+    if (deletedFiles) logger.info({ root, deletedFiles, deletedBytes, retentionDays }, '上传目录孤儿文件已清理');
+    return { root, retentionDays, referenced: referenced.size, candidates: candidates.length, deletedFiles, deletedBytes };
+}
+
 async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
     const safeRetentionDays = normalizeRetentionDays(retentionDays ?? process.env.STORAGE_GC_RETENTION_DAYS);
     const safeLimit = normalizeBatchSize(limit ?? process.env.STORAGE_GC_BATCH_SIZE);
@@ -102,8 +198,10 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         LIMIT ?
     `, [String(safeRetentionDays), safeLimit]);
 
-    const attachmentCleanupResults = removeAttachmentFiles(attachments || []);
-    const knowledgeDocCleanupResults = removeAttachmentFiles(knowledgeDocs || []);
+    const [attachmentCleanupResults, knowledgeDocCleanupResults] = await Promise.all([
+        removeAttachmentFilesAsync(attachments || []),
+        removeAttachmentFilesAsync(knowledgeDocs || [])
+    ]);
     const purgeableAttachments = filterRowsWithRemovedFiles(attachments || [], attachmentCleanupResults);
     const purgeableKnowledgeDocs = filterRowsWithRemovedFiles(knowledgeDocs || [], knowledgeDocCleanupResults);
 
@@ -130,6 +228,7 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
 
 module.exports = {
     cleanupSoftDeletedStorage,
+    reconcileUploadStorage,
     normalizeRetentionDays,
     normalizeBatchSize
 };

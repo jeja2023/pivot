@@ -417,8 +417,13 @@ test('凭据加解密可逆且密文不含明文', () => {
     assert.notEqual(encrypted, plain);
     assert.equal(encrypted.includes(plain), false);
     assert.equal(decryptSecret(encrypted), plain);
-    // 重复加密不会二次包装，保证轮换时旧密文可以直接搬运
-    assert.equal(encryptSecret(encrypted), encrypted);
+    // 外部输入不得把现成密文再次提交；受信任的数据库保留路径单独搬运。
+    assert.throws(() => encryptSecret(encrypted), error => error.code === 'ENCRYPTED_SECRET_INPUT_REJECTED');
+    const { preserveEncryptedSecret } = require('../server/security');
+    assert.equal(preserveEncryptedSecret(encrypted), encrypted);
+    const contextual = encryptSecret(plain, 'models.api_key');
+    assert.equal(decryptSecret(contextual, 'models.api_key'), plain);
+    assert.throws(() => decryptSecret(contextual, 'workflow_credentials.secret_value'), /密钥解密失败/);
 });
 
 test('工作流凭据按个人共享会持久化且列表不返回密文', async () => {

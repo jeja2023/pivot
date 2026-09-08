@@ -177,7 +177,11 @@ function pgEnqueue(queueName, item) {
     }
 }
 
-const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast/i;
+const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|invalid byte sequence|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast|integer out of range|numeric field overflow/i;
+const UNRECOVERABLE_DB_CODES = new Set(['22001', '22003', '22021', '22P02', '23502', '23503', '23514', '42703', '42P01']);
+function isUnrecoverableDbError(error) {
+    return UNRECOVERABLE_DB_CODES.has(String(error?.code || '')) || UNRECOVERABLE_DB_ERRORS.test(String(error?.message || error || ''));
+}
 
 /**
  * 使用独立 client 执行队列写入，以便超时后销毁坏连接。
@@ -276,7 +280,7 @@ async function pgFlushQueue(queueName) {
         await runPgWriteQuery(pool, sql, params);
         markQueueSuccess(queueName);
     } catch (err) {
-        const isUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(err.message || '');
+        const isUnrecoverable = isUnrecoverableDbError(err);
         // 网络/连接/超时错误不做逐条降级：逐条尝试只会把一次故障放大成
         // batch.length 次超时。整批回队首并走指数退避，保持故障恢复边界明确。
         if (!isUnrecoverable) {
@@ -293,7 +297,7 @@ async function pgFlushQueue(queueName) {
                     const singleParams = spec.fields.map(f => sanitizeQueueValue(f, item[f]));
                     await runPgWriteQuery(pool, singleSql, singleParams);
                 } catch (singleErr) {
-                    const singleUnrecoverable = UNRECOVERABLE_DB_ERRORS.test(singleErr.message || '');
+                    const singleUnrecoverable = isUnrecoverableDbError(singleErr);
                     if (singleUnrecoverable) {
                         logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
                         continue;

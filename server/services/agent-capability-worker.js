@@ -3,9 +3,33 @@
  * 仅接受平台管理员登记的不可变 image@sha256 与固定入口命令；没有已批准镜像时 fail-closed。
  */
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 
 const IMAGE_PATTERN = /^[a-z0-9][a-z0-9./:_-]{1,240}@sha256:[a-f0-9]{64}$/;
 const ARG_PATTERN = /^[A-Za-z0-9_./:=+@,-]{1,200}$/;
+const activeCapabilityWorkers = new Set();
+
+function stopCapabilityWorker(worker) {
+    if (!worker) return;
+    try { worker.child.kill('SIGKILL'); } catch (_) {}
+    // docker CLI 被杀并不保证已创建的容器同时退出；使用服务端生成的
+    // 固定格式名称精确清理，避免超时与服务关闭时遗留无主能力容器。
+    try {
+        const cleanup = spawn(worker.command, ['rm', '--force', worker.containerName], {
+            stdio: 'ignore', windowsHide: true, env: { PATH: process.env.PATH || '' }
+        });
+        cleanup.unref?.();
+    } catch (_) {}
+}
+
+function shutdownCapabilityWorkers() {
+    const workers = [...activeCapabilityWorkers];
+    activeCapabilityWorkers.clear();
+    for (const worker of workers) {
+        stopCapabilityWorker(worker);
+    }
+    return workers.length;
+}
 
 function workerError(message, code = 'CAPABILITY_WORKER_INVALID', status = 400) {
     const error = new Error(message); error.code = code; error.status = status; error.statusCode = status; error.expose = true; return error;
@@ -29,13 +53,34 @@ async function runCapabilityWorker(definition, input, options = {}) {
     const spec = normalizeDefinition(definition);
     const payload = JSON.stringify(input ?? {});
     if (Buffer.byteLength(payload) > 1024 * 1024) throw workerError('Capability Worker 输入超过 1MB 上限。', 'CAPABILITY_WORKER_INPUT_TOO_LARGE', 413);
-    const args = ['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', `${spec.limits.memoryMb}m`, '--cpus', String(spec.limits.cpu), '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--user', '65532:65532', '--env', 'NVIDIA_VISIBLE_DEVICES=void', '--env', 'CUDA_VISIBLE_DEVICES=', spec.image, ...spec.command];
+    const command = dockerCommand(options.env || process.env);
+    const containerName = `pivot-capability-${crypto.randomUUID().replace(/-/g, '')}`;
+    const args = ['run', '--rm', '--name', containerName, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', `${spec.limits.memoryMb}m`, '--cpus', String(spec.limits.cpu), '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--user', '65532:65532', '--env', 'NVIDIA_VISIBLE_DEVICES=void', '--env', 'CUDA_VISIBLE_DEVICES=', spec.image, ...spec.command];
+    const spawnProcess = options.spawn || spawn;
     return await new Promise((resolve, reject) => {
-        const child = spawn(dockerCommand(options.env || process.env), args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { PATH: process.env.PATH || '' } });
+        const child = spawnProcess(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { PATH: process.env.PATH || '' } });
+        const worker = { child, command, containerName };
+        activeCapabilityWorkers.add(worker);
         let output = '', error = '', settled = false;
-        const finish = (fn, value) => { if (!settled) { settled = true; clearTimeout(timer); fn(value); } };
-        const timer = setTimeout(() => { child.kill('SIGKILL'); finish(reject, workerError('Capability Worker 执行超时。', 'CAPABILITY_WORKER_TIMEOUT', 504)); }, spec.limits.timeoutMs);
-        child.stdout.on('data', chunk => { output += chunk; if (Buffer.byteLength(output) > spec.limits.maxOutputBytes) { child.kill('SIGKILL'); finish(reject, workerError('Capability Worker 输出超过上限。', 'CAPABILITY_WORKER_OUTPUT_TOO_LARGE', 413)); } });
+        const finish = (fn, value) => {
+            if (!settled) {
+                settled = true;
+                activeCapabilityWorkers.delete(worker);
+                clearTimeout(timer);
+                fn(value);
+            }
+        };
+        const timer = setTimeout(() => {
+            stopCapabilityWorker(worker);
+            finish(reject, workerError('Capability Worker 执行超时。', 'CAPABILITY_WORKER_TIMEOUT', 504));
+        }, spec.limits.timeoutMs);
+        child.stdout.on('data', chunk => {
+            output += chunk;
+            if (Buffer.byteLength(output) > spec.limits.maxOutputBytes) {
+                stopCapabilityWorker(worker);
+                finish(reject, workerError('Capability Worker 输出超过上限。', 'CAPABILITY_WORKER_OUTPUT_TOO_LARGE', 413));
+            }
+        });
         child.stderr.on('data', chunk => { error = `${error}${chunk}`.slice(0, 4000); });
         child.on('error', err => finish(reject, workerError(`Capability Worker 启动失败：${err.message}`, 'CAPABILITY_WORKER_START_FAILED', 503)));
         child.on('close', code => {
@@ -47,4 +92,4 @@ async function runCapabilityWorker(definition, input, options = {}) {
     });
 }
 
-module.exports = { IMAGE_PATTERN, isWorkerEnabled, normalizeDefinition, runCapabilityWorker };
+module.exports = { IMAGE_PATTERN, isWorkerEnabled, normalizeDefinition, runCapabilityWorker, shutdownCapabilityWorkers };

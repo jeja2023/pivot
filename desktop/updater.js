@@ -1,4 +1,7 @@
 const { assertAllowedUpdateFeedUrl } = require('./update-policy');
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
 
 let activeController = null;
 let activeAuthorizeIpc = null;
@@ -67,12 +70,52 @@ function createInitialState(app, updateConfig) {
         checkIntervalMinutes: Number.isFinite(Number(updateConfig.checkIntervalMinutes))
             ? Math.max(0, Math.floor(Number(updateConfig.checkIntervalMinutes)))
             : 30,
-        allowInsecureHttp: updateConfig.allowInsecureHttp === true,
+        allowInsecureHttp: false,
+        publisherName: updateConfig.publisherName || '',
         error: '',
         updateInfo: null,
         progress: null,
         checkedAt: ''
     };
+}
+
+function normalizePublisherNames(value) {
+    const names = Array.isArray(value) ? value : [value];
+    return names.map(item => String(item || '').trim()).filter(Boolean);
+}
+
+function verifyWindowsUpdateSigningConfig(updateConfig = {}, options = {}) {
+    const platform = options.platform || process.platform;
+    if (platform !== 'win32') return false;
+    const expected = String(updateConfig.publisherName || '').trim();
+    if (!expected) throw new Error('Windows 自动更新缺少签名发布者配置，已拒绝检查更新。');
+    const resourcePath = options.resourcesPath || process.resourcesPath;
+    const configPath = path.join(String(resourcePath || ''), 'app-update.yml');
+    if (!resourcePath || !fs.existsSync(configPath)) {
+        throw new Error('Windows 自动更新签名配置不存在，已拒绝检查更新。');
+    }
+    let parsed;
+    try {
+        parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) || {};
+    } catch (error) {
+        throw new Error(`无法读取 Windows 自动更新签名配置：${error.message}`);
+    }
+    if (!normalizePublisherNames(parsed.publisherName).includes(expected)) {
+        throw new Error('Windows 安装包的更新签名发布者与客户端配置不一致，已拒绝检查更新。');
+    }
+    return true;
+}
+
+function hardenWindowsAutoUpdater(autoUpdater, updateConfig = {}, options = {}) {
+    const platform = options.platform || process.platform;
+    if (platform !== 'win32') return false;
+    verifyWindowsUpdateSigningConfig(updateConfig, options);
+    if (!autoUpdater || typeof autoUpdater.verifyUpdateCodeSignature !== 'function') {
+        throw new Error('当前更新器不支持 Windows 安装包签名校验，已拒绝检查更新。');
+    }
+    autoUpdater.disableWebInstaller = true;
+    autoUpdater.allowDowngrade = false;
+    return true;
 }
 
 function registerIpcHandlers() {
@@ -201,13 +244,14 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
 
     const feedUrl = assertAllowedUpdateFeedUrl(updateConfig.url, {
         allowedOrigins: updateConfig.allowedOrigins || [],
-        allowInsecureHttp: updateConfig.allowInsecureHttp === true,
         env: process.env
     });
 
     if (autoUpdater && typeof autoUpdater.on === 'function') {
+        hardenWindowsAutoUpdater(autoUpdater, updateConfig);
         autoUpdater.autoDownload = updateConfig.autoDownload !== false;
         autoUpdater.allowPrerelease = updateConfig.allowPrerelease === true;
+        autoUpdater.allowDowngrade = false;
         autoUpdater.autoInstallOnAppQuit = updateConfig.installOnQuit !== false;
         if (typeof autoUpdater.setFeedURL === 'function') {
             autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
@@ -276,5 +320,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
 }
 
 module.exports = {
-    setupAutoUpdater
+    hardenWindowsAutoUpdater,
+    setupAutoUpdater,
+    verifyWindowsUpdateSigningConfig
 };

@@ -24,7 +24,7 @@ const {
     applyChatLanguageInstruction,
     applyChatNoThinkSoftSwitch,
     hasRagScopeFilter
-} = require('../routes/chat/helpers');
+} = require('./chat-helpers');
 
 function buildMcpFollowupInstruction(mcpContext = '') {
     const hasToolResult = String(mcpContext || '').includes('PIVOT_MCP_TOOL_RESULT_BEGIN');
@@ -82,9 +82,16 @@ async function assembleChatContext({
     const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
     const memoryQuery = effectiveUserPrompt || modelContent;
 
+    const shouldRetrieveRag = ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled() && Boolean(effectiveUserPrompt);
+    const [memoryResult, ragResult] = await Promise.allSettled([
+        memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user }) : Promise.resolve([]),
+        shouldRetrieveRag ? retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : Promise.resolve(null)
+    ]);
+
     if (memoryQuery) {
         try {
-            const memoryMatches = await retrieveLongTermMemories(userId, memoryQuery, { user: req.user });
+            if (memoryResult.status === 'rejected') throw memoryResult.reason;
+            const memoryMatches = memoryResult.value || [];
             const memoryMessage = buildLongTermMemoryContextMessage(memoryMatches, {
                 inputBudget: getModelContextBudget(modelCfg).inputBudget
             });
@@ -103,8 +110,8 @@ async function assembleChatContext({
         }
     }
 
-    if (ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled()) {
-        const ragContext = effectiveUserPrompt ? await retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : null;
+    if (shouldRetrieveRag) {
+        const ragContext = ragResult.status === 'fulfilled' ? ragResult.value : null;
         const ragScoped = hasRagScopeFilter(ragScope);
         const ragScopeText = ragScoped ? '（当前选择范围）' : '';
         if (ragContext) {

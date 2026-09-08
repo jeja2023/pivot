@@ -79,6 +79,6 @@ test('单位白名单 SQL 使用精确 token 匹配，不把 % 和 _ 当作通�
     assert.deepEqual(filter.params, [20, '%', 20]);
 });
 
-test('Graph-RAG 汇总接受完整用户上下文以应用共享单位范围', () => {
-    assert.doesNotThrow(() => getGraphSummary(sameUnit));
+test('Graph-RAG 汇总接受完整用户上下文以应用共享单位范围', async () => {
+    await assert.doesNotReject(() => getGraphSummary(sameUnit));
 });

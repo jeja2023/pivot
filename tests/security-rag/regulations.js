@@ -1,5 +1,7 @@
 const { assert, db, getBeijingTimestamp, test } = require('../security-helpers');
 const { sql } = require('../../server/db/statements');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
     countActualRegulationArticles,
@@ -42,6 +44,15 @@ test('regulation version label auto-detected from filename version date', () => 
     assert.equal(deriveRegulationVersionLabelFromFilename(companyLaw + '_2024-01-01.pdf'), '2024\u5e7401\u670801\u65e5');
     assert.equal(deriveRegulationVersionLabelFromFilename(companyLaw + '2024\u5e7401\u670801\u65e5.pdf'), '2024\u5e7401\u670801\u65e5');
     assert.equal(deriveRegulationVersionLabelFromFilename(companyLaw + '.pdf'), '');
+});
+
+test('regulation upload routes authorize administrators before multipart files reach multer', () => {
+    const route = fs.readFileSync(path.join(__dirname, '../../server/routes/apps/regulations/documents.js'), 'utf8');
+    for (const endpoint of ['/documents/batch', '/documents/preview', '/documents/:id/versions', '/documents']) {
+        const escaped = endpoint.replace(/[/:]/g, value => value === '/' ? '\\/' : value);
+        const pattern = new RegExp(`router\\.post\\('${escaped}', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload\\.`);
+        assert.match(route, pattern, endpoint);
+    }
 });
 
 test('regulation article parsing counts legal articles instead of long-content chunks', () => {

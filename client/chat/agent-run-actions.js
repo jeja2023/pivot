@@ -123,7 +123,7 @@ async function saveCurrentAgentTaskAsSchedule() {
     if (!payload.modelId) return showToast('请选择模型', 'error');
     if (payload._invalid) return;
     window.Pivot.legacy.setTaskComposerOpen?.(false);
-    await window.Pivot.legacy.openAgentDagWorkbench?.({
+    await window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({
         tab: 'schedules',
         scheduleDraft: payload
     });
@@ -233,7 +233,7 @@ window.Pivot.legacy.createWorkflowDraftFromAgentRun = async function(runId) {
         if (!result.workflowId) throw new Error('本次任务没有足够的安全步骤可生成工作流草稿。');
         showToast('已生成受控工作流草稿，请预览、评测后再发布。', 'success');
         window.Pivot.legacy.closeAgentRunDetailModal();
-        await window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId: result.workflowId, editor: true });
+        await window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ workflowId: result.workflowId, editor: true });
     } catch (e) {
         showToast(e.message || '生成工作流草稿失败', 'error');
     }

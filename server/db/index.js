@@ -39,7 +39,8 @@ async function initializePostgresStructure({
 async function initPostgresDatabase() {
     const { runSeedsPg } = require('./seed');
     const { ensureAppSettingAsync } = require('../services/app-settings');
-    const { RUNTIME_SETTING_DEFINITIONS, getRuntimeDefaultValue } = require('../services/runtime-settings-defs');
+    const { RUNTIME_SETTING_DEFINITIONS, getRuntimeDefaultValue, normalizeRuntimeSettingValue } = require('../services/runtime-settings-defs');
+    const { logger } = require('../logger');
 
     await initializePostgresStructure();
     await runSeedsPg();
@@ -59,7 +60,12 @@ async function initPostgresDatabase() {
     await ensureSetting('api_access_enabled', process.env.API_ACCESS_ENABLED === 'false' ? 'false' : 'true');
     await ensureSetting('memory_threshold', process.env.MEMORY_THRESHOLD || '12000');
     for (const definition of RUNTIME_SETTING_DEFINITIONS) {
-        await ensureSetting(definition.key, getRuntimeDefaultValue(definition));
+        const raw = getRuntimeDefaultValue(definition);
+        const normalized = normalizeRuntimeSettingValue(definition.key, raw);
+        if (normalized.error) {
+            logger.warn({ key: definition.key, value: raw, error: normalized.error }, '运行时环境默认值越界，已回退到定义默认值');
+        }
+        await ensureSetting(definition.key, normalized.error ? definition.defaultValue : normalized.value);
     }
 }
 

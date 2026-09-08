@@ -961,7 +961,8 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
     assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(runController\.signal\)\)/);
-    assert.match(dagRuntime, /executeToolByName\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext, signal \}\)/);
+    assert.match(dagRuntime, /const executeDagTool = deps\.executeToolByName \|\| executeToolByName/);
+    assert.match(dagRuntime, /executeDagTool\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext, signal \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
     assert.match(model, /max_tokens: maxTokens/);
 });
@@ -1370,7 +1371,7 @@ test('工作流交付节点未完成时不使用数据库行数冒充最终结�
 });
 
 test('agent runs can be cancelled and rerun from an existing run', async () => {
-    const { getAgentQueue } = require('../server/services/agent-runtime');
+    const { monitoring: { getAgentQueue } } = require('../server/services/agent-runtime');
     const globalQueue = getAgentQueue();
     const previousMax = globalQueue.getStatus().maxConcurrent;
     globalQueue.updateMaxConcurrent(0);
@@ -1690,7 +1691,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
 });
 
 test('DAG final answer uses the terminal node output without an implicit summary call', async () => {
-    const { getAgentQueue } = require('../server/services/agent-runtime');
+    const { monitoring: { getAgentQueue } } = require('../server/services/agent-runtime');
     const globalQueue = getAgentQueue();
     const previousMax = globalQueue.getStatus().maxConcurrent;
     globalQueue.updateMaxConcurrent(0);

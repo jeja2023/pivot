@@ -411,6 +411,12 @@ function extractSqlTables(sql = '') {
         const value = normalizePolicyIdentifier(match[1]);
         if (value && !tables.includes(value)) tables.push(value);
     }
+    const fromBody = text.match(/\bfrom\b([\s\S]*?)(?=\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\bhaving\b|\blimit\b|\boffset\b|\bunion\b|$)/i)?.[1] || '';
+    splitTopLevelCsv(fromBody).forEach(source => {
+        const candidate = source.trim().match(/^(?:lateral\s+)?([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)/i)?.[1];
+        const value = normalizePolicyIdentifier(candidate || '');
+        if (value && !tables.includes(value)) tables.push(value);
+    });
     return tables;
 }
 
@@ -452,13 +458,22 @@ function extractSqlTableRefs(sql = '') {
         const alias = candidateAlias && !reserved.has(candidateAlias) ? candidateAlias : baseIdentifier(table);
         if (table && !refs.some(item => item.table === table && item.alias === alias)) refs.push({ table, alias });
     }
+    const fromBody = text.match(/\bfrom\b([\s\S]*?)(?=\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\bhaving\b|\blimit\b|\boffset\b|\bunion\b|$)/i)?.[1] || '';
+    splitTopLevelCsv(fromBody).forEach(source => {
+        const sourceMatch = source.trim().match(/^(?:lateral\s+)?([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)(?:\s+(?:as\s+)?([A-Za-z_][\w$]*))?/i);
+        if (!sourceMatch) return;
+        const table = normalizePolicyIdentifier(sourceMatch[1]);
+        const candidateAlias = normalizePolicyIdentifier(sourceMatch[2] || '');
+        const alias = candidateAlias && !reserved.has(candidateAlias) ? candidateAlias : baseIdentifier(table);
+        if (table && !refs.some(item => item.table === table && item.alias === alias)) refs.push({ table, alias });
+    });
     return refs;
 }
 
 function assertSqlGovernance(sql = '', cfg = {}) {
     const tables = extractSqlTables(sql);
     const refs = extractSqlTableRefs(sql);
-    if (hasTableAllowlist(cfg) && /^\s*select\b/i.test(sql) && tables.length === 0) {
+    if (hasTableAllowlist(cfg) && /^\s*select\b/i.test(sql) && (tables.length === 0 || /\bfrom\s*\(/i.test(sql))) {
         const err = new Error('表白名单已启用，复杂 SQL 需要改写为能明确识别 FROM/JOIN 表名的查询。');
         err.status = 403;
         throw err;

@@ -32,6 +32,11 @@ function buildBrowserContextOptions(options = {}) {
         serviceWorkers: 'block'
     };
     if (options.executablePath) result.executablePath = String(options.executablePath);
+    if (process.env.PIVOT_CHROMIUM_PATH && !options.args) {
+        // 容器默认 /dev/shm 较小；避免 Chromium 在大页面自动化时因共享内存不足崩溃。
+        result.args = ['--disable-dev-shm-usage'];
+    }
+    if (Array.isArray(options.args)) result.args = options.args.map(String).filter(Boolean);
     return result;
 }
 

@@ -111,7 +111,7 @@ async function createWorkflowCredential(user, body = {}) {
         RETURNING id
     `, [
         user.id, data.name, data.slug, data.description,
-        encryptSecret(secret), data.scope, data.allowedUnits, data.allowedUserIds, now, now
+        encryptSecret(secret, 'workflow_credentials.secret_value'), data.scope, data.allowedUnits, data.allowedUserIds, now, now
     ]);
     logger.info({ userId: user.id, slug: data.slug }, '工作流凭据已创建');
     const created = await queryOne('SELECT * FROM workflow_credentials WHERE id = ?', [row?.id]);
@@ -154,7 +154,7 @@ async function rotateWorkflowCredential(credentialId, user, body = {}) {
         SET secret_value = ?, previous_value = ?, previous_expires_at = ?,
             version = version + 1, updated_at = ?
         WHERE id = ?
-    `, [encryptSecret(secret), current.secret_value, graceUntil, now, current.id]);
+    `, [encryptSecret(secret, 'workflow_credentials.secret_value'), current.secret_value, graceUntil, now, current.id]);
     logger.info({ userId: user.id, slug: current.slug }, '工作流凭据已轮换');
     const updated = await queryOne('SELECT * FROM workflow_credentials WHERE id = ?', [current.id]);
     return formatCredential(updated, user);
@@ -238,7 +238,7 @@ async function resolveCredentialSecret(slug, user) {
     return {
         id: row.id,
         slug: row.slug,
-        value: decryptSecret(row.secret_value),
+        value: decryptSecret(row.secret_value, 'workflow_credentials.secret_value'),
         version: Number(row.version || 1)
     };
 }

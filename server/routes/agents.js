@@ -68,51 +68,55 @@ const {
     listWorkflowApprovalRequests
 } = require('../services/agent-approval-requests');
 const {
-    cancelAgentRun,
-    approveAgentTool,
-    createAgentArtifactVersion,
-    createStandaloneArtifact,
-    createAgentSchedule,
-    createAgentTemplate,
-    createAgentRun,
-    createAgentWorkflow,
-    createWorkflowTrigger,
-    deleteAgentSchedule,
-    deleteAgentTemplate,
-    deleteAgentWorkflow,
-    deleteWorkflowTrigger,
-    diffAgentArtifactVersions,
-    diffAgentWorkflowVersions,
-    exportAgentRun,
-    listAgentArtifacts,
-    listAgentArtifactVersions,
-    listAgentNotifications,
-    listAgentSchedules,
-    listAgentTemplates,
-    listAgentWorkflowShareOptions,
-    listAgentWorkflowVersions,
-    listAgentWorkflows,
-    listWorkflowTriggers,
-    getAgentMetrics,
-    getAgentRuntimeStatus,
-    markAgentNotificationRead,
-    rerunAgentRun,
-    rerunAgentDagFromNode,
-    resumeAgentRun,
-    restoreAgentWorkflow,
-    restoreAgentWorkflowVersion,
-    rollbackAgentArtifactVersion,
-    rotateWorkflowTriggerToken,
-    runAgentScheduleNow,
-    saveAgentRunArtifact,
-    softDeleteAgentRun
-    ,
-    updateAgentSchedule,
-    updateAgentTemplate,
-    updateAgentWorkflow,
-    updateAgentWorkflowMetadata,
-    updateAgentWorkflowSharing,
-    updateWorkflowTrigger
+    artifacts: {
+        createAgentArtifactVersion,
+        createStandaloneArtifact,
+        diffAgentArtifactVersions,
+        exportAgentRun,
+        listAgentArtifacts,
+        listAgentArtifactVersions,
+        rollbackAgentArtifactVersion,
+        saveAgentRunArtifact
+    },
+    monitoring: { getAgentMetrics, getAgentRuntimeStatus },
+    notifications: { listAgentNotifications, markAgentNotificationRead },
+    runs: {
+        approveAgentTool,
+        cancelAgentRun,
+        createAgentRun,
+        rerunAgentDagFromNode,
+        rerunAgentRun,
+        resumeAgentRun,
+        softDeleteAgentRun
+    },
+    schedules: {
+        createAgentSchedule,
+        deleteAgentSchedule,
+        listAgentSchedules,
+        runAgentScheduleNow,
+        updateAgentSchedule
+    },
+    templates: { createAgentTemplate, deleteAgentTemplate, listAgentTemplates, updateAgentTemplate },
+    triggers: {
+        createWorkflowTrigger,
+        deleteWorkflowTrigger,
+        listWorkflowTriggers,
+        rotateWorkflowTriggerToken,
+        updateWorkflowTrigger
+    },
+    workflows: {
+        createAgentWorkflow,
+        deleteAgentWorkflow,
+        diffAgentWorkflowVersions,
+        listAgentWorkflowShareOptions,
+        listAgentWorkflowVersions,
+        listAgentWorkflows,
+        restoreAgentWorkflow,
+        restoreAgentWorkflowVersion,
+        updateAgentWorkflow,
+        updateAgentWorkflowMetadata,
+        updateAgentWorkflowSharing
+    }
 } = require('../services/agent-runtime');
 
 function allowedSkillPermissions() {

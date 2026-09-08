@@ -6,6 +6,7 @@ const { getBeijingTimestamp } = require('../../time');
 const {
     decryptSecret,
     encryptSecret,
+    preserveEncryptedSecret,
     assertSafeMcpOutboundUrl
 } = require('../../security');
 const { getSystemHealthSnapshot } = require('../../services/system-health');
@@ -48,7 +49,7 @@ const {
     getBuiltinConfigForServerAsync,
     normalizeBuiltinPayload
 } = require('../../services/builtin-mcp');
-const { isSuperAdmin } = require('../../permissions');
+const { isSuperAdmin, requireCapability } = require('../../permissions');
 const { MCP_CHAT_TOOL_TITLES } = require('../../services/chat-mcp-context');
 const {
     SYSTEM_MCP_SERVICES,
@@ -100,7 +101,7 @@ async function createSystemBuiltinService(serviceType, user) {
 }
 
 function decryptExistingDatabasePassword(row) {
-    return decryptSecret(row?.password || '');
+    return decryptSecret(row?.password || '', 'mcp_database_connections.password');
 }
 
 function sendJsonRpc(res, id, result, error = null) {
@@ -140,7 +141,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     mountMcpManagementRoutes({
         router,
         authMiddleware,
-        adminMiddleware,
+        requireCapability,
         logAction,
         asyncHandler,
         query,
@@ -174,6 +175,7 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         transaction,
         decryptSecret,
         encryptSecret,
+        preserveEncryptedSecret,
         assertSafeMcpOutboundUrl,
         getAccessibleMcpServer,
         normalizeServerRowAsync,

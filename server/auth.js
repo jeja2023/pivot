@@ -7,6 +7,13 @@ const { weakSecrets } = require('./config');
 const { parsePositiveInt } = require('./number');
 const { normalizeRole, withPermissionFlags } = require('./permissions');
 const { getApiAccessSetting } = require('./services/api-access-settings');
+const { PASSWORD_RULE_DESCRIPTION, getPasswordValidationMessage } = require('./password-policy');
+
+function apiKeyAllowsRequest(req, apiKeyData) {
+    const path = String(req?.originalUrl || req?.url || '').split('?')[0];
+    const scopes = String(apiKeyData?.scopes || 'openai').split(/[,\s]+/).map(item => item.trim()).filter(Boolean);
+    return scopes.includes('openai') && /^\/v1(?:\/|$)/.test(path);
+}
 
 const { logger } = require('./logger');
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -18,11 +25,13 @@ if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET) || JWT_
 
 const AUTH_COOKIE_NAME = 'pivot_access_token';
 const REFRESH_COOKIE_NAME = 'pivot_refresh_token';
+const DEVICE_COOKIE_NAME = 'pivot_device_id';
 const CSRF_COOKIE_NAME = 'pivot_csrf_token';
 
 const ACCESS_TOKEN_EXPIRES_MINUTES = parsePositiveInt(process.env.ACCESS_TOKEN_EXPIRES_MINUTES, 480);
 const REFRESH_TOKEN_EXPIRES_DAYS = parsePositiveInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS, 30);
 const ACCESS_TOKEN_EXPIRES = `${ACCESS_TOKEN_EXPIRES_MINUTES}m`;
+const BCRYPT_ROUNDS = Math.max(12, Math.min(Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12, 15));
 
 const COOKIE_OPTIONS = {
     httpOnly: true,
@@ -42,6 +51,12 @@ const REFRESH_COOKIE_OPTIONS = {
     maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000
 };
 
+const DEVICE_COOKIE_OPTIONS = {
+    ...COOKIE_OPTIONS,
+    path: '/api/auth',
+    maxAge: 365 * 24 * 60 * 60 * 1000
+};
+
 const LEGACY_REFRESH_COOKIE_OPTIONS = {
     ...COOKIE_OPTIONS,
     path: '/api/auth/refresh',
@@ -56,6 +71,11 @@ const CLEAR_COOKIE_OPTIONS = {
 };
 
 const CLEAR_REFRESH_COOKIE_OPTIONS = {
+    ...CLEAR_COOKIE_OPTIONS,
+    path: '/api/auth'
+};
+
+const CLEAR_DEVICE_COOKIE_OPTIONS = {
     ...CLEAR_COOKIE_OPTIONS,
     path: '/api/auth'
 };
@@ -79,20 +99,6 @@ class UserInputError extends Error {
     }
 }
 
-const PASSWORD_RULE_DESCRIPTION = '至少 8 位，并同时包含字母和数字';
-
-function getPasswordValidationMessage(password) {
-    if (!password) {
-        return `请输入密码。密码要求：${PASSWORD_RULE_DESCRIPTION}。`;
-    }
-    const missing = [];
-    if (String(password).length < 8) missing.push('至少 8 位');
-    if (!/[A-Za-z]/.test(password)) missing.push('包含字母');
-    if (!/[0-9]/.test(password)) missing.push('包含数字');
-    if (missing.length === 0) return '';
-    return `密码不符合要求：请确保${missing.join('、')}。完整规则：${PASSWORD_RULE_DESCRIPTION}。`;
-}
-
 function hashApiKey(key) {
     return crypto.createHash('sha256').update(String(key || '')).digest('hex');
 }
@@ -113,7 +119,8 @@ function generateAccessToken(user) {
             username: user.username,
             nickname: user.nickname || '',
             unit: user.unit || '',
-            role: normalizeRole(user.role)
+            role: normalizeRole(user.role),
+            tv: Math.max(Number(user.token_version ?? user.tokenVersion ?? 0) || 0, 0)
         },
         JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRES }
@@ -124,27 +131,40 @@ function hashRefreshToken(token) {
     return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
-async function generateRefreshToken(userId) {
-    return issueRefreshToken({ execute }, userId);
+function normalizeDeviceId(value) {
+    const text = String(value || '').trim();
+    return /^[A-Za-z0-9_-]{24,128}$/.test(text) ? text : '';
 }
 
-async function issueRefreshToken(executor, userId) {
+function generateDeviceId() {
+    return crypto.randomBytes(24).toString('base64url');
+}
+
+async function generateRefreshToken(userId, deviceId = '') {
+    return issueRefreshToken({ execute }, userId, crypto.randomUUID(), deviceId);
+}
+
+async function issueRefreshToken(executor, userId, familyId = crypto.randomUUID(), deviceId = '') {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
     
-    await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr]);
+    await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at, family_id, device_id) VALUES (?, ?, ?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr, familyId, normalizeDeviceId(deviceId)]);
     return token;
 }
 
 async function rotateRefreshToken(tokenHash, userId) {
     return transaction(async trx => {
+        const current = await trx.queryOne('SELECT family_id FROM refresh_tokens WHERE token = ? FOR UPDATE', [tokenHash]);
+        if (!current) {
+            throw new Error('刷新令牌已被使用或已失效，请重新登录。');
+        }
         const changes = await trx.execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
         if (changes !== 1) {
             throw new Error('刷新令牌已被使用或已失效，请重新登录。');
         }
-        return issueRefreshToken(trx, userId);
+        return issueRefreshToken(trx, userId, current?.family_id || crypto.randomUUID());
     });
 }
 
@@ -170,44 +190,6 @@ function getCookie(req, name) {
     return cookies[name];
 }
 
-function resolveAuthenticatedUser(req) {
-    const authHeader = req.headers?.authorization;
-    const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
-    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : cookieToken;
-
-    if (!token) {
-        return { user: null, token: null, code: 'AUTH_MISSING' };
-    }
-
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        if (decoded && decoded.id) {
-            return {
-                user: withPermissionFlags({
-                    id: decoded.id,
-                    username: decoded.username,
-                    nickname: decoded.nickname || '',
-                    unit: decoded.unit || '',
-                    role: decoded.role || 'user',
-                    status: 'active'
-                }),
-                token,
-                code: 'AUTH_OK'
-            };
-        }
-    } catch (e) {
-        if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
-            return { user: null, token, code: 'TOKEN_EXPIRED' };
-        }
-    }
-
-    if (String(token || '').startsWith('sk-') && !getApiAccessSetting()) {
-        return { user: null, token, code: 'API_ACCESS_DISABLED' };
-    }
-
-    return { user: null, token, code: 'TOKEN_INVALID' };
-}
-
 async function resolveAuthenticatedUserAsync(req) {
     const authHeader = req.headers?.authorization;
     const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
@@ -220,10 +202,10 @@ async function resolveAuthenticatedUserAsync(req) {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await queryOne(
-            'SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ? AND deleted_at IS NULL',
+            'SELECT id, username, nickname, unit, role, status, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
             [decoded.id]
         );
-        if (user && user.status !== 'disabled') {
+        if (user && user.status !== 'disabled' && Number(decoded.tv ?? 0) === Number(user.token_version || 0)) {
             return { user: withPermissionFlags(user), token, code: 'AUTH_OK' };
         }
     } catch (e) {
@@ -237,12 +219,13 @@ async function resolveAuthenticatedUserAsync(req) {
     }
 
     const apiKeyData = await queryOne(
-        "SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active'",
-        [hashApiKey(token)]
+        "SELECT * FROM api_keys WHERE key_hash = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)",
+        [hashApiKey(token), getBeijingTimestamp()]
     );
     if (apiKeyData) {
+        if (!apiKeyAllowsRequest(req, apiKeyData)) return { user: null, token, code: 'API_KEY_SCOPE_DENIED' };
         const user = await queryOne(
-            'SELECT id, username, nickname, unit, role, status, default_model_id FROM users WHERE id = ? AND deleted_at IS NULL',
+            'SELECT id, username, nickname, unit, role, status, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
             [apiKeyData.user_id]
         );
         if (user && user.status !== 'disabled') {
@@ -261,7 +244,7 @@ async function register(username, password, nickname, unit, role = 'user') {
         throw new UserInputError('用户名需为 3-32 位字母、数字、点、下划线或短横线');
     }
     validatePassword(password);
-    const hash = bcrypt.hashSync(password, 10);
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const safeRole = normalizeRole(role);
 
     const deletedUser = await queryOne('SELECT id FROM users WHERE username = ? AND deleted_at IS NOT NULL', [cleanUsername]);
@@ -284,16 +267,22 @@ async function register(username, password, nickname, unit, role = 'user') {
 }
 
 // 登录验证
-async function login(username, password) {
+async function login(username, password, options = {}) {
     const user = await queryOne('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL', [username]);
-    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    if (!user || !await bcrypt.compare(password, user.password_hash)) {
         throw new Error('用户名或密码错误');
     }
     if (user.status === 'disabled') {
         throw new Error('账号已被禁用，请联系管理员');
     }
+    // 旧账号在一次成功登录后以异步方式升级哈希成本，不阻塞登录响应。
+    if ((bcrypt.getRounds(user.password_hash) || 0) < BCRYPT_ROUNDS) {
+        bcrypt.hash(password, BCRYPT_ROUNDS)
+            .then(hash => execute('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [hash, user.id, user.password_hash]))
+            .catch(error => logger.warn({ err: error.message, userId: user.id }, '登录后密码哈希升级失败'));
+    }
     const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user.id);
+    const refreshToken = await generateRefreshToken(user.id, options.deviceId);
     await execute('UPDATE users SET last_login_at = ? WHERE id = ?', [getBeijingTimestamp(), user.id]);
     return { 
         accessToken, 
@@ -303,7 +292,7 @@ async function login(username, password) {
 }
 
 // 刷新 Token
-async function refreshTokens(token) {
+async function refreshTokens(token, options = {}) {
     const tokenHash = hashRefreshToken(token);
     let terminalError = null;
     const result = await transaction(async trx => {
@@ -319,18 +308,32 @@ async function refreshTokens(token) {
             terminalError = new Error('刷新令牌已过期，请重新登录');
             return null;
         }
+        if (refreshTokenData.consumed_at) {
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ? AND family_id = ?', [refreshTokenData.user_id, refreshTokenData.family_id || '']);
+            await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            terminalError = new Error('检测到刷新令牌重放，当前登录会话已全部撤销，请重新登录。');
+            return null;
+        }
+        const requestedDeviceId = normalizeDeviceId(options.deviceId);
+        const boundDeviceId = normalizeDeviceId(refreshTokenData.device_id);
+        if (boundDeviceId && boundDeviceId !== requestedDeviceId) {
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ? AND family_id = ?', [refreshTokenData.user_id, refreshTokenData.family_id || '']);
+            await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            terminalError = new Error('刷新令牌设备绑定不匹配，当前登录会话已全部撤销，请重新登录。');
+            return null;
+        }
         const user = await trx.queryOne('SELECT * FROM users WHERE id = ?', [refreshTokenData.user_id]);
         if (!user || user.status === 'disabled') {
             terminalError = new Error('用户状态异常');
             return null;
         }
-        const changes = await trx.execute('DELETE FROM refresh_tokens WHERE token = ?', [tokenHash]);
+        const changes = await trx.execute('UPDATE refresh_tokens SET consumed_at = ? WHERE token = ? AND consumed_at IS NULL', [now, tokenHash]);
         if (changes !== 1) {
             terminalError = new Error('刷新令牌已被使用或已失效，请重新登录。');
             return null;
         }
         const accessToken = generateAccessToken(user);
-        const newRefreshToken = await issueRefreshToken(trx, user.id);
+        const newRefreshToken = await issueRefreshToken(trx, user.id, refreshTokenData.family_id || crypto.randomUUID(), requestedDeviceId || boundDeviceId);
         return { accessToken, refreshToken: newRefreshToken };
     });
     if (terminalError) throw terminalError;
@@ -352,6 +355,10 @@ async function authMiddleware(req, res, next) {
 
         if (auth.code === 'API_ACCESS_DISABLED') {
             return res.status(403).json({ error: 'API 接入已由管理员关闭' });
+        }
+
+        if (auth.code === 'API_KEY_SCOPE_DENIED') {
+            return res.status(403).json({ error: 'API Key 仅允许访问 OpenAI 兼容接口', code: 'API_KEY_SCOPE_DENIED' });
         }
 
         if (auth.user) {
@@ -390,19 +397,22 @@ module.exports = {
     authMiddleware, 
     validatePassword, 
     getCookie,
-    resolveAuthenticatedUser,
     resolveAuthenticatedUserAsync,
-    AUTH_COOKIE_NAME, 
+    AUTH_COOKIE_NAME,
     REFRESH_COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
     CSRF_COOKIE_NAME,
     ACCESS_COOKIE_OPTIONS, 
     REFRESH_COOKIE_OPTIONS,
+    DEVICE_COOKIE_OPTIONS,
     LEGACY_REFRESH_COOKIE_OPTIONS,
     CLEAR_COOKIE_OPTIONS,
     CLEAR_REFRESH_COOKIE_OPTIONS,
+    CLEAR_DEVICE_COOKIE_OPTIONS,
     CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS,
     CLEAR_CSRF_COOKIE_OPTIONS,
     generateCsrfToken,
+    generateDeviceId,
     csrfMiddleware,
     hashApiKey,
     previewApiKey,

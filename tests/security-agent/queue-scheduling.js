@@ -61,3 +61,34 @@ test('agent queue coalesces repeated wakeups into one scheduled drain', () => {
     scheduled[0]();
     assert.equal(scheduled.length, 1);
 });
+
+test('agent queue status is derived from persistent queued runs rather than stale in-memory hints', async () => {
+    const { createAgentQueue } = require('../../server/services/agent-queue');
+    const queue = createAgentQueue({
+        logger: { info() {}, warn() {}, error() {} },
+        instanceId: 'agent-status-test',
+        maxConcurrent: 1,
+        getRunUser: async () => null,
+        runAgent: async () => {},
+        markRunError: async () => {},
+        getTimestamp: () => '2026-09-08 00:00:00',
+        dbRunner: {
+            async query(sql) {
+                if (sql.includes('SELECT id\n            FROM agent_runs')) return [{ id: 'actual-queued-run' }];
+                return [];
+            },
+            async queryOne(sql) {
+                if (sql.includes('COUNT(*) AS count')) return { count: 1 };
+                if (sql.includes('ORDER BY created_at ASC')) return { id: 'actual-queued-run', created_at: '2026-09-08 00:00:00' };
+                return null;
+            },
+            async execute() { return 0; }
+        }
+    });
+    queue.enqueueRun('stale-hint');
+    const status = await queue.getStatusAsync();
+    assert.equal(status.queued, 1);
+    assert.equal(status.hinted, 1);
+    assert.equal(status.oldestQueuedRunId, 'actual-queued-run');
+    assert.ok(status.oldestQueuedAgeMs >= 0);
+});

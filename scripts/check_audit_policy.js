@@ -1,4 +1,7 @@
 const { spawnSync } = require('child_process');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
 
 // 依赖审计豁免清单。
 // 只登记「上游确认暂时无法修复」的 high/critical 问题，且必须同时写明豁免理由和复查日期。
@@ -11,6 +14,11 @@ const { spawnSync } = require('child_process');
 //     }]
 // 当前无需豁免：axios、js-yaml、sharp 与 body-parser 的历史告警已通过依赖升级清零。
 const allowed = new Map([]);
+// npm audit 以安装包名匹配 advisory。转发/镜像包必须明确声明上游身份，
+// 否则同版本 Excel 解析器的安全公告会被 npm audit 静默遗漏。
+const UPSTREAM_ALIASES = new Map([
+    ['@e965/xlsx', 'xlsx']
+]);
 
 function buildAuditInvocation(args, platform = process.platform, env = process.env) {
     if (platform === 'win32') {
@@ -56,6 +64,77 @@ function runAudit({ omitDev = false } = {}) {
     }
 
     return auditResult;
+}
+
+function getAliasPackageVersions(lock = {}, aliases = UPSTREAM_ALIASES) {
+    const packages = lock.packages || {};
+    const result = new Map();
+    for (const [installedName, upstreamName] of aliases) {
+        const version = String(packages[`node_modules/${installedName}`]?.version || '').trim();
+        if (!version) throw new Error(`上游审计别名 ${installedName} 缺少 package-lock 版本信息`);
+        result.set(upstreamName, version);
+    }
+    return result;
+}
+
+function requestJson(url, payload, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload);
+        const request = https.request(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+                'User-Agent': 'Pivot-Audit-Policy/1.0'
+            },
+            timeout: timeoutMs
+        }, response => {
+            let text = '';
+            response.setEncoding('utf8');
+            response.on('data', chunk => { text += chunk; });
+            response.on('end', () => {
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                    reject(new Error(`上游 advisory 查询返回 HTTP ${response.statusCode}`));
+                    return;
+                }
+                try { resolve(JSON.parse(text || '{}')); } catch (error) { reject(error); }
+            });
+        });
+        request.once('timeout', () => request.destroy(new Error('上游 advisory 查询超时')));
+        request.once('error', reject);
+        request.end(body);
+    });
+}
+
+function buildAliasAuditResult(advisories = {}, aliases = UPSTREAM_ALIASES) {
+    const vulnerabilities = {};
+    for (const [installedName, upstreamName] of aliases) {
+        const items = Array.isArray(advisories[upstreamName]) ? advisories[upstreamName] : [];
+        if (!items.length) continue;
+        const severity = items.some(item => item.severity === 'critical') ? 'critical' : 'high';
+        vulnerabilities[installedName] = {
+            name: installedName,
+            severity,
+            fixAvailable: items.some(item => String(item.patched_versions || '').trim() && item.patched_versions !== '<0.0.0-0'),
+            via: items.map(item => ({
+                source: item.id || item.url || upstreamName,
+                name: installedName,
+                title: `[${upstreamName}] ${item.title || item.overview || '安全公告'}`,
+                url: item.url || '',
+                severity: item.severity || severity,
+                range: item.vulnerable_versions || ''
+            }))
+        };
+    }
+    return { vulnerabilities };
+}
+
+async function runUpstreamAliasAudit({ root = path.resolve(__dirname, '..'), aliases = UPSTREAM_ALIASES, request = requestJson } = {}) {
+    const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+    const versions = getAliasPackageVersions(lock, aliases);
+    const payload = Object.fromEntries([...versions].map(([name, version]) => [name, [version]]));
+    const advisories = await request('https://registry.npmjs.org/-/npm/v1/security/advisories/bulk', payload);
+    return buildAliasAuditResult(advisories, aliases);
 }
 
 function selectAuditPackages(auditResult, packageNames) {
@@ -147,17 +226,20 @@ function classifyAuditFindings(auditResult, exceptions = allowed) {
     return { accepted, failures };
 }
 
-function main() {
+async function main() {
     const production = classifyAuditFindings(runAudit({ omitDev: true }));
     const desktopRuntimeAudit = selectAuditPackages(runAudit(), ['electron']);
     const desktopRuntime = classifyAuditFindings(desktopRuntimeAudit);
+    const upstreamAlias = classifyAuditFindings(await runUpstreamAliasAudit());
     const accepted = [
         ...production.accepted.map(item => `[production] ${item}`),
-        ...desktopRuntime.accepted.map(item => `[desktop-runtime] ${item}`)
+        ...desktopRuntime.accepted.map(item => `[desktop-runtime] ${item}`),
+        ...upstreamAlias.accepted.map(item => `[upstream-alias] ${item}`)
     ];
     const failures = [
         ...production.failures.map(item => `[production] ${item}`),
-        ...desktopRuntime.failures.map(item => `[desktop-runtime] ${item}`)
+        ...desktopRuntime.failures.map(item => `[desktop-runtime] ${item}`),
+        ...upstreamAlias.failures.map(item => `[upstream-alias] ${item}`)
     ];
 
     if (accepted.length > 0) {
@@ -175,11 +257,19 @@ function main() {
     console.log('依赖审计策略检查通过。');
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+    main().catch(error => {
+        console.error(`依赖审计策略检查失败：${error.message}`);
+        process.exit(1);
+    });
+}
 
 module.exports = {
     buildAuditInvocation,
+    buildAliasAuditResult,
     classifyAuditFindings,
     evaluateException,
+    getAliasPackageVersions,
+    runUpstreamAliasAudit,
     selectAuditPackages
 };

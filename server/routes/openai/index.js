@@ -705,8 +705,8 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         try {
                             const json = JSON.parse(payload);
                             if (json?.error) streamPayloadError = json;
+                            accumulator.pushJson(json);
                         } catch (e) {}
-                        accumulator.pushPayload(payload);
                         if (directCompletionTracker) directCompletionTracker.observeStreamPayload(payload);
                     }
                 });

@@ -117,7 +117,7 @@ test('关闭配置或缺少回调时返回惰性看门狗，调用不报错', ()
 // 锁定「上游静默挂住 → 中止上游 → 许可只释放一次 → 不重复给客户端写错误帧」。
 const { PassThrough } = require('node:stream');
 
-function wireLikeRoute(upstream, { idleMs }) {
+function wireLikeRoute(upstream, { idleMs, clock = null }) {
     const events = [];
     let released = false;
     let streamIdleAborted = false;
@@ -128,6 +128,11 @@ function wireLikeRoute(upstream, { idleMs }) {
     };
     const watchdog = createStreamIdleWatchdog({
         idleMs,
+        ...(clock ? {
+            now: clock.now,
+            setIntervalFn: clock.setIntervalFn,
+            clearIntervalFn: clock.clearIntervalFn
+        } : {}),
         onIdle: () => {
             streamIdleAborted = true;
             events.push('idle');
@@ -148,12 +153,13 @@ function wireLikeRoute(upstream, { idleMs }) {
     return { events, watchdog };
 }
 
-test('上游静默挂住时：中止上游、只给客户端写一次错误帧、许可只释放一次', async () => {
+test('上游静默挂住时：中止上游、只给客户端写一次错误帧、许可只释放一次', () => {
     const upstream = new PassThrough();
-    const { events } = wireLikeRoute(upstream, { idleMs: MIN_IDLE_TIMEOUT_MS });
+    const clock = createFakeClock();
+    const { events } = wireLikeRoute(upstream, { idleMs: MIN_IDLE_TIMEOUT_MS, clock });
     upstream.write('data: hello\n\n');
     // 之后不再写入任何字节，模拟上游发完头就静默挂住（既无 end 也无 error）
-    await new Promise(resolve => setTimeout(resolve, MIN_IDLE_TIMEOUT_MS + 1500));
+    clock.advance(MIN_IDLE_TIMEOUT_MS + 1);
     assert.ok(events.includes('idle'), '应判定为空闲并中止');
     assert.equal(events.filter(item => item === 'client-error-frame').length, 1, '错误帧不得重复写出');
     assert.equal(events.filter(item => item === 'release').length, 1, '许可只能释放一次');
@@ -162,10 +168,14 @@ test('上游静默挂住时：中止上游、只给客户端写一次错误帧�
 
 test('上游正常结束时看门狗不介入，也不会在结束后再触发', async () => {
     const upstream = new PassThrough();
-    const { events } = wireLikeRoute(upstream, { idleMs: MIN_IDLE_TIMEOUT_MS });
+    const clock = createFakeClock();
+    const { events } = wireLikeRoute(upstream, { idleMs: MIN_IDLE_TIMEOUT_MS, clock });
     upstream.write('data: hello\n\n');
     upstream.end();
-    await new Promise(resolve => setTimeout(resolve, MIN_IDLE_TIMEOUT_MS + 1500));
+    // PassThrough 的 end 事件异步派发；先等路由监听器停止看门狗，
+    // 再推进确定性时钟，才能验证“结束后”不会触发。
+    await new Promise(resolve => upstream.once('end', resolve));
+    clock.advance(MIN_IDLE_TIMEOUT_MS + 1);
     assert.ok(!events.includes('idle'), '正常结束不得被判定为空闲');
     assert.ok(events.includes('end'));
     assert.equal(events.filter(item => item === 'release').length, 1);

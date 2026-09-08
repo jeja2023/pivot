@@ -69,36 +69,35 @@ test('admin tool policy routes manage only global tool packages', async () => {
     try {
         const packagesRes = makeRes();
         await runExpressHandlers(packagesRoute.route.stack.map(layer => layer.handle), { user: managerUser }, packagesRes);
-        assert.equal(packagesRes.statusCode, 200);
-        assert.equal(packagesRes.body.data.some(item => item.package_key === globalPackageKey), true);
-        assert.equal(packagesRes.body.data.some(item => item.package_key === privatePackageKey), false);
+        assert.equal(packagesRes.statusCode, 403);
+        assert.equal(packagesRes.body.code, 'PERMISSION_CAPABILITY_REQUIRED');
+
+        const superPackagesRes = makeRes();
+        await runExpressHandlers(packagesRoute.route.stack.map(layer => layer.handle), { user: superUser }, superPackagesRes);
+        assert.equal(superPackagesRes.statusCode, 200);
+        assert.equal(superPackagesRes.body.data.some(item => item.package_key === globalPackageKey), true);
 
         const privateRes = makeRes();
         await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
             params: { key: privatePackageKey },
             user: managerUser
         }, privateRes);
-        assert.equal(privateRes.statusCode, 404);
+        assert.equal(privateRes.statusCode, 403);
 
         const listRes = makeRes();
         await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
             params: { key: globalPackageKey },
             user: managerUser
         }, listRes);
-        assert.equal(listRes.statusCode, 200);
-        assert.equal(listRes.body.item.package_key, globalPackageKey);
-        assert.equal(listRes.body.tools.length, 1);
-        assert.equal(listRes.body.tools[0].name, 'external.search');
-        assert.equal(listRes.body.tools[0].governance.enabled, true);
+        assert.equal(listRes.statusCode, 403);
 
-        await assert.rejects(
-            runExpressHandlers(saveRoute.route.stack.map(layer => layer.handle), {
-                params: { key: globalPackageKey, tool: 'external.search' },
-                body: { enabled: false },
-                user: managerUser
-            }, makeRes()),
-            err => err?.status === 403
-        );
+        const deniedSaveRes = makeRes();
+        await runExpressHandlers(saveRoute.route.stack.map(layer => layer.handle), {
+            params: { key: globalPackageKey, tool: 'external.search' },
+            body: { enabled: false },
+            user: managerUser
+        }, deniedSaveRes);
+        assert.equal(deniedSaveRes.statusCode, 403);
 
         const saveRes = makeRes();
         await runExpressHandlers(saveRoute.route.stack.map(layer => layer.handle), {
@@ -119,7 +118,7 @@ test('admin tool policy routes manage only global tool packages', async () => {
         const rereadRes = makeRes();
         await runExpressHandlers(toolsRoute.route.stack.map(layer => layer.handle), {
             params: { key: globalPackageKey },
-            user: managerUser
+            user: superUser
         }, rereadRes);
         assert.equal(rereadRes.body.tools[0].governance.enabled, false);
         assert.equal(rereadRes.body.tools[0].governance.usage, 'Only after admin approval');

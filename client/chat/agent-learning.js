@@ -41,7 +41,7 @@
     }
 
     function openMemoryCenter() {
-        window.Pivot.legacy.showMainWorkspace?.('settings');
+        window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
         window.Pivot.legacy.switchTab?.('memories');
     }
 
@@ -154,7 +154,7 @@
             return window.Pivot?.moduleApi?.('agent.skillManagement')?.open?.({ versionId: proposal?.artifactVersionId, releaseId: proposal?.releaseId });
         }
         if (action === 'preview') {
-            return window.Pivot.legacy.openAgentDagWorkbench?.({ workflowId: proposal?.artifactId, editor: true });
+            return window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ workflowId: proposal?.artifactId, editor: true });
         }
         const path = action === 'share'
             ? `/agents/evolution/proposals/${encodeURIComponent(id)}/share-request`

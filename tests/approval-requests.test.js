@@ -8,7 +8,7 @@ const {
     runApprovalTimeouts,
     waitForWorkflowApproval
 } = require('../server/services/agent-approval-requests');
-const { getAgentQueue } = require('../server/services/agent-runtime');
+const { monitoring: { getAgentQueue } } = require('../server/services/agent-runtime');
 const { db } = require('./security-helpers');
 const { encryptSecret } = require('../server/security');
 const { getBeijingTimestamp } = require('../server/time');
@@ -21,10 +21,8 @@ function cleanup(runId, requestId, credentialSlug = '') {
     if (credentialSlug) db.prepare('DELETE FROM workflow_credentials WHERE slug = ?').run(credentialSlug);
 }
 
-function signCallback(secret, token, requestId, decision, nonce = '') {
-    const payload = nonce
-        ? `${token}.${requestId}.${decision}.${nonce}`
-        : `${token}.${requestId}.${decision}`;
+function signCallback(secret, token, requestId, decision, nonce = '', requirementKey = '') {
+    const payload = `${token}.${requestId}.${decision}.${nonce}.${requirementKey}`;
     return `sha256=${crypto.createHmac('sha256', secret).update(payload).digest('hex')}`;
 }
 
@@ -85,10 +83,12 @@ test('workflow approval callback validates token and approves matching request',
         const rejected = await handleImApprovalCallback(`apr_${'b'.repeat(48)}`, { decision: 'approve', requestId }, {});
         assert.equal(rejected, null);
 
-        const approved = await handleImApprovalCallback(token, { decision: 'approve', requestId }, {});
-        assert.equal(approved.status, 'approved');
+        await assert.rejects(
+            () => handleImApprovalCallback(token, { decision: 'approve', requestId }, {}),
+            /未绑定签名审批要求/
+        );
         const row = db.prepare('SELECT status FROM agent_approval_requests WHERE id = ?').get(requestId);
-        assert.equal(row.status, 'approved');
+        assert.equal(row.status, 'pending');
     } finally {
         cleanup(runId, requestId);
     }
@@ -120,10 +120,10 @@ test('workflow approval callback signature is bound to request nonce', async () 
         INSERT OR REPLACE INTO agent_approval_requests (
             id, run_id, user_id, request_type, node_key, approval_key, title, summary, instructions,
             status, current_level, required_levels, levels_json, decisions_json, input_json,
-            callback_token_hash, callback_token_hint, callback_nonce, callback_credential_slug,
+            callback_token_hash, callback_token_hint, callback_nonce, callback_credential_slug, callback_requirement_key,
             callback_signature_required, timeout_action, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'approval', 'node_signed', 'node_signed', 'Signed callback approval', '', '', 'pending', 1, 1,
-            '[{"approverUserIds":[1],"approverUnits":[]}]', '[]', '{}', ?, 'hint', ?, ?, 1, 'reject', NULL, ?, ?)
+            '[{"approverUserIds":[1],"approverUnits":[]}]', '[]', '{}', ?, 'hint', ?, ?, 'user:1', 1, 'reject', NULL, ?, ?)
     `).run(requestId, runId, userId, tokenHash, nonce, credentialSlug, now, now);
 
     try {
@@ -141,7 +141,7 @@ test('workflow approval callback signature is bound to request nonce', async () 
         const approved = await handleImApprovalCallback(token, {
             decision: 'approve',
             requestId,
-            signature: signCallback(secret, token, requestId, 'approve', nonce)
+                signature: signCallback(secret, token, requestId, 'approve', nonce, 'user:1')
         }, {});
         assert.equal(approved.status, 'approved');
         const row = db.prepare('SELECT status, callback_token_hash, callback_nonce FROM agent_approval_requests WHERE id = ?').get(requestId);

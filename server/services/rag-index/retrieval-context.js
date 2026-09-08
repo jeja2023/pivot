@@ -48,7 +48,10 @@ function formatInjectedContext(topChunks, scoreThreshold = 0) {
         Number(chunk?.rankScore ?? chunk?.fused ?? chunk?.score) || 0
     ), 0);
     (topChunks || []).forEach((chunk, index) => {
-        const location = String(chunk.headingPath || '').trim() || chunk.source;
+        const offset = chunk.charStart != null && chunk.charEnd != null && Number.isInteger(Number(chunk.charStart)) && Number.isInteger(Number(chunk.charEnd))
+            ? `字符 ${Number(chunk.charStart)}-${Number(chunk.charEnd)}`
+            : `片段 ${Number(chunk.chunkIndex || index) + 1}`;
+        const location = [String(chunk.headingPath || '').trim() || chunk.source, offset].filter(Boolean).join(' · ');
         const confidence = Number.isFinite(Number(chunk.citationConfidence))
             ? Number(chunk.citationConfidence)
             : calculateCitationConfidence(chunk, scoreThreshold, maxRankScore);
@@ -65,26 +68,26 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
     const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
     const accessFilter = user ? scopeFilter.accessSql : '';
     const accessJoin = user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = knowledge_docs.collection_id AND c_access.deleted_at IS NULL' : '';
-    const docs = (await queryOne(`
-        SELECT
-            COUNT(*) AS doc_count,
-            COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
-            COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version
-        FROM knowledge_docs
-        ${accessJoin}
-        WHERE 1 = 1 ${ownerFilter}
-          AND knowledge_docs.deleted_at IS NULL
-          AND knowledge_docs.status = 'ready'
-          AND COALESCE(knowledge_docs.is_enabled, 1) = 1
-          ${scopeFilter.sql}
-          ${accessFilter}
-    `, (user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]))) || {};
-    const entityVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]);
-    const relationVersionRow = await queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]);
-    const feedbackVersionRow = await queryOne(
-        'SELECT COALESCE(MAX(created_at)::text, \'\') AS feedback_version FROM rag_feedback WHERE user_id = ?',
-        [userId]
-    );
+    const [docsResult, entityVersionRow, relationVersionRow, feedbackVersionRow] = await Promise.all([
+        queryOne(`
+            SELECT
+                COUNT(*) AS doc_count,
+                COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
+                COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version
+            FROM knowledge_docs
+            ${accessJoin}
+            WHERE 1 = 1 ${ownerFilter}
+              AND knowledge_docs.deleted_at IS NULL
+              AND knowledge_docs.status = 'ready'
+              AND COALESCE(knowledge_docs.is_enabled, 1) = 1
+              ${scopeFilter.sql}
+              ${accessFilter}
+        `, user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]),
+        queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]),
+        queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]),
+        queryOne('SELECT COALESCE(MAX(created_at)::text, \'\') AS feedback_version FROM rag_feedback WHERE user_id = ?', [userId])
+    ]);
+    const docs = docsResult || {};
 
     return [
         'algo=dual_rrf_v2',
@@ -117,6 +120,9 @@ function normalizeRetrievalDebugMatch(match, scoreThreshold, rank = 0, selectedI
         chunkId: match.chunkId,
         source: match.source,
         documentName: match.documentName || match.source,
+        chunkIndex: Number(match.chunkIndex || 0),
+        charStart: match.charStart != null && Number.isInteger(Number(match.charStart)) ? Number(match.charStart) : null,
+        charEnd: match.charEnd != null && Number.isInteger(Number(match.charEnd)) ? Number(match.charEnd) : null,
         score: roundDebugScore(denseScore),
         fusedScore: roundDebugScore(fusedScore),
         rankScore: roundDebugScore(match.rankScore ?? fusedScore),

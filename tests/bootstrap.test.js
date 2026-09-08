@@ -6,7 +6,7 @@ const {
     startBackgroundServices
 } = require('../server/bootstrap');
 
-test('process handlers log rejections and flush before fatal exit', () => {
+test('process handlers log rejections and flush before fatal exit', async () => {
     const handlers = new Map();
     const calls = [];
     const processRef = {
@@ -35,9 +35,10 @@ test('process handlers log rejections and flush before fatal exit', () => {
     const fatal = new Error('fatal');
     handlers.get('uncaughtException')(fatal);
     assert.deepEqual(calls.slice(1).map(call => call[0]), ['fatal', 'flush']);
-    assert.equal(scheduled.delay, 250);
+    assert.equal(scheduled.delay, 5000);
     assert.equal(timer.unrefCalled, true);
     scheduled.callback();
+    await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(calls.at(-1), ['exit', 1]);
 });
 

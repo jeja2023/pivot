@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.99",
+  "version": "0.1.100",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -25,18 +25,26 @@
     "check:governance": "node scripts/check_governance_metrics.js",
     "report:governance": "node scripts/check_governance_metrics.js --report",
     "check:standards": "node scripts/check_development_standards.js && node scripts/check_no_new_raw_sql.js",
+    "check:standards:changed": "node scripts/check_development_standards.js --changed",
     "check:external": "node scripts/check_external_links.js",
     "check:external:live": "node scripts/check_external_links.js --live",
     "check:no-new-raw-sql": "node scripts/check_no_new_raw_sql.js",
-    "audit:policy": "node scripts/check_audit_policy.js",
+    "audit:policy": "node scripts/check_audit_policy.js && node scripts/check_dependency_overrides.js",
+    "check:overrides": "node scripts/check_dependency_overrides.js",
+    "check:licenses": "node scripts/check_licenses.js",
+    "check:dead-exports": "node scripts/check_dead_exports.js",
+    "check:env-example": "node scripts/check_env_example.js",
+    "check:regression-matrix": "node scripts/check_regression_matrix.js",
+    "build:chat-css": "node scripts/build_chat_css.js",
     "check:safe-html": "node scripts/check_safe_html_usage.js",
     "check:async_db_calls": "node scripts/check_async_db_calls.js --enforce",
     "check:sync_io_hotpaths": "node scripts/check_sync_io_hotpaths.js",
     "preflight:deployment": "node scripts/preflight_deployment.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
-    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:governance && npm run check:standards && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
+    "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=40 --test-coverage-functions=40 --test-coverage-branches=30",
     "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js",
     "test:mcp:official": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario initialize --spec-version 2025-11-25",
     "test:mcp:official:tools": "npx --no-install @modelcontextprotocol/conformance client --command \"node scripts/mcp-conformance-client.js\" --scenario tools_call --spec-version 2025-11-25",
@@ -44,6 +52,7 @@
     "test": "npm run check && npm run lint && npm run test:all",
     "verify": "npm test",
     "backup": "node scripts/backup_db.js",
+    "clean:workspace": "node scripts/clean_workspace.js",
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
     "dist:win": "node scripts/package_desktop.js nsis",
@@ -61,9 +70,10 @@
     "test:e2e": "node scripts/run_e2e_tests.js"
   },
   "overrides": {
-    "@xmldom/xmldom": "0.9.12",
-    "fast-uri": "3.1.6",
-    "qs": "6.16.0"
+    "@xmldom/xmldom": "^0.9.12",
+    "fast-uri": "^3.1.6",
+    "qs": "^6.16.0",
+    "debug": "^4.4.3"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",
@@ -119,7 +129,6 @@
       "client/**",
       "assets/fonts/cjk/**",
       "!client/*.exe",
-      "scripts/**",
       "package.json",
       "package-lock.json",
       "README.md",
@@ -133,13 +142,16 @@
       "!.codex-tmp/**",
       "!.claude/**",
       "!artifacts/**",
-      "!tests/**"
+      "!tests/**",
+      "!node_modules/@types/**",
+      "!node_modules/@azure/msal-browser/**"
     ],
     "asarUnpack": [
       "node_modules/better-sqlite3/**",
       "node_modules/@duckdb/**",
       "node_modules/sharp/**"
     ],
+    "afterPack": "scripts/after-pack.js",
     "win": {
       "target": [
         "nsis"
@@ -181,8 +193,8 @@
         "to": "docs/远程模式部署说明.md"
       },
       {
-        "from": "artifacts/agent-browser-pack",
-        "to": "agent-runtime/browser"
+        "from": "docs/licenses",
+        "to": "licenses"
       },
       {
         "from": "artifacts/agent-python-pack",

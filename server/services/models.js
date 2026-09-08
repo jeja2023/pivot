@@ -122,7 +122,7 @@ function _decryptApiKey(model) {
     if (!model) return model;
     if (model.api_key) {
         try {
-            model.api_key = decryptSecret(model.api_key);
+            model.api_key = decryptSecret(model.api_key, 'models.api_key');
         } catch (e) {
             model.api_key = '';
             model.secret_error = e.message || '模型密钥解密失败';

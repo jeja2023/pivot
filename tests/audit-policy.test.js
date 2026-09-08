@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildAuditInvocation, classifyAuditFindings, selectAuditPackages } = require('../scripts/check_audit_policy');
+const { buildAliasAuditResult, buildAuditInvocation, classifyAuditFindings, getAliasPackageVersions, selectAuditPackages } = require('../scripts/check_audit_policy');
 
 // 构造一份最小可用的 npm audit JSON 结果。
 function buildAuditResult({ name = 'demo-pkg', severity = 'high', fixAvailable = false, title = '示例高危漏洞', url = 'https://example.test/GHSA-demo' } = {}) {
@@ -142,4 +142,15 @@ test('npm audit uses a platform-safe invocation', () => {
         command: 'npm',
         args
     });
+});
+
+test('forwarded packages query the upstream advisory identity instead of silently trusting npm audit name matching', () => {
+    const versions = getAliasPackageVersions({
+        packages: { 'node_modules/@e965/xlsx': { version: '0.20.3' } }
+    });
+    assert.equal(versions.get('xlsx'), '0.20.3');
+    const result = buildAliasAuditResult({
+        xlsx: [{ id: 123, severity: 'high', title: 'Sheet parser issue', vulnerable_versions: '<0.20.4', patched_versions: '>=0.20.4' }]
+    });
+    assert.match(classifyAuditFindings(result).failures[0], /Sheet parser issue/);
 });

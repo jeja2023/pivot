@@ -2,7 +2,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { db } = require('../server/db');
 const { createAgentQueue } = require('../server/services/agent-queue');
-const { getAgentQueue, recoverAgentRuns } = require('../server/services/agent-runtime');
+const {
+    monitoring: { getAgentQueue },
+    runs: { recoverAgentRuns }
+} = require('../server/services/agent-runtime');
 const {
     canTransitionAgentRunStatus,
     transitionAgentRunStatus
@@ -199,4 +202,35 @@ test('an awaiting approval run releases its queue slot to the next run', async (
         db.prepare('DELETE FROM agent_runs WHERE id IN (?, ?)').run(approvalRunId, nextRunId);
         db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(users[0].id, users[1].id);
     }
+});
+
+test('任务认领后读取用户遇到瞬时数据库异常时会延迟回队而非遗留 running 孤儿', async () => {
+    const warnings = [];
+    const updates = [];
+    const queue = createAgentQueue({
+        logger: { info() {}, error() {}, warn: entry => warnings.push(entry) },
+        instanceId: 'queue-user-lookup-retry',
+        maxConcurrent: 1,
+        getRunUser: async () => { throw new Error('temporary user lookup database outage'); },
+        runAgent: async () => { throw new Error('不应执行'); },
+        markRunError: async () => { throw new Error('不应标记为永久失败'); },
+        getTimestamp: value => require('../server/time').getBeijingTimestamp(value),
+        dbRunner: {
+            async query(sql) {
+                if (sql.includes("WHERE status = 'queued'")) return [{ id: 'retry-run', user_id: 7 }];
+                return [];
+            },
+            async queryOne() { return null; },
+            async execute(sql, params) {
+                updates.push({ sql, params });
+                return 1;
+            }
+        }
+    });
+    await queue.processQueue();
+    const requeueUpdate = updates.find(item => item.sql.includes("SET status = 'queued'"));
+    assert.ok(requeueUpdate, '用户读取失败后必须以持锁 CAS 回到 queued');
+    assert.equal(requeueUpdate.params[2], 'retry-run');
+    assert.ok(requeueUpdate.params[0], '回队必须设置 retry_after，避免热循环');
+    assert.equal(warnings.length, 1);
 });

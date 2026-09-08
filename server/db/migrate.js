@@ -66,7 +66,7 @@ function runMigrations() {
 // ── PostgreSQL 异步模式 ─────────────────────────────────────────────────────
 
 /**
- * PG 侧迁移策略：Baseline（基线标记）
+ * PG 侧迁移策略：历史基线 + 新迁移严格执行
  *
  * 历史版本化迁移（migrations/index.js、migrations/legacy.js、regulations.js）
  * 全部是 SQLite 方言实现（PRAGMA table_info、db.prepare 同步 API），传入 pg
@@ -75,7 +75,7 @@ function runMigrations() {
  *
  * 因此 PG 库的正确做法是把这些历史迁移标记为「已应用」而不执行（baseline），
  * 后续新增迁移若需在 PG 生效，必须提供 `upPg(client, options)` 方法；仅有
- * `up` 的迁移视为 SQLite 专属，在 PG 侧跳过并记录。
+ * `up` 的迁移只有登记在 pg-baseline.js 的历史项才允许标记，否则启动失败。
  */
 async function runMigrationsPg() {
     const { getPgPool } = require('./pg-connection');
@@ -85,6 +85,7 @@ async function runMigrationsPg() {
         hasPgMigration,
         recordPgMigration,
     } = require('./migrations/runner');
+    const { PG_SCHEMA_BASELINE } = require('./migrations/pg-baseline');
 
     const client = await getPgPool().connect();
     try {
@@ -115,7 +116,10 @@ async function runMigrationsPg() {
                 continue;
             }
 
-            // SQLite 专属迁移：其结果已由 initSchemaPg 的建表 DDL 覆盖，标记基线
+            if (!PG_SCHEMA_BASELINE.has(migration.id)) {
+                throw new Error(`[PG] 迁移 ${migration.id} 缺少 upPg(client)，且未登记为已验证的 schema 基线。`);
+            }
+            // 已验证由 initSchemaPg 的建表 DDL 覆盖的历史 SQLite 迁移，才允许标记基线。
             await recordPgMigration(
                 client,
                 migration.id,

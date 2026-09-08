@@ -4,7 +4,6 @@ const path = require('path');
 const rootDir = path.resolve(__dirname, '..');
 const baselinePath = path.join(__dirname, 'raw_sql_baseline.json');
 const writeBaseline = process.argv.includes('--write-baseline');
-const reportOnly = String(process.env.PIVOT_RAW_SQL_REPORT_ONLY || '').toLowerCase() === 'true';
 
 function walk(dir, files = []) {
     if (!fs.existsSync(dir)) return files;
@@ -21,25 +20,27 @@ function rel(filePath) {
     return path.relative(rootDir, filePath).replace(/\\/g, '/');
 }
 
-function countRawPrepare(filePath) {
+function countRawSqlCalls(filePath) {
     const text = fs.readFileSync(filePath, 'utf8');
-    return (text.match(/\bdb\.prepare\s*\(/g) || []).length;
+    // PostgreSQL 化后请求路径不会走 db.prepare；检查生产代码中直接写入
+    // query/queryOne/execute 的 SQL 字面量，避免门禁只统计测试夹具和死代码。
+    return (text.match(/\b(?:[A-Za-z_$][\w$]*\.)?(?:queryOne|query|execute)\s*\(\s*(?:`|['"])/g) || []).length;
 }
 
 function collectRawSqlCounts() {
-    const files = ['server', 'scripts', 'tests']
+    const files = ['server']
         .map(item => path.join(rootDir, item))
         .flatMap(dir => walk(dir))
         .sort((a, b) => rel(a).localeCompare(rel(b)));
     return files
-        .map(file => ({ file: rel(file), count: countRawPrepare(file) }))
+        .map(file => ({ file: rel(file), count: countRawSqlCalls(file) }))
         .filter(item => item.count > 0);
 }
 
 function summarize(entries) {
     return {
         version: 1,
-        description: 'Baseline for legacy db.prepare(...) usage. New raw SQL should use server/db/statements.js sql(...) or be moved behind a repository boundary.',
+        description: 'Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.',
         total: entries.reduce((sum, item) => sum + item.count, 0),
         entries
     };
@@ -48,7 +49,7 @@ function summarize(entries) {
 if (writeBaseline) {
     const baseline = summarize(collectRawSqlCounts());
     fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
-    console.log(`Raw SQL baseline written: ${baseline.total} db.prepare(...) call(s) in ${baseline.entries.length} file(s).`);
+    console.log(`Raw SQL baseline written: ${baseline.total} production SQL literal call(s) in ${baseline.entries.length} file(s).`);
     process.exit(0);
 }
 
@@ -64,7 +65,7 @@ const failures = [];
 
 current.entries.forEach(item => {
     const max = allowed.get(item.file) || 0;
-    if (item.count > max) failures.push(`${item.file}: db.prepare(...) ${item.count} > baseline ${max}`);
+    if (item.count > max) failures.push(`${item.file}: 直接 SQL 字面量 ${item.count} > baseline ${max}`);
 });
 
 if (current.total > Number(baseline.total || 0)) {
@@ -74,7 +75,7 @@ if (current.total > Number(baseline.total || 0)) {
 if (failures.length) {
     console.error(`新增 raw SQL 检查失败：${failures.length} 项超出基线。`);
     failures.slice(0, 80).forEach(item => console.error(` - ${item}`));
-    if (!reportOnly) process.exit(1);
+    process.exit(1);
 } else {
-    console.log(`新增 raw SQL 检查通过：${current.total}/${baseline.total || 0} 个 db.prepare(...)，未超出基线。`);
+    console.log(`新增 raw SQL 检查通过：${current.total}/${baseline.total || 0} 个生产直接 SQL 字面量，未超出基线。`);
 }

@@ -13,6 +13,7 @@
 @import url("./workspaces/agent/agent-dag-workspace-shell.css");
 @import url("./workspaces/agent/agent-workflow-modals.css");
 @import url("./workspaces/agent/agent-dag-workbench.css");
+@import url("./workspaces/agent/agent-dag-node-library.css");
 @import url("./workspaces/agent/agent-dag-svg.css");
 @import url("./workspaces/agent/agent-dag-drawer-inspector.css");
 @import url("./workspaces/agent/agent-dag-input-overview.css");

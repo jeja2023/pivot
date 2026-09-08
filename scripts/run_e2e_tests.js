@@ -32,6 +32,25 @@ function runNodeScript(args, env) {
     return Number.isInteger(result.status) ? result.status : 1;
 }
 
+async function startFakeModelServer(logPath = '') {
+    const port = await reserveAvailablePort();
+    const child = cp.spawn(process.execPath, [path.join(root, 'scripts', 'e2e_fake_model.js')], {
+        cwd: root,
+        env: { ...process.env, E2E_FAKE_MODEL_PORT: String(port), E2E_FAKE_MODEL_LOG: logPath },
+        stdio: ['ignore', 'pipe', 'inherit']
+    });
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('E2E fake model server start timeout')), 5000);
+        child.once('error', error => { clearTimeout(timer); reject(error); });
+        child.stdout.once('data', chunk => {
+            clearTimeout(timer);
+            if (String(chunk).includes('ready')) resolve();
+            else reject(new Error('E2E fake model server did not become ready'));
+        });
+    });
+    return { child, url: `http://127.0.0.1:${port}/v1` };
+}
+
 async function main() {
     const databaseUrl = String(
         process.env.TEST_DATABASE_URL
@@ -43,8 +62,11 @@ async function main() {
     }
 
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-e2e-tests-'));
+    const fakeModelLogPath = path.join(testRoot, 'fake-model.log');
     const testSchema = `pivot_e2e_${process.pid}_${Date.now().toString(36)}`;
     const port = await reserveAvailablePort();
+    const fakeModel = await startFakeModelServer(fakeModelLogPath);
+    if (process.env.PIVOT_E2E_DEBUG === 'true') console.error(`[e2e-debug] fake model url: ${fakeModel.url}`);
     const playwrightCli = path.join(root, 'node_modules', '@playwright', 'test', 'cli.js');
     const setupScript = path.join(root, 'scripts', 'setup_pg_test_db.js');
     const env = {
@@ -64,9 +86,11 @@ async function main() {
         PG_IDLE_TIMEOUT_MS: '100',
         PIVOT_TEST_DB_SYNC: 'postgres',
         PIVOT_DB_WRITE_QUEUE_DISABLED: 'false',
+        PIVOT_LOGIN_RATE_LIMIT_MAX: '100',
         DEFAULT_ADMIN_PASSWORD: 'E2eAdmin123',
         JWT_SECRET: 'pivot-e2e-tests-jwt-secret-012345678901234567890123',
         DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123'
+        ,E2E_MODEL_URL: fakeModel.url
     };
 
     let status = 1;
@@ -89,6 +113,14 @@ async function main() {
         console.error(error.stack || error.message);
         status = error.exitCode || 1;
     } finally {
+        if (process.env.PIVOT_E2E_DEBUG === 'true') {
+            try { console.error('[e2e-debug] fake model log:\n' + fs.readFileSync(fakeModelLogPath, 'utf8')); } catch (_) {}
+            try { console.error('[e2e-debug] server log:\n' + fs.readFileSync(path.join(testRoot, 'logs', 'pivot.log'), 'utf8').slice(-20000)); } catch (_) {}
+        }
+        if (fakeModel.child && !fakeModel.child.killed) {
+            fakeModel.child.kill();
+            await new Promise(resolve => fakeModel.child.once('exit', resolve));
+        }
         try {
             const cleanupStatus = runNodeScript([setupScript, '--cleanup'], env);
             if (cleanupStatus !== 0 && status === 0) status = cleanupStatus;

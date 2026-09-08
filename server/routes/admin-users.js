@@ -220,9 +220,9 @@ function createAdminUsersRouter({
             if (e.status === 400) return res.status(400).json({ error: e.message });
             throw e;
         }
-        const hash = bcrypt.hashSync(password, 10);
+        const hash = await bcrypt.hash(password, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
         await transaction(async () => {
-            await execute('UPDATE users SET password_hash = ? WHERE id = ?', [hash, targetUserId]);
+            await execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [hash, targetUserId]);
             await execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
         });
         logAction(req, '重置密码', `用户ID: ${targetUserId}`);
@@ -589,7 +589,7 @@ function createAdminUsersRouter({
             await execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
             await execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
             await execute('UPDATE knowledge_docs SET deleted_at = ?, deleted_by_user = 0, is_enabled = 0, updated_at = ? WHERE user_id = ? AND deleted_at IS NULL', [now, now, targetUserId]);
-            await execute("UPDATE users SET status = 'disabled', deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL", [now, req.user.id, targetUserId]);
+            await execute("UPDATE users SET status = 'disabled', token_version = COALESCE(token_version, 0) + 1, deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL", [now, req.user.id, targetUserId]);
             await archiveDeletedUsernameAsync(targetUserId);
         });
 

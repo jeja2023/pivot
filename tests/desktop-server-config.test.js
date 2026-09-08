@@ -45,6 +45,9 @@ test('Desktop Server Config: 用户自定义配置路径与持久化', () => {
         assert.equal(parsed.mode, 'remote');
         assert.equal(parsed.remoteUrl, 'http://192.168.1.88:3000');
         assert.equal(parsed.stealthSecret, 'test-secret-12345678');
+        if (process.platform !== 'win32') {
+            assert.equal((fs.statSync(configPath).mode & 0o777), 0o600);
+        }
 
         // 候选路径优先级验证：user-config 处于候选列表中并成功加载
         const loadedConfig = loadDesktopConfig(mockApp, [], {});
@@ -76,6 +79,22 @@ test('Desktop Server Config: 安全渲染器白名单包含 server-config.html',
     };
     const fileUrl = pathToFileURL(serverConfigPage).toString();
     assert.equal(isTrustedRendererUrl(fileUrl, 'http://192.168.1.88:3000/', allowedOptions), true);
+});
+
+test('Desktop Server Config: 主渲染页不暴露修改服务器配置或探测地址的特权桥', () => {
+    const preload = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'preload.js'), 'utf8');
+    assert.doesNotMatch(preload, /setServerConfig\s*\(/);
+    assert.doesNotMatch(preload, /testServerConnection\s*\(/);
+    const configPreload = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'server-config-preload.js'), 'utf8');
+    assert.match(configPreload, /set-server-config/);
+    assert.match(configPreload, /test-server-connection/);
+});
+
+test('Desktop main process explicitly denies remote renderer permission prompts', () => {
+    const policy = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'renderer-permissions.js'), 'utf8');
+    assert.match(policy, /setPermissionRequestHandler/);
+    assert.match(policy, /callback\(false\)/);
+    assert.match(policy, /setPermissionCheckHandler/);
 });
 
 test('Desktop Server Config: 服务端健康探测与签名握手', async () => {
@@ -144,4 +163,3 @@ test('Desktop Server Config: 企业锁定 lockServerConfig 策略继承与防降
     const unmanagedMerged = mergeDesktopConfigs(unmanagedBase, userOverride);
     assert.equal(unmanagedMerged.lockServerConfig, false);
 });
-

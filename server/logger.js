@@ -3,6 +3,7 @@ const pinoHttp = require('pino-http');
 const path = require('path');
 const fs = require('fs');
 const { getClientIp } = require('./http');
+const { getRequestContext } = require('./services/request-context');
 
 const os = require('os');
 const isProduction = process.env.NODE_ENV === 'production';
@@ -20,6 +21,9 @@ try {
 } catch (_err) {
     // 忽略只读或虚拟文件系统路径下的创建失败
 }
+const logFilePath = path.join(logDir, 'pivot.log');
+const logFileMaxBytes = Math.max(Number.parseInt(process.env.LOG_FILE_MAX_BYTES || String(50 * 1024 * 1024), 10) || 50 * 1024 * 1024, 1024 * 1024);
+const logFileMaxArchives = Math.max(Number.parseInt(process.env.LOG_FILE_MAX_ARCHIVES || '5', 10) || 5, 1);
 
 // 敏感字段脱敏配置
 const redactFields = [
@@ -90,14 +94,42 @@ if (consolePretty) {
 }
 
 // 始终将结构化 JSON 日志写入文件（同步写入避免进程快速退出或单例检测退出时 sonic-boom 尚未就绪导致异常）
-streams.push({ 
-    level: 'info',
-    stream: pino.destination({
-        dest: path.join(logDir, 'pivot.log'),
-        sync: true,
-        mkdir: true
-    })
+const fileLogDestination = pino.destination({
+    dest: logFilePath,
+    sync: true,
+    mkdir: true
 });
+streams.push({
+    level: 'info',
+    stream: fileLogDestination
+});
+
+function rotateLogFileIfNeeded() {
+    try {
+        const stat = fs.statSync(logFilePath);
+        if (stat.size < logFileMaxBytes) return;
+        fileLogDestination.flushSync?.();
+        fs.rmSync(`${logFilePath}.${logFileMaxArchives}`, { force: true });
+        for (let index = logFileMaxArchives - 1; index >= 1; index -= 1) {
+            const source = `${logFilePath}.${index}`;
+            const target = `${logFilePath}.${index + 1}`;
+            if (fs.existsSync(source)) {
+                fs.renameSync(source, target);
+            }
+        }
+        try {
+            fs.renameSync(logFilePath, `${logFilePath}.1`);
+        } catch (_) {
+            // Windows may hold the active descriptor; truncate it as a bounded fallback.
+            fs.truncateSync(logFilePath, 0);
+            fileLogDestination.reopen?.(logFilePath);
+            return;
+        }
+        fileLogDestination.reopen?.(logFilePath);
+    } catch (_) {}
+}
+const logRotationTimer = setInterval(rotateLogFileIfNeeded, 60 * 1000);
+logRotationTimer.unref?.();
 
 const logger = pino({
     level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
@@ -108,6 +140,10 @@ const logger = pino({
     timestamp: () => `,"time":"${new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('Z', '+08:00')}"`,
     formatters: {
         level: (label) => ({ level: label.toUpperCase() })
+    },
+    mixin: () => {
+        const context = getRequestContext();
+        return context.requestId ? { requestId: context.requestId, requestUserId: context.userId } : {};
     }
 }, pino.multistream(streams));
 

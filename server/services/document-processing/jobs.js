@@ -263,28 +263,21 @@ async function updatePageText({ pageId, text, ocrStatus, confidence }) {
 async function insertOcrBlocks({ userId, fileId, jobId, pageId, pageNumber, blocks = [] }) {
     if (!blocks || !blocks.length) return;
     const now = getBeijingTimestamp();
-    for (let index = 0; index < blocks.length; index++) {
-        const block = blocks[index];
+    // OCR 一页可包含数百文本块；按批写入避免逐条数据库往返和事务放大。
+    const batchSize = 500;
+    for (let offset = 0; offset < blocks.length; offset += batchSize) {
+        const batch = blocks.slice(offset, offset + batchSize);
         await execute(`
             INSERT INTO document_ocr_blocks (
                 user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, bbox_json, confidence, language, engine, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-            userId,
-            fileId,
-            jobId,
-            pageId,
-            pageNumber,
-            Number(block.sortOrder ?? index),
-            block.blockType || 'line',
-            String(block.text || '').trim(),
-            safeJson(block.bbox || []),
-            Number(block.confidence || 0),
-            block.language || '',
-            block.engine || '',
-            now,
-            now
-        ]);
+            ) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+        `, batch.flatMap((block, index) => [
+            userId, fileId, jobId, pageId, pageNumber,
+            Number(block.sortOrder ?? (offset + index)),
+            block.blockType || 'line', String(block.text || '').trim(),
+            safeJson(block.bbox || []), Number(block.confidence || 0),
+            block.language || '', block.engine || '', now, now
+        ]));
     }
 }
 

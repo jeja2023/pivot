@@ -236,6 +236,19 @@ test('ConcurrencySemaphore keeps configured max while adaptive max changes', () 
     assert.equal(semaphore.getStatus().configuredMax, 4);
 });
 
+test('ConcurrencySemaphore removes aborted requests from the wait queue', async () => {
+    const semaphore = new ConcurrencySemaphore({ maxConcurrent: 1, maxQueueSize: 2, queueTimeoutMs: 5000 });
+    await semaphore.acquire();
+    const controller = new AbortController();
+    const waiting = semaphore.acquire({ signal: controller.signal });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(semaphore.getStatus().queued, 1);
+    controller.abort();
+    await assert.rejects(waiting, error => error.code === 'REQUEST_ABORTED');
+    assert.equal(semaphore.getStatus().queued, 0);
+    semaphore.release();
+});
+
 test('模型视觉能力辅助函数可检测视觉输入和标记', () => {
     assert.equal(modelSupportsVision({ supports_vision: 1 }), true);
     assert.equal(modelSupportsVision({ supports_vision: 0 }), false);
@@ -1180,8 +1193,8 @@ test('api access disabled blocks openai router at the router level', async () =>
         assert.equal(getApiAccessSetting(), previousValue);
     }
 });
-test('public health snapshot is lightweight and does not expose filesystem paths', () => {
-    const health = getSystemHealthSnapshot({ public: true });
+test('public health snapshot is lightweight and does not expose filesystem paths', async () => {
+    const health = await getSystemHealthSnapshot({ public: true });
     assert.ok(['ok', 'degraded', 'error'].includes(health.status));
     assert.ok(health.checks.some(item => item.name === 'database'));
     assert.equal(JSON.stringify(health).includes('path'), false);

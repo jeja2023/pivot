@@ -7,7 +7,7 @@ const {
     listAgentControlMessages,
     sendAgentControlMessage
 } = require('../server/services/agent-control');
-const { cancelAgentRun } = require('../server/services/agent-runtime');
+const { runs: { cancelAgentRun } } = require('../server/services/agent-runtime');
 
 test('AgentControl delivers parent-child messages with user isolation and acknowledgement', async () => {
     const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');

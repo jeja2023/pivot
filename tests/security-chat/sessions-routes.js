@@ -126,11 +126,12 @@ test('聊天消息服务会保存消息并更新会话统计', async () => {
         await touchSession(sessionId, '2099-01-01 00:00:00');
 
         const row = db.prepare(`
-            SELECT token_count, cost_time, tokens_per_sec
+            SELECT token_count, context_token_count, cost_time, tokens_per_sec
             FROM messages
             WHERE session_id = ? AND role = 'assistant'
         `).get(sessionId);
         assert.equal(row.token_count, 7);
+        assert.equal(row.context_token_count, estimateTokens('world'));
         assert.equal(row.cost_time, 1.5);
         assert.equal(row.tokens_per_sec, 3.2);
         assert.equal(db.prepare('SELECT updated_at FROM sessions WHERE id = ?').get(sessionId).updated_at, '2099-01-01 00:00:00');

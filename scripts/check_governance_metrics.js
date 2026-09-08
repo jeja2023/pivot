@@ -6,6 +6,7 @@ const baseline = JSON.parse(fs.readFileSync(path.join(__dirname, 'governance_bas
 const reportOnly = process.argv.includes('--report');
 const productionRoots = ['server', 'client', 'desktop'];
 const ignoredPrefixes = ['client/common/vendor/'];
+const BASELINE_SHRINK_GRACE = 30;
 
 function walk(relativeDir, files = []) {
     const absoluteDir = path.join(root, relativeDir);
@@ -50,7 +51,13 @@ for (const item of largeFiles) {
 for (const [file, allowed] of Object.entries(baseline.files)) {
     if (!fs.existsSync(path.join(root, file))) continue;
     const current = lineCount(file);
-    if (current > allowed) failures.push(`${file} 从基线 ${allowed} 行增长到 ${current} 行`);
+    if (current <= baseline.largeFileThreshold) {
+        failures.push(`${file} 已降至 ${current} 行（不超过 ${baseline.largeFileThreshold} 行阈值），必须从治理基线移除以恢复默认保护`);
+    } else if (current > allowed) {
+        failures.push(`${file} 从基线 ${allowed} 行增长到 ${current} 行`);
+    } else if (current < allowed - BASELINE_SHRINK_GRACE) {
+        failures.push(`${file} 已从基线 ${allowed} 行缩小到 ${current} 行，请同步收紧治理基线`);
+    }
 }
 
 const report = {

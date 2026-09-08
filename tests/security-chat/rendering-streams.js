@@ -8,6 +8,7 @@ const {
     buildModelHeaders,
     buildResponsesUrl,
     convertChatMessagesToResponsesInput,
+    closeRealtimeEventClients,
     createChartSseCapture,
     createChatRenderSandbox,
     createFakeSseResponse,
@@ -75,7 +76,6 @@ test('知识库和工具库工作台入口保持可点击', () => {
     const ragDebugPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'rag-debug-modal.html'), 'utf8');
     const appWorkspaces = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'app-workspaces.js'), 'utf8');
     const chatCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'chat.css'), 'utf8');
-    const adminCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'admin.css'), 'utf8');
     const knowledgeCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'knowledge.css'), 'utf8');
     const inputCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'input.css'), 'utf8');
     const mcpCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'mcp', 'mcp-forms.css'), 'utf8');
@@ -114,7 +114,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.doesNotMatch(agentPartial, /agent-capability-list/);
     assert.doesNotMatch(agentRunLoaders, /loadCapabilityPackages/);
     assert.doesNotMatch(agentRunLoaders, /data-capability-key/);
-    assert.match(adminCss, /admin-tool-policy\.css/);
+    assert.doesNotMatch(chatCss, /styles\/admin\.css/);
     assert.match(adminSettings, /boundEmbeddingOpen/);
     assert.doesNotMatch(adminSettings, /cloneNode/);
     assert.match(ragCore, /ragDebugSample/);
@@ -610,6 +610,31 @@ test('实时 SSE 事件按订阅用户隔离', () => {
 
     unsubscribeFirst();
     unsubscribeSecond();
+});
+
+test('服务有序关闭会通知并释放所有实时 SSE 客户端', () => {
+    const first = createFakeSseResponse();
+    const second = createFakeSseResponse();
+    subscribeUserEvents({ id: 301 }, first, { heartbeatMs: 0 });
+    subscribeUserEvents({ id: 302 }, second, { heartbeatMs: 0 });
+
+    assert.equal(closeRealtimeEventClients({ reason: 'sigterm' }), 2);
+    assert.match(first.chunks.join(''), /event: server\.shutdown/);
+    assert.match(second.chunks.join(''), /"reason":"sigterm"/);
+    assert.equal(getRealtimeStats().clients, 0);
+});
+
+test('达到每用户 SSE 上限的请求不会先登记再返回 429', () => {
+    const clients = Array.from({ length: 8 }, () => createFakeSseResponse());
+    const unsubscribes = clients.map(client => subscribeUserEvents({ id: 401 }, client, { heartbeatMs: 0 }));
+    const rejected = createFakeSseResponse();
+    subscribeUserEvents({ id: 401 }, rejected, { heartbeatMs: 0 });
+
+    assert.equal(getRealtimeStats().clients, 8);
+    assert.equal(rejected.statusCode, 429);
+    assert.equal(rejected.jsonBody.code, 'REALTIME_CONNECTION_LIMIT');
+    unsubscribes.forEach(unsubscribe => unsubscribe());
+    assert.equal(getRealtimeStats().clients, 0);
 });
 
 test('createStreamAccumulator 包装推理增量并捕获用量', () => {

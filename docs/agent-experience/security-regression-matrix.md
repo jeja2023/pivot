@@ -1,12 +1,14 @@
-# Security Regression Matrix
+# Agent Security Regression Matrix
 
-| Area | Regression |
-| --- | --- |
-| Skill | Invalid signature, missing lockfile, path traversal, lifecycle script, sandbox timeout, failing fixed test, unpublished runtime lookup |
-| Workflow | Side-effect in preview, missing evaluation gate, unauthorized release scope, stale dependency binding, rollout mismatch, rollback |
-| Channel | SSRF/private host, invalid credential reference, oversized attachment, chunk duplication, retry storm, dead letter, approval interaction |
-| Goals | Webhook replay/signature, duplicate event, file path outside roots, write SQL, budget/cooldown/failure circuit |
-| Data | User/tenant cross-read, field version conflict, sensitive memory, export/delete audit, reliability minimum sample |
-| Runtime | Restart, checkpoint replay, approval re-request, outbox duplicate, provider timeout, database outage |
+每一行均须给出可执行测试证据；`npm run check:regression-matrix` 会校验测试文件和测试标题仍然存在。这里的证据代表已覆盖的行为路径，不把参数归一化测试伪装成完整故障演练。
 
-The matrix is executable through `tests/agent-production-control.test.js`, `tests/agent-fault-drills.test.js`, `tests/agent-postgres-integration.test.js`, existing security suites, and the staging drills in `scripts/agent-production-drill.js` and `scripts/agent-load-drill.js`.
+| Area | Regression | Evidence |
+| --- | --- | --- |
+| Skill | Invalid signature, missing lockfile, path traversal, lifecycle script, sandbox timeout, failing fixed test, unpublished runtime lookup | `tests/agent-skill-packages.test.js#SKILL.zip verifies detached RSA signature, permissions and installs in a jailed directory`<br>`tests/agent-skill-packages.test.js#SKILL.zip rejects traversal, duplicate entries and unauthorized permissions`<br>`tests/agent-postgres-integration.test.js#PostgreSQL Skill release path enforces signature, sandbox regression and runtime resolution` |
+| Workflow | Side-effect in preview, missing evaluation gate, unauthorized release scope, stale dependency binding, rollout mismatch, rollback | `tests/agent-non-idempotent-fault-matrix.test.js#non-idempotent fault matrix never auto-replays ambiguous side effects`<br>`tests/agent-postgres-integration.test.js#workflow release gate requires a completed fixed evaluation batch`<br>`tests/e2e/workflow-version.spec.js#receiver dependency mapping becomes stale after a newly published workflow version` |
+| Channel | SSRF/private host, invalid credential reference, oversized attachment, chunk duplication, retry storm, dead letter, approval interaction | `tests/agent-postgres-integration.test.js#Webhook Channel Adapter performs bounded chunked delivery over a real local HTTP server`<br>`tests/agent-channel-delivery-reliability.test.js#渠道投递以原子认领抵御并发重复，失败上限进入死信且过期认领可恢复`<br>`tests/agent-fault-drills.test.js#channel approval interaction signatures are constant-time verifiable` |
+| Goals | Webhook replay/signature, duplicate event, file path outside roots, write SQL, budget/cooldown/failure circuit | `tests/agent-production-control.test.js#goal webhook trigger requires explicit token and supports replay controls`<br>`tests/agent-production-control.test.js#file and database goal triggers are normalized as governed read-only sources`<br>`tests/agent-channel-delivery-reliability.test.js#持续目标会阻止冷却窗口内重复运行，并在失败阈值后熔断暂停` |
+| Data | User/tenant cross-read, field version conflict, sensitive memory, export/delete audit, reliability minimum sample | `tests/agent-postgres-integration.test.js#PostgreSQL profile field versions reject stale concurrent updates`<br>`tests/agent-production-control.test.js#reliability signals preserve minimum sample confidence`<br>`tests/security-agent.test.js#automation schedules validate Sunday, reject malformed payloads, and deduplicate manual runs` |
+| Runtime | Restart, checkpoint replay, approval re-request, outbox duplicate, provider timeout, database outage | `tests/agent-runtime-lifecycle.test.js#runtime recovery requeues stale idempotent checkpoints and suspends side effects for approval`<br>`tests/agent-event-resource-plan.test.js#Agent event outbox is retryable and event replay advances by seq`<br>`tests/agent-provider-sse-harness.test.js#Agent 模型在首响应时限内未开始响应会给出可诊断错误码`<br>`tests/agent-runtime-lifecycle.test.js#任务认领后读取用户遇到瞬时数据库异常时会延迟回队而非遗留 running 孤儿` |
+
+覆盖矩阵与运行时测试互补：上线前仍应在目标环境执行发布演练，但新增、改名或删除测试不会再让文档静默失真。

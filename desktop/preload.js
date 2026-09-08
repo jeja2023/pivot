@@ -11,12 +11,6 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     getServerConfig() {
         return ipcRenderer.invoke('pivot-desktop:get-server-config');
     },
-    setServerConfig(payload = {}) {
-        return ipcRenderer.invoke('pivot-desktop:set-server-config', payload);
-    },
-    testServerConnection(payload = {}) {
-        return ipcRenderer.invoke('pivot-desktop:test-server-connection', payload);
-    },
     openServerConfigDialog() {
         return ipcRenderer.invoke('pivot-desktop:open-server-config-dialog');
     },

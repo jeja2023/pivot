@@ -10,6 +10,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
         transaction,
         decryptSecret,
         encryptSecret,
+        preserveEncryptedSecret,
         assertSafeMcpOutboundUrl,
         getAccessibleMcpServer,
         normalizeServerRowAsync,
@@ -110,7 +111,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                 INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, config, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
                 RETURNING id
-            `, [shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey), description, JSON.stringify(config), now, now]);
+            `, [shared ? null : req.user.id, name, baseUrl, encryptSecret(apiKey, 'mcp_servers.api_key'), description, JSON.stringify(config), now, now]);
             logAction(req, '新增工具服务', `${name}: ${baseUrl}`);
             const created = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [row?.id]);
             res.status(201).json({ success: true, server: await normalizeServerRowAsync(created) });
@@ -149,7 +150,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                     connection.port,
                     connection.database_name,
                     connection.username,
-                    encryptSecret(connection.password),
+                    encryptSecret(connection.password, 'mcp_database_connections.password'),
                     JSON.stringify(connection.options),
                     now,
                     now
@@ -192,7 +193,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                     userId,
                     service.serviceType,
                     JSON.stringify(service.config),
-                    encryptSecret(service.secret),
+                    encryptSecret(service.secret, 'mcp_builtin_configs.secret'),
                     now,
                     now
                 ]);
@@ -238,7 +239,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                 ...req.body,
                 service_type: serviceType,
                 secret: req.body?.secret === undefined || req.body?.secret === '********'
-                    ? decryptSecret(configRow.secret || '')
+                    ? decryptSecret(configRow.secret || '', 'mcp_builtin_configs.secret')
                     : req.body?.secret
             });
             if (service.serviceType === 'im') {
@@ -258,7 +259,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                 `, [
                     service.serviceType,
                     JSON.stringify(service.config),
-                    encryptSecret(service.secret),
+                    encryptSecret(service.secret, 'mcp_builtin_configs.secret'),
                     status,
                     now,
                     existing.id
@@ -306,7 +307,7 @@ function mountMcpConfigurationRoutes(deps = {}) {
                     connection.port,
                     connection.database_name,
                     connection.username,
-                    encryptSecret(connection.password),
+                    encryptSecret(connection.password, 'mcp_database_connections.password'),
                     JSON.stringify(connection.options),
                     status,
                     now,
@@ -335,8 +336,8 @@ function mountMcpConfigurationRoutes(deps = {}) {
             const config = normalizeExternalServerConfig({ ...parseServerConfig(existing.config), ...(req.body || {}) });
             const apiKeyInput = req.body?.api_key ?? req.body?.apiKey;
             const nextApiKey = apiKeyInput === undefined || apiKeyInput === '********'
-                ? encryptSecret(existing.api_key || '')
-                : encryptSecret(String(apiKeyInput || '').trim());
+                ? preserveEncryptedSecret(existing.api_key || '', 'mcp_servers.api_key')
+                : encryptSecret(String(apiKeyInput || '').trim(), 'mcp_servers.api_key');
             await assertSafeMcpOutboundUrl(baseUrl, req.user);
             if (config.healthCheckUrl) await assertSafeMcpOutboundUrl(config.healthCheckUrl, req.user);
             await execute(`

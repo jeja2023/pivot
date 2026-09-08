@@ -3,6 +3,7 @@ const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { redactTraceValue } = require('./agent-traces');
 const { buildAgentAuditFields } = require('./agent-step-context');
+const { getRequestId } = require('./request-context');
 
 function payloadHash(payload) {
     return crypto.createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex');
@@ -21,7 +22,8 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
         previousWorldStateHash: stepContext?.previousWorldStateHash || payload?.previousWorldStateHash || '',
         worldStateWindow: stepContext?.worldStateWindow || payload?.contextWindow || {}
     }, { entrypoint: entrypoint || stepContext?.entrypoint || payload?.entrypoint || 'agent', purpose: type });
-    const safePayload = redactTraceValue({ ...payload, ...auditContext });
+    const requestId = getRequestId();
+    const safePayload = redactTraceValue({ ...payload, ...auditContext, ...(requestId ? { requestId } : {}) });
     const hash = payloadHash(safePayload);
     const now = getBeijingTimestamp();
     const safeEventKey = String(eventKey || '').slice(0, 255);

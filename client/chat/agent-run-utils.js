@@ -128,9 +128,7 @@ function agentStatusLabel(status) {
     return map[String(status || '').trim().toLowerCase()] || status || '-';
 }
 
-if (typeof window !== 'undefined' && window.Pivot?.legacy) {
-    window.Pivot.legacy.agentStatusLabel = agentStatusLabel;
-}
+window.Pivot?.exposeModule?.('agent.runUtils', { statusLabel: agentStatusLabel });
 
 
 const AGENT_ACTIVE_STATUS_SET = new Set([

@@ -6,7 +6,7 @@ const { execFileSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
 const stagedMode = process.argv.includes('--staged');
-const reportOnly = String(process.env.PIVOT_STANDARDS_REPORT_ONLY || '').toLowerCase() === 'true';
+const changedMode = process.argv.includes('--changed');
 
 const failures = [];
 
@@ -148,10 +148,20 @@ function getStagedFiles() {
     }
 }
 
-function parseAddedLines(file) {
+function getChangedFiles() {
+    try {
+        const output = runGitDiff(['HEAD^', 'HEAD', '--name-only', '--diff-filter=ACMR']);
+        return output.split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => item.replace(/\\/g, '/'));
+    } catch (error) {
+        addFailure(`无法读取 HEAD^..HEAD 变更文件：${error.message}`);
+        return [];
+    }
+}
+
+function parseAddedLines(file, diffArgs = ['--cached']) {
     let diff = '';
     try {
-        diff = runGitDiff(['--cached', '--unified=0', '--', file]);
+        diff = runGitDiff([...diffArgs, '--unified=0', '--', file]);
     } catch (error) {
         addFailure(`无法读取暂存区 diff：${file}，${error.message}`);
         return [];
@@ -318,10 +328,9 @@ function checkBackendRouteAddedLine(file, item) {
     }
 }
 
-function checkStagedChanges() {
-    const files = getStagedFiles().filter(file => !isSkippableGeneratedFile(file));
-    files.forEach(file => {
-        const addedLines = parseAddedLines(file);
+function checkChanges(files, diffArgs) {
+    files.filter(file => !isSkippableGeneratedFile(file)).forEach(file => {
+        const addedLines = parseAddedLines(file, diffArgs);
         addedLines.forEach(item => {
             if (/\.(js|css|html)$/i.test(file)) checkChineseHumanTextAddedLine(file, item);
             if (isFrontendFile(file)) checkFrontendAddedLine(file, item);
@@ -330,16 +339,25 @@ function checkStagedChanges() {
     });
 }
 
+function checkStagedChanges() {
+    checkChanges(getStagedFiles(), ['--cached']);
+}
+
+function checkCommittedChanges() {
+    checkChanges(getChangedFiles(), ['HEAD^', 'HEAD']);
+}
+
 function main() {
     checkRequiredDocuments();
     checkPackageScripts();
     checkGitHookFiles();
     checkNoRuntimePublicCdn();
     if (stagedMode) checkStagedChanges();
+    if (changedMode) checkCommittedChanges();
 
     if (failures.length === 0) {
-        console.log(stagedMode
-            ? '开发规范检查通过：基础门禁和暂存区增量均符合要求。'
+        console.log(stagedMode || changedMode
+            ? `开发规范检查通过：基础门禁和${stagedMode ? '暂存区' : '提交'}增量均符合要求。`
             : '开发规范检查通过：基础门禁已固化。');
         return;
     }
@@ -347,7 +365,7 @@ function main() {
     console.error(`开发规范检查失败：${failures.length} 项问题。`);
     failures.slice(0, 40).forEach(message => console.error(` - ${message}`));
     if (failures.length > 40) console.error(` - 还有 ${failures.length - 40} 项未显示`);
-    if (!reportOnly) process.exit(1);
+    process.exit(1);
 }
 
 main();

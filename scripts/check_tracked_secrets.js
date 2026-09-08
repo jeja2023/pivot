@@ -25,7 +25,7 @@ for (const relative of tracked) {
     if (secretKeyPattern.test(text) && !isFixture && !relative.endsWith('.example') && !relative.endsWith('.example.json')) {
         violations.push(`${relative}: 检测到疑似密钥配置值`);
     }
-    const placeholderCredential = /(?:postgres(?:ql)?|mysql):\/\/[^\s:@]+:(?:pass|password|change-me|yoursecurepassword|\*{3,})@/i.test(text);
+    const placeholderCredential = /(?:postgres(?:ql)?|mysql):\/\/[^\s:@]+:(?:pass|password|change-me|replace[_-][^@]*|your[^@]*password|\*{3,})@/i.test(text);
     if (!isFixture && !placeholderCredential && (credentialUrlPattern.test(text) || tokenPattern.test(text))) {
         violations.push(`${relative}: 检测到疑似凭据或令牌`);
     }
