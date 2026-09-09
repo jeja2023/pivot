@@ -296,7 +296,7 @@ window.Pivot.legacy.loadApiKeys = async function() {
     }
 }
 
-document.getElementById('api-keys-body')?.addEventListener('click', (event) => {
+document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-api-key-action="delete"]');
     if (!button) return;
     window.Pivot.legacy.deleteApiKey(button.dataset.apiKeyId);
