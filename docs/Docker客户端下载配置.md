@@ -154,7 +154,7 @@ fetch('/downloads/Pivot-Setup.exe', { method: 'HEAD' })
 - `Pivot Setup <version>.exe`
 - `Pivot Setup <version>.exe.blockmap`
 
-业务 `remoteUrl` 可以是隔离局域网 HTTP 地址，但自动更新不允许复用 HTTP；需配置独立的 HTTPS 更新地址和 `allowedOrigins`，或保持 `autoUpdate.enabled=false` 并通过受控共享目录/离线介质分发。
+桌面客户端现已全面放开私有局域网/专网 HTTP 自动更新，无公网 HTTPS 域名的内网服务器亦可直接作为更新源。更新源支持基于 `remoteUrl` 同源动态推导（`http://<ip>:<port>/downloads/`），当服务器 IP 或端口变更时，客户端跟随无缝适应。
 
 ## 多版本支持（可选）
 
