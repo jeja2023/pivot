@@ -1,15 +1,31 @@
-<div id="key-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="key-modal-title" style="z-index: 5000;">
-        <div class="modal" style="width: 550px; padding: 30px; position: relative;">
-            <button type="button" class="btn-secondary settings-dialog-close"
-                data-static-action="close-key-modal">关闭</button>
-            <div id="key-input-view">
-                <h3 id="key-modal-title" style="margin-bottom: 20px;">新建 API Key</h3>
-                <div class="form-item" style="margin-bottom: 20px;">
-                    <label for="new-key-name">密钥名称</label>
-                    <input type="text" id="new-key-name" class="form-input" placeholder="例如：沉浸式翻译" style="width: 100%;">
+<div id="key-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="key-modal-title">
+    <div class="modal key-modal-panel">
+
+        <!-- 创建表单视图 -->
+        <div id="key-input-view">
+            <div class="key-modal-header">
+                <div class="key-modal-title-group">
+                    <h3 id="key-modal-title" class="key-modal-title">新建 API Key</h3>
+                    <p class="key-modal-subtitle">创建后请立即保存，密钥仅完整显示一次。</p>
                 </div>
+                <button type="button" class="key-modal-close-icon btn-secondary"
+                    data-static-action="close-key-modal" title="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="key-modal-body">
                 <div class="form-item key-modal-field">
-                    <label for="new-key-expires">有效期限</label>
+                    <label class="key-modal-label" for="new-key-name">密钥名称</label>
+                    <input type="text" id="new-key-name" class="form-input key-modal-input"
+                        placeholder="例如：沉浸式翻译、个人测试">
+                </div>
+
+                <div class="form-item key-modal-field">
+                    <label class="key-modal-label" for="new-key-expires">有效期限</label>
                     <select id="new-key-expires" class="form-input key-modal-select">
                         <option value="30">30 天</option>
                         <option value="90" selected>90 天（默认）</option>
@@ -19,36 +35,67 @@
                         <option value="custom">自定义天数...</option>
                     </select>
                 </div>
+
                 <div id="new-key-custom-days-wrap" class="form-item key-modal-field hidden">
-                    <label for="new-key-custom-days">自定义有效天数（1 ~ 3650 天）</label>
-                    <input type="number" id="new-key-custom-days" class="form-input" min="1" max="3650" placeholder="请输入有效天数，如 60">
+                    <label class="key-modal-label" for="new-key-custom-days">自定义有效天数</label>
+                    <div class="key-modal-custom-wrap">
+                        <input type="number" id="new-key-custom-days" class="form-input key-modal-input"
+                            min="1" max="3650" placeholder="输入天数，如 60">
+                        <span class="key-modal-unit-tag">天</span>
+                    </div>
+                    <p class="key-modal-hint">支持 1 ~ 3650 天（约 10 年）。</p>
                 </div>
-                <button type="button" data-static-action="confirm-create-key" class="btn-primary"
-                    style="width: 100%; height: 42px;">确定创建</button>
             </div>
-            <div id="key-result-view" class="hidden">
-                <h3 style="margin-bottom: 15px; color: var(--primary);">创建成功</h3>
-                <p style="font-size: 0.88rem; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">
-                    请立即复制并妥善保存此密钥。出于安全考虑，它将<strong>不会再次完整显示</strong>：</p>
-                <div
-                    style="background: rgba(15, 23, 42, 0.04); padding: 16px 50px 16px 16px; border-radius: 10px; font-family: 'Fira Code', 'JetBrains Mono', monospace; border: 1px dashed var(--primary); position: relative; font-size: 0.9rem; color: var(--text-main); margin-bottom: 25px; overflow: hidden;">
-                    <span id="generated-key-text" style="display: block; white-space: nowrap; overflow-x: auto; scrollbar-width: thin;"></span>
-                    <button type="button" data-static-action="copy-generated-key"
-                        style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: white; border: 1px solid var(--border); border-radius: 6px; padding: 6px; color: var(--primary); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"
-                        title="复制到剪贴板">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
-                        </svg>
-                    </button>
-                </div>
-                <div id="generated-key-meta" class="key-modal-result-meta">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                    <span id="generated-key-expiry-text"></span>
-                </div>
-                <button type="button" data-static-action="close-key-modal" class="btn-secondary"
-                    style="width: 100%; height: 42px;">我已妥善保存</button>
+
+            <div class="key-modal-footer">
+                <button type="button" data-static-action="close-key-modal"
+                    class="btn-secondary key-modal-btn">取消</button>
+                <button type="button" data-static-action="confirm-create-key"
+                    class="btn-primary key-modal-btn">确定创建</button>
             </div>
         </div>
+
+        <!-- 创建成功结果视图 -->
+        <div id="key-result-view" class="hidden key-result-card">
+            <div class="key-modal-header">
+                <div class="key-result-head">
+                    <div class="key-result-icon-wrap">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                    <div class="key-modal-title-group">
+                        <h3 class="key-modal-title">创建成功</h3>
+                        <p class="key-modal-subtitle">请立即复制并妥善保存，密钥<strong>不会再次完整显示</strong>。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="key-token-box">
+                <span id="generated-key-text" class="key-token-text"></span>
+                <button type="button" data-static-action="copy-generated-key"
+                    class="btn-secondary key-copy-action-btn" title="复制到剪贴板">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+                    </svg>
+                    复制
+                </button>
+            </div>
+
+            <div id="generated-key-meta" class="key-meta-badge-bar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span id="generated-key-expiry-text"></span>
+            </div>
+
+            <div class="key-modal-footer">
+                <button type="button" data-static-action="close-key-modal"
+                    class="btn-primary key-modal-btn key-modal-btn--full">我已妥善保存，关闭</button>
+            </div>
+        </div>
+
     </div>
+</div>
