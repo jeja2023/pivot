@@ -745,7 +745,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const setLibraryCollapsed = (collapsed) => {
             canvas.classList.toggle('is-library-collapsed', !!collapsed);
             if (libraryExpandBtn) libraryExpandBtn.hidden = !collapsed;
-            updateViewBox();
         };
         const mountNodeLibrary = () => {
             if (!window.Pivot.legacy.PivotDagNodeLibrary) return;
@@ -774,7 +773,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             canvas.appendChild(libraryExpandBtn);
             canvas.classList.add('has-node-library');
         };
-        if (!readOnly) mountNodeLibrary();
+        // 工作流编排页面不展示左侧悬浮节点面板，节点添加统一由顶部工具栏「添加节点」和「高级节点」完成
+        // if (!readOnly) mountNodeLibrary();
 
         // —— textarea 外部改动同步回画布 ——
         const onTextareaInput = () => {

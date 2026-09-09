@@ -307,28 +307,24 @@ body.dark-mode .pivot-node-library-advanced-toggle,
     color: #cbd5e1;
 }
 
-/* ── 画布容器：为左侧面板腾出空间 ─────────── */
+/* ── 画布容器：工作流编排页面不展示左侧节点面板，画布占满全宽 ─────────── */
 .pivot-dag-editor-canvas.has-node-library {
-    padding-left: 260px;
+    padding-left: 0 !important;
 }
 
-.pivot-dag-node-library-host {
-    position: absolute;
-    top: 10px;
-    bottom: 10px;
-    left: 10px;
-    z-index: 7;
-    width: 240px;
-    pointer-events: auto;
+.pivot-dag-node-library-host,
+.pivot-node-library,
+.pivot-node-library-toggle {
+    display: none !important;
 }
 
-/* 折叠态：面板隐藏，画布占满 */
+/* 折叠态与隐藏态：面板隐藏，画布占满 */
 .pivot-dag-editor-canvas.has-node-library.is-library-collapsed {
-    padding-left: 0;
+    padding-left: 0 !important;
 }
 
 .pivot-dag-editor-canvas.is-library-collapsed .pivot-dag-node-library-host {
-    display: none;
+    display: none !important;
 }
 
 /* ── 空画布引导 ─────────────────────────────── */
