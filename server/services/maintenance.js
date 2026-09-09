@@ -203,7 +203,32 @@ function cleanupOldBackups(options = {}) {
     };
 }
 
-const { execute } = require('../db/client');
+const { execute, transaction } = require('../db/client');
+const { getPgSchemaName, getPgSchemaTableNames } = require('../db/schema/pg');
+
+const ANALYZE_TIMEOUT_MS = Math.max(
+    Number.parseInt(process.env.PG_ANALYZE_TIMEOUT_MS || '60000', 10) || 60000,
+    1000
+);
+
+function quotePgIdentifier(value) {
+    return `"${String(value || '').replace(/"/g, '""')}"`;
+}
+
+function listAnalyzableTables() {
+    const schemaname = getPgSchemaName();
+    return getPgSchemaTableNames().map(tablename => ({ schemaname, tablename }));
+}
+
+async function analyzeOneTable(table) {
+    const schema = quotePgIdentifier(table.schemaname);
+    const name = quotePgIdentifier(table.tablename);
+    await transaction(async trx => {
+        // 每张表使用独立事务，避免一次性 ANALYZE 84 张表超过
+        // PostgreSQL max_locks_per_transaction 并触发 shared memory exhausted。
+        await trx.execute(`SET LOCAL statement_timeout = ${ANALYZE_TIMEOUT_MS}; ANALYZE ${schema}.${name}`);
+    });
+}
 
 async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
     maintenanceState.auditCleanup.lastRunAt = getBeijingTimestamp();
@@ -290,7 +315,19 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
 async function optimizeDatabase() {
     maintenanceState.optimize.lastRunAt = getBeijingTimestamp();
     try {
-        await execute('ANALYZE');
+        const tables = await listAnalyzableTables();
+        const failures = [];
+        for (const table of tables) {
+            try {
+                await analyzeOneTable(table);
+            } catch (error) {
+                failures.push({ table: `${table.schemaname}.${table.tablename}`, error: error.message });
+                logger.warn({ table: `${table.schemaname}.${table.tablename}`, err: error.message }, '单表统计信息采集失败');
+            }
+        }
+        if (failures.length) {
+            throw new Error(`ANALYZE 完成但有 ${failures.length}/${tables.length} 张表失败。`);
+        }
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.optimize.lastError = '';
         return true;

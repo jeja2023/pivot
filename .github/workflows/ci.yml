@@ -33,7 +33,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          # 增量规范检查使用 PR 目标分支与 HEAD 的 merge-base，需要完整历史。
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

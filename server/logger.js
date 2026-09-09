@@ -7,6 +7,26 @@ const { getRequestContext } = require('./services/request-context');
 
 const os = require('os');
 const isProduction = process.env.NODE_ENV === 'production';
+const LOG_TIME_ZONE = 'Asia/Shanghai';
+
+function formatBeijingLogTimestamp(date = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: LOG_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3,
+        hourCycle: 'h23'
+    }).formatToParts(date).reduce((result, part) => {
+        result[part.type] = part.value;
+        return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${parts.fractionalSecond || '000'}+08:00`;
+}
+
 function resolveSafeLogDir() {
     if (process.env.LOG_DIR) return path.resolve(process.env.LOG_DIR);
     const candidate = path.resolve(__dirname, '../logs');
@@ -71,7 +91,9 @@ if (consolePretty) {
     streams.push({
         stream: require('pino-pretty')({
             colorize: true,
-            translateTime: 'yyyy-mm-dd HH:MM:ss',
+            // 显式 SYS: 按进程所在的东八区格式化；缺少 SYS: 前缀时
+            // pino-pretty 会按 UTC 转换，导致控制台少 8 小时。
+            translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
             ignore: 'pid,hostname,version,req,res,responseTime,reqId',
             singleLine: true,
             messageFormat: (log, messageKey) => {
@@ -120,7 +142,7 @@ function rotateLogFileIfNeeded() {
         try {
             fs.renameSync(logFilePath, `${logFilePath}.1`);
         } catch (_) {
-            // Windows may hold the active descriptor; truncate it as a bounded fallback.
+            // Windows 可能仍持有活动文件描述符，此时以截断作为受限回退方案。
             fs.truncateSync(logFilePath, 0);
             fileLogDestination.reopen?.(logFilePath);
             return;
@@ -137,7 +159,7 @@ const logger = pino({
         paths: redactFields,
         censor: '[REDACTED]'
     },
-    timestamp: () => `,"time":"${new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('Z', '+08:00')}"`,
+    timestamp: () => `,"time":"${formatBeijingLogTimestamp()}"`,
     formatters: {
         level: (label) => ({ level: label.toUpperCase() })
     },
@@ -208,4 +230,4 @@ const httpLogger = pinoHttp({
 });
 
 // 导出
-module.exports = { logger, httpLogger };
+module.exports = { formatBeijingLogTimestamp, logger, httpLogger };

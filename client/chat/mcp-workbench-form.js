@@ -354,6 +354,7 @@ function bindMcpToolsModalControls() {
 
 async function openMcpWorkbench(options = {}) {
     bindMcpModalAccessibility();
+    window.Pivot.moduleApi?.('mcp.actions')?.bindMcpWorkbenchActions?.();
     const tabsApi = window.Pivot?.moduleApi?.('mcp.tabs', {}) || {};
     tabsApi.bindTabs?.();
     let savedTab = null;

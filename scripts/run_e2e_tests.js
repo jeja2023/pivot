@@ -40,12 +40,12 @@ async function startFakeModelServer(logPath = '') {
         stdio: ['ignore', 'pipe', 'inherit']
     });
     await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('E2E fake model server start timeout')), 5000);
+        const timer = setTimeout(() => reject(new Error('E2E 假模型服务启动超时')), 5000);
         child.once('error', error => { clearTimeout(timer); reject(error); });
         child.stdout.once('data', chunk => {
             clearTimeout(timer);
             if (String(chunk).includes('ready')) resolve();
-            else reject(new Error('E2E fake model server did not become ready'));
+            else reject(new Error('E2E 假模型服务未进入就绪状态'));
         });
     });
     return { child, url: `http://127.0.0.1:${port}/v1` };
@@ -66,7 +66,7 @@ async function main() {
     const testSchema = `pivot_e2e_${process.pid}_${Date.now().toString(36)}`;
     const port = await reserveAvailablePort();
     const fakeModel = await startFakeModelServer(fakeModelLogPath);
-    if (process.env.PIVOT_E2E_DEBUG === 'true') console.error(`[e2e-debug] fake model url: ${fakeModel.url}`);
+    if (process.env.PIVOT_E2E_DEBUG === 'true') console.error(`[e2e-debug] 假模型地址：${fakeModel.url}`);
     const playwrightCli = path.join(root, 'node_modules', '@playwright', 'test', 'cli.js');
     const setupScript = path.join(root, 'scripts', 'setup_pg_test_db.js');
     const env = {
@@ -114,8 +114,8 @@ async function main() {
         status = error.exitCode || 1;
     } finally {
         if (process.env.PIVOT_E2E_DEBUG === 'true') {
-            try { console.error('[e2e-debug] fake model log:\n' + fs.readFileSync(fakeModelLogPath, 'utf8')); } catch (_) {}
-            try { console.error('[e2e-debug] server log:\n' + fs.readFileSync(path.join(testRoot, 'logs', 'pivot.log'), 'utf8').slice(-20000)); } catch (_) {}
+            try { console.error('[e2e-debug] 假模型日志：\n' + fs.readFileSync(fakeModelLogPath, 'utf8')); } catch (_) {}
+            try { console.error('[e2e-debug] 服务端日志：\n' + fs.readFileSync(path.join(testRoot, 'logs', 'pivot.log'), 'utf8').slice(-20000)); } catch (_) {}
         }
         if (fakeModel.child && !fakeModel.child.killed) {
             fakeModel.child.kill();

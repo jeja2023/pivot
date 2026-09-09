@@ -211,7 +211,7 @@ test('任务认领后读取用户遇到瞬时数据库异常时会延迟回队�
         logger: { info() {}, error() {}, warn: entry => warnings.push(entry) },
         instanceId: 'queue-user-lookup-retry',
         maxConcurrent: 1,
-        getRunUser: async () => { throw new Error('temporary user lookup database outage'); },
+        getRunUser: async () => { throw new Error('读取任务用户时发生临时数据库故障'); },
         runAgent: async () => { throw new Error('不应执行'); },
         markRunError: async () => { throw new Error('不应标记为永久失败'); },
         getTimestamp: value => require('../server/time').getBeijingTimestamp(value),

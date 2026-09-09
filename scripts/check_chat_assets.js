@@ -36,7 +36,9 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'data-workspace-view="apps"',
     'data-workspace-view="manual"',
     'data-src="/manual?embed=1"',
+    'src="/chat/admin-settings-events.js?v=__APP_VERSION__"',
     'src="/chat/workspace-template-loader.js?v=__APP_VERSION__"',
+    'src="/chat/workspace-settings-scale.js?v=__APP_VERSION__"',
     'src="/chat/app-workspaces.js?v=__APP_VERSION__"',
     'src="/chat/app.js?v=__APP_VERSION__"'
 ].forEach(needle => {

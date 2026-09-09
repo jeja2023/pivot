@@ -104,3 +104,18 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.match(css, /\.memory-modal-header[\s\S]*?display:\s*flex;/);
     assert.match(css, /\.memory-source-close[\s\S]*?margin-left:\s*auto;/);
 });
+
+test('分页控件统一使用直接绑定的工作区组件，避免依赖全局点击委托', () => {
+    const ui = read('client/chat/ui.js');
+    const settings = read('client/chat/admin-settings.js');
+    const toolPolicy = read('client/chat/tool-policy.js');
+
+    assert.match(ui, /function renderWorkspacePagination/);
+    assert.match(ui, /button\.addEventListener\('click'/);
+    assert.match(ui, /dataset\.workspacePaginationPage/);
+    assert.match(ui, /Math\.min\(Math\.max/);
+    assert.match(settings, /renderWorkspacePagination\?\.\(container/);
+    assert.match(toolPolicy, /renderWorkspacePagination\?\.\(container/);
+    assert.doesNotMatch(settings, /data-pagination-tab|data-pagination-page/);
+    assert.doesNotMatch(toolPolicy, /data-pagination-tab|data-pagination-page/);
+});

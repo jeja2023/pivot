@@ -36,3 +36,4 @@ downloads/SHA256SUMS-*.txt
 .paddlex/
 # 本地临时验证脚本与产物目录
 .tmp/
+test-results/

@@ -1,5 +1,5 @@
 <!-- 用户管理 -->
-                    <div id="tab-content-users" class="admin-tab-content hidden">
+                    <div id="tab-content-users" class="admin-tab-content users-tab hidden">
                         <div class="settings-page-head">
                             <div>
                                 <h3>用户管理</h3>
@@ -19,6 +19,39 @@
                                 <button id="user-template-btn" type="button" class="btn-secondary">下载模板</button>
                                 <button id="user-import-btn" type="button" class="btn-secondary">导入用户</button>
                                 <button id="user-export-btn" type="button" class="btn-secondary">导出用户</button>
+                            </div>
+                        </div>
+                        <div class="filter-bar user-filter-bar">
+                            <div class="filter-item filter-inline">
+                                <label for="user-filter-search">用户</label>
+                                <input type="text" id="user-filter-search" class="form-input" placeholder="用户名 / 显示名">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="user-filter-unit">单位</label>
+                                <input type="text" id="user-filter-unit" class="form-input" placeholder="按单位筛选">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="user-filter-role">角色</label>
+                                <select id="user-filter-role" class="form-input">
+                                    <option value="">全部角色</option>
+                                    <option value="super_admin">系统管理员</option>
+                                    <option value="manager">管理员</option>
+                                    <option value="user">普通用户</option>
+                                </select>
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="user-filter-status">状态</label>
+                                <select id="user-filter-status" class="form-input">
+                                    <option value="">全部状态（正常）</option>
+                                    <option value="active">启用</option>
+                                    <option value="disabled">禁用</option>
+                                    <option value="deleted">已删除</option>
+                                    <option value="all">全部状态（含已删除）</option>
+                                </select>
+                            </div>
+                            <div class="filter-item filter-actions">
+                                <button type="button" id="user-query-btn" class="btn-primary">查询</button>
+                                <button type="button" id="user-reset-btn" class="btn-secondary">重置</button>
                             </div>
                         </div>
                         <div class="table-container users-table-wrap">

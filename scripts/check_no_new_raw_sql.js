@@ -49,7 +49,7 @@ function summarize(entries) {
 if (writeBaseline) {
     const baseline = summarize(collectRawSqlCounts());
     fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
-    console.log(`Raw SQL baseline written: ${baseline.total} production SQL literal call(s) in ${baseline.entries.length} file(s).`);
+    console.log(`直接 SQL 基线已写入：${baseline.total} 个生产 SQL 字面量调用，分布于 ${baseline.entries.length} 个文件。`);
     process.exit(0);
 }
 

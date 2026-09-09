@@ -68,6 +68,12 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#agent-goal-trigger').selectOption('manual');
         await page.locator('#agent-goal-editor button[type="submit"]').click();
         await expect(page.locator('#agent-goals-panel')).toContainText('E2E 临时目标');
+
+        const workflowResponse = page.waitForResponse(response => response.url().endsWith('/chat/workspaces/agent-dag'));
+        await page.locator('#agent-workbench-modal [data-automation-section="workflows"]').click();
+        await expect((await workflowResponse).status()).toBe(200);
+        await expect(page.locator('#agent-dag-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#agent-workbench-modal')).toBeHidden();
     });
 
     test('应用、知识库、工具库和设置工作区均在首次打开时按需挂载', async ({ page }) => {
@@ -84,7 +90,131 @@ test.describe('Pivot browser smoke', () => {
             await page.evaluate(open);
             await expect((await responsePromise).status()).toBe(200);
             await expect(page.locator(`#${panelId}`)).toBeVisible({ timeout: 15_000 });
+            if (name === 'knowledge' || name === 'mcp') {
+                const closeFunction = name === 'knowledge' ? 'closeKnowledgeWorkbench' : 'closeMcpWorkbench';
+                const closeButton = name === 'knowledge' ? '#knowledge-modal-close' : '#mcp-modal-close';
+                await page.evaluate((functionName) => {
+                    const original = window.Pivot.legacy[functionName];
+                    window.__workspaceCloseCalls = 0;
+                    window.Pivot.legacy[functionName] = (...args) => {
+                        window.__workspaceCloseCalls += 1;
+                        return original(...args);
+                    };
+                }, closeFunction);
+                await page.locator(closeButton).click();
+                await expect.poll(() => page.evaluate(() => window.__workspaceCloseCalls)).toBe(1);
+                await expect(page.locator(`#${panelId}`)).toBeHidden();
+            }
         }
+    });
+
+    test('工具库的动态操作在重绘后仍可刷新、自检并打开本机授权中心', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.());
+        await expect(page.locator('#mcp-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#mcp-refresh-btn')).toBeVisible({ timeout: 15_000 });
+
+        const refreshRequest = page.waitForRequest(request => (
+            request.method() === 'GET' && new URL(request.url()).pathname === '/api/mcp/governance'
+        ));
+        await page.locator('#mcp-refresh-btn').click();
+        await refreshRequest;
+        await expect(page.locator('#mcp-refresh-btn')).toHaveText('刷新');
+
+        await page.evaluate(() => {
+            const api = window.Pivot.moduleApi('mcp.workbench');
+            window.__mcpHealthCheckCalls = 0;
+            api.runMcpBatchHealthCheck = async () => {
+                window.__mcpHealthCheckCalls += 1;
+            };
+        });
+        await page.locator('#mcp-health-check-btn').click();
+        await expect.poll(() => page.evaluate(() => window.__mcpHealthCheckCalls)).toBe(1);
+
+        await page.locator('[data-mcp-section="data"]').click();
+        await expect(page.locator('[data-mcp-pane="data"]')).toBeVisible();
+        await expect(page.locator('[data-mcp-open-local-auth] .mcp-source-btn-wrap em')).toHaveText(/授权/);
+        await page.locator('[data-mcp-open-local-auth]').first().click();
+        await expect(page.locator('#mcp-local-auth-modal')).toBeVisible();
+        await expect(page.locator('#mcp-local-auth-body')).toContainText(/网页端|桌面客户端|本机授权/);
+
+        await page.locator('#mcp-local-auth-close-btn').click();
+        await page.locator('[data-mcp-create="database"]').click();
+        await expect(page.locator('#mcp-edit-modal')).toBeVisible();
+    });
+
+    test('个人工作台入口可打开并关闭所有按需工作区', async ({ page }) => {
+        test.setTimeout(90_000);
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('personal'));
+        await expect(page.locator('#personal-workbench-modal')).toBeVisible();
+
+        const cases = [
+            ['open-apps', '#apps-workbench-modal', '#apps-modal-close'],
+            ['open-automation', '#agent-workbench-modal', '#agent-modal-close'],
+            ['open-knowledge', '#knowledge-workbench-modal', '#knowledge-modal-close'],
+            ['open-tools', '#mcp-workbench-modal', '#mcp-modal-close'],
+            ['open-settings', '#admin-container', '#admin-modal-close']
+        ];
+        for (const [action, panel, close] of cases) {
+            await page.locator(`[data-personal-action="${action}"]`).first().click();
+            await expect(page.locator(panel)).toBeVisible({ timeout: 20_000 });
+            await page.locator(close).click();
+            await expect(page.locator(panel)).toBeHidden({ timeout: 15_000 });
+            await expect(page.locator('#personal-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        }
+    });
+
+    test('统一分页与设置页分页均可翻页，并会钳制越界页码', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => {
+            const pager = document.createElement('div');
+            pager.id = 'pagination-contract-smoke';
+            document.body.appendChild(pager);
+            window.__workspacePaginationPages = [];
+            window.Pivot.legacy.renderWorkspacePagination(pager, {
+                total: 30,
+                limit: 15,
+                page: 99,
+                onPageChange: pageNo => window.__workspacePaginationPages.push(pageNo)
+            });
+        });
+        await expect(page.locator('#pagination-contract-smoke')).toContainText('第 2 / 2 页');
+        await expect(page.locator('#pagination-contract-smoke button', { hasText: '下一页' })).toBeDisabled();
+        await page.locator('#pagination-contract-smoke button', { hasText: '上一页' }).click();
+        await expect.poll(() => page.evaluate(() => window.__workspacePaginationPages)).toEqual([1]);
+
+        await page.evaluate(() => {
+            const pager = document.getElementById('pagination-contract-smoke');
+            window.__workspacePaginationPages = [];
+            window.Pivot.legacy.renderWorkspacePagination(pager, {
+                total: 30,
+                limit: 15,
+                page: 1,
+                onPageChange: pageNo => window.__workspacePaginationPages.push(pageNo)
+            });
+        });
+        await page.locator('#pagination-contract-smoke button', { hasText: '末页' }).click();
+        await expect.poll(() => page.evaluate(() => window.__workspacePaginationPages)).toEqual([2]);
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        const modelsLoaded = page.waitForResponse(response => {
+            const url = new URL(response.url());
+            return url.pathname === '/api/models' && url.searchParams.get('limit') === '15';
+        });
+        await page.locator('#tab-models').click();
+        await modelsLoaded;
+        await expect(page.locator('#tab-content-models')).toBeVisible();
+        await page.evaluate(() => {
+            window.__settingsPaginationCalls = [];
+            window.Pivot.legacy.loadTabData = async (tab, pageNo) => {
+                window.__settingsPaginationCalls.push({ tab, pageNo });
+            };
+            window.renderPagination('models', 30, 1);
+        });
+        await page.locator('#pagination-models button', { hasText: '下一页' }).click();
+        await expect.poll(() => page.evaluate(() => window.__settingsPaginationCalls)).toEqual([{ tab: 'models', pageNo: 2 }]);
     });
 
     test('chat shell loads safe HTML and Pivot module namespace', async ({ page }) => {
@@ -284,6 +414,37 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#tab-content-details')).toBeHidden();
         await expect(page.locator('#tab-content-report')).toBeVisible();
         await expect(page.locator('#report-query-btn')).toBeVisible();
+    });
+
+    test('知识库预加载配置后，设置工作区仍会绑定运行时参数和记忆操作', async ({ page }) => {
+        test.setTimeout(60_000);
+        await ensureBrowserSession(page);
+
+        // 知识库会按需预加载 admin-settings.js；这里刻意在设置模板挂载前走这条路径，
+        // 防止脚本缓存后设置页的事件监听未重新绑定。
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
+        await expect(page.locator('#knowledge-workbench-modal')).toBeVisible({ timeout: 15_000 });
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+
+        await page.locator('#tab-memories').click();
+        await expect(page.locator('#memory-refresh-btn')).toBeVisible();
+        await page.evaluate(() => {
+            window.__memoryRefreshCalls = 0;
+            window.Pivot.legacy.loadMemories = async () => { window.__memoryRefreshCalls += 1; };
+        });
+        await page.locator('#memory-refresh-btn').click();
+        await expect.poll(() => page.evaluate(() => window.__memoryRefreshCalls)).toBe(1);
+
+        await page.locator('#tab-global-params').click();
+        await expect(page.locator('#runtime-settings-page-refresh')).toBeVisible();
+        await page.evaluate(() => {
+            window.__runtimeSettingsRefreshCalls = 0;
+            window.Pivot.legacy.loadSettings = async () => { window.__runtimeSettingsRefreshCalls += 1; };
+        });
+        await page.locator('#runtime-settings-page-refresh').click();
+        await expect.poll(() => page.evaluate(() => window.__runtimeSettingsRefreshCalls)).toBe(1);
     });
 
     test('system monitor renders RAG diagnostics and embedding latency state', async ({ page }) => {

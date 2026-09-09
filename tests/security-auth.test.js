@@ -967,6 +967,110 @@ test('deleting a user releases the username without reviving the old identity', 
     }
 });
 
+test('admin user list supports keyword, unit, role, and status filtering', async () => {
+    const suffix = Date.now().toString(36);
+    const u1 = `test_filter_user_${suffix}`;
+    const u2 = `test_filter_admin_${suffix}`;
+    const u3 = `test_filter_disabled_${suffix}`;
+    const u4 = `test_filter_deleted_${suffix}`;
+    const u1Info = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(u1, 'hash', '研发小张', '研发中心', 'user', 'active');
+    const u2Info = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(u2, 'hash', '运营管理李', '运营部门', 'admin', 'active');
+    const u3Info = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(u3, 'hash', '已禁用王', '研发中心', 'user', 'disabled');
+    const u4Info = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(u4, 'hash', '已删除赵', '运营部门', 'user', 'disabled');
+
+    const superAdmin = { id: 1, username: 'admin', role: 'admin', unit: '' };
+    const router = createAdminUsersRouter({
+        authMiddleware: (req, _res, next) => { req.user = superAdmin; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        upload: { single: () => (_req, _res, next) => next() },
+        logAction: () => {}
+    });
+    const listRoute = router.stack.find(layer => layer.route?.path === '/admin/users' && layer.route?.methods?.get);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+
+    try {
+        // 1. 按显示名关键字筛选
+        const res1 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { search: '研发小张' }
+        }, res1);
+        assert.equal(res1.statusCode, 200);
+        assert.ok(res1.body.data.some(u => u.username === u1));
+        assert.ok(!res1.body.data.some(u => u.username === u2));
+
+        // 2. 按单位筛选
+        const res2 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { unit: '运营部门' }
+        }, res2);
+        assert.equal(res2.statusCode, 200);
+        assert.ok(res2.body.data.some(u => u.username === u2));
+        assert.ok(!res2.body.data.some(u => u.username === u1));
+
+        // 3. 按角色筛选
+        const res3 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { role: 'admin', search: suffix }
+        }, res3);
+        assert.equal(res3.statusCode, 200);
+        assert.ok(res3.body.data.some(u => u.username === u2));
+        assert.ok(!res3.body.data.some(u => u.username === u1));
+
+        // 4. 按状态筛选：禁用用户（未删除）
+        const res4 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { status: 'disabled', search: suffix }
+        }, res4);
+        assert.equal(res4.statusCode, 200);
+        assert.ok(res4.body.data.some(u => u.username === u3));
+        assert.ok(!res4.body.data.some(u => u.username === u1));
+        assert.ok(!res4.body.data.some(u => u.username === u4));
+
+        // 5. 按状态筛选：已删除用户
+        const res5 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { status: 'deleted', search: suffix }
+        }, res5);
+        assert.equal(res5.statusCode, 200);
+        assert.ok(res5.body.data.some(u => u.username === u4));
+        assert.ok(!res5.body.data.some(u => u.username === u1));
+        assert.ok(!res5.body.data.some(u => u.username === u3));
+
+        // 6. 按状态筛选：全部用户（含已删除）
+        const res6 = makeRes();
+        await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
+            query: { status: 'all', search: suffix }
+        }, res6);
+        assert.equal(res6.statusCode, 200);
+        assert.ok(res6.body.data.some(u => u.username === u1));
+        assert.ok(res6.body.data.some(u => u.username === u2));
+        assert.ok(res6.body.data.some(u => u.username === u3));
+        assert.ok(res6.body.data.some(u => u.username === u4));
+    } finally {
+        [u1Info, u2Info, u3Info, u4Info].forEach(info => {
+            if (info?.lastInsertRowid) {
+                db.prepare('DELETE FROM users WHERE id = ?').run(Number(info.lastInsertRowid));
+            }
+        });
+    }
+});
+
 test('non-root admin cannot manage administrator accounts', async () => {
     const suffix = Date.now().toString(36);
     const adminInfo = db.prepare(`

@@ -249,9 +249,7 @@ bind('personal-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigati
 bind('admin-panel-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.());
 bind('automation-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' }));
 bind('knowledge-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
-bind('knowledge-modal-close', () => window.Pivot.legacy.closeKnowledgeWorkbench?.());
 bind('mcp-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.());
-bind('mcp-modal-close', () => window.Pivot.legacy.closeMcpWorkbench?.());
 bind('manual-link-btn', () => window.Pivot.legacy.openManualWorkbench?.());
 bind('manual-modal-close', () => window.Pivot.legacy.closeManualWorkbench?.());
 bind('print-modal-close', () => window.Pivot.legacy.closePrintWorkbench?.());
@@ -269,12 +267,13 @@ function bindMountedWorkspaceControls(name) {
         return;
     }
     if (name === 'knowledge') {
+        bind('knowledge-modal-close', () => window.Pivot.legacy.closeKnowledgeWorkbench?.());
         bind('rag-upload-btn', () => window.Pivot.legacy.openKnowledgeUploadModal?.());
         bind('rag-upload-input', () => window.Pivot.legacy.addKnowledgeUploadFiles?.(), 'change');
         return;
     }
     if (name === 'mcp') {
-        bind('mcp-refresh-btn', () => window.Pivot.legacy.loadMcpWorkbench?.());
+        bind('mcp-modal-close', () => window.Pivot.legacy.closeMcpWorkbench?.());
         bind('mcp-save-btn', () => window.Pivot.legacy.saveMcpServer?.());
         bind('mcp-reset-btn', () => window.Pivot.legacy.resetMcpForm?.());
         bind('mcp-edit-cancel-btn', () => window.Pivot.legacy.closeMcpEditModal?.());
@@ -367,7 +366,6 @@ bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
 bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());
 bind('m-submit-btn', () => window.Pivot.legacy.addModel());
 bind('m-scope', () => window.Pivot.legacy.updateModelScopeControls?.(), 'change');
-bind('mcp-refresh-btn', () => window.Pivot.legacy.loadMcpWorkbench?.());
 bind('mcp-save-btn', () => window.Pivot.legacy.saveMcpServer?.());
 bind('mcp-reset-btn', () => window.Pivot.legacy.resetMcpForm?.());
 bind('mcp-edit-cancel-btn', () => window.Pivot.legacy.closeMcpEditModal?.());
@@ -381,6 +379,8 @@ bind('rag-upload-input', () => window.Pivot.legacy.addKnowledgeUploadFiles?.(), 
 bind('user-add-btn', () => window.Pivot.legacy.openUserModal());
 bind('modal-user-cancel', () => window.Pivot.legacy.closeUserModal());
 bind('modal-user-save', () => window.Pivot.legacy.saveUser());
+bind('user-query-btn', () => window.Pivot.legacy.loadUsers?.(1));
+bind('user-reset-btn', () => window.Pivot.legacy.resetUserFilters?.());
 bind('user-template-btn', () => window.Pivot.legacy.downloadUserTemplate());
 bind('user-import-btn', () => document.getElementById('user-import-input').click());
 bind('user-import-input', () => window.Pivot.legacy.importUsers(), 'change');

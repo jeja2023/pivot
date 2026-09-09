@@ -201,8 +201,8 @@ function recordSlowSql(sql, durationMs, params = []) {
         logger.warn({ err: error.message }, '慢 SQL 观测记录启动失败');
         return null;
     } finally {
-        // recordObservabilityEvent is asynchronous; the guard is released by
-        // the promise settlement above, not at function-return time.
+        // recordObservabilityEvent 是异步操作；防重守卫由上方 Promise
+        // 完成后释放，而不是在当前函数返回时提前释放。
     }
 }
 

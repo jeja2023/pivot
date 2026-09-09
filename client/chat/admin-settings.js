@@ -821,7 +821,7 @@ function getEmbeddingModelValue() {
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
-
+window.Pivot.moduleApi('settings.events').registerAdminSettingsEvents(() => {
 document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.Pivot.legacy.saveRuntimeSettings?.(event));
 document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.Pivot.legacy.loadSettings?.());
 document.getElementById('memory-refresh-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMemories?.());
@@ -1001,7 +1001,7 @@ document.getElementById('memory-edit-modal')?.addEventListener('click', (event) 
 document.getElementById('memory-source-modal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'memory-source-modal') window.Pivot.legacy.closeMemorySourceModal?.();
 });
-
+});
 window.Pivot.legacy.fetchEmbeddingModels = async () => {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
@@ -1294,41 +1294,13 @@ window.Pivot.legacy.bindRagDebugModalEvents = function() {
 };
 
 function renderPagination(tab, total, currentPage) {
-    const totalPages = Math.ceil(total / pageState.limit);
     const container = document.getElementById(`pagination-${tab}`);
     if (!container) return;
-    container.replaceChildren();
-    if (totalPages <= 1) return;
-
-    const createButton = (label, targetPage, disabled) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn-secondary';
-        button.disabled = disabled;
-        button.dataset.paginationTab = tab;
-        button.dataset.paginationPage = String(targetPage);
-        button.textContent = label;
-        return button;
-    };
-
-    const summary = document.createElement('span');
-    summary.style.margin = '0 15px';
-    summary.style.fontWeight = '500';
-    summary.textContent = `第 ${currentPage} / ${totalPages} 页 (共 ${total} 条)`;
-
-    container.append(
-        createButton('首页', 1, currentPage === 1),
-        createButton('上一页', currentPage - 1, currentPage === 1),
-        summary,
-        createButton('下一页', currentPage + 1, currentPage === totalPages),
-        createButton('末页', totalPages, currentPage === totalPages)
-    );
+    const renderWorkspacePagination = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination;
+    renderWorkspacePagination?.(container, {
+        total,
+        limit: pageState.limit,
+        page: currentPage,
+        onPageChange: targetPage => window.Pivot.legacy.loadTabData?.(tab, targetPage)
+    });
 }
-
-document.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-pagination-tab][data-pagination-page]');
-    if (!button || button.disabled) return;
-    const page = parseInt(button.dataset.paginationPage, 10);
-    if (!Number.isFinite(page) || page < 1) return;
-    window.Pivot.legacy.loadTabData(button.dataset.paginationTab, page);
-});

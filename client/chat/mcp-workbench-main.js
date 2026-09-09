@@ -5,10 +5,10 @@ const mcpModalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
 
 function setMcpWorkbenchState(kind = '', message = '') {
     const state = document.getElementById('mcp-workbench-state');
-    if (state) state.hidden = true;
-    if (kind === 'error' && message) {
-        showToast(message, 'error');
-    }
+    if (!state) return;
+    state.hidden = !message;
+    state.textContent = message;
+    state.dataset.state = kind || '';
 }
 
 async function withMcpActionLock(key, button, busyText, action) {
@@ -360,34 +360,6 @@ async function loadMcpServers() {
                 btn.parentElement?.insertBefore(share, btn);
             }
         });
-        container.querySelectorAll('[data-mcp-open-data-analysis]').forEach(btn => {
-            btn.addEventListener('click', () => openMcpDataAnalysisImport({
-                datasetId: btn.dataset.mcpOpenDataAnalysisDataset || '',
-                tab: btn.dataset.mcpOpenDataAnalysisTab || btn.dataset.mcpOpenDataAnalysis || 'overview'
-            }));
-        });
-        container.querySelectorAll('[data-mcp-open-local-auth]').forEach(btn => {
-            btn.addEventListener('click', () => window.Pivot.legacy.openMcpLocalAuthorizationCenter?.(btn.dataset.mcpOpenLocalAuth || 'local_database'));
-        });
-        container.querySelectorAll('[data-mcp-create]').forEach(btn => {
-            btn.addEventListener('click', () => window.Pivot.legacy.openMcpCreateModal(btn.dataset.mcpCreate));
-        });
-        container.querySelectorAll('[data-mcp-system-config]').forEach(btn => {
-            btn.addEventListener('click', () => window.Pivot.legacy.openMcpSystemConfig(btn.dataset.mcpSystemConfig));
-        });
-        container.querySelectorAll('[data-mcp-edit]').forEach(btn => btn.addEventListener('click', () => {
-            window.Pivot.legacy.openMcpEditModal(btn.dataset.mcpEdit);
-        }));
-        container.querySelectorAll('[data-mcp-tools]').forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.openMcpToolsModal(btn.dataset.mcpTools)));
-        container.querySelectorAll('[data-mcp-share]').forEach(btn => btn.addEventListener('click', () => openMcpShareModal(btn.dataset.mcpShare)));
-        container.querySelectorAll('[data-mcp-toggle]').forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn)));
-        container.querySelectorAll('[data-mcp-delete]').forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.deleteMcpServer(btn.dataset.mcpDelete, btn)));
-        container.querySelectorAll('[data-mcp-open-tool-policy]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                await window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false });
-                await window.Pivot.legacy.switchTab?.('tool-policy');
-            });
-        });
     });
 }
 function mcpToolRiskLabel(level) {
@@ -408,18 +380,6 @@ function renderMcpSystemServices() {
     PivotSafeHtml.setHtml(box, `
         ${renderMcpSection('处理与交付', '文档、数据、格式转换、图表和报告只处理上传文件、数据集或上游结果。', systemCards)}
     `);
-    box.querySelectorAll('[data-mcp-system-enable]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.ensureMcpSystemService(btn.dataset.mcpSystemEnable, btn));
-    });
-    box.querySelectorAll('[data-mcp-system-config]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.openMcpSystemConfig(btn.dataset.mcpSystemConfig));
-    });
-    box.querySelectorAll('[data-mcp-tools]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.openMcpToolsModal(btn.dataset.mcpTools));
-    });
-    box.querySelectorAll('[data-mcp-toggle]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.toggleMcpServerStatus(btn.dataset.mcpToggle, btn.dataset.nextStatus, btn));
-    });
 }
 window.Pivot.legacy.openMcpSystemConfig = function (type) {
     const service = mcpBuiltinServices.find(item => item.type === type);
@@ -807,8 +767,8 @@ function bindMcpToolTestModalControls() {
     });
 }
 
-async function runMcpBatchHealthCheck() {
-    const btn = document.getElementById('mcp-health-check-btn');
+async function runMcpBatchHealthCheck(triggerButton = null) {
+    const btn = triggerButton || document.getElementById('mcp-health-check-btn');
     if (mcpActionLocks.has('batch-health-check')) return;
     mcpActionLocks.add('batch-health-check');
     const originalText = btn ? btn.textContent : '连通性自检';
@@ -904,7 +864,6 @@ async function loadMcpGovernance() {
     const logs = await logsRes.json().catch(() => ({}));
     if (!govRes.ok || !logsRes.ok) {
         PivotSafeHtml.setHtml(panel, '<div class="mcp-governance-empty">治理概览暂不可用，工具列表仍可继续使用。<button type="button" class="btn-secondary" data-mcp-retry-governance>重试治理概览</button></div>');
-        panel.querySelector('[data-mcp-retry-governance]')?.addEventListener('click', () => loadMcpGovernance());
         return;
     }
     panel.className = 'workspace-governance-panel mcp-governance-panel';
@@ -936,8 +895,6 @@ async function loadMcpGovernance() {
         </div>
         ${notes.length ? `<div class="governance-list mcp-safety-notes">${notes.map(item => `<span>${mcpEscape(item)}</span>`).join('')}</div>` : ''}
     `);
-    panel.querySelector('#mcp-refresh-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMcpWorkbench?.());
-    panel.querySelector('#mcp-health-check-btn')?.addEventListener('click', () => window.Pivot.legacy.runMcpBatchHealthCheck?.());
 }
 
 function collectMcpDatabasePayload(mode = 'create') {
@@ -1396,18 +1353,33 @@ async function openMcpShareModal(serverId) {
     mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: 'input[name="mcp-share-scope"]' });
 };
 
+async function refreshMcpWorkbench(button = null) {
+    return withMcpActionLock('workbench-refresh', button, '刷新中...', async () => {
+        setMcpWorkbenchState('loading', '正在刷新工具服务、工具清单和治理状态…');
+        const loaded = await window.Pivot.legacy.loadMcpWorkbench();
+        if (loaded === false) throw new Error('工具库刷新失败，请检查网络或服务日志。');
+        setMcpWorkbenchState();
+        showToast('工具库已刷新', 'success');
+        return true;
+    });
+}
+
 window.Pivot?.exposeModule?.('mcp.workbench', {
+    fillMcpToolSampleInput,
+    loadMcpGovernance,
+    openMcpDataAnalysisImport,
     openMcpShareModal,
     openMcpToolTestModal,
-    runMcpToolTest,
+    refreshMcpWorkbench,
     runMcpBatchHealthCheck,
-    fillMcpToolSampleInput
+    runMcpToolTest
 });
 
 window.Pivot.legacy.loadMcpWorkbench = async function () {
     if (mcpWorkbenchLoadPromise) return mcpWorkbenchLoadPromise;
     mcpWorkbenchLoadPromise = (async () => {
         try {
+            window.Pivot.moduleApi?.('mcp.actions')?.bindMcpWorkbenchActions?.();
             window.Pivot?.moduleApi?.('mcp.tabs')?.bindTabs?.();
             await loadMcpGovernance();
             await (window.Pivot.legacy.syncMcpLocalExecutionBridge
@@ -1415,8 +1387,12 @@ window.Pivot.legacy.loadMcpWorkbench = async function () {
                 : Promise.resolve(null)).catch(() => null);
             await loadMcpTools();
             await loadMcpServers();
+            return true;
         } catch (e) {
-            showToast(e?.message || '工具库加载失败，请检查网络连接', 'error');
+            const message = e?.message || '工具库加载失败，请检查网络连接';
+            setMcpWorkbenchState('error', message);
+            showToast(message, 'error');
+            return false;
         } finally {
             mcpWorkbenchLoadPromise = null;
         }

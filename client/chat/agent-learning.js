@@ -40,9 +40,9 @@
         return '来源：自动沉淀';
     }
 
-    function openMemoryCenter() {
-        window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
-        window.Pivot.legacy.switchTab?.('memories');
+    async function openMemoryCenter() {
+        await window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true });
+        await window.Pivot.legacy.switchTab?.('memories');
     }
 
     function renderMemories() {
@@ -179,7 +179,10 @@
             const button = event.target.closest('[data-agent-memory-action]');
             if (button) actOnMemory(button.dataset.agentMemoryId, button.dataset.agentMemoryAction);
         });
-        document.querySelectorAll('[data-memory-open]').forEach(button => button.addEventListener('click', event => { event.preventDefault(); openMemoryCenter(); }));
+        document.querySelectorAll('[data-memory-open]').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            openMemoryCenter().catch(error => notice(error.message || '记忆中心打开失败。', 'error'));
+        }));
         document.addEventListener('pivot:memory-changed', () => loadMemories().catch(() => {}));
     }
 

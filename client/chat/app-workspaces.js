@@ -705,23 +705,46 @@ const WORKSPACE_SCRIPT_GROUPS = {
     mcp: [
         '/chat/tool-policy.js', '/chat/mcp-workbench-common.js', '/chat/mcp-workbench-local-auth.js',
         '/chat/mcp-workbench-credentials.js', '/chat/agent-automation-resources.js',
-        '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-main.js'
+        '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-actions.js', '/chat/mcp-workbench-main.js'
     ]
 };
+
+// 工作流编排器复用 Agent 脚本，但 DOM 根节点独立。此前只加载 agent 模板后
+// 就切换到 agent-dag，导致原面板隐藏而目标面板不存在，页面呈现为空白。
+const WORKSPACE_MARKUP_DEPENDENCIES = Object.freeze({
+    'agent-dag': ['agent', 'agent-dag']
+});
+const WORKSPACE_SCRIPT_GROUP_ALIASES = Object.freeze({
+    'agent-dag': 'agent'
+});
+const LAZY_WORKSPACE_OPENERS = Object.freeze({
+    apps: 'openAppsWorkbench',
+    agent: 'openAgentWorkbench',
+    'agent-dag': 'openAgentDagWorkbench',
+    knowledge: 'openKnowledgeWorkbench',
+    mcp: 'openMcpWorkbench',
+    settings: 'openAdminPanel'
+});
 
 const workspaceLoadPromises = {};
 
 async function ensureWorkspaceScripts(name) {
     const ensureMarkup = window.Pivot.moduleApi?.('workspaces.templateLoader')?.ensureWorkspaceMarkup;
     if (typeof ensureMarkup !== 'function') throw new Error('工作区模板加载器尚未就绪');
-    await ensureMarkup(name);
-    if (!WORKSPACE_SCRIPT_GROUPS[name]) return;
-    if (!workspaceLoadPromises[name]) {
-        workspaceLoadPromises[name] = window.Pivot?.loadScripts
-            ? window.Pivot.loadScripts(WORKSPACE_SCRIPT_GROUPS[name])
-            : Promise.reject(new Error(`无法加载 ${name} 工作区脚本`));
+    const markupNames = WORKSPACE_MARKUP_DEPENDENCIES[name] || [name];
+    for (const markupName of markupNames) await ensureMarkup(markupName);
+    const scriptGroup = WORKSPACE_SCRIPT_GROUP_ALIASES[name] || name;
+    if (!WORKSPACE_SCRIPT_GROUPS[scriptGroup]) return;
+    if (!workspaceLoadPromises[scriptGroup]) {
+        workspaceLoadPromises[scriptGroup] = (window.Pivot?.loadScripts
+            ? window.Pivot.loadScripts(WORKSPACE_SCRIPT_GROUPS[scriptGroup])
+            : Promise.reject(new Error(`无法加载 ${name} 工作区脚本`)))
+            .catch(error => {
+                delete workspaceLoadPromises[scriptGroup];
+                throw error;
+            });
     }
-    return workspaceLoadPromises[name];
+    return workspaceLoadPromises[scriptGroup];
 }
 
 window.Pivot.legacy.ensureWorkspaceScripts = ensureWorkspaceScripts;
@@ -805,8 +828,17 @@ function showMainWorkspace(view = 'personal') {
         agent: 'agent-workbench-modal', 'agent-dag': 'agent-dag-workbench-modal', knowledge: 'knowledge-workbench-modal',
         mcp: 'mcp-workbench-modal', manual: 'manual-workbench-modal', print: 'print-workbench-modal', settings: 'admin-container'
     };
+    const targetPanel = document.getElementById(viewMap[target]);
+    const lazyOpener = LAZY_WORKSPACE_OPENERS[target];
+    if (isFullWorkspace && lazyOpener && !targetPanel) {
+        // 不允许先隐藏当前面板再显示一个尚未挂载的目标面板。所有懒加载工作区
+        // 必须回到标准入口，由入口完成模板、脚本和数据初始化。
+        const openWorkspace = window.Pivot.moduleApi?.('workspaces.navigation')?.[lazyOpener];
+        if (typeof openWorkspace === 'function') return openWorkspace(target === 'settings' ? { restore: true } : {});
+        console.warn(`工作区 ${target} 尚未挂载，已保留当前页面。`);
+        return current || 'personal';
+    }
     if (isFullWorkspace && chatContainer) {
-        const targetPanel = document.getElementById(viewMap[target]);
         if (targetPanel && targetPanel.parentElement !== chatContainer) {
             chatContainer.appendChild(targetPanel);
         }
@@ -842,68 +874,6 @@ function showMainWorkspace(view = 'personal') {
     return target;
 }
 
-let settingsWorkspaceScaleObserver = null, settingsWorkspaceScaleRaf = 0;
-let lastObservedSettingsWidth = 0, lastObservedSettingsHeight = 0;
-
-window.Pivot.legacy.scheduleSettingsWorkspaceScale = function() {
-    if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
-    settingsWorkspaceScaleRaf = window.requestAnimationFrame(() => {
-        settingsWorkspaceScaleRaf = 0;
-        window.Pivot.legacy.updateSettingsWorkspaceScale?.();
-    });
-};
-
-window.Pivot.legacy.updateSettingsWorkspaceScale = function() {
-    const stage = document.getElementById('settings-scale-stage');
-    const canvas = document.getElementById('settings-scale-canvas');
-    const content = document.querySelector('.settings-workspace-view .admin-content');
-    if (!stage || !canvas || !content) return;
-    if (window.ResizeObserver && !settingsWorkspaceScaleObserver) {
-        settingsWorkspaceScaleObserver = new window.ResizeObserver((entries) => {
-            if (document.body?.dataset.activeWorkspace === 'settings') {
-                const entry = entries?.[0];
-                const width = entry?.contentRect?.width || content.clientWidth;
-                const height = entry?.contentRect?.height || content.clientHeight;
-                if (Math.abs(width - lastObservedSettingsWidth) > 1 || Math.abs(height - lastObservedSettingsHeight) > 1) {
-                    lastObservedSettingsWidth = width;
-                    lastObservedSettingsHeight = height;
-                    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
-                }
-            }
-        });
-        settingsWorkspaceScaleObserver.observe(content);
-    }
-    const baseWidth = 1540;
-    const contentStyle = window.getComputedStyle(content);
-    const horizontalPadding = (parseFloat(contentStyle.paddingLeft) || 0) + (parseFloat(contentStyle.paddingRight) || 0);
-    const verticalPadding = (parseFloat(contentStyle.paddingTop) || 0) + (parseFloat(contentStyle.paddingBottom) || 0);
-    const availableWidth = Math.max(1, content.clientWidth - horizontalPadding - 2);
-    const availableHeight = Math.max(1, content.clientHeight - verticalPadding - 2);
-    const useResponsiveCanvas = availableWidth < 1100;
-    const layoutWidth = useResponsiveCanvas ? availableWidth : Math.max(baseWidth, availableWidth);
-    const scale = useResponsiveCanvas ? 1 : Math.min(1, availableWidth / baseWidth);
-    const stageWidth = Math.max(1, Math.ceil(layoutWidth * scale));
-    const isMonitorTabActive = content.classList.contains('is-monitor-tab-active');
-    stage.style.removeProperty('--settings-stage-height');
-    canvas.style.setProperty('--settings-canvas-width', `${layoutWidth}px`);
-    canvas.style.setProperty('--settings-scale', String(Number(scale.toFixed(4))));
-    stage.style.setProperty('--settings-stage-width', `${stageWidth}px`);
-    if (isMonitorTabActive) {
-        const canvasHeight = Math.max(1, Math.ceil(availableHeight / scale));
-        canvas.style.setProperty('--settings-canvas-height', `${canvasHeight}px`);
-        stage.style.setProperty('--settings-stage-height', `${availableHeight}px`);
-        return;
-    }
-    canvas.style.removeProperty('--settings-canvas-height');
-    const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
-    const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
-    stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
-};
-
-window.addEventListener('resize', () => {
-    if (document.body?.dataset.activeWorkspace === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
-});
-
 function createLazyWorkspaceEntrypoint(group, functionName) {
     const loadedImplementation = typeof window.Pivot.legacy[functionName] === 'function' ? window.Pivot.legacy[functionName] : null;
     const lazyEntrypoint = async (...args) => {
@@ -926,7 +896,7 @@ async function openPersonalWorkbenchEntrypoint(...args) {
 }
 const openAppsWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('apps', 'openAppsWorkbench');
 const openAgentWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent', 'openAgentWorkbench');
-const openAgentDagWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent', 'openAgentDagWorkbench');
+const openAgentDagWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent-dag', 'openAgentDagWorkbench');
 const openKnowledgeWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
 const openMcpWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
 const openAdminPanelEntrypoint = createLazyWorkspaceEntrypoint('settings', 'openAdminPanel');

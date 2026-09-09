@@ -1,6 +1,6 @@
 /**
- * Test-only synchronous facade for legacy db.prepare() fixtures backed by PG.
- * Uses a SharedArrayBuffer Worker instead of temporary JSON files and polling.
+ * 仅供测试使用的同步适配层，让旧版 db.prepare() 测试夹具可由 PostgreSQL 承载。
+ * 使用 SharedArrayBuffer Worker 替代临时 JSON 文件和轮询。
  */
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -71,7 +71,7 @@ function request(worker, value) {
     Atomics.store(worker.control, 0, IDLE);
     Atomics.notify(worker.control, 0, 1);
     if (state !== RESPONSE || !response?.ok) {
-        const error = new Error(response?.error || 'PG test query failed');
+        const error = new Error(response?.error || 'PostgreSQL 测试查询失败');
         if (response?.code) error.code = response.code;
         throw error;
     }

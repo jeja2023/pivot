@@ -269,34 +269,17 @@ function toolPolicyPageEntries() {
 function renderToolPolicyPagination(page) {
     const container = document.getElementById('pagination-tool-policy');
     if (!container) return;
-    container.replaceChildren();
     const total = toolPolicyToolsCache.length;
-    const totalPages = Math.ceil(total / TOOL_POLICY_PAGE_SIZE);
-    if (totalPages <= 1) return;
-
-    const createButton = (label, targetPage, disabled) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn-secondary';
-        button.disabled = disabled;
-        button.dataset.paginationTab = 'tool-policy';
-        button.dataset.paginationPage = String(targetPage);
-        button.textContent = label;
-        return button;
-    };
-
-    const summary = document.createElement('span');
-    summary.style.margin = '0 15px';
-    summary.style.fontWeight = '500';
-    summary.textContent = `第 ${page} / ${totalPages} 页 (共 ${total} 条)`;
-
-    container.append(
-        createButton('首页', 1, page === 1),
-        createButton('上一页', page - 1, page === 1),
-        summary,
-        createButton('下一页', page + 1, page === totalPages),
-        createButton('末页', totalPages, page === totalPages)
-    );
+    const renderWorkspacePagination = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination;
+    renderWorkspacePagination?.(container, {
+        total,
+        limit: TOOL_POLICY_PAGE_SIZE,
+        page,
+        onPageChange: targetPage => {
+            setToolPolicyPage(targetPage);
+            renderToolPolicyTools();
+        }
+    });
 }
 
 function renderToolPolicyGovernancePanel(entry = null) {

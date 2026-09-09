@@ -27,7 +27,7 @@ test('DAG 节点重试复用稳定 checkpoint operation key，不把 attempt 拼
         async executeToolByName(_name, _input, _user, _toolList, context) {
             operationKeys.push(context.operationKey);
             attempts += 1;
-            if (attempts === 1) throw Object.assign(new Error('temporary failure'), { code: 'ETEMPORARY' });
+            if (attempts === 1) throw Object.assign(new Error('临时失败'), { code: 'ETEMPORARY' });
             return { delivered: true };
         },
         async recordAgentToolCall() {},

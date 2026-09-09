@@ -20,10 +20,15 @@ const escapeSelectorText = (str) => {
 function renderWorkspacePagination(containerOrId, options = {}) {
     const container = typeof containerOrId === 'string' ? document.getElementById(containerOrId) : containerOrId;
     if (!container) return;
-    const total = Math.max(Number(options.total || 0), 0);
-    const limit = Math.max(Number(options.limit || 10), 1);
-    const page = Math.max(Number(options.page || 1), 1);
+    const suppliedTotal = Number(options.total);
+    const suppliedLimit = Number(options.limit);
+    const suppliedPage = Number(options.page);
+    const total = Math.max(Number.isFinite(suppliedTotal) ? suppliedTotal : 0, 0);
+    const limit = Math.max(Number.isFinite(suppliedLimit) ? suppliedLimit : 10, 1);
     const totalPages = Math.max(Math.ceil(total / limit), 1);
+    // 数据删除、筛选变更或并发刷新后，调用方可能仍持有已不存在的末页。
+    // 统一在渲染层钳制页码，避免生成越界的“下一页/末页”按钮。
+    const page = Math.min(Math.max(Number.isFinite(suppliedPage) ? suppliedPage : 1, 1), totalPages);
     const onPageChange = typeof options.onPageChange === 'function' ? options.onPageChange : null;
     container.replaceChildren();
     if (totalPages <= 1) return;
@@ -33,6 +38,7 @@ function renderWorkspacePagination(containerOrId, options = {}) {
         button.type = 'button';
         button.className = 'btn-secondary';
         button.disabled = disabled;
+        button.dataset.workspacePaginationPage = String(targetPage);
         button.textContent = label;
         button.addEventListener('click', () => {
             if (!button.disabled && onPageChange) onPageChange(targetPage);

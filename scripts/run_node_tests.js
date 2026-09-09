@@ -78,7 +78,7 @@ function runSetup(args, env) {
     });
     if (result.error) throw result.error;
     if (result.status !== 0) {
-        const error = new Error(args.includes('--cleanup') ? 'PostgreSQL test schema cleanup failed' : 'PostgreSQL test schema setup failed');
+        const error = new Error(args.includes('--cleanup') ? 'PostgreSQL 测试 schema 清理失败' : 'PostgreSQL 测试 schema 创建失败');
         error.exitCode = Number.isInteger(result.status) ? result.status : 1;
         throw error;
     }

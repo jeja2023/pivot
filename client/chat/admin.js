@@ -273,6 +273,7 @@ async function openAdminPanel(options = {}) {
         return;
     }
     const adminContainer = document.getElementById('admin-container');
+    window.Pivot.moduleApi?.('settings.events')?.bindAdminSettingsEvents?.();
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
     adminContainer?.classList.remove('hidden');
     adminContainer?.setAttribute('aria-hidden', 'false');

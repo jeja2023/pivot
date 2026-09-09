@@ -110,3 +110,27 @@ test('桌面连接器构建配置只临时改写 package.json，并在构建后�
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
+
+test('未指定裁剪档位时桌面构建默认保留三类可选数据库连接器', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-desktop-local-connectors-'));
+    const nodeModules = path.join(root, 'node_modules');
+    try {
+        const manifest = {
+            name: 'fixture',
+            dependencies: { mysql2: '1.0.0', mssql: '1.0.0', mongodb: '1.0.0' },
+            build: { files: ['desktop/**', 'node_modules/**'] }
+        };
+        fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
+        for (const name of ['mysql2', 'mssql', 'mongodb']) writePackage(nodeModules, name);
+        const previous = process.env.PIVOT_DESKTOP_DB_CONNECTORS;
+        delete process.env.PIVOT_DESKTOP_DB_CONNECTORS;
+        const profile = prepareDesktopConnectorProfile(root);
+        assert.deepEqual(profile.enabledConnectors, ['mongodb', 'mssql', 'mysql']);
+        assert.deepEqual(profile.excludes, []);
+        profile.restore();
+        if (previous === undefined) delete process.env.PIVOT_DESKTOP_DB_CONNECTORS;
+        else process.env.PIVOT_DESKTOP_DB_CONNECTORS = previous;
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});

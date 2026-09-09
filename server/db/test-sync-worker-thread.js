@@ -1,4 +1,4 @@
-/** Shared-memory Worker endpoint for server/db/test-sync-db.js. */
+/** server/db/test-sync-db.js 使用的共享内存 Worker 端点。 */
 const { workerData } = require('node:worker_threads');
 const { Client, types } = require('pg');
 
@@ -76,7 +76,7 @@ async function execute(client, request) {
 
 async function main() {
     const schema = String(process.env.PG_TEST_SCHEMA || '').trim();
-    if (!/^[a-z_][a-z0-9_]{0,62}$/i.test(schema)) throw new Error('invalid PG_TEST_SCHEMA');
+    if (!/^[a-z_][a-z0-9_]{0,62}$/i.test(schema)) throw new Error('PG_TEST_SCHEMA 格式无效');
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     await client.query(`SET search_path TO "${schema}", public`);

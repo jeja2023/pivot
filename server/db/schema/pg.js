@@ -28,10 +28,26 @@ const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
 const PG_SCHEMA_VERSION = '20260908.4';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
 
+function getPgSchemaName() {
+    const testSchema = String(process.env.PG_TEST_SCHEMA || '').trim();
+    return /^[a-z_][a-z0-9_]{0,62}$/i.test(testSchema) ? testSchema : 'public';
+}
+
+function quotePgIdentifier(value) {
+    return `"${String(value || '').replace(/"/g, '""')}"`;
+}
+
+function qualifiedPgTable(tableName) {
+    return `${quotePgIdentifier(getPgSchemaName())}.${quotePgIdentifier(tableName)}`;
+}
+
 async function isPgSchemaCurrent(pool) {
     if (String(process.env[PG_SCHEMA_RECONCILE_ENV] || '').toLowerCase() === 'true') return false;
     try {
-        const result = await pool.query('SELECT value FROM app_meta WHERE key = $1', ['pg_schema_version']);
+        // search_path 会在隔离 schema 缺表时回退到 public。版本标记若从 public
+        // 读取，会让新 schema 错误跳过全部 DDL 与 seed。直接限定表名；表不存在
+        // 时查询会进入 catch 并执行初始化，不需要额外探测 information_schema。
+        const result = await pool.query(`SELECT value FROM ${qualifiedPgTable('app_meta')} WHERE key = $1`, ['pg_schema_version']);
         return result.rows[0]?.value === PG_SCHEMA_VERSION;
     } catch (_) {
         return false;
@@ -40,7 +56,7 @@ async function isPgSchemaCurrent(pool) {
 
 async function markPgSchemaCurrent(client) {
     await client.query(`
-        INSERT INTO app_meta (key, value, updated_at)
+        INSERT INTO ${qualifiedPgTable('app_meta')} (key, value, updated_at)
         VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'))
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
     `, ['pg_schema_version', PG_SCHEMA_VERSION]);
@@ -130,6 +146,14 @@ function splitCreateTableStatements(sql) {
         .split(/;\s*(?=\n|$)/)
         .map(part => part.trim())
         .filter(part => /^CREATE\s+TABLE/i.test(part));
+}
+
+function getPgSchemaTableNames() {
+    return splitCreateTableStatements(baseTablesSql()).map(statement => {
+        const match = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(statement);
+        if (!match) throw new Error(`[PG Schema] 无法解析表名: ${statement.slice(0, 80)}`);
+        return match[1];
+    });
 }
 
 /**
@@ -485,6 +509,9 @@ module.exports = {
     initSchemaPg,
     applyPgSchemaComments,
     buildPgSchemaStatements,
+    getPgSchemaTableNames,
+    getPgSchemaName,
+    isPgSchemaCurrent,
     normalizeLegacyResidualColumnTypes,
     convertColumnTypes,
     convertVectorColumnTypes,
@@ -493,4 +520,5 @@ module.exports = {
     PG_VECTOR_COLUMNS,
     PG_JSONB_COLUMNS,
     PG_NOW,
+    PG_SCHEMA_VERSION,
 };

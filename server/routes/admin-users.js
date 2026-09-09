@@ -126,20 +126,63 @@ function createAdminUsersRouter({
         return false;
     };
 
+    function buildUserQueryFilters(req) {
+        const conditions = [];
+        const params = [];
+        const search = String(req.query.search ?? req.query.keyword ?? req.query.username ?? '').trim();
+        const unit = String(req.query.unit ?? '').trim();
+        const role = String(req.query.role ?? '').trim();
+        const status = String(req.query.status ?? '').trim();
+        const includeDeleted = req.query.includeDeleted === 'true';
+
+        if (search) {
+            conditions.push("(COALESCE(NULLIF(deleted_username, ''), username) ILIKE ? OR nickname ILIKE ?)");
+            params.push(`%${search}%`, `%${search}%`);
+        }
+        if (unit) {
+            conditions.push("unit ILIKE ?");
+            params.push(`%${unit}%`);
+        }
+        if (role) {
+            if (role === 'super_admin') {
+                conditions.push("COALESCE(NULLIF(deleted_username, ''), username) = 'admin'");
+            } else if (role === 'manager') {
+                conditions.push("(role = 'admin' AND COALESCE(NULLIF(deleted_username, ''), username) != 'admin')");
+            } else if (role === 'admin') {
+                conditions.push("role = 'admin'");
+            } else if (role === 'user') {
+                conditions.push("role = 'user'");
+            }
+        }
+        if (status === 'active') {
+            conditions.push("status = 'active' AND deleted_at IS NULL");
+        } else if (status === 'disabled') {
+            conditions.push("status = 'disabled' AND deleted_at IS NULL");
+        } else if (status === 'deleted') {
+            conditions.push("deleted_at IS NOT NULL");
+        } else if (status === 'all' || includeDeleted) {
+            // 不添加 deleted_at 限制，返回所有状态用户（包含已删除）
+        } else {
+            conditions.push("deleted_at IS NULL");
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        return { whereClause, params };
+    }
+
     router.get('/admin/users', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const page = normalizePage(req.query.page);
         const limit = normalizeLimit(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;
-        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
-        const where = includeDeleted ? '' : 'WHERE deleted_at IS NULL';
+        const { whereClause, params } = buildUserQueryFilters(req);
         const users = (await query(`
             SELECT id, COALESCE(NULLIF(deleted_username, ''), username) AS username,
                    nickname, unit, role, status, deleted_at, created_at, last_login_at
             FROM users
-            ${where}
+            ${whereClause}
             ORDER BY id ASC LIMIT ? OFFSET ?
-        `, [limit, offset])).map(withPermissionFlags);
-        const totalRow = await queryOne(`SELECT COUNT(*) as count FROM users ${where}`);
+        `, [...params, limit, offset])).map(withPermissionFlags);
+        const totalRow = await queryOne(`SELECT COUNT(*) as count FROM users ${whereClause}`, params);
         const total = Number(totalRow?.count || 0);
         res.json({
             data: users,
@@ -283,14 +326,15 @@ function createAdminUsersRouter({
     }));
 
     router.get('/admin/users/export', authMiddleware, requireCapability('exportAudit'), asyncHandler(async (req, res) => {
-        const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
+        const { whereClause, params } = buildUserQueryFilters(req);
         const users = await query(`
             SELECT id, COALESCE(NULLIF(deleted_username, ''), username) AS username,
                    nickname, unit, role, status, deleted_at, created_at
             FROM users
-            ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'}
+            ${whereClause}
+            ORDER BY id ASC
             LIMIT 10000
-        `);
+        `, params);
         let csv = '\uFEFFID,用户名,显示名,单位,角色,状态,删除时间,创建时间\n';
         users.forEach(u => {
             csv += [u.id, u.username, u.nickname || '', u.unit || '', u.role, u.status || 'active', u.deleted_at || '', u.created_at].map(escapeCsvCell).join(',') + '\n';

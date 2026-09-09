@@ -188,14 +188,14 @@ try {
         required: windowsRelease
     });
     restoreWindowsUpdateSigningProfile = () => windowsUpdateSigningProfile.restore();
-    const desktopConnectorProfile = prepareDesktopConnectorProfile(root);
-    restoreDesktopConnectorProfile = () => desktopConnectorProfile.restore();
     const bundledDesktopConfig = prepareBundledDesktopConfig({
         requireDistributionConfig: !rawBuilderArgs.includes('--dir'),
         windowsTarget: buildTarget.platform === 'win32',
         windowsUpdatePublisher: windowsUpdateSigningProfile.publisherName
     });
     restoreBundledDesktopConfig = bundledDesktopConfig.restore;
+    const desktopConnectorProfile = prepareDesktopConnectorProfile(root);
+    restoreDesktopConnectorProfile = () => desktopConnectorProfile.restore();
     const desktopRuntimeProfile = prepareDesktopRuntimeProfile(root, {
         config: bundledDesktopConfig.config
     });

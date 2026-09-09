@@ -3,10 +3,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const acorn = require('acorn');
 
 const rootDir = path.resolve(__dirname, '..');
 const stagedMode = process.argv.includes('--staged');
 const changedMode = process.argv.includes('--changed');
+const GENERATED_FILES = new Set([
+    'client/chat/chat.bundle.css'
+]);
 
 const failures = [];
 
@@ -148,12 +152,52 @@ function getStagedFiles() {
     }
 }
 
-function getChangedFiles() {
+function buildBaseRefCandidates(baseRef) {
+    const normalized = String(baseRef || '').trim();
+    if (!normalized) return [];
+    if (normalized.startsWith('origin/') || normalized.startsWith('refs/')) return [normalized];
+    return [`origin/${normalized}`, normalized];
+}
+
+function resolveChangedDiffArgs(
+    env = process.env,
+    resolveMergeBase = ref => execFileSync('git', ['merge-base', 'HEAD', ref], { cwd: rootDir, encoding: 'utf8' }).trim(),
+    hasWorkingTreeChanges = () => Boolean(execFileSync(
+        'git', ['diff', 'HEAD', '--name-only', '--diff-filter=ACMR'], { cwd: rootDir, encoding: 'utf8' }
+    ).trim())
+) {
+    const baseRef = String(env.PIVOT_STANDARDS_BASE_REF || env.GITHUB_BASE_REF || '').trim();
+    if (!baseRef) return hasWorkingTreeChanges() ? ['HEAD'] : ['HEAD^', 'HEAD'];
+    for (const candidate of buildBaseRefCandidates(baseRef)) {
+        try {
+            const mergeBase = String(resolveMergeBase(candidate) || '').trim();
+            if (mergeBase) return [mergeBase, 'HEAD'];
+        } catch (_error) {
+            // 候选引用不存在时继续尝试本地或远端同名引用。
+        }
+    }
+    throw new Error(`无法解析目标分支 ${baseRef} 与 HEAD 的共同基线`);
+}
+
+function getChangedFiles(diffArgs) {
     try {
-        const output = runGitDiff(['HEAD^', 'HEAD', '--name-only', '--diff-filter=ACMR']);
+        const output = runGitDiff([...diffArgs, '--name-only', '--diff-filter=ACMR']);
         return output.split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => item.replace(/\\/g, '/'));
     } catch (error) {
-        addFailure(`无法读取 HEAD^..HEAD 变更文件：${error.message}`);
+        addFailure(`无法读取提交变更文件：${error.message}`);
+        return [];
+    }
+}
+
+function getUntrackedFiles() {
+    try {
+        const output = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+            cwd: rootDir,
+            encoding: 'utf8'
+        });
+        return output.split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => item.replace(/\\/g, '/'));
+    } catch (error) {
+        addFailure(`无法读取未跟踪文件：${error.message}`);
         return [];
     }
 }
@@ -195,7 +239,8 @@ function isBackendRouteFile(file) {
 }
 
 function isSkippableGeneratedFile(file) {
-    return file.includes('/vendor/') ||
+    return GENERATED_FILES.has(file) ||
+        file.includes('/vendor/') ||
         file.endsWith('package-lock.json');
 }
 
@@ -228,14 +273,40 @@ function isEnglishOnlyHumanText(value) {
     return !isAllowedTechnicalLiteral(text);
 }
 
-function extractStringLiterals(line) {
-    const literals = [];
-    const pattern = /(["'`])((?:\\.|(?!\1).){1,200})\1/g;
-    let match;
-    while ((match = pattern.exec(line))) {
-        literals.push(match[2]);
+function extractMessageStringLiterals(line) {
+    const source = String(line || '');
+    const messageCall = source.match(/\b(?:console\.(?:log|error|warn|info)|logger\.(?:trace|debug|info|warn|error|fatal)|showToast|toast|notify|alert|confirm|prompt)\s*\(|new\s+Error\s*\(|res(?:\.status\([^)]*\))?\.json\s*\(/);
+    if (!messageCall) return [];
+    try {
+        const expression = acorn.parseExpressionAt(source, messageCall.index, { ecmaVersion: 'latest' });
+        const literals = [];
+        const collect = (node, inspectObjects = false) => {
+            if (!node || typeof node !== 'object') return;
+            if (node.type === 'Literal') {
+                if (typeof node.value === 'string') literals.push(node.value);
+                return;
+            }
+            if (node.type === 'TemplateLiteral') {
+                literals.push(node.quasis.map(item => item.value.cooked || item.value.raw || '').join('${...}'));
+                return;
+            }
+            // 嵌套函数参数通常是编码、路径或错误码，不属于当前日志的人类文案。
+            if (node.type === 'CallExpression' || node.type === 'NewExpression') return;
+            if (node.type === 'ObjectExpression' && !inspectObjects) return;
+            Object.entries(node).forEach(([key, value]) => {
+                if (['start', 'end', 'loc', 'callee', 'key'].includes(key)) return;
+                if (Array.isArray(value)) value.forEach(item => collect(item, inspectObjects));
+                else collect(value, inspectObjects);
+            });
+        };
+        const isJsonResponse = expression.type === 'CallExpression'
+            && expression.callee?.type === 'MemberExpression'
+            && expression.callee.property?.name === 'json';
+        (expression.arguments || []).forEach(argument => collect(argument, isJsonResponse));
+        return literals;
+    } catch (_error) {
+        return [];
     }
-    return literals;
 }
 
 function extractHumanComment(line) {
@@ -256,9 +327,9 @@ function checkChineseHumanTextAddedLine(file, item) {
         addFailure(`${location} 新增英文注释。注释必须使用中文，必要英文技术名词需放在中文语境中。`);
     }
 
-    const messageContext = /\b(?:console\.(?:log|error|warn|info)|logger\.(?:trace|debug|info|warn|error|fatal)|showToast|toast|notify|alert|confirm|prompt)\s*\(|new\s+Error\s*\(|throw\s+new\s+Error\s*\(|res(?:\.status\([^)]*\))?\.json\s*\(/.test(text);
-    if (messageContext) {
-        extractStringLiterals(text).forEach(value => {
+    const messageLiterals = extractMessageStringLiterals(text);
+    if (messageLiterals.length) {
+        messageLiterals.forEach(value => {
             if (isEnglishOnlyHumanText(value)) {
                 addFailure(`${location} 新增英文日志或错误提示：${value.slice(0, 80)}。请改为中文。`);
             }
@@ -339,12 +410,31 @@ function checkChanges(files, diffArgs) {
     });
 }
 
+function checkUntrackedChanges(files) {
+    files.filter(file => !isSkippableGeneratedFile(file)).forEach(file => {
+        const fullPath = path.join(rootDir, file);
+        if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return;
+        readUtf8(fullPath).split(/\r?\n/).forEach((text, index) => {
+            const item = { line: index + 1, text };
+            if (/\.(js|css|html)$/i.test(file)) checkChineseHumanTextAddedLine(file, item);
+            if (isFrontendFile(file)) checkFrontendAddedLine(file, item);
+            if (isBackendRouteFile(file)) checkBackendRouteAddedLine(file, item);
+        });
+    });
+}
+
 function checkStagedChanges() {
     checkChanges(getStagedFiles(), ['--cached']);
 }
 
 function checkCommittedChanges() {
-    checkChanges(getChangedFiles(), ['HEAD^', 'HEAD']);
+    try {
+        const diffArgs = resolveChangedDiffArgs();
+        checkChanges(getChangedFiles(diffArgs), diffArgs);
+        if (diffArgs.length === 1 && diffArgs[0] === 'HEAD') checkUntrackedChanges(getUntrackedFiles());
+    } catch (error) {
+        addFailure(`无法确定提交增量范围：${error.message}`);
+    }
 }
 
 function main() {
@@ -368,4 +458,11 @@ function main() {
     process.exit(1);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+    buildBaseRefCandidates,
+    extractMessageStringLiterals,
+    isSkippableGeneratedFile,
+    resolveChangedDiffArgs
+};

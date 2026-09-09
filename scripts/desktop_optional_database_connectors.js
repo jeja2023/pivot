@@ -40,15 +40,21 @@ function buildDesktopConnectorExcludes({ nodeModulesDir, projectManifest, connec
     };
 }
 
-function prepareDesktopConnectorProfile(rootDir, { connectors = process.env.PIVOT_DESKTOP_DB_CONNECTORS || '' } = {}) {
+function prepareDesktopConnectorProfile(rootDir, { connectors } = {}) {
     const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
     const packagePath = path.join(root, 'package.json');
     const original = fs.readFileSync(packagePath, 'utf8');
     const pkg = JSON.parse(original);
+    // 为兼容既有桌面客户端，未显式指定档位时保留全部可选驱动；只有发布方
+    // 明确设置 PIVOT_DESKTOP_DB_CONNECTORS 才裁剪。此处不改变 remote 模式
+    // local_database 授权桥的资源范围，后者仍由本机授权协议单独控制。
+    const selectedConnectors = connectors === undefined
+        ? (String(process.env.PIVOT_DESKTOP_DB_CONNECTORS || '').trim() || Object.keys(CONNECTORS).join(','))
+        : connectors;
     const profile = buildDesktopConnectorExcludes({
         nodeModulesDir: path.join(root, 'node_modules'),
         projectManifest: pkg,
-        connectors
+        connectors: selectedConnectors
     });
     const baseFiles = Array.isArray(pkg.build?.files) ? pkg.build.files.filter(item => !CONNECTOR_FILE_RULE.test(String(item))) : [];
     pkg.build = { ...pkg.build, files: [...baseFiles, ...profile.excludes] };

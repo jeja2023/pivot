@@ -21,27 +21,94 @@ function renderUserActionButton(action, label, userOrId, className = 'btn-second
     return `<button type="button" class="${className}" style="padding: 1px 5px; font-size: 0.68rem;" data-user-action="${action}" data-user-id="${escapeHtml(userId)}">${label}</button>`;
 }
 
+function getUserFilterParams() {
+    const search = document.getElementById('user-filter-search')?.value.trim() || '';
+    const unit = document.getElementById('user-filter-unit')?.value.trim() || '';
+    const role = document.getElementById('user-filter-role')?.value || '';
+    const status = document.getElementById('user-filter-status')?.value || '';
+    return { search, unit, role, status };
+}
+
+window.Pivot.legacy.resetUserFilters = () => {
+    const searchInput = document.getElementById('user-filter-search');
+    const unitInput = document.getElementById('user-filter-unit');
+    const roleSelect = document.getElementById('user-filter-role');
+    const statusSelect = document.getElementById('user-filter-status');
+    if (searchInput) searchInput.value = '';
+    if (unitInput) unitInput.value = '';
+    if (roleSelect) roleSelect.value = '';
+    if (statusSelect) statusSelect.value = '';
+    window.Pivot.legacy.loadUsers(1);
+};
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target && event.target.closest?.('.user-filter-bar')) {
+        event.preventDefault();
+        window.Pivot.legacy.loadUsers(1);
+    }
+});
+
+document.addEventListener('change', (event) => {
+    if (event.target && event.target.closest?.('.user-filter-bar') && event.target.tagName === 'SELECT') {
+        window.Pivot.legacy.loadUsers(1);
+    }
+});
+
 window.Pivot.legacy.loadUsers = async function(page = 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
     pageState.users = requestedPage;
+    const { search, unit, role, status } = getUserFilterParams();
     const params = new URLSearchParams({ page: String(requestedPage), limit: String(limit) });
+    if (search) params.set('search', search);
+    if (unit) params.set('unit', unit);
+    if (role) params.set('role', role);
+    if (status) {
+        params.set('status', status);
+        if (status === 'deleted' || status === 'all') params.set('includeDeleted', 'true');
+    }
     const res = await apiFetch(`${API_BASE}/admin/users?${params.toString()}`, { headers: authHeaders() });
     const { data = [], total = 0, isSuperAdmin, allowPublicRegistration } = await res.json();
     const totalCount = Number(total) || 0;
     const lastPage = Math.max(Math.ceil(totalCount / limit), 1);
     if (requestedPage > lastPage && totalCount > 0) return window.Pivot.legacy.loadUsers(lastPage);
+    const tbody = document.getElementById('user-list-body');
     if (!res.ok) {
-        renderTableMessage(document.getElementById('user-list-body'), 9, '用户加载失败');
+        renderTableMessage(tbody, 9, '用户加载失败');
         renderPagination('users', 0, 1);
         return;
     }
     const canViewUserRecords = isSuperAdmin === true || isSuperAdminUser();
     setPublicRegistrationToggle(allowPublicRegistration === true);
+
     userActionCache.clear();
-    PivotSafeHtml.setHtml(document.getElementById('user-list-body'), data.map(u => {
+    if (!data.length) {
+        renderTableMessage(tbody, 9, (search || unit || role || status) ? '未找到符合条件的用户' : '暂无用户数据');
+        renderPagination('users', 0, requestedPage);
+        return;
+    }
+    PivotSafeHtml.setHtml(tbody, data.map(u => {
         const permissionTier = u.permissionTier || u.permission_tier || getPermissionTier(u);
         const permissionLabel = u.permissionLabel || u.permission_label || getPermissionLabel(u);
+        const isDeleted = Boolean(u.deleted_at);
+        const statusLabel = isDeleted ? '已删除' : ((u.status || 'active') === 'disabled' ? '禁用' : '启用');
+        const statusClass = isDeleted ? 'is-deleted' : ((u.status || 'active') === 'disabled' ? 'is-disabled' : 'is-active');
+
+        let actionsHtml = '';
+        if (isDeleted) {
+            actionsHtml = `
+                ${canViewUserRecords ? renderUserActionButton('records', '记录', u) : ''}
+                <span class="user-deleted-tag">已注销</span>
+            `;
+        } else {
+            actionsHtml = `
+                ${canViewUserRecords ? renderUserActionButton('records', '记录', u) : ''}
+                ${renderUserActionButton('edit', '编辑', u)}
+                ${u.username !== 'admin' ? renderUserActionButton('reset-password', '重置密码', u.id) : ''}
+                ${u.id !== currentUser?.id && u.username !== 'admin' ? renderUserActionButton('delete', '删除', u.id, 'btn-danger') : ''}
+            `;
+        }
+
         return `
         <tr>
             <td class="text-center" title="${u.id}">${u.id}</td>
@@ -49,15 +116,12 @@ window.Pivot.legacy.loadUsers = async function(page = 1) {
             <td title="${escapeHtml(u.nickname || '')}">${escapeHtml(u.nickname || u.username)}</td>
             <td title="${escapeHtml(u.unit || '')}">${escapeHtml(u.unit || '-')}</td>
             <td title="${escapeHtml(`权限层级: ${permissionTier}; 存储角色: ${u.role}`)}">${escapeHtml(permissionLabel)}</td>
-            <td title="${escapeHtml(u.deleted_at ? '已删除' : (u.status || 'active'))}">${u.deleted_at ? '已删除' : ((u.status || 'active') === 'disabled' ? '禁用' : '启用')}</td>
+            <td><span class="user-status-badge ${statusClass}" title="${escapeHtml(statusLabel)}">${statusLabel}</span></td>
             <td title="${escapeHtml(formatDateToCN(u.created_at))}">${escapeHtml(formatDateToCN(u.created_at))}</td>
             <td title="${escapeHtml(formatDateToCN(u.last_login_at))}">${escapeHtml(formatDateToCN(u.last_login_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 4px; justify-content: center; align-items: center; flex-wrap: wrap;">
-                    ${canViewUserRecords ? renderUserActionButton('records', '记录', u) : ''}
-                    ${renderUserActionButton('edit', '编辑', u)}
-                    ${u.username !== 'admin' ? renderUserActionButton('reset-password', '重置密码', u.id) : ''}
-                    ${u.id !== currentUser?.id && u.username !== 'admin' ? renderUserActionButton('delete', '删除', u.id, 'btn-danger') : ''}
+                    ${actionsHtml}
                 </div>
             </td>
         </tr>
@@ -206,7 +270,19 @@ window.Pivot.legacy.updatePublicRegistrationSetting = async () => {
     }
 };
 
-window.Pivot.legacy.exportUsers = () => downloadFileByFetch(`${API_BASE}/admin/users/export`, 'users.csv');
+window.Pivot.legacy.exportUsers = () => {
+    const { search, unit, role, status } = getUserFilterParams();
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (unit) params.set('unit', unit);
+    if (role) params.set('role', role);
+    if (status) {
+        params.set('status', status);
+        if (status === 'deleted' || status === 'all') params.set('includeDeleted', 'true');
+    }
+    const queryStr = params.toString();
+    downloadFileByFetch(`${API_BASE}/admin/users/export${queryStr ? `?${queryStr}` : ''}`, 'users.csv');
+};
 
 let userRecordsTarget = null;
 let userRecordsEventsBound = false;
