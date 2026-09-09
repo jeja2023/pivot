@@ -19,15 +19,25 @@ const MIME_TYPE_MAP = {
     'application/json': 'JSON 数据'
 };
 
-window.Pivot.legacy.loadAttachments = async function(page = 1) {
-    const keyword = document.getElementById('attachment-search-input')?.value || '';
-    const res = await apiFetch(`${API_BASE}/attachments?page=${page}&limit=${pageState.limit}&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
-    const { data, total, isSuperAdmin } = await res.json();
-    const showOwner = isSuperAdmin === true;
+function isAttachmentSuperAdmin() {
+    if (typeof isSuperAdminUser === 'function') {
+        return Boolean(isSuperAdminUser());
+    }
     const attachmentsTab = document.getElementById('tab-content-attachments');
-    if (attachmentsTab) attachmentsTab.classList.toggle('attachments-show-owner', showOwner);
+    return attachmentsTab?.classList.contains('attachments-show-owner') || false;
+}
+
+function syncAttachmentOwnerVisibility(showOwner) {
+    const isSuper = Boolean(showOwner);
+    const attachmentsTab = document.getElementById('tab-content-attachments');
+    if (attachmentsTab) attachmentsTab.classList.toggle('attachments-show-owner', isSuper);
+    const userFilterGroup = document.getElementById('attachment-filter-user-group') || document.querySelector('.attachments-user-filter');
+    if (userFilterGroup) {
+        userFilterGroup.classList.toggle('hidden', !isSuper);
+        userFilterGroup.style.display = isSuper ? '' : 'none';
+    }
     let ownerHeader = document.getElementById('attachment-user-header');
-    if (!ownerHeader && showOwner) {
+    if (!ownerHeader && isSuper) {
         const firstHeader = document.querySelector('#tab-content-attachments thead tr th:first-child');
         if (firstHeader) {
             ownerHeader = document.createElement('th');
@@ -36,35 +46,81 @@ window.Pivot.legacy.loadAttachments = async function(page = 1) {
             firstHeader.insertAdjacentElement('afterend', ownerHeader);
         }
     }
-    ownerHeader?.classList.toggle('hidden', !showOwner);
-    PivotSafeHtml.setHtml(document.getElementById('attachment-list-body'), data.map((item, idx) => {
-        const typeDisplay = MIME_TYPE_MAP[item.file_type] || item.file_type || '未知类型';
-        const ownerName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
-        return `
-        <tr>
-            <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
-            ${showOwner ? `<td title="${escapeHtml(ownerName)}">${escapeHtml(ownerName)}</td>` : ''}
-            <td title="${escapeHtml(item.file_name)}">${escapeHtml(item.file_name)}</td>
-            <td title="${escapeHtml(item.session_title || item.session_id || '-')}">${escapeHtml(item.session_title || item.session_id || '-')}</td>
-            <td title="${escapeHtml(item.file_type)}">${escapeHtml(typeDisplay)}</td>
-            <td title="${formatFileSize(item.file_size)}">${formatFileSize(item.file_size)}</td>
-            <td title="${escapeHtml(formatDateToCN(item.created_at))}">${escapeHtml(formatDateToCN(item.created_at))}</td>
-            <td class="text-center">
-                <div style="display: flex; gap: 5px; justify-content: center;">
-                    <button class="btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-preview data-attachment-url="${escapeHtml(item.url)}" data-attachment-name="${escapeHtml(item.file_name)}" data-attachment-type="${escapeHtml(item.file_type || '')}">预览</button>
-                    <button class="btn-danger" style="padding: 2px 8px; font-size: 0.75rem;" data-attachment-action="delete" data-attachment-id="${item.id}">删除</button>
-                </div>
-            </td>
-        </tr>
-    `}).join(''));
+    ownerHeader?.classList.toggle('hidden', !isSuper);
+}
+
+function getAttachmentFilterParams() {
+    const filename = document.getElementById('attachment-filter-filename')?.value?.trim() || '';
+    const fileType = document.getElementById('attachment-filter-type')?.value || '';
+    const session = document.getElementById('attachment-filter-session')?.value?.trim() || '';
+    const isSuper = isAttachmentSuperAdmin();
+    const user = isSuper ? (document.getElementById('attachment-filter-user')?.value?.trim() || '') : '';
+    return { filename, fileType, user, session };
+}
+
+function resetAttachmentFilters() {
+    const filenameEl = document.getElementById('attachment-filter-filename');
+    const typeEl = document.getElementById('attachment-filter-type');
+    const userEl = document.getElementById('attachment-filter-user');
+    const sessionEl = document.getElementById('attachment-filter-session');
+    if (filenameEl) filenameEl.value = '';
+    if (typeEl) typeEl.value = '';
+    if (userEl) userEl.value = '';
+    if (sessionEl) sessionEl.value = '';
+}
+
+window.Pivot.legacy.loadAttachments = async function(page = 1) {
+    syncAttachmentOwnerVisibility(isAttachmentSuperAdmin());
+    const { filename, fileType, user, session } = getAttachmentFilterParams();
+    const params = new URLSearchParams({
+        page: String(page),
+        limit: String(pageState.limit || 10)
+    });
+    if (filename) params.set('keyword', filename);
+    if (fileType) params.set('fileType', fileType);
+    if (user) params.set('user', user);
+    if (session) params.set('session', session);
+
+    const res = await apiFetch(`${API_BASE}/attachments?${params.toString()}`, { headers: authHeaders() });
+    const { data, total, isSuperAdmin } = await res.json();
+    const showOwner = isSuperAdmin === true;
+    syncAttachmentOwnerVisibility(showOwner);
+
+    const tbody = document.getElementById('attachment-list-body');
+    const colSpan = showOwner ? 8 : 7;
+    if (!data || data.length === 0) {
+        PivotSafeHtml.setHtml(tbody, `<tr><td colspan="${colSpan}" class="text-center">暂无匹配的附件数据</td></tr>`);
+    } else {
+        PivotSafeHtml.setHtml(tbody, data.map((item, idx) => {
+            const typeDisplay = MIME_TYPE_MAP[item.file_type] || item.file_type || '未知类型';
+            const ownerName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
+            const sessionText = item.session_title || item.session_id || '未关联会话';
+            const safeOwner = escapeHtml(ownerName);
+            const safeFileName = escapeHtml(item.file_name);
+            const safeSession = escapeHtml(sessionText);
+            const safeType = escapeHtml(typeDisplay);
+            const safeDate = escapeHtml(formatDateToCN(item.created_at));
+            return `
+            <tr>
+                <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
+                ${showOwner ? `<td title="${safeOwner}">${safeOwner}</td>` : ''}
+                <td title="${safeFileName}">${safeFileName}</td>
+                <td title="${safeSession}">${safeSession}</td>
+                <td title="${safeType}">${safeType}</td>
+                <td title="${formatFileSize(item.file_size)}">${formatFileSize(item.file_size)}</td>
+                <td title="${safeDate}">${safeDate}</td>
+                <td class="text-center">
+                    <div class="attachment-actions">
+                        <button class="btn-secondary btn-sm" data-attachment-preview data-attachment-url="${escapeHtml(item.url)}" data-attachment-name="${safeFileName}" data-attachment-type="${escapeHtml(item.file_type || '')}">预览</button>
+                        <button class="btn-danger btn-sm" data-attachment-action="delete" data-attachment-id="${item.id}">删除</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+        }).join(''));
+    }
     renderPagination('attachments', total, page);
 };
-
-document.getElementById('attachment-list-body')?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-attachment-action="delete"]');
-    if (!button) return;
-    window.Pivot.legacy.deleteAttachment(button.dataset.attachmentId);
-});
 
 function formatFileSize(size) {
     const v = Number(size) || 0;
@@ -80,10 +136,26 @@ window.Pivot.legacy.deleteAttachment = (id) => {
     });
 };
 
-let attachmentSearchTimer = null;
-document.getElementById('attachment-search-input')?.addEventListener('input', () => {
-    clearTimeout(attachmentSearchTimer);
-    attachmentSearchTimer = setTimeout(() => window.Pivot.legacy.loadAttachments(1), 300);
+document.addEventListener('click', (event) => {
+    const deleteBtn = event.target.closest('[data-attachment-action="delete"]');
+    if (deleteBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.deleteAttachment(deleteBtn.dataset.attachmentId);
+        return;
+    }
+
+    if (event.target.closest('#attachment-query-btn')) {
+        event.preventDefault();
+        window.Pivot.legacy.loadAttachments(1);
+        return;
+    }
+
+    if (event.target.closest('#attachment-reset-btn')) {
+        event.preventDefault();
+        resetAttachmentFilters();
+        window.Pivot.legacy.loadAttachments(1);
+        return;
+    }
 });
 
 window.Pivot.legacy.changePassword = async () => {

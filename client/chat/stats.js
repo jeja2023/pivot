@@ -40,19 +40,56 @@ function formatUsageRoleLabel(role) {
     return '其它调用';
 }
 
+function getDetailsFilterParams() {
+    const user = document.getElementById('details-filter-user')?.value.trim() || '';
+    const model = document.getElementById('details-filter-model')?.value.trim() || '';
+    const role = document.getElementById('details-filter-role')?.value || '';
+    const startDate = document.getElementById('details-filter-start')?.value || '';
+    const endDate = document.getElementById('details-filter-end')?.value || '';
+    return { user, model, role, startDate, endDate };
+}
+
+window.Pivot.legacy.resetDetailsFilters = () => {
+    const userEl = document.getElementById('details-filter-user');
+    const modelEl = document.getElementById('details-filter-model');
+    const roleEl = document.getElementById('details-filter-role');
+    const startEl = document.getElementById('details-filter-start');
+    const endEl = document.getElementById('details-filter-end');
+    if (userEl) userEl.value = '';
+    if (modelEl) modelEl.value = '';
+    if (roleEl) roleEl.value = '';
+    if (startEl) startEl.value = '';
+    if (endEl) endEl.value = '';
+    window.Pivot.legacy.loadDetails(1);
+};
+
 window.Pivot.legacy.loadDetails = async function(page = 1) {
+    const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
+    pageState.details = requestedPage;
     const titleEl = document.getElementById('details-title') || document.getElementById('usage-title');
     if (titleEl) titleEl.innerText = '用量明细';
     try {
-        const res = await apiFetch(`${API_BASE}/stats/details?page=${page}&limit=${pageState.limit}`, { headers: authHeaders() });
-        const { data, total } = await res.json();
-        PivotSafeHtml.setHtml(document.getElementById('details-list-body'), data.map((d, i) => {
+        const { user, model, role, startDate, endDate } = getDetailsFilterParams();
+        const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
+        const params = new URLSearchParams({ page: String(requestedPage), limit: String(limit) });
+        if (user) params.set('user', user);
+        if (model) params.set('model', model);
+        if (role) params.set('role', role);
+        if (startDate) params.set('startDate', startDate);
+        if (endDate) params.set('endDate', endDate);
+
+        const res = await apiFetch(`${API_BASE}/stats/details?${params.toString()}`, { headers: authHeaders() });
+        const { data = [], total = 0 } = await res.json();
+        const hasFilters = Boolean(user || model || role || startDate || endDate);
+        const tbody = document.getElementById('details-list-body');
+        if (!tbody) return;
+        PivotSafeHtml.setHtml(tbody, data.length ? data.map((d, i) => {
             const roleLabel = formatUsageRoleLabel(d.role);
             const username = d.username || '-';
             const displayName = d.nickname || d.username || '-';
             return `
                 <tr>
-                    <td class="text-center">${(page - 1) * pageState.limit + i + 1}</td>
+                    <td class="text-center">${(requestedPage - 1) * limit + i + 1}</td>
                     <td title="${escapeHtml(formatDateToCN(d.created_at))}">${escapeHtml(formatDateToCN(d.created_at))}</td>
                     <td title="${escapeHtml(username)}">${escapeHtml(username)}</td>
                     <td title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</td>
@@ -63,9 +100,32 @@ window.Pivot.legacy.loadDetails = async function(page = 1) {
                     <td class="text-center" title="${Number(d.token_count || 0).toLocaleString()}">${formatTokenCount(d.token_count)}</td>
                 </tr>
             `;
-        }).join(''));
-        renderPagination('details', total, page);
-    } catch (e) { showToast('加载明细失败', 'error'); }
+        }).join('') : `<tr><td colspan="9" class="text-center">${hasFilters ? '未找到符合条件的明细数据' : '暂无明细数据'}</td></tr>`);
+        renderPagination('details', total, requestedPage);
+    } catch (e) {
+        renderPagination('details', 0, 1);
+        showToast('加载明细失败', 'error');
+    }
+};
+
+function getStatsFilterParams() {
+    const user = document.getElementById('stats-filter-user')?.value.trim() || '';
+    const model = document.getElementById('stats-filter-model')?.value.trim() || '';
+    const startDate = document.getElementById('stats-filter-start')?.value || '';
+    const endDate = document.getElementById('stats-filter-end')?.value || '';
+    return { user, model, startDate, endDate };
+}
+
+window.Pivot.legacy.resetStatsFilters = () => {
+    const userEl = document.getElementById('stats-filter-user');
+    const modelEl = document.getElementById('stats-filter-model');
+    const startEl = document.getElementById('stats-filter-start');
+    const endEl = document.getElementById('stats-filter-end');
+    if (userEl) userEl.value = '';
+    if (modelEl) modelEl.value = '';
+    if (startEl) startEl.value = '';
+    if (endEl) endEl.value = '';
+    window.Pivot.legacy.loadStats(1);
 };
 
 window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
@@ -74,19 +134,27 @@ window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
     const titleEl = document.getElementById('stats-title') || document.getElementById('usage-title');
     if (titleEl) titleEl.innerText = '用量统计';
     try {
+        const { user, model, startDate, endDate } = getStatsFilterParams();
+        const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
         const params = new URLSearchParams({
             page: String(requestedPage),
-            limit: String(pageState.limit || 15)
+            limit: String(limit)
         });
+        if (user) params.set('user', user);
+        if (model) params.set('model', model);
+        if (startDate) params.set('startDate', startDate);
+        if (endDate) params.set('endDate', endDate);
+
         const res = await apiFetch(`${API_BASE}/stats/usage?${params.toString()}`, { headers: authHeaders() });
         const payload = await res.json();
         const data = Array.isArray(payload) ? payload : (payload.data || []);
         const total = Array.isArray(payload) ? data.length : Number(payload.total || data.length || 0);
         const tbody = document.getElementById('stats-list-body');
         if (!tbody) return;
+        const hasFilters = Boolean(user || model || startDate || endDate);
         PivotSafeHtml.setHtml(tbody, data.length ? data.map((s, idx) => `
             <tr>
-                <td class="text-center">${(requestedPage - 1) * pageState.limit + idx + 1}</td>
+                <td class="text-center">${(requestedPage - 1) * limit + idx + 1}</td>
                 <td title="${escapeHtml(s.username)}">${escapeHtml(s.username)}</td>
                 <td title="${escapeHtml(s.nickname || s.username)}">${escapeHtml(s.nickname || s.username)}</td>
                 <td title="${escapeHtml(s.model_name || '未知模型')}">${escapeHtml(s.model_name || '未知模型')}</td>
@@ -96,7 +164,7 @@ window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
                 <td class="text-center" title="${Number(s.total_tokens || 0).toLocaleString()}">${formatTokenCount(s.total_tokens)} / <small>${escapeHtml(formatEstimatedCost(s.estimated_cost, s.price_currency || '人民币'))}</small></td>
                 <td>${s.last_active || '-'}</td>
             </tr>
-        `).join('') : '<tr><td colspan="9" class="text-center">暂无统计数据</td></tr>');
+        `).join('') : `<tr><td colspan="9" class="text-center">${hasFilters ? '未找到符合条件的统计数据' : '暂无统计数据'}</td></tr>`);
         renderPagination('stats', total, requestedPage);
     } catch (e) {
         renderPagination('stats', 0, 1);
@@ -225,7 +293,17 @@ function renderTrendChart(canvasId, data) {
     ctx.fillText(formatTokenCount(max), padLeft, 14);
 }
 
-window.Pivot.legacy.exportDetails = () => downloadFileByFetch(`${API_BASE}/stats/details/export`, 'usage_details.csv');
+window.Pivot.legacy.exportDetails = () => {
+    const { user, model, role, startDate, endDate } = getDetailsFilterParams();
+    const params = new URLSearchParams();
+    if (user) params.set('user', user);
+    if (model) params.set('model', model);
+    if (role) params.set('role', role);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    downloadFileByFetch(`${API_BASE}/stats/details/export${qs ? `?${qs}` : ''}`, 'usage_details.csv');
+};
 window.Pivot.legacy.exportModelCosts = () => downloadFileByFetch(`${API_BASE}/stats/model-costs/export`, 'model_costs.csv');
 window.Pivot.legacy.exportCompliancePackage = () => {
     const start = document.getElementById('log-filter-start')?.value || '';
@@ -246,7 +324,16 @@ window.Pivot.legacy.closeMonitorRoutesModal = () => {
     modal?.setAttribute('aria-hidden', 'true');
 };
 
-window.Pivot.legacy.exportStats = () => downloadFileByFetch(`${API_BASE}/stats/usage/export`, 'usage_stats.csv');
+window.Pivot.legacy.exportStats = () => {
+    const { user, model, startDate, endDate } = getStatsFilterParams();
+    const params = new URLSearchParams();
+    if (user) params.set('user', user);
+    if (model) params.set('model', model);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    downloadFileByFetch(`${API_BASE}/stats/usage/export${qs ? `?${qs}` : ''}`, 'usage_stats.csv');
+};
 
 window.Pivot.legacy.loadLogs = async function(page = 1) {
     try {
@@ -499,3 +586,30 @@ function renderBarChart(canvasId, data, labelField, fallbackField) {
         ctx.fillText(formatTokenCount(v), padX + barWidth + 8, y);
     });
 }
+
+document.addEventListener('click', (event) => {
+    const statsQueryBtn = event.target.closest('#stats-query-btn');
+    if (statsQueryBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.loadStats?.(1);
+        return;
+    }
+    const statsResetBtn = event.target.closest('#stats-reset-btn');
+    if (statsResetBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.resetStatsFilters?.();
+        return;
+    }
+    const detailsQueryBtn = event.target.closest('#details-query-btn');
+    if (detailsQueryBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.loadDetails?.(1);
+        return;
+    }
+    const detailsResetBtn = event.target.closest('#details-reset-btn');
+    if (detailsResetBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.resetDetailsFilters?.();
+        return;
+    }
+});

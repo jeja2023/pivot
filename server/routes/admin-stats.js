@@ -235,6 +235,49 @@ function invalidateMonitorSummaryCache() {
     invalidateGlobalCountsCache();
 }
 
+function buildUsageFilterConditions(req, { canViewAll, userAlias = 'u', modelAlias = 'm', usageAlias = 'usage' } = {}) {
+    const conditions = [];
+    const params = [];
+
+    if (!canViewAll) {
+        conditions.push(`${usageAlias}.user_id = ?`);
+        params.push(req.user.id);
+    }
+
+    const userKeyword = String(req.query.user || '').trim();
+    if (userKeyword) {
+        conditions.push(`(COALESCE(${userAlias}.username, '') ILIKE ? OR COALESCE(${userAlias}.nickname, '') ILIKE ? OR COALESCE(${userAlias}.deleted_username, '') ILIKE ?)`);
+        params.push(`%${userKeyword}%`, `%${userKeyword}%`, `%${userKeyword}%`);
+    }
+
+    const modelKeyword = String(req.query.model || '').trim();
+    if (modelKeyword) {
+        conditions.push(`COALESCE(${modelAlias}.name, '') ILIKE ?`);
+        params.push(`%${modelKeyword}%`);
+    }
+
+    const startDate = String(req.query.startDate || '').trim();
+    if (startDate) {
+        conditions.push(`${usageAlias}.created_at >= (? :: date :: timestamp AT TIME ZONE 'Asia/Shanghai')`);
+        params.push(startDate);
+    }
+
+    const endDate = String(req.query.endDate || '').trim();
+    if (endDate) {
+        conditions.push(`${usageAlias}.created_at < ((? :: date + interval '1 day') :: timestamp AT TIME ZONE 'Asia/Shanghai')`);
+        params.push(endDate);
+    }
+
+    const role = String(req.query.role || '').trim();
+    if (role) {
+        conditions.push(`${usageAlias}.role = ?`);
+        params.push(role);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    return { whereClause, params };
+}
+
 function createAdminStatsRouter({
     authMiddleware,
     adminMiddleware,
@@ -448,8 +491,12 @@ function createAdminStatsRouter({
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
         const offset = (page - 1) * limit;
 
-        const whereParams = [];
-        const whereClause = canViewAll ? '' : (() => { whereParams.push(req.user.id); return 'WHERE usage.user_id = ?'; })();
+        const { whereClause, params: whereParams } = buildUsageFilterConditions(req, {
+            canViewAll,
+            userAlias: 'u',
+            modelAlias: 'm',
+            usageAlias: 'usage'
+        });
 
         const groupedQuery = `
             SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
@@ -481,8 +528,12 @@ function createAdminStatsRouter({
 
     router.get('/usage/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const whereParams = [];
-        const whereClause = canViewAll ? '' : (() => { whereParams.push(req.user.id); return 'WHERE usage.user_id = ?'; })();
+        const { whereClause, params: whereParams } = buildUsageFilterConditions(req, {
+            canViewAll,
+            userAlias: 'u',
+            modelAlias: 'm',
+            usageAlias: 'usage'
+        });
 
         const rows = await query(`
             SELECT COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, m.name as model_name,
@@ -839,8 +890,12 @@ function createAdminStatsRouter({
         const limit = normalizeLimit(req.query.limit, 20, 100);
         const offset = (page - 1) * limit;
 
-        const innerParams = [];
-        const innerWhere = canViewAll ? '' : (() => { innerParams.push(req.user.id); return 'user_id = ?'; })();
+        const { whereClause, params: whereParams } = buildUsageFilterConditions(req, {
+            canViewAll,
+            userAlias: 'u',
+            modelAlias: 'md',
+            usageAlias: 'usage'
+        });
 
         const detailsSql = `
             SELECT usage.id, usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name,
@@ -850,19 +905,21 @@ function createAdminStatsRouter({
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
                    COALESCE(md.price_currency, '人民币') AS price_currency,
                    usage.usage_source
-            FROM (${tokenUsageSubquery(innerWhere)}) usage
+            FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
+            ${whereClause}
             ORDER BY usage.created_at DESC
             LIMIT ? OFFSET ?
         `;
-        // UNION ALL 内部 innerParams 传两份
-        const unionParams = [...innerParams, ...innerParams];
-        const details = await query(detailsSql, [...unionParams, limit, offset]);
+        const details = await query(detailsSql, [...whereParams, limit, offset]);
 
         const countRow = await queryOne(
-            `SELECT COUNT(*) as count FROM (${tokenUsageSubquery(innerWhere)}) usage`,
-            unionParams
+            `SELECT COUNT(*) as count FROM (${tokenUsageSubquery()}) usage
+             JOIN users u ON usage.user_id = u.id
+             LEFT JOIN models md ON usage.model_id = md.id
+             ${whereClause}`,
+            whereParams
         );
         const total = Number(countRow?.count || 0);
         res.json({ data: details, total });
@@ -870,9 +927,12 @@ function createAdminStatsRouter({
 
     router.get('/details/export', authMiddleware, asyncHandler(async (req, res) => {
         const canViewAll = isSuperAdmin(req.user);
-        const innerParams = [];
-        const innerWhere = canViewAll ? '' : (() => { innerParams.push(req.user.id); return 'user_id = ?'; })();
-        const unionParams = [...innerParams, ...innerParams];
+        const { whereClause, params: whereParams } = buildUsageFilterConditions(req, {
+            canViewAll,
+            userAlias: 'u',
+            modelAlias: 'md',
+            usageAlias: 'usage'
+        });
 
         const details = await query(`
             SELECT usage.created_at, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, md.name as model_name, usage.role,
@@ -882,11 +942,12 @@ function createAdminStatsRouter({
                    ${usageCostSql('usage', 'md')} AS estimated_cost,
                    COALESCE(md.price_currency, '人民币') AS price_currency,
                    usage.usage_source
-            FROM (${tokenUsageSubquery(innerWhere)}) usage
+            FROM (${tokenUsageSubquery()}) usage
             JOIN users u ON usage.user_id = u.id
             LEFT JOIN models md ON usage.model_id = md.id
+            ${whereClause}
             ORDER BY usage.created_at DESC LIMIT 10000
-        `, unionParams);
+        `, whereParams);
 
         let csv = '\uFEFF时间,用户名,显示名,模型,角色,输入Token,输出Token,总Token\n';
         details.forEach(d => {

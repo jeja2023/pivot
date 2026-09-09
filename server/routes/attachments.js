@@ -248,27 +248,58 @@ function createAttachmentsRouter({
         const page = normalizePage(req.query.page || 1);
         const limit = normalizeLimit(req.query.limit || 20);
         const keyword = String(req.query.keyword || '').trim();
+        const fileType = String(req.query.fileType || '').trim();
+        const userKeyword = String(req.query.user || '').trim();
+        const sessionKeyword = String(req.query.session || '').trim();
         const offset = (page - 1) * limit;
         const ownerId = parseInt(req.query.userId, 10);
         const includeDeleted = req.query.includeDeleted === 'true' && isSuperAdmin(req.user);
-        let where = '';
+        const conditions = [];
         const params = [];
+
         if (isSuperAdmin(req.user) && ownerId) {
-            where = 'WHERE a.user_id = ?';
+            conditions.push('a.user_id = ?');
             params.push(ownerId);
         } else if (!isSuperAdmin(req.user)) {
-            where = 'WHERE a.user_id = ?';
+            conditions.push('a.user_id = ?');
             params.push(req.user.id);
-        } else {
-            where = 'WHERE 1 = 1';
         }
+
         if (!includeDeleted) {
-            where += ' AND a.deleted_at IS NULL';
+            conditions.push('a.deleted_at IS NULL');
         }
+
         if (keyword) {
-            where += ' AND a.file_name ILIKE ?';
+            conditions.push('a.file_name ILIKE ?');
             params.push(`%${keyword}%`);
         }
+
+        if (fileType) {
+            if (fileType === 'image') {
+                conditions.push("a.file_type LIKE 'image/%'");
+            } else if (fileType === 'doc' || fileType === 'document') {
+                conditions.push("(a.file_type LIKE '%pdf%' OR a.file_type LIKE '%word%' OR a.file_type LIKE '%document%' OR a.file_type LIKE '%text%' OR a.file_type LIKE '%sheet%' OR a.file_name ILIKE '%.pdf' OR a.file_name ILIKE '%.docx' OR a.file_name ILIKE '%.doc' OR a.file_name ILIKE '%.txt' OR a.file_name ILIKE '%.xlsx' OR a.file_name ILIKE '%.csv')");
+            } else if (fileType === 'archive' || fileType === 'zip') {
+                conditions.push("(a.file_type LIKE '%zip%' OR a.file_type LIKE '%tar%' OR a.file_type LIKE '%rar%' OR a.file_type LIKE '%7z%' OR a.file_name ILIKE '%.zip' OR a.file_name ILIKE '%.tar%' OR a.file_name ILIKE '%.gz' OR a.file_name ILIKE '%.7z')");
+            } else if (fileType === 'code' || fileType === 'data') {
+                conditions.push("(a.file_type LIKE '%json%' OR a.file_type LIKE '%xml%' OR a.file_type LIKE '%javascript%' OR a.file_name ILIKE '%.json' OR a.file_name ILIKE '%.js' OR a.file_name ILIKE '%.py' OR a.file_name ILIKE '%.sql')");
+            } else {
+                conditions.push('(a.file_type ILIKE ? OR a.file_name ILIKE ?)');
+                params.push(`%${fileType}%`, `%.${fileType}%`);
+            }
+        }
+
+        if (userKeyword && isSuperAdmin(req.user)) {
+            conditions.push('(COALESCE(u.username, \'\') ILIKE ? OR COALESCE(u.nickname, \'\') ILIKE ? OR COALESCE(u.deleted_username, \'\') ILIKE ?)');
+            params.push(`%${userKeyword}%`, `%${userKeyword}%`, `%${userKeyword}%`);
+        }
+
+        if (sessionKeyword) {
+            conditions.push('(COALESCE(s.title, \'\') ILIKE ? OR a.session_id ILIKE ?)');
+            params.push(`%${sessionKeyword}%`, `%${sessionKeyword}%`);
+        }
+
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
         const rows = await query(`
             SELECT a.*, s.title AS session_title, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname
             FROM attachments a
@@ -282,7 +313,7 @@ function createAttachmentsRouter({
             ...item,
             url: encodeAttachmentUrl(item.file_path, item.access_token)
         }));
-        const countRow = await queryOne(`SELECT COUNT(*) AS count FROM attachments a ${where}`, params);
+        const countRow = await queryOne(`SELECT COUNT(*) AS count FROM attachments a LEFT JOIN sessions s ON s.id = a.session_id LEFT JOIN users u ON u.id = a.user_id ${where}`, params);
         const total = Number(countRow?.count || 0);
         res.json({ data, total, hasMore: offset + data.length < total, isSuperAdmin: isSuperAdmin(req.user) });
     }));

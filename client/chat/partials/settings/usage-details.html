@@ -1,4 +1,40 @@
 <div id="tab-content-details" class="usage-view hidden" data-usage-panel="details" role="tabpanel" aria-labelledby="usage-subtab-details">
+    <div class="filter-bar details-filter-bar">
+        <div class="filter-item filter-inline">
+            <label for="details-filter-user">用户</label>
+            <input type="text" id="details-filter-user" class="form-input" placeholder="用户名 / 显示名">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="details-filter-model">模型</label>
+            <input type="text" id="details-filter-model" class="form-input" placeholder="模型名称">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="details-filter-role">角色</label>
+            <select id="details-filter-role" class="form-input">
+                <option value="">全部角色</option>
+                <option value="user">提问 (user)</option>
+                <option value="assistant">回答 (assistant)</option>
+                <option value="system">系统 (system)</option>
+                <option value="tool">工具 (tool)</option>
+                <option value="agent_planner">智能体规划</option>
+                <option value="agent_summary">智能体总结</option>
+                <option value="rag_embedding">知识库向量</option>
+                <option value="api">API 调用</option>
+            </select>
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="details-filter-start">开始日期</label>
+            <input type="date" id="details-filter-start" class="form-input">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="details-filter-end">结束日期</label>
+            <input type="date" id="details-filter-end" class="form-input">
+        </div>
+        <div class="filter-item filter-actions">
+            <button type="button" id="details-query-btn" class="btn-primary">查询</button>
+            <button type="button" id="details-reset-btn" class="btn-secondary">重置</button>
+        </div>
+    </div>
     <div class="table-container details-table-wrap">
         <table class="data-table detail-table">
             <colgroup>

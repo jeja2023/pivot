@@ -1,4 +1,26 @@
 <div id="tab-content-stats" class="usage-view hidden" data-usage-panel="stats" role="tabpanel" aria-labelledby="usage-subtab-stats">
+    <div class="filter-bar stats-filter-bar">
+        <div class="filter-item filter-inline">
+            <label for="stats-filter-user">用户</label>
+            <input type="text" id="stats-filter-user" class="form-input" placeholder="用户名 / 显示名">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="stats-filter-model">模型</label>
+            <input type="text" id="stats-filter-model" class="form-input" placeholder="模型名称">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="stats-filter-start">开始日期</label>
+            <input type="date" id="stats-filter-start" class="form-input">
+        </div>
+        <div class="filter-item filter-inline">
+            <label for="stats-filter-end">结束日期</label>
+            <input type="date" id="stats-filter-end" class="form-input">
+        </div>
+        <div class="filter-item filter-actions">
+            <button type="button" id="stats-query-btn" class="btn-primary">查询</button>
+            <button type="button" id="stats-reset-btn" class="btn-secondary">重置</button>
+        </div>
+    </div>
     <div class="table-container stats-table-wrap">
         <table class="data-table stats-usage-table">
             <colgroup>

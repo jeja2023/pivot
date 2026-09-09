@@ -5,8 +5,34 @@
                                 <h3>附件库</h3>
                                 <p>查看上传文件、关联会话、类型、大小和上传时间，支持快速检索附件。</p>
                             </div>
-                            <input id="attachment-search-input" class="form-input"
-                                style="width: 240px; height: 38px; margin: 0;" placeholder="搜索文件名">
+                        </div>
+                        <div class="filter-bar attachments-filter-bar">
+                            <div class="filter-item filter-inline">
+                                <label for="attachment-filter-filename">文件名</label>
+                                <input type="text" id="attachment-filter-filename" class="form-input" placeholder="搜索文件名">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="attachment-filter-type">文件类型</label>
+                                <select id="attachment-filter-type" class="form-input">
+                                    <option value="">全部类型</option>
+                                    <option value="image">图片</option>
+                                    <option value="doc">文档 (PDF/Word/Text)</option>
+                                    <option value="archive">压缩包 (ZIP/RAR/7z)</option>
+                                    <option value="code">代码与数据 (JSON/JS/SQL)</option>
+                                </select>
+                            </div>
+                            <div class="filter-item filter-inline attachments-user-filter hidden" id="attachment-filter-user-group">
+                                <label for="attachment-filter-user">上传用户</label>
+                                <input type="text" id="attachment-filter-user" class="form-input" placeholder="用户 / 显示名">
+                            </div>
+                            <div class="filter-item filter-inline">
+                                <label for="attachment-filter-session">关联会话</label>
+                                <input type="text" id="attachment-filter-session" class="form-input" placeholder="会话名称">
+                            </div>
+                            <div class="filter-item filter-actions">
+                                <button type="button" id="attachment-query-btn" class="btn-primary">查询</button>
+                                <button type="button" id="attachment-reset-btn" class="btn-secondary">重置</button>
+                            </div>
                         </div>
                         <div class="table-container attachments-table-wrap">
                             <table class="data-table attachments-table">

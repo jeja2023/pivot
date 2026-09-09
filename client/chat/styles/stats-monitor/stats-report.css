@@ -198,7 +198,13 @@
 .stats-usage-table .col-active { width: 170px; }
 .stats-usage-table th,
 .stats-usage-table td {
-    padding: 7px 9px;
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    vertical-align: middle;
+    line-height: 1.25;
 }
 .stats-usage-table th:nth-child(2),
 .stats-usage-table td:nth-child(2),
@@ -239,7 +245,13 @@
 .detail-table .col-total { width: 124px; }
 .detail-table th,
 .detail-table td {
-    padding: 7px 9px;
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    vertical-align: middle;
+    line-height: 1.25;
 }
 .detail-table th:nth-child(2),
 .detail-table td:nth-child(2),
@@ -284,5 +296,127 @@
     }
     .report-chart-grid {
         grid-template-columns: 1fr !important;
+    }
+}
+
+.stats-filter-bar,
+.details-filter-bar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px !important;
+    margin-bottom: 16px !important;
+    padding: 10px 12px !important;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-side);
+}
+
+.stats-filter-bar .filter-inline,
+.stats-filter-bar .filter-item.filter-inline,
+.details-filter-bar .filter-inline,
+.details-filter-bar .filter-item.filter-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+}
+
+.stats-filter-bar .filter-item label,
+.details-filter-bar .filter-item label {
+    flex: 0 0 auto;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.74rem !important;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.stats-filter-bar .filter-item .form-input,
+.stats-filter-bar .form-input,
+.details-filter-bar .filter-item .form-input,
+.details-filter-bar .form-input {
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
+    padding: 5px 9px !important;
+    background: var(--bg-main) !important;
+    color: var(--text-main) !important;
+    font-size: 0.78rem !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm, 4px) !important;
+    box-sizing: border-box !important;
+    width: auto;
+}
+
+.details-filter-bar select.form-input {
+    padding-right: 22px !important;
+    cursor: pointer;
+}
+
+.stats-filter-bar #stats-filter-user {
+    width: 140px;
+}
+.stats-filter-bar #stats-filter-model {
+    width: 150px;
+}
+.stats-filter-bar #stats-filter-start,
+.stats-filter-bar #stats-filter-end {
+    width: 135px;
+}
+
+.details-filter-bar #details-filter-user {
+    width: 130px;
+}
+.details-filter-bar #details-filter-model {
+    width: 140px;
+}
+.details-filter-bar #details-filter-role {
+    width: 140px;
+}
+.details-filter-bar #details-filter-start,
+.details-filter-bar #details-filter-end {
+    width: 135px;
+}
+
+.stats-filter-bar .filter-actions,
+.stats-filter-bar .filter-item.filter-actions,
+.details-filter-bar .filter-actions,
+.details-filter-bar .filter-item.filter-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.stats-filter-bar .filter-actions button,
+.stats-filter-bar .filter-item.filter-actions button,
+.details-filter-bar .filter-actions button,
+.details-filter-bar .filter-item.filter-actions button {
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    line-height: 30px !important;
+    padding: 0 14px !important;
+    font-size: 0.78rem !important;
+    border-radius: var(--radius-sm, 4px) !important;
+    box-sizing: border-box !important;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .stats-filter-bar .filter-actions,
+    .stats-filter-bar .filter-item.filter-actions,
+    .details-filter-bar .filter-actions,
+    .details-filter-bar .filter-item.filter-actions {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
     }
 }
