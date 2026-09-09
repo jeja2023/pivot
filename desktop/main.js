@@ -124,6 +124,9 @@ async function loadErrorPage(message) {
         }
     } finally {
         isLoadingErrorPage = false;
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+            mainWindow.show();
+        }
     }
 }
 async function clearDesktopCaches() {
@@ -228,6 +231,7 @@ function showServerConfigDialog() {
         serverConfigWindow.focus();
         return;
     }
+    const hasVisibleParent = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
     serverConfigWindow = new BrowserWindow({
         width: 520,
         height: 560,
@@ -237,8 +241,8 @@ function showServerConfigDialog() {
         fullscreenable: false,
         show: false,
         frame: false,
-        modal: Boolean(mainWindow),
-        parent: mainWindow || undefined,
+        modal: hasVisibleParent,
+        parent: hasVisibleParent ? mainWindow : undefined,
         title: '服务器连接配置',
         backgroundColor: '#ffffff',
         autoHideMenuBar: true,
@@ -453,8 +457,20 @@ function createMainWindow(config) {
         }
     });
 
+    let showTimer = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+            mainWindow.show();
+        }
+    }, 2500);
+
     mainWindow.once('ready-to-show', () => {
-        mainWindow.show();
+        if (showTimer) {
+            clearTimeout(showTimer);
+            showTimer = null;
+        }
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+            mainWindow.show();
+        }
     });
     const webSession = mainWindow.webContents.session;
     installRendererPermissionPolicy(webSession);
@@ -479,6 +495,10 @@ function createMainWindow(config) {
         if (mainWindow) mainWindow.setTitle(title || 'Pivot');
     });
     mainWindow.on('closed', () => {
+        if (showTimer) {
+            clearTimeout(showTimer);
+            showTimer = null;
+        }
         mainWindow = null;
     });
 }
@@ -487,7 +507,20 @@ async function loadTarget() {
     if (!mainWindow) return;
     if (!currentTargetUrl) currentTargetUrl = await resolveTargetUrl(runtimeConfig);
     try {
-        await mainWindow.loadURL(currentTargetUrl);
+        let timeoutId;
+        const loadPromise = mainWindow.loadURL(currentTargetUrl);
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                const timeoutError = new Error(`连接服务器超时 (${currentTargetUrl})，请检查网络连接或服务器配置。`);
+                timeoutError.code = 'ETIMEDOUT';
+                reject(timeoutError);
+            }, 8000);
+        });
+        try {
+            await Promise.race([loadPromise, timeoutPromise]);
+        } finally {
+            clearTimeout(timeoutId);
+        }
     } catch (err) {
         if (!mainWindow || mainWindow.isDestroyed()) return;
         if (err?.code === 'ERR_ABORTED' || err?.errno === -3) {
@@ -495,10 +528,13 @@ async function loadTarget() {
         }
         const message = err && err.message ? err.message : String(err);
         lastLoadError = {
-            errorCode: 'LOAD_FAILED',
+            errorCode: err?.code || 'LOAD_FAILED',
             errorDescription: message,
             validatedUrl: currentTargetUrl
         };
+        try {
+            mainWindow.webContents.stop();
+        } catch (_) {}
         await loadErrorPage(message);
     }
 }
@@ -944,7 +980,10 @@ if (!gotLock) {
     app.quit();
 } else {
     app.on('second-instance', () => {
-        if (!mainWindow) return;
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (!mainWindow.isVisible()) {
+            mainWindow.show();
+        }
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.focus();
     });
@@ -969,15 +1008,15 @@ if (!gotLock) {
             }
             attachStealthHeaderInterceptor(session.defaultSession);
             createMainWindow(runtimeConfig);
-            await loadTarget();
-            getDeliveryController().start();
-            getLocalMcpConnector().start();
             updaterController = setupAutoUpdater({
                 app,
                 mainWindow,
                 config: runtimeConfig,
                 authorizeIpc: assertTrustedIpcSender
             });
+            await loadTarget();
+            getDeliveryController().start();
+            getLocalMcpConnector().start();
         } catch (err) {
             dialog.showErrorBox('Pivot 启动失败', err && err.stack ? err.stack : String(err));
             app.quit();
