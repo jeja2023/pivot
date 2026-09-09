@@ -169,7 +169,7 @@
     },
     {
       "file": "server/routes/admin-stats.js",
-      "count": 30
+      "count": 28
     },
     {
       "file": "server/routes/admin-users.js",
@@ -244,8 +244,16 @@
       "count": 8
     },
     {
+      "file": "server/services/admin-stats-service.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/agent-approval-levels.js",
+      "count": 1
+    },
+    {
       "file": "server/services/agent-approval-requests.js",
-      "count": 24
+      "count": 23
     },
     {
       "file": "server/services/agent-artifact-cas.js",

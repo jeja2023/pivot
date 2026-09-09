@@ -5,15 +5,15 @@ let settingsWorkspaceScaleRaf = 0;
 let lastObservedSettingsWidth = 0;
 let lastObservedSettingsHeight = 0;
 
-window.Pivot.legacy.scheduleSettingsWorkspaceScale = function() {
+function scheduleSettingsWorkspaceScale() {
     if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
     settingsWorkspaceScaleRaf = window.requestAnimationFrame(() => {
         settingsWorkspaceScaleRaf = 0;
-        window.Pivot.legacy.updateSettingsWorkspaceScale?.();
+        updateSettingsWorkspaceScale();
     });
-};
+}
 
-window.Pivot.legacy.updateSettingsWorkspaceScale = function() {
+function updateSettingsWorkspaceScale() {
     const stage = document.getElementById('settings-scale-stage');
     const canvas = document.getElementById('settings-scale-canvas');
     const content = document.querySelector('.settings-workspace-view .admin-content');
@@ -27,7 +27,7 @@ window.Pivot.legacy.updateSettingsWorkspaceScale = function() {
                 if (Math.abs(width - lastObservedSettingsWidth) > 1 || Math.abs(height - lastObservedSettingsHeight) > 1) {
                     lastObservedSettingsWidth = width;
                     lastObservedSettingsHeight = height;
-                    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+                    scheduleSettingsWorkspaceScale();
                 }
             }
         });
@@ -58,8 +58,13 @@ window.Pivot.legacy.updateSettingsWorkspaceScale = function() {
     const measuredHeight = Math.ceil(canvas.scrollHeight * scale);
     const scaledHeight = measuredHeight > availableHeight + 2 ? measuredHeight : availableHeight;
     stage.style.setProperty('--settings-stage-height', `${scaledHeight}px`);
-};
+}
 
 window.addEventListener('resize', () => {
-    if (document.body?.dataset.activeWorkspace === 'settings') window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+    if (document.body?.dataset.activeWorkspace === 'settings') scheduleSettingsWorkspaceScale();
+});
+
+window.Pivot?.exposeModule?.('settings.scale', {
+    scheduleSettingsWorkspaceScale,
+    updateSettingsWorkspaceScale
 });

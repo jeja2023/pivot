@@ -1,3 +1,28 @@
+## [v0.1.102] - 2026-09-09
+
+### 系统架构解耦与深度性能治理
+
+- **超千行单体遗留大文件彻底解耦**：
+  - 对原后端最大单文件 `server/db/schema/base.js`（原 1,548 行）进行模块化分治，重构为核心表（`tables-core.js`）、智能体表（`tables-agent.js`）、基础索引（`indexes.js`）与 FTS5 虚拟表（`fts.js`），主入口精简至 39 行（下降 97.5%）。
+  - 解耦文档处理任务服务 `server/services/document-processing/jobs.js`，抽离配置与任务序列化模块 `settings.js`，文件行数由 1,069 降至 925 行。
+  - 解耦智能体审批服务 `server/services/agent-approval-requests.js`，抽离多级审批人决策判定模块 `agent-approval-levels.js`，文件行数由 1,154 降至 928 行。
+  - 存量治理大文件豁免清单净减 3 个（从 10 降至 7，下降 30%）。
+- **数据库热路径微性能与参数转换优化**：
+  - 消除高频查询慢 SQL 记录的动态模块引用开销，持久化单例持有 `recordSlowSql`，并增加耗时阈值前置短路，使 99.9% 快查询零开销穿透。
+  - 在 `toPostgresParams` 中增加容量 512 的 LRU 占位符转换映射缓存 `sqlParamsCache`，相同 SQL 模板执行开销降为 O(1) 内存直取。
+- **前端 CSS 构建产物安全压缩**：
+  - 构建脚本 `scripts/build_chat_css.js` 接入安全压缩器，消除冗余注释与空白符，并严格保留 `calc(...)` 语法必须的运算符空格。
+  - `client/chat/chat.bundle.css` 产物体积由 1,122,662 字节降至 862,413 字节，大幅缩减 260 KB（-26.67%）。
+- **RAG 向量检索与运行时堆内存保护**：
+  - 纯 JS 余弦降级检索候选集硬上限严格收敛至 1,000 块以内，防止冷启动或无向量扩展时撑爆 Node.js V8 堆内存引发 OOM。
+  - 切片向量缓存达到 5,000 条上限时采用单次批量淘汰 50 条策略，显著降低 GC 颠簸，并增加健壮空指针防范。
+- **门禁阻断、契约修复与全局变量规范收敛**：
+  - 路由 `server/routes/admin-stats.js` 拆分提取 `admin-stats-service.js`（1,134 行降至 931 行），同样移出大文件豁免清单。
+  - 收敛 `workspace-settings-scale.js`、`users.js`、`stats.js` 中的 legacy `window` 暴露别名，全局 legacy 别名数量由 279 降至 274（严格符合 <= 276 预算指标）。
+  - 修复 `tests/security-chat/rendering-streams.js` 统计导出断言；重构迁移中 Raw SQL 总数恒定维持在 1,420。
+
+详细发布记录见 [v0.1.102 发布记录](docs/releases/v0.1.102-系统架构解耦与深度性能治理.md)。
+
 ## [v0.1.101] - 2026-09-09
 
 ### 用户与用量多维检索治理、控件与表格规范统一、工程门禁增强

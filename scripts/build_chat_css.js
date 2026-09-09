@@ -26,8 +26,21 @@ function collectCss(filePath, stack = []) {
     });
 }
 
+function minifyCss(css) {
+    return css
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\r?\n/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*([{};,])\s*/g, '$1')
+        .replace(/;\}/g, '}')
+        .replace(/:\s+/g, ':')
+        .replace(/calc\([^)]+\)/g, match => match.replace(/\s*([+-])\s*/g, ' $1 '))
+        .trim();
+}
+
 function buildChatCss() {
-    const body = collectCss(entryPath).trimEnd();
+    const collected = collectCss(entryPath);
+    const body = minifyCss(collected);
     const digest = crypto.createHash('sha256').update(body).digest('hex');
     return `/* 此文件由 scripts/build_chat_css.js 生成；请勿手工编辑。source-sha256=${digest} */\n${body}\n`;
 }
@@ -35,9 +48,9 @@ function buildChatCss() {
 function main() {
     const output = buildChatCss();
     fs.writeFileSync(outputPath, output, 'utf8');
-    console.log(`聊天样式已合并：${path.relative(root, outputPath)}（${Buffer.byteLength(output)} bytes）`);
+    console.log(`聊天样式已合并并压缩：${path.relative(root, outputPath)}（${Buffer.byteLength(output)} bytes）`);
 }
 
 if (require.main === module) main();
 
-module.exports = { buildChatCss, collectCss, entryPath, outputPath };
+module.exports = { buildChatCss, collectCss, minifyCss, entryPath, outputPath };

@@ -16,6 +16,31 @@
  * 占位符兼容：? (参数占位符) 在发送给 PostgreSQL 时自动转换为 $1, $2, ...
  */
 const { getPgPool } = require('./pg-connection');
+const { LruCache } = require('../cache');
+
+const SLOW_SQL_THRESHOLD_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '500', 10) || 500, 100);
+let cachedSlowSqlRecorder = null;
+
+function notifySlowSql(sql, durationMs, params) {
+    if (durationMs < SLOW_SQL_THRESHOLD_MS) return;
+    try {
+        if (!cachedSlowSqlRecorder) {
+            cachedSlowSqlRecorder = require('../services/observability').recordSlowSql;
+        }
+        cachedSlowSqlRecorder(sql, durationMs, params);
+    } catch (_) {}
+}
+
+const sqlParamsCache = new LruCache({ max: 512 });
+
+function getPostgresSql(sql) {
+    const raw = String(sql);
+    let cached = sqlParamsCache.get(raw);
+    if (cached !== undefined) return cached;
+    cached = toPostgresParams(raw);
+    sqlParamsCache.set(raw, cached);
+    return cached;
+}
 
 /**
  * 将普通 SQL 语境中的 ? 占位符转换为 PostgreSQL 的 $1, $2, ... 格式。
@@ -136,9 +161,10 @@ function toPostgresParams(sql) {
  */
 async function query(sql, params = []) {
     const startedAt = Date.now();
-    const result = await getPgPool().query(toPostgresParams(sql), params);
-    if (Date.now() - startedAt > 0) {
-        try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {}
+    const result = await getPgPool().query(getPostgresSql(sql), params);
+    const duration = Date.now() - startedAt;
+    if (duration >= SLOW_SQL_THRESHOLD_MS) {
+        notifySlowSql(sql, duration, params);
     }
     return result.rows;
 }
@@ -162,9 +188,10 @@ async function queryOne(sql, params = []) {
  */
 async function execute(sql, params = []) {
     const startedAt = Date.now();
-    const result = await getPgPool().query(toPostgresParams(sql), params);
-    if (Date.now() - startedAt > 0) {
-        try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {}
+    const result = await getPgPool().query(getPostgresSql(sql), params);
+    const duration = Date.now() - startedAt;
+    if (duration >= SLOW_SQL_THRESHOLD_MS) {
+        notifySlowSql(sql, duration, params);
     }
     return result.rowCount ?? 0;
 }
@@ -182,20 +209,29 @@ async function transaction(fn) {
         const trx = {
             query: async (sql, params = []) => {
                 const startedAt = Date.now();
-                const result = await client.query(toPostgresParams(sql), params);
-                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
+                const result = await client.query(getPostgresSql(sql), params);
+                const duration = Date.now() - startedAt;
+                if (duration >= SLOW_SQL_THRESHOLD_MS) {
+                    notifySlowSql(sql, duration, params);
+                }
                 return result.rows;
             },
             queryOne: async (sql, params = []) => {
                 const startedAt = Date.now();
-                const result = await client.query(toPostgresParams(sql), params);
-                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
+                const result = await client.query(getPostgresSql(sql), params);
+                const duration = Date.now() - startedAt;
+                if (duration >= SLOW_SQL_THRESHOLD_MS) {
+                    notifySlowSql(sql, duration, params);
+                }
                 return result.rows[0] ?? null;
             },
             execute: async (sql, params = []) => {
                 const startedAt = Date.now();
-                const result = await client.query(toPostgresParams(sql), params);
-                if (Date.now() - startedAt > 0) { try { require('../services/observability').recordSlowSql(sql, Date.now() - startedAt, params); } catch (_) {} }
+                const result = await client.query(getPostgresSql(sql), params);
+                const duration = Date.now() - startedAt;
+                if (duration >= SLOW_SQL_THRESHOLD_MS) {
+                    notifySlowSql(sql, duration, params);
+                }
                 return result.rowCount ?? 0;
             },
         };

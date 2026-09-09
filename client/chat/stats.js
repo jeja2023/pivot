@@ -49,7 +49,7 @@ function getDetailsFilterParams() {
     return { user, model, role, startDate, endDate };
 }
 
-window.Pivot.legacy.resetDetailsFilters = () => {
+function resetDetailsFilters() {
     const userEl = document.getElementById('details-filter-user');
     const modelEl = document.getElementById('details-filter-model');
     const roleEl = document.getElementById('details-filter-role');
@@ -61,7 +61,7 @@ window.Pivot.legacy.resetDetailsFilters = () => {
     if (startEl) startEl.value = '';
     if (endEl) endEl.value = '';
     window.Pivot.legacy.loadDetails(1);
-};
+}
 
 window.Pivot.legacy.loadDetails = async function(page = 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
@@ -116,7 +116,7 @@ function getStatsFilterParams() {
     return { user, model, startDate, endDate };
 }
 
-window.Pivot.legacy.resetStatsFilters = () => {
+function resetStatsFilters() {
     const userEl = document.getElementById('stats-filter-user');
     const modelEl = document.getElementById('stats-filter-model');
     const startEl = document.getElementById('stats-filter-start');
@@ -126,7 +126,7 @@ window.Pivot.legacy.resetStatsFilters = () => {
     if (startEl) startEl.value = '';
     if (endEl) endEl.value = '';
     window.Pivot.legacy.loadStats(1);
-};
+}
 
 window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
@@ -597,7 +597,7 @@ document.addEventListener('click', (event) => {
     const statsResetBtn = event.target.closest('#stats-reset-btn');
     if (statsResetBtn) {
         event.preventDefault();
-        window.Pivot.legacy.resetStatsFilters?.();
+        resetStatsFilters();
         return;
     }
     const detailsQueryBtn = event.target.closest('#details-query-btn');
@@ -609,7 +609,7 @@ document.addEventListener('click', (event) => {
     const detailsResetBtn = event.target.closest('#details-reset-btn');
     if (detailsResetBtn) {
         event.preventDefault();
-        window.Pivot.legacy.resetDetailsFilters?.();
+        resetDetailsFilters();
         return;
     }
 });

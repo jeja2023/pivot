@@ -98,13 +98,17 @@ function getChunkEmbedding(chunkId, rawEmbedding, expectedLength) {
     const entry = { vec, norm: Math.sqrt(norm) };
     if (chunkId != null) {
         if (chunkEmbeddingCache.size >= CHUNK_EMBEDDING_CACHE_MAX) {
-            // 淘汰最旧项（Map 会保留插入顺序）。
-            const oldestKey = chunkEmbeddingCache.keys().next().value;
-            chunkEmbeddingCache.delete(oldestKey);
+            // 批量淘汰最旧的 50 项，避免每次写入单项颠簸
+            const iterator = chunkEmbeddingCache.keys();
+            for (let i = 0; i < 50; i += 1) {
+                const key = iterator.next().value;
+                if (key !== undefined) chunkEmbeddingCache.delete(key);
+                else break;
+            }
         }
         chunkEmbeddingCache.set(chunkId, entry);
     }
-    return entry.vec.length === expectedLength ? entry : null;
+    return entry && entry.vec && entry.vec.length === expectedLength ? entry : null;
 }
 
 // 使用预先计算的查询范数，与缓存的 chunk 向量计算余弦相似度。
@@ -372,7 +376,7 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
             userId,
             scopeFilter,
             user,
-            limit: Math.min(Math.max(Number(limit) * 4, 100), 5000)
+            limit: Math.min(Math.max(Number(limit) * 4, 100), 1000)
         })) || [];
     }
     for (const chunk of chunks) {

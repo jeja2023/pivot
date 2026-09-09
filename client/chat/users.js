@@ -31,7 +31,7 @@ function getUserFilterParams() {
     return { search, unit, role };
 }
 
-window.Pivot.legacy.resetUserFilters = () => {
+function resetUserFilters() {
     const searchInput = document.getElementById('user-filter-search');
     const unitInput = document.getElementById('user-filter-unit');
     const roleSelect = document.getElementById('user-filter-role');
@@ -39,7 +39,7 @@ window.Pivot.legacy.resetUserFilters = () => {
     if (unitInput) unitInput.value = '';
     if (roleSelect) roleSelect.value = '';
     window.Pivot.legacy.loadUsers(1);
-};
+}
 
 window.Pivot.legacy.loadUsers = async function(page = 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
@@ -111,7 +111,7 @@ window.Pivot.legacy.loadUsers = async function(page = 1) {
     `;
     }).join(''));
     renderPagination('users', totalCount, requestedPage);
-    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+    window.Pivot?.modules?.['settings.scale']?.scheduleSettingsWorkspaceScale?.();
 };
 
 document.addEventListener('click', (event) => {
@@ -124,7 +124,7 @@ document.addEventListener('click', (event) => {
     const resetBtn = event.target.closest('#user-reset-btn');
     if (resetBtn) {
         event.preventDefault();
-        window.Pivot.legacy.resetUserFilters?.();
+        resetUserFilters();
         return;
     }
     const button = event.target.closest('#user-list-body [data-user-action][data-user-id]');

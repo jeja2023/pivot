@@ -495,7 +495,7 @@ test('usage audit page merges stats, details and admin report views', () => {
     assert.match(stats, /window\.Pivot\.legacy\.loadStats = async function\(page = pageState\.stats \|\| 1\)/);
     assert.match(stats, /stats\/usage\?\$\{params\.toString\(\)\}/);
     assert.match(stats, /renderPagination\('stats', total, requestedPage\)/);
-    assert.match(stats, /window\.Pivot\.legacy\.exportStats = \(\) => downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export`, 'usage_stats\.csv'\)/);
+    assert.match(stats, /window\.Pivot\.legacy\.exportStats = \(\) => \{[\s\S]*downloadFileByFetch\(`\$\{API_BASE\}\/stats\/usage\/export\$\{qs \? `\?\$\{qs\}` : ''\}`, 'usage_stats\.csv'\);/);
     assert.match(adminStatsRoute, /router\.get\('\/usage'[\s\S]*LIMIT (?:\?|@limit) OFFSET (?:\?|@offset)/);
     assert.match(adminStatsRoute, /router\.get\('\/usage\/export'[\s\S]*filename=usage_stats\.csv/);
     assert.match(adminStatsRoute, /res\.json\(\{ data: stats, total, page, limit \}\)/);
