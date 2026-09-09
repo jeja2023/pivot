@@ -396,9 +396,6 @@
 .users-tab #user-filter-role {
     width: 125px;
 }
-.users-tab #user-filter-status {
-    width: 165px;
-}
 .users-tab .filter-actions {
     display: inline-flex;
     align-items: center;
@@ -417,15 +414,61 @@
         justify-content: flex-end;
     }
 }
+.users-table th,
+.users-table td {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    vertical-align: middle;
+    line-height: 1.25;
+}
+
+.users-table .user-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    height: 24px;
+    vertical-align: middle;
+}
+
+.users-table button,
+.users-table td button {
+    height: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    line-height: 20px;
+    padding: 0 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 4px);
+    white-space: nowrap;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+}
 
 .users-table .user-status-badge {
-    display: inline-block;
-    padding: 2px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    line-height: 1;
+    padding: 0 6px;
     border-radius: var(--radius-sm, 4px);
     font-size: 0.72rem;
     font-weight: 500;
-    line-height: 1.4;
     white-space: nowrap;
+    box-sizing: border-box;
 }
 
 .users-table .user-status-badge.is-active {

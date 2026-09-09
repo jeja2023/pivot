@@ -18,55 +18,38 @@ function userPasswordError(password, label = '密码') {
 function renderUserActionButton(action, label, userOrId, className = 'btn-secondary') {
     const userId = typeof userOrId === 'object' ? userOrId.id : userOrId;
     if (typeof userOrId === 'object') userActionCache.set(String(userId), userOrId);
-    return `<button type="button" class="${className}" style="padding: 1px 5px; font-size: 0.68rem;" data-user-action="${action}" data-user-id="${escapeHtml(userId)}">${label}</button>`;
+    if (className === 'btn-danger') {
+        return `<button type="button" class="btn-danger" data-user-action="${action}" data-user-id="${escapeHtml(userId)}">${label}</button>`;
+    }
+    return `<button type="button" class="btn-secondary" data-user-action="${action}" data-user-id="${escapeHtml(userId)}">${label}</button>`;
 }
 
 function getUserFilterParams() {
     const search = document.getElementById('user-filter-search')?.value.trim() || '';
     const unit = document.getElementById('user-filter-unit')?.value.trim() || '';
     const role = document.getElementById('user-filter-role')?.value || '';
-    const status = document.getElementById('user-filter-status')?.value || '';
-    return { search, unit, role, status };
+    return { search, unit, role };
 }
 
 window.Pivot.legacy.resetUserFilters = () => {
     const searchInput = document.getElementById('user-filter-search');
     const unitInput = document.getElementById('user-filter-unit');
     const roleSelect = document.getElementById('user-filter-role');
-    const statusSelect = document.getElementById('user-filter-status');
     if (searchInput) searchInput.value = '';
     if (unitInput) unitInput.value = '';
     if (roleSelect) roleSelect.value = '';
-    if (statusSelect) statusSelect.value = '';
     window.Pivot.legacy.loadUsers(1);
 };
-
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && event.target && event.target.closest?.('.user-filter-bar')) {
-        event.preventDefault();
-        window.Pivot.legacy.loadUsers(1);
-    }
-});
-
-document.addEventListener('change', (event) => {
-    if (event.target && event.target.closest?.('.user-filter-bar') && event.target.tagName === 'SELECT') {
-        window.Pivot.legacy.loadUsers(1);
-    }
-});
 
 window.Pivot.legacy.loadUsers = async function(page = 1) {
     const requestedPage = Math.max(parseInt(page, 10) || 1, 1);
     const limit = Math.max(parseInt(pageState.limit, 10) || 15, 1);
     pageState.users = requestedPage;
-    const { search, unit, role, status } = getUserFilterParams();
+    const { search, unit, role } = getUserFilterParams();
     const params = new URLSearchParams({ page: String(requestedPage), limit: String(limit) });
     if (search) params.set('search', search);
     if (unit) params.set('unit', unit);
     if (role) params.set('role', role);
-    if (status) {
-        params.set('status', status);
-        if (status === 'deleted' || status === 'all') params.set('includeDeleted', 'true');
-    }
     const res = await apiFetch(`${API_BASE}/admin/users?${params.toString()}`, { headers: authHeaders() });
     const { data = [], total = 0, isSuperAdmin, allowPublicRegistration } = await res.json();
     const totalCount = Number(total) || 0;
@@ -83,7 +66,7 @@ window.Pivot.legacy.loadUsers = async function(page = 1) {
 
     userActionCache.clear();
     if (!data.length) {
-        renderTableMessage(tbody, 9, (search || unit || role || status) ? '未找到符合条件的用户' : '暂无用户数据');
+        renderTableMessage(tbody, 9, (search || unit || role) ? '未找到符合条件的用户' : '暂无用户数据');
         renderPagination('users', 0, requestedPage);
         return;
     }
@@ -120,7 +103,7 @@ window.Pivot.legacy.loadUsers = async function(page = 1) {
             <td title="${escapeHtml(formatDateToCN(u.created_at))}">${escapeHtml(formatDateToCN(u.created_at))}</td>
             <td title="${escapeHtml(formatDateToCN(u.last_login_at))}">${escapeHtml(formatDateToCN(u.last_login_at))}</td>
             <td class="text-center">
-                <div style="display: flex; gap: 4px; justify-content: center; align-items: center; flex-wrap: wrap;">
+                <div class="user-table-actions">
                     ${actionsHtml}
                 </div>
             </td>
@@ -131,8 +114,20 @@ window.Pivot.legacy.loadUsers = async function(page = 1) {
     window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
 };
 
-document.getElementById('user-list-body')?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-user-action][data-user-id]');
+document.addEventListener('click', (event) => {
+    const queryBtn = event.target.closest('#user-query-btn');
+    if (queryBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.loadUsers?.(1);
+        return;
+    }
+    const resetBtn = event.target.closest('#user-reset-btn');
+    if (resetBtn) {
+        event.preventDefault();
+        window.Pivot.legacy.resetUserFilters?.();
+        return;
+    }
+    const button = event.target.closest('#user-list-body [data-user-action][data-user-id]');
     if (!button) return;
     const userId = button.dataset.userId;
     const action = button.dataset.userAction;
@@ -271,15 +266,11 @@ window.Pivot.legacy.updatePublicRegistrationSetting = async () => {
 };
 
 window.Pivot.legacy.exportUsers = () => {
-    const { search, unit, role, status } = getUserFilterParams();
+    const { search, unit, role } = getUserFilterParams();
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     if (unit) params.set('unit', unit);
     if (role) params.set('role', role);
-    if (status) {
-        params.set('status', status);
-        if (status === 'deleted' || status === 'all') params.set('includeDeleted', 'true');
-    }
     const queryStr = params.toString();
     downloadFileByFetch(`${API_BASE}/admin/users/export${queryStr ? `?${queryStr}` : ''}`, 'users.csv');
 };

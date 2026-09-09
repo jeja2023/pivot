@@ -1,4 +1,4 @@
-/* 此文件由 scripts/build_chat_css.js 生成；请勿手工编辑。source-sha256=36b76c4af9a880749f62a71b522c160487ec32b9bd36fde10e749511608cd29b */
+/* 此文件由 scripts/build_chat_css.js 生成；请勿手工编辑。source-sha256=a3265b2eee81e1c557fcaedb357e58e913e659386283b1ed3f5f57481cfa228d */
 /* 聊天页面样式入口。保持导入顺序稳定。 */
 
 /* === styles/core.css === */
@@ -6105,9 +6105,6 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .users-tab #user-filter-role {
     width: 125px;
 }
-.users-tab #user-filter-status {
-    width: 165px;
-}
 .users-tab .filter-actions {
     display: inline-flex;
     align-items: center;
@@ -6126,15 +6123,61 @@ body.dark-mode .settings-workspace-view .memories-table td,
         justify-content: flex-end;
     }
 }
+.users-table th,
+.users-table td {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    vertical-align: middle;
+    line-height: 1.25;
+}
+
+.users-table .user-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    height: 24px;
+    vertical-align: middle;
+}
+
+.users-table button,
+.users-table td button {
+    height: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    line-height: 20px;
+    padding: 0 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 4px);
+    white-space: nowrap;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+}
 
 .users-table .user-status-badge {
-    display: inline-block;
-    padding: 2px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    line-height: 1;
+    padding: 0 6px;
     border-radius: var(--radius-sm, 4px);
     font-size: 0.72rem;
     font-weight: 500;
-    line-height: 1.4;
     white-space: nowrap;
+    box-sizing: border-box;
 }
 
 .users-table .user-status-badge.is-active {
@@ -6264,7 +6307,7 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .users-table .col-status { width: 76px; }
 .users-table .col-created { width: 156px; }
 .users-table .col-login { width: 156px; }
-.users-table .col-actions { width: 220px; }
+.users-table .col-actions { width: 232px; }
 .users-table th:nth-child(1),
 .users-table td:nth-child(1),
 .users-table th:nth-child(5),
@@ -6273,12 +6316,13 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .users-table td:nth-child(6) {
     text-align: center;
 }
-.users-table td:nth-child(9) > div {
-    gap: 5px !important;
-}
-.users-table td:nth-child(9) button {
-    height: 24px;
-    line-height: 1;
+.users-table .user-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .attachments-table th,

@@ -98,7 +98,7 @@
 .users-table .col-status { width: 76px; }
 .users-table .col-created { width: 156px; }
 .users-table .col-login { width: 156px; }
-.users-table .col-actions { width: 220px; }
+.users-table .col-actions { width: 232px; }
 .users-table th:nth-child(1),
 .users-table td:nth-child(1),
 .users-table th:nth-child(5),
@@ -107,12 +107,13 @@
 .users-table td:nth-child(6) {
     text-align: center;
 }
-.users-table td:nth-child(9) > div {
-    gap: 5px !important;
-}
-.users-table td:nth-child(9) button {
-    height: 24px;
-    line-height: 1;
+.users-table .user-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .attachments-table th,

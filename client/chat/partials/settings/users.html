@@ -39,23 +39,13 @@
                                     <option value="user">普通用户</option>
                                 </select>
                             </div>
-                            <div class="filter-item filter-inline">
-                                <label for="user-filter-status">状态</label>
-                                <select id="user-filter-status" class="form-input">
-                                    <option value="">全部状态（正常）</option>
-                                    <option value="active">启用</option>
-                                    <option value="disabled">禁用</option>
-                                    <option value="deleted">已删除</option>
-                                    <option value="all">全部状态（含已删除）</option>
-                                </select>
-                            </div>
                             <div class="filter-item filter-actions">
                                 <button type="button" id="user-query-btn" class="btn-primary">查询</button>
                                 <button type="button" id="user-reset-btn" class="btn-secondary">重置</button>
                             </div>
                         </div>
                         <div class="table-container users-table-wrap">
-                            <table class="data-table compact-table users-table">
+                            <table class="data-table users-table">
                                 <colgroup>
                                     <col class="col-id">
                                     <col class="col-username">
