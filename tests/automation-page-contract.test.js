@@ -76,8 +76,10 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     assert.match(resources, /modal\.style\.zIndex = '5600'/);
     assert.match(resources, /agent-automation-resources-modal--trigger/);
     assert.match(resources, /footer\?\.classList\.toggle\('hidden', isOpen\)/);
-    const modalStyles = read('client/chat/styles/workspaces/agent/agent-workflow-modals.css');
+    const modalStyles = read('client/chat/styles/workspaces/shared-automation-resources.css');
     assert.match(modalStyles, /\.agent-automation-resources-modal--trigger/);
+    assert.match(read('client/chat/styles/workspaces/agent/agent-workflow-modals.css'), /shared-automation-resources\.css/);
+    assert.match(read('client/chat/chat.workspace.mcp.entry.css'), /shared-automation-resources\.css/);
     assert.match(credentials, /allowed_user_ids: parseAllowedUserIds\(row\.allowed_user_ids\)/);
     assert.match(credentials, /allowed_units = \?, allowed_user_ids = \?, updated_at/);
     assert.match(migrations, /202608220008_workflow_credential_user_visibility/);

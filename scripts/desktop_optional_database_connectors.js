@@ -40,11 +40,9 @@ function buildDesktopConnectorExcludes({ nodeModulesDir, projectManifest, connec
     };
 }
 
-function prepareDesktopConnectorProfile(rootDir, { connectors } = {}) {
+function applyDesktopConnectorProfile(pkg, { rootDir, connectors } = {}) {
     const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
-    const packagePath = path.join(root, 'package.json');
-    const original = fs.readFileSync(packagePath, 'utf8');
-    const pkg = JSON.parse(original);
+    if (!pkg || typeof pkg !== 'object') throw new Error('桌面连接器构建配置缺少 package.json 对象。');
     // 为兼容既有桌面客户端，未显式指定档位时保留全部可选驱动；只有发布方
     // 明确设置 PIVOT_DESKTOP_DB_CONNECTORS 才裁剪。此处不改变 remote 模式
     // local_database 授权桥的资源范围，后者仍由本机授权协议单独控制。
@@ -58,6 +56,15 @@ function prepareDesktopConnectorProfile(rootDir, { connectors } = {}) {
     });
     const baseFiles = Array.isArray(pkg.build?.files) ? pkg.build.files.filter(item => !CONNECTOR_FILE_RULE.test(String(item))) : [];
     pkg.build = { ...pkg.build, files: [...baseFiles, ...profile.excludes] };
+    return profile;
+}
+
+function prepareDesktopConnectorProfile(rootDir, { connectors } = {}) {
+    const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
+    const packagePath = path.join(root, 'package.json');
+    const original = fs.readFileSync(packagePath, 'utf8');
+    const pkg = JSON.parse(original);
+    const profile = applyDesktopConnectorProfile(pkg, { rootDir: root, connectors });
     fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
     console.log(`[desktop-db-connectors] 标准构建保留：${profile.enabledConnectors.join(', ') || '无可选连接器'}；排除 ${profile.excludes.length} 个依赖闭包根。`);
     let restored = false;
@@ -72,6 +79,7 @@ function prepareDesktopConnectorProfile(rootDir, { connectors } = {}) {
 }
 
 module.exports = {
+    applyDesktopConnectorProfile,
     buildDesktopConnectorExcludes,
     prepareDesktopConnectorProfile
 };

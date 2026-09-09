@@ -90,6 +90,23 @@ test('Desktop Server Config: 主渲染页不暴露修改服务器配置或探测
     assert.match(configPreload, /test-server-connection/);
 });
 
+test('Desktop Preload: 会话列表有独立的样式和滚轮兜底，且不暴露额外特权桥', () => {
+    const preload = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'preload.js'), 'utf8');
+    assert.match(preload, /installSessionListScrollFallback/);
+    assert.match(preload, /#session-list/);
+    assert.match(preload, /overflow-y:\s*auto\s*!important/);
+    assert.match(preload, /scrollbar-width:\s*none\s*!important/);
+    assert.match(preload, /document\.addEventListener\('wheel'/);
+    assert.match(preload, /\{ capture: true, passive: false \}/);
+    assert.match(preload, /const resolveWheelSessionList = event =>/);
+    assert.match(preload, /getBoundingClientRect\(\)/);
+    assert.match(preload, /event\.clientX/);
+    assert.match(preload, /isVisibleModalTarget/);
+    assert.match(preload, /list\.scrollTop = nextScrollTop/);
+    assert.match(preload, /event\.preventDefault\(\)/);
+    assert.doesNotMatch(preload, /setServerConfig\s*\(/);
+});
+
 test('Desktop main process explicitly denies remote renderer permission prompts', () => {
     const policy = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'renderer-permissions.js'), 'utf8');
     assert.match(policy, /setPermissionRequestHandler/);

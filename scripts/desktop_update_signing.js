@@ -14,10 +14,8 @@ function hasWindowsSigningCredential(env = process.env) {
         .some(key => String(env[key] || '').trim().length > 0);
 }
 
-function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
-    const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
-    const packagePath = path.join(root, 'package.json');
-    const original = fs.readFileSync(packagePath, 'utf8');
+function applyWindowsUpdateSigningProfile(pkg, options = {}) {
+    if (!pkg || typeof pkg !== 'object') throw new Error('Windows 更新签名配置缺少 package.json 对象。');
     const required = options.required === true;
     const publisherName = normalizeWindowsUpdatePublisher(options.publisherName || options.env?.PIVOT_WINDOWS_UPDATE_PUBLISHER);
     const signed = hasWindowsSigningCredential(options.env || process.env);
@@ -27,8 +25,7 @@ function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
     if (required && !signed) {
         throw new Error('Windows 正式更新包必须配置 CSC_LINK、WIN_CSC_LINK、CSC_NAME 或 WIN_CSC_NAME 代码签名凭据。');
     }
-    if (!publisherName) return { publisherName: '', restore() {} };
-    const pkg = JSON.parse(original);
+    if (!publisherName) return { publisherName: '', signed };
     pkg.build = {
         ...pkg.build,
         win: {
@@ -40,10 +37,20 @@ function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
             verifyUpdateCodeSignature: true
         }
     };
+    return { publisherName, signed };
+}
+
+function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
+    const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
+    const packagePath = path.join(root, 'package.json');
+    const original = fs.readFileSync(packagePath, 'utf8');
+    const pkg = JSON.parse(original);
+    const profile = applyWindowsUpdateSigningProfile(pkg, options);
+    if (!profile.publisherName) return { ...profile, restore() {} };
     fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
     let restored = false;
     return {
-        publisherName,
+        ...profile,
         restore() {
             if (restored) return;
             restored = true;
@@ -53,6 +60,7 @@ function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
 }
 
 module.exports = {
+    applyWindowsUpdateSigningProfile,
     hasWindowsSigningCredential,
     normalizeWindowsUpdatePublisher,
     prepareWindowsUpdateSigningProfile

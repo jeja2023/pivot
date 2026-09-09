@@ -21,11 +21,7 @@ services:
     env_file:
       - .env
 
-    # GPU 透传：允许容器内执行 nvidia-smi，用于显存监控和保护逻辑
-    gpus: all
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # 默认 CPU-only，可在 GPU 主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控。
 
     # 数据持久化：保证数据库和上传文件在容器重建后仍然保留
     volumes:

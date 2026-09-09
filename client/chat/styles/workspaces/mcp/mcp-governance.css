@@ -305,12 +305,26 @@
     overflow: auto;
 }
 
+#mcp-tools-modal .modal.mcp-tools-modal,
+.modal.mcp-tools-modal,
 .mcp-tools-modal {
     width: min(1040px, calc(100vw - 32px));
     max-height: calc(100vh - 40px);
-    padding: 0;
+    padding: 0 !important;
     overflow: hidden;
-    text-align: left;
+    text-align: left !important;
+}
+
+.mcp-tools-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.mcp-tools-header-actions button {
+    white-space: nowrap;
+    min-width: 60px;
 }
 
 .mcp-tools-list {
@@ -472,14 +486,16 @@
     font-weight: 700;
 }
 
+#mcp-tool-test-modal .modal.mcp-tool-test-modal,
+.modal.mcp-tool-test-modal,
 .mcp-tool-test-modal {
     width: min(680px, calc(100vw - 32px));
     max-height: calc(100vh - 40px);
     display: flex;
     flex-direction: column;
-    padding: 0;
+    padding: 0 !important;
     overflow: hidden;
-    text-align: left;
+    text-align: left !important;
 }
 
 .mcp-tool-test-body {

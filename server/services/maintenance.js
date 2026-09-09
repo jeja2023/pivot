@@ -13,6 +13,8 @@ const { cleanupExpiredDocumentProcessingFiles } = require('./document-processing
 const { recoverDocumentProcessingJobs } = require('./document-processing/jobs');
 const { cleanupRateLimitCounters } = require('./rate-limit-store');
 const { createAgentResidencyStore } = require('./agent-residency');
+const { createAnalyzeProgress, runAnalyzeTables } = require('./analyze-maintenance');
+const { readTypedEnv } = require('../config/env-registry');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEMANTIC_WORKER_INTERVAL_MS = Math.max(5000, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_WORKER_INTERVAL_MS || '10000', 10) || 10000);
@@ -61,7 +63,8 @@ const maintenanceState = {
         lastRunAt: null,
         lastSuccessAt: null,
         lastError: '',
-        operation: 'ANALYZE'
+        operation: 'ANALYZE',
+        ...createAnalyzeProgress()
     },
     backup: {
         lastRunAt: null,
@@ -206,9 +209,10 @@ function cleanupOldBackups(options = {}) {
 const { execute, transaction } = require('../db/client');
 const { getPgSchemaName, getPgSchemaTableNames } = require('../db/schema/pg');
 
-const ANALYZE_TIMEOUT_MS = Math.max(
-    Number.parseInt(process.env.PG_ANALYZE_TIMEOUT_MS || '60000', 10) || 60000,
-    1000
+const ANALYZE_TIMEOUT_MS = readTypedEnv('PG_ANALYZE_TIMEOUT_MS');
+const ANALYZE_TOTAL_TIMEOUT_MS = Math.max(
+    ANALYZE_TIMEOUT_MS,
+    readTypedEnv('PG_ANALYZE_TOTAL_TIMEOUT_MS')
 );
 
 function quotePgIdentifier(value) {
@@ -220,13 +224,14 @@ function listAnalyzableTables() {
     return getPgSchemaTableNames().map(tablename => ({ schemaname, tablename }));
 }
 
-async function analyzeOneTable(table) {
+async function analyzeOneTable(table, remainingBudgetMs = ANALYZE_TIMEOUT_MS) {
     const schema = quotePgIdentifier(table.schemaname);
     const name = quotePgIdentifier(table.tablename);
+    const statementTimeoutMs = Math.max(1_000, Math.min(ANALYZE_TIMEOUT_MS, Number(remainingBudgetMs) || ANALYZE_TIMEOUT_MS));
     await transaction(async trx => {
         // 每张表使用独立事务，避免一次性 ANALYZE 84 张表超过
         // PostgreSQL max_locks_per_transaction 并触发 shared memory exhausted。
-        await trx.execute(`SET LOCAL statement_timeout = ${ANALYZE_TIMEOUT_MS}; ANALYZE ${schema}.${name}`);
+        await trx.execute(`SET LOCAL statement_timeout = ${statementTimeoutMs}; ANALYZE ${schema}.${name}`);
     });
 }
 
@@ -313,20 +318,35 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
 }
 
 async function optimizeDatabase() {
+    if (maintenanceState.optimize.running) {
+        logger.warn({ nextTable: maintenanceState.optimize.nextTable || '' }, '数据库统计信息维护正在执行，已跳过重复请求');
+        return false;
+    }
     maintenanceState.optimize.lastRunAt = getBeijingTimestamp();
     try {
-        const tables = await listAnalyzableTables();
-        const failures = [];
-        for (const table of tables) {
-            try {
-                await analyzeOneTable(table);
-            } catch (error) {
-                failures.push({ table: `${table.schemaname}.${table.tablename}`, error: error.message });
-                logger.warn({ table: `${table.schemaname}.${table.tablename}`, err: error.message }, '单表统计信息采集失败');
-            }
+        const tables = listAnalyzableTables();
+        const result = await runAnalyzeTables(tables, {
+            analyzeTable: analyzeOneTable,
+            progress: maintenanceState.optimize,
+            totalTimeoutMs: ANALYZE_TOTAL_TIMEOUT_MS
+        });
+        result.failures.forEach(failure => {
+            logger.warn({ table: failure.table, err: failure.error }, '单表统计信息采集失败');
+        });
+        if (result.timedOut) {
+            const message = `ANALYZE 本轮达到总时限（${ANALYZE_TOTAL_TIMEOUT_MS}ms），下次将从 ${maintenanceState.optimize.nextTable || '起始表'} 继续。`;
+            maintenanceState.optimize.lastError = message;
+            logger.warn({
+                totalTables: maintenanceState.optimize.totalTables,
+                completedTables: maintenanceState.optimize.completedTables,
+                nextTable: maintenanceState.optimize.nextTable,
+                elapsedMs: maintenanceState.optimize.elapsedMs,
+                totalTimeoutMs: ANALYZE_TOTAL_TIMEOUT_MS
+            }, message);
+            return false;
         }
-        if (failures.length) {
-            throw new Error(`ANALYZE 完成但有 ${failures.length}/${tables.length} 张表失败。`);
+        if (!result.completed) {
+            throw new Error(`ANALYZE 完成但有 ${result.failures.length}/${tables.length} 张表失败。`);
         }
         maintenanceState.optimize.lastSuccessAt = getBeijingTimestamp();
         maintenanceState.optimize.lastError = '';

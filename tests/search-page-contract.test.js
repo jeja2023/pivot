@@ -33,7 +33,9 @@ test('工作流搜索接口支持服务端关键词过滤并返回计数', () =>
     assert.match(route, /res\.json\(\{ data, total: data\.length \}\)/);
     assert.match(service, /const searchText = String\(options\.query \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
     assert.match(service, /\.includes\(searchText\)/);
-    assert.match(read('server/repositories/agent-workflows.js'), /searchPattern = searchText\.replace/);
+    const repository = read('server/repositories/agent-workflows.js');
+    assert.match(repository, /STRPOS\(LOWER\(COALESCE\(w\.name/);
+    assert.doesNotMatch(repository, /LIKE LOWER\(\?\) ESCAPE/);
 });
 
 test('对话视图搜索弹窗隐藏任务与工作流，仅个人工作台作为全局搜索展示全量选项卡', () => {

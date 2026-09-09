@@ -6,7 +6,13 @@ const ACTIVE_POLL_INTERVAL_MS = 5000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_BACKOFF_MS = 60000;
 
-function createLocalMcpConnector({ request, getLocalAuthorizationStatus, executeLocalTool, identity: customIdentity, ensureRegistered: customEnsureRegistered, logger = console } = {}) {
+function withRetryJitter(delayMs, random = Math.random) {
+    const base = Math.max(0, Number(delayMs) || 0);
+    const sample = Math.min(1, Math.max(0, Number(random()) || 0));
+    return Math.round(base * (0.8 + sample * 0.4));
+}
+
+function createLocalMcpConnector({ request, getLocalAuthorizationStatus, executeLocalTool, identity: customIdentity, ensureRegistered: customEnsureRegistered, logger = console, random = Math.random } = {}) {
     if (typeof request !== 'function' || typeof getLocalAuthorizationStatus !== 'function' || typeof executeLocalTool !== 'function') {
         throw new Error('本机连接器缺少受控依赖。');
     }
@@ -122,7 +128,8 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
             }
         } catch (error) {
             consecutiveErrors += 1;
-            nextDelay = Math.min(10000 * Math.pow(2, Math.min(consecutiveErrors - 1, 3)), MAX_BACKOFF_MS);
+            const exponentialDelay = Math.min(10000 * Math.pow(2, Math.min(consecutiveErrors - 1, 3)), MAX_BACKOFF_MS);
+            nextDelay = withRetryJitter(exponentialDelay, random);
             logger.debug?.('[Pivot 本机连接器] 轮询等待（将在 ' + Math.round(nextDelay / 1000) + 's 后重试）：', error?.message || error);
         }
         if (running) timer = setTimeout(tick, nextDelay);
@@ -133,4 +140,4 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     return { runOnce, start, status, stop, sync };
 }
 
-module.exports = { createLocalMcpConnector };
+module.exports = { createLocalMcpConnector, withRetryJitter };

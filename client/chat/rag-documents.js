@@ -813,7 +813,7 @@ async function openKnowledgeWorkbench() {
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
     try {
-        await window.Pivot.legacy.ensureAdminSettingsScript?.();
+        await window.Pivot.legacy.ensureAdminSettingsScript?.(); window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles?.('settings')?.catch?.(() => {});
     } catch (e) {
         console.error('加载知识库配置脚本失败', e);
         showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');

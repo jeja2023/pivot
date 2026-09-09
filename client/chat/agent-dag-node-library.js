@@ -47,7 +47,7 @@ function mount({ container, onAddNode, onToggleCollapse, getTools }) {
         header.className = 'pivot-node-library-header';
         const headerTitle = document.createElement('span');
         headerTitle.className = 'pivot-node-library-title';
-        headerTitle.textContent = '节点';
+        headerTitle.textContent = '节点库';
         header.appendChild(headerTitle);
         const collapseBtn = document.createElement('button');
         collapseBtn.type = 'button';

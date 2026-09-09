@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createLocalMcpConnector } = require('../desktop/local-mcp-connector');
+const { createLocalMcpConnector, withRetryJitter } = require('../desktop/local-mcp-connector');
 
 const mockIdentity = {
     getDeviceId: () => 'desktop-test-device',
@@ -9,6 +9,12 @@ const mockIdentity = {
     signPayload: payload => `sig:${payload}`,
     getIdentityStatus: () => ({ available: true, deviceId: 'desktop-test-device' })
 };
+
+test('本机连接器重试抖动始终受 ±20% 边界约束', () => {
+    assert.equal(withRetryJitter(10000, () => 0), 8000);
+    assert.equal(withRetryJitter(10000, () => 0.5), 10000);
+    assert.equal(withRetryJitter(10000, () => 1), 12000);
+});
 
 test('本机连接器在无授权工具时待机，不发起任务认领', async () => {
     const requests = [];

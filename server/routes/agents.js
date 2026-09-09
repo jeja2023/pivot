@@ -210,6 +210,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
     }));
 
     router.post('/agents/tools/test', authMiddleware, asyncHandler(async (req, res) => {
+        const { PolicyError } = require('../services/agent-policy');
         const toolName = String(req.body?.tool || '').trim();
         const input = req.body?.input && typeof req.body.input === 'object' && !Array.isArray(req.body.input) ? req.body.input : {};
         const tools = await formatToolList(req.user);
@@ -219,12 +220,24 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             return res.status(400).json({ error: '人工审批、延时和子工作流节点需要在完整工作流中测试。' });
         }
         const startedAt = Date.now();
-        const output = await executeToolByName(toolName, input, req.user, tools, {
-            dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {}
-        });
+        let output;
+        try {
+            output = await executeToolByName(toolName, input, req.user, tools, {
+                dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {}
+            });
+        } catch (error) {
+            if (error instanceof PolicyError) {
+                return res.status(400).json({ error: error.message });
+            }
+            if (error?.status === 400 || error?.status === 403 || error?.status === 404) {
+                return res.status(error.status).json({ error: error.message });
+            }
+            throw error;
+        }
         logAction(req, '测试智能体工具节点', `工具: ${toolName}`);
         res.json({ success: true, output, durationMs: Date.now() - startedAt });
     }));
+
 
     // 公开支持的模型路由策略，供前端下拉填充
     router.get('/agents/model-routers', authMiddleware, asyncHandler(async (req, res) => {

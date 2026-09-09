@@ -4,23 +4,25 @@ const path = require('path');
 const fs = require('fs');
 const { getClientIp } = require('./http');
 const { getRequestContext } = require('./services/request-context');
+const { readTypedEnv } = require('./config/env-registry');
 
 const os = require('os');
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = readTypedEnv('NODE_ENV') === 'production';
 const LOG_TIME_ZONE = 'Asia/Shanghai';
+const BEIJING_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+    timeZone: LOG_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
+    hourCycle: 'h23'
+});
 
 function formatBeijingLogTimestamp(date = new Date()) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: LOG_TIME_ZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        fractionalSecondDigits: 3,
-        hourCycle: 'h23'
-    }).formatToParts(date).reduce((result, part) => {
+    const parts = BEIJING_TIMESTAMP_FORMATTER.formatToParts(date).reduce((result, part) => {
         result[part.type] = part.value;
         return result;
     }, {});
@@ -42,8 +44,8 @@ try {
     // 忽略只读或虚拟文件系统路径下的创建失败
 }
 const logFilePath = path.join(logDir, 'pivot.log');
-const logFileMaxBytes = Math.max(Number.parseInt(process.env.LOG_FILE_MAX_BYTES || String(50 * 1024 * 1024), 10) || 50 * 1024 * 1024, 1024 * 1024);
-const logFileMaxArchives = Math.max(Number.parseInt(process.env.LOG_FILE_MAX_ARCHIVES || '5', 10) || 5, 1);
+const logFileMaxBytes = readTypedEnv('LOG_FILE_MAX_BYTES');
+const logFileMaxArchives = readTypedEnv('LOG_FILE_MAX_ARCHIVES');
 
 // 敏感字段脱敏配置
 const redactFields = [
@@ -154,7 +156,7 @@ const logRotationTimer = setInterval(rotateLogFileIfNeeded, 60 * 1000);
 logRotationTimer.unref?.();
 
 const logger = pino({
-    level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
+    level: process.env.LOG_LEVEL ? readTypedEnv('LOG_LEVEL') : (isProduction ? 'info' : 'debug'),
     redact: {
         paths: redactFields,
         censor: '[REDACTED]'
@@ -230,4 +232,4 @@ const httpLogger = pinoHttp({
 });
 
 // 导出
-module.exports = { formatBeijingLogTimestamp, logger, httpLogger };
+module.exports = { BEIJING_TIMESTAMP_FORMATTER, formatBeijingLogTimestamp, logger, httpLogger };

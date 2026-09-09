@@ -1,0 +1,9 @@
+/* 工具库工作区样式。 */
+@import url("./styles/workspaces/mcp/mcp-forms.css");
+@import url("./styles/workspaces/mcp/mcp-system-cards.css");
+@import url("./styles/workspaces/mcp/mcp-call-logs.css");
+@import url("./styles/workspaces/mcp/mcp-governance.css");
+@import url("./styles/workspaces/mcp/mcp-local-auth.css");
+@import url("./styles/workspaces/mcp/mcp-responsive.css");
+@import url("./styles/workspaces/shared-target-tree.css");
+@import url("./styles/workspaces/shared-automation-resources.css");

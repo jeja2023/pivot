@@ -764,3 +764,152 @@
         justify-content: center;
     }
 }
+
+/* 知识库专属弹窗与表单基础样式（召回测试与检索配置）
+ * 确保在未打开系统设置时，知识库内的召回测试与检索配置弹窗具备完整样式。 */
+.rag-debug-modal {
+    width: min(1040px, calc(100vw - 36px));
+    min-height: min(520px, 100%);
+    max-height: min(850px, calc(100vh - 36px));
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    text-align: left;
+}
+
+.rag-debug-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 20px;
+}
+
+.rag-debug-modal-head h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    color: var(--text-main);
+}
+
+.rag-debug-modal-head .model-modal-desc {
+    margin: 4px 0 0;
+}
+
+.rag-debug-modal-head #rag-debug-modal-close {
+    flex: 0 0 auto;
+    height: 34px;
+    padding: 0 20px;
+    font-size: 0.85rem;
+}
+
+#rag-debug-btn:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none !important;
+    box-shadow: none;
+}
+
+.rag-debug-loading {
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.rag-debug-loading strong {
+    color: var(--text-main);
+    font-size: 0.9rem;
+}
+
+.rag-debug-loading small {
+    font-size: 0.76rem;
+}
+
+.rag-debug-spinner {
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(16, 185, 129, 0.18);
+    border-top-color: var(--primary);
+    border-radius: 999px;
+    animation: rag-debug-spin 0.8s linear infinite;
+}
+
+@keyframes rag-debug-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 知识库检索配置模态框骨架 */
+#rag-embedding-modal .model-modal {
+    width: min(500px, 100%);
+    max-height: 100%;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    background: #ffffff;
+}
+
+#rag-embedding-modal .model-modal-header {
+    flex: 0 0 auto;
+    padding: 18px 24px 14px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+
+#rag-embedding-modal .model-modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+#rag-embedding-modal .model-modal-desc {
+    margin: 4px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+#rag-embedding-modal .model-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 18px 24px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+    text-align: left;
+}
+
+#rag-embedding-modal .model-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+#rag-embedding-modal .model-form .form-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#rag-embedding-modal .model-modal-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+#rag-embedding-modal .model-modal-actions button {
+    flex: 1;
+    height: 38px;
+    font-weight: 600;
+    font-size: 0.82rem;
+}

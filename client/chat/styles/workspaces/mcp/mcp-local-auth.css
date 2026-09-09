@@ -3,12 +3,14 @@
     z-index: 1920;
 }
 
+#mcp-local-auth-modal .modal.mcp-local-auth-modal,
+.modal.mcp-local-auth-modal,
 .mcp-local-auth-modal {
     width: min(760px, calc(100vw - 32px));
     max-height: calc(100vh - 40px);
-    padding: 0;
+    padding: 0 !important;
     overflow: hidden;
-    text-align: left;
+    text-align: left !important;
 }
 
 .mcp-local-auth-modal .mcp-edit-header {

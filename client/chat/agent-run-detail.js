@@ -101,16 +101,24 @@ function agentTraceTimestamp(value) {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function agentTraceReadableDetail(span = {}) {
+function agentTraceReadableDetail(span = {}, runId = '') {
     const items = [];
     if (span.details) items.push(['运行信息', span.details]);
     if (span.input) items.push(['输入摘要', span.input]);
     if (span.output) items.push(['输出摘要', span.output]);
     if (!items.length && !span.error_message) return '';
-    return `<details class="agent-trace-detail"><summary>查看上下文</summary><div class="agent-trace-detail-body">${span.error_message ? `<div class="error-detail">${agentEscape(span.error_message)}</div>` : ''}${items.map(([label, value]) => `<section><h5>${agentEscape(label)}</h5>${typeof agentResultReadableMarkup === 'function' ? agentResultReadableMarkup(value, { maxRows: 4, maxItems: 5 }) : `<p>${agentEscape(agentShortText(JSON.stringify(value), 600))}</p>`}</section>`).join('')}</div></details>`;
+    const spanKey = String(span.span_id || span.id || span.name || '').trim();
+    const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    const discKey = spanKey ? `trace-span-${spanKey}` : '';
+    const isOpen = (discKey && effectiveRunId && typeof isAgentRunDisclosureOpen === 'function')
+        ? isAgentRunDisclosureOpen(effectiveRunId, discKey, false)
+        : false;
+    const openAttr = isOpen ? ' open' : '';
+    const keyAttr = discKey ? ` data-disclosure-key="${agentEscapeAttr(discKey)}"` : '';
+    return `<details class="agent-trace-detail"${keyAttr}${openAttr}><summary>查看上下文</summary><div class="agent-trace-detail-body">${span.error_message ? `<div class="error-detail">${agentEscape(span.error_message)}</div>` : ''}${items.map(([label, value]) => `<section><h5>${agentEscape(label)}</h5>${typeof agentResultReadableMarkup === 'function' ? agentResultReadableMarkup(value, { maxRows: 4, maxItems: 5 }) : `<p>${agentEscape(agentShortText(JSON.stringify(value), 600))}</p>`}</section>`).join('')}</div></details>`;
 }
 
-function renderAgentTrace(traceData = {}, runStatus = '') {
+function renderAgentTrace(traceData = {}, runStatus = '', runId = '') {
     const spans = Array.isArray(traceData?.spans) ? traceData.spans : [];
     if (!spans.length) return '';
     const summary = traceData.summary || {};
@@ -119,9 +127,16 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
     const spanEnd = Math.max(traceStart, ...spans.map(span => agentTraceTimestamp(span.completed_at) || (agentTraceTimestamp(span.started_at) + Number(span.duration_ms || 0))));
     const longestSpanMs = Math.max(0, ...spans.map(span => Number(span.duration_ms || 0)));
     const totalMs = Math.max(Number(summary.totalDurationMs || 0), spanEnd - traceStart, longestSpanMs, 1);
-    const expanded = ['error', 'approval_required'].includes(String(runStatus || '')) ? ' open' : '';
+    const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    const isPanelRecordedOpen = (effectiveRunId && typeof isAgentRunDisclosureOpen === 'function')
+        ? isAgentRunDisclosureOpen(effectiveRunId, 'trace-panel', null)
+        : null;
+    const isExpanded = isPanelRecordedOpen !== null
+        ? Boolean(isPanelRecordedOpen)
+        : ['error', 'approval_required'].includes(String(runStatus || ''));
+    const expanded = isExpanded ? ' open' : '';
     return `
-        <details class="agent-trace-panel"${expanded}>
+        <details class="agent-trace-panel" data-disclosure-key="trace-panel"${expanded}>
             <summary class="agent-trace-head">
                 <span><strong>运行追踪</strong><em>${spans.length} 个环节</em></span>
                 <span>
@@ -130,14 +145,15 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
                 </span>
             </summary>
             <div class="agent-trace-list">
-                ${spans.map(span => {
+                ${spans.map((span, spanIdx) => {
         const start = agentTraceTimestamp(span.started_at) || traceStart;
         const duration = Math.max(Number(span.duration_ms || 0), 12);
         const left = Math.max(0, Math.min(((start - traceStart) / totalMs) * 100, 96));
         const width = Math.max(2, Math.min((duration / totalMs) * 100, 100 - left));
         const status = span.status === 'error' ? 'error' : (span.status === 'running' ? 'running' : 'completed');
+        const spanKey = String(span.span_id || span.id || span.name || spanIdx).trim();
         return `
-                        <article class="agent-trace-item ${status}">
+                        <article class="agent-trace-item ${status}" data-trace-span-id="${agentEscapeAttr(spanKey)}">
                             <div class="agent-trace-item-meta">
                                 <span class="agent-trace-type">${agentEscape(agentTraceTypeLabel(span.span_type))}</span>
                                 <strong>${agentEscape(agentTraceDisplayName(span))}</strong>
@@ -146,7 +162,7 @@ function renderAgentTrace(traceData = {}, runStatus = '') {
                             <div class="agent-trace-track" aria-label="${agentEscape(agentTraceDisplayName(span))}，耗时 ${agentEscape(agentTraceDuration(span.duration_ms))}">
                                 <span style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></span>
                             </div>
-                            ${agentTraceReadableDetail(span)}
+                            ${agentTraceReadableDetail(span, effectiveRunId)}
                         </article>
                     `;
     }).join('')}
@@ -386,6 +402,70 @@ const agentRunDisclosureSelectors = Object.freeze({
     process: '.agent-run-process'
 });
 
+function getAgentRunDisclosureKey(element) {
+    if (!element || element.tagName !== 'DETAILS') return '';
+    if (element.dataset.disclosureKey) {
+        return element.dataset.disclosureKey;
+    }
+    const dagNode = element.closest('[data-dag-node-key]');
+    const nodeKey = dagNode?.dataset.dagNodeKey || '';
+    if (element.classList.contains('agent-dag-node-details')) {
+        return nodeKey ? `dag-node-${nodeKey}` : '';
+    }
+    if (element.classList.contains('agent-dag-node-technical')) {
+        return nodeKey ? `dag-tech-${nodeKey}` : '';
+    }
+    const summaryText = element.querySelector(':scope > summary')?.textContent?.trim() || '';
+    if (nodeKey && summaryText) {
+        if (summaryText.includes('输入数据')) return `dag-input-${nodeKey}`;
+        if (summaryText.includes('节点输出')) return `dag-output-${nodeKey}`;
+        return `dag-${nodeKey}-${summaryText.slice(0, 20)}`;
+    }
+    if (element.classList.contains('agent-result-raw')) {
+        if (element.closest('.agent-final')) return 'final-result-raw';
+        const stepEl = element.closest('[data-step-id], [data-step-index]');
+        const stepKey = stepEl?.dataset.stepId || stepEl?.dataset.stepIndex || '';
+        return stepKey ? `result-raw-${stepKey}` : 'result-raw';
+    }
+    if (element.classList.contains('agent-step-raw')) {
+        const stepEl = element.closest('[data-step-id], [data-step-index]');
+        const stepKey = stepEl?.dataset.stepId || stepEl?.dataset.stepIndex || '';
+        return stepKey ? `step-raw-${stepKey}` : 'step-raw';
+    }
+    if (element.classList.contains('agent-trace-panel')) {
+        return 'trace-panel';
+    }
+    if (element.classList.contains('agent-trace-detail')) {
+        const spanEl = element.closest('[data-trace-span-id]');
+        const spanKey = spanEl?.dataset.traceSpanId || '';
+        return spanKey ? `trace-span-${spanKey}` : '';
+    }
+    if (element.classList.contains('agent-run-process')) return 'process';
+    if (element.classList.contains('agent-run-metadata')) return 'metadata';
+    if (element.classList.contains('agent-run-technical-summary')) return 'technical';
+    if (element.classList.contains('agent-run-harness-diagnostics')) return 'harness';
+    return '';
+}
+
+function isAgentRunDisclosureOpen(runId, key, fallback = null) {
+    if (!runId || !key) return fallback;
+    const state = agentRunDisclosureStates.get(String(runId));
+    if (!state || !Object.hasOwn(state, key)) return fallback;
+    return Boolean(state[key]);
+}
+
+function setAgentRunDisclosureOpen(runId, key, isOpen) {
+    if (!runId || !key) return;
+    const runKey = String(runId);
+    const state = agentRunDisclosureStates.get(runKey) || {};
+    state[key] = Boolean(isOpen);
+    agentRunDisclosureStates.set(runKey, state);
+    if (agentRunDisclosureStates.size > 50) {
+        const oldestKey = agentRunDisclosureStates.keys().next().value;
+        if (oldestKey) agentRunDisclosureStates.delete(oldestKey);
+    }
+}
+
 function captureAgentRunDisclosureState(container, runId) {
     if (!container || !runId) return null;
     const key = String(runId);
@@ -393,6 +473,13 @@ function captureAgentRunDisclosureState(container, runId) {
     Object.entries(agentRunDisclosureSelectors).forEach(([prop, selector]) => {
         const element = container.querySelector(selector);
         if (element) state[prop] = element.open === true;
+    });
+    const allDetails = container.querySelectorAll('details');
+    allDetails.forEach(detailsEl => {
+        const discKey = getAgentRunDisclosureKey(detailsEl);
+        if (discKey) {
+            state[discKey] = detailsEl.open === true;
+        }
     });
     if (Object.keys(state).length) {
         agentRunDisclosureStates.set(key, state);
@@ -412,20 +499,43 @@ function restoreAgentRunDisclosureState(container, runId) {
         if (!element || !Object.hasOwn(state, prop)) return;
         element.open = state[prop] === true;
     });
+    const allDetails = container.querySelectorAll('details');
+    allDetails.forEach(detailsEl => {
+        const discKey = getAgentRunDisclosureKey(detailsEl);
+        if (discKey && Object.hasOwn(state, discKey)) {
+            detailsEl.open = state[discKey] === true;
+        }
+    });
 }
 
 document.addEventListener('toggle', event => {
     const detailsEl = event.target?.closest?.('details');
-    if (!detailsEl || !activeAgentRunId) return;
-    const key = String(activeAgentRunId);
+    if (!detailsEl) return;
+    const runContainer = detailsEl.closest('[data-agent-run-id], #agent-run-detail, #agent-tasks-detail-container, #agent-pane-steps, #agent-pane-logs, #agent-run-detail-modal');
+    const runId = runContainer?.dataset?.agentRunId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    if (!runId) return;
+    const key = String(runId);
     const state = agentRunDisclosureStates.get(key) || {};
     Object.entries(agentRunDisclosureSelectors).forEach(([prop, selector]) => {
         if (detailsEl.matches(selector)) {
             state[prop] = detailsEl.open === true;
         }
     });
+    const discKey = getAgentRunDisclosureKey(detailsEl);
+    if (discKey) {
+        state[discKey] = detailsEl.open === true;
+    }
     agentRunDisclosureStates.set(key, state);
 }, true);
+
+window.Pivot = window.Pivot || {};
+window.Pivot.legacy = window.Pivot.legacy || {};
+window.Pivot.legacy.agentRunDisclosureStates = agentRunDisclosureStates;
+window.Pivot.legacy.captureAgentRunDisclosureState = captureAgentRunDisclosureState;
+window.Pivot.legacy.restoreAgentRunDisclosureState = restoreAgentRunDisclosureState;
+window.Pivot.legacy.isAgentRunDisclosureOpen = isAgentRunDisclosureOpen;
+window.Pivot.legacy.setAgentRunDisclosureOpen = setAgentRunDisclosureOpen;
+window.Pivot.legacy.getAgentRunDisclosureKey = getAgentRunDisclosureKey;
 
 let currentActiveRunSubtab = 'overview';
 
@@ -700,22 +810,26 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             }
         }
 
+        if (workbenchDetailContainer) {
+            captureAgentRunDisclosureState(workbenchDetailContainer, run.id);
+        }
+
         // Pane 1: Overview
         const paneOverview = document.getElementById('agent-pane-overview');
         if (paneOverview) {
-            PivotSafeHtml.setHtml(paneOverview, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4><p>${agentEscape(friendlySummary)}</p></div></div></div><div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section>${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}`);
+            PivotSafeHtml.setHtml(paneOverview, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4><p>${agentEscape(friendlySummary)}</p></div></div></div><div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section>${run.final_answer ? renderAgentFinalAnswer(run.final_answer, run.id) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}`);
         }
 
         // Pane 2: Steps
         const paneSteps = document.getElementById('agent-pane-steps');
         if (paneSteps) {
-            PivotSafeHtml.setHtml(paneSteps, showDagNodeDetails ? `<div class="agent-dag-list">${renderAgentDagRunGraph(dagNodes)}<div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}</div>` : `${buildAgentToolStatsMarkup(steps)}<div class="agent-step-list">${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}</div>`);
+            PivotSafeHtml.setHtml(paneSteps, showDagNodeDetails ? `<div class="agent-dag-list">${renderAgentDagRunGraph(dagNodes)}<div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>${dagNodes.map((node, index) => agentDagNodeMarkup(node, index, run.id)).join('')}</div>` : `${buildAgentToolStatsMarkup(steps)}<div class="agent-step-list">${steps.map(step => agentStepMarkup(step, run.id)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}</div>`);
         }
 
         // Pane 3: Logs
         const paneLogs = document.getElementById('agent-pane-logs');
         if (paneLogs) {
-            PivotSafeHtml.setHtml(paneLogs, `<div class="agent-pane-logs-wrapper"><div class="agent-tool-section-head"><strong>结构化运行日志与状态流</strong><span>共 ${steps.length} 轮记录</span></div><div class="agent-run-logs-pane">${renderAgentTrace(trace, run.status) || '<div class="empty-state agent-empty-state">暂无结构化调用链路。</div>'}</div></div>`);
+            PivotSafeHtml.setHtml(paneLogs, `<div class="agent-pane-logs-wrapper"><div class="agent-tool-section-head"><strong>结构化运行日志与状态流</strong><span>共 ${steps.length} 轮记录</span></div><div class="agent-run-logs-pane">${renderAgentTrace(trace, run.status, run.id) || '<div class="empty-state agent-empty-state">暂无结构化调用链路。</div>'}</div></div>`);
         }
 
         // Pane 4: Artifacts
@@ -756,7 +870,9 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
     // --- 2. 渲染独立弹窗 (Modal Fallback) ---
     if (detail && (!isWorkbenchLayout || options.workflowPreview)) {
         captureAgentRunDisclosureState(detail, runId);
-        PivotSafeHtml.setHtml(detail, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4><p>${agentEscape(friendlySummary)}</p></div></div></div><div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section><details class="agent-run-metadata" open><summary><span>运行上下文</span><em>${agentEscape(modelLabel || '系统默认')} · ${agentEscape(agentToolPolicyLabel(run.tool_policy))}</em></summary><div class="agent-run-metadata-grid"><div><span>运行模式</span><strong>${agentEscape(agentRunModeLabel(run.run_mode))}</strong></div><div><span>调用模型</span><strong>${agentEscape(modelLabel || '系统默认')}</strong></div><div><span>工具权限</span><strong>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</strong></div><div><span>总耗时</span><strong>${agentEscape(durationLabel)}</strong></div>${friendlyTokenUsage ? `<div><span>模型用量</span><strong>${agentEscape(friendlyTokenUsage)}</strong></div>` : ''}${checkpoints?.total ? `<div><span>检查点</span><strong>${Number(checkpoints.total)} 个</strong></div>` : ''}</div></details>${window.Pivot.legacy.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}${run.final_answer ? renderAgentFinalAnswer(run.final_answer) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}${visualOutputs}<details class="agent-run-process" open><summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary><div class="agent-run-process-body">${showDagNodeDetails ? `<div class="agent-dag-list">${renderAgentDagRunGraph(dagNodes)}<div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>${dagNodes.map((node, index) => agentDagNodeMarkup(node, index)).join('')}</div>` : ''}${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}${showDagNodeDetails ? '' : `<div class="agent-step-list">${steps.map(step => agentStepMarkup(step)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}</div>`}${renderAgentTrace(trace, run.status)}</div></details>`);
+        const isMetadataOpen = isAgentRunDisclosureOpen(run.id, 'metadata', true);
+        const isProcessOpen = isAgentRunDisclosureOpen(run.id, 'process', true);
+        PivotSafeHtml.setHtml(detail, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4><p>${agentEscape(friendlySummary)}</p></div></div></div><div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span style="width: ${progressPercent}%"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section><details class="agent-run-metadata" data-disclosure-key="metadata"${isMetadataOpen ? ' open' : ''}><summary><span>运行上下文</span><em>${agentEscape(modelLabel || '系统默认')} · ${agentEscape(agentToolPolicyLabel(run.tool_policy))}</em></summary><div class="agent-run-metadata-grid"><div><span>运行模式</span><strong>${agentEscape(agentRunModeLabel(run.run_mode))}</strong></div><div><span>调用模型</span><strong>${agentEscape(modelLabel || '系统默认')}</strong></div><div><span>工具权限</span><strong>${agentEscape(agentToolPolicyLabel(run.tool_policy))}</strong></div><div><span>总耗时</span><strong>${agentEscape(durationLabel)}</strong></div>${friendlyTokenUsage ? `<div><span>模型用量</span><strong>${agentEscape(friendlyTokenUsage)}</strong></div>` : ''}${checkpoints?.total ? `<div><span>检查点</span><strong>${Number(checkpoints.total)} 个</strong></div>` : ''}</div></details>${window.Pivot.legacy.renderAgentHarnessDiagnosticMarkup?.(run.id) || ''}${run.final_answer ? renderAgentFinalAnswer(run.final_answer, run.id) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}${run.error_message ? `<div class="error-detail">${agentEscape(run.error_message)}</div>` : ''}${visualOutputs}<details class="agent-run-process" data-disclosure-key="process"${isProcessOpen ? ' open' : ''}><summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary><div class="agent-run-process-body">${showDagNodeDetails ? `<div class="agent-dag-list">${renderAgentDagRunGraph(dagNodes)}<div class="agent-tool-section-head compact"><strong>步骤详情</strong><span>${dagNodes.length} 个步骤</span></div>${dagNodes.map((node, index) => agentDagNodeMarkup(node, index, run.id)).join('')}</div>` : ''}${showDagNodeDetails ? '' : buildAgentToolStatsMarkup(steps)}${showDagNodeDetails ? '' : `<div class="agent-step-list">${steps.map(step => agentStepMarkup(step, run.id)).join('') || '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>'}</div>`}${renderAgentTrace(trace, run.status, run.id)}</div></details>`);
         restoreAgentRunDisclosureState(detail, run.id);
         bindAgentRunDetailDomEvents(detail, run, isPreview);
     }

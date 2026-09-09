@@ -117,7 +117,7 @@ function renderAgentAutomationResourceTabs() {
 
     // 针对特定工作流的自动启动配置，隐藏多余的单项 Tab 栏；全局打开凭据时展示切换
     tablist.classList.toggle('hidden', contextualTriggers);
-    triggerTab?.classList.toggle('hidden', !contextualTriggers);
+    triggerTab?.classList.toggle('hidden', false);
     credentialsTab?.classList.toggle('hidden', contextualTriggers);
     if (contextualTriggers) {
         agentAutomationResourceTab = 'triggers';
@@ -777,6 +777,12 @@ function bindAgentAutomationResources() {
 }
 
 async function openAgentAutomationResources(options = {}) {
+    try {
+        const styleLoader = window.Pivot?.moduleApi?.('workspaces.styleLoader');
+        if (typeof styleLoader?.ensureWorkspaceStyles === 'function') {
+            styleLoader.ensureWorkspaceStyles(options.workflowId ? 'agent' : 'mcp');
+        }
+    } catch (_) {}
     bindAgentAutomationResources();
     const modal = agentAutomationResourceModal();
     if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);

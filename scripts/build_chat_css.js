@@ -4,8 +4,16 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const chatDir = path.join(root, 'client', 'chat');
-const entryPath = path.join(chatDir, 'chat.css');
-const outputPath = path.join(chatDir, 'chat.bundle.css');
+const BUNDLES = Object.freeze({
+    shell: { entry: 'chat.css', output: 'chat.shell.css' },
+    apps: { entry: 'chat.workspace.apps.entry.css', output: 'chat.workspace.apps.css' },
+    agent: { entry: 'chat.workspace.agent.entry.css', output: 'chat.workspace.agent.css' },
+    knowledge: { entry: 'chat.workspace.knowledge.entry.css', output: 'chat.workspace.knowledge.css' },
+    mcp: { entry: 'chat.workspace.mcp.entry.css', output: 'chat.workspace.mcp.css' },
+    settings: { entry: 'chat.workspace.settings.entry.css', output: 'chat.workspace.settings.css' }
+});
+const entryPath = path.join(chatDir, BUNDLES.shell.entry);
+const outputPath = path.join(chatDir, BUNDLES.shell.output);
 const IMPORT_RE = /@import\s+url\("(.+?)"\);\s*/g;
 
 function assertInsideChat(target) {
@@ -38,19 +46,36 @@ function minifyCss(css) {
         .trim();
 }
 
-function buildChatCss() {
-    const collected = collectCss(entryPath);
+function resolveBundle(name = 'shell') {
+    const bundle = BUNDLES[String(name || 'shell')];
+    if (!bundle) throw new Error(`未知聊天样式包：${name}`);
+    return {
+        ...bundle,
+        entryPath: path.join(chatDir, bundle.entry),
+        outputPath: path.join(chatDir, bundle.output)
+    };
+}
+
+function buildChatCss(name = 'shell') {
+    const bundle = resolveBundle(name);
+    const collected = collectCss(bundle.entryPath);
     const body = minifyCss(collected);
     const digest = crypto.createHash('sha256').update(body).digest('hex');
     return `/* 此文件由 scripts/build_chat_css.js 生成；请勿手工编辑。source-sha256=${digest} */\n${body}\n`;
 }
 
+function buildAllChatCss() {
+    return Object.fromEntries(Object.keys(BUNDLES).map(name => [name, buildChatCss(name)]));
+}
+
 function main() {
-    const output = buildChatCss();
-    fs.writeFileSync(outputPath, output, 'utf8');
-    console.log(`聊天样式已合并并压缩：${path.relative(root, outputPath)}（${Buffer.byteLength(output)} bytes）`);
+    Object.entries(buildAllChatCss()).forEach(([name, output]) => {
+        const bundle = resolveBundle(name);
+        fs.writeFileSync(bundle.outputPath, output, 'utf8');
+        console.log(`聊天样式已合并并压缩：${path.relative(root, bundle.outputPath)}（${Buffer.byteLength(output)} bytes）`);
+    });
 }
 
 if (require.main === module) main();
 
-module.exports = { buildChatCss, collectCss, minifyCss, entryPath, outputPath };
+module.exports = { BUNDLES, buildAllChatCss, buildChatCss, collectCss, entryPath, minifyCss, outputPath, resolveBundle };

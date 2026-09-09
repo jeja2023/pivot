@@ -9,10 +9,9 @@ const { renderManualHtml, stripVersionUpdateSections } = require('../server/manu
 
 const rootDir = path.resolve(__dirname, '..');
 const chatDir = path.join(rootDir, 'client', 'chat');
-const cssEntryPath = path.join(chatDir, 'chat.css');
 const partialsDir = path.join(chatDir, 'partials');
 const stylesDir = path.join(chatDir, 'styles');
-const { buildChatCss, outputPath: chatBundlePath } = require('./build_chat_css');
+const { BUNDLES, buildChatCss, resolveBundle } = require('./build_chat_css');
 
 function fail(message) {
     console.error(`Chat asset check failed: ${message}`);
@@ -38,6 +37,7 @@ if (html.includes('@include')) fail('unresolved include directive remains after 
     'data-src="/manual?embed=1"',
     'src="/chat/admin-settings-events.js?v=__APP_VERSION__"',
     'src="/chat/workspace-template-loader.js?v=__APP_VERSION__"',
+    'src="/chat/workspace-style-loader.js?v=__APP_VERSION__"',
     'src="/chat/workspace-settings-scale.js?v=__APP_VERSION__"',
     'src="/chat/app-workspaces.js?v=__APP_VERSION__"',
     'src="/chat/app.js?v=__APP_VERSION__"'
@@ -261,7 +261,8 @@ partialFiles.forEach(filePath => {
 validateHtmlFragment(html, 'assembled client/chat template');
 validateHtmlTemplateLiterals(path.join(chatDir, 'agent-artifacts.js'));
 
-const cssFiles = [cssEntryPath, ...collectFiles(stylesDir, '.css')];
+const cssEntryPaths = Object.keys(BUNDLES).map(name => resolveBundle(name).entryPath);
+const cssFiles = [...cssEntryPaths, ...collectFiles(stylesDir, '.css')];
 const imports = [];
 cssFiles.forEach(cssFile => {
     const cssText = fs.readFileSync(cssFile, 'utf8');
@@ -269,7 +270,7 @@ cssFiles.forEach(cssFile => {
         imports.push({ cssFile, importPath: match[1] });
     });
 });
-if (imports.length < 10) fail('chat.css should import split style modules');
+if (imports.length < 10) fail('聊天样式入口应拆分为多个模块。');
 imports.forEach(({ cssFile, importPath }) => {
     if (!importPath.startsWith('./styles/') || !importPath.endsWith('.css')) {
         const importerDir = path.dirname(cssFile);
@@ -299,17 +300,50 @@ function resolveStylesheetImports(entryPath, visited = new Set()) {
     return visited;
 }
 
-const reachableCss = resolveStylesheetImports(cssEntryPath);
+const reachableCss = cssEntryPaths.reduce((reachable, entry) => {
+    resolveStylesheetImports(entry, reachable);
+    return reachable;
+}, new Set());
 const orphanCss = collectFiles(stylesDir, '.css').filter(file => !reachableCss.has(path.resolve(file)));
 if (orphanCss.length) {
     fail(`unreachable chat stylesheet modules: ${orphanCss.map(relative).join(', ')}`);
 }
-if (!fs.existsSync(chatBundlePath)) fail('client/chat/chat.bundle.css is missing; run npm run build:chat-css');
-if (fs.readFileSync(chatBundlePath, 'utf8') !== buildChatCss()) {
-    fail('client/chat/chat.bundle.css is stale; run npm run build:chat-css and commit the generated bundle');
+Object.keys(BUNDLES).forEach(name => {
+    const bundle = resolveBundle(name);
+    if (!fs.existsSync(bundle.outputPath)) fail(`${relative(bundle.outputPath)} is missing; run npm run build:chat-css`);
+    if (fs.readFileSync(bundle.outputPath, 'utf8') !== buildChatCss(name)) {
+        fail(`${relative(bundle.outputPath)} is stale; run npm run build:chat-css and commit the generated bundle`);
+    }
+});
+if (!html.includes('href="/chat/chat.shell.css?v=__APP_VERSION__"')) {
+    fail('聊天模板必须加载首屏样式包，而不是加载全部工作区样式。');
 }
-if (!html.includes('href="/chat/chat.bundle.css?v=__APP_VERSION__"')) {
-    fail('chat template must load the compiled CSS bundle instead of the @import entry file');
+const shellStyles = fs.readFileSync(path.join(chatDir, 'chat.css'), 'utf8');
+[
+    './styles/workspaces/table-foundation.css',
+    './styles/workspaces/shared.css',
+    './styles/workspaces/responsive.css'
+].forEach(importPath => {
+    if (!shellStyles.includes(importPath)) {
+        fail(`聊天首屏样式必须常驻工作区基础结构：${importPath}`);
+    }
+});
+const markdownStyles = fs.readFileSync(path.join(stylesDir, 'base', 'markdown.css'), 'utf8');
+if (!markdownStyles.includes('.message-stats') || !markdownStyles.includes('.message-stats .stat-model')) {
+    fail('对话页模型统计样式必须位于首屏消息样式入口。');
+}
+const settingsAttachmentStyles = fs.readFileSync(path.join(stylesDir, 'admin', 'admin-chat-attachments.css'), 'utf8');
+if (settingsAttachmentStyles.includes('.message-stats')) {
+    fail('对话页模型统计样式不能依赖设置工作区附件样式包。');
+}
+const workspaceStyles = fs.readFileSync(path.join(chatDir, 'workspace-style-loader.js'), 'utf8');
+['apps', 'agent', 'knowledge', 'mcp', 'settings'].forEach(name => {
+    if (!workspaceStyles.includes(`'/chat/chat.workspace.${name}.css'`)) {
+        fail(`${name} 工作区必须按需加载独立样式包。`);
+    }
+});
+if (workspaceStyles.includes('chat.workspace.shared.css')) {
+    fail('共享工作区基础样式必须由首屏样式包提供，不能成为按需加载的单点依赖。');
 }
 
 const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.css'), 'utf8');

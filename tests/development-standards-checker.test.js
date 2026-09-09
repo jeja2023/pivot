@@ -8,7 +8,8 @@ const {
 } = require('../scripts/check_development_standards');
 
 test('增量规范检查忽略生成的聊天样式包', () => {
-    assert.equal(isSkippableGeneratedFile('client/chat/chat.bundle.css'), true);
+    assert.equal(isSkippableGeneratedFile('client/chat/chat.shell.css'), true);
+    assert.equal(isSkippableGeneratedFile('client/chat/chat.workspace.agent.css'), true);
     assert.equal(isSkippableGeneratedFile('client/chat/styles/base/chat-shell.css'), false);
 });
 

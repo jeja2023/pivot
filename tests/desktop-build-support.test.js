@@ -85,19 +85,32 @@ test('desktop package excludes build-time scripts that have no runtime import pa
     assert.equal(pkg.build.extraResources.some(item => item.from === 'artifacts/agent-browser-pack'), false);
 });
 
-test('desktop packaging applies the optional database connector profile before electron-builder runs', () => {
+test('desktop packaging applies optional connector and runtime profiles in an isolated staging configuration', () => {
     const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
-    const profile = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'desktop_optional_database_connectors.js'), 'utf8');
-    assert.match(script, /prepareDesktopConnectorProfile\(root\)/);
-    assert.match(profile, /PIVOT_DESKTOP_DB_CONNECTORS/);
-    assert.match(script, /restoreDesktopConnectorProfile\(\)/);
+    const staging = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'desktop_build_staging.js'), 'utf8');
+    assert.match(script, /createDesktopBuildStaging\(root/);
+    assert.match(script, /--config', desktopBuildStaging\.builderConfigPath/);
+    assert.match(staging, /applyDesktopConnectorProfile/);
+    assert.match(staging, /applyDesktopRuntimeProfile/);
+    assert.match(staging, /applyWindowsUpdateSigningProfile/);
+});
+
+test('desktop development and packaging generate CSS bundles before starting Electron or assembling asar', () => {
+    const packageScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
+    const runScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'run_desktop.js'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    assert.match(packageScript, /scripts', 'build_chat_css\.js/);
+    assert.match(runScript, /scripts', 'build_chat_css\.js/);
+    assert.equal(pkg.scripts.prestart, 'node scripts/build_chat_css.js');
+    assert.equal(pkg.scripts.predev, 'node scripts/build_chat_css.js');
+    assert.equal(pkg.scripts.precheck, 'node scripts/build_chat_css.js');
 });
 
 test('unpacked Windows smoke builds disable auto update unless a signed publisher profile is injected', () => {
     const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
     assert.match(script, /config\.autoUpdate\.enabled = false/);
     assert.match(script, /windowsTarget: buildTarget\.platform === 'win32'/);
-    assert.match(script, /windowsUpdatePublisher: windowsUpdateSigningProfile\.publisherName/);
+    assert.match(script, /windowsUpdatePublisher/);
 });
 
 test('release desktop builds require a dedicated distribution configuration rather than the development config', () => {
@@ -109,7 +122,7 @@ test('release desktop builds require a dedicated distribution configuration rath
 
 test('desktop packaging only assembles and verifies Chromium for the local runtime profile', () => {
     const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
-    assert.match(script, /prepareDesktopRuntimeProfile\(root/);
+    assert.match(script, /runtimeProfile: \{ config: bundledDesktopConfig\.config \}/);
     assert.match(script, /if \(desktopRuntimeProfile\.includesBrowserRuntime\)/);
     assert.match(script, /PIVOT_VERIFY_DESKTOP_BROWSER_RUNTIME/);
 });

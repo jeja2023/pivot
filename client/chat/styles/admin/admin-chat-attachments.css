@@ -198,15 +198,6 @@
     }
 }
 
-/* 消息性能指标样式 */
-.message-stats { 
-    font-size: 0.66rem; color: #64748b; display: inline-flex; gap: 8px;
-    user-select: none; font-weight: 500; background: rgba(15, 23, 42, 0.025);
-    padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(148, 163, 184, 0.12);
-}
-.stat-item { display: flex; align-items: center; gap: 5px; }
-.stat-model { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 .settings-workspace-view .text-success {
     color: #059669;
 }

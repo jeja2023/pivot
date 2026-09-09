@@ -9,7 +9,12 @@ const rootDir = path.resolve(__dirname, '..');
 const stagedMode = process.argv.includes('--staged');
 const changedMode = process.argv.includes('--changed');
 const GENERATED_FILES = new Set([
-    'client/chat/chat.bundle.css'
+    'client/chat/chat.shell.css',
+    'client/chat/chat.workspace.apps.css',
+    'client/chat/chat.workspace.agent.css',
+    'client/chat/chat.workspace.knowledge.css',
+    'client/chat/chat.workspace.mcp.css',
+    'client/chat/chat.workspace.settings.css'
 ]);
 
 const failures = [];

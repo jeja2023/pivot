@@ -41,10 +41,50 @@ test('模板加载职责独立于工作区导航脚本，并在导航脚本之�
     const loader = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-template-loader.js'), 'utf8');
     const settingsScale = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-settings-scale.js'), 'utf8');
     assert.ok(scripts.indexOf('/chat/workspace-template-loader.js') < scripts.indexOf('/chat/app-workspaces.js'));
+    assert.ok(scripts.indexOf('/chat/workspace-style-loader.js') < scripts.indexOf('/chat/app-workspaces.js'));
     assert.ok(scripts.indexOf('/chat/workspace-settings-scale.js') < scripts.indexOf('/chat/app-workspaces.js'));
     assert.match(loader, /ensureWorkspaceMarkup/);
     assert.match(loader, /\/chat\/workspaces\/settings/);
     assert.match(settingsScale, /scheduleSettingsWorkspaceScale/);
+});
+
+test('聊天首屏只加载壳样式，懒加载工作区各自加载样式包', () => {
+    const root = path.resolve(__dirname, '..');
+    const html = fs.readFileSync(path.join(root, 'client', 'chat', 'chat.html'), 'utf8');
+    const shellStyles = fs.readFileSync(path.join(root, 'client', 'chat', 'chat.css'), 'utf8');
+    const workspaces = fs.readFileSync(path.join(root, 'client', 'chat', 'app-workspaces.js'), 'utf8');
+    const styleLoader = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-style-loader.js'), 'utf8');
+    assert.match(html, /\/chat\/chat\.shell\.css/);
+    assert.doesNotMatch(html, /\/chat\/chat\.workspace\./);
+    assert.match(shellStyles, /styles\/workspaces\/table-foundation\.css/);
+    assert.match(shellStyles, /styles\/workspaces\/shared\.css/);
+    assert.match(shellStyles, /styles\/workspaces\/responsive\.css/);
+    ['apps', 'agent', 'knowledge', 'mcp', 'settings'].forEach(name => {
+        assert.match(styleLoader, new RegExp(`chat\\.workspace\\.${name}\\.css`));
+    });
+    assert.doesNotMatch(styleLoader, /chat\.workspace\.shared\.css/);
+    assert.match(workspaces, /workspaces\.styleLoader/);
+    assert.doesNotMatch(workspaces, /await window\.Pivot\.moduleApi\('workspaces\.styleLoader'\)\.ensureWorkspaceStyles/);
+    assert.match(workspaces, /样式资源不可成为功能入口的单点阻塞/);
+});
+
+test('会话列表保留独立滚动容器并通过滚动自动分页', () => {
+    const root = path.resolve(__dirname, '..');
+    const sidebarCss = fs.readFileSync(path.join(root, 'client', 'chat', 'styles', 'base', 'sidebar.css'), 'utf8');
+    const layoutCss = fs.readFileSync(path.join(root, 'client', 'chat', 'styles', 'layout-refresh.css'), 'utf8');
+    const sidebarJs = fs.readFileSync(path.join(root, 'client', 'chat', 'sidebar.js'), 'utf8');
+    const chatShell = fs.readFileSync(path.join(root, 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
+    assert.match(sidebarCss, /\.session-list[\s\S]*overflow-y:\s*auto/);
+    assert.match(sidebarCss, /\.sidebar[\s\S]*height:\s*100%[\s\S]*min-height:\s*0/);
+    assert.match(sidebarCss, /\.session-list[\s\S]*flex:\s*1\s+1\s+0[\s\S]*scrollbar-width:\s*none/);
+    assert.match(sidebarCss, /\.session-list::\-webkit-scrollbar[\s\S]*display:\s*none/);
+    assert.match(layoutCss, /\.session-list[\s\S]*min-height:\s*0/);
+    assert.match(sidebarJs, /pivot-desktop-runtime/);
+    assert.match(sidebarJs, /addEventListener\('wheel'/);
+    assert.doesNotMatch(sidebarJs, /session-load-more/);
+    assert.match(sidebarJs, /loadSessions\(true\)/);
+    assert.doesNotMatch(chatShell, /session-list-footer/);
+    assert.doesNotMatch(sidebarCss, /session-list-footer|session-load-more/);
 });
 
 test('工作流入口同时挂载 Agent 与独立工作流模板，避免切换后目标面板缺失', () => {

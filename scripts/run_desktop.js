@@ -27,6 +27,7 @@ function rebuildForCurrentNode() {
 
 let runError = null;
 try {
+    run(process.execPath, [path.join('scripts', 'build_chat_css.js')]);
     run(process.execPath, [path.join('scripts', 'build_desktop_icon.js')]);
     run(process.execPath, [electronBuilderInstallDeps]);
     run(process.execPath, [electronCli, '.']);

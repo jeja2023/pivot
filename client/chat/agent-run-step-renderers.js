@@ -626,13 +626,18 @@ function agentResultRawText(value) {
     }
 }
 
-function renderAgentFinalAnswer(value) {
+function renderAgentFinalAnswer(value, runId = null) {
     const raw = agentResultRawText(value);
+    const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    const discKey = 'final-result-raw';
+    const isRawOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && effectiveRunId)
+        ? (window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, discKey, false) ? ' open' : '')
+        : '';
     return `
         <div class="agent-final">
             <div class="agent-final-label">任务结果</div>
             <div class="agent-result-readable">${agentResultReadableMarkup(value, { maxRows: 10, maxItems: 12 })}</div>
-            ${raw ? `<details class="agent-result-raw"><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
+            ${raw ? `<details class="agent-result-raw" data-disclosure-key="${discKey}"${isRawOpen}><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
         </div>
     `;
 }
@@ -793,18 +798,24 @@ function agentStepRawDetail(step, preview) {
     return raw.length > 5000 ? `${raw.slice(0, 5000)}\n...` : raw;
 }
 
-function agentStepMarkup(step) {
+function agentStepMarkup(step, runId = null) {
     const preview = normalizeAgentMarkdown(agentStepPreview(step));
     const readable = agentStepReadableMarkup(step);
     const raw = agentStepRawDetail(step, preview);
+    const stepKey = String(step.step_index || step.id || step.step || '').trim();
+    const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    const discKey = stepKey ? `step-raw-${stepKey}` : '';
+    const isStepRawOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && discKey && effectiveRunId)
+        ? (window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, discKey, false) ? ' open' : '')
+        : '';
     return `
-        <div class="agent-step ${agentEscape(step.status)}">
+        <div class="agent-step ${agentEscape(step.status)}" data-step-index="${agentEscape(stepKey)}">
             <div class="agent-step-head">
                 <strong>${step.step_index}. ${agentEscape(agentStepTitle(step))}</strong>
                 <span>${agentEscape(agentToolTitle(step.tool_name || step.type))} · ${Number(step.duration_ms || 0)} 毫秒</span>
             </div>
             <div class="agent-step-body">${readable || renderMarkdown(agentEscape(preview))}</div>
-            ${raw ? `<details class="agent-step-raw"><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
+            ${raw ? `<details class="agent-step-raw"${discKey ? ` data-disclosure-key="${agentEscape(discKey)}"` : ''}${isStepRawOpen}><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}
         </div>
     `;
 }

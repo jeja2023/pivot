@@ -18,5 +18,10 @@
     "reason": "统一旧版 compression 传递依赖，消除生产树重复 debug 副本。",
     "scope": "production",
     "expiresOn": "2026-12-31"
+  },
+  "hono": {
+    "reason": "MCP conformance 开发工具链的传递依赖；固定到已修复路径遍历、资源耗尽和代理解析差异问题的版本。",
+    "scope": "dev",
+    "expiresOn": "2026-12-31"
   }
 }

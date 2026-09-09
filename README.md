@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.102-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.112-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,9 +11,9 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.102
+## 最新版本：0.1.112
 
-（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.1.102 发布记录](docs/releases/v0.1.102-系统架构解耦与深度性能治理.md)。）
+（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.1.107 发布记录](docs/releases/v0.1.107-客户端会话列表滚轮修复.md)。）
 
 国产化桌面客户端当前正式支持 Linux AMD64 和 ARM64 的 UOS/Debian 构建；构建命令、离线依赖、原生模块验收和 LoongArch64 限制见 [统信 UOS 与龙芯客户端打包指南](docs/统信UOS与龙芯3A6000客户端打包指南.md)。龙芯 LoongArch64 当前不会生成正式安装包。
 
@@ -223,6 +223,12 @@ docker network create ai-bridge
 docker compose up -d
 ```
 
+GPU 主机安装 NVIDIA Container Toolkit 后，再显式叠加 GPU 覆盖层：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
 ### 3. 升级已有部署
 
 如果目标服务器已经运行过旧版本，建议显式重建并重启容器，确保运行中的容器使用新镜像：
@@ -273,6 +279,7 @@ cp .env.example .env
 ```
 
 `.env.example` 是配置模板，实际服务启动时读取 `.env`。生产部署修改 `.env` 后需要重启服务，新的登录有效期需要重新登录后才会体现在 Cookie 中。
+核心运行、日志、数据库维护和桌面交付参数由[类型化配置注册表](docs/configuration-registry.md)统一定义；修改该注册表后执行 `npm run generate:config-docs` 同步模板和说明文档。
 开放注册的 `.env` 值只作为首次初始化默认值；系统运行后请由内置 `admin` 在“系统设置 > 用户管理”页面切换，设置会写入数据库并即时生效。
 局域网部署时，通常可以保持 `PUBLIC_URL` 为空，`CORS_ORIGIN` 只填写实际会访问本系统的内网地址；如果是纯 HTTP 内网环境，`COOKIE_SECURE` 保持 `false` 即可。若模型服务、MCP 服务或反向代理使用内网主机名，把它们补到 `PIVOT_LOCAL_MODEL_HOSTS` 和 `MODEL_URL_ALLOWLIST` 里，避免被当成外网地址拦截。
 
@@ -442,6 +449,12 @@ npm run lint
 npm run test:all
 ```
 
+覆盖率门禁（行 75%、函数 75%、分支 60%）：
+
+```bash
+npm run test:coverage
+```
+
 Agent 质量扩展回归（Provider usage 校准、非幂等故障矩阵、多进程 residency）：
 
 ```bash
@@ -536,4 +549,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.102
+**当前版本**：v0.1.112

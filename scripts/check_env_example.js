@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { assertRegistryArtifacts } = require('../server/config/env-registry');
 
 const root = path.resolve(__dirname, '..');
 const ignored = JSON.parse(fs.readFileSync(path.join(__dirname, 'env_example_ignored.json'), 'utf8'));
@@ -29,6 +30,12 @@ function declaredEnvironmentNames(text) {
 }
 
 function main() {
+    try {
+        assertRegistryArtifacts(root);
+    } catch (error) {
+        console.error(`类型化配置注册表检查失败：${error.message}`);
+        process.exit(1);
+    }
     const declared = declaredEnvironmentNames(fs.readFileSync(path.join(root, '.env.example'), 'utf8'));
     const missing = [...collectEnvironmentReferences()]
         .filter(name => !declared.has(name) && !Object.prototype.hasOwnProperty.call(ignored, name))

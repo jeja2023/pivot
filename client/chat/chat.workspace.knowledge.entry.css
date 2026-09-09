@@ -1,0 +1,5 @@
+/* 知识库与知识图谱工作区样式。 */
+@import url("./styles/workspaces/knowledge.css");
+@import url("./styles/workspaces/rag-graph-base.css");
+@import url("./styles/workspaces/rag-graph-map.css");
+@import url("./styles/workspaces/shared-target-tree.css");

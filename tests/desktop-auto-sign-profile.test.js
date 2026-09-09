@@ -27,7 +27,7 @@ test('ensureDefaultDistributionConfig 生成包含 autoUpdate 开启的生产默
     }
 });
 
-test('autoProvisionDesktopEnvironment 在未配置时自动补全默认分发配置与发布者', () => {
+test('autoProvisionDesktopEnvironment 总会补全默认分发配置，签名资料仅在本机证书可用时注入', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-provision-'));
     try {
         const mockEnv = {};
@@ -36,8 +36,12 @@ test('autoProvisionDesktopEnvironment 在未配置时自动补全默认分发配
         const distFile = path.resolve(root, mockEnv.PIVOT_DISTRIBUTION_CONFIG);
         assert.equal(fs.existsSync(distFile), true);
         if (process.platform === 'win32') {
-            assert.equal(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER, DEFAULT_LOCAL_PUBLISHER);
-            assert.equal(mockEnv.CSC_NAME, DEFAULT_LOCAL_PUBLISHER);
+            const signingInjected = Boolean(mockEnv.CSC_NAME);
+            assert.equal(Boolean(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER), signingInjected);
+            if (signingInjected) {
+                assert.equal(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER, DEFAULT_LOCAL_PUBLISHER);
+                assert.equal(mockEnv.CSC_NAME, DEFAULT_LOCAL_PUBLISHER);
+            }
         }
     } finally {
         fs.rmSync(root, { recursive: true, force: true });

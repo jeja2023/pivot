@@ -162,29 +162,42 @@ const loadMonitorSummary = async function(options = {}) {
         const diskBarWidth = Math.min(100, Math.round(diskUsedRate * 100));
         const diskBarColor = diskBarWidth > 90 ? '#ef4444' : (diskBarWidth > 75 ? '#f59e0b' : '#10b981');
 
-        // 恢复详细资源展示 (9行)
+        const heapUsed = processInfo.memory?.heapUsed || 0;
+        const heapTotal = processInfo.memory?.heapTotal || 1;
+        const heapBarWidth = Math.min(100, Math.round((heapUsed / heapTotal) * 100));
+        const heapBarColor = heapBarWidth > 90 ? '#ef4444' : (heapBarWidth > 75 ? '#f59e0b' : '#10b981');
+
+        // 系统资源指标 (完整规格展示)
         PivotSafeHtml.setHtml(document.getElementById('monitor-resource-list'), [
             ['运行主机', `<strong>${escapeHtml(system.hostname || '-')}</strong>`],
             ['操作系统', `<strong>${escapeHtml(`${system.type || ''} ${system.release || ''}`.trim() || '-')}</strong>`],
-            ['Node 版本', `<strong>${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}</strong>`],
+            ['运行架构', `<strong>${escapeHtml(system.platform || '-')}${system.arch ? ` (${escapeHtml(system.arch)})` : ''}</strong>`],
             ['CPU 型号', `<strong>${escapeHtml(system.cpuModel || '-')}</strong>`],
+            ['CPU 规格', `<strong>${formatMetricNumber(system.cpuCount || 1)} 逻辑核心</strong>`],
+            ['系统负载', `<strong>${escapeHtml(loadAvgStr)}</strong>`],
             ['系统时长', `<strong>${formatDuration(system.uptime || 0)}</strong>`],
             ['进程时长', `<strong>${formatDuration(processInfo.uptimeSeconds || 0)}</strong>`],
-            ['系统内存', `<div class="monitor-meter-cell">
+            ['Node 运行时', `<strong>${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}</strong>`],
+            ['系统物理内存', `<div class="monitor-meter-cell">
                 <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
                 <div class="monitor-meter-track">
                     <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
                 </div>
             </div>`],
-            ['硬盘空间', `<div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')}">
+            ['Node 堆内存', `<div class="monitor-meter-cell">
+                <strong>${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)</strong>
+                <div class="monitor-meter-track">
+                    <div class="monitor-meter-fill" style="width: ${heapBarWidth}%; background: ${heapBarColor};"></div>
+                </div>
+            </div>`],
+            ['硬盘挂载空间', `<div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')}">
                 <strong>${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)</strong>
                 <div class="monitor-meter-track">
                     <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
                 </div>
             </div>`],
-            ['硬盘剩余', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>`],
-            ['进程 CPU', `<strong>${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s U / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s S</strong>`],
-            ['运行平台', `<strong>${escapeHtml(system.platform || '-')}</strong>`]
+            ['硬盘剩余容量', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>`],
+            ['进程 CPU 耗时', `<strong>${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s 用户 / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s 系统</strong>`]
         ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
 
         const healthEl = document.getElementById('monitor-health-maintenance-list');
@@ -221,6 +234,26 @@ const loadMonitorSummary = async function(options = {}) {
             PivotSafeHtml.setHtml(healthEl, [...healthRows, ...maintenanceRows].join(''));
         }
 
+        const concurrencyActive = Number(concurrency.active || 0);
+        const concurrencyQueued = Number(concurrency.queued || 0);
+        const concurrencyMaxQueue = Number(concurrency.maxQueue || 20);
+        const queueTimeoutSec = Math.round(Number(concurrency.queueTimeoutMs || 300000) / 1000);
+
+        const aiMeterWidth = concurrencyEffectiveMax > 0 ? Math.min(100, Math.round((concurrencyActive / concurrencyEffectiveMax) * 100)) : 0;
+        const aiMeterColor = aiMeterWidth > 85 ? '#ef4444' : (aiMeterWidth > 65 ? '#f59e0b' : '#10b981');
+
+        const queueMeterWidth = concurrencyMaxQueue > 0 ? Math.min(100, Math.round((concurrencyQueued / concurrencyMaxQueue) * 100)) : 0;
+        const queueMeterColor = queueMeterWidth > 80 ? '#ef4444' : (queueMeterWidth > 50 ? '#f59e0b' : '#10b981');
+
+        const gpuRejectThreshold = ((gpu.thresholds?.reject || 0.98) * 100).toFixed(0);
+        const gpuSafeThreshold = ((gpu.thresholds?.safe || 0.85) * 100).toFixed(0);
+        const gpuCriticalThreshold = ((gpu.thresholds?.critical || 0.95) * 100).toFixed(0);
+        const gpuIntervalSec = Math.round(Number(gpu.intervalMs || 15000) / 1000);
+
+        const totalEndpoints = Number(endpoints.total || 0);
+        const localEndpoints = Number(endpoints.localCount || 0);
+        const remoteEndpoints = Number(endpoints.remoteCount || 0);
+
         const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
             ? gpu.gpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
@@ -229,20 +262,30 @@ const loadMonitorSummary = async function(options = {}) {
                 const utilization = Number(item.utilization);
                 if (Number.isFinite(utilization)) {
                     const utilizationRate = utilization > 1 ? utilization : utilization * 100;
-                    gpuDetails.push(`GPU利用率 ${utilizationRate.toFixed(0)}%`);
+                    gpuDetails.push(`利用率 ${utilizationRate.toFixed(0)}%`);
                 }
                 if (Number.isFinite(Number(item.temperature))) gpuDetails.push(`${Number(item.temperature).toFixed(0)}°C`);
+                const gpuBarColor = usedRate > 90 ? '#ef4444' : (usedRate > 75 ? '#f59e0b' : '#10b981');
                 return `<div class="monitor-row monitor-gpu-row">
                     <span class="monitor-gpu-name" title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
-                    <strong class="monitor-gpu-usage">
-                        ${escapeHtml(`${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} · 显存 ${usedRate.toFixed(0)}%`)}
-                        ${gpuDetails.length ? `<small>${escapeHtml(gpuDetails.join(' · '))}</small>` : ''}
-                    </strong>
+                    <div class="monitor-meter-cell">
+                        <strong>${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(0)}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${Math.min(100, Math.round(usedRate))}%; background: ${gpuBarColor};"></div>
+                        </div>
+                        ${gpuDetails.length ? `<small style="color:#64748b;font-size:0.68rem;font-weight:700;">${escapeHtml(gpuDetails.join(' · '))}</small>` : ''}
+                    </div>
                 </div>`;
             }).join('')
-            : '<div class="monitor-empty is-warning"><strong>硬件提示：</strong>未检测到 NVIDIA GPU (请检查驱动)。</div>';
+            : `<div class="monitor-hardware-banner">
+                <div class="monitor-hardware-banner-head">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <strong>算力形态：CPU 宿主 / 混合分布式架构</strong>
+                </div>
+                <p>未检测到本地 NVIDIA 独立显卡。系统已启用自适应动态削峰与熔断保护，多模型请求由云端与本地分布式端点协同承载调度。</p>
+            </div>`;
 
-        const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>本机指标：</strong>仅显示 Pivot 部署服务器上的 NVIDIA GPU 与全局并发保护；模型端点本地/远端状态请查看“模型端点状态”。</div>';
+        const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>保护机制：</strong>Pivot 部署服务器已接入全局并发管控、显存压力自适应调谐与缓冲队列。</div>';
 
         PivotSafeHtml.setHtml(document.getElementById('monitor-gpu-list'), [
             gpuScopeNotice,
@@ -252,13 +295,47 @@ const loadMonitorSummary = async function(options = {}) {
                     <strong>${escapeHtml(gpuProtectionStatus)}</strong>
                 </div>
                 <div>
-                    <span>AI上限</span>
-                    <strong title="当前 / 配置">${escapeHtml(`${formatMetricNumber(concurrencyEffectiveMax)}/${formatMetricNumber(concurrencyConfiguredMax)}`)}</strong>
+                    <span>动态上限</span>
+                    <strong title="生效 / 配置">${escapeHtml(`${formatMetricNumber(concurrencyEffectiveMax)}/${formatMetricNumber(concurrencyConfiguredMax)}`)}</strong>
                 </div>
                 <div>
-                    <span>拒绝阈值</span>
-                    <strong>${escapeHtml(`${((gpu.thresholds?.reject || 0) * 100).toFixed(0)}%`)}</strong>
+                    <span>熔断阈值</span>
+                    <strong>${escapeHtml(`${gpuRejectThreshold}%`)}</strong>
                 </div>
+            </div>`,
+            `<div class="monitor-row">
+                <span>AI 并发槽位</span>
+                <div class="monitor-meter-cell">
+                    <strong>${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)</strong>
+                    <div class="monitor-meter-track">
+                        <div class="monitor-meter-fill" style="width: ${aiMeterWidth}%; background: ${aiMeterColor};"></div>
+                    </div>
+                </div>
+            </div>`,
+            `<div class="monitor-row">
+                <span>排队缓冲池</span>
+                <div class="monitor-meter-cell" title="超过 ${queueTimeoutSec} 秒自动解挂">
+                    <strong>${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)</strong>
+                    <div class="monitor-meter-track">
+                        <div class="monitor-meter-fill" style="width: ${queueMeterWidth}%; background: ${queueMeterColor};"></div>
+                    </div>
+                </div>
+            </div>`,
+            `<div class="monitor-row">
+                <span>显存水位线</span>
+                <strong title="安全线 / 警戒线 / 拒载线">安全 ${escapeHtml(gpuSafeThreshold)}% · 警戒 ${escapeHtml(gpuCriticalThreshold)}%</strong>
+            </div>`,
+            `<div class="monitor-row">
+                <span>硬件探针周期</span>
+                <strong>${escapeHtml(String(gpuIntervalSec))} 秒 / 轮询</strong>
+            </div>`,
+            `<div class="monitor-row">
+                <span>活跃模型端点</span>
+                <strong>${formatMetricNumber(totalEndpoints)} 个（本地 ${formatMetricNumber(localEndpoints)} · 远端 ${formatMetricNumber(remoteEndpoints)}）</strong>
+            </div>`,
+            `<div class="monitor-row">
+                <span>队列超时保护</span>
+                <strong>${formatMetricNumber(queueTimeoutSec)} 秒释放</strong>
             </div>`,
             gpuRows
         ].join(''));

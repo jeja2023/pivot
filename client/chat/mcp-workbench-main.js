@@ -480,7 +480,8 @@ window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
             const toolName = btn.dataset.mcpTestTool;
             const toolTitle = btn.dataset.mcpToolTitle;
             const toolObj = tools.find(t => (t.fullName || t.name) === toolName);
-            window.Pivot.legacy.openMcpToolTestModal(toolName, toolTitle, toolObj);
+            const openFn = (window.Pivot?.moduleApi?.('mcp.workbench', {}) || {}).openMcpToolTestModal || openMcpToolTestModal;
+            openFn(toolName, toolTitle, toolObj);
         });
     });
     mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-tools-refresh-btn' });

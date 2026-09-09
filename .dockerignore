@@ -112,5 +112,8 @@ scripts/window_globals_baseline.json
 
 # 非运行文档；服务运行需要 CHANGELOG.md 和 使用帮助.md
 docs/
+!docs/
+!docs/licenses/
+!docs/licenses/**
 README.md
 开发规范.md

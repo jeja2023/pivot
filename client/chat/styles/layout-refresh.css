@@ -25,6 +25,8 @@
 /* The sidebar is a compact navigation surface, not a second content pane. */
 .sidebar {
     --sidebar-width: 288px;
+    height: 100%;
+    min-height: 0;
     background: var(--ui-sidebar);
     border-right: 1px solid var(--ui-line);
     box-shadow: 4px 0 20px rgba(15, 23, 42, 0.025);
@@ -124,8 +126,12 @@
 .session-list {
     gap: 2px;
     padding: 4px 10px 16px;
-    flex: 1;
+    flex: 1 1 0;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: auto;
+    scrollbar-width: none;
 }
 
 .session-date-group {

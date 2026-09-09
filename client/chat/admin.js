@@ -206,6 +206,7 @@ const adminFeatureScripts = [
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
     '/chat/admin-settings.js',
+    '/chat/admin-settings-memory.js',
     '/chat/admin-stealth.js',
     '/chat/admin-skill-signing.js',
     '/chat/memory-usage.js',
@@ -272,11 +273,22 @@ async function openAdminPanel(options = {}) {
         showToast(error.message || '设置模块加载失败', 'error');
         return;
     }
+    const whenStyles = window.Pivot.moduleApi?.('workspaces.styleLoader')?.whenWorkspaceStylesLoaded;
+    if (typeof whenStyles === 'function') {
+        try {
+            // 给设置工作区专属样式包充分就绪窗口（最多 2500ms），确保首帧渲染具备完整样式与画布尺寸，
+            // 杜绝无样式布局导致画布计算偏窄、高度撑大出现滚动条与留白；若超时则平滑降级继续渲染
+            await Promise.race([
+                whenStyles('settings'),
+                new Promise(resolve => setTimeout(resolve, 2500))
+            ]);
+        } catch (e) {
+            // 样式加载异常由 styleLoader 告警，此处平滑降级不阻塞功能
+        }
+    }
     const adminContainer = document.getElementById('admin-container');
     window.Pivot.moduleApi?.('settings.events')?.bindAdminSettingsEvents?.();
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
-    adminContainer?.classList.remove('hidden');
-    adminContainer?.setAttribute('aria-hidden', 'false');
     const isAdmin = isAdminUser();
     const isSuperAdmin = isSuperAdminUser();
     const titleEl = adminContainer?.querySelector('.settings-workspace-header h3');
@@ -294,10 +306,30 @@ async function openAdminPanel(options = {}) {
     document.querySelectorAll('.super-admin-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
-    const loaded = await window.Pivot.legacy.loadSettings?.();
-    if (openSequence !== settingsPanelOpenSequence || loaded === false) return;
+
     const targetTab = options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab();
-    await window.Pivot.legacy.switchTab(targetTab);
+    // 展示前预先收拢非目标标签并激活目标标签，杜绝其它标签在初始帧撑大画布触发不必要的纵向滚动条
+    SETTINGS_TABS.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
+    document.getElementById(`tab-content-${targetTab}`)?.classList.remove('hidden');
+    document.querySelectorAll('.admin-tab').forEach(b => {
+        const active = b.id === `tab-${targetTab}`;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+        b.tabIndex = active ? 0 : -1;
+    });
+
+    adminContainer?.classList.remove('hidden');
+    adminContainer?.setAttribute('aria-hidden', 'false');
+
+    const content = document.querySelector('.settings-workspace-view .admin-content');
+    if (content) content.scrollTop = 0;
+
+    await window.Pivot.legacy.switchTab(targetTab, { skipDirtyCheck: true });
+    if (openSequence !== settingsPanelOpenSequence) return;
+
+    if (targetTab !== 'global-params' && window.Pivot.legacy.loadSettings) {
+        window.Pivot.legacy.loadSettings().catch(() => {});
+    }
 }
 window.Pivot.exposeModule('workspaces.implementations', { openAdminPanel });
 
@@ -364,6 +396,8 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         });
         if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
     }
+    const content = document.querySelector('.settings-workspace-view .admin-content');
+    if (content) content.scrollTop = 0;
     window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
     await loadTabData(tab);
     setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);

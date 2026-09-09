@@ -76,6 +76,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     const ragDebugPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'rag-debug-modal.html'), 'utf8');
     const appWorkspaces = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'app-workspaces.js'), 'utf8');
     const chatCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'chat.css'), 'utf8');
+    const settingsCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'chat.workspace.settings.entry.css'), 'utf8');
     const knowledgeCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'knowledge.css'), 'utf8');
     const inputCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'input.css'), 'utf8');
     const mcpCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'mcp', 'mcp-forms.css'), 'utf8');
@@ -110,7 +111,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(toolPolicy, /toolPolicyIsGlobalPackage/);
     assert.ok(toolPolicy.includes('${editable ? `<button type="button" class="btn-secondary" data-tool-policy-edit='));
     assert.doesNotMatch(toolPolicy, /data-tool-policy-edit="[^"]+"\s+\$\{editable \? '' : 'disabled'\}/);
-    assert.match(chatCss, /admin-tool-policy\.css/);
+    assert.match(settingsCss, /admin-tool-policy\.css/);
     assert.doesNotMatch(agentPartial, /agent-capability-list/);
     assert.doesNotMatch(agentRunLoaders, /loadCapabilityPackages/);
     assert.doesNotMatch(agentRunLoaders, /data-capability-key/);
@@ -510,6 +511,7 @@ test('usage audit page merges stats, details and admin report views', () => {
 test('long-term memory table and modals use shared controls', () => {
     const adminCore = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin.js'), 'utf8');
     const adminSettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings.js'), 'utf8');
+    const memorySettings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'admin-settings-memory.js'), 'utf8');
     const memoryPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'memories.html'), 'utf8');
     const preAppModals = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
     const globalParamsPartial = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'settings', 'global-params.html'), 'utf8');
@@ -528,7 +530,7 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(memoryPartial, /id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close"/);
     assert.doesNotMatch(memoryPartial, /<div class="model-form memory-source-form">[\s\S]*?model-modal-actions memory-modal-actions/);
     assert.match(adminCore, /window\.Pivot\.legacy\.loadMemories\(page\)/);
-    assert.match(adminSettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
+    assert.match(memorySettings, /function memoryQueryParams\(page = pageState\.memories \|\| 1\)/);
     assert.match(adminSettings, /function collectRuntimeSettingsPayload\(source = null\)/);
     assert.match(adminSettings, /sourceEl\?\.closest\?\.\('#tab-content-global-params'\)/);
     assert.doesNotMatch(adminSettings, /openRuntimeSettingsModal/);
@@ -540,14 +542,14 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(globalParamsPartial, /id="runtime-settings-page-save"/);
     assert.match(globalParamsPartial, /data-runtime-key="model_endpoint_default_concurrency"/);
     assert.doesNotMatch(adminSettings, /document\.querySelectorAll\('\[data-runtime-key\]'\)\)[\s\S]*visibleRuntimeInputs/);
-    assert.match(adminSettings, /params\.set\('limit', String\(limit\)\)/);
-    assert.match(adminSettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
-    assert.match(adminSettings, /renderPagination\('memories', total, requestedPage\)/);
-    assert.match(adminSettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
-    assert.match(adminSettings, /formatMemoryStatusLabel\(memory\.status\)/);
-    assert.doesNotMatch(adminSettings, /escapeHtml\(memory\.status \|\| 'active'\)/);
-    assert.match(adminSettings, /const memory = getCurrentMemory\(memoryId\);/);
-    assert.match(adminSettings, /catch \(e\) \{\s*if \(body\) PivotSafeHtml\.setHtml\(body, `<p class="muted">\$\{escapeHtml\(e\.message/s);
+    assert.match(memorySettings, /params\.set\('limit', String\(limit\)\)/);
+    assert.match(memorySettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
+    assert.match(memorySettings, /renderMemoryPagination\('memories', total, requestedPage\)/);
+    assert.match(memorySettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
+    assert.match(memorySettings, /formatMemoryStatusLabel\(memory\.status\)/);
+    assert.doesNotMatch(memorySettings, /escapeHtml\(memory\.status \|\| 'active'\)/);
+    assert.match(adminSettings, /const selectedMemory = memory\.getCurrentMemory\(memoryId\);/);
+    assert.match(memorySettings, /catch \(e\) \{\s*if \(body\) PivotSafeHtml\.setHtml\(body, `<p class="muted">\$\{escapeHtml\(e\.message/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-content-cell \{\s*max-width: 500px;\s*white-space: nowrap;\s*overflow: hidden;\s*text-overflow: ellipsis;/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-modal \{\s*width: min\(680px,/s);
     assert.match(adminLayoutCss, /\.settings-workspace-view \.memory-edit-content textarea\.form-input \{\s*height: 180px;/s);

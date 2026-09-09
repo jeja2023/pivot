@@ -54,6 +54,14 @@ function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, se
     };
 }
 
+function runBackgroundTask(task, logger, failureMessage) {
+    return Promise.resolve()
+        .then(() => task())
+        .catch(err => {
+            logger.warn({ err: err && err.message ? err.message : err }, failureMessage);
+        });
+}
+
 function startBackgroundServices({
     logger,
     setImmediateFn = setImmediate,
@@ -75,37 +83,21 @@ function startBackgroundServices({
             logger.warn({ err: err && err.message ? err.message : err }, '运行时压力采样启动失败');
         }
     }
-    dependencies.startGpuMonitor().catch(err => {
-        logger.warn({ err: err && err.message ? err.message : err }, 'GPU 监控服务启动失败');
-    });
-    dependencies.startModelEndpointMonitor().catch(err => {
-        logger.warn({ err: err && err.message ? err.message : err }, '模型端点监控服务启动失败');
-    });
+    runBackgroundTask(dependencies.startGpuMonitor, logger, 'GPU 监控服务启动失败');
+    runBackgroundTask(dependencies.startModelEndpointMonitor, logger, '模型端点监控服务启动失败');
     setImmediateFn(() => {
-        try { dependencies.recoverStaleKnowledgeDocumentIndexes(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, '知识库索引恢复执行失败');
-        }
-        try { dependencies.recoverAgentRuns(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, '智能体任务恢复执行失败');
-        }
+        runBackgroundTask(dependencies.recoverStaleKnowledgeDocumentIndexes, logger, '知识库索引恢复执行失败');
+        runBackgroundTask(dependencies.recoverAgentRuns, logger, '智能体任务恢复执行失败');
         if (typeof dependencies.startAgentRecoveryRunner === 'function') {
-            try { dependencies.startAgentRecoveryRunner(); } catch (err) {
-                logger.warn({ err: err && err.message ? err.message : err }, '智能体周期性恢复服务启动失败');
-            }
+            runBackgroundTask(dependencies.startAgentRecoveryRunner, logger, '智能体周期性恢复服务启动失败');
         }
-        try { dependencies.startAgentScheduleRunner(); } catch (err) {
-            logger.warn({ err: err && err.message ? err.message : err }, '智能体计划调度器启动失败');
-        }
+        runBackgroundTask(dependencies.startAgentScheduleRunner, logger, '智能体计划调度器启动失败');
         if (typeof dependencies.startAgentEventOutboxDispatcher === 'function') {
-            try { dependencies.startAgentEventOutboxDispatcher(); } catch (err) {
-                logger.warn({ err: err && err.message ? err.message : err }, 'Agent 事件 outbox 投递器启动失败');
-            }
+            runBackgroundTask(dependencies.startAgentEventOutboxDispatcher, logger, 'Agent 事件 outbox 投递器启动失败');
         }
         // 技能发布熔断巡检：达到冻结阈值即自动回滚或暂停，避免坏版本长时间留在灰度里。
         if (typeof dependencies.startSkillReleaseBreakerRunner === 'function') {
-            try { dependencies.startSkillReleaseBreakerRunner(); } catch (err) {
-                logger.warn({ err: err && err.message ? err.message : err }, '技能发布熔断巡检器启动失败');
-            }
+            runBackgroundTask(dependencies.startSkillReleaseBreakerRunner, logger, '技能发布熔断巡检器启动失败');
         }
     });
 }

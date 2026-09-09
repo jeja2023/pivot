@@ -164,7 +164,7 @@ function agentDagConditionLabel(condition) {
     return labels[raw] || condition;
 }
 
-function agentDagNodeMarkup(node, index = null) {
+function agentDagNodeMarkup(node, index = null, runId = null) {
     const deps = Array.isArray(node.depends_on) ? node.depends_on : [];
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
@@ -186,11 +186,39 @@ function agentDagNodeMarkup(node, index = null) {
         ? String(node.input?.agentName || node.input?.agent_name || '').trim()
         : '';
     const displayTitle = agentDagNodeDisplayTitle(node);
-    const detailOpen = ['error', 'running'].includes(status) ? ' open' : '';
+    const nodeKey = String(node.node_key || (index !== null ? index : '')).trim();
+    const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
+    const discKey = nodeKey ? `dag-node-${nodeKey}` : '';
+    const isRecordedOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && discKey && effectiveRunId)
+        ? window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, discKey, null)
+        : null;
+    const isOpen = isRecordedOpen !== null && isRecordedOpen !== undefined
+        ? Boolean(isRecordedOpen)
+        : ['error', 'running'].includes(status);
+    const detailOpen = isOpen ? ' open' : '';
     const stepNumber = Number.isInteger(index) ? `<span class="agent-dag-node-index">${index + 1}</span>` : '';
+
+    const techDiscKey = nodeKey ? `dag-tech-${nodeKey}` : '';
+    const isTechRecordedOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && techDiscKey && effectiveRunId)
+        ? window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, techDiscKey, false)
+        : false;
+    const techOpen = isTechRecordedOpen ? ' open' : '';
+
+    const inputDiscKey = nodeKey ? `dag-input-${nodeKey}` : '';
+    const isInputRecordedOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && inputDiscKey && effectiveRunId)
+        ? window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, inputDiscKey, false)
+        : false;
+    const inputOpen = isInputRecordedOpen ? ' open' : '';
+
+    const outputDiscKey = nodeKey ? `dag-output-${nodeKey}` : '';
+    const isOutputRecordedOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && outputDiscKey && effectiveRunId)
+        ? window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, outputDiscKey, false)
+        : false;
+    const outputOpen = isOutputRecordedOpen ? ' open' : '';
+
     return `
-        <div class="agent-dag-node ${agentEscape(status)}">
-            <details class="agent-dag-node-details"${detailOpen}>
+        <div class="agent-dag-node ${agentEscape(status)}" data-dag-node-key="${agentEscape(nodeKey)}">
+            <details class="agent-dag-node-details"${discKey ? ` data-disclosure-key="${agentEscape(discKey)}"` : ''}${detailOpen}>
                 <summary class="agent-dag-node-head">
                     <div class="agent-dag-node-title">
                         ${stepNumber}
@@ -206,7 +234,7 @@ function agentDagNodeMarkup(node, index = null) {
                     ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
                     ${contractIssues.length ? `<div class="agent-dag-contract-issues"><strong>结果校验未通过</strong><span>${agentEscape(contractIssues.join('；'))}</span></div>` : ''}
                     ${readableOutput ? `<section class="agent-dag-node-result"><h5>本步骤结果</h5>${readableOutput}</section>` : ''}
-                    <details class="agent-dag-node-technical">
+                    <details class="agent-dag-node-technical"${techDiscKey ? ` data-disclosure-key="${agentEscape(techDiscKey)}"` : ''}${techOpen}>
                         <summary>查看技术信息</summary>
                         <div class="agent-dag-node-meta">
                             <span><em>前置步骤</em><strong>${agentEscape(depText)}</strong></span>
@@ -216,8 +244,8 @@ function agentDagNodeMarkup(node, index = null) {
                         </div>
                         ${(input || output) ? `
                             <div class="agent-dag-node-folders">
-                                ${input ? `<details><summary>查看输入数据</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
-                                ${output ? `<details><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
+                                ${input ? `<details${inputDiscKey ? ` data-disclosure-key="${agentEscape(inputDiscKey)}"` : ''}${inputOpen}><summary>查看输入数据</summary><pre>${agentEscape(agentShortText(input, 2400))}</pre></details>` : ''}
+                                ${output ? `<details${outputDiscKey ? ` data-disclosure-key="${agentEscape(outputDiscKey)}"` : ''}${outputOpen}><summary>节点输出</summary><pre>${agentEscape(agentShortText(output, 3000))}</pre></details>` : ''}
                             </div>
                         ` : ''}
                     </details>

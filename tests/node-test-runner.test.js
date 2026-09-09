@@ -12,8 +12,8 @@ test('Node 测试运行器支持原生覆盖率参数，且发布脚本配置了
     assert.match(runner, /PIVOT_NODE_TEST_WORKERS/);
     assert.match(runner, /splitTestGroups/);
     assert.match(runner, /nodeTestOptions\.includes\('--experimental-test-coverage'\)/);
-    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-lines=40/);
-    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-functions=40/);
-    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-branches=30/);
+    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-lines=75/);
+    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-functions=75/);
+    assert.match(packageJson.scripts['test:coverage'], /--test-coverage-branches=60/);
     assert.match(workflow, /Node test coverage threshold/);
 });

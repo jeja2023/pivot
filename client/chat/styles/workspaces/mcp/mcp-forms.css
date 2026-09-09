@@ -51,12 +51,14 @@
     resize: vertical;
 }
 
+#mcp-edit-modal .modal.mcp-edit-modal,
+.modal.mcp-edit-modal,
 .mcp-edit-modal {
     width: min(720px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
-    padding: 0;
+    padding: 0 !important;
     overflow: hidden;
-    text-align: left;
+    text-align: left !important;
     background: #ffffff;
     border-radius: 14px;
     box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 10px 10px -5px rgba(15, 23, 42, 0.03);

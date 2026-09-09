@@ -1,0 +1,24 @@
+# 文本文件统一使用 LF，避免 Windows 开发机把源码和配置改写为 CRLF。
+* text=auto eol=lf
+
+# Windows 命令脚本保留 Windows 原生换行。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资产禁止 Git 文本转换。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.exe binary
+*.dll binary
+*.node binary
+*.pak binary
+*.db binary
+*.zip binary
+*.tar binary
+*.gz binary

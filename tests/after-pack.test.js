@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const afterPack = require('../scripts/after-pack');
+const { configuredElectronLocales, pruneElectronLocales } = require('../scripts/after-pack');
 const packageJson = require('../package.json');
 
 test('after-pack 仅保留当前平台 better-sqlite3 原生模块并移除构建源文件', async () => {
@@ -30,4 +31,18 @@ test('桌面包不携带纯类型文件或 Node 运行时不用的浏览器 MSAL
     const files = packageJson.build.files;
     assert.ok(files.includes('!node_modules/@types/**'));
     assert.ok(files.includes('!node_modules/@azure/msal-browser/**'));
+});
+
+test('Electron 安装包只保留中文与英文语言包', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-electron-locales-'));
+    try {
+        const locales = path.join(root, 'locales');
+        fs.mkdirSync(locales, { recursive: true });
+        ['en-US.pak', 'zh-CN.pak', 'fr.pak', 'de.pak'].forEach(name => fs.writeFileSync(path.join(locales, name), 'locale'));
+        assert.deepEqual(configuredElectronLocales('fr'), new Set(['fr', 'en-US', 'zh-CN']));
+        assert.deepEqual(pruneElectronLocales(root), ['de.pak', 'fr.pak']);
+        assert.deepEqual(fs.readdirSync(locales).sort(), ['en-US.pak', 'zh-CN.pak']);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 });

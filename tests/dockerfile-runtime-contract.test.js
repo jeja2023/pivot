@@ -4,6 +4,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
+const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
 
 test('Dockerfile relies on lockfile-provided DuckDB native binding and fails closed when absent', () => {
     assert.match(dockerfile, /ARG TARGETARCH/);
@@ -18,6 +21,11 @@ test('Docker install uses only lockfile artifacts and carries no obsolete sharp 
     assert.doesNotMatch(dockerfile, /SHARP_IGNORE_GLOBAL_LIBVIPS/);
     assert.doesNotMatch(dockerfile, /SHARP_USE_GLOBAL_LIBVIPS/);
     assert.doesNotMatch(dockerfile, /(?:python3\s+make\s+g\+\+|libvips-dev|librsvg2-dev)/);
+});
+
+test('Docker image generates split chat CSS bundles before the non-root runtime starts', () => {
+    assert.match(dockerfile, /COPY --chown=node:node scripts\/build_chat_css\.js \.\/scripts\/build_chat_css\.js/);
+    assert.match(dockerfile, /RUN node scripts\/build_chat_css\.js/);
 });
 
 test('Docker production dependencies remove verified non-runtime type and browser-only packages', () => {
@@ -44,9 +52,18 @@ test('Dockerfile validates native modules in the final runtime stage', () => {
 
 test('Docker image carries required LGPL notice material with runtime dependencies', () => {
     assert.match(dockerfile, /COPY --chown=node:node docs\/licenses \.\/licenses/);
+    assert.match(dockerignore, /^!docs\/$/m);
+    assert.match(dockerignore, /^!docs\/licenses\/$/m);
+    assert.match(dockerignore, /^!docs\/licenses\/\*\*$/m);
 });
 
 test('Docker image ships a Chromium runtime for agent.browser instead of silently hiding it', () => {
     assert.match(dockerfile, /chromium/);
     assert.match(dockerfile, /PIVOT_CHROMIUM_PATH=\/usr\/bin\/chromium/);
+});
+
+test('默认 Compose 可运行于 CPU 主机，GPU 透传由独立覆盖层启用', () => {
+    assert.doesNotMatch(compose, /^\s*gpus:\s*all\s*$/m);
+    assert.match(gpuCompose, /^\s*gpus:\s*all\s*$/m);
+    assert.match(gpuCompose, /NVIDIA_VISIBLE_DEVICES/);
 });

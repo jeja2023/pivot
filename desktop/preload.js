@@ -93,6 +93,136 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     }
 });
 
+function installSessionListScrollFallback() {
+    const styleId = 'pivot-desktop-session-list-scroll-fallback';
+    if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+            html,
+            body {
+                height: 100% !important;
+                min-height: 0 !important;
+                overflow: hidden !important;
+            }
+            #app {
+                height: calc(100vh - 30px) !important;
+                height: calc(100dvh - 30px) !important;
+                min-height: 0 !important;
+                box-sizing: border-box !important;
+            }
+            body.is-main-workspace-full .sidebar {
+                display: none !important;
+            }
+            body:not(.is-main-workspace-full) .sidebar {
+                display: flex !important;
+                flex-direction: column !important;
+                height: 100% !important;
+                min-height: 0 !important;
+                align-self: stretch !important;
+            }
+            .sidebar.collapsed {
+                margin-left: calc(var(--sidebar-width, 336px) * -1) !important;
+            }
+            #session-list {
+                flex: 1 1 0 !important;
+                min-height: 0 !important;
+                max-height: 100% !important;
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
+                overscroll-behavior-y: contain !important;
+                touch-action: pan-y !important;
+                scrollbar-width: none !important;
+                -ms-overflow-style: none !important;
+            }
+            .sidebar:hover #session-list,
+            #session-list:hover {
+                scrollbar-width: none !important;
+            }
+            #session-list::-webkit-scrollbar {
+                display: none !important;
+                width: 0 !important;
+                height: 0 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    const isVisibleModalTarget = target => {
+        const modal = target && typeof target.closest === 'function'
+            ? target.closest('.modal-overlay, [role="dialog"]')
+            : null;
+        if (!modal || modal.classList.contains('hidden')) return false;
+        const style = window.getComputedStyle(modal);
+        const opacity = Number.parseFloat(style.opacity);
+        return style.display !== 'none'
+            && style.visibility !== 'hidden'
+            && style.pointerEvents !== 'none'
+            && (!Number.isFinite(opacity) || opacity > 0.01);
+    };
+
+    const resolveWheelSessionList = event => {
+        const list = document.getElementById('session-list');
+        if (!list) return null;
+        const target = event.target;
+        if (target && typeof target.closest === 'function') {
+            if (target.closest('#session-list, .sidebar-session-section-label')) return list;
+            if (target.closest('.sidebar')) return list;
+        }
+
+        // Chromium/Electron 在无边框窗口、透明层或合成层切换后，偶尔会把
+        // wheel.target 报为 BODY/HTML/覆盖层。此时按指针坐标识别侧栏，避免
+        // 因错误的命中目标丢掉滚轮；真正可见的弹窗仍保持独立滚动。
+        const app = document.getElementById('app');
+        if (document.body?.classList.contains('auth-active') || app?.classList.contains('hidden')) return null;
+        if (isVisibleModalTarget(target)) return null;
+        const sidebar = list.closest('.sidebar');
+        if (!sidebar) return null;
+        const rect = sidebar.getBoundingClientRect();
+        const x = Number(event.clientX);
+        const y = Number(event.clientY);
+        return Number.isFinite(x) && Number.isFinite(y)
+            && x >= rect.left && x <= rect.right
+            && y >= rect.top && y <= rect.bottom
+            ? list
+            : null;
+    };
+
+    // 远程服务可能尚未升级到与客户端匹配的 CSS。在滚轮事件命中侧栏
+    // 且会话列表有溢出内容时兜底更新 scrollTop，确保任何鼠标与触控板均可顺畅浏览。
+    document.addEventListener('wheel', event => {
+        const list = resolveWheelSessionList(event);
+        if (!list || list.scrollHeight <= list.clientHeight) return;
+
+        const rawDeltaY = Number(event.deltaY) || 0;
+        if (!rawDeltaY) return;
+
+        let deltaY = 0;
+        if (event.deltaMode === 1) {
+            deltaY = rawDeltaY * 36;
+        } else if (event.deltaMode === 2) {
+            deltaY = rawDeltaY * (list.clientHeight || 360);
+        } else {
+            const abs = Math.abs(rawDeltaY);
+            if (abs < 1) {
+                deltaY = rawDeltaY;
+            } else if (abs < 30) {
+                // 触控板/高精度滚轮微步放大平滑度，避免整数截断无响应
+                deltaY = Math.sign(rawDeltaY) * Math.max(32, abs * 2.2);
+            } else {
+                deltaY = rawDeltaY;
+            }
+        }
+
+        const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+        const nextScrollTop = Math.min(maxScrollTop, Math.max(0, list.scrollTop + deltaY));
+        if (nextScrollTop === list.scrollTop) return;
+
+        list.scrollTop = nextScrollTop;
+        event.preventDefault();
+    }, { capture: true, passive: false });
+}
+
 window.addEventListener('DOMContentLoaded', () => {
     const style = document.createElement('style');
     style.innerHTML = `
@@ -114,4 +244,5 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     `;
     document.head.appendChild(style);
+    installSessionListScrollFallback();
 });

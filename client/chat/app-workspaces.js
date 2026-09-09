@@ -731,6 +731,17 @@ const workspaceLoadPromises = {};
 async function ensureWorkspaceScripts(name) {
     const ensureMarkup = window.Pivot.moduleApi?.('workspaces.templateLoader')?.ensureWorkspaceMarkup;
     if (typeof ensureMarkup !== 'function') throw new Error('工作区模板加载器尚未就绪');
+    // 样式资源不可成为功能入口的单点阻塞：在桌面端升级、代理延迟或缓存处于
+    // 短暂不一致时，仍先挂载模板与交互脚本，样式到达后由浏览器自动应用。
+    // 否则一个 CSS link 的超时会让整个工作区表现为“页面可见但无法点击”。
+    const ensureStyles = window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles;
+    if (typeof ensureStyles === 'function') {
+        ensureStyles(name).catch(error => {
+            console.warn(`工作区 ${name} 样式加载失败，已保持功能可用：`, error);
+        });
+    } else {
+        console.warn(`工作区 ${name} 样式加载器未就绪，已继续挂载功能入口。`);
+    }
     const markupNames = WORKSPACE_MARKUP_DEPENDENCIES[name] || [name];
     for (const markupName of markupNames) await ensureMarkup(markupName);
     const scriptGroup = WORKSPACE_SCRIPT_GROUP_ALIASES[name] || name;

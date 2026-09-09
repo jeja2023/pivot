@@ -94,7 +94,7 @@ test('工具策略卡片具备工具名称与简介全量中文化映射', () =>
 
 test('长期记忆表格移除独立来源列并将来源按钮移入操作列，来源弹窗关闭按钮靠右', () => {
     const html = read('client/chat/partials/settings/memories.html');
-    const js = read('client/chat/admin-settings.js');
+    const js = read('client/chat/admin-settings-memory.js');
     const css = read('client/chat/styles/admin/admin-layout.css');
 
     assert.doesNotMatch(html, /<th[^>]*>来源<\/th>/);
@@ -107,7 +107,7 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
 
 test('分页控件统一使用直接绑定的工作区组件，避免依赖全局点击委托', () => {
     const ui = read('client/chat/ui.js');
-    const settings = read('client/chat/admin-settings.js');
+    const settings = read('client/chat/admin-settings-memory.js');
     const toolPolicy = read('client/chat/tool-policy.js');
 
     assert.match(ui, /function renderWorkspacePagination/);

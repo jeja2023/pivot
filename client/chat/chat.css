@@ -1,17 +1,10 @@
-/* 聊天页面样式入口。保持导入顺序稳定。 */
+/* 聊天首屏样式入口。大型工作区样式在首次打开时按需加载。 */
 @import url("./styles/core.css");
-@import url("./styles/admin/admin-layout.css");
-@import url("./styles/admin/admin-account-api.css");
-@import url("./styles/admin/admin-tables-models.css");
-@import url("./styles/admin/admin-audit.css");
-@import url("./styles/admin/admin-chat-attachments.css");
-@import url("./styles/admin/admin-announcements.css");
-@import url("./styles/admin/admin-records.css");
-@import url("./styles/admin/admin-tool-policy.css");
-@import url("./styles/admin/admin-global-params.css");
-@import url("./styles/stats-monitor/stats-report.css");
-@import url("./styles/stats-monitor/stats-monitor-common.css");
-@import url("./styles/stats-monitor/stats-system-monitor.css");
-@import url("./styles/workspaces.css");
 @import url("./styles/sessions-prompts.css");
 @import url("./styles/layout-refresh.css");
+@import url("./styles/workspaces/personal.css");
+/* 静态工作区和所有懒加载页面共用的结构必须常驻，不能依赖运行时 link。
+ * 保持在壳样式之后，以维持拆分前工作区规则覆盖聊天壳规则的级联顺序。 */
+@import url("./styles/workspaces/table-foundation.css");
+@import url("./styles/workspaces/shared.css");
+@import url("./styles/workspaces/responsive.css");

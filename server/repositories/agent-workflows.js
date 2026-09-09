@@ -62,14 +62,13 @@ function listWorkflowsForUser(userId, limit = 200, search = '') {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 200, 1), 200);
     const searchText = String(search || '').trim();
     const params = [userId];
-    const searchPattern = searchText.replace(/[\\%_]/g, character => `\\${character}`);
     const searchClause = searchText
-        ? `AND (LOWER(w.name) LIKE LOWER(?) ESCAPE '\\'
-            OR LOWER(COALESCE(w.description, '')) LIKE LOWER(?) ESCAPE '\\'
-            OR CAST(COALESCE(v.version, 0) AS TEXT) LIKE ? ESCAPE '\\'
-            OR CAST(COALESCE(pv.version, 0) AS TEXT) LIKE ? ESCAPE '\\')`
+        ? `AND (STRPOS(LOWER(COALESCE(w.name, '')), LOWER(?)) > 0
+            OR STRPOS(LOWER(COALESCE(w.description, '')), LOWER(?)) > 0
+            OR STRPOS(CAST(COALESCE(v.version, 0) AS TEXT), ?) > 0
+            OR STRPOS(CAST(COALESCE(pv.version, 0) AS TEXT), ?) > 0)`
         : '';
-    if (searchText) params.push(`%${searchPattern}%`, `%${searchPattern}%`, `%${searchPattern}%`, `%${searchPattern}%`);
+    if (searchText) params.push(searchText, searchText, searchText, searchText);
     params.push(safeLimit);
     return query(`
         SELECT

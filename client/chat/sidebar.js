@@ -24,6 +24,49 @@ function updateSessionListStatus(text = '') {
     status.classList.toggle('hidden', !text);
 }
 
+function bindSessionListScrolling(list) {
+    if (!list || list.dataset.boundLoadMore === '1') return;
+    list.dataset.boundLoadMore = '1';
+    list.addEventListener('scroll', () => {
+        if (sidebarState.isLoading || !sidebarState.hasMore) return;
+        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) {
+            loadSessions(true);
+        }
+    }, { passive: true });
+
+    // Electron 客户端的无边框窗口会在部分 Windows 精度触控板环境下吞掉
+    // overflow 容器的默认滚轮滚动。仅在桌面运行时接管滚轮，确保仍可浏览历史会话。
+    const handleWheel = event => {
+        if (!document.body?.classList.contains('pivot-desktop-runtime')) return;
+        if (event.defaultPrevented) return;
+        if (list.scrollHeight <= list.clientHeight) return;
+        const rawDeltaY = Number(event.deltaY) || 0;
+        if (!rawDeltaY) return;
+        let deltaY = 0;
+        if (event.deltaMode === 1) {
+            deltaY = rawDeltaY * 36;
+        } else if (event.deltaMode === 2) {
+            deltaY = rawDeltaY * (list.clientHeight || 360);
+        } else {
+            const abs = Math.abs(rawDeltaY);
+            deltaY = abs < 30 ? Math.sign(rawDeltaY) * Math.max(32, abs * 2.2) : rawDeltaY;
+        }
+        const before = list.scrollTop;
+        list.scrollTop += deltaY;
+        if (list.scrollTop !== before) event.preventDefault();
+    };
+    list.addEventListener('wheel', handleWheel, { passive: false });
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar && sidebar.dataset.boundSidebarWheel !== '1') {
+        sidebar.dataset.boundSidebarWheel = '1';
+        sidebar.addEventListener('wheel', event => {
+            const targetList = document.getElementById('session-list');
+            if (!targetList || targetList.contains(event.target)) return;
+            handleWheel(event);
+        }, { passive: false });
+    }
+}
+
 async function loadSessions(append = false) {
     if (sidebarState.isLoading) return;
     ensureSessionTagTools();
@@ -38,7 +81,9 @@ async function loadSessions(append = false) {
         sidebarState.cursor = '';
         sidebarState.hasMore = true;
     }
-    if (!sidebarState.hasMore) return;
+    if (!sidebarState.hasMore) {
+        return;
+    }
 
     sidebarState.isLoading = true;
     updateSessionListStatus(append ? '加载中...' : '');
@@ -61,16 +106,7 @@ async function loadSessions(append = false) {
         const list = document.getElementById('session-list');
         if (!append) PivotSafeHtml.setHtml(list, '');
 
-        // 绑定无限滚动监听
-        if (!list.dataset.boundLoadMore) {
-            list.dataset.boundLoadMore = '1';
-            list.addEventListener('scroll', () => {
-                if (sidebarState.isLoading || !sidebarState.hasMore) return;
-                if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) {
-                    loadSessions(true);
-                }
-            }, { passive: true });
-        }
+        bindSessionListScrolling(list);
 
         sessions.forEach(s => {
             const title = s.title || '新对话';

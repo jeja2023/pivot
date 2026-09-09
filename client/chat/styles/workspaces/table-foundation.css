@@ -1,0 +1,92 @@
+/* 懒加载工作区共用的表格骨架。
+ *
+ * 这些规则原先仅随设置页的 admin-tables-models.css 加载，导致知识库、应用中心
+ * 和工具库的 data-table 在拆包后缺少表头、边框与固定列宽约束。
+ */
+.table-container {
+    flex: 1;
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: white;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    text-align: left;
+    table-layout: fixed;
+}
+
+.data-table th,
+.data-table td {
+    height: 36px;
+    padding: 7px 8px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.13);
+    box-sizing: border-box;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+}
+
+.data-table th {
+    color: #64748b;
+    background: #f8fafc;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+.data-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-table th.text-center,
+.data-table td.text-center {
+    text-align: center;
+}
+
+/* 懒加载工作区共用的紧凑表格与分页条骨架。
+ * 确保应用中心、知识库、自动化任务等表格在拆包后独立具备标准分页样式。 */
+.compact-table {
+    font-size: 0.82rem;
+}
+.compact-table th,
+.compact-table td {
+    padding: 6px 8px;
+    height: 38px;
+    min-height: 38px;
+}
+.compact-table th {
+    font-size: 0.72rem;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.pagination button,
+.pagination .btn-secondary {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.pagination span {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}

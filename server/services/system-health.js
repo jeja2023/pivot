@@ -8,10 +8,14 @@ let cachedDetailedSnapshot = null;
 let detailedSnapshotExpiresAt = 0;
 let detailedSnapshotLoad = null;
 
-function checkDatabase() {
+function getExistingPgPool() {
+    const { peekPgPool } = require('../db/pg-connection');
+    return peekPgPool();
+}
+
+function checkDatabase({ getPool = getExistingPgPool } = {}) {
     try {
-        const { getPgPool } = require('../db/pg-connection');
-        const pool = getPgPool();
+        const pool = getPool();
         return {
             status: pool ? 'ok' : 'degraded',
             message: pool ? 'PostgreSQL 连接池运行正常' : 'PostgreSQL 连接池未初始化'
@@ -21,18 +25,27 @@ function checkDatabase() {
     }
 }
 
-async function checkDatabaseAsync(timeoutMs = 2000) {
+async function checkDatabaseAsync(timeoutMs = 2000, {
+    getPool = getExistingPgPool,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout
+} = {}) {
     try {
-        const { getPgPool } = require('../db/pg-connection');
-        const pool = getPgPool();
+        const pool = getPool();
         if (!pool) return { status: 'error', message: 'PostgreSQL 数据库连接池未初始化' };
-        const result = await Promise.race([
-            pool.query('SELECT 1 AS ok'),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('数据库健康探针超时')), timeoutMs))
-        ]);
-        return result?.rows?.[0]?.ok === 1
-            ? { status: 'ok', message: 'PostgreSQL 查询探针正常' }
-            : { status: 'error', message: 'PostgreSQL 查询探针返回异常' };
+        let timer = null;
+        try {
+            const timeout = new Promise((_, reject) => {
+                timer = setTimeoutFn(() => reject(new Error('数据库健康探针超时')), timeoutMs);
+                timer?.unref?.();
+            });
+            const result = await Promise.race([pool.query('SELECT 1 AS ok'), timeout]);
+            return result?.rows?.[0]?.ok === 1
+                ? { status: 'ok', message: 'PostgreSQL 查询探针正常' }
+                : { status: 'error', message: 'PostgreSQL 查询探针返回异常' };
+        } finally {
+            if (timer) clearTimeoutFn(timer);
+        }
     } catch (e) {
         return { status: 'error', message: e.message };
     }

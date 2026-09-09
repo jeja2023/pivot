@@ -21,6 +21,7 @@
     border-radius: 0;
     box-shadow: none;
     background: var(--surface);
+    overflow: hidden;
 }
 
 .settings-workspace-view .admin-layout {
@@ -29,6 +30,7 @@
     gap: 12px;
     padding: 12px 14px 14px;
     background: #f8fafc;
+    overflow: hidden;
 }
 
 .settings-workspace-header {
@@ -150,7 +152,8 @@
     flex: 1;
     min-width: 0;
     padding: 24px;
-    overflow: auto;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
     background: #fff;
     border: 1px solid rgba(148, 163, 184, 0.12);
     border-radius: 12px;
@@ -179,11 +182,15 @@
     flex: 0 0 auto;
     position: relative;
     width: var(--settings-stage-width);
+    max-width: 100%;
     height: var(--settings-stage-height);
     min-height: 0;
     overflow: visible;
 }
 .settings-workspace-view .table-container {
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
     overflow-x: auto;
     overscroll-behavior-inline: contain;
 }
@@ -270,6 +277,8 @@
 }
 .settings-workspace-view .admin-tab-content {
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 .settings-workspace-view .admin-tab-content > div:first-child {
     margin-bottom: 14px !important;

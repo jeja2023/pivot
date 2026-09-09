@@ -1,0 +1,23 @@
+/* 自动化与工作流工作区样式。 */
+@import url("./styles/workspaces/agent/agent-layout.css");
+@import url("./styles/workspaces/agent/agent-controls.css");
+@import url("./styles/workspaces/agent/agent-model-tools.css");
+@import url("./styles/workspaces/agent/agent-runs-list-table.css");
+@import url("./styles/workspaces/agent/agent-run-detail.css");
+@import url("./styles/workspaces/agent/agent-run-steps.css");
+@import url("./styles/workspaces/agent/agent-run-capabilities.css");
+@import url("./styles/workspaces/agent/agent-harness.css");
+@import url("./styles/workspaces/agent/agent-evaluations.css");
+@import url("./styles/workspaces/agent/agent-run-dag-artifacts.css");
+@import url("./styles/workspaces/agent/agent-dag-toolbar.css");
+@import url("./styles/workspaces/agent/agent-dag-workspace-shell.css");
+@import url("./styles/workspaces/agent/agent-workflow-modals.css");
+@import url("./styles/workspaces/agent/agent-dag-workbench.css");
+@import url("./styles/workspaces/agent/agent-dag-node-library.css");
+@import url("./styles/workspaces/agent/agent-dag-svg.css");
+@import url("./styles/workspaces/agent/agent-dag-drawer-inspector.css");
+@import url("./styles/workspaces/agent/agent-dag-input-overview.css");
+@import url("./styles/workspaces/agent/agent-dag-input-wizard.css");
+@import url("./styles/workspaces/agent/agent-dag-query-builder.css");
+@import url("./styles/workspaces/agent/agent-dag-minimap.css");
+@import url("./styles/workspaces/agent-runtime.css");

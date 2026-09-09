@@ -42,6 +42,70 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#user-info')).toContainText(/admin|管理员/i);
     });
 
+    test('对话页模型统计样式来自首屏消息壳，而不是设置工作区 CSS', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const stats = page.locator('#message-container .message-stats').first();
+        await expect(stats).toHaveCount(0);
+        await page.evaluate(() => {
+            const container = document.getElementById('message-container');
+            const message = document.createElement('div');
+            message.className = 'message assistant';
+            message.innerHTML = `
+                <div class="avatar">✦</div>
+                <div class="message-content">
+                    <div class="text-body"><p>样式回归测试消息</p></div>
+                    <div class="message-footer">
+                        <div class="message-stats">
+                            <span class="stat-item stat-model">◈chatgpt-5.5</span>
+                            <span class="stat-item">◷10.0s</span>
+                            <span class="stat-item">◈305 Tokens</span>
+                            <span class="stat-item">↯30.4 t/s</span>
+                        </div>
+                    </div>
+                </div>`;
+            container.appendChild(message);
+        });
+        const renderedStats = page.locator('#message-container .message-stats').last();
+        await expect(renderedStats).toBeVisible();
+        await expect.poll(() => renderedStats.evaluate(element => {
+            const style = window.getComputedStyle(element);
+            const model = window.getComputedStyle(element.querySelector('.stat-model'));
+            return style.borderRadius === '999px'
+                && style.gap === '8px'
+                && style.backgroundColor.includes('15, 23, 42')
+                && ['flex', 'inline-flex'].includes(style.display)
+                && model.maxWidth === '180px';
+        })).toBe(true);
+    });
+
+    test('对话列表可被真实鼠标滚轮滚动，触底后自动继续加载下一页', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const list = page.locator('#session-list');
+        await expect(list).toBeVisible();
+        await page.evaluate(() => document.body.classList.add('pivot-desktop-runtime'));
+        await expect.poll(() => list.evaluate(element => ({
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight,
+            overflowY: window.getComputedStyle(element).overflowY,
+            minHeight: window.getComputedStyle(element).minHeight
+        }))).toMatchObject({ overflowY: 'auto', minHeight: '0px' });
+        const initialMetrics = await list.evaluate(element => ({
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight
+        }));
+        if (initialMetrics.scrollHeight > initialMetrics.clientHeight) {
+            await list.hover();
+            await page.mouse.wheel(0, 640);
+            await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        }
+        if (await list.locator('.session-item').count() > 0) {
+            const before = await list.locator('.session-item').count();
+            await list.hover();
+            await page.mouse.wheel(0, 4_000);
+            await expect.poll(() => list.locator('.session-item').count()).toBeGreaterThan(before);
+        }
+    });
+
     test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
         await ensureBrowserSession(page);
         await expect(page.locator('#agent-workbench-modal')).toHaveCount(0);
@@ -90,9 +154,45 @@ test.describe('Pivot browser smoke', () => {
             await page.evaluate(open);
             await expect((await responsePromise).status()).toBe(200);
             await expect(page.locator(`#${panelId}`)).toBeVisible({ timeout: 15_000 });
+            const styleName = name === 'settings' ? 'settings' : name;
+            await expect(page.locator(`link[href*="/chat/chat.workspace.${styleName}.css"]`)).toHaveCount(1);
+            await expect.poll(() => page.evaluate((href) => {
+                const link = [...document.querySelectorAll('link[rel="stylesheet"]')]
+                    .find(item => (item.getAttribute('href') || '').includes(href));
+                return Boolean(link?.sheet);
+            }, `/chat/chat.workspace.${styleName}.css`)).toBe(true);
+            if (name === 'knowledge') {
+                const table = page.locator('#knowledge-workbench-modal .data-table');
+                await expect(table).toBeVisible();
+                await expect.poll(() => table.evaluate(element => {
+                    const header = element.querySelector('th');
+                    const tableStyle = window.getComputedStyle(element);
+                    const headerStyle = window.getComputedStyle(header);
+                    return {
+                        tableLayout: tableStyle.tableLayout,
+                        headerBackground: headerStyle.backgroundColor,
+                        headerBorder: headerStyle.borderTopStyle
+                    };
+                })).toEqual({
+                    tableLayout: 'fixed',
+                    headerBackground: 'rgb(248, 250, 252)',
+                    headerBorder: 'solid'
+                });
+            }
+            const closeButton = {
+                apps: '#apps-modal-close',
+                knowledge: '#knowledge-modal-close',
+                mcp: '#mcp-modal-close',
+                settings: '#admin-modal-close'
+            }[name];
+            const closeControl = page.locator(closeButton);
+            await expect.poll(() => closeControl.evaluate(button => {
+                const rect = button.getBoundingClientRect();
+                const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return hit === button || button.contains(hit);
+            })).toBe(true);
             if (name === 'knowledge' || name === 'mcp') {
                 const closeFunction = name === 'knowledge' ? 'closeKnowledgeWorkbench' : 'closeMcpWorkbench';
-                const closeButton = name === 'knowledge' ? '#knowledge-modal-close' : '#mcp-modal-close';
                 await page.evaluate((functionName) => {
                     const original = window.Pivot.legacy[functionName];
                     window.__workspaceCloseCalls = 0;
@@ -101,11 +201,34 @@ test.describe('Pivot browser smoke', () => {
                         return original(...args);
                     };
                 }, closeFunction);
-                await page.locator(closeButton).click();
+                await closeControl.click();
                 await expect.poll(() => page.evaluate(() => window.__workspaceCloseCalls)).toBe(1);
+                await expect(page.locator(`#${panelId}`)).toBeHidden();
+            } else {
+                await closeControl.click();
                 await expect(page.locator(`#${panelId}`)).toBeHidden();
             }
         }
+    });
+
+    test('工作区样式资源短暂失败时，知识库仍会挂载并保持关闭控件可点击', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => {
+            window.Pivot.moduleApi('workspaces.styleLoader').ensureWorkspaceStyles = () => (
+                Promise.reject(new Error('E2E 模拟样式资源暂不可用'))
+            );
+        });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
+        const panel = page.locator('#knowledge-workbench-modal');
+        const closeControl = page.locator('#knowledge-modal-close');
+        await expect(panel).toBeVisible({ timeout: 15_000 });
+        await expect.poll(() => closeControl.evaluate(button => {
+            const rect = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            return hit === button || button.contains(hit);
+        })).toBe(true);
+        await closeControl.click();
+        await expect(panel).toBeHidden();
     });
 
     test('工具库的动态操作在重绘后仍可刷新、自检并打开本机授权中心', async ({ page }) => {

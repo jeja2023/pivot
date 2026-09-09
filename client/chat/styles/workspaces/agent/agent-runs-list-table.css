@@ -942,3 +942,14 @@
     }
 }
 
+/* 智能体审计记录表格包裹层 */
+.agent-audit-table-wrap {
+    max-height: min(62vh, 620px);
+}
+.agent-audit-table-wrap td small {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+

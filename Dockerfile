@@ -47,13 +47,15 @@ ENV NODE_ENV=production \
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
+COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
 COPY --chown=node:node assets ./assets
 COPY --chown=node:node docs/licenses ./licenses
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
 COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.md ./
 
 # 在最终运行阶段重新加载原生模块和系统工具，避免只验证构建阶段而漏掉 runtime 层缺失。
-RUN node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
+RUN node scripts/build_chat_css.js && \
+  node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
   python3 --version && \
   pg_dump --version
 

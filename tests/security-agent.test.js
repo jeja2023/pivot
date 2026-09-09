@@ -117,6 +117,8 @@ function readDagEditorSourceBundle() {
 
 function readAgentCssBundle() {
     return [
+        'shared-target-tree.css',
+        'shared-automation-resources.css',
         'agent/agent-layout.css',
         'agent/agent-controls.css',
         'agent/agent-model-tools.css',

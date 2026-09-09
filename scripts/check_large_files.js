@@ -8,7 +8,7 @@ const failures = [];
 
 function walk(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith('.') || ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith('.') || entry.name.startsWith('dist-electron') || ignoredDirs.has(entry.name)) continue;
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(fullPath);
         else if (entry.isFile()) {

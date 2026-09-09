@@ -111,7 +111,7 @@ function collectFiles(dir, files = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-            if (!ignoredDirs.has(entry.name)) collectFiles(fullPath, files);
+            if (!ignoredDirs.has(entry.name) && !entry.name.startsWith('dist-electron')) collectFiles(fullPath, files);
         } else if (entry.isFile() && isTextFile(fullPath)) {
             files.push(fullPath);
         }

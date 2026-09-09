@@ -231,3 +231,98 @@
 .workspace-governance-panel.ready .governance-head strong {
     color: var(--primary);
 }
+
+/* 设置工作区基础骨架与缩放画布结构（常驻壳样式，保障首屏进入即具备标准 Flex 与缩放画布） */
+.settings-workspace-view {
+    min-height: 0;
+    overflow: hidden;
+}
+.settings-workspace-view .admin-panel {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.settings-workspace-view .admin-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 12px;
+    padding: 12px 14px 14px;
+    background: #f8fafc;
+    overflow: hidden;
+}
+.settings-workspace-view .admin-sidebar {
+    width: 220px;
+    flex: 0 0 220px;
+}
+.settings-workspace-view .admin-content {
+    flex: 1;
+    min-width: 0;
+    padding: 24px;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+.settings-scale-stage {
+    --settings-stage-width: 100%;
+    --settings-stage-height: 100%;
+    flex: 0 0 auto;
+    position: relative;
+    width: var(--settings-stage-width);
+    max-width: 100%;
+    height: var(--settings-stage-height);
+    min-height: 0;
+    overflow: visible;
+}
+.settings-scale-canvas {
+    --settings-canvas-width: 1540px;
+    --settings-scale: 1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--settings-canvas-width);
+    transform: translateZ(0) scale(var(--settings-scale));
+    transform-origin: top left;
+    display: flex;
+    flex-direction: column;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+/* 全局辅助文字颜色工具类 */
+.text-muted {
+    color: var(--text-muted);
+}
+.text-success {
+    color: var(--success);
+}
+
+/* 跨工作区弹窗公用头部（供知识库详情、工作流输入向导等使用） */
+.rag-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+}
+.rag-detail-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    max-width: 680px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

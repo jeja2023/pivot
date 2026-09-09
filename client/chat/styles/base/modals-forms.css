@@ -663,15 +663,53 @@ body.auth-active {
 #auth-form {
     margin-bottom: clamp(14px, 2vh, 18px);
 }
+.btn-toggle-pw {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    transition: color 0.2s, background-color 0.2s;
+    z-index: 3;
+}
+.btn-toggle-pw:hover {
+    color: var(--primary, #059669);
+    background: rgba(0, 0, 0, 0.05);
+}
 #auth-container .auth-password-field {
+    position: relative;
     margin-bottom: clamp(12px, 1.9vh, 16px) !important;
 }
 #auth-container .auth-password-field .form-input {
     padding-right: 52px !important;
 }
 #auth-container .btn-toggle-pw {
+    position: absolute;
     right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
     color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    z-index: 3;
 }
 #auth-container .btn-toggle-pw:hover {
     color: #008a61;

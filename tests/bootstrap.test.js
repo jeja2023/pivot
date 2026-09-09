@@ -91,5 +91,27 @@ test('background services start monitors and defer recovery work', async () => {
     await Promise.resolve();
     assert.deepEqual(calls, ['gpu', 'model']);
     deferred();
+    await Promise.resolve();
     assert.deepEqual(calls, ['gpu', 'model', 'rag-recovery', 'agent-recovery', 'schedule-runner']);
+});
+
+test('background recovery catches rejected promises without leaking an unhandled rejection', async () => {
+    let deferred;
+    const warnings = [];
+    startBackgroundServices({
+        logger: { warn(payload, message) { warnings.push([message, payload.err]); } },
+        dependencies: {
+            startGpuMonitor() { return Promise.resolve(); },
+            startModelEndpointMonitor() { return Promise.resolve(); },
+            recoverStaleKnowledgeDocumentIndexes() { return Promise.reject(new Error('知识库数据库暂不可用')); },
+            recoverAgentRuns() { return Promise.reject(new Error('智能体数据库暂不可用')); },
+            startAgentScheduleRunner() {}
+        },
+        setImmediateFn(callback) { deferred = callback; }
+    });
+
+    deferred();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(warnings.map(([message]) => message), ['知识库索引恢复执行失败', '智能体任务恢复执行失败']);
+    assert.deepEqual(warnings.map(([, error]) => error), ['知识库数据库暂不可用', '智能体数据库暂不可用']);
 });
