@@ -210,11 +210,20 @@ function createAuthRouter({
         }
         const { name } = req.body;
         const expiresAtInput = req.body?.expiresAt ?? req.body?.expires_at;
+        const expiresInDays = req.body?.expiresInDays ?? req.body?.expires_in_days;
         let expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-        if (expiresAtInput) {
+        if (expiresInDays === 'never' || expiresInDays === 0 || expiresAtInput === null || expiresAtInput === 'never') {
+            expiresAt = null;
+        } else if (expiresInDays !== undefined && expiresInDays !== null && expiresInDays !== '') {
+            const days = Math.floor(Number(expiresInDays));
+            if (!Number.isFinite(days) || days < 1 || days > 3650) {
+                return res.status(400).json({ error: '有效天数必须在 1 到 3650 天之间' });
+            }
+            expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+        } else if (expiresAtInput) {
             const parsed = new Date(expiresAtInput);
-            if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now() || parsed.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000) {
-                return res.status(400).json({ error: 'API Key 有效期必须在 1 到 365 天内' });
+            if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now() || parsed.getTime() > Date.now() + 3650 * 24 * 60 * 60 * 1000) {
+                return res.status(400).json({ error: 'API Key 有效期必须在有效时间范围内' });
             }
             expiresAt = parsed;
         }
@@ -225,10 +234,15 @@ function createAuthRouter({
             hashApiKey(key),
             previewApiKey(key),
             'openai',
-            getBeijingTimestamp(expiresAt)
+            expiresAt ? getBeijingTimestamp(expiresAt) : null
         ]);
-        logAction(req, '创建 API Key', `名称: ${name}`);
-        res.json({ key, name });
+        const expiryDesc = expiresAt ? getBeijingTimestamp(expiresAt) : '永久有效';
+        logAction(req, '创建 API Key', `名称: ${name || '未命名密钥'}，有效期: ${expiryDesc}`);
+        res.json({
+            key,
+            name: name || '未命名密钥',
+            expires_at: expiresAt ? getBeijingTimestamp(expiresAt) : null
+        });
     }));
 
     router.delete('/auth/keys/:id', authMiddleware, asyncHandler(async (req, res) => {

@@ -1233,6 +1233,71 @@ test('api access disabled blocks api key creation', async () => {
     }
 });
 
+test('api key creation supports custom expiresInDays and permanent expiry', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`api_key_custom_${suffix}`, 'hash', 'Custom Key User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `api_key_custom_${suffix}`, role: 'user', unit: 'QA' };
+    const router = createAuthRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        loginLimiter: (_req, _res, next) => next(),
+        isPublicRegistrationEnabled: () => true,
+        logAction: () => {},
+        publicUrl: 'http://localhost'
+    });
+    const createRoute = router.stack.find(layer => layer.route?.path === '/auth/keys' && layer.route?.methods?.post);
+
+    const makeCall = async (body) => {
+        const res = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(data) { this.body = data; return this; }
+        };
+        await runExpressHandlers(createRoute.route.stack.map(layer => layer.handle), {
+            body,
+            user
+        }, res);
+        return res;
+    };
+
+    try {
+        // 1. 永久有效密钥
+        const permRes = await makeCall({ name: 'permanent-key', expiresInDays: 'never' });
+        assert.equal(permRes.statusCode, 200);
+        assert.equal(permRes.body.expires_at, null);
+        assert.equal(permRes.body.name, 'permanent-key');
+
+        const permDb = db.prepare('SELECT expires_at FROM api_keys WHERE name = ? AND user_id = ?').get('permanent-key', user.id);
+        assert.equal(permDb.expires_at, null);
+
+        // 2. 自定义 30 天有效密钥
+        const customRes = await makeCall({ name: 'custom-30-key', expiresInDays: 30 });
+        assert.equal(customRes.statusCode, 200);
+        assert.ok(customRes.body.expires_at);
+        const diff30 = new Date(customRes.body.expires_at.replace(' ', 'T')).getTime() - Date.now();
+        const days30 = Math.round(diff30 / (24 * 60 * 60 * 1000));
+        assert.equal(days30, 30);
+
+        // 3. 超出天数范围（> 3650 天）校验拦截
+        const invalidRes = await makeCall({ name: 'invalid-key', expiresInDays: 5000 });
+        assert.equal(invalidRes.statusCode, 400);
+        assert.match(invalidRes.body.error, /1 到 3650/);
+
+        // 4. 未传参数时默认 90 天有效期
+        const defaultRes = await makeCall({ name: 'default-key' });
+        assert.equal(defaultRes.statusCode, 200);
+        assert.ok(defaultRes.body.expires_at);
+        const diffDef = new Date(defaultRes.body.expires_at.replace(' ', 'T')).getTime() - Date.now();
+        const daysDef = Math.round(diffDef / (24 * 60 * 60 * 1000));
+        assert.equal(daysDef, 90);
+    } finally {
+        db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
 test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the file', async () => {
     const { createKnowledgeUploadMiddleware, createUploadMiddleware, uploadSecurityMiddleware } = require('../server/upload');
     assert.equal(typeof createUploadMiddleware().single('file'), 'function');

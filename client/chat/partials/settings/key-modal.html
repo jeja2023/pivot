@@ -8,6 +8,21 @@
                     <label for="new-key-name">密钥名称</label>
                     <input type="text" id="new-key-name" class="form-input" placeholder="例如：沉浸式翻译" style="width: 100%;">
                 </div>
+                <div class="form-item key-modal-field">
+                    <label for="new-key-expires">有效期限</label>
+                    <select id="new-key-expires" class="form-input key-modal-select">
+                        <option value="30">30 天</option>
+                        <option value="90" selected>90 天（默认）</option>
+                        <option value="180">180 天（半年）</option>
+                        <option value="365">365 天（一年）</option>
+                        <option value="never">永久有效</option>
+                        <option value="custom">自定义天数...</option>
+                    </select>
+                </div>
+                <div id="new-key-custom-days-wrap" class="form-item key-modal-field hidden">
+                    <label for="new-key-custom-days">自定义有效天数（1 ~ 3650 天）</label>
+                    <input type="number" id="new-key-custom-days" class="form-input" min="1" max="3650" placeholder="请输入有效天数，如 60">
+                </div>
                 <button type="button" data-static-action="confirm-create-key" class="btn-primary"
                     style="width: 100%; height: 42px;">确定创建</button>
             </div>
@@ -27,6 +42,10 @@
                             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
                         </svg>
                     </button>
+                </div>
+                <div id="generated-key-meta" class="key-modal-result-meta">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span id="generated-key-expiry-text"></span>
                 </div>
                 <button type="button" data-static-action="close-key-modal" class="btn-secondary"
                     style="width: 100%; height: 42px;">我已妥善保存</button>

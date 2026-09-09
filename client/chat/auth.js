@@ -235,6 +235,29 @@ loadAuthConfig();
 
 // --- 账户安全与 API Key 管理 ---
 
+function formatKeyExpiry(expiresAt) {
+    if (!expiresAt) {
+        return '<span class="key-expiry-permanent">永久有效</span>';
+    }
+    const safeStr = String(expiresAt).trim();
+    const expTime = new Date(safeStr.replace(' ', 'T')).getTime();
+    const formatted = formatDateToCN(safeStr);
+    if (Number.isNaN(expTime)) {
+        return `<span class="key-expiry-muted">${escapeHtml(formatted)}</span>`;
+    }
+    const diffMs = expTime - Date.now();
+    if (diffMs <= 0) {
+        return `<span class="key-expiry-expired" title="${escapeHtml(formatted)}">已过期</span>`;
+    }
+    const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+    if (diffDays <= 7) {
+        const remainingLabel = diffDays === 1 ? '1 天内到期' : `余 ${diffDays} 天`;
+        return `<span class="key-expiry-warning" title="${escapeHtml(formatted)}">${remainingLabel}</span>`;
+    }
+    const dateOnly = formatted.split(' ')[0] || formatted;
+    return `<span title="${escapeHtml(formatted)}">${escapeHtml(dateOnly)} <small class="key-expiry-muted">(余${diffDays}天)</small></span>`;
+}
+
 window.Pivot.legacy.loadApiKeys = async function() {
     try {
         document.querySelectorAll('.super-admin-only').forEach(el => {
@@ -247,7 +270,7 @@ window.Pivot.legacy.loadApiKeys = async function() {
         window.Pivot.legacy.updateApiAccessState?.(data.apiAccessEnabled === true);
         const body = document.getElementById('api-keys-body');
         if (keys.length === 0) {
-            renderTableMessage(body, 9, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
+            renderTableMessage(body, 10, '暂无 API Key，点击右上角新建', { padding: '30px', color: 'var(--text-muted)' });
         } else {
             PivotSafeHtml.setHtml(body, keys.map((k, index) => `
                 <tr>
@@ -258,6 +281,7 @@ window.Pivot.legacy.loadApiKeys = async function() {
                     <td class="text-center" title="${Number(k.output_tokens || 0).toLocaleString()} Tokens" style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${formatTokenCount(k.output_tokens)}</td>
                     <td class="text-center" title="${Number(k.usage_tokens || 0).toLocaleString()} Tokens" style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">${formatTokenCount(k.usage_tokens)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${formatDateToCN(k.created_at)}</td>
+                    <td class="key-expiry-cell">${formatKeyExpiry(k.expires_at)}</td>
                     <td style="font-size: 0.8rem; color: var(--text-muted);">${k.last_used_at ? formatDateToCN(k.last_used_at) : '从未'}</td>
                     <td class="text-center">
                         <button class="btn-danger" type="button" title="删除" data-api-key-action="delete" data-api-key-id="${k.id}">删除</button>
@@ -388,18 +412,51 @@ window.Pivot.legacy.createApiKey = function() {
         showToast('API 接入已关闭，暂不能新建密钥', 'error');
         return;
     }
-    document.getElementById('new-key-name').value = '我的第三方密钥';
-    document.getElementById('key-input-view').classList.remove('hidden');
-    document.getElementById('key-result-view').classList.add('hidden');
+    const nameInput = document.getElementById('new-key-name');
+    if (nameInput) nameInput.value = '我的第三方密钥';
+    const expiresSelect = document.getElementById('new-key-expires');
+    if (expiresSelect) expiresSelect.value = '90';
+    const customDaysWrap = document.getElementById('new-key-custom-days-wrap');
+    if (customDaysWrap) customDaysWrap.classList.add('hidden');
+    const customDaysInput = document.getElementById('new-key-custom-days');
+    if (customDaysInput) customDaysInput.value = '';
+    document.getElementById('key-input-view')?.classList.remove('hidden');
+    document.getElementById('key-result-view')?.classList.add('hidden');
     const modal = document.getElementById('key-modal');
     modal?.classList.remove('hidden');
     modal?.setAttribute('aria-hidden', 'false');
-    document.getElementById('new-key-name')?.focus();
-}
+    nameInput?.focus();
+};
+
+document.getElementById('new-key-expires')?.addEventListener('change', (e) => {
+    const customWrap = document.getElementById('new-key-custom-days-wrap');
+    if (!customWrap) return;
+    if (e.target.value === 'custom') {
+        customWrap.classList.remove('hidden');
+        document.getElementById('new-key-custom-days')?.focus();
+    } else {
+        customWrap.classList.add('hidden');
+    }
+});
 
 window.Pivot.legacy.confirmCreateKey = async function() {
     const button = document.querySelector('[data-static-action="confirm-create-key"]');
-    const name = document.getElementById('new-key-name').value || '未命名密钥';
+    const name = document.getElementById('new-key-name')?.value?.trim() || '未命名密钥';
+    const expiresSelect = document.getElementById('new-key-expires');
+    const expiresVal = expiresSelect ? expiresSelect.value : '90';
+
+    let expiresInDays = expiresVal;
+    if (expiresVal === 'custom') {
+        const customInput = document.getElementById('new-key-custom-days');
+        const days = parseInt(customInput?.value, 10);
+        if (!Number.isFinite(days) || days < 1 || days > 3650) {
+            showToast('自定义有效天数必须在 1 到 3650 天之间', 'error');
+            customInput?.focus();
+            return;
+        }
+        expiresInDays = days;
+    }
+
     if (button) {
         button.disabled = true;
         button.dataset.originalText = button.innerText;
@@ -409,15 +466,19 @@ window.Pivot.legacy.confirmCreateKey = async function() {
         const res = await apiFetch(`${API_BASE}/auth/keys`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name, expiresInDays })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || `创建密钥失败（HTTP ${res.status}）`);
         
         // 显示结果视图
         document.getElementById('generated-key-text').innerText = data.key;
-        document.getElementById('key-input-view').classList.add('hidden');
-        document.getElementById('key-result-view').classList.remove('hidden');
+        const expiryTextEl = document.getElementById('generated-key-expiry-text');
+        if (expiryTextEl) {
+            expiryTextEl.textContent = data.expires_at ? `有效期至：${data.expires_at}` : '有效期：永久有效';
+        }
+        document.getElementById('key-input-view')?.classList.add('hidden');
+        document.getElementById('key-result-view')?.classList.remove('hidden');
         
         window.Pivot.legacy.loadApiKeys();
     } catch (e) {
@@ -428,7 +489,7 @@ window.Pivot.legacy.confirmCreateKey = async function() {
             button.innerText = button.dataset.originalText || '确定创建';
         }
     }
-}
+};
 
 window.Pivot.legacy.closeKeyModal = function() {
     const modal = document.getElementById('key-modal');
