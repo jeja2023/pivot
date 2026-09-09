@@ -36,23 +36,29 @@ test('desktop local mode waits for server initialization before resolving', asyn
     assert.equal(await pending, server);
 });
 
-test('desktop update policy requires https for remote feeds', () => {
+test('desktop update policy supports http and https for update feeds', () => {
     assert.equal(
         normalizeUpdateFeedUrl('https://updates.example.com/pivot', { required: true }),
         'https://updates.example.com/pivot/'
     );
+    assert.equal(
+        normalizeUpdateFeedUrl('http://50.64.150.51:9006/downloads', { required: true }),
+        'http://50.64.150.51:9006/downloads/'
+    );
     assert.throws(
-        () => assertAllowedUpdateFeedUrl('http://updates.example.com/pivot'),
-        /must use https|必须使用 HTTPS/
+        () => assertAllowedUpdateFeedUrl('ftp://updates.example.com/pivot'),
+        /must use http or https|必须使用 http 或 https/
     );
 });
 
-test('desktop update policy rejects HTTP feeds including local development loopback', () => {
-    assert.throws(
-        () => assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases', {
-            env: { PIVOT_DESKTOP_ALLOW_INSECURE_UPDATE_FEED: 'true' }
-        }),
-        /must use https|必须使用 HTTPS/
+test('desktop update policy allows HTTP feeds including local development loopback and intranet', () => {
+    assert.equal(
+        assertAllowedUpdateFeedUrl('http://127.0.0.1:9000/releases'),
+        'http://127.0.0.1:9000/releases/'
+    );
+    assert.equal(
+        assertAllowedUpdateFeedUrl('http://50.64.150.51:9006/downloads'),
+        'http://50.64.150.51:9006/downloads/'
     );
 });
 
@@ -104,12 +110,10 @@ test('desktop update path rejects full URLs', () => {
     );
 });
 
-test('desktop update policy rejects LAN HTTP feeds even if an old configuration requests it', () => {
-    assert.throws(
-        () => assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', {
-            allowInsecureHttp: true
-        }),
-        /must use https|必须使用 HTTPS/
+test('desktop update policy supports LAN and intranet HTTP feeds', () => {
+    assert.equal(
+        assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads'),
+        'http://pivot.lan:3000/downloads/'
     );
 });
 
@@ -132,11 +136,13 @@ test('Windows 更新仅接受与打包 app-update.yml 绑定的签名发布者�
     }
 });
 
-test('desktop config rejects legacy allowInsecureHttp when automatic updates are enabled', () => {
-    assert.throws(() => normalizeConfig({
+test('desktop config supports HTTP feeds when automatic updates are enabled', () => {
+    const config = normalizeConfig({
         mode: 'remote', remoteUrl: 'http://192.168.10.20:3000/',
-        autoUpdate: { enabled: true, allowInsecureHttp: true }
-    }, {}, {}), /allowInsecureHttp 已不再受支持/);
+        autoUpdate: { enabled: true, path: '/downloads/' }
+    }, {}, {});
+    assert.equal(config.autoUpdate.enabled, true);
+    assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');
 });
 
 test('bundled desktop config preserves remote bootstrap and update settings without a secret', () => {

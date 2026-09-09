@@ -28,8 +28,9 @@ function isOriginAllowed(url, allowedOrigins = []) {
 }
 
 function assertHttpUpdatePolicy(url, _options = {}) {
-    if (url.protocol !== 'http:') return;
-    throw new Error('自动更新 URL 必须使用 HTTPS 协议；HTTP 业务服务不能作为自动更新源。');
+    if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new Error('自动更新 URL 必须使用 HTTP 或 HTTPS 协议。');
+    }
 }
 
 function normalizeUpdateFeedUrl(value, options = {}) {

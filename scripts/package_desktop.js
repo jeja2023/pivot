@@ -14,6 +14,7 @@ const { prepareWindowsUpdateSigningProfile } = require('./desktop_update_signing
 const { beginDesktopBuildTransaction, recoverPendingDesktopBuildTransaction } = require('./desktop_build_transaction');
 const { loadDistributionDesktopConfig } = require('./desktop_distribution_config');
 const { prepareDesktopRuntimeProfile } = require('./desktop_runtime_profile');
+const { autoProvisionDesktopEnvironment } = require('./desktop_auto_sign_profile');
 
 const root = path.resolve(__dirname, '..');
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
@@ -182,6 +183,10 @@ try {
     const desktopBuildTransaction = beginDesktopBuildTransaction(root);
     restoreDesktopBuildTransaction = () => desktopBuildTransaction.restore();
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
+    autoProvisionDesktopEnvironment(root, process.env, {
+        platform: buildTarget.platform,
+        isDirBuild: rawBuilderArgs.includes('--dir')
+    });
     const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
     const windowsUpdateSigningProfile = prepareWindowsUpdateSigningProfile(root, {
         env: process.env,

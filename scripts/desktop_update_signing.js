@@ -28,9 +28,18 @@ function prepareWindowsUpdateSigningProfile(rootDir, options = {}) {
         throw new Error('Windows 正式更新包必须配置 CSC_LINK、WIN_CSC_LINK、CSC_NAME 或 WIN_CSC_NAME 代码签名凭据。');
     }
     if (!publisherName) return { publisherName: '', restore() {} };
-
     const pkg = JSON.parse(original);
-    pkg.build = { ...pkg.build, win: { ...pkg.build?.win, publisherName, verifyUpdateCodeSignature: true } };
+    pkg.build = {
+        ...pkg.build,
+        win: {
+            ...pkg.build?.win,
+            signtoolOptions: {
+                ...pkg.build?.win?.signtoolOptions,
+                publisherName
+            },
+            verifyUpdateCodeSignature: true
+        }
+    };
     fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
     let restored = false;
     return {

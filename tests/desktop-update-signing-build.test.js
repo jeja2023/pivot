@@ -32,7 +32,7 @@ test('Windows 更新签名构建配置仅临时写入 publisherName，并在结�
         });
         const duringBuild = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
         assert.equal(profile.publisherName, 'Pivot Release Signing');
-        assert.equal(duringBuild.build.win.publisherName, 'Pivot Release Signing');
+        assert.equal(duringBuild.build.win.signtoolOptions.publisherName, 'Pivot Release Signing');
         assert.equal(duringBuild.build.win.verifyUpdateCodeSignature, true);
         profile.restore();
         assert.equal(fs.readFileSync(packagePath, 'utf8'), original);

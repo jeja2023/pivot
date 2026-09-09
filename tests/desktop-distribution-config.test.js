@@ -26,24 +26,23 @@ test('正式桌面构建必须使用独立分发配置，而开发构建可使�
     }
 });
 
-test('正式分发配置允许 HTTP 业务地址，但自动更新必须使用 HTTPS', () => {
+test('正式分发配置支持 HTTP 与 HTTPS 自动更新，并支持从 remoteUrl 动态推导', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-distribution-update-policy-'));
     const configPath = path.join(root, 'production-client.json');
     try {
         const write = autoUpdate => fs.writeFileSync(configPath, JSON.stringify({
-            mode: 'remote', remoteUrl: 'http://pivot.lan:3000/', autoUpdate
+            mode: 'remote', remoteUrl: 'http://50.64.150.51:9006/', autoUpdate
         }));
         write({ enabled: true, url: 'https://updates.example.com/pivot/', allowedOrigins: ['https://updates.example.com'] });
         assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.autoUpdate.url, 'https://updates.example.com/pivot/');
-        write({ enabled: true, path: '/downloads/', allowInsecureHttp: true, allowedOrigins: ['http://pivot.lan:3000'] });
+        write({ enabled: true, url: 'http://50.64.150.51:9006/downloads/' });
+        assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.autoUpdate.url, 'http://50.64.150.51:9006/downloads/');
+        write({ enabled: true, url: '', path: '/downloads/' });
+        assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.remoteUrl, 'http://50.64.150.51:9006/');
+        write({ enabled: true, url: 'ftp://updates.example.com/pivot/' });
         assert.throws(
             () => loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }),
-            /禁止 allowInsecureHttp/
-        );
-        write({ enabled: true, url: 'http://updates.example.com/pivot/' });
-        assert.throws(
-            () => loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }),
-            /必须使用 HTTPS/
+            /必须使用 HTTP 或 HTTPS/
         );
     } finally {
         fs.rmSync(root, { recursive: true, force: true });

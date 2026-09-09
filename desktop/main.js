@@ -438,11 +438,11 @@ function createMainWindow(config) {
         title: 'Pivot 智枢',
         titleBarStyle: 'hidden',
         titleBarOverlay: {
-            color: '#ffffff',
+            color: 'rgba(0, 0, 0, 0)',
             symbolColor: '#334155',
             height: 30
         },
-        backgroundColor: '#0f172a',
+        backgroundColor: '#ffffff',
         icon: path.join(__dirname, 'icon.ico'),
         webPreferences: {
             contextIsolation: true,

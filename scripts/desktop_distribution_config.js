@@ -6,21 +6,28 @@ const path = require('path');
 function assertDistributionUpdatePolicy(config) {
     const autoUpdate = config?.autoUpdate;
     if (!autoUpdate || autoUpdate.enabled !== true) return;
-    if (autoUpdate.allowInsecureHttp === true) {
-        throw new Error('正式安装包禁止 allowInsecureHttp=true；自动更新必须使用 HTTPS。');
+    let rawUrl = String(autoUpdate.url || '').trim();
+    if (!rawUrl && config.remoteUrl) {
+        try {
+            rawUrl = new URL(
+                String(autoUpdate.path || '/downloads/'),
+                String(config.remoteUrl || '')
+            ).toString();
+        } catch (_) {
+            throw new Error('正式安装包自动更新配置未能从 remoteUrl 解析出有效 URL。');
+        }
     }
-    const rawUrl = String(autoUpdate.url || '').trim() || new URL(
-        String(autoUpdate.path || '/downloads/'),
-        String(config.remoteUrl || '')
-    ).toString();
+    if (!rawUrl) {
+        throw new Error('正式安装包自动更新配置缺少有效更新源 URL（可提供 url 或配置 remoteUrl 自动推导）。');
+    }
     let updateUrl;
     try {
         updateUrl = new URL(rawUrl);
     } catch (_) {
-        throw new Error('正式安装包自动更新配置缺少有效 HTTPS URL。');
+        throw new Error('正式安装包自动更新配置缺少有效 URL。');
     }
-    if (updateUrl.protocol !== 'https:') {
-        throw new Error('正式安装包自动更新必须使用 HTTPS；业务 remoteUrl 可独立保留内网 HTTP。');
+    if (!['http:', 'https:'].includes(updateUrl.protocol)) {
+        throw new Error('正式安装包自动更新必须使用 HTTP 或 HTTPS 协议。');
     }
 }
 
