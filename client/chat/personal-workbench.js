@@ -544,11 +544,15 @@
         if (createdEl) {
             if (user?.created_at) {
                 try {
-                    const d = new Date(user.created_at);
-                    if (!Number.isNaN(d.getTime())) {
-                        createdEl.textContent = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                    if (typeof formatDateToCN === 'function') {
+                        createdEl.textContent = formatDateToCN(user.created_at);
                     } else {
-                        createdEl.textContent = String(user.created_at);
+                        const d = new Date(String(user.created_at).replace(' ', 'T'));
+                        if (!Number.isNaN(d.getTime())) {
+                            createdEl.textContent = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                        } else {
+                            createdEl.textContent = String(user.created_at);
+                        }
                     }
                 } catch {
                     createdEl.textContent = String(user.created_at);

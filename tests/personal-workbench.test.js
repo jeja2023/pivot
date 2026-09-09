@@ -123,3 +123,13 @@ test('任务状态全面中文化且需要我处理精准过滤非审批任务',
     assert.match(harnessClient, /openAgentRun.*returnTab:\s*'workbench'.*returnSubview:\s*'inbox'/);
 });
 
+test('用户个人信息弹窗支持展示真实注册时间，并在缺少时间时优雅回退系统初始用户', () => {
+    const authServer = read('server/auth.js');
+    const personalClient = read('client/chat/personal-workbench.js');
+
+    assert.match(authServer, /SELECT id, username, nickname, unit, role, status, created_at, default_model_id/);
+    assert.match(authServer, /created_at:\s*user\.created_at/);
+    assert.match(personalClient, /personal-user-created-at/);
+    assert.match(personalClient, /系统初始用户/);
+});
+

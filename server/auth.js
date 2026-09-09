@@ -202,7 +202,7 @@ async function resolveAuthenticatedUserAsync(req) {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await queryOne(
-            'SELECT id, username, nickname, unit, role, status, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
+            'SELECT id, username, nickname, unit, role, status, created_at, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
             [decoded.id]
         );
         if (user && user.status !== 'disabled' && Number(decoded.tv ?? 0) === Number(user.token_version || 0)) {
@@ -225,7 +225,7 @@ async function resolveAuthenticatedUserAsync(req) {
     if (apiKeyData) {
         if (!apiKeyAllowsRequest(req, apiKeyData)) return { user: null, token, code: 'API_KEY_SCOPE_DENIED' };
         const user = await queryOne(
-            'SELECT id, username, nickname, unit, role, status, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
+            'SELECT id, username, nickname, unit, role, status, created_at, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
             [apiKeyData.user_id]
         );
         if (user && user.status !== 'disabled') {
@@ -256,7 +256,7 @@ async function register(username, password, nickname, unit, role = 'user') {
             'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [cleanUsername, hash, nickname, unit, safeRole, 'active', getBeijingTimestamp()]
         );
-        const created = await queryOne('SELECT id, username, nickname, role, status FROM users WHERE username = ? AND deleted_at IS NULL', [cleanUsername]);
+        const created = await queryOne('SELECT id, username, nickname, role, status, created_at FROM users WHERE username = ? AND deleted_at IS NULL', [cleanUsername]);
         return withPermissionFlags(created);
     } catch (e) {
         if (e.code === '23505' || String(e.message).includes('duplicate key') || String(e.message).includes('unique constraint')) {
@@ -287,7 +287,7 @@ async function login(username, password, options = {}) {
     return { 
         accessToken, 
         refreshToken, 
-        user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active' })
+        user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active', created_at: user.created_at })
     };
 }
 
