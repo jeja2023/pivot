@@ -102,7 +102,7 @@ async function getPersonalWorkbench(user) {
         ...runs.map(record => toRecentWork('run', record))
     ]
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
-        .slice(0, 3);
+        .slice(0, 4);
     return {
         generatedAt: getBeijingTimestamp(),
         stats: {

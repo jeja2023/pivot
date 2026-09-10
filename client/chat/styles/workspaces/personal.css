@@ -173,8 +173,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    min-height: 66px;
-    padding: 0 28px;
+    min-height: 54px;
+    height: 54px;
+    padding: 0 24px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
 }
@@ -183,13 +184,13 @@
     display: flex;
     align-items: baseline;
     min-width: 0;
-    gap: 12px;
+    gap: 10px;
 }
 
 .personal-workbench-heading h1 {
     margin: 0;
     color: var(--text-main);
-    font-size: 1.35rem;
+    font-size: 1.2rem;
     font-weight: 700;
     line-height: 1.2;
     white-space: nowrap;
@@ -197,7 +198,7 @@
 
 .personal-workbench-heading span {
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 400;
     white-space: nowrap;
 }
@@ -286,22 +287,25 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 22px 28px 28px;
+    padding: 12px 24px 14px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
 }
 
 /* Hero 横幅卡片：精简轻量横幅 */
 .personal-hero {
     position: relative;
-    min-height: 60px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     overflow: hidden;
-    padding: 14px 24px;
-    border-radius: 12px;
+    padding: 8px 18px;
+    border-radius: 10px;
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
     color: var(--surface, #ffffff);
-    box-shadow: 0 4px 14px rgba(16, 163, 127, 0.14);
+    box-shadow: 0 2px 8px rgba(16, 163, 127, 0.12);
 }
 
 .personal-hero::before {
@@ -334,38 +338,38 @@
 }
 
 .personal-hero-copy h2 {
-    margin: 0 0 3px;
+    margin: 0 0 2px;
     color: inherit;
-    font-size: 1.12rem;
+    font-size: 1.02rem;
     font-weight: 700;
-    line-height: 1.3;
+    line-height: 1.25;
 }
 
 .personal-hero-copy span {
     display: block;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     opacity: 0.9;
-    line-height: 1.35;
+    line-height: 1.3;
 }
 
 /* 3 栏 KPI 概览指标卡片 */
 .personal-stats {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-    margin: 16px 0 16px;
+    gap: 12px;
+    margin: 10px 0;
 }
 
 .personal-stat {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 84px;
-    padding: 16px 20px;
+    min-height: 62px;
+    padding: 10px 16px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 10px;
     background: var(--surface);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -383,26 +387,26 @@
 .personal-stat-label {
     display: block;
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     font-weight: 500;
 }
 
 .personal-stat-value-group {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    margin-top: 6px;
+    gap: 6px;
+    margin-top: 4px;
 }
 
 .personal-stat-value {
     color: var(--text-main);
-    font-size: 1.7rem;
+    font-size: 1.45rem;
     font-weight: 700;
     line-height: 1;
 }
 
 .personal-stat-subtext {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     font-weight: 500;
     white-space: nowrap;
 }
@@ -417,10 +421,10 @@
 
 .personal-stat-icon-wrap {
     display: grid;
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
     place-items: center;
-    border-radius: 10px;
+    border-radius: 8px;
     flex-shrink: 0;
 }
 
@@ -441,53 +445,59 @@
 
 /* 2 列工作台卡片栅格 */
 .personal-workbench-grid {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
-    gap: 14px;
+    grid-template-rows: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 0;
 }
 
 .personal-card {
     min-height: 0;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 10px;
     background: var(--surface);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: column;
 }
 
 .personal-card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    min-height: 58px;
-    padding: 13px 18px;
+    gap: 10px;
+    min-height: 42px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--border);
 }
 
 .personal-card-header h3 {
     margin: 0;
     color: var(--text-main);
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 700;
 }
 
 .personal-card-header p {
-    margin: 3px 0 0;
+    margin: 2px 0 0;
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: 0.7rem;
 }
 
 .personal-card-link {
-    min-height: 28px;
+    min-height: 24px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
+    padding: 2px 6px;
     border: none;
     background: transparent;
     color: var(--primary);
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     font-weight: 500;
     cursor: pointer;
     transition: opacity 0.2s ease;
@@ -509,15 +519,19 @@
 
 /* 列表与行项 */
 .personal-list {
-    min-height: 180px;
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .personal-row {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 13px 18px;
+    gap: 10px;
+    padding: 8px 14px;
     border: 0;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
@@ -665,11 +679,12 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 180px;
-    padding: 24px 18px;
+    min-height: 0;
+    flex: 1;
+    padding: 10px 14px;
     color: var(--text-muted);
-    font-size: 0.82rem;
-    line-height: 1.6;
+    font-size: 0.78rem;
+    line-height: 1.4;
     text-align: center;
 }
 
@@ -683,23 +698,23 @@
 }
 
 .personal-empty-icon svg {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
 }
 
 .personal-empty-text {
     margin: 0;
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
 }
 
 .personal-empty-action {
-    margin-top: 6px;
-    height: 30px;
-    padding: 0 14px;
-    font-size: 0.78rem;
+    margin-top: 4px;
+    height: 26px;
+    padding: 0 12px;
+    font-size: 0.74rem;
     font-weight: 500;
-    border-radius: 8px;
+    border-radius: 6px;
     color: var(--text-main);
     background: #f8fafc;
     border: 1px solid rgba(226, 232, 240, 0.95);
@@ -730,21 +745,23 @@ body.dark-mode .personal-empty-action:hover,
 .personal-shortcuts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    padding: 14px;
+    gap: 8px;
+    padding: 8px 12px;
+    flex: 1;
+    align-content: stretch;
 }
 
 .personal-shortcut {
     min-width: 0;
-    min-height: 94px;
+    min-height: 52px;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    justify-content: flex-start;
-    gap: 6px;
-    padding: 13px;
+    justify-content: center;
+    gap: 3px;
+    padding: 8px 10px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 8px;
     background: var(--surface);
     color: var(--text-main);
     text-align: left;
@@ -755,29 +772,39 @@ body.dark-mode .personal-empty-action:hover,
 .personal-shortcut:hover {
     border-color: var(--primary);
     background: var(--bg-side);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
 }
 
 .personal-shortcut-icon {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--primary);
 }
 
+.personal-shortcut-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
 .personal-shortcut-title {
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--text-main);
+    line-height: 1.2;
 }
 
 .personal-shortcut-hint {
     color: var(--text-muted);
-    font-size: 0.68rem;
-    line-height: 1.35;
+    font-size: 0.66rem;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
 }
 
 .personal-shortcut-add {
@@ -786,7 +813,7 @@ body.dark-mode .personal-empty-action:hover,
     align-items: center;
     justify-content: center;
     text-align: center;
-    gap: 4px;
+    gap: 3px;
 }
 
 .personal-shortcut-add:hover {
@@ -798,6 +825,8 @@ body.dark-mode .personal-empty-action:hover,
 .personal-shortcut-add .personal-shortcut-icon {
     color: var(--primary);
 }
+
+
 
 /* 页脚合规文案 */
 .personal-workbench-footer {
@@ -965,29 +994,8 @@ body.dark-mode .personal-empty-action:hover,
     font-family: var(--font-mono, monospace);
 }
 
-.personal-modal-close-btn {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 8px;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    background: transparent;
-    cursor: pointer;
-    transition: all 0.16s ease;
-}
-
-.personal-modal-close-btn:hover {
-    color: var(--text-main);
-    background: var(--bg-side);
-    border-color: var(--border);
-}
-
 .personal-user-dialog-body {
-    padding: 20px 24px;
+    padding: 22px 24px 26px;
 }
 
 .personal-user-info-grid {
@@ -1052,39 +1060,6 @@ body.dark-mode .personal-empty-action:hover,
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
 }
 
-.personal-user-dialog-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 16px 24px;
-    background: var(--bg-side);
-    border-top: 1px solid var(--border);
-}
-
-.personal-user-dialog-actions button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    font-size: 0.88rem;
-    font-weight: 600;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.16s ease;
-}
-
-.personal-user-dialog-actions .btn-red-outline {
-    color: var(--danger, #ef4444);
-    border-color: rgba(239, 68, 68, 0.25);
-}
-
-.personal-user-dialog-actions .btn-red-outline:hover {
-    background: rgba(239, 68, 68, 0.08);
-    border-color: var(--danger, #ef4444);
-    color: var(--danger, #ef4444);
-}
-
 
 /* 响应式断点 */
 @media (max-width: 1180px) {
@@ -1140,3 +1115,11 @@ body.dark-mode .personal-empty-action:hover,
         display: none;
     }
 }
+
+/* 高度充足时（标准窗口与桌面客户端），一屏完整呈现且不出现垂直滚动条 */
+@media (min-height: 650px) {
+    .personal-workbench-scroll {
+        overflow-y: hidden;
+    }
+}
+

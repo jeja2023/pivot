@@ -739,43 +739,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             onOpenJson
         });
 
-        // —— 左侧节点库面板 ——
-        let nodeLibraryInstance = null;
-        let libraryExpandBtn = null;
-        const setLibraryCollapsed = (collapsed) => {
-            canvas.classList.toggle('is-library-collapsed', !!collapsed);
-            if (libraryExpandBtn) libraryExpandBtn.hidden = !collapsed;
-        };
-        const mountNodeLibrary = () => {
-            if (!window.Pivot.legacy.PivotDagNodeLibrary) return;
-            // host 必须挂在 canvas 本身内部，才能正确相对定位
-            let host = canvas.querySelector('.pivot-dag-node-library-host');
-            if (!host) {
-                host = document.createElement('div');
-                host.className = 'pivot-dag-node-library-host';
-                canvas.appendChild(host);
-            }
-            nodeLibraryInstance = window.Pivot.legacy.PivotDagNodeLibrary.mount({
-                container: host,
-                onAddNode: (preset) => addPresetNode(preset),
-                onToggleCollapse: (collapsed) => setLibraryCollapsed(collapsed),
-                getTools: currentTools
-            });
-            // 折叠态下的展开按钮
-            libraryExpandBtn = document.createElement('button');
-            libraryExpandBtn.type = 'button';
-            libraryExpandBtn.className = 'pivot-node-library-toggle';
-            libraryExpandBtn.title = '展开节点面板';
-            libraryExpandBtn.setAttribute('aria-label', '展开节点面板');
-            libraryExpandBtn.textContent = '»';
-            libraryExpandBtn.hidden = true;
-            libraryExpandBtn.addEventListener('click', () => setLibraryCollapsed(false));
-            canvas.appendChild(libraryExpandBtn);
-            canvas.classList.add('has-node-library');
-        };
-        // 工作流编排页面不展示左侧悬浮节点面板，节点添加统一由顶部工具栏「添加节点」和「高级节点」完成
-        // if (!readOnly) mountNodeLibrary();
-
         // —— textarea 外部改动同步回画布 ——
         const onTextareaInput = () => {
             if (suppressTextareaSync) return;
@@ -806,10 +769,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             if (textarea) textarea.removeEventListener('input', onTextareaInput);
             emptyHintEl?.remove();
             emptyHintEl = null;
-            libraryExpandBtn?.remove();
-            libraryExpandBtn = null;
-            nodeLibraryInstance?.destroy?.();
-            canvas.classList.remove('has-node-library', 'is-library-collapsed');
             canvas.replaceChildren();
             if (minimap?.wrap?.parentNode === canvas) {
                 // canvas.replaceChildren 已清空
