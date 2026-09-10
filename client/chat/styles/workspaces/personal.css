@@ -305,7 +305,7 @@
     border-radius: 10px;
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
     color: var(--surface, #ffffff);
-    box-shadow: 0 2px 8px rgba(16, 163, 127, 0.12);
+    box-shadow: var(--shadow-sm);
 }
 
 .personal-hero::before {
@@ -369,7 +369,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    box-shadow: var(--shadow-sm);
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -460,7 +460,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    box-shadow: var(--shadow-sm);
     display: flex;
     flex-direction: column;
 }
@@ -773,7 +773,7 @@ body.dark-mode .personal-empty-action:hover,
     border-color: var(--primary);
     background: var(--bg-side);
     transform: translateY(-1px);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
+    box-shadow: var(--shadow-sm);
 }
 
 .personal-shortcut-icon {
