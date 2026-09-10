@@ -27,6 +27,26 @@ test('after-pack 仅保留当前平台 better-sqlite3 原生模块并移除构�
     }
 });
 
+test('after-pack 兼容 build/Release 原生二进制布局并清理构建残留', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-after-pack-release-'));
+    const packageRoot = path.join(root, 'resources', 'app.asar.unpacked', 'node_modules', 'better-sqlite3');
+    const releaseDir = path.join(packageRoot, 'build', 'Release');
+    try {
+        fs.mkdirSync(path.join(packageRoot, 'deps'), { recursive: true });
+        fs.mkdirSync(path.join(packageRoot, 'src'), { recursive: true });
+        fs.mkdirSync(releaseDir, { recursive: true });
+        fs.writeFileSync(path.join(releaseDir, 'better_sqlite3.node'), 'native-release');
+        fs.writeFileSync(path.join(packageRoot, 'binding.gyp'), 'gyp');
+        await afterPack({ appOutDir: root, electronPlatformName: 'win32', arch: 1 });
+        assert.equal(fs.existsSync(path.join(releaseDir, 'better_sqlite3.node')), true);
+        assert.equal(fs.existsSync(path.join(packageRoot, 'deps')), false);
+        assert.equal(fs.existsSync(path.join(packageRoot, 'src')), false);
+        assert.equal(fs.existsSync(path.join(packageRoot, 'binding.gyp')), false);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('桌面包不携带纯类型文件或 Node 运行时不用的浏览器 MSAL 包', () => {
     const files = packageJson.build.files;
     assert.ok(files.includes('!node_modules/@types/**'));

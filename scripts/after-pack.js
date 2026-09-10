@@ -57,14 +57,22 @@ async function afterPack(context) {
     assertInside(appOutDir, packageRoot);
     const prebuilds = path.join(packageRoot, 'prebuilds');
     const wanted = targetPrebuildNames(platform, arch);
-    if (!fs.existsSync(prebuilds)) throw new Error(`better-sqlite3 预编译目录不存在：${prebuilds}`);
-
-    const present = fs.readdirSync(prebuilds).filter(name => name.endsWith('.node'));
-    for (const name of wanted) {
-        if (!present.includes(name)) throw new Error(`缺少目标平台 better-sqlite3 原生模块：${name}`);
-    }
-    for (const name of present) {
-        if (!wanted.has(name)) fs.rmSync(path.join(prebuilds, name), { force: true });
+    let retainedPrebuild = false;
+    if (fs.existsSync(prebuilds)) {
+        const present = fs.readdirSync(prebuilds).filter(name => name.endsWith('.node'));
+        for (const name of wanted) {
+            if (!present.includes(name)) throw new Error(`缺少目标平台 better-sqlite3 原生模块：${name}`);
+        }
+        for (const name of present) {
+            if (!wanted.has(name)) fs.rmSync(path.join(prebuilds, name), { force: true });
+        }
+        retainedPrebuild = true;
+    } else {
+        const releaseBinary = path.join(packageRoot, 'build', 'Release', 'better_sqlite3.node');
+        const debugBinary = path.join(packageRoot, 'build', 'Debug', 'better_sqlite3.node');
+        if (!fs.existsSync(releaseBinary) && !fs.existsSync(debugBinary)) {
+            throw new Error(`缺少 better-sqlite3 原生模块：未找到 ${prebuilds} 或 ${releaseBinary}`);
+        }
     }
     for (const name of ['deps', 'src', 'binding.gyp']) {
         const target = path.join(packageRoot, name);
@@ -72,7 +80,8 @@ async function afterPack(context) {
         fs.rmSync(target, { recursive: true, force: true });
     }
     const removedLocales = pruneElectronLocales(appOutDir);
-    console.log(`[afterPack] 已裁剪 better-sqlite3：${platform}/${arch}，保留 ${[...wanted].join(', ')}；Electron 语言包保留 ${[...configuredElectronLocales()].sort().join(', ')}，移除 ${removedLocales.length} 个。`);
+    const binaryInfo = retainedPrebuild ? `保留 ${[...wanted].join(', ')}` : '保留 build/Release 原生二进制';
+    console.log(`[afterPack] 已裁剪 better-sqlite3：${platform}/${arch}，${binaryInfo}；Electron 语言包保留 ${[...configuredElectronLocales()].sort().join(', ')}，移除 ${removedLocales.length} 个。`);
 }
 
 module.exports = afterPack;
