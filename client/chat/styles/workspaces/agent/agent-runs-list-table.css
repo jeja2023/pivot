@@ -170,7 +170,7 @@
 
 .agent-runs-table th:nth-child(3),
 .agent-runs-table td:nth-child(3) {
-    width: calc(22% - 36px);
+    width: calc(16% - 24px);
 }
 
 .agent-runs-table th:nth-child(4),
@@ -180,7 +180,7 @@
 
 .agent-runs-table th:nth-child(5),
 .agent-runs-table td:nth-child(5) {
-    width: 120px;
+    width: 160px;
 }
 
 .agent-runs-table th:nth-child(6),
@@ -208,7 +208,7 @@
 
 .agent-runs-table th:nth-child(13),
 .agent-runs-table td:nth-child(13) {
-    width: 135px;
+    width: 170px;
 }
 
 .agent-runs-table th:nth-child(14),
