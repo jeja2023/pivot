@@ -1344,7 +1344,7 @@ window.Pivot?.exposeModule?.('mcp.workbench', {
     refreshMcpWorkbench,
     runMcpBatchHealthCheck,
     runMcpToolTest,
-    setMcpWorkbenchState
+    setMcpWorkbenchState: (...args) => (typeof setMcpWorkbenchState === 'function' ? setMcpWorkbenchState(...args) : undefined)
 });
 
 window.Pivot.legacy.loadMcpWorkbench = async function () {

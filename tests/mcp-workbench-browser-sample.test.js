@@ -23,6 +23,8 @@ function loadWorkbenchApi(input) {
         }
     };
     vm.createContext(sandbox);
+    const commonSource = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'mcp-workbench-common.js'), 'utf8');
+    vm.runInContext(commonSource, sandbox, { filename: 'mcp-workbench-common.js' });
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'mcp-workbench-main.js'), 'utf8');
     vm.runInContext(source, sandbox, { filename: 'mcp-workbench-main.js' });
     return api;
