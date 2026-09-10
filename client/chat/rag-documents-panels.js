@@ -474,13 +474,13 @@ const renderRagDebugResults = (data) => {
 };
 
 async function openKnowledgeCollectionShareModal() {
-    const normalizeId = window.Pivot.legacy.normalizeRagCollectionId || (value => {
+    const normalizeId = window.Pivot.modules?.['rag.documents']?.normalizeRagCollectionId || window.Pivot.legacy.normalizeRagCollectionId || (value => {
         const id = Number.parseInt(value, 10);
         return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
     });
     const collectionId = normalizeId(document.getElementById('rag-collection-filter')?.value);
     if (!collectionId) return showToast('请先在专题库筛选中选择一个自己的专题库', 'error');
-    const collections = window.Pivot.legacy.getRagCollections?.() || (typeof ragCollections !== 'undefined' ? ragCollections : []);
+    const collections = window.Pivot.modules?.['rag.documents']?.getRagCollections?.() || window.Pivot.legacy.getRagCollections?.() || (typeof ragCollections !== 'undefined' ? ragCollections : []);
     const collection = collections.find(item => String(item.id) === collectionId);
     if (!collection?.can_edit) return showToast('共享专题库需要所有者权限', 'error');
 
@@ -689,5 +689,7 @@ async function openKnowledgeCollectionShareModal() {
     window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '[name="knowledge-share-scope"]' });
 }
 
-window.Pivot.legacy.openKnowledgeCollectionShareModal = openKnowledgeCollectionShareModal;
+window.Pivot?.exposeModule?.('rag.panels', {
+    openKnowledgeCollectionShareModal
+});
 

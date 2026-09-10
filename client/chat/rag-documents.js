@@ -2,7 +2,6 @@
 // RAG 文档功能从 rag.js 拆分而来。
 /* eslint-disable no-undef */
 let ragCollections = [];
-window.Pivot.legacy.getRagCollections = () => ragCollections;
 let ragTags = [];
 let ragDocsCache = [];
 const ragTagsByCollection = new Map();
@@ -66,7 +65,9 @@ function setKnowledgeModalVisibility(modalOrId, open, { focusSelector = '' } = {
 
 window.Pivot?.exposeModule?.('rag.documents', {
     setKnowledgeModalVisibility,
-    syncRagSelectAllState
+    syncRagSelectAllState,
+    getRagCollections: () => ragCollections,
+    normalizeRagCollectionId
 }, [
     { globalName: 'setKnowledgeModalVisibility', exportName: 'setKnowledgeModalVisibility' },
     { globalName: 'syncRagSelectAllState', exportName: 'syncRagSelectAllState' }
@@ -98,12 +99,10 @@ function normalizeRagCollectionId(value) {
     const id = Number.parseInt(value, 10);
     return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
 }
-window.Pivot.legacy.normalizeRagCollectionId = normalizeRagCollectionId;
 
 function normalizeRagTag(value) {
     return String(value || '').trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40);
 }
-window.Pivot.legacy.normalizeRagTag = normalizeRagTag;
 
 function parseRagTags(value) {
     const values = Array.isArray(value) ? value : String(value || '').split(/[,，;；\s\n]+/);
@@ -620,7 +619,7 @@ async function openKnowledgeWorkbench() {
         button.type = 'button';
         button.setAttribute('role', 'menuitem');
         button.textContent = '分享专题库';
-        button.addEventListener('click', () => openKnowledgeCollectionShareModal());
+        button.addEventListener('click', () => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.());
         const contentMenu = toolbar.querySelector('.knowledge-action-menu:first-of-type .knowledge-action-menu-panel');
         if (contentMenu) contentMenu.appendChild(button);
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
@@ -1036,7 +1035,7 @@ async function loadRagDebugHistory() {
 
 window.Pivot.exposeModule('rag.debug', {
     loadRagDebugHistory,
-    openKnowledgeCollectionShareModal
+    openKnowledgeCollectionShareModal: (...args) => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.(...args)
 }, {
     loadRagDebugHistory: 'loadRagDebugHistory'
 });

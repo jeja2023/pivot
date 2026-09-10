@@ -11,7 +11,7 @@ const ALLOWED_WINDOW_PROPERTIES = new Set([
     'Pivot', 'DOMPurify', 'confirm', 'prompt', 'location', 'URL',
     'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
     'addEventListener', 'removeEventListener', 'requestAnimationFrame',
-    'cancelAnimationFrame', 'innerWidth', 'innerHeight', 'matchMedia', 'CustomEvent',
+    'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'innerWidth', 'innerHeight', 'matchMedia', 'CustomEvent',
     'getComputedStyle', 'ResizeObserver', 'EventSource', 'isSecureContext',
     'localStorage', 'sessionStorage', 'crypto', 'CSS', 'devicePixelRatio',
     'fetch', 'getSelection', 'navigator', 'electronAPI', 'pivotDesktop',
