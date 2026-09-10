@@ -54,6 +54,7 @@ test('聊天首屏只加载壳样式，懒加载工作区各自加载样式包',
     const shellStyles = fs.readFileSync(path.join(root, 'client', 'chat', 'chat.css'), 'utf8');
     const workspaces = fs.readFileSync(path.join(root, 'client', 'chat', 'app-workspaces.js'), 'utf8');
     const styleLoader = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-style-loader.js'), 'utf8');
+    const loader = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-template-loader.js'), 'utf8');
     assert.match(html, /\/chat\/chat\.shell\.css/);
     assert.doesNotMatch(html, /\/chat\/chat\.workspace\./);
     assert.match(shellStyles, /styles\/workspaces\/table-foundation\.css/);
@@ -66,6 +67,13 @@ test('聊天首屏只加载壳样式，懒加载工作区各自加载样式包',
     assert.match(workspaces, /workspaces\.styleLoader/);
     assert.doesNotMatch(workspaces, /await window\.Pivot\.moduleApi\('workspaces\.styleLoader'\)\.ensureWorkspaceStyles/);
     assert.match(workspaces, /样式资源不可成为功能入口的单点阻塞/);
+    assert.match(styleLoader, /function preloadWorkspaceStyles/);
+    assert.match(loader, /function preloadWorkspaceMarkup/);
+    assert.match(workspaces, /function showWorkspaceWithStyleGate/);
+    assert.match(workspaces, /function prewarmAutomationWorkspaces/);
+    assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'agents.js'), 'utf8'), /showWorkspaceWithStyleGate/);
+    assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'agent-workflows.js'), 'utf8'), /showWorkspaceWithStyleGate/);
+    assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'auth.js'), 'utf8'), /pivot:app-shown/);
 });
 
 test('会话列表保留独立滚动容器并通过滚动自动分页', () => {

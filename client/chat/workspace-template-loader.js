@@ -1,6 +1,8 @@
 // 大型工作区模板的同源按需加载器。模板只来自服务端白名单端点，
 // 挂载前统一经过 Pivot.html 的 DOMPurify 安全插入点。
 const workspaceMarkupPromises = {};
+const workspaceMarkupFetchPromises = {};
+const workspaceMarkupCache = {};
 const LAZY_WORKSPACE_HTML = Object.freeze({
     apps: { endpoint: '/chat/workspaces/apps', slotId: 'workspace-lazy-slot-apps', panelId: 'apps-workbench-modal' },
     agent: { endpoint: '/chat/workspaces/agent', slotId: 'workspace-lazy-slot-agent', panelId: 'agent-workbench-modal' },
@@ -10,6 +12,32 @@ const LAZY_WORKSPACE_HTML = Object.freeze({
     settings: { endpoint: '/chat/workspaces/settings', slotId: 'workspace-lazy-slot-settings', panelId: 'admin-container' }
 });
 
+function fetchWorkspaceMarkup(name, definition) {
+    if (workspaceMarkupCache[name]) return Promise.resolve(workspaceMarkupCache[name]);
+    if (!workspaceMarkupFetchPromises[name]) {
+        workspaceMarkupFetchPromises[name] = fetch(definition.endpoint, {
+            credentials: 'same-origin',
+            headers: { Accept: 'text/html' }
+        }).then(async response => {
+            if (!response.ok) throw new Error(`${name} 工作区模板加载失败（HTTP ${response.status}）`);
+            const markup = await response.text();
+            if (!markup.trim()) throw new Error(`${name} 工作区模板为空`);
+            workspaceMarkupCache[name] = markup;
+            return markup;
+        }).catch(error => {
+            delete workspaceMarkupFetchPromises[name];
+            throw error;
+        });
+    }
+    return workspaceMarkupFetchPromises[name];
+}
+
+function preloadWorkspaceMarkup(name) {
+    const definition = LAZY_WORKSPACE_HTML[name];
+    if (!definition || document.getElementById(definition.panelId)) return Promise.resolve();
+    return fetchWorkspaceMarkup(name, definition);
+}
+
 async function ensureWorkspaceMarkup(name) {
     const definition = LAZY_WORKSPACE_HTML[name];
     if (!definition || document.getElementById(definition.panelId)) return;
@@ -17,10 +45,7 @@ async function ensureWorkspaceMarkup(name) {
         workspaceMarkupPromises[name] = (async () => {
             const slot = document.getElementById(definition.slotId);
             if (!slot) throw new Error(`${name} 工作区挂载点不存在`);
-            const response = await fetch(definition.endpoint, { credentials: 'same-origin', headers: { Accept: 'text/html' } });
-            if (!response.ok) throw new Error(`${name} 工作区模板加载失败（HTTP ${response.status}）`);
-            const markup = await response.text();
-            if (!markup.trim()) throw new Error(`${name} 工作区模板为空`);
+            const markup = await fetchWorkspaceMarkup(name, definition);
             const safeHtml = window.Pivot?.html;
             if (!safeHtml?.setHtml) throw new Error('安全 HTML 组件尚未就绪，拒绝挂载工作区模板');
             safeHtml.setHtml(slot, markup);
@@ -34,4 +59,7 @@ async function ensureWorkspaceMarkup(name) {
     return workspaceMarkupPromises[name];
 }
 
-window.Pivot?.exposeModule?.('workspaces.templateLoader', { ensureWorkspaceMarkup });
+window.Pivot?.exposeModule?.('workspaces.templateLoader', {
+    ensureWorkspaceMarkup,
+    preloadWorkspaceMarkup
+});

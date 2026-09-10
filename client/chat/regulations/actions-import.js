@@ -1,9 +1,28 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsImportReady) return;
-    with (ns) {
+
+    const {
+        API,
+        state,
+        esc,
+        canManage,
+        toast,
+        fetchJson,
+        regulationConfirm,
+        getRegulationsSelectedModelId
+    } = ns;
+
+    const setBusy = (...args) => ns.setBusy?.(...args);
+    const syncImportHint = (...args) => ns.syncImportHint?.(...args);
+    const closeDialogs = (...args) => ns.closeDialogs?.(...args);
+    const loadDocuments = (...args) => ns.loadDocuments?.(...args);
+    const collectForm = (...args) => ns.collectForm?.(...args);
+    const closeInlineForms = (...args) => ns.closeInlineForms?.(...args);
+    const loadDetail = (...args) => ns.loadDetail?.(...args);
+    const syncFileInputState = (...args) => ns.syncFileInputState?.(...args);
+    const renderAiAnswer = (...args) => ns.renderAiAnswer?.(...args);
             async function uploadDocument(form) {
                         const fileInput = form.querySelector('#regulations-upload-file');
                         const fileCount = Number(fileInput?.files?.length || 0);
@@ -136,14 +155,17 @@
                     }
 
                     async function askAi() {
-                        const question = document.getElementById('regulations-ai-question')?.value.trim() || '';
+                        const questionInput = document.getElementById('regulations-ai-question');
+                        const question = questionInput?.value.trim() || '';
                         if (!question) {
                             toast('请输入要咨询的问题', 'warning');
                             return;
                         }
                         state.aiBusy = true;
                         const modelSelector = document.getElementById('regulations-ai-model');
+                        const askBtn = document.getElementById('regulations-ai-btn');
                         if (modelSelector) modelSelector.disabled = true;
+                        if (askBtn) askBtn.disabled = true;
                         renderAiAnswer();
                         setBusy(true, '正在生成回答...');
                         try {
@@ -158,11 +180,13 @@
                             const answer = data.content || data.answer || '';
                             const sources = Array.isArray(data.sources) ? data.sources : [];
                             state.aiTurns.push({ question, answer, sources });
+                            if (questionInput) questionInput.value = '';
                         } catch (e) {
                             toast(e.message || 'AI 回答失败', 'error');
                         } finally {
                             state.aiBusy = false;
                             if (modelSelector) modelSelector.disabled = !modelSelector.value;
+                            if (askBtn) askBtn.disabled = false;
                             setBusy(false);
                             renderAiAnswer();
                         }
@@ -200,5 +224,4 @@
             clearAiTurns,
             actionsImportReady: true
         });
-    }
 })();

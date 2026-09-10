@@ -444,7 +444,7 @@ async function loadToolPolicyToolsForPackage(item) {
 }
 
 window.Pivot.legacy.loadToolPolicy = async function(options = {}) {
-    if (!isAdminUser()) return;
+    if (!isSuperAdminUser()) return;
     if (!options.forceReload && toolPolicyToolsCache.length) {
         if (!options.preserveSelection) {
             toolPolicySelectedToolKey = '';

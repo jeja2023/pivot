@@ -7,8 +7,20 @@ function setMcpWorkbenchState(kind = '', message = '') {
     const state = document.getElementById('mcp-workbench-state');
     if (!state) return;
     state.hidden = !message;
-    state.textContent = message;
     state.dataset.state = kind || '';
+    state.replaceChildren();
+    if (!message) return;
+    const copy = document.createElement('span');
+    copy.textContent = message;
+    state.appendChild(copy);
+    if (kind === 'error' || kind === 'partial') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn-secondary';
+        retry.textContent = '重试';
+        retry.addEventListener('click', () => refreshMcpWorkbench(retry));
+        state.appendChild(retry);
+    }
 }
 
 async function withMcpActionLock(key, button, busyText, action) {
@@ -182,7 +194,7 @@ function renderMcpOtherUserToolsPanel(servers = []) {
                 <p>${mcpEscape(typeText || '暂无类型统计')}</p>
                 <div class="mcp-other-tools-list">${previewRows}</div>
                 ${servers.length > 8 ? `<small>另有 ${mcpEscape(servers.length - 8)} 个个人工具未展开显示，可到工具策略或对应用户配置中治理。</small>` : ''}
-                <button class="btn-secondary" type="button" data-mcp-open-tool-policy>查看工具策略</button>
+                ${typeof isSuperAdminUser === 'function' && isSuperAdminUser() ? '<button class="btn-secondary" type="button" data-mcp-open-tool-policy>查看工具策略</button>' : ''}
             </div>
         </details>
     `;
@@ -242,12 +254,14 @@ async function loadMcpServers() {
     const list = document.getElementById('mcp-server-list');
     if (!dataSourcesBox && !notificationsBox && !list) return;
 
-    const res = await apiFetch(`${API_BASE}/mcp/servers`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || '工具服务加载失败');
+    const [serverResponse, datasetSummary, localAuthorizationStatus] = await Promise.all([
+        apiFetch(`${API_BASE}/mcp/servers`),
+        loadMcpDatasetSummary(),
+        window.Pivot.legacy.getMcpLocalAuthorizationStatus?.({ silent: true }) || Promise.resolve(null)
+    ]);
+    const data = await serverResponse.json().catch(() => ({}));
+    if (!serverResponse.ok) throw new Error(data.error || '工具服务加载失败');
     mcpServersCache = data.data || [];
-    const datasetSummary = await loadMcpDatasetSummary();
-    const localAuthorizationStatus = await (window.Pivot.legacy.getMcpLocalAuthorizationStatus?.({ silent: true }) || Promise.resolve(null));
     const systemTypes = new Set(mcpSystemServices.map(item => item.type));
     const personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
     const userManagedServers = mcpServersCache.filter(server => !systemTypes.has(server.server_type));
@@ -1359,8 +1373,9 @@ async function refreshMcpWorkbench(button = null) {
         setMcpWorkbenchState('loading', '正在刷新工具服务、工具清单和治理状态…');
         const loaded = await window.Pivot.legacy.loadMcpWorkbench();
         if (loaded === false) throw new Error('工具库刷新失败，请检查网络或服务日志。');
-        setMcpWorkbenchState();
-        showToast('工具库已刷新', 'success');
+        const partial = document.getElementById('mcp-workbench-state')?.dataset.state === 'partial';
+        if (!partial) setMcpWorkbenchState();
+        showToast(partial ? '工具库已刷新，但部分数据暂不可用' : '工具库已刷新', partial ? 'warning' : 'success');
         return true;
     });
 }
@@ -1373,7 +1388,8 @@ window.Pivot?.exposeModule?.('mcp.workbench', {
     openMcpToolTestModal,
     refreshMcpWorkbench,
     runMcpBatchHealthCheck,
-    runMcpToolTest
+    runMcpToolTest,
+    setMcpWorkbenchState
 });
 
 window.Pivot.legacy.loadMcpWorkbench = async function () {
@@ -1382,12 +1398,23 @@ window.Pivot.legacy.loadMcpWorkbench = async function () {
         try {
             window.Pivot.moduleApi?.('mcp.actions')?.bindMcpWorkbenchActions?.();
             window.Pivot?.moduleApi?.('mcp.tabs')?.bindTabs?.();
-            await loadMcpGovernance();
-            await (window.Pivot.legacy.syncMcpLocalExecutionBridge
-                ? window.Pivot.legacy.syncMcpLocalExecutionBridge()
-                : Promise.resolve(null)).catch(() => null);
-            await loadMcpTools();
-            await loadMcpServers();
+            const results = await Promise.allSettled([
+                loadMcpGovernance(),
+                window.Pivot.legacy.syncMcpLocalExecutionBridge
+                    ? window.Pivot.legacy.syncMcpLocalExecutionBridge()
+                    : Promise.resolve(null),
+                loadMcpTools(),
+                loadMcpServers()
+            ]);
+            const failures = results.filter(result => result.status === 'rejected');
+            if (failures.length === results.length) {
+                throw failures[0]?.reason || new Error('工具库加载失败，请检查网络连接');
+            }
+            if (failures.length) {
+                setMcpWorkbenchState('partial', '工具库已打开，但部分数据暂不可用，请稍后刷新。');
+            } else {
+                setMcpWorkbenchState();
+            }
             return true;
         } catch (e) {
             const message = e?.message || '工具库加载失败，请检查网络连接';

@@ -80,31 +80,57 @@ async function runLocalBrowserTask({ toolName, input, grant, profileRoot, confir
     });
     try {
         const page = context.pages()[0] || await context.newPage();
-        await page.goto(task.url, { waitUntil: 'domcontentloaded', timeout: task.timeoutMs });
+        let navigationError = null;
+        try {
+            await page.goto(task.url, { waitUntil: 'domcontentloaded', timeout: task.timeoutMs });
+        } catch (navErr) {
+            const isTimeout = /timeout/i.test(navErr?.message || '') || navErr?.name === 'TimeoutError';
+            const currentUrl = String(page.url() || '');
+            const hasNavigated = currentUrl && currentUrl !== 'about:blank';
+            if (isTimeout && hasNavigated) {
+                navigationError = navErr;
+            } else {
+                throw navErr;
+            }
+        }
         const base = {
             browserId: browser.id,
             browser: browser.label,
             engine: browser.engine,
             url: page.url(),
-            title: await page.title()
+            title: await page.title().catch(() => '')
         };
         if (toolName === 'browser.open') {
             await confirmLocalBrowserAction(confirmAction, {
-                kind: 'login', title: '本机浏览器已打开', url: page.url(), browser: browser.label,
-                message: '如需要，请在独立浏览器窗口中完成登录。完成后点击“继续”；不会读取或上传登录凭据。'
+                kind: 'login',
+                title: '本机浏览器已打开',
+                url: page.url(),
+                browser: browser.label,
+                message: navigationError
+                    ? '页面已在独立浏览器窗口中打开（网页响应或加载耗时较长，请在窗口中查看）。完成后点击“继续”；不会读取或上传登录凭据。'
+                    : '如需要，请在独立浏览器窗口中完成登录。完成后点击“继续”；不会读取或上传登录凭据。'
             });
-            return { ...base, action: 'opened', url: page.url(), title: await page.title(), profile: 'isolated' };
+            return {
+                ...base,
+                action: 'opened',
+                url: page.url(),
+                title: await page.title().catch(() => ''),
+                profile: 'isolated',
+                ...(navigationError ? { warning: '页面加载耗时较长，已在浏览器中打开。' } : {})
+            };
         }
         if (toolName === 'browser.click') {
+            if (navigationError) await page.waitForTimeout?.(2000).catch(() => {});
             await confirmLocalBrowserAction(confirmAction, {
                 kind: 'click', title: '确认本机浏览器点击', url: page.url(), browser: browser.label,
                 target: task.target, message: '此操作会在本机浏览器中点击页面元素，可能触发外部副作用。'
             });
             const target = await clickBrowserTarget(page, task.target);
             await page.waitForLoadState('domcontentloaded', { timeout: Math.min(task.timeoutMs, 30000) }).catch(() => {});
-            return { ...base, action: 'clicked', target, url: page.url(), title: await page.title() };
+            return { ...base, action: 'clicked', target, url: page.url(), title: await page.title().catch(() => '') };
         }
         if (toolName === 'browser.screenshot') {
+            if (navigationError) await page.waitForTimeout?.(2000).catch(() => {});
             await confirmLocalBrowserAction(confirmAction, {
                 kind: 'screenshot', title: '确认截取本机浏览器页面', url: page.url(), browser: browser.label,
                 message: '页面截图将作为本次任务结果回传。请确认当前页面不含不应分享的内容。'
@@ -115,11 +141,13 @@ async function runLocalBrowserTask({ toolName, input, grant, profileRoot, confir
             }
             return { ...base, action: 'screenshot', screenshot: { mimeType: 'image/png', sha256: crypto.createHash('sha256').update(screenshot).digest('hex'), dataBase64: screenshot.toString('base64') } };
         }
+        if (navigationError) await page.waitForTimeout?.(2000).catch(() => {});
         await confirmLocalBrowserAction(confirmAction, {
             kind: 'inspect', title: '确认读取本机网页内容', url: page.url(), browser: browser.label,
             message: '页面正文将作为本次任务结果回传。请确认当前页面不含不应分享的内容。'
         });
-        return { ...base, action: 'inspected', text: String(await page.locator('body').innerText()).slice(0, MAX_TEXT_CHARS) };
+        const bodyText = await page.locator('body').innerText().catch(() => '');
+        return { ...base, action: 'inspected', text: String(bodyText).slice(0, MAX_TEXT_CHARS) };
     } finally {
         await closeAgentBrowserContext(context);
     }

@@ -23,7 +23,7 @@ const {
     hashRefreshToken
 } = require('../auth');
 const { asyncHandler } = require('../http');
-const { query, execute, transaction } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const crypto = require('crypto');
 const { hashApiKey, previewApiKey } = require('../auth');
 const { getApiAccessSetting } = require('../services/api-access-settings');
@@ -246,7 +246,14 @@ function createAuthRouter({
     }));
 
     router.delete('/auth/keys/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const changes = await execute('DELETE FROM api_keys WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+        const targetUserId = req.user.role === 'admin' ? null : req.user.id;
+        const key = targetUserId
+            ? await queryOne('SELECT id, user_id FROM api_keys WHERE id = ? AND user_id = ?', [req.params.id, targetUserId])
+            : await queryOne('SELECT id, user_id FROM api_keys WHERE id = ?', [req.params.id]);
+        if (!key) return res.status(404).json({ error: '密钥不存在' });
+
+        await execute('UPDATE api_call_logs SET api_key_id = NULL WHERE api_key_id = ?', [key.id]);
+        const changes = await execute('DELETE FROM api_keys WHERE id = ?', [key.id]);
         if (changes === 0) return res.status(404).json({ error: '密钥不存在' });
         logAction(req, '删除 API Key', `ID: ${req.params.id}`);
         res.json({ success: true });

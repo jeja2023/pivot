@@ -28,6 +28,7 @@ const refreshTokenDeviceBindingMigrations = require('./refresh-token-device-bind
 const messageContextTokenCountMigrations = require('./message-context-token-count');
 const agentChannelDeliveryClaimMigrations = require('./agent-channel-delivery-claims');
 const modelUsageEventsFkeySoftenMigrations = require('./model-usage-events-fkey-soften');
+const apiCallLogsFkeySoftenMigrations = require('./api-call-logs-fkey-soften');
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
     if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return false;
@@ -980,7 +981,8 @@ const migrations = [
     ...messageContextTokenCountMigrations,
     ...agentChannelDeliveryClaimMigrations,
     ...refreshTokenReuseDetectionMigrations,
-    ...modelUsageEventsFkeySoftenMigrations
+    ...modelUsageEventsFkeySoftenMigrations,
+    ...apiCallLogsFkeySoftenMigrations
 ];
 
 module.exports = migrations;

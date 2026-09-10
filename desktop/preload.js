@@ -205,6 +205,15 @@ function installSessionListScrollFallback() {
     };
 
     let viewportSyncScheduled = false;
+    let pointerInsideSessionList = false;
+
+    const setSessionListPointerInside = inside => {
+        const next = inside === true;
+        if (pointerInsideSessionList === next) return;
+        pointerInsideSessionList = next;
+        scheduleSessionListViewportSync();
+    };
+
     const publishSessionListViewport = () => {
         viewportSyncScheduled = false;
         const list = document.getElementById('session-list');
@@ -215,6 +224,7 @@ function installSessionListScrollFallback() {
             || app?.classList.contains('hidden')
             || hasVisibleModal();
         if (inactive) {
+            pointerInsideSessionList = false;
             ipcRenderer.send('pivot-desktop:session-list-viewport', { active: false });
             return;
         }
@@ -225,6 +235,7 @@ function installSessionListScrollFallback() {
             active,
             scrollable: list.scrollHeight > list.clientHeight,
             modalOpen: false,
+            pointerInside: pointerInsideSessionList,
             left: rect.left,
             top: rect.top,
             right: rect.right,
@@ -282,6 +293,9 @@ function installSessionListScrollFallback() {
 
     const list = document.getElementById('session-list');
     const sidebar = list?.closest('.sidebar');
+    list?.addEventListener('pointerenter', () => setSessionListPointerInside(true), { passive: true });
+    list?.addEventListener('pointerleave', () => setSessionListPointerInside(false), { passive: true });
+    window.addEventListener('blur', () => setSessionListPointerInside(false), { passive: true });
     if (typeof window.ResizeObserver === 'function') {
         const resizeObserver = new window.ResizeObserver(scheduleSessionListViewportSync);
         if (list) resizeObserver.observe(list);

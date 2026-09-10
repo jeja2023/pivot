@@ -77,6 +77,7 @@
             }
             if (button.hasAttribute('data-mcp-open-tool-policy')) {
                 event.preventDefault();
+                if (typeof isSuperAdminUser === 'function' && !isSuperAdminUser()) return;
                 await window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false });
                 return await window.Pivot.legacy.switchTab?.('tool-policy');
             }

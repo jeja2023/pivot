@@ -55,6 +55,22 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(statsRoute, /getCachedDatabaseSize\(\)/);
     assert.match(read('server/services/admin-stats-cache.js'), /DATABASE_SIZE_TTL_MS/);
 });
+test('系统监控固定在设置画布内，只有慢查询与异常告警列表允许内部滚动', () => {
+    const monitorCss = read('client/chat/styles/stats-monitor/stats-system-monitor.css');
+    const scale = read('client/chat/workspace-settings-scale.js');
+    const monitor = read('client/chat/stats-monitor.js');
+
+    assert.match(monitorCss, /\.admin-content\.is-monitor-tab-active\s*\{[^}]*overflow:\s*hidden !important/);
+    assert.match(monitorCss, /\.monitor-panel-observability \.monitor-list\s*\{[^}]*overflow-y:\s*auto/);
+    assert.doesNotMatch(monitorCss, /\.monitor-panel-gpu \.monitor-list,\s*\.settings-workspace-view #tab-content-monitor \.monitor-panel-observability/);
+    assert.match(monitorCss, /grid-template-rows:\s*minmax\(250px, 1fr\) minmax\(0, 1fr\)/);
+    assert.match(scale, /const MONITOR_MIN_CANVAS_HEIGHT = 780/);
+    assert.match(scale, /availableHeight \/ MONITOR_MIN_CANVAS_HEIGHT/);
+    assert.match(monitor, /const visibleModels = models\.slice\(0, 6\)/);
+    assert.match(monitor, /const healthChecks = allHealthChecks\.slice\(0, 8\)/);
+    assert.match(monitor, /const displayTime = match \? `\$\{match\[2\]\} \$\{match\[3\]\}` : fullStr/);
+    assert.doesNotMatch(monitor, /const isToday = fullStr\.startsWith/);
+});
 
 test('后台调度轮询具备防重入保护', () => {
     const schedules = read('server/services/agent-schedules.js');
@@ -118,4 +134,43 @@ test('分页控件统一使用直接绑定的工作区组件，避免依赖全�
     assert.match(toolPolicy, /renderWorkspacePagination\?\.\(container/);
     assert.doesNotMatch(settings, /data-pagination-tab|data-pagination-page/);
     assert.doesNotMatch(toolPolicy, /data-pagination-tab|data-pagination-page/);
+});
+
+test('工具策略设置项与面板对齐为仅系统管理员专享契约', () => {
+    const shell = read('client/chat/partials/settings/shell-start.html');
+    const toolPolicyHtml = read('client/chat/partials/settings/tool-policy.html');
+    const admin = read('client/chat/admin.js');
+    const toolPolicyJs = read('client/chat/tool-policy.js');
+    const mcpWorkbench = read('client/chat/mcp-workbench-main.js');
+
+    const tabMatch = shell.match(/<button id="tab-tool-policy"[^>]*class="([^"]+)"/);
+    assert.ok(tabMatch);
+    const tabClasses = tabMatch[1].split(/\s+/);
+    assert.ok(tabClasses.includes('super-admin-only'));
+    assert.ok(!tabClasses.includes('admin-only'));
+
+    const contentMatch = toolPolicyHtml.match(/<section id="tab-content-tool-policy"[^>]*class="([^"]+)"/);
+    assert.ok(contentMatch);
+    const contentClasses = contentMatch[1].split(/\s+/);
+    assert.ok(contentClasses.includes('super-admin-only'));
+    assert.ok(!contentClasses.includes('admin-only'));
+
+    assert.match(admin, /const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set\(\['tool-policy'\]\)/);
+    assert.match(admin, /SUPER_ADMIN_ONLY_SETTINGS_TABS\.has\(target\) && !isSuperAdminUser\(\)/);
+    assert.match(toolPolicyJs, /if \(!isSuperAdminUser\(\)\) return;/);
+    assert.match(mcpWorkbench, /isSuperAdminUser\(\) \? '<button[^>]*data-mcp-open-tool-policy/);
+});
+
+test('API 接入与全局权限选择器严格隔离，杜绝跨面板解冻非活跃 Tab', () => {
+    const authJs = read('client/chat/auth.js');
+    const adminJs = read('client/chat/admin.js');
+
+    // loadApiKeys 必须作用于 #tab-content-keys 容器内，不能全局选择 .super-admin-only
+    assert.match(authJs, /const\s+keysTab\s*=\s*document\.getElementById\(['"]tab-content-keys['"]\)/);
+    assert.match(authJs, /keysTab\?\.querySelectorAll\(['"]\.super-admin-only['"]\)/);
+    assert.doesNotMatch(authJs, /document\.querySelectorAll\s*\(\s*['"]\.super-admin-only['"]\s*\)/);
+
+    // openAdmin 的 admin-only 与 super-admin-only 必须排除 .admin-tab-content 面板
+    assert.match(adminJs, /\.admin-only:not\(\.admin-tab-content\)/);
+    assert.match(adminJs, /\.super-admin-only:not\(\.admin-tab-content\)/);
 });

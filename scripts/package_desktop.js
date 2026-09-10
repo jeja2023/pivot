@@ -229,7 +229,21 @@ try {
     if (windowsRelease) {
         const installerPath = path.join(electronOutputDir, `Pivot Setup ${projectVersion}.exe`);
         const appPath = path.join(electronOutputDir, 'win-unpacked', 'Pivot.exe');
-        run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
+        const { DEFAULT_LOCAL_PUBLISHER } = require('./desktop_auto_sign_profile');
+        const isLocalDevBuild = (windowsUpdatePublisher || '').trim() === DEFAULT_LOCAL_PUBLISHER;
+        if (isLocalDevBuild) {
+            // 本地自签名测试包：自签名证书链未受信任根 CA 认可属正常现象，
+            // 且测试包的 autoUpdate.enabled = false，无需校验更新链签名。
+            // 仅验证产物文件存在且非零大小即可。
+            const fs2 = require('fs');
+            for (const artifactPath of [installerPath, appPath]) {
+                const stat = fs2.statSync(artifactPath);
+                if (!stat.isFile() || stat.size === 0) throw new Error(`本地测试包产物异常（文件不存在或为空）：${artifactPath}`);
+            }
+            console.log(`[desktop-sign] 本地测试包跳过更新链签名校验（自签名证书）：${require('path').basename(installerPath)}`);
+        } else {
+            run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
+        }
     }
     copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget);
 } catch (err) {

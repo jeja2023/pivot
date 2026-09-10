@@ -109,9 +109,8 @@ test.describe('Pivot browser smoke', () => {
     test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
         await ensureBrowserSession(page);
         await expect(page.locator('#agent-workbench-modal')).toHaveCount(0);
-        const workspaceResponse = page.waitForResponse(response => response.url().endsWith('/chat/workspaces/agent'));
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.());
-        await expect((await workspaceResponse).status()).toBe(200);
+        await expect(page.locator('#agent-workbench-modal')).toBeVisible({ timeout: 15_000 });
         await page.locator('#agent-workbench-modal [data-automation-section="workbench"]').click();
         await expect(page.locator('#agent-control-plane')).toBeVisible();
         await page.locator('[data-agent-cp-subview="governance"]').click();
@@ -133,11 +132,94 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#agent-goal-editor button[type="submit"]').click();
         await expect(page.locator('#agent-goals-panel')).toContainText('E2E 临时目标');
 
-        const workflowResponse = page.waitForResponse(response => response.url().endsWith('/chat/workspaces/agent-dag'));
         await page.locator('#agent-workbench-modal [data-automation-section="workflows"]').click();
-        await expect((await workflowResponse).status()).toBe(200);
         await expect(page.locator('#agent-dag-workbench-modal')).toBeVisible({ timeout: 15_000 });
         await expect(page.locator('#agent-workbench-modal')).toBeHidden();
+    });
+
+    test('自动化任务与工作流在样式延迟时显示稳定加载页，样式就绪后再展示内容', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const agentStylePreload = page.locator('link[data-pivot-workspace-style-preload="/chat/chat.workspace.agent.css"]');
+        await expect(agentStylePreload).toHaveCount(1, { timeout: 5_000 });
+
+        await page.evaluate(() => {
+            const styles = window.Pivot.moduleApi('workspaces.styleLoader');
+            let resolve = null;
+            window.__resolveAutomationStyleGate = () => resolve?.();
+            styles.isWorkspaceStyleLoaded = () => false;
+            styles.waitForWorkspaceStyles = () => Promise.resolve(false);
+            styles.whenWorkspaceStylesLoaded = () => new Promise(done => { resolve = done; });
+        });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.(); });
+        const agentPanel = page.locator('#agent-workbench-modal');
+        await expect(agentPanel).toBeVisible({ timeout: 15_000 });
+        await expect(agentPanel).toHaveClass(/workspace-style-gated/);
+        await expect(agentPanel.locator(':scope > .workspace-style-gate')).toContainText('正在准备自动化工作台');
+        await expect.poll(() => agentPanel.locator(':scope > .agent-modal').evaluate(element => window.getComputedStyle(element).visibility)).toBe('hidden');
+        await page.evaluate(() => window.__resolveAutomationStyleGate());
+        await expect(agentPanel.locator(':scope > .workspace-style-gate')).toHaveCount(0);
+        await expect(agentPanel.locator(':scope > .agent-modal')).toBeVisible();
+
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.(); });
+        const workflowPanel = page.locator('#agent-dag-workbench-modal');
+        await expect(workflowPanel).toBeVisible({ timeout: 15_000 });
+        await expect(workflowPanel).toHaveClass(/workspace-style-gated/);
+        await expect(workflowPanel.locator(':scope > .workspace-style-gate')).toContainText('工作流编排器');
+        await page.evaluate(() => window.__resolveAutomationStyleGate());
+        await expect(workflowPanel.locator(':scope > .workspace-style-gate')).toHaveCount(0);
+        await expect(workflowPanel.locator(':scope > .agent-dag-modal')).toBeVisible();
+    });
+
+    test('工作流画布支持负坐标拖拽、缩放与自由平移', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ editor: true }); });
+        const canvas = page.locator('#agent-dag-editor-canvas');
+        await expect(canvas).toBeVisible({ timeout: 15_000 });
+        await expect(canvas.locator('.pivot-dag-svg')).toBeVisible({ timeout: 15_000 });
+
+        await page.evaluate(() => {
+            const textarea = document.getElementById('agent-dag-spec');
+            textarea.value = JSON.stringify({
+                nodes: [{ id: 'input_1', title: '工作流输入', tool: 'workflow.input', input: {}, dependsOn: [] }],
+                layout: { input_1: { x: 80, y: 80 } }
+            });
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            window.mountAgentDagEditor?.();
+        });
+        const node = canvas.locator('.pivot-dag-node[data-pivot-dag-id="input_1"]');
+        await expect(node).toBeVisible();
+        const nodeBox = await node.boundingBox();
+        if (!nodeBox) throw new Error('工作流节点没有可用的可视区域');
+        await page.mouse.move(nodeBox.x + nodeBox.width / 2, nodeBox.y + nodeBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(nodeBox.x - 360, nodeBox.y - 260, { steps: 8 });
+        await page.mouse.up();
+        await expect.poll(() => page.evaluate(() => {
+            const layout = JSON.parse(document.getElementById('agent-dag-spec').value).layout || {};
+            return layout.input_1 || null;
+        })).toMatchObject({ x: expect.any(Number), y: expect.any(Number) });
+        await expect.poll(() => page.evaluate(() => {
+            const position = JSON.parse(document.getElementById('agent-dag-spec').value).layout?.input_1 || {};
+            return Number(position.x) < 0 && Number(position.y) < 0;
+        })).toBe(true);
+
+        const root = canvas.locator('.pivot-dag-svg');
+        const beforeZoom = await root.getAttribute('viewBox');
+        await canvas.getByRole('button', { name: '放大画布' }).click();
+        await expect.poll(() => root.getAttribute('viewBox')).not.toBe(beforeZoom);
+        await canvas.getByRole('button', { name: '适配全部节点到当前画布' }).click();
+        const initialView = canvas.getByRole('button', { name: '默认缩放并将现有节点居中' });
+        await expect(initialView).toBeVisible();
+        await initialView.click();
+        await expect(node).toBeVisible();
+        await expect.poll(async () => {
+            const [currentNodeBox, canvasBox] = await Promise.all([node.boundingBox(), canvas.boundingBox()]);
+            if (!currentNodeBox || !canvasBox) return false;
+            return currentNodeBox.x + currentNodeBox.width > canvasBox.x
+                && currentNodeBox.x < canvasBox.x + canvasBox.width
+                && currentNodeBox.y + currentNodeBox.height > canvasBox.y
+                && currentNodeBox.y < canvasBox.y + canvasBox.height;
+        }).toBe(true);
     });
 
     test('应用、知识库、工具库和设置工作区均在首次打开时按需挂载', async ({ page }) => {
@@ -214,9 +296,7 @@ test.describe('Pivot browser smoke', () => {
     test('工作区样式资源短暂失败时，知识库仍会挂载并保持关闭控件可点击', async ({ page }) => {
         await ensureBrowserSession(page);
         await page.evaluate(() => {
-            window.Pivot.moduleApi('workspaces.styleLoader').ensureWorkspaceStyles = () => (
-                Promise.reject(new Error('E2E 模拟样式资源暂不可用'))
-            );
+            window.Pivot.moduleApi('workspaces.styleLoader').waitForWorkspaceStyles = () => Promise.resolve(false);
         });
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
         const panel = page.locator('#knowledge-workbench-modal');
@@ -229,6 +309,76 @@ test.describe('Pivot browser smoke', () => {
         })).toBe(true);
         await closeControl.click();
         await expect(panel).toBeHidden();
+    });
+
+    test('知识库在辅助统计尚未完成时优先渲染文档表', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/rag/quality-report', async route => {
+            await new Promise(resolve => setTimeout(resolve, 2_000));
+            await route.continue();
+        });
+        const docsResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rag/docs');
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await docsResponse;
+        const docsBody = page.locator('#rag-docs-body');
+        const state = page.locator('#rag-workbench-state');
+        await expect.poll(() => docsBody.getAttribute('data-loaded')).toBe('1');
+        await expect(state).toContainText('文档已加载，正在补充统计信息');
+    });
+
+    test('工具库请求较慢或部分失败时显示可恢复状态，不显示空白页', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/mcp/governance', async route => {
+            await new Promise(resolve => setTimeout(resolve, 700));
+            await route.abort('failed');
+        });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.(); });
+        const panel = page.locator('#mcp-workbench-modal');
+        const state = page.locator('#mcp-workbench-state');
+        await expect(panel).toBeVisible({ timeout: 15_000 });
+        await expect(state).toContainText('正在加载工具库');
+        await expect(state).toContainText('工具库已打开，但部分数据暂不可用', { timeout: 15_000 });
+        await expect(state.getByRole('button', { name: '重试' })).toBeVisible();
+    });
+
+    test('系统监控固定在工作区视口内，仅慢查询与异常告警列表支持内部滚动', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-monitor').click();
+        await expect(page.locator('#tab-content-monitor')).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#monitor-summary-grid .monitor-card')).toHaveCount(8, { timeout: 15_000 });
+        await page.locator('#monitor-auto-refresh').uncheck();
+
+        await page.evaluate(() => {
+            const list = document.getElementById('monitor-observability-list');
+            list.replaceChildren(...Array.from({ length: 24 }, (_, index) => {
+                const row = document.createElement('div');
+                row.className = `monitor-observability-row ${index % 2 ? 'is-warning' : 'is-critical'}`;
+                row.textContent = `慢查询与异常告警验收记录 ${index + 1}`;
+                return row;
+            }));
+        });
+
+        await expect.poll(() => page.evaluate(() => {
+            const content = document.querySelector('.settings-workspace-view .admin-content');
+            const list = document.getElementById('monitor-observability-list');
+            return {
+                outerHasHorizontalOverflow: content.scrollWidth > content.clientWidth + 1,
+                outerHasVerticalOverflow: content.scrollHeight > content.clientHeight + 1,
+                documentHasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+                documentHasVerticalOverflow: document.documentElement.scrollHeight > window.innerHeight + 1,
+                alertCanScroll: list.scrollHeight > list.clientHeight,
+                alertOverflowY: window.getComputedStyle(list).overflowY
+            };
+        })).toEqual({
+            outerHasHorizontalOverflow: false,
+            outerHasVerticalOverflow: false,
+            documentHasHorizontalOverflow: false,
+            documentHasVerticalOverflow: false,
+            alertCanScroll: true,
+            alertOverflowY: 'auto'
+        });
     });
 
     test('工具库的动态操作在重绘后仍可刷新、自检并打开本机授权中心', async ({ page }) => {

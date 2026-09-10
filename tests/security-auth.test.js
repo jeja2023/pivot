@@ -1298,6 +1298,63 @@ test('api key creation supports custom expiresInDays and permanent expiry', asyn
     }
 });
 
+test('api key deletion unlinks api_call_logs without foreign key violation', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`api_key_del_${suffix}`, 'hash', 'Delete Key User', 'QA', 'user', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `api_key_del_${suffix}`, role: 'user', unit: 'QA' };
+
+    const keyInfo = db.prepare(`
+        INSERT INTO api_keys (user_id, name, key_hash, key_preview, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(user.id, 'key-to-delete', 'hash123', 'sk-test****');
+    const keyId = Number(keyInfo.lastInsertRowid);
+
+    const logInfo = db.prepare(`
+        INSERT INTO api_call_logs (user_id, api_key_id, model_name, status, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(user.id, keyId, 'test-model', 'success');
+    const logId = Number(logInfo.lastInsertRowid);
+
+    const router = createAuthRouter({
+        authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        loginLimiter: (_req, _res, next) => next(),
+        isPublicRegistrationEnabled: () => true,
+        logAction: () => {},
+        publicUrl: 'http://localhost'
+    });
+    const deleteRoute = router.stack.find(layer => layer.route?.path === '/auth/keys/:id' && layer.route?.methods?.delete);
+
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; }
+    };
+
+    try {
+        await runExpressHandlers(deleteRoute.route.stack.map(layer => layer.handle), {
+            params: { id: String(keyId) },
+            user
+        }, res);
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.success, true);
+
+        const keyAfter = db.prepare('SELECT id FROM api_keys WHERE id = ?').get(keyId);
+        assert.equal(keyAfter, undefined);
+
+        const logAfter = db.prepare('SELECT id, api_key_id FROM api_call_logs WHERE id = ?').get(logId);
+        assert.ok(logAfter);
+        assert.equal(logAfter.api_key_id, null);
+    } finally {
+        db.prepare('DELETE FROM api_call_logs WHERE id = ?').run(logId);
+        db.prepare('DELETE FROM api_keys WHERE id = ?').run(keyId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+
 test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the file', async () => {
     const { createKnowledgeUploadMiddleware, createUploadMiddleware, uploadSecurityMiddleware } = require('../server/upload');
     assert.equal(typeof createUploadMiddleware().single('file'), 'function');

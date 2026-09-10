@@ -725,19 +725,158 @@ const LAZY_WORKSPACE_OPENERS = Object.freeze({
     mcp: 'openMcpWorkbench',
     settings: 'openAdminPanel'
 });
+const WORKSPACE_PANEL_IDS = Object.freeze({
+    personal: 'personal-workbench-modal',
+    chat: 'chat-workspace-view',
+    apps: 'apps-workbench-modal',
+    agent: 'agent-workbench-modal',
+    'agent-dag': 'agent-dag-workbench-modal',
+    knowledge: 'knowledge-workbench-modal',
+    mcp: 'mcp-workbench-modal',
+    manual: 'manual-workbench-modal',
+    print: 'print-workbench-modal',
+    settings: 'admin-container'
+});
+const AUTOMATION_WORKSPACES = Object.freeze(['agent', 'agent-dag']);
 
 const workspaceLoadPromises = {};
+let automationWorkspacePrewarmScheduled = false;
+
+function createWorkspaceStyleGate(panel) {
+    if (!panel) return null;
+    const gate = panel.querySelector(':scope > .workspace-style-gate') || document.createElement('div');
+    if (!gate.isConnected) {
+        gate.className = 'workspace-style-gate';
+        gate.setAttribute('role', 'status');
+        gate.setAttribute('aria-live', 'polite');
+        panel.appendChild(gate);
+    }
+    panel.classList.add('workspace-style-gated');
+    return gate;
+}
+
+function renderWorkspaceStyleGate(gate, name, error = null) {
+    if (!gate) return;
+    const isError = Boolean(error);
+    gate.classList.toggle('is-error', isError);
+    gate.replaceChildren();
+    const card = document.createElement('div');
+    card.className = 'workspace-style-gate-card';
+    if (!isError) {
+        const spinner = document.createElement('i');
+        spinner.className = 'workspace-style-gate-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        card.appendChild(spinner);
+    }
+    const title = document.createElement('strong');
+    title.textContent = isError ? '自动化样式加载失败' : '正在准备自动化工作台';
+    const copy = document.createElement('span');
+    copy.textContent = isError
+        ? '页面内容已安全保留。请重试加载样式后继续。'
+        : (name === 'agent-dag' ? '正在加载工作流编排器的界面资源…' : '正在加载任务与控制台的界面资源…');
+    card.append(title, copy);
+    if (isError) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn-secondary';
+        retry.textContent = '重试';
+        retry.addEventListener('click', () => showWorkspaceWithStyleGate(name, { forceRetry: true }));
+        card.appendChild(retry);
+    }
+    gate.appendChild(card);
+}
+
+function clearWorkspaceStyleGate(panel) {
+    if (!panel) return;
+    delete panel.dataset.workspaceStyleGateId;
+    panel.classList.remove('workspace-style-gated');
+    panel.querySelector(':scope > .workspace-style-gate')?.remove();
+}
+
+function showWorkspaceWithStyleGate(name, options = {}) {
+    const panelId = WORKSPACE_PANEL_IDS[name];
+    const panel = panelId ? document.getElementById(panelId) : null;
+    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
+    const stylesLoaded = styleLoader?.isWorkspaceStyleLoaded?.(name) === true;
+    if (!panel || stylesLoaded) {
+        if (panel) clearWorkspaceStyleGate(panel);
+        return showMainWorkspace(name);
+    }
+    const gate = createWorkspaceStyleGate(panel);
+    renderWorkspaceStyleGate(gate, name);
+    const gateId = `${Date.now()}-${Math.random()}`;
+    panel.dataset.workspaceStyleGateId = gateId;
+    const loadStyles = options.forceRetry === true
+        ? styleLoader?.ensureWorkspaceStyles?.(name)
+        : styleLoader?.whenWorkspaceStylesLoaded?.(name) || styleLoader?.ensureWorkspaceStyles?.(name);
+    Promise.resolve(loadStyles).then(() => {
+        if (panel.dataset.workspaceStyleGateId !== gateId) return;
+        clearWorkspaceStyleGate(panel);
+    }).catch(error => {
+        if (panel.dataset.workspaceStyleGateId !== gateId) return;
+        console.warn(`工作区 ${name} 样式加载失败，已保留加载页：`, error);
+        renderWorkspaceStyleGate(gate, name, error);
+    });
+    return showMainWorkspace(name);
+}
+
+function prewarmAutomationWorkspaces() {
+    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
+    const templateLoader = window.Pivot.moduleApi?.('workspaces.templateLoader');
+    styleLoader?.preloadWorkspaceStyles?.('agent')?.catch?.(() => {});
+    AUTOMATION_WORKSPACES.forEach(name => templateLoader?.preloadWorkspaceMarkup?.(name)?.catch?.(() => {}));
+}
+
+function scheduleAutomationWorkspacePrewarm() {
+    if (automationWorkspacePrewarmScheduled) return;
+    automationWorkspacePrewarmScheduled = true;
+    const run = () => {
+        automationWorkspacePrewarmScheduled = false;
+        prewarmAutomationWorkspaces();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 1500 });
+    } else {
+        setTimeout(run, 700);
+    }
+}
+
+function isAutomationWorkspaceTrigger(target) {
+    const trigger = target?.closest?.('[data-personal-action], [data-workspace-view], [data-automation-section], [data-automation-jump]');
+    if (!trigger) return false;
+    return trigger.dataset.personalAction === 'open-automation'
+        || trigger.dataset.personalAction === 'open-goals'
+        || trigger.dataset.personalAction === 'open-completed-tasks'
+        || trigger.dataset.personalAction === 'open-inbox'
+        || trigger.dataset.workspaceView === 'automation'
+        || Boolean(trigger.dataset.automationSection)
+        || trigger.dataset.automationJump === 'workbench';
+}
+
+document.addEventListener('pointerover', event => {
+    if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
+}, { passive: true });
+document.addEventListener('focusin', event => {
+    if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
+});
+document.addEventListener('pivot:app-shown', scheduleAutomationWorkspacePrewarm);
 
 async function ensureWorkspaceScripts(name) {
     const ensureMarkup = window.Pivot.moduleApi?.('workspaces.templateLoader')?.ensureWorkspaceMarkup;
     if (typeof ensureMarkup !== 'function') throw new Error('工作区模板加载器尚未就绪');
-    // 样式资源不可成为功能入口的单点阻塞：在桌面端升级、代理延迟或缓存处于
-    // 短暂不一致时，仍先挂载模板与交互脚本，样式到达后由浏览器自动应用。
-    // 否则一个 CSS link 的超时会让整个工作区表现为“页面可见但无法点击”。
-    const ensureStyles = window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles;
-    if (typeof ensureStyles === 'function') {
-        ensureStyles(name).catch(error => {
+    // 样式资源不可成为功能入口的单点阻塞：首帧只给它一个短暂就绪窗口，
+    // 代理、缓存或升级短暂不一致时仍会按时挂载模板与交互脚本。
+    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
+    let stylesReady = Promise.resolve(false);
+    if (typeof styleLoader?.waitForWorkspaceStyles === 'function') {
+        stylesReady = styleLoader.waitForWorkspaceStyles(name).then(loaded => {
+            if (!loaded) console.warn(`工作区 ${name} 样式未在首帧窗口内就绪，已继续挂载功能入口。`);
+            return loaded;
+        });
+    } else if (typeof styleLoader?.ensureWorkspaceStyles === 'function') {
+        stylesReady = styleLoader.ensureWorkspaceStyles(name).then(() => true).catch(error => {
             console.warn(`工作区 ${name} 样式加载失败，已保持功能可用：`, error);
+            return false;
         });
     } else {
         console.warn(`工作区 ${name} 样式加载器未就绪，已继续挂载功能入口。`);
@@ -755,7 +894,8 @@ async function ensureWorkspaceScripts(name) {
                 throw error;
             });
     }
-    return workspaceLoadPromises[scriptGroup];
+    await workspaceLoadPromises[scriptGroup];
+    await stylesReady;
 }
 
 window.Pivot.legacy.ensureWorkspaceScripts = ensureWorkspaceScripts;
@@ -834,11 +974,7 @@ function showMainWorkspace(view = 'personal') {
     }
     const chatContainer = document.querySelector('.chat-container');
     const isFullWorkspace = target !== 'chat';
-    const viewMap = {
-        personal: 'personal-workbench-modal', chat: 'chat-workspace-view', apps: 'apps-workbench-modal',
-        agent: 'agent-workbench-modal', 'agent-dag': 'agent-dag-workbench-modal', knowledge: 'knowledge-workbench-modal',
-        mcp: 'mcp-workbench-modal', manual: 'manual-workbench-modal', print: 'print-workbench-modal', settings: 'admin-container'
-    };
+    const viewMap = WORKSPACE_PANEL_IDS;
     const targetPanel = document.getElementById(viewMap[target]);
     const lazyOpener = LAZY_WORKSPACE_OPENERS[target];
     if (isFullWorkspace && lazyOpener && !targetPanel) {
@@ -921,6 +1057,8 @@ window.Pivot?.exposeModule?.('workspaces.navigation', {
     openKnowledgeWorkbench: openKnowledgeWorkbenchEntrypoint,
     openMcpWorkbench: openMcpWorkbenchEntrypoint,
     openAdminPanel: openAdminPanelEntrypoint,
+    showWorkspaceWithStyleGate,
+    prewarmAutomationWorkspaces,
     openManualWorkbench: () => showMainWorkspace('manual'),
     closeManualWorkbench: () => returnFromWorkspace()
 });

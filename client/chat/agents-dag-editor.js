@@ -24,7 +24,7 @@
  *   - CSP 兼容：所有事件都用 addEventListener，无内联 onclick
  *   - 多次 mount 同一容器幂等：先 destroy 旧实例
  */
-/* global createDagIcon, placeNewNode */
+/* global createDagIcon, placeNewNode, clampDagCoordinate */
 (function () {
 if (window.Pivot.legacy.PivotDagEditor) return;
 
@@ -141,8 +141,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
 
         const updateMinimap = () => {
             if (!minimap) return;
-            const { width, height } = contentBounds();
-            minimap.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            const bounds = contentBounds();
+            minimap.svg.setAttribute('viewBox', `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`);
             minimap.nodesLayer.replaceChildren();
             spec.nodes.forEach(node => {
                 const rect = makeSvgEl('rect', {
@@ -160,8 +160,9 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 minimap.nodesLayer.appendChild(rect);
             });
             // 视口框：viewState 对应内容坐标系下的矩形
-            const vbWidth = width / viewState.scale;
-            const vbHeight = height / viewState.scale;
+            const viewBox = root.viewBox.baseVal;
+            const vbWidth = viewBox.width || bounds.width / viewState.scale;
+            const vbHeight = viewBox.height || bounds.height / viewState.scale;
             minimap.viewport.setAttribute('x', viewState.x);
             minimap.viewport.setAttribute('y', viewState.y);
             minimap.viewport.setAttribute('width', vbWidth);
@@ -171,13 +172,14 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         // 点击小地图：把视口中心移到点击位置
         const minimapClickHandler = (event) => {
             const rect = minimap.svg.getBoundingClientRect();
-            const { width, height } = contentBounds();
-            const contentX = (event.clientX - rect.left) * width / rect.width;
-            const contentY = (event.clientY - rect.top) * height / rect.height;
-            const vbWidth = width / viewState.scale;
-            const vbHeight = height / viewState.scale;
-            viewState.x = Math.max(0, contentX - vbWidth / 2);
-            viewState.y = Math.max(0, contentY - vbHeight / 2);
+            const bounds = contentBounds();
+            const contentX = bounds.minX + (event.clientX - rect.left) * bounds.width / Math.max(rect.width, 1);
+            const contentY = bounds.minY + (event.clientY - rect.top) * bounds.height / Math.max(rect.height, 1);
+            const viewBox = root.viewBox.baseVal;
+            const vbWidth = viewBox.width || bounds.width / viewState.scale;
+            const vbHeight = viewBox.height || bounds.height / viewState.scale;
+            viewState.x = contentX - vbWidth / 2;
+            viewState.y = contentY - vbHeight / 2;
             updateViewBox();
         };
         minimap.svg.addEventListener('click', minimapClickHandler);
@@ -214,9 +216,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         // 计算内容包围盒；保证空 DAG 也有合理底盘
         const contentBounds = () => {
             const bounds = nodeBounds();
-            const w = Math.max(MIN_CONTENT_WIDTH, bounds.maxX + PADDING);
-            const h = Math.max(MIN_CONTENT_HEIGHT, bounds.maxY + PADDING);
-            return { width: w, height: h };
+            const minX = Math.min(0, bounds.minX - PADDING);
+            const minY = Math.min(0, bounds.minY - PADDING);
+            const maxX = Math.max(MIN_CONTENT_WIDTH, bounds.maxX + PADDING);
+            const maxY = Math.max(MIN_CONTENT_HEIGHT, bounds.maxY + PADDING);
+            return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
         };
 
         const updateViewBox = ({ refreshCulling = false } = {}) => {
@@ -231,6 +235,65 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             root.style.minHeight = '100%';
             updateMinimap();
             if (refreshCulling) refreshDagViewport?.();
+        };
+
+        const pointFromClient = (clientX, clientY) => {
+            const matrix = root.getScreenCTM?.();
+            if (matrix?.inverse && typeof root.createSVGPoint === 'function') {
+                const point = root.createSVGPoint();
+                point.x = clientX;
+                point.y = clientY;
+                const transformed = point.matrixTransform(matrix.inverse());
+                return { x: transformed.x, y: transformed.y };
+            }
+            const rect = root.getBoundingClientRect();
+            const viewBox = root.viewBox.baseVal;
+            return {
+                x: viewBox.x + (clientX - rect.left) * viewBox.width / Math.max(rect.width, 1),
+                y: viewBox.y + (clientY - rect.top) * viewBox.height / Math.max(rect.height, 1)
+            };
+        };
+
+        const zoomAt = (event, factor) => {
+            const nextScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, viewState.scale * factor));
+            if (nextScale === viewState.scale) return false;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = Number.isFinite(Number(event?.clientX)) ? Number(event.clientX) : rect.left + rect.width / 2;
+            const clientY = Number.isFinite(Number(event?.clientY)) ? Number(event.clientY) : rect.top + rect.height / 2;
+            const anchor = pointFromClient(clientX, clientY);
+            const containerW = rect.width > 50 ? rect.width : MIN_CONTENT_WIDTH;
+            const containerH = rect.height > 50 ? rect.height : MIN_CONTENT_HEIGHT;
+            const nextWidth = containerW / nextScale;
+            const nextHeight = containerH / nextScale;
+            viewState.scale = nextScale;
+            viewState.x = anchor.x - (clientX - rect.left) / Math.max(rect.width, 1) * nextWidth;
+            viewState.y = anchor.y - (clientY - rect.top) / Math.max(rect.height, 1) * nextHeight;
+            updateViewBox({ refreshCulling: true });
+            return true;
+        };
+
+        // “初始视图”恢复默认缩放，但不应把视口强行拉回逻辑原点。
+        // 节点可能位于负坐标，或由适配视图带到远离 (0, 0) 的位置；直接归零会让节点消失。
+        const resetView = () => {
+            viewState.scale = DEFAULT_VIEW_SCALE;
+            if (!spec.nodes || !spec.nodes.length) {
+                viewState.x = 0;
+                viewState.y = 0;
+                updateViewBox({ refreshCulling: true });
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const containerW = rect.width > 50 ? rect.width : MIN_CONTENT_WIDTH;
+            const containerH = rect.height > 50 ? rect.height : MIN_CONTENT_HEIGHT;
+            const vbW = containerW / viewState.scale;
+            const vbH = containerH / viewState.scale;
+            const bounds = nodeBounds();
+
+            // 保持默认缩放，同时让节点包围盒中心落在当前视口中心。
+            viewState.x = bounds.minX + bounds.width / 2 - vbW / 2;
+            viewState.y = bounds.minY + bounds.height / 2 - vbH / 2;
+            updateViewBox({ refreshCulling: true });
         };
 
         // 重置缩放/平移到完整内容可见
@@ -268,6 +331,34 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
 
             updateViewBox();
         };
+
+        const viewportControls = (() => {
+            const controls = document.createElement('div');
+            controls.className = 'pivot-dag-viewport-controls';
+            controls.setAttribute('role', 'group');
+            controls.setAttribute('aria-label', '画布视图控制');
+            const makeControl = (label, title, action, className = '') => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = `pivot-dag-viewport-btn${className ? ` ${className}` : ''}`;
+                button.textContent = label;
+                button.title = title;
+                button.setAttribute('aria-label', title);
+                button.addEventListener('click', action);
+                controls.appendChild(button);
+            };
+            makeControl('−', '缩小画布', () => zoomAt(null, 0.85));
+            makeControl('+', '放大画布', () => zoomAt(null, 1.18));
+            makeControl('适配', '适配全部节点到当前画布', fitToContent, 'is-fit');
+            makeControl('初始', '默认缩放并将现有节点居中', resetView, 'is-reset');
+            canvas.appendChild(controls);
+            return controls;
+        })();
+
+        const viewportHint = document.createElement('div');
+        viewportHint.className = 'pivot-dag-viewport-hint';
+        viewportHint.textContent = '拖拽空白处平移 · 滚轮缩放 · 空格 + 拖拽抓手移动';
+        canvas.appendChild(viewportHint);
 
         const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
 
@@ -608,6 +699,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             recordHistory();
             autoLayout(spec.nodes);
             render();
+            fitToContent();
             flushOut();
         };
 
@@ -667,6 +759,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             onWheel,
             onDoubleClick,
             onKeyDown,
+            onKeyUp,
+            onWindowBlur,
             closeToolbarDropdowns
         } = createDagInteractionController({
             root,
@@ -688,6 +782,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             clearSelection,
             contentBounds,
             updateViewBox,
+            zoomAt,
             render: () => render(),
             renderEdges: () => renderEdges(),
             flushOut: () => flushOut(),
@@ -702,12 +797,14 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             addNodeAt: point => {
                 addNode();
                 const node = spec.nodes.find(item => item.id === selectedId);
-                if (node && point) { node._x = Math.max(0, point.x - NODE_WIDTH / 2); node._y = Math.max(0, point.y - NODE_HEIGHT / 2); render(); flushOut(); }
+                if (node && point) { node._x = clampDagCoordinate(point.x - NODE_WIDTH / 2); node._y = clampDagCoordinate(point.y - NODE_HEIGHT / 2); render(); flushOut(); }
             },
             wouldCreateCycle: (fromId, targetId) => wouldCreateCycle(fromId, targetId)
         });
         document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
         document.addEventListener('pointerdown', closeToolbarDropdowns);
+        window.addEventListener('blur', onWindowBlur);
 
         // pointermove 每帧可触发数十次，用 rafThrottle 合并到每帧最多一次，降低拖拽时的重复计算与重排
         const rafThrottle = window.Pivot?.rafThrottle;
@@ -733,6 +830,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             pasteSelection,
             duplicateSelection,
             fitToContent,
+            resetView,
             openStatsChartWizard,
             resetLayout,
             showValidationResult,
@@ -756,7 +854,9 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
 
         const destroy = () => {
             document.removeEventListener('keydown', onKeyDown);
+            document.removeEventListener('keyup', onKeyUp);
             document.removeEventListener('pointerdown', closeToolbarDropdowns);
+            window.removeEventListener('blur', onWindowBlur);
             root.removeEventListener('pointerdown', onPointerDown);
             root.removeEventListener('pointermove', throttledPointerMove);
             root.removeEventListener('pointerup', onPointerUp);
@@ -769,6 +869,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             if (textarea) textarea.removeEventListener('input', onTextareaInput);
             emptyHintEl?.remove();
             emptyHintEl = null;
+            viewportControls?.remove();
+            viewportHint?.remove();
             canvas.replaceChildren();
             if (minimap?.wrap?.parentNode === canvas) {
                 // canvas.replaceChildren 已清空
@@ -812,9 +914,11 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             },
             refresh: () => {
                 render();
-                fitToContent();
             },
             fitToContent: () => fitToContent(),
+            resetView: () => resetView(),
+            zoomIn: () => zoomAt(null, 1.18),
+            zoomOut: () => zoomAt(null, 0.85),
             // 暴露校验方法用于保存/发布前门禁
             validate: () => validateWorkflow()
         };

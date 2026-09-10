@@ -1,9 +1,24 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.renderShellReady) return;
-    with (ns) {
+
+    const {
+        FILE_ACCEPT,
+        SUPPORTED_FORMATS,
+        state,
+        esc,
+        canManage,
+        canImportDocuments
+    } = ns;
+
+    const bindEvents = (...args) => ns.bindEvents?.(...args);
+    const renderDocuments = (...args) => ns.renderDocuments?.(...args);
+    const renderDetail = (...args) => ns.renderDetail?.(...args);
+    const renderSearchResults = (...args) => ns.renderSearchResults?.(...args);
+    const renderSavedSearches = (...args) => ns.renderSavedSearches?.(...args);
+    const renderAiAnswer = (...args) => ns.renderAiAnswer?.(...args);
+    const syncImportHint = (...args) => ns.syncImportHint?.(...args);
             function ensureView() {
                         let view = document.getElementById('regulations-view');
                         if (view) return view;
@@ -118,27 +133,60 @@
                             </section>
                             <section id="regulations-ai-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-ai-title">
                                 <div class="workspace-modal regulations-admin-dialog regulations-ai-dialog">
-                                    <div class="workspace-modal-header">
-                                        <div>
-                                            <h3 id="regulations-ai-title">AI问答</h3>
-                                            <p>基于法规库检索命中的条文回答，并标注依据。</p>
+                                    <div class="workspace-modal-header regulations-ai-modal-header">
+                                        <div class="regulations-ai-header-main">
+                                            <span class="regulations-ai-header-icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                                                </svg>
+                                            </span>
+                                            <div>
+                                                <div class="regulations-ai-title-row">
+                                                    <h3 id="regulations-ai-title">法规 AI 智能问答</h3>
+                                                    <span class="regulations-ai-header-badge">条文依据检索</span>
+                                                </div>
+                                                <p>基于法规库检索匹配的条文回答，并标注具体条款出处与依据。</p>
+                                            </div>
                                         </div>
-                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-ai>关闭</button>
+                                        <div class="regulations-ai-header-aside">
+                                            <label class="regulations-ai-model-field" for="regulations-ai-model">
+                                                <span>模型</span>
+                                                <select id="regulations-ai-model" class="form-input regulations-ai-model-select" data-pivot-app-model="regulations" aria-label="选择法规 AI 问答模型" disabled>
+                                                    <option value="">加载模型中…</option>
+                                                </select>
+                                            </label>
+                                            <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-ai>关闭</button>
+                                        </div>
                                     </div>
                                     <div class="workspace-modal-body regulations-ai-modal-body">
-                                        <label class="regulations-ai-model-field" for="regulations-ai-model">
-                                            <span>模型</span>
-                                            <select id="regulations-ai-model" class="form-input" aria-label="选择法规 AI 问答模型" disabled>
-                                                <option value="">加载模型中…</option>
-                                            </select>
-                                        </label>
-                                        <textarea id="regulations-ai-question" class="form-input regulations-ai-question-input" placeholder="输入问题，例如：该制度对审批流程有哪些要求？"></textarea>
-                                        <div class="regulations-ai-actions">
-                                            <button id="regulations-ai-btn" class="btn-primary" type="button">生成回答</button>
-                                            <button id="regulations-ai-clear-btn" class="btn-secondary" type="button">清空</button>
-                                        </div>
-                                        <div id="regulations-ai-answer" class="regulations-ai-answer"></div>
+                                        <div id="regulations-ai-answer" class="regulations-ai-answer" role="log" aria-live="polite"></div>
                                         <div id="regulations-ai-search-results" class="regulations-search-results regulations-ai-search-results hidden" data-regulations-search-results></div>
+                                        <div class="regulations-ai-composer">
+                                            <div class="regulations-ai-input-card">
+                                                <textarea id="regulations-ai-question" class="form-input regulations-ai-question-input" rows="2" placeholder="输入您关注的问题，例如：该制度对审批流程有哪些要求？"></textarea>
+                                                <div class="regulations-ai-composer-footer">
+                                                    <div class="regulations-ai-composer-tip">
+                                                        <span>快捷键 <code>Ctrl+回车</code> 发送</span>
+                                                    </div>
+                                                    <div class="regulations-ai-actions">
+                                                        <button id="regulations-ai-clear-btn" class="btn-secondary regulations-ai-clear-btn" type="button" title="清空历史问答与输入">
+                                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                                <polyline points="3 6 5 6 21 6"></polyline>
+                                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                                            </svg>
+                                                            <span>清空</span>
+                                                        </button>
+                                                        <button id="regulations-ai-btn" class="btn-primary regulations-ai-submit-btn" type="button">
+                                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                                            </svg>
+                                                            <span>生成回答</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </section>
@@ -279,5 +327,4 @@
             renderAdminPanel,
             renderShellReady: true
         });
-    }
 })();

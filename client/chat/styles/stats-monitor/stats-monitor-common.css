@@ -82,16 +82,25 @@
 #monitor-rag-storage-list .monitor-row span {
     width: auto;
     flex: 0 0 auto;
-    overflow: visible;
-    text-overflow: clip;
+    max-width: 48%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 #monitor-resource-list .monitor-row > strong,
-#monitor-resource-list .monitor-row > div,
 #monitor-health-maintenance-list .monitor-row > strong,
 #monitor-rag-storage-list .monitor-row > strong {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
     text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#monitor-resource-list .monitor-row > div,
+#monitor-health-maintenance-list .monitor-row > div,
+#monitor-rag-storage-list .monitor-row > div {
+    min-width: 0;
 }
 .monitor-memory-cell {
     flex: 1;

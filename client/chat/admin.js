@@ -109,6 +109,7 @@ let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachment
 const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
 const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'announcements']);
+const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
 
 function normalizeUsageSubtab(subtab) {
@@ -193,6 +194,9 @@ function normalizeSettingsTab(tab) {
     if (LEGACY_SETTINGS_TAB_ALIASES.has(requested)) {
         target = 'usage';
         persistUsageSubtab(requested);
+    }
+    if (SUPER_ADMIN_ONLY_SETTINGS_TABS.has(target) && !isSuperAdminUser()) {
+        target = getDefaultSettingsTab();
     }
     if (ADMIN_ONLY_SETTINGS_TABS.has(target) && !isAdminUser()) target = 'models';
     return target;
@@ -299,11 +303,11 @@ async function openAdminPanel(options = {}) {
         : '管理你的模型、附件、用量审计、API 接入与账号安全。';
 
     if (isAdmin) {
-        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+        document.querySelectorAll('.admin-only:not(.admin-tab-content)').forEach(el => el.classList.remove('hidden'));
     } else {
-        document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+        document.querySelectorAll('.admin-only:not(.admin-tab-content)').forEach(el => el.classList.add('hidden'));
     }
-    document.querySelectorAll('.super-admin-only').forEach(el => {
+    document.querySelectorAll('.super-admin-only:not(.admin-tab-content)').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
 
@@ -382,7 +386,9 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
     });
     document.querySelectorAll('.admin-tab-content').forEach(panel => {
         panel.setAttribute('role', 'tabpanel');
-        panel.setAttribute('aria-hidden', panel.id !== `tab-content-${tab}` ? 'true' : 'false');
+        const isActive = panel.id === `tab-content-${tab}`;
+        panel.classList.toggle('hidden', !isActive);
+        panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
     });
     document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
 

@@ -77,6 +77,7 @@ window.Pivot.legacy.showApp = (options = {}) => {
     document.getElementById('auth-container').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     document.body?.classList.remove('auth-active');
+    document.dispatchEvent(new window.CustomEvent('pivot:app-shown'));
     const restoreWorkspace = options.restoreWorkspace !== false;
     if (restoreWorkspace && window.Pivot.legacy.restoreMainWorkspaceAfterLogin) {
         Promise.resolve(window.Pivot.legacy.restoreMainWorkspaceAfterLogin()).catch(err => {
@@ -114,7 +115,7 @@ window.Pivot.legacy.showApp = (options = {}) => {
     }
 
     if (isAdminRole) {
-        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+        document.querySelectorAll('.admin-only:not(.admin-tab-content)').forEach(el => el.classList.remove('hidden'));
         const btn = document.getElementById('admin-panel-btn');
         if (btn) btn.classList.remove('hidden');
     }
@@ -260,7 +261,8 @@ function formatKeyExpiry(expiresAt) {
 
 window.Pivot.legacy.loadApiKeys = async function() {
     try {
-        document.querySelectorAll('.super-admin-only').forEach(el => {
+        const keysTab = document.getElementById('tab-content-keys');
+        keysTab?.querySelectorAll('.super-admin-only').forEach(el => {
             el.classList.toggle('hidden', !isSuperAdminUser());
         });
         const res = await apiFetch(`${API_BASE}/auth/keys`);

@@ -9,17 +9,28 @@ const ragActionLocks = new Set();
 const knowledgeModalFocus = new Map();
 const ragControlLoadErrors = new Set();
 let ragDocsLoadSequence = 0;
-function setKnowledgeWorkbenchState(state = '', message = '', { _retry = false } = {}) {
+function setKnowledgeWorkbenchState(state = '', message = '', { retry = false } = {}) {
     const el = document.getElementById('rag-workbench-state');
     if (el) {
         el.dataset.state = state || '';
-        el.hidden = true;
         PivotSafeHtml.setHtml(el, '');
+        if (message) {
+            const copy = document.createElement('span');
+            copy.textContent = message;
+            el.appendChild(copy);
+            if (retry) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'btn-secondary';
+                button.textContent = '重试';
+                button.addEventListener('click', () => window.Pivot.legacy.loadKnowledgeDocs?.(ragDocsPage));
+                el.appendChild(button);
+            }
+        }
+        el.hidden = !message;
     }
     if (message && state === 'error') {
         showToast(message, 'error');
-    } else if (message && state === 'partial') {
-        showToast(message, 'warning');
     }
 }
 function syncRagSelectAllState() {
@@ -714,9 +725,12 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
     ragDocsPage = Math.max(Number(page) || 1, 1);
     setKnowledgeWorkbenchState('loading', '正在加载知识库…');
     try {
-        await window.Pivot.legacy.loadKnowledgeCollections?.();
-        await window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.();
-        if (requestSequence !== ragDocsLoadSequence) return;
+        // 专题与标签控件在自身链路中保持依赖顺序，但不再阻塞文档表格首屏。
+        const controlsPromise = Promise.resolve(window.Pivot.legacy.loadKnowledgeCollections?.())
+            .then(() => window.Pivot.legacy.refreshRagTagControlsForSelectedCollections?.())
+            .catch(error => {
+            console.warn('知识库筛选控件加载失败，先显示文档列表：', error);
+        });
         const activeCollectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
         const activeTag = normalizeRagTag(document.getElementById('rag-tag-filter')?.value);
         const collectionQuery = activeCollectionId ? `&collectionId=${encodeURIComponent(activeCollectionId)}` : '';
@@ -725,12 +739,8 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         if (activeCollectionId) summaryQuery.set('collectionId', activeCollectionId);
         if (activeTag) summaryQuery.set('tag', activeTag);
         const summaryUrl = `${API_BASE}/rag/summary${summaryQuery.toString() ? `?${summaryQuery.toString()}` : ''}`;
-        const [docsResult, summaryResult, qualityResult, graphSummaryResult] = await Promise.allSettled([
-            fetchKnowledgeJson(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}${collectionQuery}${tagQuery}`, { headers: authHeaders() }),
-            fetchKnowledgeJson(summaryUrl, { headers: authHeaders() }),
-            fetchKnowledgeJson(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
-            fetchKnowledgeJson(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
-        ]);
+        const docsPromise = fetchKnowledgeJson(`${API_BASE}/rag/docs?page=${ragDocsPage}&limit=${RAG_DOCS_PAGE_SIZE}${collectionQuery}${tagQuery}`, { headers: authHeaders() });
+        const [docsResult] = await Promise.allSettled([docsPromise]);
         if (requestSequence !== ragDocsLoadSequence) return;
         if (docsResult.status !== 'fulfilled') throw docsResult.reason || new Error('文档列表加载失败');
         const payload = docsResult.value || {};
@@ -740,11 +750,6 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         const total = Array.isArray(payload) ? docs.length : Number(payload.total || docs.length);
         const pageSize = Array.isArray(payload) ? RAG_DOCS_PAGE_SIZE : Number(payload.limit || RAG_DOCS_PAGE_SIZE);
         const pageNo = Array.isArray(payload) ? ragDocsPage : Number(payload.page || ragDocsPage);
-        const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
-        const quality = qualityResult.status === 'fulfilled' ? qualityResult.value : null;
-        const graphSummary = graphSummaryResult.status === 'fulfilled' ? graphSummaryResult.value : null;
-        renderRagSummary(summary, quality, graphSummary);
-        renderRagQualityReport(quality);
         updateRagDebugSamples(docs);
 
         const body = document.getElementById('rag-docs-body');
@@ -778,6 +783,22 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         syncRagSelectAllState();
         renderRagDocsPagination(total, pageNo, pageSize);
         scheduleRagStatusRefresh(docs);
+        // 文档数据到达后立即结束主表的等待态，统计与图谱继续在后台完成。
+        setKnowledgeWorkbenchState('loading', '文档已加载，正在补充统计信息…');
+
+        const secondaryPromise = Promise.allSettled([
+            fetchKnowledgeJson(summaryUrl, { headers: authHeaders() }),
+            fetchKnowledgeJson(`${API_BASE}/rag/quality-report`, { headers: authHeaders() }),
+            fetchKnowledgeJson(`${API_BASE}/rag/graph/summary`, { headers: authHeaders() })
+        ]);
+        const [summaryResult, qualityResult, graphSummaryResult] = await secondaryPromise;
+        await controlsPromise;
+        if (requestSequence !== ragDocsLoadSequence) return;
+        const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+        const quality = qualityResult.status === 'fulfilled' ? qualityResult.value : null;
+        const graphSummary = graphSummaryResult.status === 'fulfilled' ? graphSummaryResult.value : null;
+        renderRagSummary(summary, quality, graphSummary);
+        renderRagQualityReport(quality);
         const secondaryFailures = [summaryResult, qualityResult, graphSummaryResult]
             .filter(result => result.status !== 'fulfilled').length;
         const controlFailures = ragControlLoadErrors.size;
@@ -812,12 +833,17 @@ async function openKnowledgeWorkbench() {
         if (contentMenu) contentMenu.appendChild(button);
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
-    try {
-        await window.Pivot.legacy.ensureAdminSettingsScript?.(); window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles?.('settings')?.catch?.(() => {});
-    } catch (e) {
-        console.error('加载知识库配置脚本失败', e);
-        showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
-    }
+    const settingsPromise = Promise.resolve()
+        .then(() => window.Pivot.legacy.ensureAdminSettingsScript?.())
+        .then(() => {
+            window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles?.('settings')?.catch?.(() => {});
+            return window.Pivot.legacy.loadSettings?.() || Promise.resolve();
+        })
+        .then(() => window.Pivot.legacy.bindEmbeddingModalEvents?.())
+        .catch(e => {
+            console.error('加载知识库配置脚本失败', e);
+            showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
+        });
     ensureKnowledgeUploadModal();
     panel.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !isAdminUser());
@@ -825,10 +851,12 @@ async function openKnowledgeWorkbench() {
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
-    window.Pivot.legacy.bindEmbeddingModalEvents?.();
     window.Pivot.legacy.bindRagDebugModalEvents?.();
-    await window.Pivot.legacy.loadSettings?.();
-    await window.Pivot.legacy.loadKnowledgeDocs?.();
+    // 配置脚本、设置接口和文档接口同时开始；文档表无需等待配置资源即可绘制。
+    await Promise.allSettled([
+        settingsPromise,
+        window.Pivot.legacy.loadKnowledgeDocs?.()
+    ]);
     const restoreGraphDocId = getKnowledgeGraphRestoreDocId();
     if (restoreGraphDocId !== null) {
         await window.Pivot.legacy.openKnowledgeGraph?.(restoreGraphDocId || null);

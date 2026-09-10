@@ -2,7 +2,7 @@
 /* DAG 小地图与视口预览样式。 */
 .pivot-dag-minimap {
     position: absolute;
-    right: 8px;
+    left: 8px;
     bottom: 8px;
     width: 140px;
     height: 90px;
@@ -13,6 +13,13 @@
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
     z-index: 2;
     pointer-events: auto;
+    transition: width 0.16s ease, height 0.16s ease, box-shadow 0.16s ease;
+}
+
+.pivot-dag-minimap:hover {
+    width: 180px;
+    height: 116px;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16);
 }
 
 .pivot-dag-minimap-svg {
@@ -24,10 +31,105 @@
 
 .pivot-dag-minimap-viewport {
     pointer-events: none;
+    vector-effect: non-scaling-stroke;
+}
+
+.pivot-dag-viewport-controls {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.1);
+}
+
+.pivot-dag-viewport-btn {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: #334155;
+    font-size: 0.72rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.pivot-dag-viewport-btn:hover,
+.pivot-dag-viewport-btn:focus-visible {
+    border-color: rgba(16, 163, 127, 0.28);
+    background: rgba(236, 253, 245, 0.9);
+    color: #047857;
+    outline: none;
+}
+
+.pivot-dag-viewport-btn.is-fit,
+.pivot-dag-viewport-btn.is-reset {
+    min-width: 38px;
+    font-size: 0.68rem;
+}
+
+.pivot-dag-viewport-hint {
+    position: absolute;
+    left: 160px;
+    bottom: 10px;
+    z-index: 2;
+    max-width: min(420px, calc(100% - 180px));
+    padding: 5px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.84);
+    color: #64748b;
+    font-size: 0.66rem;
+    font-weight: 650;
+    line-height: 1.35;
+    pointer-events: none;
+    user-select: none;
 }
 
 body.dark-mode .pivot-dag-minimap,
 .dark-mode .pivot-dag-minimap {
     background: rgba(15, 23, 42, 0.88);
     border-color: rgba(148, 163, 184, 0.4);
+}
+
+body.dark-mode .pivot-dag-viewport-controls,
+.dark-mode .pivot-dag-viewport-controls {
+    border-color: rgba(148, 163, 184, 0.34);
+    background: rgba(15, 23, 42, 0.94);
+}
+
+body.dark-mode .pivot-dag-viewport-btn,
+.dark-mode .pivot-dag-viewport-btn {
+    color: #cbd5e1;
+}
+
+body.dark-mode .pivot-dag-viewport-btn:hover,
+body.dark-mode .pivot-dag-viewport-btn:focus-visible,
+.dark-mode .pivot-dag-viewport-btn:hover,
+.dark-mode .pivot-dag-viewport-btn:focus-visible {
+    border-color: rgba(45, 212, 191, 0.34);
+    background: rgba(20, 184, 166, 0.16);
+    color: #99f6e4;
+}
+
+body.dark-mode .pivot-dag-viewport-hint,
+.dark-mode .pivot-dag-viewport-hint {
+    border-color: rgba(148, 163, 184, 0.28);
+    background: rgba(15, 23, 42, 0.84);
+    color: #94a3b8;
+}
+
+@media (max-width: 760px) {
+    .pivot-dag-viewport-controls { left: 6px; top: 6px; }
+    .pivot-dag-viewport-hint { display: none; }
+    .pivot-dag-minimap { width: 112px; height: 72px; left: 6px; bottom: 6px; }
+    .pivot-dag-minimap:hover { width: 132px; height: 86px; }
 }

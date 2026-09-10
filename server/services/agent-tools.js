@@ -779,7 +779,7 @@ async function executeAgentBrowser(input = {}, context = {}) {
     });
     try {
         const page = await browserContext.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(Number(input.timeoutMs) || 30000, 120000) });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(Number(input.timeoutMs) || 60000, 180000) });
         let action = 'inspect';
         let targetResult = null;
         if (String(input.action || 'inspect') === 'click') {

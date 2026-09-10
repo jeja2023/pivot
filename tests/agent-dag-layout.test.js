@@ -177,6 +177,24 @@ test('normalizeDagSpec preserves layout and ignores legacy primary LLM metadata'
     assert.deepEqual(normalized.nodes.map(node => node.id), ['source', 'llm_first', 'llm_final']);
 });
 
+test('normalizeDagSpec preserves negative coordinates for the infinite workflow canvas', () => {
+    const normalized = normalizeDagSpec({
+        layout: {
+            source: { x: -320.5, y: -96.25 },
+            next: { x: 180, y: 64 }
+        },
+        nodes: [
+            { id: 'source', tool: 'workflow.input' },
+            { id: 'next', tool: 'agent.llm', input: { model: 'model-a', prompt: '{{goal}}' } }
+        ]
+    });
+
+    assert.deepEqual(normalized.layout, {
+        source: { x: -320.5, y: -96.25 },
+        next: { x: 180, y: 64 }
+    });
+});
+
 test('DAG core migrates legacy coordinates and keeps layout separate from nodes', () => {
     const core = loadDagCore();
     const internal = core.ensureDefaults({
@@ -202,6 +220,17 @@ test('DAG core migrates legacy coordinates and keeps layout separate from nodes'
     assert.equal(Object.hasOwn(serialized, 'primaryLlmNodeId'), false);
     assert.equal(Object.hasOwn(serialized.nodes[0], '_x'), false);
     assert.equal(Object.hasOwn(serialized.nodes[0], '_y'), false);
+});
+
+test('DAG core retains negative node positions when serializing manual layouts', () => {
+    const core = loadDagCore();
+    const internal = core.ensureDefaults({
+        layout: { source: { x: -240, y: -120 } },
+        nodes: [{ id: 'source', tool: 'workflow.input', input: {}, dependsOn: [] }]
+    });
+
+    const serialized = JSON.parse(JSON.stringify(core.serialize(internal)));
+    assert.deepEqual(serialized.layout, { source: { x: -240, y: -120 } });
 });
 
 test('DAG core keeps a new workflow empty until the user adds a node', () => {
@@ -276,6 +305,32 @@ test('editor dependency rules are independent from canvas direction', () => {
     assert.doesNotMatch(interaction, /isForwardDependency/);
     assert.match(editor, /!wouldCreateCycle\(candidate\.id, node\?\.id\)/);
     assert.match(interaction, /ctx\.wouldCreateCycle\(connecting\.fromId, targetId\)/);
+    assert.match(interaction, /node\._x = clampDagCoordinate\(origin\.x \+ dx\)/);
+    assert.match(interaction, /node\._y = clampDagCoordinate\(origin\.y \+ dy\)/);
+    assert.match(interaction, /event\.button === 1 \|\| spacePressed/);
+    assert.match(interaction, /const onKeyUp = event =>/);
+    assert.match(interaction, /ctx\.zoomAt\(event, factor\)/);
+    assert.doesNotMatch(interaction, /const nextX = Math\.max\(0,/);
+});
+
+test('DAG editor supports infinite canvas coordinates and explicit view controls', () => {
+    const editor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    const core = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-core.js'), 'utf8');
+    const toolbar = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-toolbar.js'), 'utf8');
+    const minimap = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent', 'agent-dag-minimap.css'), 'utf8');
+
+    assert.match(core, /const DAG_COORDINATE_MIN = -100000/);
+    assert.match(core, /function clampDagCoordinate/);
+    assert.doesNotMatch(core, /x: Math\.max\(0, node\._x\)/);
+    assert.match(editor, /const minX = Math\.min\(0, bounds\.minX - PADDING\)/);
+    assert.match(editor, /const zoomAt = \(event, factor\) =>/);
+    assert.match(editor, /const resetView = \(\) =>/);
+    assert.match(editor, /bounds\.minX \+ bounds\.width \/ 2 - vbW \/ 2/);
+    assert.match(editor, /bounds\.minY \+ bounds\.height \/ 2 - vbH \/ 2/);
+    assert.match(editor, /pivot-dag-viewport-controls/);
+    assert.match(editor, /zoomIn: \(\) => zoomAt\(null, 1\.18\)/);
+    assert.match(toolbar, /makeButton\('初始视图'/);
+    assert.match(minimap, /\.pivot-dag-viewport-controls/);
 });
 
 test('visual SQL wizard styles are bundled with agent workspaces', () => {

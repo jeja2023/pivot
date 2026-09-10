@@ -39,10 +39,21 @@
                                 <div id="monitor-rag-latency-trend" class="monitor-rag-latency-trend"></div>
                             </div>
                             <div class="stat-card monitor-panel-card monitor-panel-observability">
-                                <h4>慢查询与异常告警</h4>
-                                <div class="observability-webhook-inline">
-                                    <input id="observability-webhook-url" class="form-input" placeholder="Webhook URL">
-                                    <button id="observability-webhook-save" class="btn-secondary" type="button">保存</button>
+                                <div class="monitor-panel-head">
+                                    <h4>慢查询与异常告警</h4>
+                                    <div class="observability-head-actions">
+                                        <span id="observability-webhook-status-badge" class="observability-status-badge is-empty" title="未配置 Webhook 告警">未配置推送</span>
+                                        <button type="button" class="btn-secondary btn-xs observability-toggle-btn" id="observability-toggle-btn" data-static-action="toggle-observability-webhook" title="配置 Webhook 推送地址">配置推送</button>
+                                    </div>
+                                </div>
+                                <div id="observability-webhook-panel" class="observability-webhook-drawer hidden">
+                                    <div class="observability-webhook-tip">
+                                        <span>慢 SQL、模型超时、RAG 延迟及熔断异常将自动推送至该地址（支持企业微信、飞书、钉钉机器人等）。留空保存可停用。</span>
+                                    </div>
+                                    <div class="observability-webhook-inline">
+                                        <input id="observability-webhook-url" class="form-input" placeholder="Webhook URL (如 https://qyapi.weixin.qq.com/...)" title="Webhook URL">
+                                        <button id="observability-webhook-save" class="btn-secondary" type="button">保存</button>
+                                    </div>
                                 </div>
                                 <div id="monitor-observability-list" class="monitor-list"></div>
                             </div>

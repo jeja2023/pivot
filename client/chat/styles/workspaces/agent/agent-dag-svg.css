@@ -11,6 +11,10 @@
     cursor: grab;
 }
 
+.pivot-dag-svg.is-pan-ready {
+    cursor: grab;
+}
+
 .pivot-dag-node {
     cursor: grab;
 }
@@ -146,6 +150,11 @@
     stroke: #94a3b8;
     stroke-width: 1.5;
     pointer-events: none;
+}
+
+.pivot-dag-svg.is-panning,
+.pivot-dag-svg.is-panning .pivot-dag-node {
+    cursor: grabbing;
 }
 
 .pivot-dag-edge-hit {

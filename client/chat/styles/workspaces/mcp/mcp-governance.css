@@ -259,19 +259,43 @@
 }
 
 .mcp-workbench-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    margin: 0 0 10px;
+    padding: 7px 10px;
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.9);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.mcp-workbench-state[hidden] {
     display: none !important;
 }
 
-.mcp-workbench-state.is-loading {
+.mcp-workbench-state.is-loading,
+.mcp-workbench-state[data-state="loading"] {
     border-color: rgba(59, 130, 246, 0.18);
     background: rgba(59, 130, 246, 0.1);
     color: #1d4ed8;
 }
 
-.mcp-workbench-state.is-error {
+.mcp-workbench-state.is-error,
+.mcp-workbench-state[data-state="error"] {
     border-color: rgba(220, 38, 38, 0.2);
     background: rgba(220, 38, 38, 0.1);
     color: #b91c1c;
+}
+
+.mcp-workbench-state.is-partial,
+.mcp-workbench-state[data-state="partial"] {
+    border-color: rgba(245, 158, 11, 0.24);
+    background: rgba(255, 251, 235, 0.9);
+    color: #92400e;
 }
 
 .mcp-workbench-state .btn-secondary {

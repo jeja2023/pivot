@@ -168,12 +168,8 @@ window.Pivot.legacy.bindAgentWorkbenchShortcuts = function() {
 };
 
 async function openAgentWorkbench(options = {}) {
-    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
-    if (typeof styleLoader?.whenWorkspaceStylesLoaded === 'function') {
-        const styleTimeout = new Promise(resolve => setTimeout(resolve, 2500));
-        await Promise.race([styleLoader.whenWorkspaceStylesLoaded('agent'), styleTimeout]).catch(() => {});
-    }
-    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('agent');
+    const navigation = window.Pivot.moduleApi('workspaces.navigation');
+    (navigation.showWorkspaceWithStyleGate || navigation.showMainWorkspace)?.('agent');
     let tab = options.tab || 'tasks';
     let subview = options.subview || '';
     if (tab === 'inbox') {

@@ -350,7 +350,8 @@ document.addEventListener('click', async (event) => {
         'close-key-modal': () => window.Pivot.legacy.closeKeyModal?.(),
         'confirm-create-key': () => window.Pivot.legacy.confirmCreateKey?.(),
         'copy-generated-key': () => window.Pivot.legacy.copyGeneratedKey?.(),
-        'close-monitor-routes': () => window.Pivot.legacy.closeMonitorRoutesModal?.()
+        'close-monitor-routes': () => window.Pivot.legacy.closeMonitorRoutesModal?.(),
+        'toggle-observability-webhook': () => window.Pivot.legacy.toggleObservabilityWebhookDrawer?.()
     };
     await actions[actionButton.dataset.staticAction]?.();
 });

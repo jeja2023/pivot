@@ -1,4 +1,5 @@
 /* Agent DAG canvas interaction: selection, drag, connect, pan and keyboard actions. */
+/* global clampDagCoordinate */
 
 const cssEscape = window.CSS && typeof window.CSS.escape === 'function'
     ? window.CSS.escape.bind(window.CSS)
@@ -9,8 +10,17 @@ function createDagInteractionController(ctx) {
     let dragging = null;
     let panning = null;
     let boxSelecting = null;
+    let spacePressed = false;
 
     const pointFromEvent = event => {
+        const matrix = ctx.root.getScreenCTM?.();
+        if (matrix?.inverse && typeof ctx.root.createSVGPoint === 'function') {
+            const point = ctx.root.createSVGPoint();
+            point.x = event.clientX;
+            point.y = event.clientY;
+            const transformed = point.matrixTransform(matrix.inverse());
+            return { x: transformed.x, y: transformed.y };
+        }
         const rect = ctx.root.getBoundingClientRect();
         const vb = ctx.root.viewBox.baseVal || { x: 0, y: 0, width: rect.width, height: rect.height };
         return {
@@ -29,23 +39,30 @@ function createDagInteractionController(ctx) {
         boxSelecting.bounds = { x, y, right: Math.max(start.x, end.x), bottom: Math.max(start.y, end.y) };
     };
 
+    const startPanning = event => {
+        ctx.root.setPointerCapture?.(event.pointerId);
+        panning = {
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            originX: ctx.viewState.x,
+            originY: ctx.viewState.y
+        };
+        ctx.root.classList.add('is-panning');
+    };
+
     const onPointerDown = event => {
+        if (event.button === 1 || spacePressed) {
+            event.preventDefault();
+            startPanning(event);
+            return;
+        }
         if (ctx.readOnly) {
             const nodeGroup = event.target.closest?.('[data-pivot-dag-id]');
             if (nodeGroup) {
                 ctx.selectNode(nodeGroup.dataset.pivotDagId, event.shiftKey || event.ctrlKey || event.metaKey);
                 ctx.render();
             } else {
-                const rect = ctx.root.getBoundingClientRect();
-                ctx.root.setPointerCapture?.(event.pointerId);
-                panning = {
-                    startClientX: event.clientX,
-                    startClientY: event.clientY,
-                    originX: ctx.viewState.x,
-                    originY: ctx.viewState.y,
-                    rect
-                };
-                ctx.root.classList.add('is-panning');
+                startPanning(event);
             }
             return;
         }
@@ -78,8 +95,7 @@ function createDagInteractionController(ctx) {
             } else {
                 ctx.clearSelection();
                 ctx.render();
-                panning = { startClientX: event.clientX, startClientY: event.clientY, originX: ctx.viewState.x, originY: ctx.viewState.y };
-                ctx.root.classList.add('is-panning');
+                startPanning(event);
             }
             ctx.root.setPointerCapture?.(event.pointerId);
             return;
@@ -119,8 +135,8 @@ function createDagInteractionController(ctx) {
             const anchor = ctx.spec.nodes.find(item => item.id === dragging.id);
             if (!anchor) return;
             const pointer = pointFromEvent(event);
-            const nextX = Math.max(0, pointer.x - dragging.offsetX);
-            const nextY = Math.max(0, pointer.y - dragging.offsetY);
+            const nextX = clampDagCoordinate(pointer.x - dragging.offsetX);
+            const nextY = clampDagCoordinate(pointer.y - dragging.offsetY);
             const dx = nextX - (dragging.origins.get(dragging.id)?.x || 0);
             const dy = nextY - (dragging.origins.get(dragging.id)?.y || 0);
             if (!dragging.moved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
@@ -130,8 +146,8 @@ function createDagInteractionController(ctx) {
             dragging.origins.forEach((origin, nodeId) => {
                 const node = ctx.spec.nodes.find(item => item.id === nodeId);
                 if (!node) return;
-                node._x = Math.max(0, origin.x + dx);
-                node._y = Math.max(0, origin.y + dy);
+                node._x = clampDagCoordinate(origin.x + dx);
+                node._y = clampDagCoordinate(origin.y + dy);
                 const group = ctx.nodesLayer.querySelector(`[data-pivot-dag-id="${cssEscape(nodeId)}"]`);
                 group?.setAttribute('transform', `translate(${node._x}, ${node._y})`);
             });
@@ -145,9 +161,11 @@ function createDagInteractionController(ctx) {
         }
         if (panning) {
             const rect = ctx.root.getBoundingClientRect();
-            const { width, height } = ctx.contentBounds();
-            ctx.viewState.x = panning.originX - (event.clientX - panning.startClientX) * (width / ctx.viewState.scale) / rect.width;
-            ctx.viewState.y = panning.originY - (event.clientY - panning.startClientY) * (height / ctx.viewState.scale) / rect.height;
+            const viewBox = ctx.root.viewBox.baseVal;
+            const xScale = viewBox.width / Math.max(rect.width, 1);
+            const yScale = viewBox.height / Math.max(rect.height, 1);
+            ctx.viewState.x = panning.originX - (event.clientX - panning.startClientX) * xScale;
+            ctx.viewState.y = panning.originY - (event.clientY - panning.startClientY) * yScale;
             ctx.updateViewBox({ refreshCulling: true });
         }
     };
@@ -200,6 +218,10 @@ function createDagInteractionController(ctx) {
     const onWheel = event => {
         event.preventDefault();
         const factor = event.deltaY > 0 ? 0.9 : 1.1;
+        if (typeof ctx.zoomAt === 'function') {
+            ctx.zoomAt(event, factor);
+            return;
+        }
         const nextScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, ctx.viewState.scale * factor));
         if (nextScale === ctx.viewState.scale) return;
         const anchor = pointFromEvent(event);
@@ -232,6 +254,12 @@ function createDagInteractionController(ctx) {
     const onKeyDown = event => {
         const tag = (document.activeElement?.tagName || '').toLowerCase();
         if (['input', 'textarea', 'select'].includes(tag)) return;
+        if (event.code === 'Space') {
+            spacePressed = true;
+            ctx.root.classList.add('is-pan-ready');
+            event.preventDefault();
+            return;
+        }
         if (ctx.readOnly) {
             if (event.key === 'Escape') {
                 event.preventDefault();
@@ -251,10 +279,21 @@ function createDagInteractionController(ctx) {
         if (event.key === 'Escape') { event.preventDefault(); ctx.clearSelection(); ctx.render(); ctx.onNodeSelectionChange?.(null); }
     };
 
+    const onKeyUp = event => {
+        if (event.code !== 'Space') return;
+        spacePressed = false;
+        ctx.root.classList.remove('is-pan-ready');
+    };
+
+    const onWindowBlur = () => {
+        spacePressed = false;
+        ctx.root.classList.remove('is-pan-ready');
+    };
+
     const closeToolbarDropdowns = event => {
         if (!ctx.toolbar || event.target?.closest?.('.pivot-dag-toolbar-dropdown')) return;
         ctx.toolbar.querySelectorAll('.pivot-dag-toolbar-dropdown[open]').forEach(item => { item.open = false; });
     };
 
-    return { onPointerDown, onPointerMove, onPointerUp, onWheel, onDoubleClick, onKeyDown, closeToolbarDropdowns };
+    return { onPointerDown, onPointerMove, onPointerUp, onWheel, onDoubleClick, onKeyDown, onKeyUp, onWindowBlur, closeToolbarDropdowns };
 }

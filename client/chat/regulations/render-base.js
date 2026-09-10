@@ -1,9 +1,10 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.renderBaseReady) return;
-    with (ns) {
+
+    const { API, state, REGULATIONS_PAGE_SIZE, esc, canManage, canDeleteDocuments } = ns;
+    const loadDocuments = (...args) => ns.loadDocuments?.(...args);
         function renderRegulationStatusCell(doc) {
                         const chips = [];
                         if (doc?.status === 'archived') chips.push('<span class="regulations-status-pill archived">已归档</span>');
@@ -72,5 +73,4 @@
             renderDocumentsPagination,
             renderBaseReady: true
         });
-    }
 })();

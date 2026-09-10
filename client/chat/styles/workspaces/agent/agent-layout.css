@@ -254,6 +254,15 @@
     margin: -5px 0 0;
 }
 
+.agent-task-editor-modal .agent-task-primary-fields {
+    display: block;
+}
+
+.agent-task-editor-modal .agent-task-primary-fields .modal-form-field {
+    width: min(380px, 100%);
+    max-width: 380px;
+}
+
 .agent-task-primary-fields .agent-model-trigger {
     height: 40px;
     padding: 0 12px;

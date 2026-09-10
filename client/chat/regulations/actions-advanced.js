@@ -1,9 +1,12 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsAdvancedReady) return;
-    with (ns) {
+
+    const { API, state, esc, cleanDisplayTitle, cleanArticleTitle, toast, fetchJson, regulationConfirm, fmtSize } = ns;
+    const setBusy = (...args) => ns.setBusy?.(...args);
+    const collectForm = (...args) => ns.collectForm?.(...args);
+    const focusFirstField = (...args) => ns.focusFirstField?.(...args);
             const REG_GRAPH_REL_COLORS = {
                         cite: '#10a37f',
                         depend: '#2563eb',
@@ -617,5 +620,4 @@
             syncFileInputState,
             actionsAdvancedReady: true
         });
-    }
 })();

@@ -1,9 +1,46 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.eventsReady) return;
-    with (ns) {
+
+    const { state, PRESETS, canDeleteDocuments, toast } = ns;
+
+    const uploadDocument = (...args) => ns.uploadDocument?.(...args);
+    const saveMetadata = (...args) => ns.saveMetadata?.(...args);
+    const uploadVersion = (...args) => ns.uploadVersion?.(...args);
+    const runCompare = (...args) => ns.runCompare?.(...args);
+    const submitAnnotation = (...args) => ns.submitAnnotation?.(...args);
+    const closeDialogs = (...args) => ns.closeDialogs?.(...args);
+    const runSearch = (...args) => ns.runSearch?.(...args);
+    const syncFileInputState = (...args) => ns.syncFileInputState?.(...args);
+    const syncImportHint = (...args) => ns.syncImportHint?.(...args);
+    const loadDetail = (...args) => ns.loadDetail?.(...args);
+    const openSearchDialog = (...args) => ns.openSearchDialog?.(...args);
+    const saveCurrentSearch = (...args) => ns.saveCurrentSearch?.(...args);
+    const applySavedSearch = (...args) => ns.applySavedSearch?.(...args);
+    const deleteSavedSearch = (...args) => ns.deleteSavedSearch?.(...args);
+    const loadDocuments = (...args) => ns.loadDocuments?.(...args);
+    const openAiDialog = (...args) => ns.openAiDialog?.(...args);
+    const closeSearchDialog = (...args) => ns.closeSearchDialog?.(...args);
+    const focusFirstField = (...args) => ns.focusFirstField?.(...args);
+    const closeInlineForms = (...args) => ns.closeInlineForms?.(...args);
+    const archiveDocument = (...args) => ns.archiveDocument?.(...args);
+    const focusArticle = (...args) => ns.focusArticle?.(...args);
+    const showSimilarArticles = (...args) => ns.showSimilarArticles?.(...args);
+    const showCitationGraph = (...args) => ns.showCitationGraph?.(...args);
+    const showVersionTimeline = (...args) => ns.showVersionTimeline?.(...args);
+    const previewRegulationImport = (...args) => ns.previewRegulationImport?.(...args);
+    const exportRegulationReport = (...args) => ns.exportRegulationReport?.(...args);
+    const showAnnotations = (...args) => ns.showAnnotations?.(...args);
+    const deleteAnnotation = (...args) => ns.deleteAnnotation?.(...args);
+    const showCompareDialog = (...args) => ns.showCompareDialog?.(...args);
+    const runChangeImpact = (...args) => ns.runChangeImpact?.(...args);
+    const askAi = (...args) => ns.askAi?.(...args);
+    const clearAiTurns = (...args) => ns.clearAiTurns?.(...args);
+    const ensureView = (...args) => ns.ensureView?.(...args);
+    const renderShell = (...args) => ns.renderShell?.(...args);
+    const loadFacets = (...args) => ns.loadFacets?.(...args);
+    const loadSavedSearches = (...args) => ns.loadSavedSearches?.(...args);
         async function ensureModuleReadiness() {
             if (ns.renderReadyPromise) await ns.renderReadyPromise;
             if (ns.actionsReadyPromise) await ns.actionsReadyPromise;
@@ -45,6 +82,11 @@
                     if (event.key === 'Enter' && ['regulations-query', 'regulations-category-filter', 'regulations-jurisdiction-filter'].includes(event.target?.id)) {
                         event.preventDefault();
                         runSearch().catch(e => toast(e.message || '搜索失败', 'error'));
+                        return;
+                    }
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && event.target?.id === 'regulations-ai-question') {
+                        event.preventDefault();
+                        document.getElementById('regulations-ai-btn')?.click();
                         return;
                     }
                 });
@@ -324,6 +366,29 @@
                         clearAiTurns();
                         const question = document.getElementById('regulations-ai-question');
                         if (question) question.value = '';
+                        return;
+                    }
+                    const sampleChip = event.target.closest('[data-regulations-ai-sample]');
+                    if (sampleChip) {
+                        const question = document.getElementById('regulations-ai-question');
+                        if (question) {
+                            question.value = sampleChip.dataset.regulationsAiSample || '';
+                            question.focus();
+                        }
+                        return;
+                    }
+                    const copyAiBtn = event.target.closest('[data-regulations-ai-copy]');
+                    if (copyAiBtn) {
+                        const idx = parseInt(copyAiBtn.dataset.regulationsAiCopy, 10);
+                        const turn = state.aiTurns[idx];
+                        if (turn?.answer) {
+                            navigator.clipboard.writeText(turn.answer).then(() => {
+                                toast('已复制回答内容', 'success');
+                            }).catch(() => {
+                                toast('复制失败', 'error');
+                            });
+                        }
+                        return;
                     }
                 });
             }
@@ -387,5 +452,4 @@
                 runSearch: runSearchFromRegistry
             };
             window.Pivot.legacy.showRegulationsApp = showRegulationsApp;
-    }
 })();

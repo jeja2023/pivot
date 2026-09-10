@@ -627,7 +627,7 @@ function coreTablesSql() {
             ip_address TEXT,
             created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (api_key_id) REFERENCES api_keys(id),
+            FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL,
             FOREIGN KEY (model_id) REFERENCES models(id)
         );
     `;

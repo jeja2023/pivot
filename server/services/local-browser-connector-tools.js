@@ -134,7 +134,7 @@ async function normalizeLocalBrowserTask(toolName, input = {}, grant = {}) {
         browser: { id: browser.id, label: browser.label, engine: browser.engine },
         url,
         target,
-        timeoutMs: Math.min(Math.max(Number.parseInt(input.timeoutMs || input.timeout_ms, 10) || 30000, 5000), 120000),
+        timeoutMs: Math.min(Math.max(Number.parseInt(input.timeoutMs || input.timeout_ms, 10) || 60000, 5000), 180000),
         policy
     };
 }
@@ -145,7 +145,7 @@ function localBrowserToolDefinitions() {
         properties: {
             browserId: { type: 'string', description: '从当前设备已授权浏览器中选择的标识。' },
             url: { type: 'string', description: '必须位于该设备授权站点白名单中的 HTTP/HTTPS 页面。' },
-            timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000, default: 30000 }
+            timeoutMs: { type: 'integer', minimum: 5000, maximum: 180000, default: 60000 }
         },
         required: ['url']
     };

@@ -167,38 +167,75 @@ const loadMonitorSummary = async function(options = {}) {
         const heapBarWidth = Math.min(100, Math.round((heapUsed / heapTotal) * 100));
         const heapBarColor = heapBarWidth > 90 ? '#ef4444' : (heapBarWidth > 75 ? '#f59e0b' : '#10b981');
 
-        // 系统资源指标 (完整规格展示)
+        const osType = String(system.type || '').replace(/^Windows_NT$/i, 'Windows');
+        const osDisplay = `${osType} ${system.release || ''}`.trim() || '-';
+
+        // 系统资源指标 (紧凑双栏合并展示，单列项带独立卡片框)
         PivotSafeHtml.setHtml(document.getElementById('monitor-resource-list'), [
-            ['运行主机', `<strong>${escapeHtml(system.hostname || '-')}</strong>`],
-            ['操作系统', `<strong>${escapeHtml(`${system.type || ''} ${system.release || ''}`.trim() || '-')}</strong>`],
-            ['运行架构', `<strong>${escapeHtml(system.platform || '-')}${system.arch ? ` (${escapeHtml(system.arch)})` : ''}</strong>`],
-            ['CPU 型号', `<strong>${escapeHtml(system.cpuModel || '-')}</strong>`],
-            ['CPU 规格', `<strong>${formatMetricNumber(system.cpuCount || 1)} 逻辑核心</strong>`],
-            ['系统负载', `<strong>${escapeHtml(loadAvgStr)}</strong>`],
-            ['系统时长', `<strong>${formatDuration(system.uptime || 0)}</strong>`],
-            ['进程时长', `<strong>${formatDuration(processInfo.uptimeSeconds || 0)}</strong>`],
-            ['Node 运行时', `<strong>${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}</strong>`],
-            ['系统物理内存', `<div class="monitor-meter-cell">
-                <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
-                <div class="monitor-meter-track">
-                    <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
+            `<div class="monitor-row monitor-split-row">
+                <div><span>运行主机</span><strong title="${escapeHtml(system.hostname || '-')}">${escapeHtml(system.hostname || '-')}</strong></div>
+                <div><span>运行架构</span><strong title="${escapeHtml(system.platform || '-')}${system.arch ? ` (${escapeHtml(system.arch)})` : ''}">${escapeHtml(system.platform || '-')}${system.arch ? ` (${escapeHtml(system.arch)})` : ''}</strong></div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row">
+                <div><span>操作系统</span><strong title="${escapeHtml(`${system.type || ''} ${system.release || ''}`.trim() || '-')}">${escapeHtml(osDisplay)}</strong></div>
+                <div><span>Node环境</span><strong title="${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}">${escapeHtml(`${processInfo.version || ''} (${processInfo.arch || ''})`.trim() || '-')}</strong></div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row">
+                <div><span>CPU 规格</span><strong>${formatMetricNumber(system.cpuCount || 1)} 逻辑核心</strong></div>
+                <div><span>系统负载</span><strong title="${escapeHtml(loadAvgStr)}">${escapeHtml(loadAvgStr)}</strong></div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row monitor-single-row">
+                <div>
+                    <span>CPU 型号</span>
+                    <strong title="${escapeHtml(system.cpuModel || '-')}">${escapeHtml(system.cpuModel || '-')}</strong>
                 </div>
-            </div>`],
-            ['Node 堆内存', `<div class="monitor-meter-cell">
-                <strong>${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)</strong>
-                <div class="monitor-meter-track">
-                    <div class="monitor-meter-fill" style="width: ${heapBarWidth}%; background: ${heapBarColor};"></div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row">
+                <div><span>系统时长</span><strong>${formatDuration(system.uptime || 0)}</strong></div>
+                <div><span>进程时长</span><strong>${formatDuration(processInfo.uptimeSeconds || 0)}</strong></div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>物理内存</span>
+                    <div class="monitor-meter-cell" title="${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)">
+                        <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>`],
-            ['硬盘挂载空间', `<div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')}">
-                <strong>${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)</strong>
-                <div class="monitor-meter-track">
-                    <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
+                <div>
+                    <span title="Node.js V8 引擎对象堆内存：已用堆 / 分配堆总额 (反映应用对象及闭包占用，用于排查内存泄漏)">Node 堆</span>
+                    <div class="monitor-meter-cell" title="V8 对象堆：${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)">
+                        <strong>${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${heapBarWidth}%; background: ${heapBarColor};"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>`],
-            ['硬盘剩余容量', `<strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>`],
-            ['进程 CPU 耗时', `<strong>${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s 用户 / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s 系统</strong>`]
-        ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
+            </div>`,
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>硬盘空间</span>
+                    <div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')} ${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)">
+                        <strong>${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <span>剩余容量</span>
+                    <strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>
+                </div>
+            </div>`,
+            `<div class="monitor-row monitor-split-row monitor-single-row">
+                <div>
+                    <span>进程 CPU 耗时</span>
+                    <strong title="用户态 ${Number(processInfo.cpuSeconds?.user || 0).toFixed(2)}s · 系统态 ${Number(processInfo.cpuSeconds?.system || 0).toFixed(2)}s">${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s 用户 / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s 系统</strong>
+                </div>
+            </div>`
+        ].join(''));
 
         const healthEl = document.getElementById('monitor-health-maintenance-list');
         if (healthEl) {
@@ -213,31 +250,86 @@ const loadMonitorSummary = async function(options = {}) {
                 'api': '接口可用性',
                 'cache': '缓存服务'
             };
-            const healthRows = (health.checks || []).map(item => {
-                const cls = item.status === 'ok' ? '' : ' is-warning';
-                const displayName = HEALTH_NAME_MAP[item.name] || item.name;
-                return `<div class="monitor-row${cls}">
-                    <span title="${escapeHtml(item.message || '')}">${escapeHtml(displayName)}</span>
-                    <strong>${escapeHtml(formatHealthStatus(item.status))}</strong>
+            const allHealthChecks = Array.isArray(health.checks) ? health.checks : [];
+            // 普通健康卡片不滚动，最多呈现八个最重要的检查项；其余仍会由接口详情和
+            // 服务端日志完整保留，避免偶发检查项激增把整个监控画布挤出视口。
+            const healthChecks = allHealthChecks.slice(0, 8);
+            const pairedHealthRows = [];
+            for (let i = 0; i < healthChecks.length; i += 2) {
+                const item1 = healthChecks[i];
+                const item2 = healthChecks[i + 1];
+                const cls1 = item1.status === 'ok' ? '' : ' is-warning';
+                const name1 = HEALTH_NAME_MAP[item1.name] || item1.name;
+                const cell1 = `<div class="${cls1}">
+                    <span title="${escapeHtml(item1.message || '')}">${escapeHtml(name1)}</span>
+                    <strong>${escapeHtml(formatHealthStatus(item1.status))}</strong>
                 </div>`;
-            });
-            const maintenanceRows = [
-                ['审计清理', `${formatMaintenanceTime(maintenance.auditCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.auditCleanup?.lastChanges || 0)} 条`],
-                ['API 日志清理', `${formatMaintenanceTime(maintenance.apiCallLogCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`],
-                ['令牌清理', `${formatMaintenanceTime(maintenance.refreshTokenCleanup?.lastSuccessAt)} / ${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`],
-                ['数据库备份', `${formatMaintenanceTime(maintenance.backup?.lastSuccessAt)} / ${formatBytes(maintenance.backup?.lastSizeBytes || 0)}`],
-                ['PostgreSQL 统计', formatMaintenanceTime(maintenance.optimize?.lastSuccessAt)]
-            ].map(([label, value]) => `<div class="monitor-row">
-                <span>${escapeHtml(label)}</span>
-                <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
-            </div>`);
-            PivotSafeHtml.setHtml(healthEl, [...healthRows, ...maintenanceRows].join(''));
+                let cell2 = '';
+                if (item2) {
+                    const cls2 = item2.status === 'ok' ? '' : ' is-warning';
+                    const name2 = HEALTH_NAME_MAP[item2.name] || item2.name;
+                    cell2 = `<div class="${cls2}">
+                        <span title="${escapeHtml(item2.message || '')}">${escapeHtml(name2)}</span>
+                        <strong>${escapeHtml(formatHealthStatus(item2.status))}</strong>
+                    </div>`;
+                }
+                pairedHealthRows.push(`<div class="monitor-row monitor-split-row">${cell1}${cell2}</div>`);
+            }
+
+            const formatMaintenanceItem = (timeVal, extra) => {
+                if (!timeVal) return { label: '尚未成功', title: '尚未成功执行' };
+                const fullStr = formatDateToCN(timeVal);
+                // 维护任务不是实时指标；即使执行发生在今天，也要保留日期，避免用户把
+                // 昨天或更早的一次成功记录误当成刚刚完成。界面使用紧凑的月日 + 分钟，
+                // 完整秒级时间仍通过 title 提供。
+                const match = fullStr.match(/^(\d{4}-)(\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+                const displayTime = match ? `${match[2]} ${match[3]}` : fullStr;
+                const label = extra ? `${displayTime} · ${extra}` : displayTime;
+                const title = extra ? `${fullStr} (${extra})` : fullStr;
+                return { label, title };
+            };
+
+            const mAudit = formatMaintenanceItem(maintenance.auditCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.auditCleanup?.lastChanges || 0)} 条`);
+            const mApiLog = formatMaintenanceItem(maintenance.apiCallLogCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`);
+            const mToken = formatMaintenanceItem(maintenance.refreshTokenCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`);
+            const mBackup = formatMaintenanceItem(maintenance.backup?.lastSuccessAt, formatBytes(maintenance.backup?.lastSizeBytes || 0));
+            const mOptimize = formatMaintenanceItem(maintenance.optimize?.lastSuccessAt, '');
+
+            const maintenanceTasks = [
+                ['审计清理', mAudit.label, mAudit.title],
+                ['API 日志清理', mApiLog.label, mApiLog.title],
+                ['令牌清理', mToken.label, mToken.title],
+                ['数据库备份', mBackup.label, mBackup.title],
+                ['PostgreSQL 统计', mOptimize.label, mOptimize.title]
+            ];
+            const pairedMaintenanceRows = [];
+            for (let i = 0; i < maintenanceTasks.length; i += 2) {
+                const t1 = maintenanceTasks[i];
+                const t2 = maintenanceTasks[i + 1];
+                const cell1 = `<div>
+                    <span>${escapeHtml(t1[0])}</span>
+                    <strong title="${escapeHtml(t1[2])}">${escapeHtml(t1[1])}</strong>
+                </div>`;
+                let cell2 = '';
+                if (t2) {
+                    cell2 = `<div>
+                        <span>${escapeHtml(t2[0])}</span>
+                        <strong title="${escapeHtml(t2[2])}">${escapeHtml(t2[1])}</strong>
+                    </div>`;
+                }
+                pairedMaintenanceRows.push(`<div class="monitor-row monitor-split-row">${cell1}${cell2}</div>`);
+            }
+            const hiddenHealthHint = allHealthChecks.length > healthChecks.length
+                ? `<div class="monitor-empty compact">另有 ${formatMetricNumber(allHealthChecks.length - healthChecks.length)} 项健康检查，请在接口详情中查看。</div>`
+                : '';
+            PivotSafeHtml.setHtml(healthEl, [...pairedHealthRows, ...pairedMaintenanceRows, hiddenHealthHint].join(''));
         }
 
         const concurrencyActive = Number(concurrency.active || 0);
         const concurrencyQueued = Number(concurrency.queued || 0);
         const concurrencyMaxQueue = Number(concurrency.maxQueue || 20);
         const queueTimeoutSec = Math.round(Number(concurrency.queueTimeoutMs || 300000) / 1000);
+        const gpuActiveStatus = gpu.status === 'error' ? '过载熔断' : (concurrencyActive >= concurrencyEffectiveMax && concurrencyEffectiveMax > 0 ? '峰值排队' : gpuProtectionStatus);
 
         const aiMeterWidth = concurrencyEffectiveMax > 0 ? Math.min(100, Math.round((concurrencyActive / concurrencyEffectiveMax) * 100)) : 0;
         const aiMeterColor = aiMeterWidth > 85 ? '#ef4444' : (aiMeterWidth > 65 ? '#f59e0b' : '#10b981');
@@ -254,8 +346,10 @@ const loadMonitorSummary = async function(options = {}) {
         const localEndpoints = Number(endpoints.localCount || 0);
         const remoteEndpoints = Number(endpoints.remoteCount || 0);
 
-        const gpuRows = gpu.available && Array.isArray(gpu.gpus) && gpu.gpus.length
-            ? gpu.gpus.map((item, idx) => {
+        const allGpus = gpu.available && Array.isArray(gpu.gpus) ? gpu.gpus : [];
+        const visibleGpus = allGpus.slice(0, 2);
+        const gpuRows = visibleGpus.length
+            ? `<div class="monitor-gpu-cards-wrap">${visibleGpus.map((item, idx) => {
                 const usedRate = Number(item.ratio || 0) * 100;
                 const gpuName = item.name || 'GPU';
                 const gpuDetails = [];
@@ -267,89 +361,97 @@ const loadMonitorSummary = async function(options = {}) {
                 if (Number.isFinite(Number(item.temperature))) gpuDetails.push(`${Number(item.temperature).toFixed(0)}°C`);
                 const gpuBarColor = usedRate > 90 ? '#ef4444' : (usedRate > 75 ? '#f59e0b' : '#10b981');
                 return `<div class="monitor-row monitor-gpu-row">
-                    <span class="monitor-gpu-name" title="${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
+                    <span class="monitor-gpu-name" title="#${idx} ${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
                     <div class="monitor-meter-cell">
                         <strong>${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(0)}%)</strong>
                         <div class="monitor-meter-track">
                             <div class="monitor-meter-fill" style="width: ${Math.min(100, Math.round(usedRate))}%; background: ${gpuBarColor};"></div>
                         </div>
-                        ${gpuDetails.length ? `<small style="color:#64748b;font-size:0.68rem;font-weight:700;">${escapeHtml(gpuDetails.join(' · '))}</small>` : ''}
+                        ${gpuDetails.length ? `<small title="${escapeHtml(gpuDetails.join(' · '))}"><strong>${escapeHtml(gpuDetails.join(' · '))}</strong></small>` : ''}
                     </div>
                 </div>`;
-            }).join('')
+            }).join('')}${allGpus.length > visibleGpus.length
+                ? `<div class="monitor-empty compact">另有 ${formatMetricNumber(allGpus.length - visibleGpus.length)} 张 GPU，详情请查看接口监控。</div>`
+                : ''}</div>`
             : `<div class="monitor-hardware-banner">
                 <div class="monitor-hardware-banner-head">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    <strong>算力形态：CPU 宿主 / 混合分布式架构</strong>
+                    <strong>当前算力形态：CPU / 混合集群调度</strong>
                 </div>
-                <p>未检测到本地 NVIDIA 独立显卡。系统已启用自适应动态削峰与熔断保护，多模型请求由云端与本地分布式端点协同承载调度。</p>
+                <p>未检测到本地显卡资源。系统已启用自适应动态削峰保护，多模型请求由分布式端点承载。</p>
             </div>`;
 
-        const gpuScopeNotice = '<div class="monitor-empty is-info"><strong>保护机制：</strong>Pivot 部署服务器已接入全局并发管控、显存压力自适应调谐与缓冲队列。</div>';
-
         PivotSafeHtml.setHtml(document.getElementById('monitor-gpu-list'), [
-            gpuScopeNotice,
             `<div class="monitor-row monitor-split-row is-three">
                 <div>
                     <span>保护状态</span>
-                    <strong>${escapeHtml(gpuProtectionStatus)}</strong>
+                    <strong title="当前并发负载状态">${escapeHtml(gpuActiveStatus)}</strong>
                 </div>
                 <div>
                     <span>动态上限</span>
-                    <strong title="生效 / 配置">${escapeHtml(`${formatMetricNumber(concurrencyEffectiveMax)}/${formatMetricNumber(concurrencyConfiguredMax)}`)}</strong>
+                    <strong title="生效上限 / 配置上限">${escapeHtml(`${formatMetricNumber(concurrencyEffectiveMax)}/${formatMetricNumber(concurrencyConfiguredMax)}`)}</strong>
                 </div>
                 <div>
                     <span>熔断阈值</span>
-                    <strong>${escapeHtml(`${gpuRejectThreshold}%`)}</strong>
+                    <strong title="负载熔断百分比">${escapeHtml(`${gpuRejectThreshold}%`)}</strong>
                 </div>
             </div>`,
-            `<div class="monitor-row">
-                <span>AI 并发槽位</span>
-                <div class="monitor-meter-cell">
-                    <strong>${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)</strong>
-                    <div class="monitor-meter-track">
-                        <div class="monitor-meter-fill" style="width: ${aiMeterWidth}%; background: ${aiMeterColor};"></div>
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>AI 并发</span>
+                    <div class="monitor-meter-cell" title="${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)">
+                        <strong>${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${aiMeterWidth}%; background: ${aiMeterColor};"></div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <span>排队缓冲</span>
+                    <div class="monitor-meter-cell" title="超过 ${queueTimeoutSec} 秒自动解挂 · ${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)">
+                        <strong>${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)</strong>
+                        <div class="monitor-meter-track">
+                            <div class="monitor-meter-fill" style="width: ${queueMeterWidth}%; background: ${queueMeterColor};"></div>
+                        </div>
                     </div>
                 </div>
             </div>`,
-            `<div class="monitor-row">
-                <span>排队缓冲池</span>
-                <div class="monitor-meter-cell" title="超过 ${queueTimeoutSec} 秒自动解挂">
-                    <strong>${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)</strong>
-                    <div class="monitor-meter-track">
-                        <div class="monitor-meter-fill" style="width: ${queueMeterWidth}%; background: ${queueMeterColor};"></div>
-                    </div>
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>显存水位</span>
+                    <strong title="安全水位 ${escapeHtml(gpuSafeThreshold)}% · 警戒阈值 ${escapeHtml(gpuCriticalThreshold)}%">${escapeHtml(gpuSafeThreshold)}% / ${escapeHtml(gpuCriticalThreshold)}%</strong>
+                </div>
+                <div>
+                    <span>探针周期</span>
+                    <strong title="${escapeHtml(String(gpuIntervalSec))} 秒 / 轮询">${escapeHtml(String(gpuIntervalSec))}s / 轮询</strong>
                 </div>
             </div>`,
-            `<div class="monitor-row">
-                <span>显存水位线</span>
-                <strong title="安全线 / 警戒线 / 拒载线">安全 ${escapeHtml(gpuSafeThreshold)}% · 警戒 ${escapeHtml(gpuCriticalThreshold)}%</strong>
-            </div>`,
-            `<div class="monitor-row">
-                <span>硬件探针周期</span>
-                <strong>${escapeHtml(String(gpuIntervalSec))} 秒 / 轮询</strong>
-            </div>`,
-            `<div class="monitor-row">
-                <span>活跃模型端点</span>
-                <strong>${formatMetricNumber(totalEndpoints)} 个（本地 ${formatMetricNumber(localEndpoints)} · 远端 ${formatMetricNumber(remoteEndpoints)}）</strong>
-            </div>`,
-            `<div class="monitor-row">
-                <span>队列超时保护</span>
-                <strong>${formatMetricNumber(queueTimeoutSec)} 秒释放</strong>
+            `<div class="monitor-row monitor-split-row">
+                <div>
+                    <span>活跃端点</span>
+                    <strong title="总计 ${formatMetricNumber(totalEndpoints)} 个端点（本地 ${formatMetricNumber(localEndpoints)} · 远端 ${formatMetricNumber(remoteEndpoints)}）">${formatMetricNumber(totalEndpoints)} 个 (${formatMetricNumber(localEndpoints)}本 / ${formatMetricNumber(remoteEndpoints)}远)</strong>
+                </div>
+                <div>
+                    <span>超时保护</span>
+                    <strong title="排队超时自动释放：${formatMetricNumber(queueTimeoutSec)} 秒">${formatMetricNumber(queueTimeoutSec)}s 释放</strong>
+                </div>
             </div>`,
             gpuRows
         ].join(''));
 
-        const models = tokens.byModel || [];
-        PivotSafeHtml.setHtml(document.getElementById('monitor-model-list'), models.length
-            ? models.map(item => {
+        const models = Array.isArray(tokens.byModel) ? tokens.byModel : [];
+        const visibleModels = models.slice(0, 6);
+        PivotSafeHtml.setHtml(document.getElementById('monitor-model-list'), visibleModels.length
+            ? [visibleModels.map(item => {
                 const modelName = item.model_name || '未知模型';
                 return `<div class="monitor-row monitor-model-token-row">
                     <span class="monitor-model-token-name" title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>
                     <strong class="monitor-model-token-value" title="${Number(item.tokens || 0).toLocaleString()} Tokens">${formatTokenCount(item.tokens)}</strong>
                 </div>`;
-            }).join('')
-            : '<div class="monitor-empty">今日暂无 Token 消耗</div>');
+            }).join(''), models.length > visibleModels.length
+                ? `<div class="monitor-empty compact">另有 ${formatMetricNumber(models.length - visibleModels.length)} 个模型，已按 Token 消耗排序。</div>`
+                : ''].join('')
+            : '<div class="monitor-empty">今日暂无各模型 Token 消耗记录</div>');
 
         // 4. 数据与知识库渲染
         const ragStorageEl = document.getElementById('monitor-rag-storage-list');
@@ -362,25 +464,42 @@ const loadMonitorSummary = async function(options = {}) {
             const storageData = data.storage || {};
             const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
             PivotSafeHtml.setHtml(ragStorageEl, [
-                ['检索总数', `<strong>${formatMetricNumber(ragData.retrievals)} 次</strong>`],
-                ['命中率', `<strong>${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%</strong>`],
-                ['缓存命中率', `<strong>${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%</strong>`],
-                ['平均耗时', `<strong>${avgRetrieval} ms</strong>`],
-                ['Embedding 平均耗时', `<strong>${formatMetricNumber(embeddingSummary.averageDurationMs, 1)} ms</strong>`],
-                ['Embedding 失败率', `<strong>${(Number(embeddingSummary.errorRate || 0) * 100).toFixed(1)}%</strong>`],
-                ['检索诊断（24h）', `<strong>${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms</strong>`],
-                ['索引分片', `<strong>${formatMetricNumber(ragData.chunksIndexed)}</strong>`],
-                ['数据库大小', `<strong>${formatBytes(storageData.db)}</strong>`],
-                ['附件总存储', `<strong>${formatBytes(storageData.uploads)}</strong>`]
-            ].map(([k, v]) => `<div class="monitor-row"><span>${escapeHtml(k)}</span>${v}</div>`).join(''));
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>检索总数</span><strong>${formatMetricNumber(ragData.retrievals)} 次</strong></div>
+                    <div><span>平均耗时</span><strong>${avgRetrieval} ms</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>命中率</span><strong>${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%</strong></div>
+                    <div><span>缓存命中</span><strong>${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>Embedding</span><strong>${formatMetricNumber(embeddingSummary.averageDurationMs, 1)} ms</strong></div>
+                    <div><span>失败率</span><strong>${(Number(embeddingSummary.errorRate || 0) * 100).toFixed(1)}%</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>索引分片</span><strong>${formatMetricNumber(ragData.chunksIndexed)}</strong></div>
+                    <div><span>检索诊断</span><strong title="24h: ${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms">${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>数据库</span><strong>${formatBytes(storageData.db)}</strong></div>
+                    <div><span>附件存储</span><strong>${formatBytes(storageData.uploads)}</strong></div>
+                </div>`
+            ].join(''));
             renderRagEmbeddingLatencyTrend(document.getElementById('monitor-rag-latency-trend'), embedding);
         }
 
         const observability = data.observability || {};
         const observabilityEl = document.getElementById('monitor-observability-list');
         const webhookInput = document.getElementById('observability-webhook-url');
+        const webhookBadge = document.getElementById('observability-webhook-status-badge');
+        const hasWebhook = Boolean(observability.settings?.webhookUrl && observability.settings.webhookUrl.trim());
         if (webhookInput && observability.settings) {
             webhookInput.value = observability.settings.webhookUrl || '';
+        }
+        if (webhookBadge) {
+            webhookBadge.textContent = hasWebhook ? '已启用推送' : '未配置推送';
+            webhookBadge.title = hasWebhook ? `已配置推送: ${observability.settings.webhookUrl}` : '未配置 Webhook 告警';
+            webhookBadge.className = `observability-status-badge ${hasWebhook ? 'is-active' : 'is-empty'}`;
         }
         if (observabilityEl) {
             const events = observability.events || [];
@@ -501,7 +620,23 @@ const saveObservabilityWebhook = async function() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '告警设置保存失败', 'error');
     showToast('告警设置已保存', 'success');
+    const drawer = document.getElementById('observability-webhook-panel');
+    if (drawer && input?.value?.trim()) {
+        drawer.classList.add('hidden');
+    }
     loadMonitorSummary();
+};
+
+const toggleObservabilityWebhookDrawer = function() {
+    const drawer = document.getElementById('observability-webhook-panel');
+    if (!drawer) return;
+    const isHidden = drawer.classList.contains('hidden');
+    if (isHidden) {
+        drawer.classList.remove('hidden');
+        document.getElementById('observability-webhook-url')?.focus();
+    } else {
+        drawer.classList.add('hidden');
+    }
 };
 
 window.Pivot?.exposeModule?.('settings.monitor', {
@@ -509,6 +644,7 @@ window.Pivot?.exposeModule?.('settings.monitor', {
     loadMonitorSummary,
     refreshMonitorSummary,
     saveObservabilityWebhook,
+    toggleObservabilityWebhookDrawer,
     clearMonitorRefreshTimer,
     cancelMonitorSummaryLoad,
     cancelOpsSummaryLoad
@@ -517,6 +653,7 @@ window.Pivot?.exposeModule?.('settings.monitor', {
     'loadMonitorSummary',
     'refreshMonitorSummary',
     'saveObservabilityWebhook',
+    'toggleObservabilityWebhookDrawer',
     'clearMonitorRefreshTimer',
     'cancelMonitorSummaryLoad',
     'cancelOpsSummaryLoad'

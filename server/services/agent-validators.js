@@ -179,7 +179,9 @@ function normalizePositiveInt(value, fallback, min = 0, max = Number.MAX_SAFE_IN
 function normalizeDagCoordinate(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
-    return Math.round(Math.max(0, Math.min(parsed, 100000)) * 100) / 100;
+    // 工作流画布允许使用负坐标，以支持节点在逻辑原点的左侧或上方排布。
+    // 限制为有限范围，避免恶意或损坏的布局数据放大 SVG 渲染开销。
+    return Math.round(Math.max(-100000, Math.min(parsed, 100000)) * 100) / 100;
 }
 
 function normalizeScheduleFrequency(value) {

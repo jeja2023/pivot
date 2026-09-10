@@ -404,6 +404,27 @@ body.dark-mode .desktop-app-menu-separator {
 .sidebar:hover .session-list {
     scrollbar-width: none;
 }
+/* 桌面客户端保留可拖动的细滚动条：除鼠标滚轮外，也给触控板异常或无障碍
+   操作提供明确、可见的回退入口。预加载层会用同一规则覆盖旧服务端样式。 */
+body.pivot-desktop-runtime .session-list {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.46) transparent;
+    -ms-overflow-style: auto;
+}
+body.pivot-desktop-runtime .session-list::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+}
+body.pivot-desktop-runtime .session-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+body.pivot-desktop-runtime .session-list::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: rgba(100, 116, 139, 0.46);
+    background-clip: padding-box;
+}
 .session-list-status {
     padding: 10px 8px 12px;
     color: #94a3b8;

@@ -137,8 +137,9 @@ function renderDagToolbar(ctx) {
                 makeButton('粘贴节点', '粘贴已复制的节点', ctx.pasteSelection),
                 makeButton('创建副本', '复制并立即粘贴当前节点', ctx.duplicateSelection),
                 makeButton('校验', '校验节点、依赖和工具可用性', ctx.showValidationResult),
-                makeButton('自动布局', '按依赖层次重新排列', ctx.resetLayout),
-                makeButton('适配画布', '重置缩放和平移到默认视角', ctx.fitToContent),
+                makeButton('自动布局', '按依赖层次重新排列，并自动适配全部节点', ctx.resetLayout),
+                makeButton('适配画布', '显示全部节点并居中', ctx.fitToContent),
+                makeButton('初始视图', '默认缩放并将现有节点居中', ctx.resetView),
                 makeButton('高级配置', '打开高级配置编辑窗口', () => {
                     if (typeof ctx.onOpenJson === 'function') ctx.onOpenJson();
                 })

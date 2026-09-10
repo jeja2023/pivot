@@ -15,6 +15,53 @@ body.is-main-workspace-full .chat-container {
     display: flex;
     flex-direction: column;
 }
+
+/* 大型工作区的专属样式仍在下载时，先交给常驻聊天壳渲染稳定加载页，
+ * 防止 Agent/工作流模板在无样式状态下短暂闪现。 */
+.main-workspace-view.workspace-style-gated {
+    position: relative;
+    isolation: isolate;
+    background: #f8fafc;
+}
+.main-workspace-view.workspace-style-gated > :not(.workspace-style-gate) {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+.workspace-style-gate {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: linear-gradient(145deg, #f8fafc, #ffffff);
+    color: #475569;
+}
+.workspace-style-gate-card {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    width: min(320px, 100%);
+    padding: 20px 24px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+    text-align: center;
+}
+.workspace-style-gate-spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid rgba(16, 185, 129, 0.16);
+    border-top-color: var(--primary, #10b981);
+    border-radius: 50%;
+    animation: workspaceStyleGateSpin 0.8s linear infinite;
+}
+.workspace-style-gate strong { color: #0f172a; font-size: 0.9rem; }
+.workspace-style-gate span { font-size: 0.75rem; line-height: 1.45; }
+.workspace-style-gate.is-error .workspace-style-gate-spinner { display: none; }
+.workspace-style-gate .btn-secondary { height: 30px; padding: 0 12px; font-size: 0.74rem; }
+@keyframes workspaceStyleGateSpin { to { transform: rotate(360deg); } }
 .chat-workspace-view {
     background: var(--bg-main);
 }

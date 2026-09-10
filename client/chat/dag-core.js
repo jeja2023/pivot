@@ -24,6 +24,18 @@ const MIN_CONTENT_WIDTH = 960;
 
 const MIN_CONTENT_HEIGHT = 360;
 
+// 工作流是无限画布：允许节点越过默认原点向左、向上布局，同时保留足够大的
+// 安全边界，避免异常数据把 SVG / 小地图扩展到不可渲染的尺寸。
+const DAG_COORDINATE_MIN = -100000;
+
+const DAG_COORDINATE_MAX = 100000;
+
+function clampDagCoordinate(value, fallback = 0) {
+        const coordinate = Number(value);
+        if (!Number.isFinite(coordinate)) return fallback;
+        return Math.max(DAG_COORDINATE_MIN, Math.min(DAG_COORDINATE_MAX, coordinate));
+    }
+
 const dagEscapeHtml = (window.Pivot.legacy.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeHtml)
         || ((value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
 
@@ -129,8 +141,8 @@ function ensureDefaults(spec) {
             timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
             onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
             // 优先读取独立布局元数据，同时兼容旧版节点内坐标。
-            _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? Number(savedLayout[n.id]?.x ?? n._x) : undefined,
-            _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? Number(savedLayout[n.id]?.y ?? n._y) : undefined
+            _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? clampDagCoordinate(savedLayout[n.id]?.x ?? n._x) : undefined,
+            _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? clampDagCoordinate(savedLayout[n.id]?.y ?? n._y) : undefined
         })) : [];
         nodes.forEach(ensureLlmNodeInput);
         const missingPositionNodes = nodes.filter(n => n._x === undefined || n._y === undefined);
@@ -164,7 +176,7 @@ function serialize(spec) {
         });
         const layout = Object.fromEntries(spec.nodes
             .filter(node => Number.isFinite(node._x) && Number.isFinite(node._y))
-            .map(node => [node.id, { x: Math.max(0, node._x), y: Math.max(0, node._y) }]));
+            .map(node => [node.id, { x: clampDagCoordinate(node._x), y: clampDagCoordinate(node._y) }]));
         return { nodes, layout };
     }
 

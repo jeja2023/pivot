@@ -265,12 +265,8 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
 
 async function openAgentDagWorkbench(options = {}) {
     window.Pivot.legacy.closeAgentConfigModal();
-    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
-    if (typeof styleLoader?.whenWorkspaceStylesLoaded === 'function') {
-        const styleTimeout = new Promise(resolve => setTimeout(resolve, 2500));
-        await Promise.race([styleLoader.whenWorkspaceStylesLoaded('agent-dag'), styleTimeout]).catch(() => {});
-    }
-    window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('agent-dag');
+    const navigation = window.Pivot.moduleApi('workspaces.navigation');
+    (navigation.showWorkspaceWithStyleGate || navigation.showMainWorkspace)?.('agent-dag');
     window.Pivot.legacy.initAgentRealtime?.();
     const requestedWorkflowId = options.workflowId || '';
     const incomingDraft = options.draft || pendingAgentWorkflowDraft || null;

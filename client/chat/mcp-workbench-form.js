@@ -361,6 +361,7 @@ async function openMcpWorkbench(options = {}) {
     try { savedTab = sessionStorage.getItem('pivot.mcp.active_tab'); } catch (_) {}
     const activeTab = options?.tab || savedTab || 'tools';
     tabsApi.setActiveTab?.(activeTab);
+    window.Pivot.moduleApi?.('mcp.workbench')?.setMcpWorkbenchState?.('loading', '正在加载工具库…');
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('mcp');
     const panel = document.getElementById('mcp-workbench-modal');
     if (!panel) return;

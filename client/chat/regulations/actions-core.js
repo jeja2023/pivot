@@ -1,9 +1,14 @@
-/* eslint-disable no-undef -- Split regulations modules resolve names through PivotRegulationsInternal. */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsCoreReady) return;
-    with (ns) {
+
+    const { API, state, REGULATIONS_PAGE_SIZE, esc, cleanArticleTitle, canManage, toast, fetchJson, regulationConfirm } = ns;
+    const renderSavedSearches = (...args) => ns.renderSavedSearches?.(...args);
+    const renderSearchResults = (...args) => ns.renderSearchResults?.(...args);
+    const renderDocuments = (...args) => ns.renderDocuments?.(...args);
+    const renderAiAnswer = (...args) => ns.renderAiAnswer?.(...args);
+    const renderDetail = (...args) => ns.renderDetail?.(...args);
         function setBusy(busy, text = '') {
                         state.busy = !!busy;
                         document.querySelector('.regulations-panel')?.classList.toggle('is-busy', state.busy);
@@ -313,5 +318,4 @@
             showSimilarArticles,
             actionsCoreReady: true
         });
-    }
 })();
