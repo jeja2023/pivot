@@ -361,6 +361,9 @@ test('渲染器输出确定性，公文 DOCX 满足结构与度量断言且页�
 
 test('未提供 CJK 字体资产时 PDF 渲染能力显式下线并拒绝渲染', async () => {
     const { resetCjkFontCache } = require('../server/services/document-rendering/cjk-fonts');
+    const { logger } = require('../server/logger');
+    const originalError = logger.error;
+    logger.error = () => {};
     const previousDir = process.env.PIVOT_PDF_FONT_DIR;
     const previousFile = process.env.PIVOT_PDF_FONT_FILE;
     process.env.PIVOT_PDF_FONT_DIR = path.join(os.tmpdir(), 'pivot-missing-font-dir');
@@ -374,6 +377,7 @@ test('未提供 CJK 字体资产时 PDF 渲染能力显式下线并拒绝渲染'
             error => error.code === 'DOCUMENT_RENDERER_UNAVAILABLE'
         );
     } finally {
+        logger.error = originalError;
         if (previousDir === undefined) delete process.env.PIVOT_PDF_FONT_DIR; else process.env.PIVOT_PDF_FONT_DIR = previousDir;
         if (previousFile === undefined) delete process.env.PIVOT_PDF_FONT_FILE; else process.env.PIVOT_PDF_FONT_FILE = previousFile;
         resetCjkFontCache();

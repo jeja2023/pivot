@@ -29,12 +29,39 @@ function writeSseChunks(res, { chunks = [], usage = null } = {}) {
  */
 async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usage = null } = {}) {
     const server = http.createServer((req, res) => {
-        req.resume();
         if (typeof handler === 'function') {
+            req.resume();
             handler(req, res);
             return;
         }
-        writeSseChunks(res, { chunks: replyChunks, usage });
+        let rawBody = '';
+        req.on('data', chunk => { rawBody += chunk; });
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(rawBody || '{}');
+                if (parsed && parsed.stream === false) {
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.end(JSON.stringify({
+                        id: 'fake-cmpl-1',
+                        object: 'chat.completion',
+                        created: Math.floor(Date.now() / 1000),
+                        model: parsed.model || 'fake-model',
+                        choices: [{
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content: replyChunks.join('')
+                            },
+                            finish_reason: 'stop'
+                        }],
+                        usage: usage || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 }
+                    }));
+                    return;
+                }
+            } catch (_) {}
+            writeSseChunks(res, { chunks: replyChunks, usage });
+        });
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     return {

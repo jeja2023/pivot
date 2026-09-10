@@ -13,7 +13,30 @@ async function withClient(callback) {
 }
 
 async function setup() {
-    await withClient(client => client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`));
+    await withClient(async client => {
+        await client.query(`
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_extension e
+                    JOIN pg_namespace n ON e.extnamespace = n.oid
+                    WHERE e.extname = 'vector' AND n.nspname <> 'public'
+                ) THEN
+                    ALTER EXTENSION vector SET SCHEMA public;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM pg_extension e
+                    JOIN pg_namespace n ON e.extnamespace = n.oid
+                    WHERE e.extname = 'pg_trgm' AND n.nspname <> 'public'
+                ) THEN
+                    ALTER EXTENSION pg_trgm SET SCHEMA public;
+                END IF;
+            END $$;
+        `).catch(() => {});
+        await client.query('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public').catch(() => {});
+        await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public').catch(() => {});
+        await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    });
     process.env.PG_TEST_SCHEMA = schema;
     const { initSchemaPg } = require('../server/db/schema');
     const { runMigrationsPg } = require('../server/db/migrate');

@@ -349,7 +349,7 @@ function createSessionsRouter({
 
         let result;
         try {
-            result = await compactSessionMemory(req.params.id, req.user.id, modelCfg, { force: true });
+            result = await compactSessionMemory(req.params.id, req.user.id, modelCfg, { force: true, user: req.user });
         } catch (err) {
             if (err instanceof TimeoutError || err.code === 'OPERATION_TIMEOUT') {
                 return res.status(504).json({

@@ -39,7 +39,7 @@ async function main() {
 
     // pg_trgm —— 内置扩展，随 PG 安装
     try {
-        await target.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+        await target.query('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public');
         console.log('✅ 扩展 pg_trgm 已启用');
     } catch(e) {
         console.warn('⚠️  pg_trgm 安装失败:', e.message);
@@ -47,7 +47,7 @@ async function main() {
 
     // pgvector —— 需要 >= 0.5.0 才支持 HNSW
     try {
-        await target.query('CREATE EXTENSION IF NOT EXISTS vector');
+        await target.query('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public');
         const vr = await target.query("SELECT extversion FROM pg_extension WHERE extname='vector'");
         console.log(`✅ 扩展 pgvector 已启用，版本: ${vr.rows[0]?.extversion || '未知'}`);
     } catch(e) {

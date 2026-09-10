@@ -48,3 +48,11 @@ test('隔离 schema 缺少 app_meta 时必须执行初始化，不能回退 publ
         assert.match(calls[0].sql, /"pivot_new_test"\."app_meta"/);
     }));
 });
+
+test('PostgreSQL 扩展必须显式声明在 public schema 下并包含异构回迁保护', () => {
+    const { buildPgSchemaStatements } = require('../server/db/schema/pg');
+    const plan = buildPgSchemaStatements();
+    assert.ok(plan.extensions.some(sql => sql.includes('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public')), 'vector 扩展必须指定 SCHEMA public');
+    assert.ok(plan.extensions.some(sql => sql.includes('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public')), 'pg_trgm 扩展必须指定 SCHEMA public');
+    assert.ok(plan.extensions.some(sql => sql.includes('ALTER EXTENSION vector SET SCHEMA public')), '必须包含 vector 扩展回迁 public 逻辑');
+});

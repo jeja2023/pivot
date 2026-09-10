@@ -301,8 +301,25 @@ function buildPgSchemaStatements() {
 
     return {
         extensions: [
-            `CREATE EXTENSION IF NOT EXISTS vector`,
-            `CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+            `DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_extension e
+                    JOIN pg_namespace n ON e.extnamespace = n.oid
+                    WHERE e.extname = 'vector' AND n.nspname <> 'public'
+                ) THEN
+                    ALTER EXTENSION vector SET SCHEMA public;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM pg_extension e
+                    JOIN pg_namespace n ON e.extnamespace = n.oid
+                    WHERE e.extname = 'pg_trgm' AND n.nspname <> 'public'
+                ) THEN
+                    ALTER EXTENSION pg_trgm SET SCHEMA public;
+                END IF;
+            END $$;`,
+            `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`,
+            `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`,
         ],
         helperFunctions: PG_HELPER_FUNCTIONS,
         tables,
@@ -410,6 +427,7 @@ async function initSchemaPg() {
 
     try {
         // pgvector 是 embedding 列的必需类型；pg_trgm 则允许降级为顺序扫描。
+        // 数据库级扩展必须位于 public schema，否则隔离测试 schema 在并发创建与 CASCADE 清理时会击穿类型解析。
         for (const sql of plan.extensions) {
             try {
                 await client.query(sql);

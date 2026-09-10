@@ -1,3 +1,13 @@
+## [v0.1.120] - 2026-09-10
+
+### PostgreSQL 扩展隔离修复与记忆压缩 SSRF 穿透加固
+
+- **PostgreSQL 扩展隔离与建表加固**：在 `server/db/schema/pg.js`、`scripts/setup_pg_test_db.js` 与 `scripts/setup_pg_db.js` 中将 `vector` 与 `pg_trgm` 扩展显式限定在 `SCHEMA public`，并在 DDL 计划中增加自愈迁移 `DO $$` 块，解决多 Worker 并发测试时扩展归属错位导致 `type "vector" does not exist` 及 CASCADE 清理级联删除扩展的问题；在 `tests/pg-schema-isolation.test.js` 增加自动化断言。
+- **记忆压缩用户身份透传与 SSRF 修复**：在 `server/llm.js` 的 `getContext`、`runGuardedCompression` 与 `compactSessionMemory` 中逐级接收并透传 `options`（包含 `user` 与 `signal`），在 `compressMemory` 中增加基于 `userId` 的用户信息异步兜底，解决记忆压缩出站调用模型时因缺失用户身份触发的本地/私有地址 SSRF 拦截异常；在 `tests/security-chat/chat-route-harness.js` 假上游中增加对非流式（`stream: false`）JSON 请求的响应支持。
+- **测试环境告警净化与门禁全通**：在 `tests/agent-skill-governance.test.js` 中对负向自检用例临时拦截 `logger.error`，彻底消除测试输出中的 CJK 自检错误日志；通过 ESLint 校验、SQL 基线（1421/1421）及全量 22 项项目架构门禁（`npm run check`）。
+
+详细发布记录见 [v0.1.120 发布记录](docs/releases/v0.1.120-PG扩展隔离修复与记忆压缩SSRF穿透加固.md)。
+
 ## [v0.1.119] - 2026-09-10
 
 ### 用量审计外键解耦与 CI 稳定性加固

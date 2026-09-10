@@ -24,6 +24,7 @@ const THRESHOLD = DEFAULT_MEMORY_THRESHOLD;
 const SUMMARY_KEEP_COUNT = Math.max(1, parseInt(process.env.MEMORY_SUMMARY_KEEP_COUNT, 10) || 6);
 const MIN_MESSAGES_TO_COMPRESS = Math.max(1, parseInt(process.env.MEMORY_MIN_MESSAGES_TO_COMPRESS, 10) || 1);
 const MEMORY_COMPRESSION_TIMEOUT_MS = Math.max(15000, parseInt(process.env.MEMORY_COMPRESSION_TIMEOUT_MS, 10) || 180000);
+const USER_ROLE_LOOKUP_SQL = 'SELECT id, username, role FROM users WHERE id = ? AND deleted_at IS NULL';
 // 同会话同时只触发一次后台压缩，全局并发上限可在环境变量调整
 const memoryCompressionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: getBackgroundRuntimeConfig().memoryCompressionMaxConcurrent
@@ -46,11 +47,11 @@ function unwrapGuardedCompressionResult(guardedResult) {
     return guardedResult?.skipped ? guardedResult : (guardedResult?.value || guardedResult || {});
 }
 
-async function runGuardedCompression(sessionId, userId, messages, modelCfg) {
+async function runGuardedCompression(sessionId, userId, messages, modelCfg, options = {}) {
     syncMemoryCompressionConcurrency();
     const guardedResult = await memoryCompressionGuard.run(`mem:${sessionId}`, () =>
         withTimeout(
-            (signal) => compressMemory(sessionId, userId, messages, modelCfg, { signal }),
+            (signal) => compressMemory(sessionId, userId, messages, modelCfg, { ...options, signal }),
             MEMORY_COMPRESSION_TIMEOUT_MS,
             '记忆压缩'
         )
@@ -615,7 +616,7 @@ async function hydrateMessageContent(message, userId, sessionId, totalImageCount
     return getMessageContentForContext({ ...message, content: finalContent.length > 0 ? finalContent : content });
 }
 
-async function getContext(sessionId, userId, modelCfg) {
+async function getContext(sessionId, userId, modelCfg, options = {}) {
     const session = await queryOne('SELECT system_prompt FROM sessions WHERE id = ? AND deleted_at IS NULL', [sessionId]);
     let messages = (await loadSessionMessages(sessionId, userId)) || [];
 
@@ -634,7 +635,7 @@ async function getContext(sessionId, userId, modelCfg) {
 
     if (contextMeta.activeTokens > compactionThreshold && contextMeta.activeCount > MIN_MESSAGES_TO_COMPRESS) {
         try {
-            const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
+            const result = await runGuardedCompression(sessionId, userId, messages, modelCfg, options);
             if (result?.skipped) {
                 logger.info({ sessionId, reason: result.reason }, '记忆压缩已跳过');
             } else if (result?.compressed) {
@@ -677,7 +678,7 @@ async function compactSessionMemory(sessionId, userId, modelCfg, options = {}) {
         };
     }
 
-    const result = await runGuardedCompression(sessionId, userId, messages, modelCfg);
+    const result = await runGuardedCompression(sessionId, userId, messages, modelCfg, options);
     const afterMessages = (await loadSessionMessages(sessionId, userId)) || [];
     const after = buildContextMeta(afterMessages);
     return {
@@ -700,11 +701,17 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
         + toSummarize.map(m => `${m.role}: ${getMessageTextForContext(m)}`).join('\n');
 
     try {
+        let user = options.user || null;
+        if (!user && userId) {
+            try {
+                user = await queryOne(USER_ROLE_LOOKUP_SQL, [userId]);
+            } catch (_) {}
+        }
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         // 调用时校验出站地址（含 DNS 解析），与其它模型出站点一致，阻断 SSRF / DNS rebinding
         const response = await forwardChatCompletion({
             modelCfg,
-            user: options.user || null,
+            user,
             url: targetUrl,
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             data: {
