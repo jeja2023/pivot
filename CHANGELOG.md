@@ -1,3 +1,12 @@
+## [v0.1.121] - 2026-09-10
+
+### CI 无头环境受控登录测试适配与无显示服务降级
+
+- **受控登录无头模式自适应与参数解耦**：在 `server/services/agent-browser.js` 中解除 `createControlledLoginFlow` 对 `headless: false` 的硬编码，支持外部显式传入 `headless` 配置；增加 `isHeadlessEnvironment()` 环境检测能力，自动识别 `CI`、`HEADLESS` 以及 Linux 无 `$DISPLAY` / 无 `$WAYLAND_DISPLAY` 运行环境并安全回退至无头模式，避免 Linux 容器与 CI 矩阵因缺少 XServer 触发 Chromium Ozone 平台崩溃。
+- **自动化测试无头隔离与环境断言**：在 `tests/agent-browser.test.js` 中将受控登录测试显式配置为 `headless: true`，消除测试对桌面显示服务的依赖；新增无头环境探测器环境变量与模式识别单测。
+
+详细发布记录见 [v0.1.121 发布记录](docs/releases/v0.1.121-CI无头环境受控登录测试适配与无显示服务降级.md)。
+
 ## [v0.1.120] - 2026-09-10
 
 ### PostgreSQL 扩展隔离修复与记忆压缩 SSRF 穿透加固

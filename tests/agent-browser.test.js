@@ -13,6 +13,7 @@ const {
     closeAgentBrowserContext,
     createAgentBrowserContext,
     createControlledLoginFlow,
+    isHeadlessEnvironment,
     locateBrowserTarget,
     resolveChromiumExecutable,
     isAgentBrowserRuntimeAvailable
@@ -70,6 +71,24 @@ test('browser context options always use a separate profile and block downloads'
     assert.equal(options.serviceWorkers, 'block');
 });
 
+test('headless environment detector recognizes CI and explicit flags', () => {
+    assert.equal(typeof isHeadlessEnvironment(), 'boolean');
+    const originalCI = process.env.CI;
+    const originalHeadless = process.env.HEADLESS;
+    try {
+        process.env.CI = 'true';
+        assert.equal(isHeadlessEnvironment(), true);
+        delete process.env.CI;
+        process.env.HEADLESS = 'true';
+        assert.equal(isHeadlessEnvironment(), true);
+    } finally {
+        if (originalCI !== undefined) process.env.CI = originalCI;
+        else delete process.env.CI;
+        if (originalHeadless !== undefined) process.env.HEADLESS = originalHeadless;
+        else delete process.env.HEADLESS;
+    }
+});
+
 test('controlled login flow waits for user readiness without exposing credentials', { skip: !hasChromium && '未检测到可用的 Chromium 可执行文件，跳过受控登录测试' }, async () => {
     const fixture = await startFixture();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-login-test-'));
@@ -78,7 +97,7 @@ test('controlled login flow waits for user readiness without exposing credential
     let flow;
     try {
         const policy = { allowed_origins: [fixture.url], allowed_ports: [Number(new URL(fixture.url).port)], block_private_ranges: false, block_loopback: false, block_link_local: false };
-        flow = await createControlledLoginFlow({ loginUrl: fixture.url, profileRoot: root, taskId: 'login-test', networkPolicy: policy, executablePath: resolveChromiumExecutable(chromium) });
+        flow = await createControlledLoginFlow({ loginUrl: fixture.url, profileRoot: root, taskId: 'login-test', networkPolicy: policy, executablePath: resolveChromiumExecutable(chromium), headless: true });
         const result = await flow.waitForUserReady({ readySelector: '#run', timeoutMs: 3000 });
         assert.equal(result.authenticated, true);
         assert.throws(() => assertSafeBrowserEvaluation('() => localStorage.getItem("token")'), /禁止读取 Cookie/);

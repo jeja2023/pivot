@@ -148,11 +148,22 @@ async function createAgentBrowserContext(options = {}) {
     return await createManagedBrowserContext({ ...options, engine: 'chromium' });
 }
 
+function isHeadlessEnvironment() {
+    return Boolean(
+        process.env.CI ||
+        process.env.HEADLESS === 'true' ||
+        (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY)
+    );
+}
+
 async function createControlledLoginFlow(options = {}) {
     const policy = normalizeNetworkPolicy(options.networkPolicy || {});
     const loginUrl = String(options.loginUrl || '').trim();
     await assertNetworkPolicyUrl(loginUrl, policy, { requireAllowlist: true });
-    const context = await createAgentBrowserContext({ ...options, headless: false, networkPolicy: policy });
+    const headless = typeof options.headless === 'boolean'
+        ? options.headless
+        : isHeadlessEnvironment();
+    const context = await createAgentBrowserContext({ ...options, headless, networkPolicy: policy });
     const page = await context.newPage();
     await page.goto(loginUrl, { waitUntil: options.waitUntil || 'domcontentloaded' });
     return {
@@ -228,6 +239,7 @@ module.exports = {
     createIsolatedProfile,
     attachBrowserNetworkGuards,
     evaluateSafe,
+    isHeadlessEnvironment,
     locateBrowserTarget,
     resolveChromiumExecutable,
     isAgentBrowserRuntimeAvailable
