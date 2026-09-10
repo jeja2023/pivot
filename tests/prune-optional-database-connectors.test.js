@@ -46,6 +46,34 @@ test('可选数据库连接器裁剪仅移除未选连接器的不可达依赖�
     }
 });
 
+test('完整数据库连接器档位保留 MySQL、SQL Server 与 MongoDB 驱动', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-full-connector-profile-'));
+    const nodeModules = path.join(root, 'node_modules');
+    try {
+        writePackage(nodeModules, 'core');
+        writePackage(nodeModules, 'mysql2', { dependencies: { mysql_only: '1.0.0' } });
+        writePackage(nodeModules, 'mssql', { dependencies: { mssql_only: '1.0.0' } });
+        writePackage(nodeModules, 'mongodb', { dependencies: { mongo_only: '1.0.0' } });
+        writePackage(nodeModules, 'mysql_only');
+        writePackage(nodeModules, 'mssql_only');
+        writePackage(nodeModules, 'mongo_only');
+        const projectManifest = { dependencies: { core: '1.0.0', mysql2: '1.0.0', mssql: '1.0.0', mongodb: '1.0.0' } };
+
+        const result = pruneOptionalDatabaseConnectors({
+            nodeModulesDir: nodeModules,
+            projectManifest,
+            connectors: 'mysql,mssql,mongodb'
+        });
+
+        assert.deepEqual(result.enabledConnectors, ['mongodb', 'mssql', 'mysql']);
+        for (const name of ['mysql2', 'mssql', 'mongodb', 'mysql_only', 'mssql_only', 'mongo_only']) {
+            assert.equal(fs.existsSync(path.join(nodeModules, name)), true, `${name} 应保留在完整连接器档位中`);
+        }
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('可选连接器参数只接受明确的产品名称', () => {
     assert.deepEqual([...parseConnectorList('mysql, mongodb')].sort(), ['mongodb', 'mysql']);
     assert.throws(() => parseConnectorList('oracle'), /未知的 PIVOT_DB_CONNECTORS/);

@@ -1,51 +1,6 @@
 // 聊天工具库工作台数据加载与操作 Chat MCP workbench data loading and actions
 let mcpWorkbenchLoadPromise = null;
-const mcpActionLocks = new Set();
 const mcpModalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
-
-function setMcpWorkbenchState(kind = '', message = '') {
-    const state = document.getElementById('mcp-workbench-state');
-    if (!state) return;
-    state.hidden = !message;
-    state.dataset.state = kind || '';
-    state.replaceChildren();
-    if (!message) return;
-    const copy = document.createElement('span');
-    copy.textContent = message;
-    state.appendChild(copy);
-    if (kind === 'error' || kind === 'partial') {
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.className = 'btn-secondary';
-        retry.textContent = '重试';
-        retry.addEventListener('click', () => refreshMcpWorkbench(retry));
-        state.appendChild(retry);
-    }
-}
-
-async function withMcpActionLock(key, button, busyText, action) {
-    if (mcpActionLocks.has(key)) return null;
-    mcpActionLocks.add(key);
-    const originalText = button?.textContent || '';
-    if (button) {
-        button.disabled = true;
-        button.setAttribute('aria-busy', 'true');
-        if (busyText) button.textContent = busyText;
-    }
-    try {
-        return await action();
-    } catch (error) {
-        showToast(error?.message || '工具库操作失败，请稍后重试', 'error');
-        return null;
-    } finally {
-        mcpActionLocks.delete(key);
-        if (button) {
-            button.disabled = false;
-            button.removeAttribute('aria-busy');
-            if (busyText) button.textContent = originalText;
-        }
-    }
-}
 
 function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
     const badge = count ? `${count} 个` : service.badge;

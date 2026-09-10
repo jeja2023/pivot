@@ -33,8 +33,8 @@ test('Docker production dependencies remove verified non-runtime type and browse
     assert.match(dockerfile, /node scripts\/prune_runtime_modules\.js --node-modules \/app\/node_modules/);
 });
 
-test('Docker image removes optional database connector closures unless selected at build time', () => {
-    assert.match(dockerfile, /ARG PIVOT_DB_CONNECTORS=""/);
+test('Docker image retains all tool-library database connectors by default while allowing optional connector profiles', () => {
+    assert.match(dockerfile, /ARG PIVOT_DB_CONNECTORS="mysql,mssql,mongodb"/);
     assert.match(dockerfile, /COPY scripts\/prune_optional_database_connectors\.js \.\/scripts\/prune_optional_database_connectors\.js/);
     assert.match(dockerfile, /prune_optional_database_connectors\.js --node-modules \/app\/node_modules --connectors "\$PIVOT_DB_CONNECTORS"/);
 });

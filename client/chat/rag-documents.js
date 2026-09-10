@@ -2,6 +2,7 @@
 // RAG 文档功能从 rag.js 拆分而来。
 /* eslint-disable no-undef */
 let ragCollections = [];
+window.Pivot.legacy.getRagCollections = () => ragCollections;
 let ragTags = [];
 let ragDocsCache = [];
 const ragTagsByCollection = new Map();
@@ -97,10 +98,12 @@ function normalizeRagCollectionId(value) {
     const id = Number.parseInt(value, 10);
     return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
 }
+window.Pivot.legacy.normalizeRagCollectionId = normalizeRagCollectionId;
 
 function normalizeRagTag(value) {
     return String(value || '').trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40);
 }
+window.Pivot.legacy.normalizeRagTag = normalizeRagTag;
 
 function parseRagTags(value) {
     const values = Array.isArray(value) ? value : String(value || '').split(/[,，;；\s\n]+/);
@@ -472,216 +475,7 @@ window.Pivot.legacy.createKnowledgeTagFromPrompt = async function () {
     }
 };
 
-async function openKnowledgeCollectionShareModal() {
-    const collectionId = normalizeRagCollectionId(document.getElementById('rag-collection-filter')?.value);
-    if (!collectionId) return showToast('请先在专题库筛选中选择一个自己的专题库', 'error');
-    const collection = ragCollections.find(item => String(item.id) === collectionId);
-    if (!collection?.can_edit) return showToast('共享专题库需要所有者权限', 'error');
-
-    const res = await apiFetch(`${API_BASE}/rag/collections/share-options?collectionId=${encodeURIComponent(collectionId)}`, { headers: authHeaders() });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showToast(data.error || '无法读取专题库共享设置', 'error');
-
-    let modal = document.getElementById('knowledge-share-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'knowledge-share-modal';
-        modal.className = 'modal-overlay hidden knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
-        modal.dataset.knowledgeModal = '1';
-        modal.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(modal);
-    } else {
-        modal.className = 'modal-overlay hidden knowledge-share-modal-overlay agent-workflow-share-modal-overlay';
-        modal.dataset.knowledgeModal = '1';
-        modal.setAttribute('aria-hidden', 'true');
-    }
-
-    const current = data.data?.collection || collection;
-    const units = Array.isArray(data.data?.units) ? data.data.units.filter(Boolean) : [];
-    const users = Array.isArray(data.data?.users) ? data.data.users.filter(item => Number(item?.id) > 0) : [];
-    const allowed = new Set(String(current.allowed_units || '').split(',').map(item => item.trim()).filter(Boolean));
-    const allowedUserIds = new Set((Array.isArray(current.allowed_user_ids)
-        ? current.allowed_user_ids
-        : String(current.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
-    const isShared = current.scope === 'shared';
-    const canShareAll = data.data?.canShareAll === true;
-    const isAll = isShared && canShareAll && allowed.size === 0 && allowedUserIds.size === 0;
-    const currentUnit = String(data.data?.currentUnit || '').trim();
-
-    PivotSafeHtml.setHtml(modal, `
-        <div class="modal agent-workflow-share-modal knowledge-share-modal" role="dialog" aria-modal="true" aria-labelledby="knowledge-share-title">
-            <div class="agent-workflow-share-head">
-                <div>
-                    <h3 id="knowledge-share-title">分享专题库</h3>
-                    <p id="knowledge-share-subtitle">设置哪些单位或个人可以只读检索与问答该专题库。</p>
-                </div>
-                <button type="button" class="btn-danger-outline" data-knowledge-share-close data-knowledge-modal-close>关闭</button>
-            </div>
-            <div class="agent-workflow-share-body">
-                <div class="agent-workflow-share-summary">
-                    <strong>${window.Pivot.legacy.escapeRagHtml(current.name || '专题库')}</strong>
-                    <span>共享后，接收方只能检索、查看详情和知识图谱，无法上传、编辑、重建或删除文档。</span>
-                </div>
-                <fieldset class="agent-workflow-share-scope-fieldset">
-                    <legend>可见范围</legend>
-                    <label class="agent-workflow-share-choice">
-                        <input type="radio" name="knowledge-share-scope" value="personal" ${!isShared ? 'checked' : ''}>
-                        <span>
-                            <strong>仅自己</strong>
-                            <small>未启用共享时，该专题库仅对自己可见和检索。</small>
-                        </span>
-                    </label>
-                    <label class="agent-workflow-share-choice">
-                        <input type="radio" name="knowledge-share-scope" value="shared" ${isShared ? 'checked' : ''}>
-                        <span>
-                            <strong>共享给单位或个人</strong>
-                            <small>选定成员可以以只读方式检索、查看详情和知识图谱。</small>
-                        </span>
-                    </label>
-                </fieldset>
-                <section id="knowledge-share-units-section" class="agent-workflow-share-units-section ${isShared ? '' : 'hidden'}">
-                    <label id="knowledge-share-all-label" class="agent-workflow-share-all ${canShareAll ? '' : 'hidden'}">
-                        <input id="knowledge-share-all" type="checkbox" ${isAll ? 'checked' : ''} ${canShareAll ? '' : 'disabled'}>
-                        <span>共享给全体成员</span>
-                    </label>
-                    <div class="agent-workflow-share-units-head">
-                        <div>
-                            <strong>共享对象</strong>
-                            <span>按单位展开并选择整个单位或其中的用户。</span>
-                        </div>
-                        <div class="agent-workflow-share-target-actions">
-                            <button type="button" class="btn-secondary" data-knowledge-share-select="tree">全选</button>
-                            <button type="button" class="btn-secondary" data-knowledge-share-clear="tree">全不选</button>
-                        </div>
-                    </div>
-                    <div id="knowledge-share-target-tree" class="agent-workflow-share-tree" role="tree" aria-label="单位和用户">
-                        ${window.Pivot.legacy.PivotShareTargetTree?.render({
-        units,
-        users,
-        allowedUnits: [...allowed],
-        allowedUserIds: [...allowedUserIds],
-        currentUnit,
-        isShared,
-        isAll,
-        unitInputName: 'knowledge-share-unit',
-        userInputName: 'knowledge-share-user',
-        escapeText: window.Pivot.legacy.escapeRagHtml,
-        escapeAttr: window.Pivot.legacy.escapeRagAttr
-    }) || '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>'}
-                    </div>
-                </section>
-                <div id="knowledge-share-error" class="agent-workflow-share-error" role="alert" hidden></div>
-            </div>
-            <div class="agent-workflow-share-footer">
-                <button type="button" class="btn-secondary" data-knowledge-share-close>取消</button>
-                <button type="button" class="btn-primary" data-knowledge-share-save>保存共享设置</button>
-            </div>
-        </div>
-    `);
-
-    const closeButtons = modal.querySelectorAll('[data-knowledge-share-close]');
-    closeButtons.forEach(btn => btn.addEventListener('click', () => window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false)));
-    if (modal.dataset.boundKnowledgeShareOverlay !== '1') {
-        modal.dataset.boundKnowledgeShareOverlay = '1';
-        modal.addEventListener('click', e => {
-            if (e.target === modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
-        });
-    }
-
-    const setKnowledgeError = (msg = '') => {
-        const errEl = modal.querySelector('#knowledge-share-error');
-        if (!errEl) return;
-        errEl.textContent = msg;
-        errEl.hidden = !msg;
-    };
-
-    const scopeRadios = modal.querySelectorAll('input[name="knowledge-share-scope"]');
-    scopeRadios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value;
-            const sec = modal.querySelector('#knowledge-share-units-section');
-            if (sec) sec.classList.toggle('hidden', scopeVal !== 'shared');
-            setKnowledgeTargetsEnabled();
-            setKnowledgeError('');
-        });
-    });
-
-    const allChk = modal.querySelector('#knowledge-share-all');
-    const setKnowledgeTargetsEnabled = () => {
-        const enabled = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value === 'shared';
-        const allChecked = allChk?.checked === true && allChk?.disabled !== true;
-        const disabled = !enabled || allChecked;
-        modal.querySelectorAll('input[name="knowledge-share-unit"], input[name="knowledge-share-user"], [data-knowledge-share-select], [data-knowledge-share-clear]')
-            .forEach(control => control.disabled = disabled);
-    };
-    allChk?.addEventListener('change', () => {
-        setKnowledgeTargetsEnabled();
-        setKnowledgeError('');
-    });
-    modal.querySelectorAll('[data-knowledge-share-select], [data-knowledge-share-clear]').forEach(button => {
-        button.addEventListener('click', () => {
-            const group = button.dataset.knowledgeShareSelect || button.dataset.knowledgeShareClear;
-            const checked = Boolean(button.dataset.knowledgeShareSelect);
-            const tree = modal.querySelector('#knowledge-share-target-tree');
-            if (group === 'tree') window.Pivot.legacy.PivotShareTargetTree?.setChecked(tree, checked);
-            setKnowledgeError('');
-        });
-    });
-    window.Pivot.legacy.PivotShareTargetTree?.bind(modal.querySelector('#knowledge-share-target-tree'), {
-        unitSelector: 'input[name="knowledge-share-unit"]',
-        userSelector: 'input[name="knowledge-share-user"]',
-        onChange: () => setKnowledgeError('')
-    });
-    setKnowledgeTargetsEnabled();
-
-    const saveBtn = modal.querySelector('[data-knowledge-share-save]');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', async () => {
-            const scopeVal = modal.querySelector('input[name="knowledge-share-scope"]:checked')?.value || 'personal';
-            const enabled = scopeVal === 'shared';
-            const allCheckbox = modal.querySelector('#knowledge-share-all');
-            const allChecked = allCheckbox?.checked === true && allCheckbox?.disabled !== true;
-            const allowedUnits = enabled && !allChecked
-                ? [...modal.querySelectorAll('input[name="knowledge-share-unit"]:checked')].map(input => input.value).filter(Boolean)
-                : [];
-            const allowedUserIds = enabled && !allChecked
-                ? [...modal.querySelectorAll('input[name="knowledge-share-user"]:checked')]
-                    .filter(input => !allowedUnits.includes(input.dataset.shareTreeUserUnit || ''))
-                    .map(input => Number(input.value))
-                    .filter(Number.isSafeInteger)
-                : [];
-
-            if (enabled && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
-                setKnowledgeError('共享时至少选择一个单位或一个个人，也可以由管理员共享给全体成员。');
-                return;
-            }
-
-            setKnowledgeError('');
-            saveBtn.disabled = true;
-
-            try {
-                const saveRes = await apiFetch(`${API_BASE}/rag/collections/${encodeURIComponent(collectionId)}/sharing`, {
-                    method: 'PATCH',
-                    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ scope: enabled ? 'shared' : 'personal', allowedUnits, allowedUserIds })
-                });
-                const saveData = await saveRes.json().catch(() => ({}));
-                if (!saveRes.ok) throw new Error(saveData.error || '共享设置保存失败');
-
-                window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
-                showToast('专题库共享设置已更新', 'success');
-                await window.Pivot.legacy.loadKnowledgeCollections?.();
-                window.Pivot.legacy.loadKnowledgeDocs(1);
-            } catch (err) {
-                setKnowledgeError(err.message || '共享设置保存失败');
-            } finally {
-                saveBtn.disabled = false;
-            }
-        });
-    }
-
-    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '[name="knowledge-share-scope"]' });
-};
+const openKnowledgeCollectionShareModal = (...args) => (window.Pivot.legacy.openKnowledgeCollectionShareModal || window.openKnowledgeCollectionShareModal)?.(...args);
 
 function renderRagDocsPagination(total, page, limit) {
     window.Pivot.legacy.renderWorkspacePagination?.('pagination-ragDocs', {
