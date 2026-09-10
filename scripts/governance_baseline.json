@@ -3,7 +3,7 @@
   "largeFileThreshold": 1000,
   "legacyWindowGlobalBudget": 276,
   "files": {
-    "client/chat/rag-documents.js": 1481,
+    "client/chat/rag-documents.js": 1479,
     "client/chat/mcp-workbench-main.js": 1421,
     "client/chat/apps-workbench-editor.js": 1419,
     "server/db/migrations/legacy.js": 1285,

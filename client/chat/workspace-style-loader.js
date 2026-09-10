@@ -1,5 +1,5 @@
 /* 工作区样式按需加载器：避免首屏加载所有业务工作区 CSS。 */
-
+(() => {
 const WORKSPACE_STYLE_GROUPS = Object.freeze({
     apps: ['/chat/chat.workspace.apps.css'],
     agent: ['/chat/chat.workspace.agent.css'],
@@ -280,3 +280,4 @@ window.Pivot?.exposeModule?.('workspaces.styleLoader', {
     prewarmAutomationWorkspaces,
     WORKSPACE_PANEL_IDS
 });
+})();

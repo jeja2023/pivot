@@ -475,8 +475,6 @@ window.Pivot.legacy.createKnowledgeTagFromPrompt = async function () {
     }
 };
 
-const openKnowledgeCollectionShareModal = (...args) => (window.Pivot.legacy.openKnowledgeCollectionShareModal || window.openKnowledgeCollectionShareModal)?.(...args);
-
 function renderRagDocsPagination(total, page, limit) {
     window.Pivot.legacy.renderWorkspacePagination?.('pagination-ragDocs', {
         total,
