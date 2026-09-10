@@ -132,9 +132,6 @@ function splitTestGroups(files, workerCount) {
 }
 
 async function main() {
-    try {
-        require('./ensure_sqlite_binary').ensureSqliteBinary();
-    } catch (_) {}
     const workerCount = normalizeWorkerCount();
     const groups = splitTestGroups(testFiles, workerCount);
     if (groups.length > 1) console.log(`Node 测试将使用 ${groups.length} 个隔离 PostgreSQL schema 并行分组执行。`);

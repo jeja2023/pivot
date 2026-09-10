@@ -2,7 +2,7 @@
 
 ### Node 20 多版本测试绑定自愈与上传中间件异步清理
 
-- **Node 20 多版本矩阵 SQLite 原生绑定自愈**：针对 Node 20 环境下 `better-sqlite3` 预编译二进制（针对 Node 22 ABI 构建）导致的 N-API 不匹配报错，引入 `scripts/ensure_sqlite_binary.js`，在运行时及 CI `npm ci` 后自动感知并在必要时调用 `node-gyp rebuild` 重建原生绑定，恢复 `agent-acceptance`、`desktop-agent-runtime`、`security-rag` 等 9 个测试套件在 Node 20 环境下的平滑运行。
+- **SQLite 依赖对齐与跨 Node 矩阵免编译自愈**：将 `better-sqlite3` 对齐至官方同时支持 `20.x` 与 `22.x` 的稳定版本 `^12.11.1`，通过内置 `prebuild-install` 机制在 Node 20 与 Node 22 双运行环境下均实现官方预编译包原生直装，彻底解决 Node 20 下因 ABI 127 预编译二进制引起的 Linux 动态链接段错误（Segmentation fault, 退出码 139）与 9 个 SQLite 相关测试套件的启动崩溃。
 - **上传安全中间件异步文件清理竞争消除**：将 `server/upload.js` 中的 `removeUploadedPath`、`removeUploadedFile` 与 `cleanupRequestUploads` 重构为纯 `async/await`，在文件类型与魔数不匹配触发拒绝时严格等待底层文件 unlink 完成再返回 400 响应，彻底消除 `tests/security-auth.test.js:1301` 中的物理文件清理断言竞态。
 - **测试环境全局状态与模块缓存隔离**：在 `tests/data-analysis.test.js` 中记录并复原 `PIVOT_ANALYSIS_DIR` 与 `DATA_ANALYSIS_MAX_ROWS`；在 `tests/db-migration-snapshots.test.js` 中移除破坏性的模块缓存清理逻辑，防止数据库连接单例受损。
 

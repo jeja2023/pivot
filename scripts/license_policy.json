@@ -29,6 +29,16 @@
       "selectedLicense": "LGPL-3.0-or-later",
       "reason": "libvips 动态库；发行包随附 LGPL-3.0 文本和替换说明。",
       "expiresOn": "2026-12-31"
+    },
+    "expand-template": {
+      "selectedLicense": "MIT",
+      "reason": "better-sqlite3 预编译工具依赖，上游声明 (MIT OR WTFPL)；本项目选择 MIT 分支。",
+      "expiresOn": "2026-12-31"
+    },
+    "rc": {
+      "selectedLicense": "MIT",
+      "reason": "better-sqlite3 预编译工具依赖，上游声明 (BSD-2-Clause OR MIT OR Apache-2.0)；本项目选择 MIT 分支。",
+      "expiresOn": "2026-12-31"
     }
   }
 }
