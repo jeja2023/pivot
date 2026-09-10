@@ -40,6 +40,7 @@ const {
     normalizeCompletionRequest
 } = require('../../server/routes/openai/helpers');
 const { logger: appLogger } = require('../../server/logger');
+const { flushAllWrites } = require('../../server/services/db-write-queue');
 
 test('代码补全仅对推理模型追加 no-think 软开关', () => {
     const messages = [{ role: 'user', content: 'Complete this code' }];
@@ -301,6 +302,7 @@ test('模型用量事件会计入每日模型配额用量', async () => {
         recordModelTokenUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid, 123, 'openai_api_key');
         assert.equal(await getModelDailyUsage(userInfo.lastInsertRowid, modelInfo.lastInsertRowid), 123);
     } finally {
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
@@ -675,6 +677,7 @@ test('OpenAI 聊天补全兼容 prompt 风格的代码补全请求', async () =>
         }
     } finally {
         await new Promise(resolve => upstream.close(resolve));
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
@@ -781,6 +784,7 @@ test('OpenAI completions 兼容 Continue 风格的 prompt 请求', async () => {
         assert.equal(capturedPayload.chat_template_kwargs.enable_thinking, false);
     } finally {
         await new Promise(resolve => upstream.close(resolve));
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
@@ -902,6 +906,7 @@ test('OpenAI completions 完整支持文本 prompt 数组与 legacy 候选参数
         assert.deepEqual(res.body.usage, { prompt_tokens: 20, completion_tokens: 6, total_tokens: 26 });
     } finally {
         await new Promise(resolve => upstream.close(resolve));
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
@@ -1025,6 +1030,7 @@ test('OpenAI completions 流式响应会转换为 text completion SSE', async ()
         assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
     } finally {
         await new Promise(resolve => upstream.close(resolve));
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
@@ -1119,6 +1125,7 @@ test('OpenAI completions 上游流中断会返回 SSE error 且不伪造 DONE', 
         assert.equal(res.writableEnded, true);
     } finally {
         await new Promise(resolve => upstream.close(resolve));
+        await flushAllWrites();
         db.prepare('DELETE FROM model_usage_events WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);

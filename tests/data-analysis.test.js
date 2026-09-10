@@ -93,11 +93,6 @@ test('数据分析支持上传 SQLite 文件生成数据集', async () => {
     } finally {
         cleanupAnalysisRows(userId);
         removeTestPath(tempDir, { recursive: true });
-        try {
-            removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 1, retryDelay: 20 });
-        } catch (_err) {
-            // Windows may release DuckDB-read Parquet handles shortly after the test exits.
-        }
     }
 });
 
@@ -150,7 +145,6 @@ test('数据分析历史可回放 AI 结果且百分比画像保持比例口径'
         assert.deepEqual(artifacts[0].analysis, { answer: '已完成', scope: 'profile' });
     } finally {
         cleanupAnalysisRows(userId);
-        try { removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 1, retryDelay: 20 }); } catch (_err) {}
     }
 });
 
@@ -196,6 +190,11 @@ test('数据分析数据总览支持编辑修改数据集名称与原始文件�
         assert.match(eventsCode, /submitEditDataset/);
     } finally {
         cleanupAnalysisRows(userId);
-        try { removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 1, retryDelay: 20 }); } catch (_err) {}
     }
+});
+
+test.after(() => {
+    try {
+        removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 3, retryDelay: 50 });
+    } catch (_err) {}
 });

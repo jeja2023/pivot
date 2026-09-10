@@ -227,10 +227,10 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
         assert.ok(legacyDb.prepare('SELECT id FROM schema_migrations WHERE id = ?').get(migrationId));
         assert.equal(legacyDb.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, 1);
     } finally {
-        clearServerDbModules();
-        legacyDb.close();
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
+        clearServerDbModules();
+        legacyDb.close();
         removeDir(dataDir);
     }
 });
@@ -312,10 +312,10 @@ test('database boot migrates legacy automation columns before creating dependent
         assert.ok(runIndexes.includes('idx_agent_runs_user_dedupe'));
         assert.ok(scheduleIndexes.includes('idx_agent_schedules_dispatch'));
     } finally {
-        clearServerDbModules();
-        legacyDb.close();
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
+        clearServerDbModules();
+        legacyDb.close();
         removeDir(dataDir);
     }
 });

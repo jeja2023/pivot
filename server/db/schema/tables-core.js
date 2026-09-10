@@ -607,9 +607,7 @@ function coreTablesSql() {
             token_count INTEGER DEFAULT 0,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
         );
 
         CREATE TABLE IF NOT EXISTS api_call_logs (

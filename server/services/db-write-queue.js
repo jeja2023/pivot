@@ -182,6 +182,9 @@ const UNRECOVERABLE_DB_CODES = new Set(['22001', '22003', '22021', '22P02', '235
 function isUnrecoverableDbError(error) {
     return UNRECOVERABLE_DB_CODES.has(String(error?.code || '')) || UNRECOVERABLE_DB_ERRORS.test(String(error?.message || error || ''));
 }
+function isForeignKeyViolation(error) {
+    return String(error?.code || '') === '23503' || /violates foreign key constraint/i.test(String(error?.message || error || ''));
+}
 
 /**
  * 使用独立 client 执行队列写入，以便超时后销毁坏连接。
@@ -299,7 +302,11 @@ async function pgFlushQueue(queueName) {
                 } catch (singleErr) {
                     const singleUnrecoverable = isUnrecoverableDbError(singleErr);
                     if (singleUnrecoverable) {
-                        logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
+                        if (isForeignKeyViolation(singleErr)) {
+                            logger.warn({ err: singleErr.message, queueName, item }, '[PG] 写入队列关联实体已不存在（外键失效），已隔离单条');
+                        } else {
+                            logger.error({ err: singleErr.message, queueName, item }, '[PG] 写入队列发生不可恢复数据异常，已隔离单条');
+                        }
                         continue;
                     }
                     // 当前失败项及其后续项都尚未尝试，必须完整放回队首，不能丢批次尾部数据。
@@ -312,7 +319,11 @@ async function pgFlushQueue(queueName) {
             return;
         }
 
-        logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
+        if (isForeignKeyViolation(err)) {
+            logger.warn({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列关联实体已不存在（外键失效），已安全丢弃');
+        } else {
+            logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
+        }
         markQueueError(queueName, err);
     }
 }

@@ -1,3 +1,14 @@
+## [v0.1.119] - 2026-09-10
+
+### 用量审计外键解耦与 CI 稳定性加固
+
+- **PostgreSQL 用量事件外键解耦**：新增迁移 `202609100001_model_usage_events_fkey_soften`，彻底剥离 `model_usage_events` 对 `users` 和 `models` 表的外键依赖，将只增审计日志流与实体物理生命周期解耦，解决测试与并发写入时外键冲突报错。
+- **异步写入队列弹性防护**：在 `server/services/db-write-queue.js` 增加 `isForeignKeyViolation` 智能捕获，将瞬态外键失效安全隔离并降级为警告，不再升级为未捕获致命错误。
+- **测试生命周期与并发隔离加固**：在 `tests/security-chat/ops-models.js` 测试清理阶段增加 `await flushAllWrites()`，确保异步队列落库完成后再执行实体物理删除；在 `tests/data-analysis.test.js` 移除用例内部过早销毁共享临时目录的缺陷，统一定位至 `test.after()`；在 `tests/db-migration-snapshots.test.js` 优先恢复 `DATA_DIR` 再清除缓存模块，保障全流程环境状态隔离。
+- **CI 全绿与规范门禁**：通过双 Worker 隔离模式下的全量 1014 项测试（0 fail）、22 项架构规范门禁（`npm run check`）以及 ESLint 检查（0 error, 0 warning）。
+
+详细发布记录见 [v0.1.119 发布记录](docs/releases/v0.1.119-用量审计外键解耦与CI稳定性加固.md)。
+
 ## [v0.1.118] - 2026-09-10
 
 ### 个人工作台视口自适应优化与个人信息弹窗重构
