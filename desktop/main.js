@@ -30,6 +30,7 @@ const { normalizeLocalMcpExecutionError } = require('./local-mcp-execution-error
 const { writeJsonAtomic } = require('./atomic-json');
 const { buildApplicationMenu } = require('./application-menu');
 const { installRendererPermissionPolicy } = require('./renderer-permissions');
+const { normalizeSessionListViewport, shouldForwardSessionListWheel } = require('./session-list-wheel');
 const {
     createWorkerApprovalStore,
     isSecureWorkerRendererUrl,
@@ -45,6 +46,7 @@ let updaterController = null;
 let aboutWindow = null;
 let serverConfigWindow = null;
 let deliveryController = null;
+const sessionListViewports = new Map();
 const localAuthManager = createLocalAuthorizationManager({
     app,
     dialog,
@@ -388,9 +390,42 @@ function assertSecureWorkerIpcSender(event) {
     }
 }
 
+function updateSessionListViewport(event, payload) {
+    try {
+        assertTrustedIpcSender(event);
+    } catch (_) {
+        return;
+    }
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+    sessionListViewports.set(event.sender.id, normalizeSessionListViewport(payload));
+}
+
+function installSessionListWheelBridge(window) {
+    const contents = window?.webContents;
+    if (!contents) return;
+
+    const clearViewport = () => sessionListViewports.delete(contents.id);
+    contents.on('did-start-loading', clearViewport);
+    contents.on('destroyed', clearViewport);
+    contents.on('before-mouse-event', (event, mouse) => {
+        const viewport = sessionListViewports.get(contents.id);
+        if (!shouldForwardSessionListWheel(mouse, viewport)) return;
+
+        // 在 Chromium 将 wheel 事件分发给页面前接管，避免无边框窗口的
+        // 合成层命中错误或直接吞掉输入后，DOM 侧兜底根本没有机会执行。
+        event.preventDefault();
+        contents.send('pivot-desktop:session-list-wheel', {
+            deltaY: Number(mouse.deltaY),
+            deltaX: Number(mouse.deltaX) || 0
+        });
+    });
+}
+
 function desktopWorkerRoot() {
     return path.join(app.getPath('userData'), 'agent-workspaces');
 }
+
+ipcMain.on('pivot-desktop:session-list-viewport', updateSessionListViewport);
 
 function handleRendererNavigation(event, targetUrl, openExternal) {
     if (isTrustedMainRendererUrl(targetUrl)) return;
@@ -480,6 +515,7 @@ function createMainWindow(config) {
     const webSession = mainWindow.webContents.session;
     installRendererPermissionPolicy(webSession);
     attachStealthHeaderInterceptor(webSession);
+    installSessionListWheelBridge(mainWindow);
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
         if (shouldOpenExternal(targetUrl)) shell.openExternal(targetUrl);
         return { action: 'deny' };

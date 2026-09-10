@@ -132,17 +132,28 @@ function installSessionListScrollFallback() {
                 overflow-y: auto !important;
                 overscroll-behavior-y: contain !important;
                 touch-action: pan-y !important;
-                scrollbar-width: none !important;
-                -ms-overflow-style: none !important;
+                scrollbar-width: thin !important;
+                scrollbar-color: rgba(100, 116, 139, 0.46) transparent !important;
+                -ms-overflow-style: auto !important;
             }
             .sidebar:hover #session-list,
             #session-list:hover {
-                scrollbar-width: none !important;
+                scrollbar-width: thin !important;
             }
             #session-list::-webkit-scrollbar {
-                display: none !important;
-                width: 0 !important;
-                height: 0 !important;
+                display: block !important;
+                width: 10px !important;
+                height: 10px !important;
+            }
+            #session-list::-webkit-scrollbar-track {
+                background: transparent !important;
+            }
+            #session-list::-webkit-scrollbar-thumb {
+                min-height: 32px !important;
+                border: 3px solid transparent !important;
+                border-radius: 999px !important;
+                background: rgba(100, 116, 139, 0.46) !important;
+                background-clip: padding-box !important;
             }
         `;
         document.head.appendChild(style);
@@ -159,6 +170,72 @@ function installSessionListScrollFallback() {
             && style.visibility !== 'hidden'
             && style.pointerEvents !== 'none'
             && (!Number.isFinite(opacity) || opacity > 0.01);
+    };
+
+    const hasVisibleModal = () => [...document.querySelectorAll('.modal-overlay, [role="dialog"]')]
+        .some(modal => isVisibleModalTarget(modal));
+
+    const scrollSessionList = (list, rawDeltaY, deltaMode = 0) => {
+        if (!list || list.scrollHeight <= list.clientHeight) return false;
+        const raw = Number(rawDeltaY) || 0;
+        if (!raw) return false;
+
+        let deltaY = 0;
+        if (deltaMode === 1) {
+            deltaY = raw * 36;
+        } else if (deltaMode === 2) {
+            deltaY = raw * (list.clientHeight || 360);
+        } else {
+            const abs = Math.abs(raw);
+            if (abs < 1) {
+                deltaY = raw;
+            } else if (abs < 30) {
+                // 触控板/高精度滚轮微步放大平滑度，避免整数截断无响应
+                deltaY = Math.sign(raw) * Math.max(32, abs * 2.2);
+            } else {
+                deltaY = raw;
+            }
+        }
+
+        const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+        const nextScrollTop = Math.min(maxScrollTop, Math.max(0, list.scrollTop + deltaY));
+        if (nextScrollTop === list.scrollTop) return false;
+        list.scrollTop = nextScrollTop;
+        return true;
+    };
+
+    let viewportSyncScheduled = false;
+    const publishSessionListViewport = () => {
+        viewportSyncScheduled = false;
+        const list = document.getElementById('session-list');
+        const sidebar = list?.closest('.sidebar');
+        const app = document.getElementById('app');
+        const inactive = !list || !sidebar
+            || document.body?.classList.contains('auth-active')
+            || app?.classList.contains('hidden')
+            || hasVisibleModal();
+        if (inactive) {
+            ipcRenderer.send('pivot-desktop:session-list-viewport', { active: false });
+            return;
+        }
+
+        const rect = sidebar.getBoundingClientRect();
+        const active = rect.width > 0 && rect.height > 0;
+        ipcRenderer.send('pivot-desktop:session-list-viewport', {
+            active,
+            scrollable: list.scrollHeight > list.clientHeight,
+            modalOpen: false,
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom
+        });
+    };
+
+    const scheduleSessionListViewportSync = () => {
+        if (viewportSyncScheduled) return;
+        viewportSyncScheduled = true;
+        window.requestAnimationFrame(publishSessionListViewport);
     };
 
     const resolveWheelSessionList = event => {
@@ -192,35 +269,33 @@ function installSessionListScrollFallback() {
     // 且会话列表有溢出内容时兜底更新 scrollTop，确保任何鼠标与触控板均可顺畅浏览。
     document.addEventListener('wheel', event => {
         const list = resolveWheelSessionList(event);
-        if (!list || list.scrollHeight <= list.clientHeight) return;
-
-        const rawDeltaY = Number(event.deltaY) || 0;
-        if (!rawDeltaY) return;
-
-        let deltaY = 0;
-        if (event.deltaMode === 1) {
-            deltaY = rawDeltaY * 36;
-        } else if (event.deltaMode === 2) {
-            deltaY = rawDeltaY * (list.clientHeight || 360);
-        } else {
-            const abs = Math.abs(rawDeltaY);
-            if (abs < 1) {
-                deltaY = rawDeltaY;
-            } else if (abs < 30) {
-                // 触控板/高精度滚轮微步放大平滑度，避免整数截断无响应
-                deltaY = Math.sign(rawDeltaY) * Math.max(32, abs * 2.2);
-            } else {
-                deltaY = rawDeltaY;
-            }
-        }
-
-        const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
-        const nextScrollTop = Math.min(maxScrollTop, Math.max(0, list.scrollTop + deltaY));
-        if (nextScrollTop === list.scrollTop) return;
-
-        list.scrollTop = nextScrollTop;
-        event.preventDefault();
+        if (scrollSessionList(list, event.deltaY, event.deltaMode)) event.preventDefault();
     }, { capture: true, passive: false });
+
+    // 主进程在 DOM 事件分发前截获原生 mouseWheel。这里只接收已经完成
+    // 可信来源和侧栏范围校验的输入，再以同一套边界规则更新列表位置。
+    ipcRenderer.on('pivot-desktop:session-list-wheel', (_event, input) => {
+        const list = document.getElementById('session-list');
+        if (hasVisibleModal()) return;
+        scrollSessionList(list, input?.deltaY, 0);
+    });
+
+    const list = document.getElementById('session-list');
+    const sidebar = list?.closest('.sidebar');
+    if (typeof window.ResizeObserver === 'function') {
+        const resizeObserver = new window.ResizeObserver(scheduleSessionListViewportSync);
+        if (list) resizeObserver.observe(list);
+        if (sidebar) resizeObserver.observe(sidebar);
+    }
+    const mutationObserver = new window.MutationObserver(scheduleSessionListViewportSync);
+    mutationObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+        childList: true,
+        subtree: true
+    });
+    window.addEventListener('resize', scheduleSessionListViewportSync, { passive: true });
+    scheduleSessionListViewportSync();
 }
 
 window.addEventListener('DOMContentLoaded', () => {

@@ -3,7 +3,7 @@
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { hasWindowsSigningCredential } = require('./desktop_update_signing');
+const { hasWindowsSigningCredential, normalizeWindowsCertificateSha1 } = require('./desktop_update_signing');
 
 const DEFAULT_LOCAL_PUBLISHER = 'Pivot Local Dev';
 
@@ -15,9 +15,7 @@ function ensureWindowsSelfSignedCertificate(publisher = DEFAULT_LOCAL_PUBLISHER)
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore']
         }).trim();
-        if (existing) {
-            return true;
-        }
+        if (existing) return normalizeWindowsCertificateSha1(existing) || false;
 
         console.log(`[desktop-sign] 未检测到代码签名凭据，正在自动创建本地自签名开发证书: CN=${publisher}...`);
         const createCmd = `New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=${publisher}' -CertStoreLocation Cert:\\CurrentUser\\My`;
@@ -25,8 +23,14 @@ function ensureWindowsSelfSignedCertificate(publisher = DEFAULT_LOCAL_PUBLISHER)
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore']
         });
+        const created = cp.execSync(`powershell -NoProfile -Command "${checkCmd}"`, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        }).trim();
+        const thumbprint = normalizeWindowsCertificateSha1(created);
+        if (!thumbprint) throw new Error('本地自签名证书创建后未读取到 SHA-1 指纹。');
         console.log(`[desktop-sign] 本地自签名证书创建成功: CN=${publisher}`);
-        return true;
+        return thumbprint;
     } catch (err) {
         console.warn(`[desktop-sign] 自动创建自签名证书失败 (可手动指定证书): ${err.message}`);
         return false;
@@ -79,15 +83,16 @@ function autoProvisionDesktopEnvironment(rootDir, env = process.env, options = {
         const hasSigning = hasWindowsSigningCredential(env);
         const hasPublisher = Boolean(String(env.PIVOT_WINDOWS_UPDATE_PUBLISHER || '').trim());
 
-        if (!hasSigning || !hasPublisher) {
-            const certOk = ensureWindowsSelfSignedCertificate(DEFAULT_LOCAL_PUBLISHER);
-            if (certOk) {
-                if (!hasPublisher) {
-                    env.PIVOT_WINDOWS_UPDATE_PUBLISHER = DEFAULT_LOCAL_PUBLISHER;
-                }
-                if (!hasSigning) {
-                    env.CSC_NAME = DEFAULT_LOCAL_PUBLISHER;
-                }
+        if (options.requireTrustedSigning === true && (!hasSigning || !hasPublisher)) {
+            throw new Error('Windows 正式更新包必须显式提供 PIVOT_WINDOWS_UPDATE_PUBLISHER，以及 CSC_LINK、WIN_CSC_LINK、PIVOT_WINDOWS_CERTIFICATE_SHA1 或 PIVOT_WINDOWS_CERTIFICATE_SUBJECT。开发机自签名证书不能用于生产自动更新。');
+        }
+
+        // 未发布的本机联调包仍可使用当前用户证书库中的自签名证书；正式包不会走此分支。
+        if (!options.requireTrustedSigning && (!hasSigning || !hasPublisher)) {
+            const thumbprint = ensureWindowsSelfSignedCertificate(DEFAULT_LOCAL_PUBLISHER);
+            if (thumbprint) {
+                if (!hasPublisher) env.PIVOT_WINDOWS_UPDATE_PUBLISHER = DEFAULT_LOCAL_PUBLISHER;
+                if (!hasSigning) env.PIVOT_WINDOWS_CERTIFICATE_SHA1 = thumbprint;
             }
         }
 

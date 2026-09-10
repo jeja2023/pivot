@@ -6,7 +6,6 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-    DEFAULT_LOCAL_PUBLISHER,
     autoProvisionDesktopEnvironment,
     ensureDefaultDistributionConfig
 } = require('../scripts/desktop_auto_sign_profile');
@@ -27,22 +26,31 @@ test('ensureDefaultDistributionConfig 生成包含 autoUpdate 开启的生产默
     }
 });
 
-test('autoProvisionDesktopEnvironment 总会补全默认分发配置，签名资料仅在本机证书可用时注入', () => {
+test('autoProvisionDesktopEnvironment 总会补全默认分发配置，并保留可被 electron-builder 识别的证书资料', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-provision-'));
     try {
-        const mockEnv = {};
+        const mockEnv = {
+            PIVOT_WINDOWS_UPDATE_PUBLISHER: 'Test Signing Publisher',
+            PIVOT_WINDOWS_CERTIFICATE_SHA1: 'B1ACD270210B82E9ADD6CB0953373E81ABD80FFC'
+        };
         autoProvisionDesktopEnvironment(root, mockEnv, { platform: 'win32', isDirBuild: false });
         assert.equal(Boolean(mockEnv.PIVOT_DISTRIBUTION_CONFIG), true);
         const distFile = path.resolve(root, mockEnv.PIVOT_DISTRIBUTION_CONFIG);
         assert.equal(fs.existsSync(distFile), true);
-        if (process.platform === 'win32') {
-            const signingInjected = Boolean(mockEnv.CSC_NAME);
-            assert.equal(Boolean(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER), signingInjected);
-            if (signingInjected) {
-                assert.equal(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER, DEFAULT_LOCAL_PUBLISHER);
-                assert.equal(mockEnv.CSC_NAME, DEFAULT_LOCAL_PUBLISHER);
-            }
-        }
+        assert.equal(mockEnv.PIVOT_WINDOWS_UPDATE_PUBLISHER, 'Test Signing Publisher');
+        assert.equal(mockEnv.PIVOT_WINDOWS_CERTIFICATE_SHA1, 'B1ACD270210B82E9ADD6CB0953373E81ABD80FFC');
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('正式 Windows 更新包拒绝开发机自签名自动兜底', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-prod-signing-'));
+    try {
+        assert.throws(
+            () => autoProvisionDesktopEnvironment(root, {}, { platform: 'win32', isDirBuild: false, requireTrustedSigning: true }),
+            /必须显式提供 PIVOT_WINDOWS_UPDATE_PUBLISHER/
+        );
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

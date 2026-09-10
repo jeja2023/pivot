@@ -528,14 +528,21 @@ document.addEventListener('toggle', event => {
     agentRunDisclosureStates.set(key, state);
 }, true);
 
-window.Pivot = window.Pivot || {};
-window.Pivot.legacy = window.Pivot.legacy || {};
-window.Pivot.legacy.agentRunDisclosureStates = agentRunDisclosureStates;
-window.Pivot.legacy.captureAgentRunDisclosureState = captureAgentRunDisclosureState;
-window.Pivot.legacy.restoreAgentRunDisclosureState = restoreAgentRunDisclosureState;
-window.Pivot.legacy.isAgentRunDisclosureOpen = isAgentRunDisclosureOpen;
-window.Pivot.legacy.setAgentRunDisclosureOpen = setAgentRunDisclosureOpen;
-window.Pivot.legacy.getAgentRunDisclosureKey = getAgentRunDisclosureKey;
+window.Pivot?.exposeModule?.('agent.runDisclosure', {
+    agentRunDisclosureStates,
+    captureAgentRunDisclosureState,
+    restoreAgentRunDisclosureState,
+    isAgentRunDisclosureOpen,
+    setAgentRunDisclosureOpen,
+    getAgentRunDisclosureKey
+}, [
+    'agentRunDisclosureStates',
+    'captureAgentRunDisclosureState',
+    'restoreAgentRunDisclosureState',
+    'isAgentRunDisclosureOpen',
+    'setAgentRunDisclosureOpen',
+    'getAgentRunDisclosureKey'
+]);
 
 let currentActiveRunSubtab = 'overview';
 

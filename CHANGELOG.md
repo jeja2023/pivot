@@ -1,3 +1,13 @@
+## [v0.1.116] - 2026-09-10
+
+### 桌面端会话列表滚动修复与 Windows 生产自动更新校验
+
+- **原生滚轮桥接与滚动保障**：主进程在 Electron 页面分发前通过 `before-mouse-event` 捕获 `mouseWheel`，仅在会话侧栏处于可滚动状态且鼠标悬停其上方时拦截分发，经受信 IPC 将滚动增量通知渲染进程平滑滚动；解除对 DOM 滚轮派发的单纯依赖，并恢复细窄可拖拽滚动条作为备用交互。弹窗、全屏模式与组合键缩放手势均不受影响。
+- **Windows 正式签名门禁与校验**：Windows 正式构建启用 `forceCodeSigning`，仅接受 Electron Builder 识别的 PFX 证书或 Windows 证书库 SHA-1/Subject 配置；严禁将未受信任的开发机自签名隐式用于正式发布；在产物复制到更新目录前执行与 electron-updater 同款的 Authenticode 签名与发布者校验，彻底确保生产自动更新覆盖安装的可靠性。
+- **前端全局变量与架构规范治理**：修复 `client/chat/agent-run-detail.js` 中的裸 `window.Pivot` 访问，全面收敛为 `window.Pivot.exposeModule('agent.runDisclosure', ...)` 统一模块注册规范，通过全局变量治理门禁（`check:window-globals`），将 legacy 存量别名压降至 274/276。
+
+详细发布记录见 [v0.1.116 发布记录](docs/releases/v0.1.116-桌面端会话列表滚动修复与Windows生产自动更新校验.md)。
+
 ## [v0.1.115] - 2026-09-10
 
 ### 桌面架构治理大文件解耦与本地授权模块独立

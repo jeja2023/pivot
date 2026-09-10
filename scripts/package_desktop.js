@@ -180,13 +180,14 @@ let desktopBuildStaging = null;
 
 try {
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
+    const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
     autoProvisionDesktopEnvironment(root, process.env, {
         platform: buildTarget.platform,
-        isDirBuild: rawBuilderArgs.includes('--dir')
+        isDirBuild: rawBuilderArgs.includes('--dir'),
+        requireTrustedSigning: windowsRelease
     });
     // Electron 包内不会保留构建脚本；在组装 asar 之前必须显式产出全部聊天样式包。
     run(process.execPath, [path.join('scripts', 'build_chat_css.js')]);
-    const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
     const windowsUpdatePublisher = normalizeWindowsUpdatePublisher(process.env.PIVOT_WINDOWS_UPDATE_PUBLISHER);
     const bundledDesktopConfig = prepareBundledDesktopConfig({
         requireDistributionConfig: !rawBuilderArgs.includes('--dir'),
@@ -225,6 +226,11 @@ try {
         }
     });
     run(process.execPath, [electronBuilderCli, '--config', desktopBuildStaging.builderConfigPath, ...normalizeBuilderArgs(rawBuilderArgs)]);
+    if (windowsRelease) {
+        const installerPath = path.join(electronOutputDir, `Pivot Setup ${projectVersion}.exe`);
+        const appPath = path.join(electronOutputDir, 'win-unpacked', 'Pivot.exe');
+        run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
+    }
     copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget);
 } catch (err) {
     runError = err;

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createAgentWorkbenchSandbox } = require('./security-helpers');
 
-test('工作流执行步骤详情与结果详情保持展开状态（不自动折叠）', async (t) => {
+test('工作流执行步骤详情与结果详情保持展开状态（不自动折叠）', async (_t) => {
     const sandbox = createAgentWorkbenchSandbox();
     const runId = 'test-run-workflow-123';
 
@@ -100,7 +100,7 @@ test('captureAgentRunDisclosureState 与 restoreAgentRunDisclosureState 支持�
     ];
 
     const mockContainer = {
-        querySelector(sel) {
+        querySelector(_sel) {
             return null;
         },
         querySelectorAll(sel) {
