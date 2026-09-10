@@ -206,6 +206,8 @@ test('desktop external navigation requires explicit origin-scoped trust', () => 
 test('desktop autoUpdate supports configurable checkIntervalMinutes', () => {
     const defaultAutoUpdate = normalizeAutoUpdate({});
     assert.equal(defaultAutoUpdate.checkIntervalMinutes, 30);
+    assert.equal(defaultAutoUpdate.autoDownload, true);
+    assert.equal(defaultAutoUpdate.installOnQuit, false);
 
     const customAutoUpdate = normalizeAutoUpdate({ checkIntervalMinutes: 45 });
     assert.equal(customAutoUpdate.checkIntervalMinutes, 45);
@@ -215,6 +217,8 @@ test('desktop autoUpdate supports configurable checkIntervalMinutes', () => {
 
     const stringInterval = normalizeAutoUpdate({ checkIntervalMinutes: '60' });
     assert.equal(stringInterval.checkIntervalMinutes, 60);
+
+    assert.equal(normalizeAutoUpdate({ installOnQuit: true }).installOnQuit, true);
 });
 
 test('mergeDesktopConfigs preserves HTTPS update policy without promoting an HTTP business origin', () => {

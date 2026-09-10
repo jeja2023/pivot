@@ -67,6 +67,7 @@ function ensureDefaultDistributionConfig(rootDir) {
                 checkOnStart: true,
                 checkIntervalMinutes: 30,
                 autoDownload: true,
+                installOnQuit: false,
                 publisherName: DEFAULT_LOCAL_PUBLISHER
             }
         };

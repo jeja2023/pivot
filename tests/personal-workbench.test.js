@@ -32,11 +32,14 @@ test('个人工作台接入主模板、当前用户聚合接口与持久化快�
     assert.match(template, /id="personal-user-modal"/);
     assert.match(template, /data-personal-action="open-user-profile"/);
     assert.match(template, /data-personal-action="open-automation"/);
+    assert.match(template, /data-personal-action="open-manual"/);
     assert.match(client, /openUserProfileModal/);
     assert.match(client, /action === 'open-automation'/);
+    assert.match(client, /action === 'open-manual'/);
     assert.match(client, /action === 'open-completed-tasks'/);
     assert.match(client, /status: 'completed'/);
     assert.match(workspace, /personal: 'personal-workbench-modal'/);
+    assert.match(workspace, /openManualWorkbench:\s*\(\)\s*=>\s*showMainWorkspace\('manual'\)/);
     assert.match(workspace, /RESTORABLE_WORKSPACES = new Set\(\['personal'/);
     assert.match(client, /\/user\/workbench-summary/);
     assert.match(client, /\/agents\/workbench\/shortcuts/);

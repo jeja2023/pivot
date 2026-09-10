@@ -12,7 +12,7 @@ const DEFAULT_AUTO_UPDATE = {
     autoDownload: true,
     allowPrerelease: false,
     publisherName: '',
-    installOnQuit: true,
+    installOnQuit: false,
     allowedOrigins: []
 };
 

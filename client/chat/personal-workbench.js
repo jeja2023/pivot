@@ -648,9 +648,14 @@
             }
             if (action === 'open-completed-tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
             if (action === 'open-tools') return window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
+            if (action === 'open-manual') return (window.Pivot?.moduleApi?.('workspaces.navigation')?.openManualWorkbench || window.Pivot?.legacy?.openManualWorkbench)?.();
             if (action === 'open-settings') return window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.();
             if (action === 'open-user-profile') return openUserProfileModal();
             if (action === 'close-user-modal') return closeUserProfileModal();
+            if (action === 'user-to-manual') {
+                closeUserProfileModal();
+                return (window.Pivot?.moduleApi?.('workspaces.navigation')?.openManualWorkbench || window.Pivot?.legacy?.openManualWorkbench)?.();
+            }
             if (action === 'user-to-settings') {
                 closeUserProfileModal();
                 return window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.();

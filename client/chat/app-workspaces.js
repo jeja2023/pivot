@@ -920,7 +920,9 @@ window.Pivot?.exposeModule?.('workspaces.navigation', {
     openAgentDagWorkbench: openAgentDagWorkbenchEntrypoint,
     openKnowledgeWorkbench: openKnowledgeWorkbenchEntrypoint,
     openMcpWorkbench: openMcpWorkbenchEntrypoint,
-    openAdminPanel: openAdminPanelEntrypoint
+    openAdminPanel: openAdminPanelEntrypoint,
+    openManualWorkbench: () => showMainWorkspace('manual'),
+    closeManualWorkbench: () => returnFromWorkspace()
 });
 
 const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) returnFromWorkspace(); };

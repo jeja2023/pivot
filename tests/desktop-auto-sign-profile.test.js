@@ -20,6 +20,8 @@ test('ensureDefaultDistributionConfig 生成包含 autoUpdate 开启的生产默
         assert.equal(parsed.autoUpdate?.enabled, true);
         assert.equal(parsed.autoUpdate?.url, '');
         assert.equal(parsed.autoUpdate?.path, '/downloads/');
+        assert.equal(parsed.autoUpdate?.autoDownload, true);
+        assert.equal(parsed.autoUpdate?.installOnQuit, false);
         assert.equal(parsed.remoteUrl, 'http://50.64.150.51:9006/');
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
