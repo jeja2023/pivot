@@ -1,3 +1,12 @@
+## [v0.1.122] - 2026-09-10
+
+### CI 无头测试环境变量登记与全量门禁固化
+
+- **运行时自动环境变量白名单登记**：在 `scripts/env_example_ignored.json` 中正式登记 `CI`、`DISPLAY`、`HEADLESS`、`WAYLAND_DISPLAY` 等 4 个运行时/OS 自动注入变量，明确其非持久业务配置的语义边界，彻底解决 `npm run check:env-example` 在 CI 流程中的未声明报错。
+- **全量静态与架构门禁全通**：打通包含 `check:env-example`、`check:standards`、`check:safe-html` 等全部 22 项静态架构门禁校验。
+
+详细发布记录见 [v0.1.122 发布记录](docs/releases/v0.1.122-CI无头测试环境变量登记与全量门禁固化.md)。
+
 ## [v0.1.121] - 2026-09-10
 
 ### CI 无头环境受控登录测试适配与无显示服务降级

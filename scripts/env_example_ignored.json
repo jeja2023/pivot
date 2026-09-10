@@ -1,9 +1,13 @@
 {
+  "CI": "CI/CD 流水线自动注入的环境变量，用于运行环境识别。",
+  "DISPLAY": "Linux X11 显示服务环境变量，由系统或桌面会话自动注入。",
+  "HEADLESS": "自动化测试或无头运行模式开关，非持久业务配置。",
   "KUBERNETES_SERVICE_HOST": "Kubernetes 自动注入，用于环境识别，不应由 .env 配置。",
   "PATH": "操作系统进程路径变量，不属于应用配置。",
   "PG_TEST_SCHEMA": "测试隔离 schema，由测试运行器动态创建。",
   "PIVOT_DESKTOP": "桌面端主进程运行时动态设置。",
   "PIVOT_TEST_DB_SYNC": "测试兼容桥开关。",
   "PIVOT_TEST_SYNC_BRIDGE_DIR": "测试同步桥临时目录。",
-  "TEST_DATABASE_URL": "测试数据库连接串，仅供自动化测试。"
+  "TEST_DATABASE_URL": "测试数据库连接串，仅供自动化测试。",
+  "WAYLAND_DISPLAY": "Linux Wayland 显示服务环境变量，由系统或桌面会话自动注入。"
 }
