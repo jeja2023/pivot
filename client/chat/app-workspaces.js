@@ -745,6 +745,7 @@ function prewarmAutomationWorkspaces(...args) {
     return window.Pivot.moduleApi?.('workspaces.styleLoader')?.prewarmAutomationWorkspaces?.(...args);
 }
 
+const workspaceLoadPromises = {};
 
 async function ensureWorkspaceScripts(name) {
     const ensureMarkup = window.Pivot.moduleApi?.('workspaces.templateLoader')?.ensureWorkspaceMarkup;
