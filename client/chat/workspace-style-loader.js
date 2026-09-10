@@ -199,7 +199,8 @@ function clearWorkspaceStyleGate(panel) {
 function showWorkspaceWithStyleGate(name, options = {}) {
     const panelId = WORKSPACE_PANEL_IDS[name];
     const panel = panelId ? document.getElementById(panelId) : null;
-    const stylesLoaded = isWorkspaceStyleLoaded(name);
+    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
+    const stylesLoaded = (styleLoader?.isWorkspaceStyleLoaded ? styleLoader.isWorkspaceStyleLoaded(name) : isWorkspaceStyleLoaded(name)) === true;
     const triggerMainWorkspace = () => (window.Pivot.moduleApi?.('workspaces.navigation')?.showMainWorkspace
         || window.Pivot.legacy.showMainWorkspace)?.(name);
     if (!panel || stylesLoaded) {
@@ -210,9 +211,11 @@ function showWorkspaceWithStyleGate(name, options = {}) {
     renderWorkspaceStyleGate(gate, name);
     const gateId = `${Date.now()}-${Math.random()}`;
     panel.dataset.workspaceStyleGateId = gateId;
+    const whenLoaded = styleLoader?.whenWorkspaceStylesLoaded ? styleLoader.whenWorkspaceStylesLoaded(name) : whenWorkspaceStylesLoaded(name);
+    const ensureStyles = styleLoader?.ensureWorkspaceStyles ? styleLoader.ensureWorkspaceStyles(name) : ensureWorkspaceStyles(name);
     const loadStyles = options.forceRetry === true
-        ? ensureWorkspaceStyles(name)
-        : whenWorkspaceStylesLoaded(name) || ensureWorkspaceStyles(name);
+        ? ensureStyles
+        : (whenLoaded || ensureStyles);
     Promise.resolve(loadStyles).then(() => {
         if (panel.dataset.workspaceStyleGateId !== gateId) return;
         clearWorkspaceStyleGate(panel);

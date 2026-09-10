@@ -478,7 +478,7 @@ const loadMonitorSummary = async function(options = {}) {
                 </div>`,
                 `<div class="monitor-row monitor-split-row">
                     <div><span>索引分片</span><strong>${formatMetricNumber(ragData.chunksIndexed)}</strong></div>
-                    <div><span>检索诊断</span><strong title="24h: ${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms">${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms</strong></div>
+                    <div><span>检索诊断（24h）</span><strong title="24h: ${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms">${formatMetricNumber(diagnostics.queryCount)} 次 / ${formatMetricNumber(diagnostics.averageElapsedMs, 1)} ms</strong></div>
                 </div>`,
                 `<div class="monitor-row monitor-split-row">
                     <div><span>数据库</span><strong>${formatBytes(storageData.db)}</strong></div>
