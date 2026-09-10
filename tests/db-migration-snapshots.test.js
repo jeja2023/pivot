@@ -25,19 +25,6 @@ function removeDir(dir) {
     }
 }
 
-function clearServerDbModules() {
-    Object.keys(require.cache).forEach(key => {
-        const normalized = key.replace(/\\/g, '/');
-        if (
-            normalized.includes('/server/db/')
-            || normalized.endsWith('/server/db.js')
-            || normalized.endsWith('/server/services/app-settings.js')
-        ) {
-            delete require.cache[key];
-        }
-    });
-}
-
 function withDbModuleConnection(relativePath, database, callback) {
     const filename = path.resolve(__dirname, '..', relativePath);
     const connectionPath = path.resolve(__dirname, '..', 'server', 'db', 'connection.js');
@@ -229,7 +216,6 @@ test('database boot path upgrades a legacy sqlite snapshot through versioned mig
     } finally {
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
-        clearServerDbModules();
         legacyDb.close();
         removeDir(dataDir);
     }
@@ -314,7 +300,6 @@ test('database boot migrates legacy automation columns before creating dependent
     } finally {
         if (previousDataDir === undefined) delete process.env.DATA_DIR;
         else process.env.DATA_DIR = previousDataDir;
-        clearServerDbModules();
         legacyDb.close();
         removeDir(dataDir);
     }

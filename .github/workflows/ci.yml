@@ -47,7 +47,9 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          node scripts/ensure_sqlite_binary.js
 
       - name: Security audit policy
         run: npm run audit:policy

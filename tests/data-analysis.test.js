@@ -2,6 +2,8 @@ const nodePath = require('node:path');
 const nodeFs = require('node:fs');
 const nodeOs = require('node:os');
 
+const previousAnalysisDir = process.env.PIVOT_ANALYSIS_DIR;
+const previousMaxRows = process.env.DATA_ANALYSIS_MAX_ROWS;
 const analysisTestRoot = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'pivot-data-analysis-'));
 process.env.PIVOT_ANALYSIS_DIR = analysisTestRoot;
 process.env.DATA_ANALYSIS_MAX_ROWS = '1000';
@@ -194,6 +196,10 @@ test('数据分析数据总览支持编辑修改数据集名称与原始文件�
 });
 
 test.after(() => {
+    if (previousAnalysisDir !== undefined) process.env.PIVOT_ANALYSIS_DIR = previousAnalysisDir;
+    else delete process.env.PIVOT_ANALYSIS_DIR;
+    if (previousMaxRows !== undefined) process.env.DATA_ANALYSIS_MAX_ROWS = previousMaxRows;
+    else delete process.env.DATA_ANALYSIS_MAX_ROWS;
     try {
         removeTestPath(analysisTestRoot, { recursive: true, maxRetries: 3, retryDelay: 50 });
     } catch (_err) {}

@@ -88,16 +88,19 @@ function trackUploadedPath(req, filePath) {
     req._pivotUploadPaths.add(path.resolve(filePath));
 }
 
-function removeUploadedPath(filePath, root = uploadRoot) {
+async function removeUploadedPath(filePath, root = uploadRoot) {
     if (!filePath) return;
     const target = path.resolve(filePath);
     if (!isPathInside(root, target)) return;
-    fs.promises.unlink(target).then(() => clearDirSizeCache()).catch(() => {});
+    try {
+        await fs.promises.unlink(target);
+        clearDirSizeCache();
+    } catch (_) {}
 }
 
-function removeUploadedFile(file, root = uploadRoot) {
+async function removeUploadedFile(file, root = uploadRoot) {
     if (!file?.path) return;
-    removeUploadedPath(file.path, root);
+    await removeUploadedPath(file.path, root);
 }
 
 function collectRequestFiles(req) {
@@ -107,9 +110,13 @@ function collectRequestFiles(req) {
     ];
 }
 
-function cleanupRequestUploads(req, root = uploadRoot) {
-    collectRequestFiles(req).forEach(file => removeUploadedFile(file, root));
-    Array.from(req._pivotUploadPaths || []).forEach(filePath => removeUploadedPath(filePath, root));
+async function cleanupRequestUploads(req, root = uploadRoot) {
+    const files = collectRequestFiles(req);
+    const paths = Array.from(req._pivotUploadPaths || []);
+    await Promise.all([
+        ...files.map(file => removeUploadedFile(file, root)),
+        ...paths.map(filePath => removeUploadedPath(filePath, root))
+    ]);
 }
 
 async function verifyUploadedMagic(file) {
@@ -149,7 +156,7 @@ async function uploadSecurityMiddleware(req, res, next) {
     const files = collectRequestFiles(req);
     for (const file of files) {
         if (!await verifyUploadedMagic(file)) {
-            cleanupRequestUploads(req, root);
+            await cleanupRequestUploads(req, root);
             return res.status(400).json({ error: '文件内容与扩展名不匹配，已拒绝上传' });
         }
     }

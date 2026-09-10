@@ -1,3 +1,13 @@
+## [v0.1.123] - 2026-09-10
+
+### Node 20 多版本测试绑定自愈与上传中间件异步清理
+
+- **Node 20 多版本矩阵 SQLite 原生绑定自愈**：针对 Node 20 环境下 `better-sqlite3` 预编译二进制（针对 Node 22 ABI 构建）导致的 N-API 不匹配报错，引入 `scripts/ensure_sqlite_binary.js`，在运行时及 CI `npm ci` 后自动感知并在必要时调用 `node-gyp rebuild` 重建原生绑定，恢复 `agent-acceptance`、`desktop-agent-runtime`、`security-rag` 等 9 个测试套件在 Node 20 环境下的平滑运行。
+- **上传安全中间件异步文件清理竞争消除**：将 `server/upload.js` 中的 `removeUploadedPath`、`removeUploadedFile` 与 `cleanupRequestUploads` 重构为纯 `async/await`，在文件类型与魔数不匹配触发拒绝时严格等待底层文件 unlink 完成再返回 400 响应，彻底消除 `tests/security-auth.test.js:1301` 中的物理文件清理断言竞态。
+- **测试环境全局状态与模块缓存隔离**：在 `tests/data-analysis.test.js` 中记录并复原 `PIVOT_ANALYSIS_DIR` 与 `DATA_ANALYSIS_MAX_ROWS`；在 `tests/db-migration-snapshots.test.js` 中移除破坏性的模块缓存清理逻辑，防止数据库连接单例受损。
+
+详细发布记录见 [v0.1.123 发布记录](docs/releases/v0.1.123-Node20多版本测试绑定自愈与上传中间件异步清理.md)。
+
 ## [v0.1.122] - 2026-09-10
 
 ### CI 无头测试环境变量登记与全量门禁固化
