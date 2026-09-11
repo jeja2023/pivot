@@ -370,3 +370,40 @@ test('visual SQL mode switch keeps the clicked query mode', () => {
     assert.match(queryBuilder, /if \(modeOverride\) \{\s+config\.mode = modeOverride;\s+\}/);
     assert.match(queryBuilder, /config\.mode = modeButton\.dataset\.pivotDagQueryMode === 'advanced' \? 'advanced' : 'visual';[\s\S]+updatePreview\(config\.mode\);/);
 });
+
+test('workflow node presets are organized into approved 6 business categories', () => {
+    const presetsSource = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-node-presets.js'), 'utf8');
+    const sandbox = {
+        window: {
+            Pivot: {
+                moduleApi: () => ({}),
+                exposeModule: (name, mod) => { sandbox.exported = mod; }
+            }
+        }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(presetsSource, sandbox, { filename: 'dag-node-presets.js' });
+    const groups = JSON.parse(JSON.stringify(sandbox.exported.groups));
+    const groupNames = groups.map(g => g.group);
+
+    assert.deepEqual(groupNames, [
+        '起始与交付',
+        'AI 与智能体',
+        '知识与检索',
+        '数据与文档',
+        '流程与控制',
+        '呈现与多媒体'
+    ]);
+
+    const totalPresets = groups.reduce((sum, g) => sum + g.items.length, 0);
+    assert.equal(totalPresets, 43);
+
+    // 验证各分类预设节点数量
+    const counts = Object.fromEntries(groups.map(g => [g.group, g.items.length]));
+    assert.equal(counts['起始与交付'], 3);
+    assert.equal(counts['AI 与智能体'], 4);
+    assert.equal(counts['知识与检索'], 6);
+    assert.equal(counts['数据与文档'], 11);
+    assert.equal(counts['流程与控制'], 9);
+    assert.equal(counts['呈现与多媒体'], 10);
+});

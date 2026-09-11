@@ -21,7 +21,7 @@ const handoffOutputSchema = {
 
 const NODE_PRESET_GROUPS = [
     {
-        group: '输入与输出',
+        group: '起始与交付',
         items: [
             {
                 base: 'input', title: '工作流输入', svgIcon: 'log-in', theme: 'input',
@@ -73,11 +73,17 @@ const NODE_PRESET_GROUPS = [
                         text: { type: 'string' }
                     }
                 }
+            },
+            {
+                base: 'embed_code', title: '网站嵌入代码', svgIcon: 'code', theme: 'code', advanced: true,
+                desc: '生成可复制到其它网站页面的 HTML iframe 代码', toolName: 'workflow.embed_code',
+                input: { url: '', title: '嵌入页面', width: 960, height: 480, responsive: true },
+                outputSchema: { type: 'object', required: ['type', 'url', 'code'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' }, responsive: { type: 'boolean' }, language: { type: 'string' }, code: { type: 'string' }, notice: { type: 'string' }, text: { type: 'string' } } }
             }
         ]
     },
     {
-        group: '智能体',
+        group: 'AI 与智能体',
         items: [
             {
                 base: 'llm', title: '大模型', svgIcon: 'bot', theme: 'llm',
@@ -166,73 +172,8 @@ const NODE_PRESET_GROUPS = [
         ]
     },
     {
-        group: '逻辑与流程',
+        group: '知识与检索',
         items: [
-            {
-                base: 'condition', title: '条件路由', svgIcon: 'git-branch', theme: 'condition',
-                desc: '计算路由值，供下游条件分支直接引用', toolName: 'workflow.condition',
-                getInput: ({ selectedNode }) => ({ value: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}', operator: 'not_empty', compareTo: '' }),
-                outputSchema: { type: 'object', required: ['matched', 'value'], properties: { matched: { type: 'boolean' }, value: {}, route: { type: 'string' } } }
-            },
-            {
-                base: 'approval', title: '人工审批', svgIcon: 'user-check', theme: 'approval',
-                desc: '暂停工作流，等待用户批准后继续', toolName: 'workflow.approval',
-                getInput: ({ selectedNode }) => ({ title: '请审批本节点', summary: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}', instructions: '' }),
-                outputSchema: { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' }, summary: { type: 'string' }, text: { type: 'string' } } }
-            },
-            {
-                base: 'code', title: '代码执行', svgIcon: 'code', theme: 'code',
-                advanced: true, requiresSandbox: true,
-                desc: '需独立受控 Worker 沙箱，服务端不会直接执行 JS', toolName: 'agent.code',
-                getInput: ({ selectedNode }) => ({
-                    code: '// vars 保存下方配置的变量\nreturn vars.input;',
-                    vars: { input: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}' }
-                }),
-                outputSchema: { type: 'object', properties: { output: {}, text: { type: 'string' }, type: { type: 'string' } } }
-            },
-            {
-                base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
-                advanced: true, requiresSandbox: true,
-                desc: '需独立受控 Worker 沙箱，服务端不会直接执行循环代码', toolName: 'workflow.foreach',
-                getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
-                outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
-            },
-            {
-                base: 'subworkflow', title: '子工作流', svgIcon: 'workflow', theme: 'subflow',
-                desc: '调用另一个已发布工作流并接收其输出', toolName: 'workflow.subworkflow',
-                input: { workflowId: '', version: 'published', goal: '{{goal}}', inputs: {} },
-                outputSchema: { type: 'object', required: ['workflowId', 'output'], properties: { workflowId: { type: 'integer' }, version: { type: 'integer' }, output: {}, outputs: { type: 'object' }, text: { type: 'string' } } }
-            },
-            {
-                base: 'delay', title: '延时', svgIcon: 'clock', theme: 'delay',
-                desc: '等待指定时长后继续执行下游节点', toolName: 'workflow.delay',
-                input: { durationMs: 60000, reason: '' },
-                outputSchema: { type: 'object', required: ['durationMs'], properties: { durationMs: { type: 'integer' }, completedAt: { type: 'string' } } }
-            }
-        ]
-    },
-    {
-        group: '集成与数据',
-        items: [
-            {
-                base: 'http', title: '网络请求', svgIcon: 'globe', theme: 'http',
-                advanced: true,
-                desc: '调用外部服务接口，支持安全凭据引用和节点测试', toolName: 'agent.http',
-                input: { url: '', method: 'GET', headers: {}, credentialSecret: '', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', body: null, timeoutMs: 10000 },
-                outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
-            },
-            {
-                base: 'browser', title: '浏览器自动化', svgIcon: 'globe', theme: 'http', advanced: true,
-                desc: '在允许的网站上执行受控查看或点击操作', toolName: 'agent.browser',
-                input: { url: '', action: 'inspect', target: {}, screenshot: false }
-            },
-            {
-                base: 'merge', title: '变量聚合', iconText: '+', theme: 'merge',
-                advanced: true,
-                desc: '把多个上游输出映射为统一对象', toolName: 'agent.merge',
-                getInput: ({ selectedNode }) => ({ fields: selectedNode ? { [selectedNode.id]: `{{nodes.${selectedNode.id}.output}}` } : {} }),
-                outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' }, count: { type: 'integer' } } }
-            },
             {
                 base: 'search', title: '知识检索', svgIcon: 'search', theme: 'rag',
                 desc: '从知识库按语义检索相关片段', toolName: 'rag.search',
@@ -242,6 +183,11 @@ const NODE_PRESET_GROUPS = [
                 base: 'knowledge_graph', title: '知识关系查询', svgIcon: 'search', theme: 'rag', advanced: true,
                 desc: '查询知识库中的实体关系、归属和影响路径', toolName: 'knowledge.graph.query',
                 input: { query: '{{goal}}', entityLimit: 6, relationLimit: 12 }
+            },
+            {
+                base: 'knowledge_list', title: '知识库文档列表', svgIcon: 'book-open', theme: 'rag', advanced: true,
+                desc: '读取当前用户可见的知识库文档及索引状态', toolName: 'knowledge.list',
+                input: { limit: 20 }
             },
             {
                 base: 'session_search', title: '历史会话检索', svgIcon: 'search', theme: 'rag', advanced: true,
@@ -254,15 +200,15 @@ const NODE_PRESET_GROUPS = [
                 input: { limit: 8 }
             },
             {
-                base: 'knowledge_list', title: '知识库文档列表', svgIcon: 'book-open', theme: 'rag', advanced: true,
-                desc: '读取当前用户可见的知识库文档及索引状态', toolName: 'knowledge.list',
-                input: { limit: 20 }
-            },
-            {
                 base: 'model_list', title: '可用模型列表', svgIcon: 'bot', theme: 'llm', advanced: true,
                 desc: '列出当前账号可以使用的模型', toolName: 'models.list',
                 input: {}
-            },
+            }
+        ]
+    },
+    {
+        group: '数据与文档',
+        items: [
             {
                 base: 'data', title: '数据查询', svgIcon: 'database', theme: 'db',
                 desc: '选择数据库连接、数据表、字段和筛选条件', patterns: ['db.run_readonly_query'],
@@ -279,14 +225,9 @@ const NODE_PRESET_GROUPS = [
                 unavailableReason: '当前没有可用的报表数据查询工具', input: { path: '', columns: [], filters: {}, limit: 100 }
             },
             {
-                base: 'document_outline', title: '提取文档大纲', svgIcon: 'file-text', theme: 'file', advanced: true,
-                desc: '从长文本中提取标题和层级结构', toolName: 'doc.extract_outline',
-                input: { text: '{{goal}}', maxHeadings: 30 }
-            },
-            {
-                base: 'document_values', title: '提取文档信息', svgIcon: 'file-text', theme: 'file', advanced: true,
-                desc: '从文档中提取名称、编号等键值信息', toolName: 'doc.extract_key_values',
-                input: { text: '{{goal}}', maxItems: 50 }
+                base: 'compare_reports', title: '对比报表文件', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '对比两份报表的工作表、字段和样本数据', toolName: 'reports.compare_files',
+                input: { leftPath: '', rightPath: '', sheet: '', sampleRows: 20 }
             },
             {
                 base: 'filter_rows', title: '筛选数据行', svgIcon: 'table', theme: 'db', advanced: true,
@@ -309,9 +250,14 @@ const NODE_PRESET_GROUPS = [
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], renameMap: {}, trimStrings: true, limit: 1000 })
             },
             {
-                base: 'compare_reports', title: '对比报表文件', svgIcon: 'file-text', theme: 'file', advanced: true,
-                desc: '对比两份报表的工作表、字段和样本数据', toolName: 'reports.compare_files',
-                input: { leftPath: '', rightPath: '', sheet: '', sampleRows: 20 }
+                base: 'document_outline', title: '提取文档大纲', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '从长文本中提取标题和层级结构', toolName: 'doc.extract_outline',
+                input: { text: '{{goal}}', maxHeadings: 30 }
+            },
+            {
+                base: 'document_values', title: '提取文档信息', svgIcon: 'file-text', theme: 'file', advanced: true,
+                desc: '从文档中提取名称、编号等键值信息', toolName: 'doc.extract_key_values',
+                input: { text: '{{goal}}', maxItems: 50 }
             },
             {
                 base: 'chunk_text', title: '拆分长文本', svgIcon: 'file-text', theme: 'file', advanced: true,
@@ -321,7 +267,72 @@ const NODE_PRESET_GROUPS = [
         ]
     },
     {
-        group: '呈现与交付',
+        group: '流程与控制',
+        items: [
+            {
+                base: 'condition', title: '条件路由', svgIcon: 'git-branch', theme: 'condition',
+                desc: '计算路由值，供下游条件分支直接引用', toolName: 'workflow.condition',
+                getInput: ({ selectedNode }) => ({ value: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}', operator: 'not_empty', compareTo: '' }),
+                outputSchema: { type: 'object', required: ['matched', 'value'], properties: { matched: { type: 'boolean' }, value: {}, route: { type: 'string' } } }
+            },
+            {
+                base: 'approval', title: '人工审批', svgIcon: 'user-check', theme: 'approval',
+                desc: '暂停工作流，等待用户批准后继续', toolName: 'workflow.approval',
+                getInput: ({ selectedNode }) => ({ title: '请审批本节点', summary: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}', instructions: '' }),
+                outputSchema: { type: 'object', required: ['approved'], properties: { approved: { type: 'boolean' }, summary: { type: 'string' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'merge', title: '变量聚合', iconText: '+', theme: 'merge',
+                advanced: true,
+                desc: '把多个上游输出映射为统一对象', toolName: 'agent.merge',
+                getInput: ({ selectedNode }) => ({ fields: selectedNode ? { [selectedNode.id]: `{{nodes.${selectedNode.id}.output}}` } : {} }),
+                outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' }, count: { type: 'integer' } } }
+            },
+            {
+                base: 'subworkflow', title: '子工作流', svgIcon: 'workflow', theme: 'subflow',
+                desc: '调用另一个已发布工作流并接收其输出', toolName: 'workflow.subworkflow',
+                input: { workflowId: '', version: 'published', goal: '{{goal}}', inputs: {} },
+                outputSchema: { type: 'object', required: ['workflowId', 'output'], properties: { workflowId: { type: 'integer' }, version: { type: 'integer' }, output: {}, outputs: { type: 'object' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
+                advanced: true, requiresSandbox: true,
+                desc: '需独立受控 Worker 沙箱，服务端不会直接执行循环代码', toolName: 'workflow.foreach',
+                getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
+                outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
+            },
+            {
+                base: 'delay', title: '延时', svgIcon: 'clock', theme: 'delay',
+                desc: '等待指定时长后继续执行下游节点', toolName: 'workflow.delay',
+                input: { durationMs: 60000, reason: '' },
+                outputSchema: { type: 'object', required: ['durationMs'], properties: { durationMs: { type: 'integer' }, completedAt: { type: 'string' } } }
+            },
+            {
+                base: 'code', title: '代码执行', svgIcon: 'code', theme: 'code',
+                advanced: true, requiresSandbox: true,
+                desc: '需独立受控 Worker 沙箱，服务端不会直接执行 JS', toolName: 'agent.code',
+                getInput: ({ selectedNode }) => ({
+                    code: '// vars 保存下方配置的变量\nreturn vars.input;',
+                    vars: { input: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : '{{goal}}' }
+                }),
+                outputSchema: { type: 'object', properties: { output: {}, text: { type: 'string' }, type: { type: 'string' } } }
+            },
+            {
+                base: 'http', title: '网络请求', svgIcon: 'globe', theme: 'http',
+                advanced: true,
+                desc: '调用外部服务接口，支持安全凭据引用和节点测试', toolName: 'agent.http',
+                input: { url: '', method: 'GET', headers: {}, credentialSecret: '', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', body: null, timeoutMs: 10000 },
+                outputSchema: { type: 'object', properties: { statusCode: { type: 'integer' }, ok: { type: 'boolean' }, data: {}, text: { type: 'string' } } }
+            },
+            {
+                base: 'browser', title: '浏览器自动化', svgIcon: 'globe', theme: 'http', advanced: true,
+                desc: '在允许的网站上执行受控查看或点击操作', toolName: 'agent.browser',
+                input: { url: '', action: 'inspect', target: {}, screenshot: false }
+            }
+        ]
+    },
+    {
+        group: '呈现与多媒体',
         items: [
             {
                 base: 'chart', title: '图表生成', svgIcon: 'chart', theme: 'viz',
@@ -378,12 +389,6 @@ const NODE_PRESET_GROUPS = [
                 desc: '生成带标题和说明的安全链接卡片', toolName: 'workflow.link_card',
                 input: { url: '', title: '打开链接', description: '' },
                 outputSchema: { type: 'object', required: ['type', 'url', 'title'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, text: { type: 'string' } } }
-            },
-            {
-                base: 'embed_code', title: '网站嵌入代码', svgIcon: 'code', theme: 'code', advanced: true,
-                desc: '生成可复制到其它网站页面的 HTML iframe 代码', toolName: 'workflow.embed_code',
-                input: { url: '', title: '嵌入页面', width: 960, height: 480, responsive: true },
-                outputSchema: { type: 'object', required: ['type', 'url', 'code'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' }, responsive: { type: 'boolean' }, language: { type: 'string' }, code: { type: 'string' }, notice: { type: 'string' }, text: { type: 'string' } } }
             }
         ]
     }

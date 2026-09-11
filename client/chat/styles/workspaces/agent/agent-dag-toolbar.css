@@ -117,11 +117,51 @@
 
 .pivot-dag-toolbar-group.is-node-group .pivot-dag-toolbar-menu {
     box-sizing: border-box;
-    max-height: min(60vh, 520px);
+    min-width: 260px;
+    max-width: 320px;
+    max-height: min(65vh, 560px);
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+}
+
+/* 节点下拉菜单 6 大分类结构化标头 */
+.pivot-dag-toolbar-section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px 3px;
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary, #64748b);
+    border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.2));
+    user-select: none;
+}
+
+.pivot-dag-toolbar-section-label:first-of-type {
+    margin-top: 2px;
+}
+
+.pivot-dag-toolbar-section-badge {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--bg-tertiary, rgba(148, 163, 184, 0.18));
+    font-size: 0.62rem;
+    font-weight: 800;
+    color: var(--text-secondary, #64748b);
+}
+
+.pivot-dag-toolbar-adv-badge {
+    margin-left: auto;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--bg-tertiary, rgba(148, 163, 184, 0.2));
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-secondary, #64748b);
 }
 
 .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn {
@@ -312,6 +352,20 @@ body.dark-mode .pivot-dag-toolbar-dropdown[open] .pivot-dag-toolbar-summary,
     border-color: rgba(45, 212, 191, 0.4);
     background: rgba(20, 184, 166, 0.14);
     color: #99f6e4;
+}
+
+body.dark-mode .pivot-dag-toolbar-section-label,
+.dark-mode .pivot-dag-toolbar-section-label {
+    border-bottom-color: var(--border, rgba(148, 163, 184, 0.22));
+    color: var(--text-secondary, #94a3b8);
+}
+
+body.dark-mode .pivot-dag-toolbar-section-badge,
+.dark-mode .pivot-dag-toolbar-section-badge,
+body.dark-mode .pivot-dag-toolbar-adv-badge,
+.dark-mode .pivot-dag-toolbar-adv-badge {
+    background: var(--bg-tertiary, rgba(148, 163, 184, 0.16));
+    color: var(--text-secondary, #94a3b8);
 }
 
 body.dark-mode .pivot-dag-toolbar-btn.is-template,
