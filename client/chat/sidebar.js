@@ -37,7 +37,7 @@ function bindSessionListScrolling(list) {
     // Electron 客户端的无边框窗口会在部分 Windows 精度触控板环境下吞掉
     // overflow 容器的默认滚轮滚动。仅在桌面运行时接管滚轮，确保仍可浏览历史会话。
     const handleWheel = event => {
-        if (!document.body?.classList.contains('pivot-desktop-runtime')) return;
+        if (!window.pivotDesktop && !document.body?.classList.contains('pivot-desktop-runtime')) return;
         if (event.defaultPrevented) return;
         if (list.scrollHeight <= list.clientHeight) return;
         const rawDeltaY = Number(event.deltaY) || 0;

@@ -49,7 +49,9 @@ function shouldForwardSessionListWheel(input = {}, viewport = {}) {
     // Windows 显示缩放、无边框窗口与合成层切换时，主进程得到的 wheel 坐标
     // 可能与渲染进程的 CSS 像素不一致。渲染进程已经通过 pointerenter 明确
     // 确认光标位于会话列表时，优先信任该状态；坐标命中仍作为无 hover 状态下的兜底。
-    return state.pointerInside || (x >= state.left && x <= state.right && y >= state.top && y <= state.bottom);
+    const xPad = 24;
+    const yPad = 24;
+    return state.pointerInside || (x >= Math.max(0, state.left - xPad) && x <= (state.right + xPad) && y >= state.top && y <= (state.bottom + yPad));
 }
 
 module.exports = {

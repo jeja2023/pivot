@@ -1,5 +1,14 @@
 ## [v0.1.134] - 2026-09-11
 
+### 桌面客户端会话列表滚动失效与细滚动条交互重构
+
+- **解除会话列表滚动条强制隐藏**：彻底移除 `sidebar.css` 和 `layout-refresh.css` 中粗暴的 `.session-list:hover, .sidebar:hover .session-list { scrollbar-width: none; }` 以及 `::-webkit-scrollbar { display: none; width: 0; }`，消除特异度反向压制；全面升级为现代化 6px/8px 精致细滚动条（平时半透明微透、悬停高亮），使得 Web 浏览器与桌面客户端均可直接点击并拖拽滑块查看历史会话。
+- **桌面端运行态与滚轮分发通道强化**：
+  - `desktop/preload.js` 增加早周期 `ensureDesktopRuntimeClass()`，无论页面在初始化还是已就绪状态下均可靠为 `<html>` 和 `<body>` 注入 `pivot-desktop-runtime` 标识。
+  - 指针监听范围扩展至整个 `.sidebar` 区域，并针对 Windows 高 DPI 缩放（125%、150% 等）在 `desktop/session-list-wheel.js` 中增加坐标容错边距，防止鼠标移入会话列表边缘时漏判。
+  - `client/chat/sidebar.js` 滚轮兜底函数接入 `window.pivotDesktop` 环境变量，保障客户端即便脱离主进程拦截也能稳定由 DOM 层平滑滚动。
+- **重新编译样式与全量验证**：执行 `node scripts/build_chat_css.js` 重新构建 `client/chat/chat.shell.css`，`npm run check:standards:changed`、`npm run lint` 与 `npm run check` 全量门禁一致 0 报错通过。
+
 ### 工作流全链路去 Emoji 符号规范与纯文本化改造
 
 - **全域清除 Emoji 符号**：全面下线工作流节点右上角快取徽章、执行耗时甘特瀑布图、后端执行步骤标题等场景中的 Emoji 图标（如闪电、秒表等图形），统一改用 `[快取]`、`快取`、`0ms` 等纯净中文字符与原生矢量渲染，确保严肃政企级公文与系统工作台的严谨与统一。

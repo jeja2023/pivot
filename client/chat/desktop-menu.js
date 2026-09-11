@@ -2,10 +2,12 @@
     const desktopApi = window.pivotDesktop;
     if (!desktopApi) return;
 
+    document.documentElement?.classList.add('pivot-desktop-runtime');
+    document.body?.classList.add('pivot-desktop-runtime');
+
     const menuRoot = document.getElementById('desktop-app-menu');
     if (!menuRoot) return;
 
-    document.body?.classList.add('pivot-desktop-runtime');
     menuRoot.hidden = false;
 
     const MENU_GROUPS = {

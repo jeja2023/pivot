@@ -93,7 +93,19 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     }
 });
 
+function ensureDesktopRuntimeClass() {
+    try {
+        if (document.documentElement && !document.documentElement.classList.contains('pivot-desktop-runtime')) {
+            document.documentElement.classList.add('pivot-desktop-runtime');
+        }
+        if (document.body && !document.body.classList.contains('pivot-desktop-runtime')) {
+            document.body.classList.add('pivot-desktop-runtime');
+        }
+    } catch (_) {}
+}
+
 function installSessionListScrollFallback() {
+    ensureDesktopRuntimeClass();
     const styleId = 'pivot-desktop-session-list-scroll-fallback';
     if (!document.getElementById(styleId)) {
         const style = document.createElement('style');
@@ -132,6 +144,7 @@ function installSessionListScrollFallback() {
                 overflow-y: auto !important;
                 overscroll-behavior-y: contain !important;
                 touch-action: pan-y !important;
+                scrollbar-gutter: stable !important;
                 scrollbar-width: thin !important;
                 scrollbar-color: rgba(100, 116, 139, 0.46) transparent !important;
                 -ms-overflow-style: auto !important;
@@ -139,6 +152,7 @@ function installSessionListScrollFallback() {
             .sidebar:hover #session-list,
             #session-list:hover {
                 scrollbar-width: thin !important;
+                scrollbar-color: rgba(100, 116, 139, 0.65) transparent !important;
             }
             #session-list::-webkit-scrollbar {
                 display: block !important;
@@ -150,13 +164,22 @@ function installSessionListScrollFallback() {
             }
             #session-list::-webkit-scrollbar-thumb {
                 min-height: 32px !important;
-                border: 3px solid transparent !important;
+                border: 2px solid transparent !important;
                 border-radius: 999px !important;
                 background: rgba(100, 116, 139, 0.46) !important;
                 background-clip: padding-box !important;
             }
+            #session-list:hover::-webkit-scrollbar-thumb,
+            .sidebar:hover #session-list::-webkit-scrollbar-thumb {
+                background: rgba(100, 116, 139, 0.65) !important;
+                background-clip: padding-box !important;
+            }
+            #session-list::-webkit-scrollbar-thumb:hover {
+                background: rgba(100, 116, 139, 0.85) !important;
+                background-clip: padding-box !important;
+            }
         `;
-        document.head.appendChild(style);
+        if (document.head) document.head.appendChild(style);
     }
 
     const isVisibleModalTarget = target => {
@@ -176,7 +199,8 @@ function installSessionListScrollFallback() {
         .some(modal => isVisibleModalTarget(modal));
 
     const scrollSessionList = (list, rawDeltaY, deltaMode = 0) => {
-        if (!list || list.scrollHeight <= list.clientHeight) return false;
+        const targetList = list || document.getElementById('session-list');
+        if (!targetList || targetList.scrollHeight <= targetList.clientHeight) return false;
         const raw = Number(rawDeltaY) || 0;
         if (!raw) return false;
 
@@ -184,7 +208,7 @@ function installSessionListScrollFallback() {
         if (deltaMode === 1) {
             deltaY = raw * 36;
         } else if (deltaMode === 2) {
-            deltaY = raw * (list.clientHeight || 360);
+            deltaY = raw * (targetList.clientHeight || 360);
         } else {
             const abs = Math.abs(raw);
             if (abs < 1) {
@@ -197,10 +221,10 @@ function installSessionListScrollFallback() {
             }
         }
 
-        const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
-        const nextScrollTop = Math.min(maxScrollTop, Math.max(0, list.scrollTop + deltaY));
-        if (nextScrollTop === list.scrollTop) return false;
-        list.scrollTop = nextScrollTop;
+        const maxScrollTop = Math.max(0, targetList.scrollHeight - targetList.clientHeight);
+        const nextScrollTop = Math.min(maxScrollTop, Math.max(0, targetList.scrollTop + deltaY));
+        if (nextScrollTop === targetList.scrollTop) return false;
+        targetList.scrollTop = nextScrollTop;
         return true;
     };
 
@@ -293,9 +317,19 @@ function installSessionListScrollFallback() {
 
     const list = document.getElementById('session-list');
     const sidebar = list?.closest('.sidebar');
-    list?.addEventListener('pointerenter', () => setSessionListPointerInside(true), { passive: true });
-    list?.addEventListener('pointerleave', () => setSessionListPointerInside(false), { passive: true });
-    window.addEventListener('blur', () => setSessionListPointerInside(false), { passive: true });
+    const onEnter = () => setSessionListPointerInside(true);
+    const onLeave = () => setSessionListPointerInside(false);
+    list?.addEventListener('pointerenter', onEnter, { passive: true });
+    list?.addEventListener('pointerleave', onLeave, { passive: true });
+    sidebar?.addEventListener('pointerenter', onEnter, { passive: true });
+    sidebar?.addEventListener('pointerleave', onLeave, { passive: true });
+    document.addEventListener('pointermove', event => {
+        const currentSidebar = document.getElementById('session-list')?.closest('.sidebar');
+        if (currentSidebar && currentSidebar.contains(event.target)) {
+            setSessionListPointerInside(true);
+        }
+    }, { passive: true });
+    window.addEventListener('blur', onLeave, { passive: true });
     if (typeof window.ResizeObserver === 'function') {
         const resizeObserver = new window.ResizeObserver(scheduleSessionListViewportSync);
         if (list) resizeObserver.observe(list);
@@ -312,7 +346,8 @@ function installSessionListScrollFallback() {
     scheduleSessionListViewportSync();
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+function bootstrapDesktopSessionScroll() {
+    ensureDesktopRuntimeClass();
     const style = document.createElement('style');
     style.innerHTML = `
         body::before {
@@ -332,6 +367,13 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         }
     `;
-    document.head.appendChild(style);
+    if (document.head) document.head.appendChild(style);
     installSessionListScrollFallback();
-});
+}
+
+ensureDesktopRuntimeClass();
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', bootstrapDesktopSessionScroll, { once: true });
+} else {
+    bootstrapDesktopSessionScroll();
+}

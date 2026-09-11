@@ -130,8 +130,15 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    scrollbar-gutter: auto;
-    scrollbar-width: none;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, rgba(148, 163, 184, 0.32)) transparent;
+}
+
+.session-list:hover,
+.sidebar:hover .session-list {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.52)) transparent;
 }
 
 .session-date-group {
