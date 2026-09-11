@@ -547,7 +547,7 @@ function triggerMemoryExtractionWorker() {
     }, 0).unref?.();
 }
 
-async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null } = {}) {
+async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, triggerWorker = true } = {}) {
     void user;
     const queued = await enqueueMemoryExtractionJob({
         userId,
@@ -558,7 +558,9 @@ async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], us
     if (!queued.queued) {
         return { scheduled: false, reason: queued.reason };
     }
-    triggerMemoryExtractionWorker();
+    if (triggerWorker) {
+        triggerMemoryExtractionWorker();
+    }
     return {
         scheduled: true,
         queued: true,

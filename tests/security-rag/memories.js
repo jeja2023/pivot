@@ -311,7 +311,8 @@ test('长期记忆产品级治理支持持久化任务、质量摘要、批量�
         userId: user.id,
         sessionId: user.sessionId,
         messageIds: [messageId],
-        user
+        user,
+        triggerWorker: false
     });
     assert.equal(queued.scheduled, true);
     assert.ok(queued.jobId);
