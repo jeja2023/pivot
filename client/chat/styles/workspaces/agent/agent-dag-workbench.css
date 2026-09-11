@@ -37,7 +37,7 @@
 
 .agent-dag-workbench .pivot-dag-editor-wrap {
     min-height: 0;
-    height: auto;
+    height: 100%;
     grid-template-rows: auto minmax(0, 1fr);
 }
 

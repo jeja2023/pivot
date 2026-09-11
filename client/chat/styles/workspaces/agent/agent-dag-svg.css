@@ -265,6 +265,8 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
     font-weight: 800;
     line-height: 1;
     pointer-events: none;
+}
+
 .pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
 .pivot-dag-run-badge.is-completed{ background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
 .pivot-dag-run-badge.is-error    { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
