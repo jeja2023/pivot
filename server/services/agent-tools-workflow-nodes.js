@@ -19,10 +19,6 @@ function normalizeEmbeddedResourceUrl(value) {
     return normalizeWorkflowEmbedUrl(value);
 }
 
-function normalizeEmbeddedPageUrl(value) {
-    return normalizeEmbeddedResourceUrl(value);
-}
-
 function executeWorkflowEmbedPage(input = {}) {
     const url = normalizeEmbeddedResourceUrl(input.url);
     const title = String(input.title || '嵌入页面').trim().slice(0, 120) || '嵌入页面';

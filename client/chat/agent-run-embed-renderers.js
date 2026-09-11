@@ -1,4 +1,4 @@
-/* Agent workflow result presentation renderers. */
+/* 智能体工作流结果呈现渲染器。 */
 /* global agentEscape, agentEscapeAttr */
 
 function agentWorkflowEmbeddedPageMarkup(page = {}) {
@@ -24,9 +24,7 @@ function agentWorkflowEmbeddedImageMarkup(image = {}) {
     const safeUrl = /^(?:https?:\/\/|\/(?!\/))/i.test(rawUrl) ? rawUrl : '';
     if (!safeUrl) return '<div class="agent-result-empty">图片地址不可用或已被安全策略拦截。</div>';
     const alt = String(image.alt || '工作流图片').trim() || '工作流图片';
-    const maxWidth = Math.max(160, Math.min(Number(image.maxWidth) || 960, 1600));
-    const maxHeight = Math.max(120, Math.min(Number(image.maxHeight) || 640, 1200));
-    return `<figure class="agent-workflow-output-media agent-workflow-output-image"><img src="${agentEscapeAttr(safeUrl)}" alt="${agentEscapeAttr(alt)}" loading="lazy" referrerpolicy="no-referrer" style="max-width:${maxWidth}px;max-height:${maxHeight}px"><figcaption>${agentEscape(alt)}</figcaption></figure>`;
+    return `<figure class="agent-workflow-output-media agent-workflow-output-image"><img src="${agentEscapeAttr(safeUrl)}" alt="${agentEscapeAttr(alt)}" loading="lazy" referrerpolicy="no-referrer"><figcaption>${agentEscape(alt)}</figcaption></figure>`;
 }
 
 function agentWorkflowEmbeddedVideoMarkup(video = {}) {

@@ -397,9 +397,9 @@
     gap: 8px;
     margin-top: 8px;
     padding: 10px;
-    border: 1px solid rgba(59, 130, 246, 0.22);
+    border: 1px solid var(--border, rgba(59, 130, 246, 0.22));
     border-radius: 9px;
-    background: #f8fbff;
+    background: var(--bg-side, #f8fbff);
 }
 
 .agent-workflow-output-embed-head {
@@ -413,7 +413,7 @@
 .agent-workflow-output-embed-head strong {
     min-width: 0;
     overflow: hidden;
-    color: #1e3a8a;
+    color: var(--text-main, #1e3a8a);
     font-size: 0.78rem;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -431,9 +431,9 @@
     width: 100%;
     max-width: 100%;
     min-height: 180px;
-    border: 1px solid rgba(148, 163, 184, 0.32);
+    border: 1px solid var(--border, rgba(148, 163, 184, 0.32));
     border-radius: 7px;
-    background: #fff;
+    background: var(--surface, #ffffff);
 }
 
 .agent-workflow-output-media,
@@ -444,9 +444,9 @@
     gap: 7px;
     margin-top: 8px;
     padding: 10px;
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    border: 1px solid var(--border, rgba(59, 130, 246, 0.2));
     border-radius: 9px;
-    background: #f8fbff;
+    background: var(--bg-side, #f8fbff);
 }
 
 .agent-workflow-output-image {
@@ -457,6 +457,7 @@
     display: block;
     width: auto;
     max-width: 100%;
+    max-height: 640px;
     border-radius: 6px;
     object-fit: contain;
 }
@@ -465,7 +466,7 @@
 .agent-workflow-output-media > strong {
     max-width: 100%;
     overflow: hidden;
-    color: #334155;
+    color: var(--text-muted, #334155);
     font-size: 0.72rem;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -476,7 +477,7 @@
     width: 100%;
     max-height: 900px;
     border-radius: 6px;
-    background: #0f172a;
+    background: var(--msg-user, #0f172a);
 }
 
 .agent-workflow-output-audio audio {
@@ -489,23 +490,23 @@
 }
 
 .agent-workflow-output-link-card:hover {
-    border-color: rgba(16, 163, 127, 0.42);
-    background: #f0fdfa;
+    border-color: var(--primary, rgba(16, 163, 127, 0.42));
+    background: var(--ui-primary-soft, #f0fdfa);
 }
 
 .agent-workflow-output-link-card strong {
-    color: #1e3a8a;
+    color: var(--text-main, #1e3a8a);
     font-size: 0.8rem;
 }
 
 .agent-workflow-output-link-card span {
-    color: #64748b;
+    color: var(--text-muted, #64748b);
     font-size: 0.7rem;
     line-height: 1.45;
 }
 
 .agent-workflow-output-link-card em {
-    color: #047857;
+    color: var(--primary, #047857);
     font-size: 0.66rem;
     font-style: normal;
     font-weight: 700;
@@ -518,9 +519,9 @@
     gap: 8px;
     margin-top: 8px;
     padding: 10px;
-    border: 1px solid rgba(100, 116, 139, 0.28);
+    border: 1px solid var(--border, rgba(100, 116, 139, 0.28));
     border-radius: 9px;
-    background: #f8fafc;
+    background: var(--bg-side, #f8fafc);
 }
 
 .agent-workflow-output-code-head {
@@ -531,7 +532,7 @@
 }
 
 .agent-workflow-output-code-head strong {
-    color: #334155;
+    color: var(--text-main, #334155);
     font-size: 0.78rem;
 }
 
@@ -547,15 +548,15 @@
     overflow: auto;
     padding: 10px;
     border-radius: 7px;
-    background: #0f172a;
-    color: #e2e8f0;
+    background: var(--msg-user, #0f172a);
+    color: var(--text-main, #e2e8f0);
     font: 0.72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
 .agent-workflow-output-code > span {
-    color: #64748b;
+    color: var(--text-muted, #64748b);
     font-size: 0.68rem;
     line-height: 1.45;
 }
