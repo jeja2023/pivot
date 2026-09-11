@@ -389,7 +389,7 @@ body.dark-mode .desktop-app-menu-separator {
     min-height: 0;
     max-height: 100%;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: scroll;
     overflow-x: hidden;
     padding: 6px 8px 4px;
     display: flex;
@@ -397,69 +397,84 @@ body.dark-mode .desktop-app-menu-separator {
     gap: 5px;
     overscroll-behavior-y: contain;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb, rgba(148, 163, 184, 0.32)) transparent;
     -ms-overflow-style: auto;
 }
-.session-list:hover,
-.sidebar:hover .session-list {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.52)) transparent;
+/* Firefox标准滚动条：默认透明，通过JS添加.scrollbar-visible类显示 */
+@supports not selector(::-webkit-scrollbar) {
+    .session-list {
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+    }
+    .session-list.scrollbar-visible {
+        scrollbar-color: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45)) var(--scrollbar-track, transparent);
+    }
 }
-/* 会话列表保留可拖动的精简细滚动条：除滚轮外，也为触控板或鼠标拖拽提供清晰入口。 */
+/* 会话列表细长精致且可拖拽的优雅细滚动条（通过JS在鼠标移入区域时添加.scrollbar-visible类显示） */
 .session-list::-webkit-scrollbar {
     display: block;
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
 }
 .session-list::-webkit-scrollbar-track {
-    background: transparent;
+    display: block;
+    background: var(--scrollbar-track, transparent);
+    border-radius: 999px;
 }
 .session-list::-webkit-scrollbar-thumb {
-    min-height: 32px;
+    display: block;
+    min-height: 28px;
     border-radius: 999px;
-    background: var(--scrollbar-thumb, rgba(148, 163, 184, 0.32));
+    background: transparent;
+    transition: background 0.18s ease;
 }
-.session-list:hover::-webkit-scrollbar-thumb,
-.sidebar:hover .session-list::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.52));
+.session-list.scrollbar-visible::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45));
 }
-.session-list::-webkit-scrollbar-thumb:hover {
-    background: var(--scrollbar-thumb-active, rgba(100, 116, 139, 0.8));
+.session-list.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.72));
 }
+.session-list.scrollbar-visible::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active, rgba(51, 65, 85, 0.9));
+}
+/* Electron 桌面客户端覆盖 */
 body.pivot-desktop-runtime .session-list {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.46)) transparent;
+    overflow-y: scroll;
     -ms-overflow-style: auto;
 }
-body.pivot-desktop-runtime .session-list:hover,
-body.pivot-desktop-runtime .sidebar:hover .session-list {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb-active, rgba(100, 116, 139, 0.65)) transparent;
+@supports not selector(::-webkit-scrollbar) {
+    body.pivot-desktop-runtime .session-list {
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+    }
+    body.pivot-desktop-runtime .session-list.scrollbar-visible {
+        scrollbar-color: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45)) var(--scrollbar-track, transparent);
+    }
 }
 body.pivot-desktop-runtime .session-list::-webkit-scrollbar {
     display: block;
-    width: 8px;
-    height: 8px;
+    width: 5px;
+    height: 5px;
 }
 body.pivot-desktop-runtime .session-list::-webkit-scrollbar-track {
-    background: transparent;
+    display: block;
+    background: var(--scrollbar-track, transparent);
+    border-radius: 999px;
 }
 body.pivot-desktop-runtime .session-list::-webkit-scrollbar-thumb {
-    min-height: 32px;
-    border: 2px solid transparent;
+    display: block;
+    min-height: 28px;
     border-radius: 999px;
-    background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.46));
-    background-clip: padding-box;
+    background: transparent;
+    transition: background 0.18s ease;
 }
-body.pivot-desktop-runtime .session-list:hover::-webkit-scrollbar-thumb,
-body.pivot-desktop-runtime .sidebar:hover .session-list::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb-active, rgba(100, 116, 139, 0.65));
-    background-clip: padding-box;
+body.pivot-desktop-runtime .session-list.scrollbar-visible::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45));
 }
-body.pivot-desktop-runtime .session-list::-webkit-scrollbar-thumb:hover {
-    background: var(--scrollbar-thumb-active, rgba(100, 116, 139, 0.85));
-    background-clip: padding-box;
+body.pivot-desktop-runtime .session-list.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.72));
+}
+body.pivot-desktop-runtime .session-list.scrollbar-visible::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active, rgba(51, 65, 85, 0.9));
 }
 .session-list-status {
     padding: 10px 8px 12px;
@@ -841,12 +856,34 @@ body.pivot-desktop-runtime .session-list::-webkit-scrollbar-thumb:hover {
 .sidebar-header + .session-list::-webkit-scrollbar,
 .session-list::-webkit-scrollbar {
     display: block;
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
 }
 .sidebar-header + .session-list::-webkit-scrollbar-track,
 .session-list::-webkit-scrollbar-track {
+    display: block;
+    background: var(--scrollbar-track, transparent);
+    border-radius: 999px;
+}
+.sidebar-header + .session-list::-webkit-scrollbar-thumb,
+.session-list::-webkit-scrollbar-thumb {
+    display: block;
+    min-height: 28px;
+    border-radius: 999px;
     background: transparent;
+    transition: background 0.15s ease;
+}
+.sidebar-header + .session-list:hover::-webkit-scrollbar-thumb,
+.session-list:hover::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45));
+}
+.sidebar-header + .session-list::-webkit-scrollbar-thumb:hover,
+.session-list::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.72));
+}
+.sidebar-header + .session-list::-webkit-scrollbar-thumb:active,
+.session-list::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active, rgba(51, 65, 85, 0.9));
 }
 .btn-link { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; }
 #auth-toggle {

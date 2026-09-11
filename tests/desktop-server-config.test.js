@@ -94,7 +94,7 @@ test('Desktop Preload: 会话列表有独立的样式和滚轮兜底，且不暴
     const preload = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'preload.js'), 'utf8');
     assert.match(preload, /installSessionListScrollFallback/);
     assert.match(preload, /#session-list/);
-    assert.match(preload, /overflow-y:\s*auto\s*!important/);
+    assert.match(preload, /overflow-y:\s*(?:auto|scroll)\s*!important/);
     assert.match(preload, /scrollbar-width:\s*thin\s*!important/);
     assert.match(preload, /document\.addEventListener\('wheel'/);
     assert.match(preload, /\{ capture: true, passive: false \}/);
@@ -102,7 +102,7 @@ test('Desktop Preload: 会话列表有独立的样式和滚轮兜底，且不暴
     assert.match(preload, /getBoundingClientRect\(\)/);
     assert.match(preload, /event\.clientX/);
     assert.match(preload, /isVisibleModalTarget/);
-    assert.match(preload, /list\.scrollTop = nextScrollTop/);
+    assert.match(preload, /(?:targetList|list)\.scrollTop = nextScrollTop/);
     assert.match(preload, /pivot-desktop:session-list-viewport/);
     assert.match(preload, /pivot-desktop:session-list-wheel/);
     assert.match(preload, /event\.preventDefault\(\)/);

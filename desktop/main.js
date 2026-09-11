@@ -17,6 +17,9 @@ function initEarlyDesktopEnv() {
 }
 initEarlyDesktopEnv();
 
+// 禁用 Windows 11 Fluent 自动隐藏浮动滚动条，确保桌面端始终渲染常驻且可交互的滚动条
+app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar,FluentOverlayScrollbar,FluentScrollbar');
+
 const { loadDesktopConfig, normalizeRemoteUrl, normalizeTrustedExternalOrigins, saveUserDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');

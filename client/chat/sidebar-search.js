@@ -1,6 +1,6 @@
 // 侧边栏搜索与批量工具（拆自 sidebar.js）
 // --- 侧边栏模块 Sidebar (完整功能版) ---
-let sidebarState = { page: 1, limit: 20, cursor: '', hasMore: true, isLoading: false, archived: false };
+let sidebarState = { page: 1, limit: 35, cursor: '', hasMore: true, isLoading: false, archived: false };
 const sessionMenuData = new Map();
 const selectedSessionIds = new Set();
 let sessionBatchMode = false;

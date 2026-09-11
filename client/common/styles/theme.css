@@ -32,6 +32,12 @@
     --pwa-update-action-bg: var(--primary, #10a37f);
     --pwa-update-action-bg-hover: var(--primary-hover, #0e8c6d);
     --pwa-update-action-text: #ffffff;
+
+    /* 侧栏滚动条变量 */
+    --scrollbar-track: var(--ui-scrollbar-track, transparent);
+    --scrollbar-thumb: var(--ui-scrollbar-thumb, rgba(148, 163, 184, 0.45));
+    --scrollbar-thumb-hover: var(--ui-scrollbar-thumb-hover, rgba(100, 116, 139, 0.72));
+    --scrollbar-thumb-active: var(--ui-scrollbar-thumb-active, rgba(51, 65, 85, 0.9));
 }
 
 /* 全局隐藏类 (符合规范第39条) */
@@ -52,7 +58,18 @@
         --pwa-update-text: var(--text-main, #ececf1);
         --pwa-update-border: var(--border, #4d4d4f);
         --pwa-update-shadow: 0 16px 36px rgba(0,0,0,.36);
+        --scrollbar-track: var(--ui-scrollbar-track, transparent);
+        --scrollbar-thumb: var(--ui-scrollbar-thumb, rgba(148, 163, 184, 0.35));
+        --scrollbar-thumb-hover: var(--ui-scrollbar-thumb-hover, rgba(203, 213, 225, 0.65));
+        --scrollbar-thumb-active: var(--ui-scrollbar-thumb-active, rgba(226, 232, 240, 0.88));
     }
+}
+
+body.dark-mode {
+    --scrollbar-track: var(--ui-scrollbar-track, transparent);
+    --scrollbar-thumb: var(--ui-scrollbar-thumb, rgba(148, 163, 184, 0.35));
+    --scrollbar-thumb-hover: var(--ui-scrollbar-thumb-hover, rgba(203, 213, 225, 0.65));
+    --scrollbar-thumb-active: var(--ui-scrollbar-thumb-active, rgba(226, 232, 240, 0.88));
 }
 
 /* 全局基础样式 */

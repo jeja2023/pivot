@@ -346,32 +346,54 @@ const loadMonitorSummary = async function(options = {}) {
         const localEndpoints = Number(endpoints.localCount || 0);
         const remoteEndpoints = Number(endpoints.remoteCount || 0);
 
+        const formatGpuDisplayName = (rawName) => {
+            if (!rawName) return 'GPU';
+            let name = String(rawName).trim();
+            name = name.replace(/^NVIDIA\s+GeForce\s+/i, '');
+            name = name.replace(/^NVIDIA\s+/i, '');
+            return name || 'GPU';
+        };
+        const formatCompactVram = (usedBytes, totalBytes) => {
+            const usedGiB = (Number(usedBytes) || 0) / (1024 * 1024 * 1024);
+            const totalGiB = (Number(totalBytes) || 0) / (1024 * 1024 * 1024);
+            if (totalGiB >= 1) {
+                const totalStr = totalGiB >= 10 ? totalGiB.toFixed(0) : totalGiB.toFixed(1);
+                return `${usedGiB.toFixed(1)} / ${totalStr} GB`;
+            }
+            return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
+        };
+
         const allGpus = gpu.available && Array.isArray(gpu.gpus) ? gpu.gpus : [];
-        const visibleGpus = allGpus.slice(0, 2);
+        const visibleGpus = allGpus.slice(0, 4);
+        const isSingleGpu = visibleGpus.length === 1;
+        const gpuCardsHtml = visibleGpus.map((item, idx) => {
+            const usedRate = Number(item.ratio || 0) * 100;
+            const rawName = item.name || 'GPU';
+            const shortName = formatGpuDisplayName(rawName);
+            const vramText = formatCompactVram(item.usedBytes, item.totalBytes);
+            const utilization = Number(item.utilization);
+            const utilRate = Number.isFinite(utilization) ? (utilization > 1 ? utilization : utilization * 100) : null;
+            const temp = Number.isFinite(Number(item.temperature)) ? `${Number(item.temperature).toFixed(0)}°C` : null;
+            const statusClass = usedRate > 90 ? 'is-danger' : (usedRate > 75 ? 'is-warning' : 'is-healthy');
+
+            return `<div class="monitor-gpu-card-item">
+                <div class="monitor-gpu-item-head">
+                    <span class="monitor-gpu-name" title="#${idx} ${escapeHtml(rawName)}">#${idx} ${escapeHtml(shortName)}</span>
+                    <strong class="monitor-gpu-vram-text" title="显存占用: ${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(1)}%)">${escapeHtml(vramText)}</strong>
+                </div>
+                <div class="monitor-meter-track" title="显存占用率: ${usedRate.toFixed(1)}%">
+                    <div class="monitor-meter-fill ${statusClass}" data-meter-rate="${Math.min(100, Math.round(usedRate))}"></div>
+                </div>
+                <div class="monitor-gpu-item-foot">
+                    <span class="monitor-gpu-metric-util">${utilRate !== null ? `利用率 <strong>${utilRate.toFixed(0)}%</strong>` : '利用率 <strong>0%</strong>'}</span>
+                    <span class="monitor-gpu-metric-extra">${temp ? `${temp} · ` : ''}${usedRate.toFixed(0)}%</span>
+                </div>
+            </div>`;
+        }).join('');
+
         const gpuRows = visibleGpus.length
-            ? `<div class="monitor-gpu-cards-wrap">${visibleGpus.map((item, idx) => {
-                const usedRate = Number(item.ratio || 0) * 100;
-                const gpuName = item.name || 'GPU';
-                const gpuDetails = [];
-                const utilization = Number(item.utilization);
-                if (Number.isFinite(utilization)) {
-                    const utilizationRate = utilization > 1 ? utilization : utilization * 100;
-                    gpuDetails.push(`利用率 ${utilizationRate.toFixed(0)}%`);
-                }
-                if (Number.isFinite(Number(item.temperature))) gpuDetails.push(`${Number(item.temperature).toFixed(0)}°C`);
-                const gpuBarColor = usedRate > 90 ? '#ef4444' : (usedRate > 75 ? '#f59e0b' : '#10b981');
-                return `<div class="monitor-row monitor-gpu-row">
-                    <span class="monitor-gpu-name" title="#${idx} ${escapeHtml(gpuName)}">#${idx} ${escapeHtml(gpuName)}</span>
-                    <div class="monitor-meter-cell">
-                        <strong>${formatBytes(item.usedBytes)} / ${formatBytes(item.totalBytes)} (${usedRate.toFixed(0)}%)</strong>
-                        <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${Math.min(100, Math.round(usedRate))}%; background: ${gpuBarColor};"></div>
-                        </div>
-                        ${gpuDetails.length ? `<small title="${escapeHtml(gpuDetails.join(' · '))}"><strong>${escapeHtml(gpuDetails.join(' · '))}</strong></small>` : ''}
-                    </div>
-                </div>`;
-            }).join('')}${allGpus.length > visibleGpus.length
-                ? `<div class="monitor-empty compact">另有 ${formatMetricNumber(allGpus.length - visibleGpus.length)} 张 GPU，详情请查看接口监控。</div>`
+            ? `<div class="monitor-gpu-cards-wrap${isSingleGpu ? ' is-single' : ''}">${gpuCardsHtml}${allGpus.length > visibleGpus.length
+                ? `<div class="monitor-empty compact monitor-gpu-overflow">另有 ${formatMetricNumber(allGpus.length - visibleGpus.length)} 张 GPU，详情请查看接口监控。</div>`
                 : ''}</div>`
             : `<div class="monitor-hardware-banner">
                 <div class="monitor-hardware-banner-head">
@@ -438,6 +460,14 @@ const loadMonitorSummary = async function(options = {}) {
             </div>`,
             gpuRows
         ].join(''));
+
+        const monitorGpuListEl = document.getElementById('monitor-gpu-list');
+        if (monitorGpuListEl) {
+            monitorGpuListEl.querySelectorAll('.monitor-meter-fill[data-meter-rate]').forEach(bar => {
+                const rate = Number(bar.dataset.meterRate) || 0;
+                bar.style.width = `${Math.min(100, Math.max(0, rate))}%`;
+            });
+        }
 
         const models = Array.isArray(tokens.byModel) ? tokens.byModel : [];
         const visibleModels = models.slice(0, 6);

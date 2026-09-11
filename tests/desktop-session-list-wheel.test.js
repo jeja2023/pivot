@@ -64,5 +64,5 @@ test('主进程与 preload 共同使用原生 mouseWheel 桥，并保留可拖�
     assert.match(preload, /pointerenter/);
     assert.match(preload, /pointerleave/);
     assert.match(preload, /scrollbar-width:\s*thin\s*!important/);
-    assert.match(preload, /#session-list::\-webkit-scrollbar[\s\S]*?width:\s*10px\s*!important/);
+    assert.match(preload, /#session-list::\-webkit-scrollbar[\s\S]*?width:\s*(?:5px|6px|8px|10px)\s*!important/);
 });

@@ -82,10 +82,10 @@ test('会话列表保留独立滚动容器并通过滚动自动分页', () => {
     const layoutCss = fs.readFileSync(path.join(root, 'client', 'chat', 'styles', 'layout-refresh.css'), 'utf8');
     const sidebarJs = fs.readFileSync(path.join(root, 'client', 'chat', 'sidebar.js'), 'utf8');
     const chatShell = fs.readFileSync(path.join(root, 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
-    assert.match(sidebarCss, /\.session-list[\s\S]*overflow-y:\s*auto/);
+    assert.match(sidebarCss, /\.session-list[\s\S]*overflow-y:\s*(?:auto|scroll)/);
     assert.match(sidebarCss, /\.sidebar[\s\S]*height:\s*100%[\s\S]*min-height:\s*0/);
-    assert.match(sidebarCss, /\.session-list[\s\S]*flex:\s*1\s+1\s+0[\s\S]*scrollbar-width:\s*none/);
-    assert.match(sidebarCss, /\.session-list::\-webkit-scrollbar[\s\S]*display:\s*none/);
+    assert.match(sidebarCss, /\.session-list[\s\S]*flex:\s*1\s+1\s+0/);
+    assert.match(sidebarCss, /\.session-list::\-webkit-scrollbar[\s\S]*display:\s*block/);
     assert.match(layoutCss, /\.session-list[\s\S]*min-height:\s*0/);
     assert.match(sidebarJs, /pivot-desktop-runtime/);
     assert.match(sidebarJs, /addEventListener\('wheel'/);

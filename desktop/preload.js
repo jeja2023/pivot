@@ -141,42 +141,47 @@ function installSessionListScrollFallback() {
                 min-height: 0 !important;
                 max-height: 100% !important;
                 overflow-x: hidden !important;
-                overflow-y: auto !important;
+                overflow-y: scroll !important;
                 overscroll-behavior-y: contain !important;
                 touch-action: pan-y !important;
                 scrollbar-gutter: stable !important;
-                scrollbar-width: thin !important;
-                scrollbar-color: rgba(100, 116, 139, 0.46) transparent !important;
                 -ms-overflow-style: auto !important;
             }
-            .sidebar:hover #session-list,
-            #session-list:hover {
-                scrollbar-width: thin !important;
-                scrollbar-color: rgba(100, 116, 139, 0.65) transparent !important;
+            @supports not selector(::-webkit-scrollbar) {
+                #session-list {
+                    scrollbar-width: thin !important;
+                    scrollbar-color: transparent transparent !important;
+                }
+                #session-list.scrollbar-visible {
+                    scrollbar-color: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45)) var(--scrollbar-track, transparent) !important;
+                }
             }
             #session-list::-webkit-scrollbar {
                 display: block !important;
-                width: 10px !important;
-                height: 10px !important;
+                width: 5px !important;
+                height: 5px !important;
             }
             #session-list::-webkit-scrollbar-track {
-                background: transparent !important;
+                display: block !important;
+                background: var(--scrollbar-track, transparent) !important;
+                border-radius: 999px !important;
             }
             #session-list::-webkit-scrollbar-thumb {
-                min-height: 32px !important;
-                border: 2px solid transparent !important;
+                display: block !important;
+                min-height: 28px !important;
+                border: none !important;
                 border-radius: 999px !important;
-                background: rgba(100, 116, 139, 0.46) !important;
-                background-clip: padding-box !important;
+                background: transparent !important;
+                transition: background 0.18s ease !important;
             }
-            #session-list:hover::-webkit-scrollbar-thumb,
-            .sidebar:hover #session-list::-webkit-scrollbar-thumb {
-                background: rgba(100, 116, 139, 0.65) !important;
-                background-clip: padding-box !important;
+            #session-list.scrollbar-visible::-webkit-scrollbar-thumb {
+                background: var(--scrollbar-thumb, rgba(148, 163, 184, 0.45)) !important;
             }
-            #session-list::-webkit-scrollbar-thumb:hover {
-                background: rgba(100, 116, 139, 0.85) !important;
-                background-clip: padding-box !important;
+            #session-list.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+                background: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.72)) !important;
+            }
+            #session-list.scrollbar-visible::-webkit-scrollbar-thumb:active {
+                background: var(--scrollbar-thumb-active, rgba(51, 65, 85, 0.9)) !important;
             }
         `;
         if (document.head) document.head.appendChild(style);
@@ -344,6 +349,56 @@ function installSessionListScrollFallback() {
     });
     window.addEventListener('resize', scheduleSessionListViewportSync, { passive: true });
     scheduleSessionListViewportSync();
+
+    // --- Scrollbar hover visibility for Electron ---
+    // 桌面客户端也需要JS控制滚动条显示/隐藏
+    if (list && sidebar) {
+        let hoverTimer = null;
+        const HIDE_DELAY = 800;
+
+        const showScrollbar = () => {
+            if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+            if (list.scrollHeight > list.clientHeight) {
+                list.classList.add('scrollbar-visible');
+            }
+        };
+
+        const hideScrollbar = () => {
+            if (hoverTimer) clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => {
+                list.classList.remove('scrollbar-visible');
+                hoverTimer = null;
+            }, HIDE_DELAY);
+        };
+
+        sidebar.addEventListener('pointerenter', showScrollbar, { passive: true });
+        sidebar.addEventListener('pointerleave', hideScrollbar, { passive: true });
+        window.addEventListener('blur', hideScrollbar, { passive: true });
+
+        // 窗口 resize/maximize 时强制重排并重新评估
+        let resizeRafId = null;
+        const onResize = () => {
+            if (resizeRafId) return;
+            resizeRafId = requestAnimationFrame(() => {
+                resizeRafId = null;
+                void list.offsetHeight;
+                if (sidebar.matches(':hover') && list.scrollHeight > list.clientHeight) {
+                    list.classList.add('scrollbar-visible');
+                }
+            });
+        };
+        window.addEventListener('resize', onResize, { passive: true });
+
+        // ResizeObserver 同步
+        if (typeof window.ResizeObserver === 'function') {
+            const scrollbarRo = new window.ResizeObserver(() => {
+                if (sidebar.matches(':hover') && list.scrollHeight > list.clientHeight) {
+                    list.classList.add('scrollbar-visible');
+                }
+            });
+            scrollbarRo.observe(list);
+        }
+    }
 }
 
 function bootstrapDesktopSessionScroll() {

@@ -53,7 +53,7 @@ function ensureDefaultDistributionConfig(rootDir) {
         const distConfig = {
             mode: baseConfig.mode || 'remote',
             environmentName: 'Pivot Production',
-            remoteUrl: 'http://50.64.150.51:9006/',
+            remoteUrl: baseConfig.remoteUrl || 'http://50.64.150.51:9006/',
             partition: 'persist:pivot-client',
             windowTitle: baseConfig.windowTitle || 'Pivot 智枢',
             allowExternalOpen: false,

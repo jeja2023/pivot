@@ -65,6 +65,75 @@ function bindSessionListScrolling(list) {
             handleWheel(event);
         }, { passive: false });
     }
+
+    // 绑定滚动条悬停显示/隐藏（通过 JS 切换 .scrollbar-visible 类）
+    bindSessionListScrollbarHover(list);
+}
+
+/**
+ * 通过 JS 在鼠标进入/离开侧边栏区域时切换 .scrollbar-visible 类，
+ * 实现滚动条仅在鼠标悬停区域内时显示。
+ * 比 CSS :hover 伪类更可靠，能正确处理 Chromium 的 ::-webkit-scrollbar 伪元素
+ * 以及 Electron 窗口最大化后的布局重排问题。
+ */
+function bindSessionListScrollbarHover(list) {
+    if (!list || list.dataset.boundScrollbarHover === '1') return;
+    list.dataset.boundScrollbarHover = '1';
+
+    const sidebar = list.closest('.sidebar');
+    if (!sidebar) return;
+
+    let hoverTimer = null;
+    const HIDE_DELAY = 800; // 鼠标离开后延迟隐藏，避免快速移动时闪烁
+
+    const showScrollbar = () => {
+        if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+        if (list.scrollHeight > list.clientHeight) {
+            list.classList.add('scrollbar-visible');
+        }
+    };
+
+    const hideScrollbar = () => {
+        if (hoverTimer) clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => {
+            list.classList.remove('scrollbar-visible');
+            hoverTimer = null;
+        }, HIDE_DELAY);
+    };
+
+    sidebar.addEventListener('pointerenter', showScrollbar, { passive: true });
+    sidebar.addEventListener('pointerleave', hideScrollbar, { passive: true });
+
+    // 窗口 resize/最大化时重新评估滚动条可见性
+    let resizeRafId = null;
+    const onResize = () => {
+        if (resizeRafId) return;
+        resizeRafId = requestAnimationFrame(() => {
+            resizeRafId = null;
+            // 强制重排以获取正确的 scrollHeight
+            void list.offsetHeight;
+            const isScrollable = list.scrollHeight > list.clientHeight;
+            // 如果鼠标当前在侧边栏内，保持显示
+            if (sidebar.matches(':hover')) {
+                if (isScrollable) {
+                    list.classList.add('scrollbar-visible');
+                } else {
+                    list.classList.remove('scrollbar-visible');
+                }
+            }
+        });
+    };
+    window.addEventListener('resize', onResize, { passive: true });
+
+    // 使用 ResizeObserver 监听列表自身尺寸变化（内容加载后）
+    if (typeof ResizeObserver === 'function') {
+        const ro = new ResizeObserver(() => {
+            if (sidebar.matches(':hover') && list.scrollHeight > list.clientHeight) {
+                list.classList.add('scrollbar-visible');
+            }
+        });
+        ro.observe(list);
+    }
 }
 
 async function loadSessions(append = false) {

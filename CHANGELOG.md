@@ -1,3 +1,34 @@
+## [v0.1.135] - 2026-09-11
+
+### 会话列表滚动条悬停显示机制重构（JS 类切换方案）
+
+**问题根因**：Chromium 内核对 `::-webkit-scrollbar` 伪元素的父级 `:hover` 状态传播存在可靠性缺陷——在 `overflow-y: scroll` + `scrollbar-gutter: stable` 组合下，`:hover::-webkit-scrollbar-thumb` 选择器无法稳定触发，导致滚动条始终可见或始终不可见；Electron 窗口直接最大化时因布局重排与 `:hover` 状态未重新评估，出现滚动条不出现的时序竞态。
+
+- **CSS 重构（`sidebar.css` / `layout-refresh.css` / `preload.js` 注入样式）**：
+  - 移除所有 `.session-list:hover::-webkit-scrollbar-thumb` 及 `.session-list:hover { scrollbar-color: ... }` 选择器，改由 JavaScript 在鼠标进入侧边栏区域时动态为 `#session-list` 添加 `.scrollbar-visible` 类，再经由 `.session-list.scrollbar-visible::-webkit-scrollbar-thumb { background: ... }` 控制显示。
+  - Firefox 标准滚动条同步改为 `.session-list.scrollbar-visible { scrollbar-color: ... }`，确保跨引擎一致。
+  - 滚动条宽度保持 5px 精致细滚动条，过渡时长从 0.15s 统一调整为 0.18s。
+
+- **JavaScript 悬停控制（`sidebar.js` — 新增 `bindSessionListScrollbarHover()`）**：
+  - 监听整个 `.sidebar` 容器的 `pointerenter` / `pointerleave` 事件，进入时立即添加 `.scrollbar-visible`（仅当 `scrollHeight > clientHeight` 时），离开时延迟 800ms 移除以防快速移动时闪烁。
+  - 通过 `window.addEventListener('resize', ...)` + `requestAnimationFrame` 在窗口大小改变（含最大化）后强制重排（`void list.offsetHeight`）并重新评估滚动条可见性，彻底修复 Electron 直接最大化时滚动条不出现的问题。
+  - 使用 `ResizeObserver` 监听列表内容尺寸变化（会话懒加载完成后），确保内容撑开触发可滚动状态时及时更新。
+
+- **Electron 客户端同步（`preload.js`）**：
+  - 注入样式同步切换到 `.scrollbar-visible` 类选择器（`#session-list.scrollbar-visible::-webkit-scrollbar-thumb`）。
+  - 在 `installSessionListScrollFallback()` 末尾追加独立的 hover 可见性控制块，与 Web 端逻辑保持对称，同样包含 resize / ResizeObserver 处理。
+
+### 系统监控页面布局与显卡信息展示优化
+
+- **底部空白修复**：`stats-system-monitor.css` 的 `.monitor-panels` 补全缺失的 `display: grid` 声明并追加 `height: 100%`，彻底消除监控页面底部遗留的大面积空白区域。
+- **面板卡片样式统一**：为 `.monitor-panel` 补充 `border`、`background` 与 `box-shadow`，与其他卡片保持视觉一致性；颜色值全面改用 CSS 变量（`var(--border, ...)` / `var(--surface, ...)` 等），支持深色模式自适应。
+- **显卡信息从单列升级为 2×2 网格**：
+  - `stats-monitor.js` 支持最多同时渲染 4 张 GPU 的信息，从单列顺序列表升级为 `grid-template-columns: repeat(2, minmax(0, 1fr))` 二列网格，单卡时自动退回单列（`.is-single`）。
+  - 移除显示名称中的 `NVIDIA ` 前缀冗余字段，保留型号核心部分（如 `GeForce RTX 4090`）以适配紧凑网格空间。
+  - VRAM 用量由原来的百分比改为 `已用 / 总量 GB` 格式（如 `18.4 / 24 GB`），直观呈现绝对显存占用。
+  - 新增 `is-healthy / is-warning / is-danger` 语义状态类（绿 / 黄 / 红）应用于显存进度条（`.monitor-meter-fill`），阈值为 80% / 90%，提供视觉预警。
+  - 新增底栏（`.monitor-gpu-item-foot`）展示温度与 GPU 利用率附加指标。
+
 ## [v0.1.134] - 2026-09-11
 
 ### 桌面客户端会话列表滚动失效与细滚动条交互重构
