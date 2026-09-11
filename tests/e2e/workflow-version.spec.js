@@ -96,7 +96,7 @@ test('receiver dependency mapping becomes stale after a newly published workflow
         assert.ok(workflowId > 0);
 
         const firstPublish = await call(request, 'post', `/api/agents/workflows/${workflowId}/publish`, adminToken, {
-            version: 'current', fixedEvaluationRequired: false
+            version: 'current', fixedEvaluationRequired: false, breakGlassReason: 'E2E测试需要快速发布新工作流版本用于依赖断言。'
         });
         assert.equal(firstPublish.response.status(), 200, JSON.stringify(firstPublish.body));
 
@@ -136,7 +136,7 @@ test('receiver dependency mapping becomes stale after a newly published workflow
         assert.equal(Number(updatedWorkflow.body.workflow.current_version), 2);
 
         const secondPublish = await call(request, 'post', `/api/agents/workflows/${workflowId}/publish`, adminToken, {
-            version: 'current', fixedEvaluationRequired: false
+            version: 'current', fixedEvaluationRequired: false, breakGlassReason: 'E2E测试需要快速发布第二版本工作流用于过期依赖断言。'
         });
         assert.equal(secondPublish.response.status(), 200, JSON.stringify(secondPublish.body));
         assert.equal(Number(secondPublish.body.workflow.published_version), 2);
