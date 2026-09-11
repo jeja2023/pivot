@@ -213,8 +213,22 @@ const renderEdges = () => {
                     if (!from) return;
                     if (viewport && !dagNodeIntersectsViewport(from, viewport) && !dagNodeIntersectsViewport(node, viewport)) return;
                     const selected = ctx.selectedEdge?.fromId === depId && ctx.selectedEdge?.toId === node.id;
+                    const fromState = window.Pivot?.legacy?.dagNodeRunStates?.get(depId);
+                    const toState = window.Pivot?.legacy?.dagNodeRunStates?.get(node.id);
+                    const isStreaming = Boolean((fromState?.status === 'completed' || fromState?.cached) && toState?.status === 'running');
+                    const isStreamDone = Boolean((fromState?.status === 'completed' || fromState?.cached) && (toState?.status === 'completed' || toState?.cached));
+                    const isStreamError = Boolean(fromState?.status === 'error' || toState?.status === 'error');
+                    const isStreamSkipped = Boolean(toState?.status === 'skipped');
+
                     const group = makeSvgEl('g', {
-                        class: `pivot-dag-edge-group${selected ? ' is-selected' : ''}`,
+                        class: [
+                            'pivot-dag-edge-group',
+                            selected ? 'is-selected' : '',
+                            isStreaming ? 'is-streaming' : '',
+                            isStreamDone ? 'is-stream-completed' : '',
+                            isStreamError ? 'is-stream-error' : '',
+                            isStreamSkipped ? 'is-stream-skipped' : ''
+                        ].filter(Boolean).join(' '),
                         'data-pivot-dag-edge-from': depId,
                         'data-pivot-dag-edge-to': node.id,
                         tabindex: '0',
@@ -236,6 +250,13 @@ const renderEdges = () => {
                         'marker-end': 'url(#pivot-dag-arrow)'
                     });
                     group.append(hit, path);
+                    if (isStreaming) {
+                        const stream = makeSvgEl('path', {
+                            class: 'pivot-dag-edge-stream',
+                            d
+                        });
+                        group.appendChild(stream);
+                    }
                     const conditionLabel = node.when ? '条件' : node.condition === 'failure' ? '失败' : node.condition === 'always' ? '始终' : '';
                     if (conditionLabel) {
                         const label = makeSvgEl('text', {
@@ -270,7 +291,7 @@ const renderEdges = () => {
                         node.tool ? '' : 'has-warning',
                         llmNode ? 'is-llm' : '',
                         visual.theme !== 'default' ? `is-${visual.theme}` : '',
-                        runStatus ? `run-${runStatus}` : ''
+                        runState?.cached ? 'run-cached' : (runStatus ? `run-${runStatus}` : '')
                     ].filter(Boolean).join(' '),
                     transform: `translate(${node._x}, ${node._y})`,
                     'data-pivot-dag-id': node.id,
@@ -342,29 +363,36 @@ const renderEdges = () => {
                 group.appendChild(toolWrap);
 
                 // 运行状态徽章：右上角叠加
-                if (runStatus) {
+                if (runStatus || runState?.cached) {
+                    const isCached = Boolean(runState?.cached);
                     const badgeWrap = makeSvgEl('foreignObject', {
                         class: 'pivot-dag-run-badge-foreign',
-                        x: NODE_WIDTH - 24,
+                        x: isCached ? NODE_WIDTH - 30 : NODE_WIDTH - 24,
                         y: -8,
-                        width: 28,
+                        width: isCached ? 36 : 28,
                         height: 20
                     });
                     const badge = document.createElement('div');
-                    badge.className = `pivot-dag-run-badge is-${runStatus}`;
-                    if (runStatus === 'running') {
-                        const spinner = document.createElement('span');
-                        spinner.className = 'pivot-dag-run-spinner';
-                        badge.appendChild(spinner);
-                    } else if (runStatus === 'completed') {
-                        badge.textContent = '✓';
-                        if (runState.durationMs) badge.title = `${(runState.durationMs / 1000).toFixed(1)}s`;
-                    } else if (runStatus === 'error' || runStatus === 'continued_error') {
-                        badge.textContent = '✗';
-                        if (runState.error) badge.title = runState.error;
-                    } else if (runStatus === 'skipped') {
-                        badge.textContent = '↷';
-                        badge.title = '已跳过';
+                    if (isCached) {
+                        badge.className = 'pivot-dag-run-badge is-cached';
+                        badge.textContent = '快取';
+                        badge.title = '已复用缓存 (0s)';
+                    } else {
+                        badge.className = `pivot-dag-run-badge is-${runStatus}`;
+                        if (runStatus === 'running') {
+                            const spinner = document.createElement('span');
+                            spinner.className = 'pivot-dag-run-spinner';
+                            badge.appendChild(spinner);
+                        } else if (runStatus === 'completed') {
+                            badge.textContent = '✓';
+                            if (runState.durationMs) badge.title = `${(runState.durationMs / 1000).toFixed(1)}s`;
+                        } else if (runStatus === 'error' || runStatus === 'continued_error') {
+                            badge.textContent = '✗';
+                            if (runState.error) badge.title = runState.error;
+                        } else if (runStatus === 'skipped') {
+                            badge.textContent = '↷';
+                            badge.title = '已跳过';
+                        }
                     }
                     badgeWrap.appendChild(badge);
                     group.appendChild(badgeWrap);

@@ -1,7 +1,5 @@
 /* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
 
-
-
 function createDagInspectorController(ctx) {
     const inspector = ctx.inspector;
     const onNodeSelectionChange = ctx.onNodeSelectionChange;
@@ -19,6 +17,24 @@ function createDagInspectorController(ctx) {
         result.hidden = false;
         result.className = 'pivot-dag-test-result is-running';
         result.textContent = '正在执行当前节点…';
+
+        // 收集所有拓扑上游节点最新运行快照
+        const getUpstream = window.Pivot?.moduleApi?.('agent.dagCore')?.getUpstreamNodes || window.Pivot?.legacy?.getUpstreamNodes;
+        const upstreamNodes = typeof getUpstream === 'function' ? getUpstream(ctx.spec?.nodes || [], node.id) : [];
+        const runStates = window.Pivot?.legacy?.dagNodeRunStates || new Map();
+        const upstreamStates = [];
+        upstreamNodes.forEach(up => {
+            const state = runStates.get(up.id);
+            if (state && state.output !== undefined) {
+                upstreamStates.push([up.id, { output: state.output, status: state.status || 'completed' }]);
+            }
+        });
+        const upstreamContext = {
+            goal: window.Pivot?.legacy?.collectAgentDagInputs?.()?.goal || '',
+            nodes: ctx.spec?.nodes || [],
+            states: upstreamStates
+        };
+
         try {
             const response = await apiFetch(`${API_BASE}/agents/tools/test`, {
                 method: 'POST',
@@ -26,13 +42,18 @@ function createDagInspectorController(ctx) {
                 body: JSON.stringify({
                     tool: node.tool,
                     input: node.input || {},
-                    dagInputs: window.Pivot.legacy.collectAgentDagInputs?.() || {}
+                    dagInputs: window.Pivot.legacy.collectAgentDagInputs?.() || {},
+                    upstreamContext
                 })
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '节点测试失败');
             result.className = 'pivot-dag-test-result is-success';
-            result.textContent = `节点执行完成 · 耗时 ${data.durationMs || 0} 毫秒\n${JSON.stringify(data.output, null, 2)}`;
+            const snapshotNotice = upstreamStates.length ? ` · 已注入 ${upstreamStates.length} 个上游运行快照` : '';
+            const resolvedInfo = data.resolvedInput && JSON.stringify(data.resolvedInput) !== JSON.stringify(node.input || {})
+                ? `\n[解析后入参]:\n${JSON.stringify(data.resolvedInput, null, 2)}\n\n[输出结果]:\n`
+                : '\n';
+            result.textContent = `节点执行完成 · 耗时 ${data.durationMs || 0} 毫秒${snapshotNotice}${resolvedInfo}${JSON.stringify(data.output, null, 2)}`;
         } catch (error) {
             result.className = 'pivot-dag-test-result is-error';
             result.textContent = error.message || '节点测试失败';
@@ -141,16 +162,10 @@ function createDagInspectorController(ctx) {
             modal.className = 'modal-overlay hidden pivot-dag-json-input-overlay';
             document.body.appendChild(modal);
         }
-        const variableTokens = [
-            { label: '任务目标', token: '{{goal}}' },
-            { label: '运行输入', token: '{{inputs}}' },
-            ...(node.dependsOn || []).flatMap(dep => ([
-                { label: `${dep} 输出`, token: `{{nodes.${dep}.output}}` },
-                { label: `${dep} 结构化结果`, token: `{{nodes.${dep}.output.structuredContent}}` },
-                { label: `${dep} 数据行`, token: `{{nodes.${dep}.output.rows}}` },
-                { label: `${dep} 状态`, token: `{{nodes.${dep}.status}}` }
-            ]))
-        ];
+        const getVarOptions = window.Pivot?.legacy?.getAvailableVariableOptions;
+        const variableGroups = typeof getVarOptions === 'function'
+            ? getVarOptions(ctx.spec?.nodes || [], node.id, currentTools())
+            : [];
         PivotSafeHtml.setHtml(modal, `
             <div class="modal rag-detail-modal pivot-dag-json-input-editor">
                 <div class="rag-detail-header pivot-dag-input-head">
@@ -171,9 +186,20 @@ function createDagInspectorController(ctx) {
                             ${renderToolSchemaHint(tool)}
                         </div>
                         <div class="pivot-dag-json-side-section">
-                            <strong>插入变量</strong>
-                            <div class="pivot-dag-token-list">
-                                ${variableTokens.map(item => `<button type="button" class="pivot-dag-token-btn" data-pivot-dag-json-token="${dagEscapeAttr(item.token)}" title="${dagEscapeAttr(item.token)}">${dagEscapeHtml(item.label)}</button>`).join('')}
+                            <strong>插入上游变量与全局输入</strong>
+                            <div class="pivot-dag-token-groups">
+                                ${variableGroups.map(grp => `
+                                    <div class="pivot-dag-token-group">
+                                        <span class="pivot-dag-token-group-title">${dagEscapeHtml(grp.group)}</span>
+                                        <div class="pivot-dag-token-list">
+                                            ${grp.items.map(item => `
+                                                <button type="button" class="pivot-dag-token-btn" data-pivot-dag-json-token="${dagEscapeAttr(item.expression)}" title="${dagEscapeAttr(item.description || item.expression)}">
+                                                    ${dagEscapeHtml(item.label)}
+                                                </button>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                `).join('')}
                             </div>
                         </div>
                     </aside>
@@ -766,6 +792,7 @@ function createDagInspectorController(ctx) {
                 <div class="pivot-dag-input-overview-actions">
                     <button type="button" class="btn-primary" data-pivot-dag-open-wizard="1">配置参数</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑高级参数</button>
+                    <button type="button" class="btn-secondary" data-pivot-dag-pick-var="1" title="查看并复制上游变量">+{x} 插入变量</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
                 </div>
@@ -840,6 +867,18 @@ function createDagInspectorController(ctx) {
             checkbox.addEventListener('change', (e) => handleDependsToggle(e.target));
         });
         inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
+        inspector.querySelector('[data-pivot-dag-pick-var]')?.addEventListener('click', (e) => {
+            const picker = window.Pivot?.moduleApi?.('agent.dagVariablePicker')?.showVariablePickerPopover
+                || window.Pivot?.legacy?.showVariablePickerPopover;
+            if (typeof picker === 'function') {
+                picker({
+                    anchorEl: e.currentTarget,
+                    nodeId: node.id,
+                    nodes: ctx.spec?.nodes || [],
+                    tools: currentTools()
+                });
+            }
+        });
         inspector.querySelector('[data-pivot-dag-test-node]')?.addEventListener('click', () => testNode(node));
         if (focusSnapshot?.field) {
             const next = inspector.querySelector(`[data-pivot-dag-field="${cssEscape(focusSnapshot.field)}"]`);

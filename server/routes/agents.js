@@ -211,6 +211,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
 
     router.post('/agents/tools/test', authMiddleware, asyncHandler(async (req, res) => {
         const { PolicyError } = require('../services/agent-policy');
+        const { resolveDagNodeInput } = require('../services/agent-dag-utils');
         const toolName = String(req.body?.tool || '').trim();
         const input = req.body?.input && typeof req.body.input === 'object' && !Array.isArray(req.body.input) ? req.body.input : {};
         const tools = await formatToolList(req.user);
@@ -219,10 +220,34 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         if (['workflow.approval', 'workflow.delay', 'workflow.subworkflow'].includes(toolName)) {
             return res.status(400).json({ error: '人工审批、延时和子工作流节点需要在完整工作流中测试。' });
         }
+
+        let resolvedInput = input;
+        const rawContext = req.body?.upstreamContext;
+        if (rawContext && typeof rawContext === 'object') {
+            const states = new Map(
+                Array.isArray(rawContext.states)
+                    ? rawContext.states
+                    : (rawContext.states && typeof rawContext.states === 'object' ? Object.entries(rawContext.states) : [])
+            );
+            const nodeMap = new Map(
+                Array.isArray(rawContext.nodes)
+                    ? rawContext.nodes.map(n => [n.id, n])
+                    : (rawContext.nodes && typeof rawContext.nodes === 'object' ? Object.entries(rawContext.nodes) : [])
+            );
+            const dagInputs = req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : (rawContext.inputs || {});
+            const context = {
+                goal: String(rawContext.goal || req.body?.dagInputs?.goal || '').trim(),
+                inputs: dagInputs,
+                states,
+                nodeMap
+            };
+            resolvedInput = resolveDagNodeInput({ tool: toolName, input }, context);
+        }
+
         const startedAt = Date.now();
         let output;
         try {
-            output = await executeToolByName(toolName, input, req.user, tools, {
+            output = await executeToolByName(toolName, resolvedInput, req.user, tools, {
                 dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {}
             });
         } catch (error) {
@@ -235,7 +260,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             throw error;
         }
         logAction(req, '测试智能体工具节点', `工具: ${toolName}`);
-        res.json({ success: true, output, durationMs: Date.now() - startedAt });
+        res.json({ success: true, output, resolvedInput, durationMs: Date.now() - startedAt });
     }));
 
 

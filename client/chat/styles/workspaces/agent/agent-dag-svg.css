@@ -268,6 +268,57 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
 }
 
 .pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+
+/* 深色模式 */
+body.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body    { fill: #1c0f00; stroke: rgba(251, 146, 60, 0.6); }
+body.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body    { fill: #0c1a36; stroke: rgba(96, 165, 250, 0.6); }
+body.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body   { fill: #052e16; stroke: rgba(74, 222, 128, 0.6); }
+body.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body{ fill: #1e1030; stroke: rgba(167, 139, 250, 0.6); }
+body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body     { fill: #082030; stroke: rgba(56, 189, 248, 0.6); }
+
+/* ── 节点图标 ───────────────────────────────── */
+.pivot-dag-node-icon-foreign { pointer-events: none; overflow: visible; }
+.pivot-dag-node-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+    background: rgba(0,0,0,0.04);
+}
+
+.pivot-dag-node-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* ── 运行状态徽章 ──────────────────────────── */
+.pivot-dag-run-badge-foreign { pointer-events: none; overflow: visible; }
+.pivot-dag-run-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
 .pivot-dag-run-badge.is-completed{ background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
 .pivot-dag-run-badge.is-error    { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
 .pivot-dag-run-badge.is-continued_error { background: #ffedd5; color: #c2410c; border: 1.5px solid #fdba74; }
@@ -306,3 +357,53 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
 .pivot-dag-node.run-error .pivot-dag-node-body    { stroke: #ef4444; stroke-width: 2; }
 .pivot-dag-node.run-continued_error .pivot-dag-node-body { stroke: #f97316; stroke-width: 2; }
 .pivot-dag-node.run-skipped .pivot-dag-node-body  { opacity: 0.55; }
+
+/* ── 缓存命中徽章与节点高光 ──────────────────── */
+.pivot-dag-run-badge.is-cached {
+    background: linear-gradient(135deg, #059669, #0891b2);
+    color: #ffffff;
+    border: 1.5px solid #34d399;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+    font-size: 10px;
+}
+.pivot-dag-node.run-cached .pivot-dag-node-body {
+    stroke: #10b981;
+    stroke-width: 2;
+    stroke-dasharray: 6 2;
+}
+
+/* ── 连线流光粒子动效（执行态数据流通道） ───── */
+.pivot-dag-edge-group.is-streaming .pivot-dag-edge {
+    stroke: #0284c7;
+    stroke-width: 2.4;
+    filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.7));
+}
+
+.pivot-dag-edge-stream {
+    fill: none;
+    stroke: #38bdf8;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-dasharray: 8 14;
+    animation: pivotDagStreamFlow 0.8s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes pivotDagStreamFlow {
+    from { stroke-dashoffset: 44; }
+    to { stroke-dashoffset: 0; }
+}
+
+.pivot-dag-edge-group.is-stream-completed .pivot-dag-edge {
+    stroke: #10b981;
+    stroke-width: 1.8;
+}
+
+.pivot-dag-edge-group.is-stream-error .pivot-dag-edge {
+    stroke: #ef4444;
+}
+
+.pivot-dag-edge-group.is-stream-skipped .pivot-dag-edge {
+    stroke-dasharray: 4 4;
+    opacity: 0.5;
+}

@@ -350,7 +350,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             makeControl('−', '缩小画布', () => zoomAt(null, 0.85));
             makeControl('+', '放大画布', () => zoomAt(null, 1.18));
             makeControl('适配', '适配全部节点到当前画布', fitToContent, 'is-fit');
-            makeControl('初始', '默认缩放并将现有节点居中', resetView, 'is-reset');
+            makeControl('重置', '恢复默认缩放并将现有节点居中', resetView, 'is-reset');
             canvas.appendChild(controls);
             return controls;
         })();
@@ -545,6 +545,24 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             flushOut();
         };
         const duplicateSelection = () => { copySelection(); if (clipboardNodes.length) pasteSelection(); };
+
+        const alignSelection = (alignment = 'horizontal_center') => {
+            const ids = selectedIds.length ? selectedIds : (selectedId ? [selectedId] : []);
+            if (ids.length < 2) {
+                window.Pivot?.legacy?.showToast?.('请至少选择 2 个节点进行对齐', 'warning');
+                return;
+            }
+            const alignFn = window.Pivot?.moduleApi?.('agent.dagCore')?.alignNodes
+                || window.Pivot?.legacy?.alignNodes;
+            if (typeof alignFn !== 'function') return;
+            recordHistory();
+            const result = alignFn(spec.nodes, ids, alignment);
+            if (result.changed) {
+                render();
+                flushOut();
+                window.Pivot?.legacy?.showToast?.(`已对齐 ${result.modifiedCount} 个节点`, 'success');
+            }
+        };
 
         const addNode = () => {
             const wasEmpty = spec.nodes.length === 0;
@@ -820,6 +838,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         toolbarStatus = renderDagToolbar({
             toolbar,
             readOnly,
+            spec,
+            render,
+            flushOut,
+            recordHistory,
+            selectNode,
+            ensureDefaults,
             addNode,
             addPresetNode,
             addAgentTeamTemplate,
@@ -829,6 +853,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             copySelection,
             pasteSelection,
             duplicateSelection,
+            alignSelection,
             fitToContent,
             resetView,
             openStatsChartWizard,

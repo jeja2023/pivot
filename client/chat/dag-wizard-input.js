@@ -117,9 +117,18 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
             }).join('');
         };
 
-        const buildWizardDependencyNodes = (node, specNodes = []) => (node?.dependsOn || [])
-            .map(depId => specNodes.find(n => n.id === depId))
-            .filter(Boolean);
+        const buildWizardDependencyNodes = (node, specNodes = []) => {
+            const getUpstream = typeof window !== 'undefined'
+                ? (window.Pivot?.moduleApi?.('agent.dagCore')?.getUpstreamNodes || window.Pivot?.legacy?.getUpstreamNodes)
+                : null;
+            if (typeof getUpstream === 'function' && Array.isArray(specNodes) && specNodes.length > 0) {
+                const upstream = getUpstream(specNodes, node?.id);
+                if (upstream.length > 0) return upstream;
+            }
+            return (node?.dependsOn || [])
+                .map(depId => specNodes.find(n => n.id === depId))
+                .filter(Boolean);
+        };
 
         const buildSchemaReferenceTokens = (node, max = 24) => {
             const schema = node?.outputSchema && typeof node.outputSchema === 'object' && !Array.isArray(node.outputSchema)

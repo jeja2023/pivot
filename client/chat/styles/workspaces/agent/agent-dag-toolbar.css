@@ -479,3 +479,211 @@ body.dark-mode .pivot-dag-toolbar-menu .pivot-dag-toolbar-btn:focus-visible,
         grid-template-columns: 1fr;
     }
 }
+
+/* ── 甘特耗时瀑布图弹层 ──────────────────────────── */
+.pivot-dag-waterfall-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
+    padding: 24px;
+}
+
+.pivot-dag-waterfall-card {
+    display: flex;
+    flex-direction: column;
+    width: min(860px, 94vw);
+    max-height: 85vh;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.22);
+    overflow: hidden;
+}
+
+body.dark-mode .pivot-dag-waterfall-card {
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.8);
+    color: #f1f5f9;
+}
+
+.pivot-dag-waterfall-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    background: rgba(248, 250, 252, 0.7);
+}
+
+body.dark-mode .pivot-dag-waterfall-header {
+    background: rgba(30, 41, 59, 0.5);
+    border-bottom-color: rgba(51, 65, 85, 0.8);
+}
+
+.pivot-dag-waterfall-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.pivot-dag-waterfall-close {
+    background: transparent;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    color: #64748b;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.pivot-dag-waterfall-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #0f172a;
+}
+
+.pivot-dag-waterfall-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+    background: rgba(241, 245, 249, 0.4);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.summary-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 14px;
+    font-size: 0.76rem;
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid rgba(203, 213, 225, 0.6);
+}
+body.dark-mode .summary-chip {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: #334155;
+}
+.summary-chip.is-success { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
+.summary-chip.is-cyan { background: #ecfeff; color: #0891b2; border-color: #a5f3fc; }
+.summary-chip.is-warning { background: #fffbeb; color: #d97706; border-color: #fde68a; }
+.summary-chip.is-danger { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+
+.pivot-dag-waterfall-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 20px;
+    overflow-y: auto;
+    max-height: 60vh;
+}
+
+.pivot-waterfall-row {
+    display: grid;
+    grid-template-columns: 240px 1fr 80px;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+body.dark-mode .pivot-waterfall-row {
+    background: #1e293b;
+    border-color: #334155;
+}
+.pivot-waterfall-row:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    transform: translateX(2px);
+}
+body.dark-mode .pivot-waterfall-row:hover {
+    background: #334155;
+}
+
+.pivot-waterfall-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.pivot-waterfall-node-name {
+    font-weight: 700;
+    font-size: 0.82rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pivot-waterfall-tool-tag {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 4px;
+    color: #64748b;
+}
+
+.waterfall-badge {
+    font-size: 0.68rem;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 800;
+}
+.waterfall-badge.is-completed { background: #dcfce7; color: #166534; }
+.waterfall-badge.is-cached { background: linear-gradient(135deg, #059669, #0891b2); color: #fff; }
+.waterfall-badge.is-running { background: #dbeafe; color: #1e40af; }
+.waterfall-badge.is-error { background: #fee2e2; color: #991b1b; }
+.waterfall-badge.is-pending { background: #f1f5f9; color: #64748b; }
+
+.pivot-waterfall-track {
+    position: relative;
+    width: 100%;
+    height: 12px;
+    background: rgba(226, 232, 240, 0.5);
+    border-radius: 6px;
+    overflow: hidden;
+}
+body.dark-mode .pivot-waterfall-track {
+    background: rgba(51, 65, 85, 0.6);
+}
+
+.pivot-waterfall-bar {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+.pivot-waterfall-bar.is-bar-normal { background: linear-gradient(90deg, #38bdf8, #3b82f6); }
+.pivot-waterfall-bar.is-bar-cached { background: linear-gradient(90deg, #10b981, #06b6d4); }
+.pivot-waterfall-bar.is-bar-slow { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+.pivot-waterfall-bar.is-bar-error { background: #ef4444; }
+
+.pivot-waterfall-duration {
+    text-align: right;
+    font-size: 0.78rem;
+    font-family: monospace;
+    font-weight: 700;
+    color: #475569;
+}
+body.dark-mode .pivot-waterfall-duration {
+    color: #94a3b8;
+}
+.pivot-waterfall-duration.is-slow-text {
+    color: #dc2626;
+}
+
+.pivot-waterfall-empty {
+    padding: 32px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 0.88rem;
+}
+

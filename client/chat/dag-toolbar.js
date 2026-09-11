@@ -150,13 +150,82 @@ function renderDagToolbar(ctx) {
                 makeButton('多智能体审阅', '添加并行研究员、审阅员与主管智能体裁决节点', ctx.addAgentTeamTemplate),
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
             ], 'is-template-group'));
+            const showTimelineWaterfall = () => {
+                const api = window.Pivot?.moduleApi?.('agent.dagTimeline');
+                api?.showTimelineWaterfallModal?.({
+                    nodes: ctx.spec?.nodes || [],
+                    runStates: window.Pivot?.legacy?.dagNodeRunStates || new Map(),
+                    onFocusNode: id => ctx.selectNode?.(id, false)
+                });
+            };
+
+            const lintWorkflow = () => {
+                const gov = window.Pivot?.moduleApi?.('agent.dagGovernance');
+                const report = gov?.lintDagGraph?.(ctx.spec?.nodes || []);
+                if (!report) return;
+                if (!report.valid) {
+                    const first = report.errors[0];
+                    if (first?.nodeId) ctx.selectNode?.(first.nodeId, false);
+                    window.Pivot?.legacy?.showToast?.(`体检未通过：${first.message}`, 'error');
+                } else if (report.warnings?.length) {
+                    window.Pivot?.legacy?.showToast?.(`体检通过（建议：${report.warnings[0].message}）`, 'warning');
+                } else {
+                    window.Pivot?.legacy?.showToast?.('工作流静态体检满分通过，无死锁与孤立节点', 'success');
+                }
+            };
+
+            const exportWorkflowSpec = () => {
+                const gov = window.Pivot?.moduleApi?.('agent.dagGovernance');
+                const data = gov?.exportDagWorkflowSpec?.(ctx.spec);
+                if (!data) return;
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `workflow-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                window.Pivot?.legacy?.showToast?.('工作流规范已导出', 'success');
+            };
+
+            const importWorkflowSpec = () => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = '.json,application/json';
+                inp.onchange = async e => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const text = await f.text();
+                    const res = window.Pivot?.moduleApi?.('agent.dagGovernance')?.importDagWorkflowSpec?.(text);
+                    if (!res?.ok) {
+                        window.Pivot?.legacy?.showToast?.(res?.error || '导入失败', 'error');
+                        return;
+                    }
+                    ctx.recordHistory?.();
+                    if (ctx.spec && ctx.ensureDefaults) {
+                        const parsed = ctx.ensureDefaults(res.spec);
+                        ctx.spec.nodes = parsed.nodes;
+                        ctx.spec.cacheEnabled = parsed.cacheEnabled;
+                    }
+                    ctx.render?.();
+                    ctx.flushOut?.();
+                    window.Pivot?.legacy?.showToast?.(`已导入 ${res.spec.nodes.length} 个节点`, 'success');
+                };
+                inp.click();
+            };
+
             ctx.toolbar.appendChild(makeToolbarDropdown('操作', [
                 makeButton('撤销', '撤销上一步画布修改', ctx.undo, { icon: '↶' }),
                 makeButton('重做', '恢复刚撤销的画布修改', ctx.redo, { icon: '↷' }),
-                makeButton('复制节点', '复制当前选中的节点', ctx.copySelection),
-                makeButton('粘贴节点', '粘贴已复制的节点', ctx.pasteSelection),
-                makeButton('创建副本', '复制并立即粘贴当前节点', ctx.duplicateSelection),
-                makeButton('校验', '校验节点、依赖和工具可用性', ctx.showValidationResult),
+                makeButton('复制节点', '复制当前选中的节点 (Ctrl+C)', ctx.copySelection),
+                makeButton('粘贴节点', '粘贴已复制的节点 (Ctrl+V)', ctx.pasteSelection),
+                makeButton('创建副本', '复制并立即粘贴当前节点 (Ctrl+D)', ctx.duplicateSelection),
+                makeButton('水平居中对齐', '将选中的多个节点水平中心对齐', () => ctx.alignSelection?.('horizontal_center')),
+                makeButton('垂直居中对齐', '将选中的多个节点垂直中心对齐', () => ctx.alignSelection?.('vertical_center')),
+                makeButton('水平等间距分布', '将选中的多个节点水平间距等分排列', () => ctx.alignSelection?.('distribute_h')),
+                makeButton('垂直等间距分布', '将选中的多个节点垂直间距等分排列', () => ctx.alignSelection?.('distribute_v')),
+                makeButton('静态体检', '静态自检拓扑死锁、孤立节点与变量依赖', lintWorkflow, { icon: '✓' }),
+                makeButton('导出规范', '导出为标准 .workflow.json 资产文件', exportWorkflowSpec, { icon: '↓' }),
+                makeButton('导入规范', '从外部标准 JSON 文件载入工作流', importWorkflowSpec, { icon: '↑' }),
                 makeButton('自动布局', '按依赖层次重新排列，并自动适配全部节点', ctx.resetLayout),
                 makeButton('适配画布', '显示全部节点并居中', ctx.fitToContent),
                 makeButton('初始视图', '默认缩放并将现有节点居中', ctx.resetView),
@@ -172,7 +241,8 @@ function renderDagToolbar(ctx) {
             ], 'is-publish-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('运行', [
                 makeButton('预览运行', '使用当前画布快照运行一次', () => window.Pivot.legacy.runAgentWorkflowPreview?.(), { runSource: 'draft' }),
-                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.Pivot.legacy.runAgentWorkflowPublished?.(), { runSource: 'published' })
+                makeButton('运行发布版', '使用最近发布的稳定版本运行', () => window.Pivot.legacy.runAgentWorkflowPublished?.(), { runSource: 'published' }),
+                makeButton('耗时瀑布图', '查看各节点的执行耗时分析与甘特图', showTimelineWaterfall)
             ], 'is-run-group'));
             const toolbarStatus = document.createElement('div');
             toolbarStatus.className = 'pivot-dag-toolbar-status';

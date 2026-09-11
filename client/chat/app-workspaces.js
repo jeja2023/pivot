@@ -688,7 +688,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
         '/chat/dag-toolbar-tools.js', '/chat/dag-toolbar-db.js', '/chat/dag-toolbar.js', '/chat/dag-toolbar-field-overrides.js',
         '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
-        '/chat/dag-wizard-fields.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-inspector.js',
+        '/chat/dag-wizard-fields.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-inspector.js',
         '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
         '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
         '/chat/agent-run-loaders.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-harness.js',

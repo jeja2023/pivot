@@ -36,10 +36,10 @@ function clampDagCoordinate(value, fallback = 0) {
         return Math.max(DAG_COORDINATE_MIN, Math.min(DAG_COORDINATE_MAX, coordinate));
     }
 
-const dagEscapeHtml = (window.Pivot.legacy.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeHtml)
+const dagEscapeHtml = (typeof window !== 'undefined' && window.Pivot?.legacy?.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeHtml)
         || ((value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
 
-const dagEscapeAttr = (window.Pivot.legacy.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeAttr)
+const dagEscapeAttr = (typeof window !== 'undefined' && window.Pivot?.legacy?.PivotSafeHtml && window.Pivot.legacy.PivotSafeHtml.escapeAttr)
         || ((value) => dagEscapeHtml(value).replace(/"/g, '&quot;'));
 
 function uniqueId(existing, base = 'node') {
@@ -194,13 +194,13 @@ function readJson(text) {
     }
 
 function workflowModelOptions() {
-        const canSelectModel = typeof window.Pivot.legacy.isSelectableModelForCurrentUser === 'function'
+        const canSelectModel = (typeof window !== 'undefined' && typeof window.Pivot?.legacy?.isSelectableModelForCurrentUser === 'function')
             ? window.Pivot.legacy.isSelectableModelForCurrentUser
-            : (model => !model?.user_id || String(model.user_id) === String(currentUser?.id));
-        const candidates = [
+            : (model => !model?.user_id || (typeof currentUser !== 'undefined' && String(model.user_id) === String(currentUser?.id)));
+        const candidates = (typeof window !== 'undefined' && window.Pivot?.legacy) ? [
             ...(Array.isArray(window.Pivot.legacy._cachedAgentModels) ? window.Pivot.legacy._cachedAgentModels : []),
             ...(Array.isArray(window.Pivot.legacy._cachedModels) ? window.Pivot.legacy._cachedModels : [])
-        ];
+        ] : [];
         const seen = new Set();
         return candidates.filter(model => {
             const id = String(model?.id || '').trim();
@@ -212,11 +212,11 @@ function workflowModelOptions() {
 
 function defaultWorkflowModelId() {
         const models = workflowModelOptions();
-        const selectedId = String(
+        const selectedId = typeof document !== 'undefined' ? String(
             document.getElementById('model-selector')?.value
             || document.getElementById('agent-model-select')?.value
             || ''
-        ).trim();
+        ).trim() : '';
         if (selectedId && models.some(model => String(model.id) === selectedId)) return selectedId;
         return String(models[0]?.id || '').trim();
     }
@@ -315,3 +315,199 @@ function isDatabaseConnectionField(name = '', tool = null) {
         if (!tool?.databaseTool) return false;
         return ['connection_id', 'database_connection_id', 'mcp_server_id'].includes(normalizeFieldKey(name));
     }
+
+function getUpstreamNodes(nodes = [], targetNodeId = '') {
+    if (!targetNodeId || !Array.isArray(nodes)) return [];
+    const nodeMap = new Map(nodes.map(n => [String(n?.id || ''), n]));
+    const target = nodeMap.get(String(targetNodeId));
+    if (!target) return [];
+    const visited = new Set();
+    const result = [];
+    const queue = [...(Array.isArray(target.dependsOn) ? target.dependsOn : [])];
+
+    while (queue.length > 0) {
+        const currentId = String(queue.shift() || '').trim();
+        if (!currentId || visited.has(currentId) || currentId === String(targetNodeId)) continue;
+        visited.add(currentId);
+        const node = nodeMap.get(currentId);
+        if (node) {
+            result.push(node);
+            (Array.isArray(node.dependsOn) ? node.dependsOn : []).forEach(depId => {
+                if (!visited.has(String(depId))) queue.push(String(depId));
+            });
+        }
+    }
+    // 保持在原节点列表中的先后拓扑顺序
+    return nodes.filter(n => visited.has(String(n.id)));
+}
+
+function getAvailableVariableOptions(nodes = [], targetNodeId = '', tools = []) {
+    const upstream = getUpstreamNodes(nodes, targetNodeId);
+    const groups = [
+        {
+            group: '全局变量',
+            items: [
+                { expression: '{{goal}}', label: '工作流目标 (goal)', description: '当前任务的目标或用户提示词' },
+                { expression: '{{inputs}}', label: '全部全局输入 (inputs)', description: '包含运行时传入的所有命名参数对象' }
+            ]
+        }
+    ];
+
+    if (upstream.length > 0) {
+        upstream.forEach(upNode => {
+            const nodeId = upNode.id;
+            const nodeTitle = upNode.title || nodeId;
+            const items = [
+                { expression: `{{nodes.${nodeId}.output}}`, label: `${nodeTitle} · 完整输出`, description: '该节点的全部输出结果（对象或文本）' },
+                { expression: `{{nodes.${nodeId}.status}}`, label: `${nodeTitle} · 运行状态`, description: 'completed / error / skipped' }
+            ];
+
+            const schema = upNode.outputSchema && typeof upNode.outputSchema === 'object' ? upNode.outputSchema : {};
+            const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : null;
+            if (props && Object.keys(props).length > 0) {
+                Object.entries(props).forEach(([propKey, propMeta]) => {
+                    items.push({
+                        expression: `{{nodes.${nodeId}.output.${propKey}}}`,
+                        label: `${nodeTitle} · ${propMeta.title || propMeta.description || propKey}`,
+                        description: `类型: ${propMeta.type || 'any'}`
+                    });
+                });
+            } else {
+                // 常见工具推断输出字段
+                const tool = String(upNode.tool || '');
+                if (tool === 'agent.llm') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.text}}`, label: `${nodeTitle} · 文本结果 (text)`, description: '大模型回答的纯文本' });
+                } else if (tool.startsWith('db.')) {
+                    items.push({ expression: `{{nodes.${nodeId}.output.rows}}`, label: `${nodeTitle} · 数据行 (rows)`, description: '查询返回的数组列表' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.count}}`, label: `${nodeTitle} · 记录数 (count)`, description: '返回数据行数' });
+                } else if (tool.startsWith('rag.')) {
+                    items.push({ expression: `{{nodes.${nodeId}.output.documents}}`, label: `${nodeTitle} · 检索切片 (documents)`, description: '命中的知识库文档段落' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.text}}`, label: `${nodeTitle} · 检索摘要 (text)`, description: '知识切片合并摘要' });
+                } else if (tool.startsWith('official_writing.')) {
+                    items.push({ expression: `{{nodes.${nodeId}.output.content}}`, label: `${nodeTitle} · 公文正文 (content)`, description: '公文生成的正文文本' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.title}}`, label: `${nodeTitle} · 公文标题 (title)`, description: '公文拟定标题' });
+                }
+            }
+
+            groups.push({
+                group: `上游节点：${nodeTitle}`,
+                nodeId,
+                items
+            });
+        });
+    }
+
+    return groups;
+}
+
+function alignNodes(nodes = [], selectedIds = [], alignment = 'horizontal_center') {
+    if (!Array.isArray(nodes) || !Array.isArray(selectedIds) || selectedIds.length < 2) {
+        return { changed: false, modifiedCount: 0 };
+    }
+    const idSet = new Set(selectedIds.map(String));
+    const targets = nodes.filter(n => idSet.has(String(n.id)) && Number.isFinite(n._x) && Number.isFinite(n._y));
+    if (targets.length < 2) return { changed: false, modifiedCount: 0 };
+
+    switch (alignment) {
+        case 'left': {
+            const minX = Math.min(...targets.map(n => n._x));
+            targets.forEach(n => { n._x = clampDagCoordinate(minX); });
+            break;
+        }
+        case 'right': {
+            const maxX = Math.max(...targets.map(n => n._x));
+            targets.forEach(n => { n._x = clampDagCoordinate(maxX); });
+            break;
+        }
+        case 'top': {
+            const minY = Math.min(...targets.map(n => n._y));
+            targets.forEach(n => { n._y = clampDagCoordinate(minY); });
+            break;
+        }
+        case 'bottom': {
+            const maxY = Math.max(...targets.map(n => n._y));
+            targets.forEach(n => { n._y = clampDagCoordinate(maxY); });
+            break;
+        }
+        case 'horizontal_center': {
+            const avgX = Math.round(targets.reduce((sum, n) => sum + n._x, 0) / targets.length);
+            targets.forEach(n => { n._x = clampDagCoordinate(avgX); });
+            break;
+        }
+        case 'vertical_center': {
+            const avgY = Math.round(targets.reduce((sum, n) => sum + n._y, 0) / targets.length);
+            targets.forEach(n => { n._y = clampDagCoordinate(avgY); });
+            break;
+        }
+        case 'distribute_h': {
+            targets.sort((a, b) => a._x - b._x);
+            const firstX = targets[0]._x;
+            const lastX = targets[targets.length - 1]._x;
+            if (Math.abs(lastX - firstX) < 1) {
+                targets.forEach((n, idx) => {
+                    n._x = clampDagCoordinate(firstX + idx * (NODE_WIDTH + NODE_GAP_X));
+                });
+            } else {
+                const step = (lastX - firstX) / (targets.length - 1);
+                targets.forEach((n, idx) => {
+                    n._x = clampDagCoordinate(Math.round(firstX + idx * step));
+                });
+            }
+            break;
+        }
+        case 'distribute_v': {
+            targets.sort((a, b) => a._y - b._y);
+            const firstY = targets[0]._y;
+            const lastY = targets[targets.length - 1]._y;
+            if (Math.abs(lastY - firstY) < 1) {
+                targets.forEach((n, idx) => {
+                    n._y = clampDagCoordinate(firstY + idx * (NODE_HEIGHT + NODE_GAP_Y));
+                });
+            } else {
+                const step = (lastY - firstY) / (targets.length - 1);
+                targets.forEach((n, idx) => {
+                    n._y = clampDagCoordinate(Math.round(firstY + idx * step));
+                });
+            }
+            break;
+        }
+        default:
+            return { changed: false, modifiedCount: 0 };
+    }
+
+    return { changed: true, modifiedCount: targets.length };
+}
+
+if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
+    window.Pivot.registerModule('agent.dagCore', {
+        getUpstreamNodes,
+        getAvailableVariableOptions,
+        alignNodes
+    });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        SVG_NS,
+        NODE_WIDTH,
+        NODE_HEIGHT,
+        NODE_GAP_X,
+        NODE_GAP_Y,
+        PADDING,
+        DEFAULT_VIEW_SCALE,
+        SCALE_MIN,
+        SCALE_MAX,
+        clampDagCoordinate,
+        uniqueId,
+        clampDependsOn,
+        autoLayout,
+        findAvailableNodePosition,
+        placeNewNode,
+        ensureDefaults,
+        serialize,
+        readJson,
+        getUpstreamNodes,
+        getAvailableVariableOptions,
+        alignNodes
+    };
+}
