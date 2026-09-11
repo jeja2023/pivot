@@ -88,15 +88,31 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
         SET title = EXCLUDED.title,
             manual_title = EXCLUDED.manual_title,
             state = EXCLUDED.state,
-            version = official_writing_documents.version + 1,
-            updated_at = NOW()
+            version = CASE
+                WHEN official_writing_documents.title = EXCLUDED.title
+                 AND official_writing_documents.manual_title = EXCLUDED.manual_title
+                 AND official_writing_documents.state = EXCLUDED.state
+                THEN official_writing_documents.version
+                ELSE official_writing_documents.version + 1
+            END,
+            updated_at = CASE
+                WHEN official_writing_documents.title = EXCLUDED.title
+                 AND official_writing_documents.manual_title = EXCLUDED.manual_title
+                 AND official_writing_documents.state = EXCLUDED.state
+                THEN official_writing_documents.updated_at
+                ELSE NOW()
+            END
         WHERE official_writing_documents.deleted_at IS NULL
         RETURNING client_id, title, manual_title, state, version, created_at, updated_at
     `, [user.id, clientId, title, manualTitle, state]);
     if (!row) {
         throw documentError('公文不存在或已删除。', 404, 'OFFICIAL_WRITING_DOCUMENT_NOT_FOUND');
     }
-    return toPublicDocument(row);
+    const publicDoc = toPublicDocument(row);
+    const clientVersion = Number(body.version || 0);
+    // 当客户端显式传入了当前版本号且更新后版本未自增时，判定为内容无变动
+    publicDoc.isModified = clientVersion > 0 ? Number(row.version) !== clientVersion : true;
+    return publicDoc;
 }
 
 async function deleteOfficialWritingDocument(user, clientIdInput) {

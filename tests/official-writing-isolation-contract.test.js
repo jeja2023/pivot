@@ -99,3 +99,50 @@ test('公文写作文档服务不会接受或查询其他用户的文档归属',
     assert.deepEqual(calls[2].params, [17, 'doc-one']);
     assert.ok(calls.every(call => !call.params.includes(18)));
 });
+
+test('公文写作草稿保存具备幂等性且内容未修改时不刷重复审计日志', async () => {
+    const migrations = require('../server/db/migrations/official-writing-documents');
+    const db = new Sqlite(':memory:');
+    try {
+        db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+        db.exec('INSERT INTO users (id) VALUES (1);');
+        migrations[0].up(db);
+
+        const fakeClient = {
+            queryOne: async (sql, params) => {
+                const sqliteSql = sql.replace(/NOW\(\)/g, "datetime('now')");
+                const stmt = db.prepare(sqliteSql);
+                return stmt.get(...params);
+            }
+        };
+
+        await withOfficialWritingDbClient(fakeClient, async service => {
+            const user = { id: 1 };
+            const first = await service.saveOfficialWritingDocument(user, 'doc-idem', {
+                title: '初次标题',
+                state: { draft: '内容一' }
+            });
+            assert.equal(first.version, 1);
+            assert.equal(first.isModified, true);
+
+            const second = await service.saveOfficialWritingDocument(user, 'doc-idem', {
+                title: '初次标题',
+                version: first.version,
+                state: { draft: '内容一' }
+            });
+            assert.equal(second.version, 1);
+            assert.equal(second.isModified, false);
+
+            const third = await service.saveOfficialWritingDocument(user, 'doc-idem', {
+                title: '修改标题',
+                version: second.version,
+                state: { draft: '内容一' }
+            });
+            assert.equal(third.version, 2);
+            assert.equal(third.isModified, true);
+        });
+    } finally {
+        db.close();
+    }
+});
+

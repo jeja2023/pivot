@@ -344,13 +344,17 @@ function bindAppsWorkbenchEvents() {
         sendOfficialWritingToChat();
         closeOfficialWritingCommandMenu();
     });
+    const handleOfficialWritingParamChange = () => {
+        syncOfficialWritingStateFromInputs();
+        renderOfficialWritingWorkspace();
+    };
     document.getElementById('official-writing-material-source')?.addEventListener('change', event => {
         setOfficialWritingMaterialSource(event.target.value);
-        renderOfficialWritingWorkspace();
+        handleOfficialWritingParamChange();
     });
-    document.getElementById('official-writing-standard')?.addEventListener('change', renderOfficialWritingWorkspace);
-    document.getElementById('official-writing-type')?.addEventListener('change', renderOfficialWritingWorkspace);
-    document.getElementById('official-writing-requirements')?.addEventListener('input', renderOfficialWritingWorkspace);
+    document.getElementById('official-writing-standard')?.addEventListener('change', handleOfficialWritingParamChange);
+    document.getElementById('official-writing-type')?.addEventListener('change', handleOfficialWritingParamChange);
+    document.getElementById('official-writing-requirements')?.addEventListener('input', handleOfficialWritingParamChange);
     document.getElementById('official-writing-new-doc-btn')?.addEventListener('click', openOfficialWritingCreateDialog);
     document.getElementById('official-writing-create-doc-btn')?.addEventListener('click', openOfficialWritingCreateDialog);
     document.getElementById('official-writing-create-form')?.addEventListener('submit', submitOfficialWritingCreateDialog);

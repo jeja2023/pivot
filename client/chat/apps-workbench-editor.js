@@ -285,8 +285,7 @@ function switchOfficialWritingDoc(docId, options = {}) {
     const target = officialWritingLibrary.docs.find(doc => doc.id === docId);
     if (!target) return;
     // 切换前先把当前编辑器内容写回当前活动文档。
-    syncOfficialWritingStateFromInputs();
-    saveOfficialWritingState({ immediate: true });
+    syncOfficialWritingStateFromInputs({ immediate: true });
     officialWritingLibrary.activeId = docId;
     officialWritingState = target.state;
     officialWritingUndoStack.length = 0;
@@ -684,7 +683,7 @@ function updateOfficialWritingSurfaceVisibility() {
     });
 }
 
-function syncOfficialWritingStateFromInputs() {
+function syncOfficialWritingStateFromInputs(options = {}) {
     // 同步即包含整库持久化，使任何待执行的去抖任务变为冗余，清掉以免重复触发。
     if (officialWritingAnalysisDebounceTimer) {
         clearTimeout(officialWritingAnalysisDebounceTimer);
@@ -702,7 +701,7 @@ function syncOfficialWritingStateFromInputs() {
     if (!isOfficialWritingSurfaceActive('source')) renderOfficialWritingSurface('source');
     if (!isOfficialWritingSurfaceActive('draft')) renderOfficialWritingSurface('draft');
     recordOfficialWritingAutoSave();
-    saveOfficialWritingState();
+    saveOfficialWritingState(options);
 }
 
 function getTextCount(text) {
@@ -1389,7 +1388,6 @@ function renderOfficialWritingMaterials() {
 }
 
 function renderOfficialWritingWorkspace() {
-    syncOfficialWritingStateFromInputs();
     updateOfficialWritingSurfaceVisibility();
     resizeOfficialWritingDraftPage();
     renderOfficialWritingStats();

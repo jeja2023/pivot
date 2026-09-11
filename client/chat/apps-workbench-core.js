@@ -701,6 +701,25 @@ function getActiveOfficialWritingDoc() {
     return officialWritingLibrary.docs.find(doc => doc.id === officialWritingLibrary.activeId) || officialWritingLibrary.docs[0];
 }
 
+function computeOfficialWritingDocFingerprint(doc) {
+    if (!doc) return '';
+    return JSON.stringify({
+        title: String(doc.title || '未命名公文'),
+        manualTitle: doc.manualTitle === true,
+        state: sanitizeOfficialWritingState(doc.state)
+    });
+}
+
+function isOfficialWritingStateEmpty(state) {
+    if (!state) return true;
+    return !String(state.source || '').trim() &&
+        !String(state.draft || '').trim() &&
+        !String(state.requirements || '').trim() &&
+        (!Array.isArray(state.comments) || state.comments.length === 0) &&
+        (!Array.isArray(state.versions) || state.versions.length === 0) &&
+        (!Array.isArray(state.materials) || state.materials.length === 0);
+}
+
 async function loadOfficialWritingState() {
     const requestId = ++officialWritingLoadSequence;
     purgeLegacyOfficialWritingStorage();
@@ -712,7 +731,11 @@ async function loadOfficialWritingState() {
         officialWritingLibrary = {
             activeId: '',
             docs: (Array.isArray(data?.data) ? data.data : [])
-                .map(normalizeOfficialWritingServerDocument)
+                .map(item => {
+                    const normalized = normalizeOfficialWritingServerDocument(item);
+                    if (normalized) normalized._savedFingerprint = computeOfficialWritingDocFingerprint(normalized);
+                    return normalized;
+                })
                 .filter(Boolean)
         };
     } catch (_) {
@@ -723,7 +746,9 @@ async function loadOfficialWritingState() {
     ensureOfficialWritingActiveDocument();
     const activeDoc = getActiveOfficialWritingDoc();
     officialWritingState = activeDoc ? activeDoc.state : createOfficialWritingState();
-    if (!activeDoc?.version) scheduleOfficialWritingDocumentSave(activeDoc, { immediate: true });
+    if (activeDoc && !activeDoc._savedFingerprint) {
+        activeDoc._savedFingerprint = computeOfficialWritingDocFingerprint(activeDoc);
+    }
     return true;
 }
 
@@ -740,12 +765,17 @@ function officialWritingDocumentPayload(doc) {
     return {
         title: String(doc?.title || '未命名公文'),
         manualTitle: doc?.manualTitle === true,
+        version: Number(doc?.version || 0),
         state: sanitizeOfficialWritingState(doc?.state)
     };
 }
 
 async function persistOfficialWritingDocument(doc) {
     if (!doc?.id || typeof apiFetch !== 'function') return;
+    const currentFingerprint = computeOfficialWritingDocFingerprint(doc);
+    if (doc.version > 0 && doc._savedFingerprint === currentFingerprint) return;
+    if (!doc.version && isOfficialWritingStateEmpty(doc.state)) return;
+
     const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}/${encodeURIComponent(doc.id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -761,11 +791,16 @@ async function persistOfficialWritingDocument(doc) {
     if (current) {
         current.version = saved.version;
         current.updatedAt = saved.updatedAt;
+        current._savedFingerprint = computeOfficialWritingDocFingerprint(current);
     }
 }
 
 function scheduleOfficialWritingDocumentSave(doc, { immediate = false } = {}) {
     if (!doc?.id || officialWritingDeletedDocumentIds.has(doc.id)) return;
+    const currentFingerprint = computeOfficialWritingDocFingerprint(doc);
+    if (doc.version > 0 && doc._savedFingerprint === currentFingerprint) return;
+    if (!doc.version && isOfficialWritingStateEmpty(doc.state)) return;
+
     const previous = officialWritingSaveTimers.get(doc.id);
     if (previous) clearTimeout(previous);
     const save = async () => {

@@ -542,7 +542,9 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
     router.put('/apps/official-writing/documents/:clientId', authMiddleware, asyncHandler(async (req, res) => {
         const document = await saveOfficialWritingDocument(req.user, req.params.clientId, req.body || {});
-        logAction(req, '保存公文写作草稿', `公文标识: ${document.id}`);
+        if (document.isModified !== false) {
+            logAction(req, '保存公文写作草稿', `公文标识: ${document.id}`);
+        }
         res.json({ success: true, document });
     }));
 
