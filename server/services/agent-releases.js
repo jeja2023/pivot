@@ -658,7 +658,13 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
             throw invalid('该工作流是组织共享候选，必须先在候选治理流程中完成审批与验证。', 409, 'EVOLUTION_CANDIDATE_GATE_REQUIRED');
         }
     }
-    await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', { skipRelease: true, skipEvaluationGate: input.fixedEvaluationRequired === false, allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
+    await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', {
+        skipRelease: true,
+        skipEvaluationGate: input.fixedEvaluationRequired === false,
+        breakGlassReason: input.breakGlassReason,
+        allowTenantAdmin: Boolean(tenantForAdmin),
+        tenantId: tenantForAdmin
+    });
     const previous = await queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1", [resolved.workflow.id]);
     const now = getBeijingTimestamp();
     const release = await queryOne(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET tenant_id = excluded.tenant_id, rollout_scope = excluded.rollout_scope, rollout_percent = excluded.rollout_percent, target_user_ids = excluded.target_user_ids, target_units = excluded.target_units, status = 'published', published_by = excluded.published_by, published_at = excluded.published_at RETURNING *`, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now]);

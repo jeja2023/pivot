@@ -134,7 +134,7 @@ test('PostgreSQL profile field versions reject stale concurrent updates', { skip
 test('workflow release gate requires a completed fixed evaluation batch', { skip: !process.env.DATABASE_URL }, async () => {
     const { getPgPool } = require('../server/db/pg-connection');
     const pool = getPgPool();
-    const user = await ensureTestUser(pool, 'integration_workflow_admin');
+    const user = await ensureTestUser(pool, 'admin');
     const suffix = Date.now();
     const workflow = await createAgentWorkflow(user, { name: `integration-gate-${suffix}`, description: 'gate', dagSpec: { nodes: [{ id: 'output', tool: 'workflow.output', input: { name: 'answer', value: 'ok' } }] } });
     try {
@@ -145,6 +145,13 @@ test('workflow release gate requires a completed fixed evaluation batch', { skip
         await pool.query(`INSERT INTO agent_eval_results (eval_run_id, case_id, status, score, passed, grader_results, created_at, completed_at) VALUES ($1, $2, 'passed', 100, 1, '{}', NOW(), NOW())`, [`gate-run-${suffix}`, evalCase.rows[0].id]);
         const release = await publishWorkflowRelease(workflow.id, user, { version: 'current', evaluationRunId: `gate-run-${suffix}` });
         assert.equal(release.status, 'published');
+
+        const breakGlassRelease = await publishWorkflowRelease(workflow.id, user, {
+            version: 'current',
+            fixedEvaluationRequired: false,
+            breakGlassReason: 'E2E测试紧急跳过发布验证必须超过十个字符'
+        });
+        assert.equal(breakGlassRelease.status, 'published');
     } finally {
         await pool.query('DELETE FROM agent_workflow_releases WHERE workflow_id = $1', [workflow.id]);
         await pool.query('DELETE FROM agent_eval_runs WHERE id LIKE $1', [`gate-run-${suffix}%`]);
