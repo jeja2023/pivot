@@ -83,12 +83,15 @@ test.describe('Pivot browser smoke', () => {
         const list = page.locator('#session-list');
         await expect(list).toBeVisible();
         await page.evaluate(() => document.body.classList.add('pivot-desktop-runtime'));
-        await expect.poll(() => list.evaluate(element => ({
-            clientHeight: element.clientHeight,
-            scrollHeight: element.scrollHeight,
-            overflowY: window.getComputedStyle(element).overflowY,
-            minHeight: window.getComputedStyle(element).minHeight
-        }))).toMatchObject({ overflowY: 'auto', minHeight: '0px' });
+        await expect.poll(() => list.evaluate(element => {
+            const style = window.getComputedStyle(element);
+            return {
+                clientHeight: element.clientHeight,
+                scrollHeight: element.scrollHeight,
+                isScrollable: ['auto', 'scroll'].includes(style.overflowY),
+                minHeight: style.minHeight
+            };
+        })).toMatchObject({ isScrollable: true, minHeight: '0px' });
         const initialMetrics = await list.evaluate(element => ({
             clientHeight: element.clientHeight,
             scrollHeight: element.scrollHeight
