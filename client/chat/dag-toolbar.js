@@ -103,12 +103,8 @@ function renderDagToolbar(ctx) {
             const registry = window.Pivot.moduleApi('agent.dagNodePresets');
             const groups = registry?.groups || [];
 
-            // 构造按 6 大分类结构化分块的「添加节点」下拉菜单
-            const nodeMenuItems = [
-                makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' })
-            ];
-
-            groups.forEach(group => {
+            // 构造按 6 大分类结构化分块的预设节点列表与「添加节点」下拉菜单
+            const presetButtons = groups.flatMap(group => {
                 const sectionLabel = document.createElement('div');
                 sectionLabel.className = 'pivot-dag-toolbar-section-label';
 
@@ -122,9 +118,8 @@ function renderDagToolbar(ctx) {
 
                 sectionLabel.appendChild(titleSpan);
                 sectionLabel.appendChild(countBadge);
-                nodeMenuItems.push(sectionLabel);
 
-                group.items.forEach(preset => {
+                const items = group.items.map(preset => {
                     const availability = registry.availability(preset, tools);
                     const advHint = preset.advanced ? '（高级）' : '';
                     const btn = makeButton(
@@ -140,12 +135,16 @@ function renderDagToolbar(ctx) {
                         advTag.textContent = '高级';
                         btn.appendChild(advTag);
                     }
-                    nodeMenuItems.push(btn);
+                    return btn;
                 });
+                return [sectionLabel, ...items];
             });
 
             ctx.toolbar.appendChild(makeToolbarGroup([
-                makeToolbarDropdown('添加节点', nodeMenuItems)
+                makeToolbarDropdown('添加节点', [
+                    makeButton('自定义节点', '从空白节点开始，自选工具、输入和依赖', ctx.addNode, { icon: '+' }),
+                    ...presetButtons
+                ])
             ], 'is-node-group'));
             ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
                 makeButton('多智能体审阅', '添加并行研究员、审阅员与主管智能体裁决节点', ctx.addAgentTeamTemplate),
