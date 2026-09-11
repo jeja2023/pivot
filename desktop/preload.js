@@ -379,7 +379,7 @@ function installSessionListScrollFallback() {
         let resizeRafId = null;
         const onResize = () => {
             if (resizeRafId) return;
-            resizeRafId = requestAnimationFrame(() => {
+            resizeRafId = window.requestAnimationFrame(() => {
                 resizeRafId = null;
                 void list.offsetHeight;
                 if (sidebar.matches(':hover') && list.scrollHeight > list.clientHeight) {
