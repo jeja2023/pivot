@@ -341,7 +341,7 @@ function getUpstreamNodes(nodes = [], targetNodeId = '') {
     return nodes.filter(n => visited.has(String(n.id)));
 }
 
-function getAvailableVariableOptions(nodes = [], targetNodeId = '', tools = []) {
+function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = []) {
     const upstream = getUpstreamNodes(nodes, targetNodeId);
     const groups = [
         {

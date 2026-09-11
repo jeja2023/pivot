@@ -26,6 +26,7 @@ const browserGlobals = {
     FileReader: 'readonly',
     FormData: 'readonly',
     Headers: 'readonly',
+    module: 'readonly',
     AbortController: 'readonly',
     AbortSignal: 'readonly',
     File: 'readonly',

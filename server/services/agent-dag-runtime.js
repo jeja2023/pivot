@@ -11,7 +11,7 @@ const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeToolInput } = require('./agent-policy');
-const { inspectDagTopology, normalizeDagSpec, parseJsonObject } = require('./agent-validators');
+const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
 const {
     normalizeJsonSchema,
     outputValueForContract,
@@ -21,11 +21,9 @@ const {
 } = require('./agent-dag-contracts');
 
 const {
-    DAG_PERSISTED_OUTPUT_MAX_CHARS,
     preparePersistedDagOutput,
     persistedDagOutput,
     compactPreparedDagOutput,
-    summarizeStructuredDagOutput,
     extractReadableDagOutput
 } = require('./agent-dag-output');
 const {

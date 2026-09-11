@@ -8,7 +8,7 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
+            .replace(/'/g, '&#39;');
     };
 
     /**
@@ -101,11 +101,11 @@
             const statusBadge = item.isCached
                 ? '<span class="waterfall-badge is-cached">快取</span>'
                 : item.status === 'completed'
-                    ? '<span class="waterfall-badge is-completed">✓ 完成</span>'
+                    ? '<span class="waterfall-badge is-completed">已完成</span>'
                     : item.status === 'running'
-                        ? '<span class="waterfall-badge is-running">⟳ 运行中</span>'
+                        ? '<span class="waterfall-badge is-running">运行中</span>'
                         : item.status === 'error'
-                            ? '<span class="waterfall-badge is-error">✗ 失败</span>'
+                            ? '<span class="waterfall-badge is-error">失败</span>'
                             : '<span class="waterfall-badge is-pending">待调度</span>';
 
             const durationText = item.isCached
@@ -130,7 +130,7 @@
                         ${statusBadge}
                     </div>
                     <div class="pivot-waterfall-track">
-                        <div class="pivot-waterfall-bar ${barColorClass}" style="width: ${item.widthPercent}%;"></div>
+                        <div class="pivot-waterfall-bar ${barColorClass}" data-bar-width="${item.widthPercent}"></div>
                     </div>
                     <div class="pivot-waterfall-duration ${item.isSlow ? 'is-slow-text' : ''}">${escapeHtml(durationText)}</div>
                 </div>
@@ -143,7 +143,7 @@
                     <div class="pivot-dag-waterfall-title">
                         <span>工作流执行耗时甘特瀑布图</span>
                     </div>
-                    <button class="pivot-dag-waterfall-close" type="button" aria-label="关闭">×</button>
+                    <button class="workspace-modal-close pivot-dag-waterfall-close" type="button" aria-label="关闭">×</button>
                 </div>
                 <div class="pivot-dag-waterfall-summary">
                     <span class="summary-chip">总耗时: <strong>${escapeHtml(totalSeconds)}s</strong></span>
@@ -161,6 +161,11 @@
 
         safeHtml.setHtml(modal, markup);
         document.body.appendChild(modal);
+
+        modal.querySelectorAll('.pivot-waterfall-bar[data-bar-width]').forEach(bar => {
+            const width = bar.getAttribute('data-bar-width');
+            if (width) bar.style.width = `${width}%`;
+        });
 
         modal.querySelector('.pivot-dag-waterfall-close')?.addEventListener('click', () => modal.remove());
         modal.addEventListener('click', (e) => {

@@ -5,6 +5,10 @@
 - **全域清除 Emoji 符号**：全面下线工作流节点右上角快取徽章、执行耗时甘特瀑布图、后端执行步骤标题等场景中的 Emoji 图标（如闪电、秒表等图形），统一改用 `[快取]`、`快取`、`0ms` 等纯净中文字符与原生矢量渲染，确保严肃政企级公文与系统工作台的严谨与统一。
 - **节点配置右侧抽屉样式与布局修复**：修复 `agent-dag-svg.css` 中由于重复代码缺少闭合大括号导致其后 `agent-dag-drawer-inspector.css` 抽屉定位与卡片样式被浏览器忽略解析的缺陷；重新编译 `chat.workspace.agent.css` 确保节点属性面板恢复为画布右侧绝对定位抽屉（宽度 500px、纯白卡片、立体阴影与内置平滑滚动）。
 - **画布缩放控制器文本体验优化**：将画布悬浮视口控制器中的“初始”按钮文案升级为现代设计系统通用的“重置”，与“适配”形成工整对仗（适配 / 重置），并优化悬停提示为“恢复默认缩放并将现有节点居中”，消除生硬表达。
+- **开发规范门禁 99 项治理清零**：全面修复最新工作流改动行中的开发规范问题，达成 `check:standards:changed` 0 报错通过：
+  - **样式类与语义规范**：为 `dag-inspector.js`、`dag-timeline-waterfall.js`、`dag-variable-picker.js` 中的新增 `<button>` 规范补充 `btn-secondary`、`workspace-modal-close` 全局语义类。
+  - **内联样式与 HTML 转义**：消除瀑布图甘特柱内联 `style="width: ..."`，改由 DOM 加载后通过 `data-bar-width` 安全动态设置；优化转义逻辑，消除误匹配。
+  - **CSS 变量主题化与大文件治理**：剔除 `agent-dag-svg.css` 中的意外冗余块并统一使用主题变量；将 `agent-dag-input-wizard.css` 中的变量级联气泡浮层样式解耦抽离至独立模块 `agent-dag-variable-picker.css`（严控在 169 行，`agent-dag-input-wizard.css` 回落至 918 行），严格满足单文件 $< 1000$ 行上限，并将全部颜色统一包装为 `var(--..., #fallback)` 规范。
 
 ## [v0.1.133] - 2026-09-11
 

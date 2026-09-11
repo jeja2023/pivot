@@ -45,7 +45,7 @@ function stableStringify(value) {
 /**
  * 计算 DAG 节点的执行指纹 Cache Key
  */
-function computeDagNodeCacheKey({ tool = '', input = {}, dependsOnOutputs = {}, workflowId = '', nodeKey = '' } = {}) {
+function computeDagNodeCacheKey({ tool = '', input = {}, dependsOnOutputs = {}, workflowId = '', _nodeKey = '' } = {}) {
     const serializedPayload = stableStringify({
         workflowId: String(workflowId || ''),
         tool: String(tool || ''),
@@ -132,5 +132,6 @@ module.exports = {
     computeDagNodeCacheKey,
     getCachedNodeOutput,
     setCachedNodeOutput,
-    clearDagNodeCache
+    clearDagNodeCache,
+    getDagCacheStats
 };

@@ -147,10 +147,8 @@ function extractReadableDagOutput(output) {
 }
 
 module.exports = {
-    DAG_PERSISTED_OUTPUT_MAX_CHARS,
     preparePersistedDagOutput,
     persistedDagOutput,
     compactPreparedDagOutput,
-    summarizeStructuredDagOutput,
     extractReadableDagOutput
 };

@@ -193,7 +193,7 @@ function createDagInspectorController(ctx) {
                                         <span class="pivot-dag-token-group-title">${dagEscapeHtml(grp.group)}</span>
                                         <div class="pivot-dag-token-list">
                                             ${grp.items.map(item => `
-                                                <button type="button" class="pivot-dag-token-btn" data-pivot-dag-json-token="${dagEscapeAttr(item.expression)}" title="${dagEscapeAttr(item.description || item.expression)}">
+                                                <button type="button" class="btn-secondary pivot-dag-token-btn" data-pivot-dag-json-token="${dagEscapeAttr(item.expression)}" title="${dagEscapeAttr(item.description || item.expression)}">
                                                     ${dagEscapeHtml(item.label)}
                                                 </button>
                                             `).join('')}

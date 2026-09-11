@@ -34,15 +34,22 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
     }
 
     const dagCore = typeof window !== 'undefined' ? window.Pivot?.moduleApi?.('agent.dagCore') : null;
-    const getOptions = dagCore?.getAvailableVariableOptions || (typeof getAvailableVariableOptions === 'function' ? getAvailableVariableOptions : null);
+    const getOptions = dagCore?.getAvailableVariableOptions || window.Pivot?.legacy?.getAvailableVariableOptions;
     const groups = typeof getOptions === 'function'
         ? getOptions(nodes || [], nodeId, tools || [])
         : [];
 
     const groupCount = groups.reduce((acc, g) => acc + (g.items?.length || 0), 0);
-    const escapeHtml = (window.Pivot?.legacy?.PivotSafeHtml?.escapeHtml) || (s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+
+    const fallbackEscape = (str) => {
+        if (typeof document === 'undefined') return String(str ?? '');
+        const div = document.createElement('div');
+        div.textContent = String(str ?? '');
+        return div.innerHTML;
+    };
+    const escapeHtml = (window.Pivot?.legacy?.PivotSafeHtml?.escapeHtml) || fallbackEscape;
     const escapeAttr = (window.Pivot?.legacy?.PivotSafeHtml?.escapeAttr) || (s => escapeHtml(s).replace(/"/g, '&quot;'));
-    const safeHtml = window.Pivot?.legacy?.PivotSafeHtml || (typeof PivotSafeHtml !== 'undefined' ? PivotSafeHtml : null);
+    const safeHtml = window.Pivot?.safeHtml || window.Pivot?.legacy?.PivotSafeHtml || (typeof PivotSafeHtml !== 'undefined' ? PivotSafeHtml : null);
 
     const markup = `
         <div class="pivot-dag-var-popover-head">
@@ -50,7 +57,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
                 <strong>插入变量</strong>
                 <span class="pivot-dag-var-badge">${groupCount} 项可用</span>
             </div>
-            <button type="button" class="pivot-dag-var-popover-close" aria-label="关闭">&times;</button>
+            <button type="button" class="workspace-modal-close pivot-dag-var-popover-close" aria-label="关闭">&times;</button>
         </div>
         <div class="pivot-dag-var-popover-search">
             <input type="text" class="form-input" placeholder="搜索变量名或字段…" data-pivot-dag-var-search="1">
@@ -61,7 +68,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
                     <div class="pivot-dag-var-group-title">${escapeHtml(grp.group)}</div>
                     <div class="pivot-dag-var-items">
                         ${grp.items.map(item => `
-                            <button type="button" class="pivot-dag-var-item" data-pivot-dag-var-expr="${escapeAttr(item.expression)}" title="${escapeAttr(item.description || item.expression)}">
+                            <button type="button" class="btn-secondary pivot-dag-var-item" data-pivot-dag-var-expr="${escapeAttr(item.expression)}" title="${escapeAttr(item.description || item.expression)}">
                                 <span class="pivot-dag-var-item-label">${escapeHtml(item.label)}</span>
                                 <code class="pivot-dag-var-item-expr">${escapeHtml(item.expression)}</code>
                             </button>
@@ -74,10 +81,6 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
 
     if (safeHtml && typeof safeHtml.setHtml === 'function') {
         safeHtml.setHtml(popover, markup);
-    } else {
-        while (popover.firstChild) popover.removeChild(popover.firstChild);
-        const doc = new DOMParser().parseFromString(markup, 'text/html');
-        while (doc.body.firstChild) popover.appendChild(doc.body.firstChild);
     }
 
     if (anchorEl) {
