@@ -44,11 +44,13 @@ function createClientEnvironment() {
 
     const toolLabelsCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-tool-labels.js'), 'utf8');
     const utilsCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-utils.js'), 'utf8');
+    const embedRenderersCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-embed-renderers.js'), 'utf8');
     const stepRenderersCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-step-renderers.js'), 'utf8');
     const visualsCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-visuals.js'), 'utf8');
 
     vm.runInContext(toolLabelsCode, sandbox);
     vm.runInContext(utilsCode, sandbox);
+    vm.runInContext(embedRenderersCode, sandbox);
     vm.runInContext(stepRenderersCode, sandbox);
     vm.runInContext(visualsCode, sandbox);
 
@@ -168,6 +170,12 @@ test('所有工作流与智能体工具标题本地化', () => {
         ['workflow.foreach', '循环 / 批处理'],
         ['workflow.subworkflow', '子工作流'],
         ['workflow.delay', '延时等待'],
+        ['workflow.embed_page', '嵌入页面'],
+        ['workflow.embed_image', '嵌入图片'],
+        ['workflow.embed_video', '嵌入视频'],
+        ['workflow.embed_audio', '嵌入音频'],
+        ['workflow.link_card', '链接卡片'],
+        ['workflow.embed_code', '网站嵌入代码'],
         ['report.compose', '报告编排'],
         ['rag.search', '知识库检索'],
         ['knowledge.graph.query', '知识图谱查询'],

@@ -1,3 +1,5 @@
+const { normalizeWorkflowEmbedUrl } = require('./workflow-embed-policy');
+
 /**
  * server/services/agent-tools-workflow-nodes.js
  * 工作流节点执行器与报告组装
@@ -11,6 +13,114 @@ function renderWorkflowValue(value) {
     if (typeof value === 'string') return value;
     if (value === undefined || value === null) return '';
     try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+}
+
+function normalizeEmbeddedResourceUrl(value) {
+    return normalizeWorkflowEmbedUrl(value);
+}
+
+function normalizeEmbeddedPageUrl(value) {
+    return normalizeEmbeddedResourceUrl(value);
+}
+
+function executeWorkflowEmbedPage(input = {}) {
+    const url = normalizeEmbeddedResourceUrl(input.url);
+    const title = String(input.title || '嵌入页面').trim().slice(0, 120) || '嵌入页面';
+    const requestedHeight = Number.parseInt(input.height ?? input.heightPx, 10);
+    const height = Math.max(180, Math.min(Number.isFinite(requestedHeight) ? requestedHeight : 480, 1200));
+    return {
+        type: 'embedded_page',
+        url,
+        title,
+        height,
+        text: `页面：${title}`
+    };
+}
+
+function executeWorkflowEmbedImage(input = {}) {
+    const url = normalizeEmbeddedResourceUrl(input.url);
+    const alt = String(input.alt || '工作流图片').trim().slice(0, 160) || '工作流图片';
+    const maxWidthValue = Number.parseInt(input.maxWidth ?? input.max_width, 10);
+    const maxHeightValue = Number.parseInt(input.maxHeight ?? input.max_height, 10);
+    return {
+        type: 'embedded_image',
+        url,
+        alt,
+        maxWidth: Math.max(160, Math.min(Number.isFinite(maxWidthValue) ? maxWidthValue : 960, 1600)),
+        maxHeight: Math.max(120, Math.min(Number.isFinite(maxHeightValue) ? maxHeightValue : 640, 1200)),
+        text: `图片：${alt}`
+    };
+}
+
+function executeWorkflowEmbedVideo(input = {}) {
+    const url = normalizeEmbeddedResourceUrl(input.url);
+    const title = String(input.title || '工作流视频').trim().slice(0, 120) || '工作流视频';
+    const requestedHeight = Number.parseInt(input.height ?? input.heightPx, 10);
+    return {
+        type: 'embedded_video',
+        url,
+        title,
+        height: Math.max(180, Math.min(Number.isFinite(requestedHeight) ? requestedHeight : 420, 900)),
+        text: `视频：${title}`
+    };
+}
+
+function executeWorkflowEmbedAudio(input = {}) {
+    const url = normalizeEmbeddedResourceUrl(input.url);
+    const title = String(input.title || '工作流音频').trim().slice(0, 120) || '工作流音频';
+    return { type: 'embedded_audio', url, title, text: `音频：${title}` };
+}
+
+function executeWorkflowLinkCard(input = {}) {
+    const url = normalizeEmbeddedResourceUrl(input.url);
+    const title = String(input.title || '打开链接').trim().slice(0, 120) || '打开链接';
+    const description = String(input.description || '').trim().slice(0, 300);
+    return { type: 'link_card', url, title, description, text: title };
+}
+
+function getWorkflowPresentationToolDefinitions(asJsonSchema) {
+    return [
+        ['workflow.embed_page', '嵌入页面', '在工作流结果中嵌入同源页面或管理员白名单页面。', { url: { type: 'string' }, title: { type: 'string', default: '嵌入页面', maxLength: 120 }, height: { type: 'integer', minimum: 180, maximum: 1200, default: 480 } }],
+        ['workflow.embed_image', '嵌入图片', '在工作流结果中展示图片资源。', { url: { type: 'string' }, alt: { type: 'string', default: '工作流图片', maxLength: 160 }, maxWidth: { type: 'integer', minimum: 160, maximum: 1600, default: 960 }, maxHeight: { type: 'integer', minimum: 120, maximum: 1200, default: 640 } }],
+        ['workflow.embed_video', '嵌入视频', '在工作流结果中展示带控件的视频资源，不自动播放。', { url: { type: 'string' }, title: { type: 'string', default: '工作流视频', maxLength: 120 }, height: { type: 'integer', minimum: 180, maximum: 900, default: 420 } }],
+        ['workflow.embed_audio', '嵌入音频', '在工作流结果中展示带控件的音频资源，不自动播放。', { url: { type: 'string' }, title: { type: 'string', default: '工作流音频', maxLength: 120 } }],
+        ['workflow.link_card', '链接卡片', '生成安全的链接卡片，在新窗口打开目标地址。', { url: { type: 'string' }, title: { type: 'string', default: '打开链接', maxLength: 120 }, description: { type: 'string', maxLength: 300 } }],
+        ['workflow.embed_code', '网站嵌入代码', '生成可粘贴到其它网站页面的 HTML iframe 嵌入代码。', { url: { type: 'string' }, title: { type: 'string', default: '嵌入页面', maxLength: 120 }, width: { type: 'integer', minimum: 320, maximum: 1600, default: 960 }, height: { type: 'integer', minimum: 180, maximum: 1200, default: 480 }, responsive: { type: 'boolean', default: true } }]
+    ].map(([name, title, description, properties]) => ({ name, title, description, input_schema: asJsonSchema(properties, ['url']) }));
+}
+
+function escapeEmbedHtmlAttribute(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function executeWorkflowEmbedCode(input = {}) {
+    const url = normalizeWorkflowEmbedUrl(input.url, { allowExternal: true });
+    const title = String(input.title || '嵌入页面').trim().slice(0, 120) || '嵌入页面';
+    const widthValue = Number.parseInt(input.width, 10);
+    const heightValue = Number.parseInt(input.height, 10);
+    const width = Math.max(320, Math.min(Number.isFinite(widthValue) ? widthValue : 960, 1600));
+    const height = Math.max(180, Math.min(Number.isFinite(heightValue) ? heightValue : 480, 1200));
+    const responsive = input.responsive !== false;
+    const src = escapeEmbedHtmlAttribute(url);
+    const iframeTitle = escapeEmbedHtmlAttribute(title);
+    const widthAttribute = responsive ? '100%' : `${width}`;
+    const code = `<iframe src="${src}" title="${iframeTitle}" width="${widthAttribute}" height="${height}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts" style="border:0;max-width:100%;" allowfullscreen></iframe>`;
+    return {
+        type: 'embed_code',
+        url,
+        title,
+        width,
+        height,
+        responsive,
+        language: 'html',
+        code,
+        text: code,
+        notice: '将这段 HTML 粘贴到目标网站页面中；目标页面必须允许被 iframe 加载。'
+    };
 }
 
 function coerceWorkflowInput(value, type, name) {
@@ -164,10 +274,17 @@ function executeReportCompose(input = {}) {
 module.exports = {
     coerceWorkflowInput,
     executeReportCompose,
+    executeWorkflowEmbedAudio,
+    executeWorkflowEmbedImage,
+    executeWorkflowEmbedPage,
+    executeWorkflowEmbedVideo,
     executeWorkflowCondition,
     executeWorkflowDelay,
     executeWorkflowForeach,
     executeWorkflowInput,
     executeWorkflowOutput,
+    executeWorkflowLinkCard,
+    getWorkflowPresentationToolDefinitions,
+    executeWorkflowEmbedCode,
     renderWorkflowValue
 };

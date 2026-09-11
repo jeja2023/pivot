@@ -61,6 +61,17 @@ const agentToolDisplayMap = {
     'workflow.foreach': { title: '循环 / 批处理', description: '需要独立受控 Worker 沙箱；服务端不会直接执行循环代码。' },
     'workflow.subworkflow': { title: '子工作流', description: '调用另一个已发布工作流。' },
     'workflow.delay': { title: '延时等待', description: '挂起工作流到指定时间后继续执行。' },
+    'workflow.embed_page': { title: '嵌入页面', description: '在工作流结果中展示受限页面嵌入。' },
+    'workflow.embed_image': { title: '嵌入图片', description: '在工作流结果中展示图片资源。' },
+    'workflow.embed_video': { title: '嵌入视频', description: '在工作流结果中展示带控件的视频资源。' },
+    'workflow.embed_audio': { title: '嵌入音频', description: '在工作流结果中展示带控件的音频资源。' },
+    'workflow.link_card': { title: '链接卡片', description: '生成安全的链接卡片并在新窗口打开。' },
+    'workflow.embed_code': { title: '网站嵌入代码', description: '生成可复制到其它网站页面的 HTML iframe 代码。' },
+    'sessions.recent': { title: '最近会话', description: '列出当前用户最近更新的会话。' },
+    'knowledge.list': { title: '知识库文档列表', description: '列出当前用户可见的知识库文档及索引状态。' },
+    'models.list': { title: '可用模型列表', description: '列出当前账号可以使用的模型。' },
+    'artifact.render': { title: '文档渲染', description: '将受控 Document IR 渲染为正式文档。' },
+    'artifact.list_renditions': { title: '渲染结果列表', description: '列出某个产物已有的渲染结果。' },
 
     // 知识库与系统
     'rag.search': { title: '知识库检索', description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。' },

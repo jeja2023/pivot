@@ -254,6 +254,7 @@ function agentAutomationTriggerConfig(type, config = {}) {
         inputMapping: config.inputMapping || config.input_mapping || {},
         staticInputs: config.staticInputs || config.static_inputs || {},
         dedupePath: config.dedupePath || config.dedupe_path || '',
+        requireSignature: config.requireSignature === true || config.require_signature === true,
         goalTemplate: config.goalTemplate || config.goal_template || ''
     };
     if (type === 'file') return {
@@ -280,6 +281,7 @@ function agentAutomationTriggerConfigFields(type, config) {
         </div>
         <div class="agent-automation-resources-form-grid">
             <label><span>去重字段路径</span><input class="form-input" name="dedupePath" type="text" maxlength="120" value="${agentEscapeAttr(config.dedupePath)}" placeholder="例如：data.eventId"></label>
+            <label class="agent-automation-checkbox-field"><span>签名校验</span><span><input type="checkbox" name="requireSignature" ${config.requireSignature ? 'checked' : ''}> 要求调用方提供时间戳和 HMAC-SHA256 签名</span></label>
             <label><span>运行目标说明</span><input class="form-input" name="goalTemplate" type="text" maxlength="2000" value="${agentEscapeAttr(config.goalTemplate)}" placeholder="例如：处理来自 ERP 的订单变更"></label>
         </div>`;
     if (type === 'file') return `
@@ -475,6 +477,7 @@ function readAgentAutomationTriggerEditor() {
             inputMapping: parseAgentAutomationResourceObject(editor.elements.inputMappingJson?.value, '输入映射'),
             staticInputs: parseAgentAutomationResourceObject(editor.elements.staticInputsJson?.value, '固定输入'),
             dedupePath: String(editor.elements.dedupePath?.value || '').trim(),
+            requireSignature: Boolean(editor.elements.requireSignature?.checked),
             goalTemplate: String(editor.elements.goalTemplate?.value || '').trim()
         };
     } else if (type === 'file') {

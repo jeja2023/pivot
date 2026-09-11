@@ -404,10 +404,16 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
 
     router.post('/agents/workflows/:id/publish', authMiddleware, asyncHandler(async (req, res) => {
         const skipEvaluationGate = req.body?.skipEvaluationGate === true || req.body?.fixedEvaluationRequired === false;
+        if (skipEvaluationGate && !isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有系统管理员可以使用紧急跳过评测门禁发布。' });
+        }
+        if (skipEvaluationGate && String(req.body?.breakGlassReason || '').trim().length < 10) {
+            return res.status(400).json({ error: '紧急跳过评测门禁必须填写至少 10 个字符的原因。' });
+        }
         const release = await publishWorkflowRelease(req.params.id, req.user, { ...(req.body || {}), version: req.body?.version || 'current', fixedEvaluationRequired: !skipEvaluationGate });
         if (!release) return res.status(404).json({ error: '智能体工作流或目标版本不存在。' });
         const workflow = await getAgentWorkflowForUser(req.params.id, req.user);
-        logAction(req, '发布智能体工作流版本', `工作流ID: ${req.params.id}，发布版本: ${workflow?.published_version || '-'}`);
+        logAction(req, '发布智能体工作流版本', `工作流ID: ${req.params.id}，发布版本: ${workflow?.published_version || '-'}${skipEvaluationGate ? `，紧急原因: ${String(req.body?.breakGlassReason || '').trim().slice(0, 240)}` : ''}`);
         res.json({ success: true, workflow, release });
     }));
 

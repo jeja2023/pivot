@@ -28,7 +28,12 @@ function createTriggersRouter({ triggerLimiter, logAction } = {}) {
         }
         let result = null;
         try {
-            result = await dispatchWebhookTrigger(token, payload, { sourceIp: req.ip });
+            result = await dispatchWebhookTrigger(token, payload, {
+                sourceIp: req.ip,
+                timestamp: req.get('X-Webhook-Timestamp') || req.get('X-Agent-Event-Timestamp'),
+                signature: req.get('X-Webhook-Signature') || req.get('X-Agent-Signature'),
+                idempotencyKey: req.get('Idempotency-Key') || ''
+            });
         } catch (err) {
             const status = Number(err.status) || 500;
             logger.warn({ err: err.message, sourceIp: req.ip }, '入站 Webhook 触发失败');

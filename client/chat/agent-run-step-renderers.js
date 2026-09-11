@@ -560,6 +560,12 @@ function agentResultPrimaryText(payload) {
 
 function agentResultObjectMarkup(payload, options = {}, depth = 0) {
     if (isAgentPivotChartSpec(payload)) return renderAgentPivotChartBlock(payload);
+    if (payload.type === 'embedded_page') return agentWorkflowEmbeddedPageMarkup(payload);
+    if (payload.type === 'embedded_image') return agentWorkflowEmbeddedImageMarkup(payload);
+    if (payload.type === 'embedded_video') return agentWorkflowEmbeddedVideoMarkup(payload);
+    if (payload.type === 'embedded_audio') return agentWorkflowEmbeddedAudioMarkup(payload);
+    if (payload.type === 'link_card') return agentWorkflowLinkCardMarkup(payload);
+    if (payload.type === 'embed_code') return agentWorkflowEmbedCodeMarkup(payload);
     if (payload.presentation === 'table' && payload.table) return agentWorkflowTableMarkup(payload.table);
     if (payload.presentation === 'file' && payload.file) return agentWorkflowFileMarkup(payload.file);
     const type = String(payload.type || '').trim();

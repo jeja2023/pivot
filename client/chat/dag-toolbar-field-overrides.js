@@ -37,6 +37,7 @@ const FIELD_LABEL_OVERRIDES = {
         groupBy: '分组字段',
         group_by: '分组字段',
         headers: '请求头',
+        height: '嵌入高度（像素）',
         input: '输入内容',
         instructions: '指令',
         items: '条目列表',
@@ -160,6 +161,38 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             tableTitle: '表格标题',
             tableColumns: '表格列',
             fileRef: '文件引用'
+        },
+        'workflow.embed_page': {
+            url: '页面地址',
+            title: '页面标题',
+            height: '嵌入高度（像素）'
+        },
+        'workflow.embed_image': {
+            url: '图片地址',
+            alt: '替代文本',
+            maxWidth: '最大宽度（像素）',
+            maxHeight: '最大高度（像素）'
+        },
+        'workflow.embed_video': {
+            url: '视频地址',
+            title: '视频标题',
+            height: '播放器高度（像素）'
+        },
+        'workflow.embed_audio': {
+            url: '音频地址',
+            title: '音频标题'
+        },
+        'workflow.link_card': {
+            url: '链接地址',
+            title: '链接标题',
+            description: '链接说明'
+        },
+        'workflow.embed_code': {
+            url: '页面地址',
+            title: '嵌入标题',
+            width: '固定宽度（像素）',
+            height: '嵌入高度（像素）',
+            responsive: '响应式宽度'
         },
         'sessions.search': {
             query: '会话关键词'

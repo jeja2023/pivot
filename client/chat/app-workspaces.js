@@ -690,7 +690,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
         '/chat/dag-wizard-fields.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-inspector.js',
         '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
-        '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
+        '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
         '/chat/agent-run-loaders.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-harness.js',
         '/chat/agent-skill-management.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',

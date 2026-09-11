@@ -31,6 +31,12 @@
 | `PG_ANALYZE_TIMEOUT_MS` | integer | `60000` | 1000–120000 | 单张表 ANALYZE 的执行超时。 |
 | `PG_ANALYZE_TOTAL_TIMEOUT_MS` | integer | `600000` | 60000–3600000 | 单轮 ANALYZE 的总时限；到期后从进度游标继续。 |
 
+## 安全
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_EMBED_ALLOWED_ORIGINS` | csv | `` | 逗号分隔的语言标记 | 工作流页面、媒体和 iframe 可使用的外部 Origin 白名单；留空时仅允许同源资源。 |
+
 ## 桌面交付
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

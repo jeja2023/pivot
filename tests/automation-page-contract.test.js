@@ -264,11 +264,12 @@ test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认�
     // 3. 前端工作流发布方法支持 skipEvaluationGate 并在 409 拦截时弹出提示确认
     assert.match(libraryJs, /async function publishSelectedAgentWorkflow\(version = 'current', options = \{\}\)/);
     assert.match(libraryJs, /WORKFLOW_EVALUATION_GATE_FAILED/);
+    assert.match(libraryJs, /isSuperAdminUser\(\)/);
     assert.match(libraryJs, /showConfirm\('发布门禁提示'/);
 
     // 4. 画布工具栏发布菜单包含「发布当前版本」与「跳过门禁发布」
     assert.match(toolbarJs, /makeButton\('发布当前版本'/);
-    assert.match(toolbarJs, /makeButton\('跳过门禁发布'/);
+    assert.match(toolbarJs, /紧急跳过门禁发布/);
 });
 
 test('Agent控制台各模块具备分页控件且收件箱点击详情自动标记已读', () => {

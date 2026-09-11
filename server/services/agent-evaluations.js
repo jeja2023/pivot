@@ -487,6 +487,22 @@ async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
         error.status = 400;
         throw error;
     }
+    let workflowVersionSnapshot = null;
+    if (suite.target_type === 'workflow') {
+        const workflow = await queryOne('SELECT id, published_version_id, current_version_id FROM agent_workflows WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [suite.workflow_id, user.id]);
+        const requestedVersion = String(suite.workflow_version || 'published').trim().toLowerCase();
+        const versionRow = requestedVersion === 'published'
+            ? await queryOne('SELECT id, version FROM agent_workflow_versions WHERE id = ?', [workflow?.published_version_id])
+            : requestedVersion === 'current'
+                ? await queryOne('SELECT id, version FROM agent_workflow_versions WHERE id = ?', [workflow?.current_version_id])
+                : await queryOne('SELECT id, version FROM agent_workflow_versions WHERE workflow_id = ? AND version = ?', [suite.workflow_id, Number.parseInt(requestedVersion, 10)]);
+        if (!versionRow?.id) {
+            const error = new Error('评测目标工作流版本不存在，请重新选择版本后再运行评测。');
+            error.status = 409;
+            throw error;
+        }
+        workflowVersionSnapshot = { workflowVersion: Number(versionRow.version), workflowVersionId: Number(versionRow.id) };
+    }
     const evalRunId = `eval-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const now = getBeijingTimestamp();
     const snapshot = {
@@ -494,7 +510,8 @@ async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
         suiteName: suite.name,
         targetType: suite.target_type,
         workflowId: suite.workflow_id || null,
-        workflowVersion: suite.workflow_version || '',
+        workflowVersion: workflowVersionSnapshot?.workflowVersion || suite.workflow_version || '',
+        workflowVersionId: workflowVersionSnapshot?.workflowVersionId || null,
         modelId,
         runConfig: config
     };

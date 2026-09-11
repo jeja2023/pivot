@@ -19,6 +19,7 @@ const { filterExistingShareUserIds, listShareTargets } = require('./share-target
 const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { isTenantAdmin } = require('./agent-skill-access');
+const { isSuperAdmin } = require('../permissions');
 
 /**
  * 工作流访问判定：所有者可读写，共享工作流按部门范围只读可运行。
@@ -271,19 +272,29 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
             throw err;
         }
         const tenantId = user.tenant_id || await getPrimaryTenantId(user.id);
-        const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
+        const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status, published_by, previous_release_id FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
         // 灰度分桶复用 agent-skill-rollout 的实现（每候选独立分桶 + 租户级 HMAC），
         // 避免同一套灰度语义在技能与工作流两处各写一份（落地方案 v1.2 §6.3）。
         const { computeRolloutBucket } = require('./agent-skill-rollout');
         const userId = Number(user?.id || 0);
         const userUnit = String(user?.unit || '').trim();
         const selectedRelease = releaseRows.find(release => {
+            if (isOwner && Number(release.published_by) === userId) return true;
             const ids = parseJsonObject(release.target_user_ids) || [];
             const units = parseJsonObject(release.target_units) || [];
             const bucket = computeRolloutBucket({ tenantId, releaseId: release.id, userId });
             return (!ids.length || ids.includes(userId)) && (!units.length || units.includes(userUnit)) && bucket < Number(release.rollout_percent || 100);
         });
-        const fallbackVersionId = selectedRelease?.workflow_version_id || releaseRows[1]?.workflow_version_id || workflow.published_version_id;
+        const fallbackRelease = releaseRows.find(release => release.id !== selectedRelease?.id && Number(release.rollout_percent || 0) >= 100);
+        // 兼容早期已写入 published_version_id、但尚未建立 release 投影记录的历史工作流。
+        const legacyPublishedVersionId = releaseRows.length === 0 ? workflow.published_version_id : null;
+        const fallbackVersionId = selectedRelease?.workflow_version_id || fallbackRelease?.workflow_version_id || legacyPublishedVersionId;
+        if (!fallbackVersionId) {
+            const error = new Error('当前账号尚未进入该工作流灰度范围，且没有可用的稳定版本。');
+            error.status = 409;
+            error.code = 'WORKFLOW_ROLLOUT_NOT_ASSIGNED';
+            throw error;
+        }
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, fallbackVersionId);
     } else if (requested === 'current') {
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.current_version_id);
@@ -340,6 +351,13 @@ async function updateAgentWorkflow(workflowId, user, body = {}) {
     if (!current) return null;
     const data = await normalizeWorkflowPayload(body, current, user);
     const currentVersion = await workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
+    const expectedVersion = Number.parseInt(body.expectedVersion ?? body.expected_version, 10);
+    if (Number.isInteger(expectedVersion) && expectedVersion > 0 && Number(currentVersion?.version || 0) !== expectedVersion) {
+        const error = new Error('工作流已被其他窗口更新，请重新加载后再保存。');
+        error.status = 409;
+        error.code = 'WORKFLOW_VERSION_CONFLICT';
+        throw error;
+    }
     const shareUnchanged = normalizeShareScope(current.scope) === data.scope
         && String(current.allowed_units || '') === data.allowedUnits
         && String(current.allowed_user_ids || '') === data.allowedUserIds;
@@ -418,6 +436,20 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
     const tenantOverride = options.allowTenantAdmin === true && isTenantAdmin(user)
         && options.tenantId && Number(options.tenantId) === Number(await getPrimaryTenantId(sourceWorkflow?.user_id));
     if (!ownerAllowed && !tenantOverride) return null;
+    if (options.skipEvaluationGate === true) {
+        if (!isSuperAdmin(user)) {
+            const error = new Error('只有系统管理员可以紧急跳过工作流评测门禁。');
+            error.status = 403;
+            error.code = 'WORKFLOW_BREAK_GLASS_FORBIDDEN';
+            throw error;
+        }
+        if (String(options.breakGlassReason || '').trim().length < 10) {
+            const error = new Error('紧急跳过评测门禁必须填写至少 10 个字符的原因。');
+            error.status = 400;
+            error.code = 'WORKFLOW_BREAK_GLASS_REASON_REQUIRED';
+            throw error;
+        }
+    }
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current', { allowTenantAdmin: tenantOverride, tenantId: options.tenantId });
     if (!resolved) return null;
     const topology = inspectDagTopology(resolved.dagSpec);
@@ -443,13 +475,14 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
             throw err;
         }
     }
-    const evaluation = await queryOne(`
-        SELECT er.summary
+    const evaluationRows = await query(`
+        SELECT er.summary, er.target_snapshot
         FROM agent_eval_runs er
         JOIN agent_eval_suites es ON es.id = er.suite_id
         WHERE es.workflow_id = ? AND er.user_id = ? AND er.status = 'completed'
-        ORDER BY er.created_at DESC LIMIT 1
+        ORDER BY er.created_at DESC LIMIT 50
     `, [resolved.workflow.id, user.id]);
+    const evaluation = evaluationRows.find(row => Number(parseJsonObject(row.target_snapshot)?.workflowVersionId || 0) === Number(resolved.version_id));
     const passRate = Number(parseJsonObject(evaluation?.summary)?.passRate || 0);
     if (options.skipEvaluationGate !== true && (!evaluation || passRate < 80)) {
         const err = new Error('工作流必须通过固定评测集（通过率至少 80%）后才能发布。');

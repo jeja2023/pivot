@@ -182,7 +182,7 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'code', title: '代码执行', svgIcon: 'code', theme: 'code',
-                advanced: true,
+                advanced: true, requiresSandbox: true,
                 desc: '需独立受控 Worker 沙箱，服务端不会直接执行 JS', toolName: 'agent.code',
                 getInput: ({ selectedNode }) => ({
                     code: '// vars 保存下方配置的变量\nreturn vars.input;',
@@ -192,7 +192,7 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
-                advanced: true,
+                advanced: true, requiresSandbox: true,
                 desc: '需独立受控 Worker 沙箱，服务端不会直接执行循环代码', toolName: 'workflow.foreach',
                 getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
                 outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
@@ -247,6 +247,21 @@ const NODE_PRESET_GROUPS = [
                 base: 'session_search', title: '历史会话检索', svgIcon: 'search', theme: 'rag', advanced: true,
                 desc: '按关键词查找当前用户的历史会话内容', toolName: 'sessions.search',
                 input: { query: '{{goal}}', limit: 8 }
+            },
+            {
+                base: 'recent_sessions', title: '最近会话', svgIcon: 'message', theme: 'session', advanced: true,
+                desc: '列出当前用户最近更新的会话', toolName: 'sessions.recent',
+                input: { limit: 8 }
+            },
+            {
+                base: 'knowledge_list', title: '知识库文档列表', svgIcon: 'book-open', theme: 'rag', advanced: true,
+                desc: '读取当前用户可见的知识库文档及索引状态', toolName: 'knowledge.list',
+                input: { limit: 20 }
+            },
+            {
+                base: 'model_list', title: '可用模型列表', svgIcon: 'bot', theme: 'llm', advanced: true,
+                desc: '列出当前账号可以使用的模型', toolName: 'models.list',
+                input: {}
             },
             {
                 base: 'data', title: '数据查询', svgIcon: 'database', theme: 'db',
@@ -323,6 +338,52 @@ const NODE_PRESET_GROUPS = [
                 desc: '聚合章节、摘要和结论生成结构化报告', toolName: 'report.compose',
                 getInput: ({ selectedNode }) => ({ title: '工作流报告', summary: '', sections: selectedNode ? { result: `{{nodes.${selectedNode.id}.output}}` } : {}, includeToc: true }),
                 outputSchema: { type: 'object', required: ['markdown', 'text'], properties: { markdown: { type: 'string' }, text: { type: 'string' }, sectionCount: { type: 'integer' } } }
+            },
+            {
+                base: 'artifact_render', title: '文档渲染', svgIcon: 'file-text', theme: 'report', advanced: true,
+                desc: '将受控 Document IR 渲染为 DOCX、PDF、XLSX、HTML 或 Markdown', toolName: 'artifact.render',
+                input: { artifactId: '', format: 'pdf', ir: {} }
+            },
+            {
+                base: 'artifact_renditions', title: '渲染结果列表', svgIcon: 'file-text', theme: 'report', advanced: true,
+                desc: '查看产物已经生成的文档渲染结果', toolName: 'artifact.list_renditions',
+                input: { artifactId: '' }
+            },
+            {
+                base: 'embed_page', title: '嵌入页面', svgIcon: 'globe', theme: 'http',
+                desc: '在工作流结果中嵌入同源或受信 HTTP/HTTPS 页面', toolName: 'workflow.embed_page',
+                input: { url: '', title: '嵌入页面', height: 480 },
+                outputSchema: { type: 'object', required: ['type', 'url', 'title', 'height'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, height: { type: 'integer' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'embed_image', title: '嵌入图片', svgIcon: 'file-text', theme: 'file',
+                desc: '在工作流结果中展示图片', toolName: 'workflow.embed_image',
+                input: { url: '', alt: '工作流图片', maxWidth: 960, maxHeight: 640 },
+                outputSchema: { type: 'object', required: ['type', 'url', 'alt'], properties: { type: { type: 'string' }, url: { type: 'string' }, alt: { type: 'string' }, maxWidth: { type: 'integer' }, maxHeight: { type: 'integer' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'embed_video', title: '嵌入视频', svgIcon: 'globe', theme: 'http',
+                desc: '在工作流结果中展示带控件的视频', toolName: 'workflow.embed_video',
+                input: { url: '', title: '工作流视频', height: 420 },
+                outputSchema: { type: 'object', required: ['type', 'url', 'title'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, height: { type: 'integer' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'embed_audio', title: '嵌入音频', svgIcon: 'message', theme: 'http',
+                desc: '在工作流结果中展示带控件的音频', toolName: 'workflow.embed_audio',
+                input: { url: '', title: '工作流音频' },
+                outputSchema: { type: 'object', required: ['type', 'url', 'title'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'link_card', title: '链接卡片', svgIcon: 'globe', theme: 'http',
+                desc: '生成带标题和说明的安全链接卡片', toolName: 'workflow.link_card',
+                input: { url: '', title: '打开链接', description: '' },
+                outputSchema: { type: 'object', required: ['type', 'url', 'title'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'embed_code', title: '网站嵌入代码', svgIcon: 'code', theme: 'code', advanced: true,
+                desc: '生成可复制到其它网站页面的 HTML iframe 代码', toolName: 'workflow.embed_code',
+                input: { url: '', title: '嵌入页面', width: 960, height: 480, responsive: true },
+                outputSchema: { type: 'object', required: ['type', 'url', 'code'], properties: { type: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' }, responsive: { type: 'boolean' }, language: { type: 'string' }, code: { type: 'string' }, notice: { type: 'string' }, text: { type: 'string' } } }
             }
         ]
     }
@@ -352,6 +413,13 @@ function resolvePresetTool(preset, tools = []) {
 
 function presetAvailability(preset, tools = []) {
     const tool = resolvePresetTool(preset, tools);
+    if (tool && preset?.requiresSandbox && tool.sandboxAvailable !== true) {
+        return {
+            available: false,
+            tool,
+            reason: '当前服务端未启用受控 Worker，暂不能运行此动态代码节点'
+        };
+    }
     return {
         available: Boolean(tool),
         tool,

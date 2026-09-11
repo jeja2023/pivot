@@ -75,6 +75,7 @@ function readAgentSourceBundle() {
         'agent-run-renderers.js',
         'agent-run-utils.js',
         'agent-run-tool-labels.js',
+        'agent-run-embed-renderers.js',
         'agent-run-step-renderers.js',
         'agent-run-visuals.js',
         'agent-run-loaders.js',
@@ -145,7 +146,7 @@ test('workflow built-ins cover presets and keep dynamic code off the server proc
     const names = new Set(definitions.map(tool => tool.name));
     [
         'workflow.input', 'workflow.output', 'workflow.condition', 'workflow.approval',
-        'workflow.foreach', 'workflow.subworkflow', 'workflow.delay', 'report.compose'
+        'workflow.foreach', 'workflow.subworkflow', 'workflow.delay', 'workflow.embed_page', 'report.compose'
     ].forEach(name => assert.equal(names.has(name), true, `${name} should be registered`));
     assert.equal(definitions.find(tool => tool.name === 'workflow.approval')?.alwaysRequiresApproval, true);
 
@@ -169,6 +170,35 @@ test('workflow built-ins cover presets and keep dynamic code off the server proc
         value: 12, operator: 'greater_than', compareTo: 10
     }, { id: 1 });
     assert.equal(condition.matched, true);
+
+    const embedded = await executeBuiltInTool('workflow.embed_page', {
+        url: '/manual?embed=1', title: '使用帮助', height: 640
+    }, { id: 1 });
+    assert.deepEqual(embedded, {
+        type: 'embedded_page',
+        url: '/manual?embed=1',
+        title: '使用帮助',
+        height: 640,
+        text: '页面：使用帮助'
+    });
+    await assert.rejects(
+        () => executeBuiltInTool('workflow.embed_page', { url: 'javascript:alert(1)' }, { id: 1 }),
+        /只允许 HTTP\/HTTPS/
+    );
+    const mediaResults = await Promise.all([
+        executeBuiltInTool('workflow.embed_image', { url: '/assets/example.png', alt: '示例图' }, { id: 1 }),
+        executeBuiltInTool('workflow.embed_video', { url: '/demo.mp4', title: '演示视频' }, { id: 1 }),
+        executeBuiltInTool('workflow.embed_audio', { url: '/demo.mp3', title: '演示音频' }, { id: 1 }),
+        executeBuiltInTool('workflow.link_card', { url: '/external', title: '示例站点', description: '打开示例站点' }, { id: 1 })
+    ]);
+    assert.deepEqual(mediaResults.map(item => item.type), ['embedded_image', 'embedded_video', 'embedded_audio', 'link_card']);
+    const embedCode = await executeBuiltInTool('workflow.embed_code', {
+        url: 'https://example.com/embed', title: '外部页面', width: 900, height: 500, responsive: true
+    }, { id: 1 });
+    assert.equal(embedCode.type, 'embed_code');
+    assert.match(embedCode.code, /<iframe/);
+    assert.match(embedCode.code, /width="100%"/);
+    assert.match(embedCode.code, /sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts"/);
 });
 
 test('workflow topology validation rejects invalid graphs without truncating nodes', () => {
@@ -386,6 +416,16 @@ test('agent result renderer turns JSON payloads into readable UI', () => {
     assert.match(readableHtml, /数据组/);
     assert.doesNotMatch(readableHtml, /&quot;summary&quot;|\{"summary"/);
     assert.match(html, /<summary>查看原始数据<\/summary>/);
+
+    const embeddedHtml = sandbox.renderAgentFinalAnswer({
+        type: 'embedded_page',
+        url: '/manual?embed=1',
+        title: '使用帮助',
+        height: 640
+    });
+    assert.match(embeddedHtml, /agent-workflow-output-embed/);
+    assert.match(embeddedHtml, /src="\/manual\?embed=1"/);
+    assert.match(embeddedHtml, /sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts"/);
 });
 
 test('generic agent tool and workflow outputs do not expose JSON as primary content', () => {
@@ -2039,7 +2079,7 @@ test('due automation schedule dispatch records audit log for workflow and agent 
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`sched_audit_${suffix}`, 'hash', 'Schedule Audit', 'QA', 'user', 'active');
     const userId = Number(userInfo.lastInsertRowid);
-    const user = { id: userId, username: `sched_audit_${suffix}`, role: 'user', unit: 'QA' };
+    const user = { id: userId, username: 'admin', role: 'admin', unit: 'QA' };
     sql(`
         INSERT INTO models (user_id, name, url, model_name, status, created_at)
         VALUES (?, ?, ?, ?, 'active', datetime('now', '+8 hours'))
@@ -2050,7 +2090,7 @@ test('due automation schedule dispatch records audit log for workflow and agent 
         description: '测试工作流',
         dagSpec: { nodes: [{ id: 'm1', tool: 'models.list', input: {} }] }
     });
-    await publishAgentWorkflowVersion(workflow.id, user, 1, { skipEvaluationGate: true });
+    await publishAgentWorkflowVersion(workflow.id, user, 1, { skipEvaluationGate: true, breakGlassReason: '集成测试需要创建可调度的已发布工作流。' });
 
     const { createAgentSchedule } = require('../server/services/agent-schedules');
     const schedule = await createAgentSchedule(user, {

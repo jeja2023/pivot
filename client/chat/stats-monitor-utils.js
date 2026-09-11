@@ -245,6 +245,7 @@ const ROUTE_NAME_MAP = {
     '/chat/agent-run-renderers.js': '智能体运行渲染脚本',
     '/chat/agent-run-utils.js': '智能体运行工具脚本',
     '/chat/agent-run-tool-labels.js': '智能体工具标签脚本',
+    '/chat/agent-run-embed-renderers.js': '智能体嵌入结果渲染脚本',
     '/chat/agent-run-step-renderers.js': '智能体步骤渲染脚本',
     '/chat/agent-run-visuals.js': '智能体可视化脚本',
     '/chat/agent-run-loaders.js': '智能体运行加载脚本',

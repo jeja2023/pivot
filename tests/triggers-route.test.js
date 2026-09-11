@@ -61,7 +61,8 @@ test('workflow webhook waits for asynchronous dispatch before responding', async
     const pending = handler({
         params: { token: `wht_${'a'.repeat(48)}` },
         body: { message: 'run' },
-        ip: '127.0.0.1'
+        ip: '127.0.0.1',
+        get() { return ''; }
     }, response);
 
     await Promise.resolve();

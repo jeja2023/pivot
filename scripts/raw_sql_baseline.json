@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1430,
+  "total": 1435,
   "entries": [
     {
       "file": "server/auth.js",
@@ -321,7 +321,7 @@
     },
     {
       "file": "server/services/agent-evaluations.js",
-      "count": 28
+      "count": 32
     },
     {
       "file": "server/services/agent-event-log.js",
@@ -389,7 +389,7 @@
     },
     {
       "file": "server/services/agent-releases.js",
-      "count": 50
+      "count": 51
     },
     {
       "file": "server/services/agent-residency.js",

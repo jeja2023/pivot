@@ -619,6 +619,7 @@ function createAgentWorkbenchSandbox() {
         'agent-run-renderers.js',
         'agent-run-utils.js',
         'agent-run-tool-labels.js',
+        'agent-run-embed-renderers.js',
         'agent-run-step-renderers.js',
         'agent-run-visuals.js',
         'agent-run-loaders.js',

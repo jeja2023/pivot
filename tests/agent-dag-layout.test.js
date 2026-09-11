@@ -333,6 +333,27 @@ test('DAG editor supports infinite canvas coordinates and explicit view controls
     assert.match(minimap, /\.pivot-dag-viewport-controls/);
 });
 
+test('workflow editor exposes the embedded page node and its safe result renderer', () => {
+    const presets = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-node-presets.js'), 'utf8');
+    const renderer = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-step-renderers.js'), 'utf8');
+    const embedRenderer = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agent-run-embed-renderers.js'), 'utf8');
+    const workflowRuntime = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-tools-workflow-nodes.js'), 'utf8');
+
+    assert.match(presets, /title: '嵌入页面'/);
+    assert.match(presets, /toolName: 'workflow\.embed_page'/);
+    assert.match(workflowRuntime, /['"]workflow\.embed_page['"]/);
+    assert.match(workflowRuntime, /type: 'embedded_page'/);
+    assert.match(workflowRuntime, /type: 'embedded_image'/);
+    assert.match(workflowRuntime, /type: 'embedded_video'/);
+    assert.match(workflowRuntime, /type: 'embedded_audio'/);
+    assert.match(workflowRuntime, /type: 'link_card'/);
+    assert.match(workflowRuntime, /type: 'embed_code'/);
+    assert.match(renderer, /agentWorkflowEmbedCodeMarkup/);
+    assert.match(embedRenderer, /agentWorkflowEmbeddedPageMarkup/);
+    assert.match(embedRenderer, /agentWorkflowEmbedCodeMarkup/);
+    assert.match(embedRenderer, /sandbox="allow-forms allow-modals allow-popups allow-presentation allow-scripts"/);
+});
+
 test('visual SQL wizard styles are bundled with agent workspaces', () => {
     const workspaceCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'chat.workspace.agent.entry.css'), 'utf8');
     const wizard = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard.js'), 'utf8');

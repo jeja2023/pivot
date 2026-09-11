@@ -1,6 +1,7 @@
 // 自动化增强回归测试：cron 调度、部门可见性和工作流触发器
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const crypto = require('node:crypto');
 const { sql } = require('../server/db/statements');
 
 const {
@@ -32,7 +33,7 @@ const {
     normalizeSlug,
     updateWorkflowCredential
 } = require('../server/services/workflow-credentials');
-const { configureAgentTriggers, pollDatabaseTrigger } = require('../server/services/agent-triggers');
+const { assertWebhookSignature, configureAgentTriggers, pollDatabaseTrigger } = require('../server/services/agent-triggers');
 
 function at(text) {
     return new Date(text.replace(' ', 'T'));
@@ -43,6 +44,15 @@ function format(date) {
     const pad = n => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+test('Webhook HMAC 签名校验拒绝过期请求并接受当前请求', () => {
+    const token = 'wht_' + 'a'.repeat(48);
+    const payload = { eventId: 'evt-1', value: 2 };
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = crypto.createHmac('sha256', token).update(`${timestamp}.${JSON.stringify(payload)}`).digest('hex');
+    assert.doesNotThrow(() => assertWebhookSignature(token, payload, { timestamp: String(timestamp), signature }));
+    assert.throws(() => assertWebhookSignature(token, payload, { timestamp: String(timestamp - 600), signature }), /时间戳/);
+});
 
 test('cron 表达式解析支持通配、步长、区间和列表', () => {
     const parsed = parseCronExpression('*/30 9-17 * * 1-5');

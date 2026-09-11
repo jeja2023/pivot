@@ -16,6 +16,7 @@ const {
     isTenantAdmin,
     resolveAccessSubjects
 } = require('./agent-skill-access');
+const { isSuperAdmin } = require('../permissions');
 const {
     chooseRolloutRelease,
     normalizeBreakerThresholds
@@ -626,15 +627,26 @@ async function resolvePublishedSkill(name, user) {
 }
 
 async function publishWorkflowRelease(workflowId, user, input = {}) {
+    if (input.fixedEvaluationRequired === false) {
+        if (!isSuperAdmin(user)) throw invalid('只有系统管理员可以紧急跳过工作流评测门禁。', 403, 'WORKFLOW_BREAK_GLASS_FORBIDDEN');
+        if (String(input.breakGlassReason || '').trim().length < 10) throw invalid('紧急跳过评测门禁必须填写至少 10 个字符的原因。', 400, 'WORKFLOW_BREAK_GLASS_REASON_REQUIRED');
+    }
     const tenantForAdmin = input.allowTenantAdmin === true && isTenantAdmin(user)
         ? (input.tenantId || await getPrimaryTenantId(user.id))
         : null;
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current', { allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     if (!resolved) return null;
     let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
+    if (evaluation && Number(evaluation.run?.target_snapshot?.workflowVersionId || 0) !== Number(resolved.version_id)) evaluation = null;
     if (!evaluation) {
-        const latest = await queryOne("SELECT er.id FROM agent_eval_runs er JOIN agent_eval_suites s ON s.id = er.suite_id WHERE er.user_id = ? AND s.workflow_id = ? AND er.status = 'completed' ORDER BY er.created_at DESC LIMIT 1", [user.id, resolved.workflow.id]);
-        if (latest) evaluation = await getAgentEvalRun(latest.id, user);
+        const candidates = await query("SELECT er.id FROM agent_eval_runs er JOIN agent_eval_suites s ON s.id = er.suite_id WHERE er.user_id = ? AND s.workflow_id = ? AND er.status = 'completed' ORDER BY er.created_at DESC LIMIT 50", [user.id, resolved.workflow.id]);
+        for (const candidate of candidates) {
+            const item = await getAgentEvalRun(candidate.id, user);
+            if (Number(item?.run?.target_snapshot?.workflowVersionId || 0) === Number(resolved.version_id)) {
+                evaluation = item;
+                break;
+            }
+        }
     }
     if (input.fixedEvaluationRequired !== false && (!evaluation?.run || Number(evaluation.run.summary?.passRate || 0) < Number(input.minPassRate || 80))) throw invalid('工作流固定评测集未通过发布门禁。', 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
     const rollout = normalizeRollout(input);
@@ -665,6 +677,8 @@ async function rollbackWorkflowRelease(id, user) {
         const previous = await queryOne('SELECT workflow_version_id FROM agent_workflow_releases WHERE id = ?', [release.previous_release_id]);
         await execute("UPDATE agent_workflow_releases SET status = 'published' WHERE id = ?", [release.previous_release_id]);
         await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [previous?.workflow_version_id || null, now, now, release.workflow_id, user.id]);
+    } else {
+        await execute('UPDATE agent_workflows SET published_version_id = NULL, published_at = NULL, updated_at = ? WHERE id = ?', [now, release.workflow_id]);
     }
     return queryOne('SELECT * FROM agent_workflow_releases WHERE id = ?', [id]);
 }

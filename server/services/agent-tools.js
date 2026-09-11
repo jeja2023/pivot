@@ -30,9 +30,16 @@ const {
     executeReportCompose,
     executeWorkflowCondition,
     executeWorkflowDelay,
+    executeWorkflowEmbedAudio,
+    executeWorkflowEmbedImage,
+    executeWorkflowEmbedPage,
+    executeWorkflowEmbedVideo,
+    executeWorkflowEmbedCode,
     executeWorkflowForeach,
     executeWorkflowInput,
+    executeWorkflowLinkCard,
     executeWorkflowOutput,
+    getWorkflowPresentationToolDefinitions,
     renderWorkflowValue
 } = require('./agent-tools-workflow-nodes');
 const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } = require('./agent-tools-artifacts');
@@ -159,6 +166,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.code',
             title: '代码执行',
+            requiresSandbox: true,
             description: '仅允许在独立受控 Worker 沙箱中执行 JavaScript；服务端进程不直接执行。对上游数据做转换、计算、过滤或格式整理时用 return 返回结果。',
             input_schema: asJsonSchema({
                 code: { type: 'string', description: '要执行的 JS 代码，使用 return 返回结果。可直接引用 vars 中定义的变量名。' },
@@ -266,6 +274,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.foreach',
             title: '循环 / 批处理',
+            requiresSandbox: true,
             description: '仅允许在独立受控 Worker 沙箱中对数组逐项执行 JavaScript 转换，并汇总结果和错误。',
             input_schema: asJsonSchema({
                 items: { type: 'array' },
@@ -295,6 +304,7 @@ function getBuiltInToolDefinitions(user) {
                 reason: { type: 'string' }
             })
         },
+        ...getWorkflowPresentationToolDefinitions(asJsonSchema),
         {
             name: 'report.compose',
             title: '报告编排',
@@ -853,6 +863,12 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         if (context.workflowDelayResult) return context.workflowDelayResult;
         return executeWorkflowDelay(input, context);
     }
+    if (name === 'workflow.embed_page') return executeWorkflowEmbedPage(input);
+    if (name === 'workflow.embed_image') return executeWorkflowEmbedImage(input);
+    if (name === 'workflow.embed_video') return executeWorkflowEmbedVideo(input);
+    if (name === 'workflow.embed_audio') return executeWorkflowEmbedAudio(input);
+    if (name === 'workflow.link_card') return executeWorkflowLinkCard(input);
+    if (name === 'workflow.embed_code') return executeWorkflowEmbedCode(input);
     if (name === 'report.compose') return executeReportCompose(input);
 
     if (name === 'rag.search') {

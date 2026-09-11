@@ -15,6 +15,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const cors = require('cors');
 const helmet = require('helmet');
+const { getWorkflowEmbedAllowedOrigins } = require('./services/workflow-embed-policy');
 const { logger, httpLogger } = require('./logger');
 const {
     metricsMiddleware,
@@ -171,7 +172,9 @@ app.use(helmet({
             "script-src": ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`, "blob:"],
             "script-src-elem": ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`, "blob:"],
             "script-src-attr": ["'none'"],
-            "img-src": ["'self'", "data:", "blob:"],
+            "img-src": ["'self'", "data:", "blob:", ...getWorkflowEmbedAllowedOrigins()],
+            "media-src": ["'self'", ...getWorkflowEmbedAllowedOrigins()],
+            "frame-src": ["'self'", ...getWorkflowEmbedAllowedOrigins()],
             "style-src": ["'self'", "'unsafe-inline'"],
             "connect-src": ["'self'"],
             "upgrade-insecure-requests": null

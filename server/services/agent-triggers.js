@@ -38,6 +38,20 @@ function hashTriggerToken(token) {
     return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
+function assertWebhookSignature(token, payload, meta = {}) {
+    const timestamp = String(meta.timestamp || '').trim();
+    const signature = String(meta.signature || '').trim().replace(/^sha256=/i, '');
+    const timestampNumber = Number(timestamp);
+    if (!/^\d+$/.test(timestamp) || !Number.isFinite(timestampNumber) || Math.abs(Date.now() - timestampNumber * 1000) > 5 * 60 * 1000) {
+        throw invalid('Webhook 签名时间戳无效或已过期。', 401);
+    }
+    if (!/^[0-9a-f]{64}$/i.test(signature)) throw invalid('Webhook 签名格式无效。', 401);
+    const expected = crypto.createHmac('sha256', String(token || '')).update(`${timestamp}.${JSON.stringify(payload)}`).digest('hex');
+    if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+        throw invalid('Webhook 签名校验失败。', 401);
+    }
+}
+
 function generateTriggerToken() {
     return `wht_${crypto.randomBytes(24).toString('hex')}`;
 }
@@ -63,6 +77,7 @@ function normalizeTriggerConfig(triggerType, raw = {}) {
             staticInputs: normalizeDagInputsPayload(config.staticInputs ?? config.static_inputs ?? {}),
             // 幂等字段路径：取到值后作为去重键，重复推送只会创建一个任务
             dedupePath: String(config.dedupePath ?? config.dedupe_path ?? '').trim().slice(0, 120),
+            requireSignature: config.requireSignature === true || config.require_signature === true,
             goalTemplate: String(config.goalTemplate ?? config.goal_template ?? '').trim().slice(0, 2000)
         };
     }
@@ -334,6 +349,9 @@ async function dispatchWebhookTrigger(token, payload = {}, meta = {}) {
     if (!user) return null;
 
     const config = parseJson(trigger.config_json, {});
+    if (config.requireSignature === true || config.require_signature === true) {
+        assertWebhookSignature(token, payload, meta);
+    }
     const inputs = { ...(config.staticInputs || {}) };
     Object.entries(config.inputMapping || {}).forEach(([inputName, pathText]) => {
         const value = readByPath(payload, pathText);
@@ -342,9 +360,10 @@ async function dispatchWebhookTrigger(token, payload = {}, meta = {}) {
     // 未配置映射时把整个 payload 作为 payload 输入，便于工作流内自行取值
     if (!Object.keys(config.inputMapping || {}).length) inputs.payload = payload;
 
+    const headerIdempotencyKey = String(meta.idempotencyKey || '').trim().slice(0, 180);
     const dedupeValue = config.dedupePath ? readByPath(payload, config.dedupePath) : null;
     const dedupeKey = dedupeValue === undefined || dedupeValue === null || dedupeValue === ''
-        ? null
+        ? (headerIdempotencyKey ? `trigger:${trigger.id}:header:${headerIdempotencyKey}` : null)
         : `trigger:${trigger.id}:${String(dedupeValue).slice(0, 160)}`;
 
     try {
@@ -570,6 +589,7 @@ module.exports = {
     createWorkflowTrigger,
     deleteWorkflowTrigger,
     dispatchWebhookTrigger,
+    assertWebhookSignature,
     hashTriggerToken,
     listWorkflowTriggers,
     pollDatabaseTrigger,
