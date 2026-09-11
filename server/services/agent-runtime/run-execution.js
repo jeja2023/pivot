@@ -348,6 +348,7 @@ const {
         });
 
         if (dagRun) {
+            assertRunNotCancelled(runId);
             await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
             await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps(runController.signal));
             return;
@@ -859,8 +860,8 @@ const {
             return;
         }
         logger.error({ err: e.message, runId }, '智能体运行失败');
-        if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId)) {
-            const currentStatus = await getRunStatus(runId);
+        const currentStatus = await getRunStatus(runId);
+        if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId) || currentStatus === 'cancelled') {
             if (currentStatus !== 'cancelled' && currentStatus !== 'deleted') {
                 await updateRun(runId, {
                     status: 'cancelled',
@@ -903,7 +904,6 @@ const {
                     ? `已完成 ${observations.length} 项执行观察，但未能生成完整总结。`
                     : '任务在产生可用总结前被中止。';
             }
-            const currentStatus = await getRunStatus(runId);
             if (!TERMINAL_STATUSES.has(currentStatus)) {
                 await updateRun(runId, {
                     status: 'completed_with_errors',
@@ -917,10 +917,13 @@ const {
             }
             return;
         }
+        if (currentStatus === 'cancelled' || currentStatus === 'deleted' || isRunCancelled(runId)) {
+            return;
+        }
         const retryRow = await queryOne('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?', [runId]);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
-        if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT') {
+        if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT' && e.code !== 'AGENT_INVALID_STATUS_TRANSITION') {
             const resumeContext = await buildAgentResumeContext(runId);
             const retryAttempt = retryCount + 1;
             const retryDelayMs = calculateAgentRetryDelayMs(retryAttempt);
@@ -951,8 +954,8 @@ const {
             enqueueAgentRun(runId, (await getRunUser(runId)) || user, { retryAfter });
             return;
         }
-        const currentStatus = await getRunStatus(runId);
-        if (TERMINAL_STATUSES.has(currentStatus)) return;
+        const latestStatus = await getRunStatus(runId);
+        if (TERMINAL_STATUSES.has(latestStatus)) return;
         await updateRun(runId, {
             status: 'error',
             error_message: e.message,

@@ -36,6 +36,10 @@ function isRunCancelled(runId) {
     }
 
 async function cancelAgentRun(runId, user) {
+    const abortError = new Error('智能体运行已被用户主动取消。');
+    abortError.code = 'AGENT_RUN_CANCELLED';
+    activeRunControllers.get(runId)?.abort(abortError);
+
     const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (!ACTIVE_STATUSES.has(run.status)) return run;
@@ -60,9 +64,6 @@ async function cancelAgentRun(runId, user) {
     for (const child of childRuns) {
         await cancelAgentRun(child.id, user);
     }
-    const abortError = new Error('智能体运行已被用户主动取消。');
-    abortError.code = 'AGENT_RUN_CANCELLED';
-    activeRunControllers.get(runId)?.abort(abortError);
     const steps = await listSteps(runId);
     await insertStep(runId, (steps || []).length + 1, {
         type: 'control',
