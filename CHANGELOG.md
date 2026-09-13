@@ -1,4 +1,38 @@
+## [v0.1.136] - 2026-09-13
+
+### 全项目前端样式体系架构重构与加载漏洞彻底修复
+
+**背景与根因分析**：
+对全项目前端样式加载机制（包含首屏常驻壳 `chat.shell.css` 与 5 大独立工作区按需加载包 `apps / agent / knowledge / mcp / settings`）进行系统级静态审计与冲突扫描，发现并彻底根治了四类关键缺陷：
+1. **DOM 容器错位导致 JS 运行时异常**：全屏图片查看器（`#image-viewer-modal`）与文档附件预览弹窗（`#attachment-preview-modal`）被误置于设置页的懒加载片段 `usage-api-account.html` 中，普通用户在未曾打开“设置”页面的情况下点击聊天图片抛出 `TypeError: Cannot set properties of null (setting 'src')`，点击附件卡片无法唤起预览；
+2. **核心聊天与通告样式被隔离在设置包中**：聊天文档卡片（`.doc-card*`）、附件预览弹窗、移动端适配规则以及用户端通告组件（横幅 `.announcement-banner`、铃铛 `.announcement-bell`、通知中心 `.announcement-center`、强制确认 `.announcement-ack-modal`）原本全部定义在仅供管理员设置页面加载的 `admin-chat-attachments.css` 与 `admin-announcements.css` 中，导致普通用户端严重漏加载；
+3. **跨工作区时序竞争覆盖与选择器污染**：Agent 工作台样式中跨界定义了 `.mcp-layout` 及 `.mcp-form, .mcp-list-wrap { padding: 12px; }`，导致用户先进入 MCP 再进入 Agent 时，MCP 工作区的表单与列表 padding 被后加载的 CSS 篡改缩水；MCP 样式中跨界修改 Knowledge 按钮尺寸；以及监控页与知识库重复声明 `@keyframes rag-debug-spin` 动画冲突；
+4. **HTML 片段内联样式污染与微型按钮工具类缺失**：`admin-extra-modals.html` 底层存在未抽离的内联 `<style>` 标签，且全局缺少系统级微型按钮规范 `.btn-xs`。
+
+**修复与优化成果**：
+- **核心聊天附件与全屏预览合流（DOM 归位 + 样式常驻）**：
+  - 将 `#image-viewer-modal` 与 `#attachment-preview-modal` 从 `usage-api-account.html` 迁入首屏常驻模态容器 `pre-app-modals.html`，彻底消除图片点击时的 DOM null 报错，实现聊天图片全屏缩放与文档卡片预览首屏即用。
+  - 将文档卡片样式（`.doc-card*`）、预览弹窗样式移入基础包 `attachments.css`，并规范聊天气泡内缩略图高度为 140px，消除与 `markdown.css` 的视觉突变；将移动端主聊天 `@media (max-width: 720px)` 规则移入 `chat-shell.css`。
+  - 补充并完善了附件卡片与预览弹窗在深色模式（`body.dark-mode`）下的主题适配。
+  - `admin-chat-attachments.css` 精简为仅保留设置工作区辅助文字色，不含任何跨界聊天样式。
+- **用户端通告系统彻底解耦与全量常驻**：
+  - 新建首屏通告样式模块 `client/chat/styles/base/announcements-shell.css`，完整收拢通告横幅、侧边栏铃铛、通知中心抽屉及强制确认弹窗样式，经由 `core.css` 编译入 `chat.shell.css`；
+  - 针对深色模式对通告横幅、未读状态卡片及确认弹窗进行了低对比度防刺眼适配；
+  - `admin-announcements.css` 仅保留管理员后台的编辑器表单、详情模态与管理表格，解除用户端对管理员样式的错误依赖。
+- **清除跨工作区时序覆盖与样式污染**：
+  - `agent-layout.css` 彻底删除 `.mcp-layout`，剔除对 `.mcp-form, .mcp-list-wrap` 的 padding 覆盖，固化独立的 `.agent-history-panel`，杜绝时序竞争导致的 MCP 表单布局缩水 Bug。
+  - `mcp-call-logs.css` 移除所有 `.rag-actions` 跨界规则，由 `knowledge.css` 统一规范化定义知识库 `.rag-actions` 操作按钮组及 `#rag-debug-btn:active` 点击态。
+  - `stats-monitor-common.css` 删除与 `knowledge.css` 完全重复的 `.rag-debug-modal*` 与 `@keyframes rag-debug-spin`，消除多包动画声明冲突。
+- **内联样式清除与通用组件标准化**：
+  - 彻底移除了 `admin-extra-modals.html` 底部的内联 `<style>` 标签。
+  - 在全局组件规范 `theme.css` 中补齐并规范化了 `.btn-xs`（统一高度 24px、字号 0.72rem）与 `.btn-red-outline`（支持深色模式自适应，满足打印弹窗关闭及管理员危险操作）。
+- **自动化构建与全量测试门禁**：
+  - 重新编译全部 6 个 CSS bundle（`chat.shell.css`, `apps`, `agent`, `knowledge`, `mcp`, `settings`）；
+  - `node scripts/check_chat_assets.js` 32 个模板片段平衡性与 76 个样式导入图谱检测 100% 通过（0 孤儿 CSS，SHA256 散列校验一致）；
+  - `npm run check:standards`、`npm run lint`（ESLint 0 报错）与业务/安全契约测试全量通过。
+
 ## [v0.1.135] - 2026-09-11
+
 
 ### 会话列表滚动条悬停显示机制重构（JS 类切换方案）
 

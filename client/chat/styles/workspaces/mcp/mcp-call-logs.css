@@ -144,22 +144,11 @@
 }
 
 .mcp-card-actions .btn-secondary,
-.mcp-card-actions .btn-danger-outline,
-.workspace-modal .rag-actions .btn-secondary,
-.workspace-modal .rag-actions .btn-danger {
+.mcp-card-actions .btn-danger-outline {
     height: 28px;
     padding: 0 9px;
     font-size: 0.72rem;
     border-radius: 7px;
-}
-
-.knowledge-workspace-modal .rag-actions .btn-secondary,
-.knowledge-workspace-modal .rag-actions .btn-danger {
-    height: 22px;
-    min-height: 22px;
-    padding: 0 7px;
-    font-size: 0.66rem;
-    border-radius: 6px;
 }
 
 .error-text {

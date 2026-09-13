@@ -100,6 +100,28 @@ body { font-family: "Inter", "Microsoft YaHei", sans-serif; background: var(--bg
 }
 .btn-danger:hover { background: #fee2e2; }
 
+.btn-xs {
+    height: 24px !important;
+    min-height: 24px !important;
+    padding: 0 8px !important;
+    font-size: 0.72rem !important;
+    line-height: 1 !important;
+    border-radius: var(--radius-sm, 6px);
+}
+
+.btn-red-outline {
+    background: transparent;
+    border: 1px solid var(--danger, #ef4444) !important;
+    color: var(--danger, #ef4444) !important;
+}
+.btn-red-outline:hover {
+    background: rgba(239, 68, 68, 0.08);
+}
+body.dark-mode .btn-red-outline:hover {
+    background: rgba(239, 68, 68, 0.16);
+}
+
+
 /* 输入框规范 */
 .form-input {
     width: 100%; padding: 10px 14px; background: var(--surface);

@@ -728,13 +728,19 @@
     font-weight: 600;
 }
 
-.knowledge-panel .rag-actions {
+.knowledge-panel .rag-actions,
+.knowledge-workspace-modal .rag-actions,
+.workspace-modal .rag-actions {
     height: 22px;
     gap: 4px;
 }
 
 .knowledge-panel .rag-actions .btn-secondary,
-.knowledge-panel .rag-actions .btn-danger {
+.knowledge-panel .rag-actions .btn-danger,
+.knowledge-workspace-modal .rag-actions .btn-secondary,
+.knowledge-workspace-modal .rag-actions .btn-danger,
+.workspace-modal .rag-actions .btn-secondary,
+.workspace-modal .rag-actions .btn-danger {
     height: 22px;
     min-height: 22px;
     padding: 0 7px;
@@ -841,6 +847,12 @@
     opacity: 0.72;
     transform: none !important;
     box-shadow: none;
+}
+
+#rag-debug-btn:active {
+    transform: scale(0.96);
+    box-shadow: none;
+    opacity: 0.8;
 }
 
 .rag-debug-loading {
