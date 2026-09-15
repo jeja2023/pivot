@@ -79,7 +79,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const cache = await caches.open(VENDOR_CACHE);
-    const cached = await cache.match(event.request);
+    const cached = await cache.match(event.request, { ignoreSearch: true });
     if (cached) return cached;
     const response = await fetch(event.request);
     if (response && response.status === 200 && response.type === 'basic') {

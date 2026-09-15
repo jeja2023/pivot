@@ -1,3 +1,37 @@
+## [v0.1.137] - 2026-09-15
+
+### 修复首屏 DOMPurify 异步加载竞态与 SafeHtml 回退文本乱码缺陷
+
+**背景与根因分析**：
+在生产广域网（WAN）环境（如部署在远程公网服务器）首次打开 Web 页面时，出现以下异常现象：
+1. **SVG 图标代码外露与文本乱码**：个人工作台中的各统计卡片（“需要我处理”、“我的自动化”、“已完成成果”）、待办空状态图标、常用入口及继续工作列表均直接渲染出 `<svg width="20" height="20" viewBox="0 0 24 24"...>` 原始 XML 代码文本；
+2. **工作区按钮异常无法切换**：侧边栏与快捷入口中的“应用”、“智能体”、“知识库”、“MCP 工具”与“系统设置”按钮点击报错或无响应，仅默认嵌入的聊天页面可展示；
+3. **对话页面内操作按钮异常**：切换至对话页面后，消息底部的分叉（Fork）、重新生成（Regenerate）、删除及模型指示器图标也出现原始 SVG 代码；
+4. **过一会儿自动恢复正常**：当后续触发重渲染且 DOMPurify 就绪后，页面自愈。
+
+经深入代码链路与加载时序排查，定位到三个核心诱因：
+- **`client/chat/safe-html.js` 破坏性回退实现**：`PivotSafeHtml.setHtml` 与 `prependHtml` 在 `!window.DOMPurify` 分支下粗暴执行了 `element.textContent = raw` 与 `element.prepend(document.createTextNode(raw))`。导致传入的任何 HTML/SVG 标记均退化为纯文本字符串节点；`workspace-template-loader.js` 加载动态工作区模板时因此无法在 DOM 树中生成面板根节点，`document.getElementById(panelId)` 始终返回 `null` 并抛出根节点缺失异常，阻断全部懒加载工作区；
+- **第三方核心库时序竞争与 Defer 竞态**：`client/chat/chat.html` 将核心安全依赖 `purify.min.js` 设为 `defer` 且未携带版本号 `?v=__APP_VERSION__`。在广域网生产环境网络延迟或 Service Worker 接管首屏的瞬间，首屏渲染与用户数据接口返回先于 `purify.min.js` 完成执行，击穿了安全插入点；
+- **Service Worker 缓存参数严格匹配**：`client/sw.js` 在处理 vendor 缓存时默认严格比对完整 URL，带版本参数的请求绕过了 CacheStorage 预缓存。
+- **前期开发规范门禁 69 项残留**：修复了在 `pre-app-modals.html`、`announcements-shell.css`、`attachments.css` 和 `theme.css` 中的 69 项内联样式与硬编码颜色问题。
+
+**修复与优化成果**：
+- **安全原生 DOM 净化回退器（`sanitizeDomFallback`）**：
+  - 重构 `client/chat/safe-html.js` 中的 `setHtml` 与 `prependHtml`，彻底移除 `element.textContent = raw` 破坏性回退；
+  - 内置原生 DOM 树安全净化器，在 DOMPurify 尚未就绪的极短时间窗口内，深度递归剔除所有高危标签（`script`, `style`, `iframe`, `frame`, `object`, `embed`, `base`, `meta`, `link`, `form`）、内联事件属性（`on*`）以及伪协议（`javascript:`, `vbscript:`, `data:text/html`），同时完整保留安全的 SVG、MathML 和 HTML 结构；
+  - 杜绝任何原始代码直接暴露为界面文本，确保即使在极低网速或离线瞬态下，图标与懒加载工作区根节点均能正确生成挂载；
+  - 增加动态环境探测与补载机制，缺失时主动触发异步拉取。
+- **核心安全库同步预加载与版本固化**：
+  - `client/chat/chat.html` 将 `/common/vendor/purify.min.js` 调整为 `<head>` 中前置同步加载，并附带 `?v=__APP_VERSION__` 强缓存一致性校验，确保所有 `<body>` 片段及业务脚本执行前安全层绝对就绪；
+  - `/common/vendor/marked.min.js` 同步追加 `?v=__APP_VERSION__`。
+- **Service Worker Vendor 预缓存极速命中**：
+  - 在 `client/sw.js` 的资源匹配中增加 `{ ignoreSearch: true }`，使附带版本号的 vendor 资源直接命中 CacheStorage，规避网络抖动。
+- **前端开发规范全面达标**：
+  - 修复 `client/chat/partials/pre-app-modals.html`、`client/chat/styles/base/announcements-shell.css`、`client/chat/styles/base/attachments.css` 和 `client/common/styles/theme.css` 中 69 项开发规范检查问题，重构编译 `chat.shell.css`。
+- **安全回归测试固化**：
+  - 在 `tests/security-chat/rendering-streams.js` 补充无 DOMPurify 状态下的 DOM 节点保留与 XSS 过滤防护单测（30/30 项全部通过）；
+  - 全量通过 `check:standards`、`check:standards:changed`、`check:text`、`eslint .`。
+
 ## [v0.1.136] - 2026-09-13
 
 ### 全项目前端样式体系架构重构与加载漏洞彻底修复

@@ -109,16 +109,19 @@ body { font-family: "Inter", "Microsoft YaHei", sans-serif; background: var(--bg
     border-radius: var(--radius-sm, 6px);
 }
 
-.btn-red-outline {
+.btn-red-outline,
+.btn-danger-outline {
     background: transparent;
     border: 1px solid var(--danger, #ef4444) !important;
     color: var(--danger, #ef4444) !important;
 }
-.btn-red-outline:hover {
-    background: rgba(239, 68, 68, 0.08);
+.btn-red-outline:hover,
+.btn-danger-outline:hover {
+    background: var(--danger-subtle-hover, rgba(239, 68, 68, 0.08));
 }
-body.dark-mode .btn-red-outline:hover {
-    background: rgba(239, 68, 68, 0.16);
+body.dark-mode .btn-red-outline:hover,
+body.dark-mode .btn-danger-outline:hover {
+    background: var(--danger-subtle-hover-dark, rgba(239, 68, 68, 0.16));
 }
 
 

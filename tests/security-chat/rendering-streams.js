@@ -38,6 +38,101 @@ test('DOMPurify 不可用时安全 HTML 兜底会转义输入', () => {
     );
 });
 
+test('DOMPurify 不可用时 safe-html setHtml 会安全保留 SVG 和模板结构且剔除高危脚本', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'safe-html.js'), 'utf8');
+
+    function createMockElement(tagName = 'div') {
+        const el = {
+            tagName: tagName.toUpperCase(),
+            attributes: [],
+            childNodes: [],
+            innerHTML: '',
+            textContent: '',
+            replaceChildren(...nodes) { this.childNodes = [...nodes]; },
+            prepend(...nodes) { this.childNodes = [...nodes, ...this.childNodes]; },
+            querySelectorAll(selector) {
+                const results = [];
+                const search = (node) => {
+                    for (const child of node.childNodes || []) {
+                        if (selector === '*' || (child.tagName && child.tagName.toLowerCase() === selector.toLowerCase())) {
+                            results.push(child);
+                        }
+                        search(child);
+                    }
+                };
+                search(this);
+                return results;
+            },
+            removeAttribute(attrName) {
+                this.attributes = this.attributes.filter(a => a.name.toLowerCase() !== attrName.toLowerCase());
+            },
+            remove() {
+                if (this.parent) {
+                    this.parent.childNodes = this.parent.childNodes.filter(c => c !== this);
+                }
+            }
+        };
+        return el;
+    }
+
+    const mockDocument = {
+        createElement: (tag) => createMockElement(tag),
+        scripts: []
+    };
+
+    const sandbox = {
+        window: { Pivot: { legacy: {} } },
+        document: mockDocument
+    };
+    vm.runInNewContext(source, sandbox);
+    const safeHtml = sandbox.window.Pivot.legacy.PivotSafeHtml;
+
+    // 1. 验证 SVG 图标输入：生成子节点而非退化为 textContent
+    const iconContainer = createMockElement('div');
+    const svgChild = createMockElement('svg');
+    const pathChild = createMockElement('path');
+    pathChild.parent = svgChild;
+    svgChild.childNodes = [pathChild];
+    svgChild.attributes = [{ name: 'viewBox', value: '0 0 24 24' }];
+
+    const origCreateElement = mockDocument.createElement;
+    mockDocument.createElement = (tag) => {
+        const node = origCreateElement(tag);
+        let _html = '';
+        Object.defineProperty(node, 'innerHTML', {
+            get() { return _html; },
+            set(val) {
+                _html = val;
+                if (val.includes('<svg')) {
+                    svgChild.parent = node;
+                    node.childNodes = [svgChild];
+                } else if (val.includes('<script')) {
+                    const scriptNode = createMockElement('script');
+                    scriptNode.parent = node;
+                    const spanNode = createMockElement('span');
+                    spanNode.attributes = [{ name: 'onclick', value: 'alert(1)' }];
+                    spanNode.parent = node;
+                    node.childNodes = [scriptNode, spanNode];
+                }
+            }
+        });
+        return node;
+    };
+
+    safeHtml.setHtml(iconContainer, '<svg viewBox="0 0 24 24"><path d="M7 20"/></svg>');
+    assert.equal(iconContainer.textContent, '', 'setHtml 不应把原始代码作为 textContent 输出');
+    assert.equal(iconContainer.childNodes.length, 1, 'setHtml 应保留 SVG 子节点');
+    assert.equal(iconContainer.childNodes[0].tagName, 'SVG');
+
+    // 2. 验证高危标签被剔除，内联事件被剥除
+    const hostileContainer = createMockElement('div');
+    safeHtml.setHtml(hostileContainer, '<script>alert(1)</script><span onclick="alert(1)">文本</span>');
+    assert.equal(hostileContainer.querySelectorAll('script').length, 0, 'script 标签必须被完全移除');
+    const span = hostileContainer.childNodes.find(c => c.tagName === 'SPAN');
+    assert.ok(span, '安全内容应被保留');
+    assert.equal(span.attributes.some(a => a.name === 'onclick'), false, '内联事件属性必须被移除');
+});
+
 test('聊天图片附件预览不会暴露浏览器破损图标', () => {
     const renderMessages = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'render-messages.js'), 'utf8');
     const attachmentsCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'attachments.css'), 'utf8');

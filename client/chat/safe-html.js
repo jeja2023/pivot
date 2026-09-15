@@ -37,31 +37,68 @@ let PivotSafeHtml;
         return document.createElement(tagName || 'div');
     }
 
+    const FORBIDDEN_TAGS = new Set([
+        'script', 'style', 'iframe', 'frame', 'object', 'embed', 'base', 'meta', 'link', 'form'
+    ]);
+    const DANGEROUS_PROTOCOLS = /^\s*(?:javascript|vbscript|data:text\/html)/i;
+
+    function sanitizeDomFallback(root) {
+        if (!root || !root.querySelectorAll) return;
+        FORBIDDEN_TAGS.forEach(tag => {
+            root.querySelectorAll(tag).forEach(el => el.remove());
+        });
+        const allElements = root.querySelectorAll('*');
+        allElements.forEach(el => {
+            const toRemove = [];
+            for (let i = 0; i < el.attributes.length; i++) {
+                const attr = el.attributes[i];
+                const name = attr.name.toLowerCase();
+                const val = attr.value;
+                if (name.startsWith('on')) {
+                    toRemove.push(attr.name);
+                } else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'data') && DANGEROUS_PROTOCOLS.test(val)) {
+                    toRemove.push(attr.name);
+                }
+            }
+            toRemove.forEach(attrName => el.removeAttribute(attrName));
+        });
+    }
+
     const setHtml = (element, html, options = {}) => {
         if (!element) return;
         const raw = String(html ?? '');
-        if (!window.DOMPurify) {
-            element.textContent = raw;
-            return;
-        }
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
-        DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+        if (window.DOMPurify) {
+            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+        } else {
+            sanitizeDomFallback(scratch);
+        }
         element.replaceChildren(...Array.from(scratch.childNodes));
     };
 
     const prependHtml = (element, html, options = {}) => {
         if (!element) return;
         const raw = String(html ?? '');
-        if (!window.DOMPurify) {
-            element.prepend(document.createTextNode(raw));
-            return;
-        }
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
-        DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+        if (window.DOMPurify) {
+            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+        } else {
+            sanitizeDomFallback(scratch);
+        }
         element.prepend(...Array.from(scratch.childNodes));
     };
+
+    if (typeof window !== 'undefined' && !window.DOMPurify && typeof document !== 'undefined') {
+        const hasScript = Array.from(document.scripts || []).some(s => (s.src || '').includes('purify.min.js'));
+        if (!hasScript && (document.head || document.documentElement)) {
+            const script = document.createElement('script');
+            script.src = '/common/vendor/purify.min.js';
+            script.async = true;
+            (document.head || document.documentElement).appendChild(script);
+        }
+    }
 
     const api = {
         escapeHtml,
