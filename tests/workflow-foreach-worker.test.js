@@ -18,7 +18,8 @@ test('workflow.foreach executes items in a separate controlled worker with bound
     assert.equal(result.count, 3);
     assert.equal(result.errors.length, 0);
     assert.equal(result.worker.code, 0);
-    assert.equal(result.worker.isolation.networkIsolation, 'policy-enforced');
+    const expectedNetworkIsolation = process.platform === 'linux' ? 'network-namespace-requested' : 'policy-enforced';
+    assert.equal(result.worker.isolation.networkIsolation, expectedNetworkIsolation);
     assert.equal(result.audit.requestedConcurrency, 2);
     assert.equal(result.audit.maxConcurrency, 2);
     assert.equal(result.audit.completedCount, 3);
