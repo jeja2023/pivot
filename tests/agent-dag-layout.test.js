@@ -406,4 +406,13 @@ test('workflow node presets are organized into approved 6 business categories', 
     assert.equal(counts['数据与文档'], 11);
     assert.equal(counts['流程与控制'], 14);
     assert.equal(counts['呈现与多媒体'], 10);
+
+    const startGroup = groups.find(group => group.group === '起始与交付');
+    const parameterDeclaration = startGroup.items.find(item => item.base === 'input');
+    assert.equal(startGroup.items[0].base, 'output');
+    assert.equal(parameterDeclaration.advanced, true);
+    assert.equal(parameterDeclaration.standalone, true);
+    assert.equal(parameterDeclaration.openWizard, true);
+    assert.equal(parameterDeclaration.title, '声明运行参数');
+    assert.equal(parameterDeclaration.input.name, '');
 });

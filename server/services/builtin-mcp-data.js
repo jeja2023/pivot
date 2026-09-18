@@ -48,7 +48,12 @@ function listDataProcessingTools() {
                 type: 'object',
                 properties: {
                     rows: { type: 'array', items: { type: 'object' } },
-                    groupBy: { type: 'string' },
+                    groupBy: {
+                        type: ['string', 'array'],
+                        items: { type: 'string' },
+                        minItems: 1,
+                        description: '一个或多个分组字段；兼容旧版单个字段字符串。'
+                    },
                     valueField: { type: 'string' },
                     aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
                     limit: { type: 'number', minimum: 1, maximum: 5000, description: '最多参与计算的输入行数。' },
@@ -118,8 +123,14 @@ function executeDataProcessingTool(_server, name, input = {}) {
     if (name === 'data.group_summary') {
         const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
-        const groupBy = String(input.groupBy || input.group_by || '').trim();
-        if (!groupBy) {
+        const rawGroupBy = input.groupBy ?? input.group_by;
+        const groupByFields = (Array.isArray(rawGroupBy) ? rawGroupBy : [rawGroupBy])
+            .flatMap(value => typeof value === 'string' ? value.split(',') : [value])
+            .map(value => String(value || '').trim())
+            .filter(Boolean)
+            .filter((field, index, items) => items.indexOf(field) === index)
+            .slice(0, 12);
+        if (!groupByFields.length) {
             const err = new Error('分组字段 groupBy 不能为空。');
             err.status = 400;
             throw err;
@@ -128,23 +139,28 @@ function executeDataProcessingTool(_server, name, input = {}) {
         const aggregation = String(input.aggregation || (valueField ? 'sum' : 'count')).toLowerCase();
         const grouped = new Map();
         rows.forEach(row => {
-            const key = String(row[groupBy] ?? '');
+            const groupValues = groupByFields.map(field => row[field] ?? '');
+            const key = JSON.stringify(groupValues);
             const bucket = grouped.get(key) || [];
-            bucket.push(row);
+            bucket.push({ row, groupValues });
             grouped.set(key, bucket);
         });
-        const items = Array.from(grouped.entries()).map(([key, groupRows]) => {
-            const values = valueField ? groupRows.map(row => toFiniteNumber(row[valueField])).filter(Number.isFinite) : [];
+        const items = Array.from(grouped.values()).map(groupRows => {
+            const values = valueField ? groupRows.map(item => toFiniteNumber(item.row[valueField])).filter(Number.isFinite) : [];
             let value = groupRows.length;
             if (aggregation === 'sum') value = values.reduce((sum, item) => sum + item, 0);
             if (aggregation === 'avg') value = values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0;
             if (aggregation === 'min') value = values.length ? Math.min(...values) : 0;
             if (aggregation === 'max') value = values.length ? Math.max(...values) : 0;
-            return { [groupBy]: key, value, count: groupRows.length };
+            const group = Object.fromEntries(groupByFields.map((field, index) => [field, groupRows[0]?.groupValues[index] ?? '']));
+            return { ...group, value, count: groupRows.length, group };
         });
         const outputLimit = Math.min(Math.max(Number(input.outputLimit || input.output_limit) || 5000, 1), 5000);
         return {
-            type: 'data_group_summary', source: buildInlineDataSource(), groupBy, valueField, aggregation,
+            type: 'data_group_summary', source: buildInlineDataSource(),
+            groupBy: groupByFields.length === 1 ? groupByFields[0] : groupByFields,
+            groupByFields,
+            valueField, aggregation,
             rowCount: Math.min(items.length, outputLimit),
             originalRowCount: requestedRows,
             limitApplied: rows.length < requestedRows || items.length > outputLimit,

@@ -96,7 +96,7 @@ const TOOL_GROUPS = [
 
 function toolShortName(tool) {
         const value = String(toolValue(tool) || '');
-        const match = value.match(/^(?:mcp\.\d+\.)?(.+)$/);
+        const match = value.match(/^(?:mcp\.[^.]+\.)?(.+)$/);
         return match ? match[1] : value;
     }
 

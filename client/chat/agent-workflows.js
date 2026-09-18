@@ -543,7 +543,7 @@ window.Pivot.legacy.bindAgentDagWorkbench = function() {
         jsonModal.dataset.boundAgentDagJsonOverlay = '1';
     }
     // 运行时输入面板刷新按钮
-    const inputsRefreshBtn = document.getElementById('agent-dag-inputs-refresh-btn');
+    const inputsRefreshBtn = document.getElementById('agent-dag-inputs-refresh-btn') || document.getElementById('agent-dag-inputs-refresh');
     if (inputsRefreshBtn && inputsRefreshBtn.dataset.boundInputsRefresh !== '1') {
         inputsRefreshBtn.dataset.boundInputsRefresh = '1';
         inputsRefreshBtn.addEventListener('click', refreshAgentDagInputsPanel);

@@ -169,6 +169,31 @@ test('数据分组汇总支持多种聚合方式且缺少 groupBy 时报 400', (
     );
 });
 
+test('数据分组汇总支持多个字段组合分组，并兼容旧版单字段写法', () => {
+    const rows = [
+        { 部门: '财务部', 状态: '已核销', 金额: 120 },
+        { 部门: '财务部', 状态: '待核销', 金额: 80 },
+        { 部门: '财务部', 状态: '已核销', 金额: 30 },
+        { 部门: '技术部', 状态: '已核销', 金额: 200 }
+    ];
+    const result = executeDataProcessingTool(null, 'data.group_summary', {
+        rows,
+        groupBy: ['部门', '状态'],
+        valueField: '金额',
+        aggregation: 'sum'
+    });
+    assert.deepEqual(result.groupBy, ['部门', '状态']);
+    assert.deepEqual(result.groupByFields, ['部门', '状态']);
+    const financePaid = result.rows.find(row => row.部门 === '财务部' && row.状态 === '已核销');
+    assert.equal(financePaid.value, 150);
+    assert.equal(financePaid.count, 2);
+    assert.deepEqual(financePaid.group, { 部门: '财务部', 状态: '已核销' });
+
+    const legacy = executeDataProcessingTool(null, 'data.group_summary', { rows, groupBy: '部门' });
+    assert.equal(legacy.groupBy, '部门');
+    assert.deepEqual(legacy.groupByFields, ['部门']);
+});
+
 test('报表目录工具只列出授权根目录内的白名单文件', async () => {
     const sandbox = createReportSandbox();
     try {

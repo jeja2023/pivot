@@ -1,9 +1,10 @@
 /* DAG 输入向导字段渲染（拆自 dag-wizard-input.js） */
+/* global buildSchemaReferenceTokens, buildWizardDataFieldOptions */
 
 
 
 
-        const renderWizardField = (name, schema = {}, value, required = false, dependencyNodes = [], tool = null, wizardTools = []) => {
+        const renderWizardField = (name, schema = {}, value, required = false, dependencyNodes = [], tool = null, wizardTools = [], nodeToolName = '', nodeTitle = '') => {
             const type = normalizeSchemaType(schema);
             const typeLabel = friendlySchemaTypeLabel(schema);
             const label = friendlyFieldLabel(name, schema, tool);
@@ -11,14 +12,71 @@
             const placeholder = friendlyFieldPlaceholder(name, schema, required, tool);
             const isEnum = Array.isArray(schema.enum) && schema.enum.length > 0;
             const fieldName = String(name || '');
+            const shortToolName = toolShortName(tool);
+            const normalizedToolNames = [...new Set([
+                nodeToolName,
+                tool?.fullName,
+                tool?.full_name,
+                tool?.name,
+                tool?.toolName,
+                tool?.tool_name,
+                shortToolName
+            ].map(item => String(item || '').trim().replace(/^mcp\.[^.]+\./i, '')).filter(Boolean))];
+            const matchesTool = toolName => normalizedToolNames.includes(toolName);
             const isDatabaseConnection = isDatabaseConnectionField(name, tool);
-            const isSubworkflowSelector = toolValue(tool) === 'workflow.subworkflow' && normalizeFieldKey(name) === 'workflowid';
-            const isContentReviewRecords = toolValue(tool) === 'agent.content_review' && normalizeFieldKey(name) === 'records';
-            const isDelayDuration = toolValue(tool) === 'workflow.delay' && normalizeFieldKey(name) === 'duration_ms';
-            const codeTextArea = type === 'array'
+            const isSubworkflowSelector = matchesTool('workflow.subworkflow') && normalizeFieldKey(name) === 'workflowid';
+            const isContentReviewRecords = matchesTool('agent.content_review') && normalizeFieldKey(name) === 'records';
+            const isContentReviewSourceField = matchesTool('agent.content_review')
+                && ['records', 'rows', 'data'].includes(normalizeFieldKey(name));
+            const isGroupSummaryGroupBy = normalizeFieldKey(name) === 'groupby'
+                && (matchesTool('data.group_summary')
+                    || /^(?:数据)?分组汇总(?:数据)?$/.test(String(tool?.title || '').trim())
+                    || /^(?:数据)?分组汇总(?:数据)?$/.test(String(nodeTitle || '').trim())
+                    || /一个或多个分组字段|多个字段组合/.test(String(schema?.description || ''))
+                    || Array.isArray(value));
+            const isApprovalTagField = matchesTool('workflow.approval')
+                && ['approvers', 'approveruserids', 'approverunits'].includes(normalizeFieldKey(name));
+            const isApprovalLevels = matchesTool('workflow.approval')
+                && normalizeFieldKey(name) === 'approvallevels';
+            const isBrowserTargetField = ['agent.browser', 'browser.click'].includes(shortToolName)
+                && normalizeFieldKey(name) === 'target';
+            const isReportPathField = ['reports.read_file_summary', 'reports.query_table', 'reports.compare_files'].includes(shortToolName)
+                && ['path', 'leftpath', 'rightpath'].includes(normalizeFieldKey(name));
+            const isArtifactSelector = /^artifactid$/i.test(fieldName) && /^artifact\./.test(shortToolName);
+            const isDataFieldSelector = /^(valuefield|xaxis|yaxis|idfield|titlefield|contentfield)$/i.test(fieldName);
+            const isColumnSelector = /^(columns|tablecolumns)$/i.test(fieldName) && type === 'array';
+            const isKeyValueMapField = type === 'object'
+                && /^(filters|renamemap|fields|headers|body|vars|inputs|sections)$/i.test(fieldName)
+                && (!value || (typeof value === 'object' && !Array.isArray(value)));
+            const isDelayDuration = matchesTool('workflow.delay') && normalizeFieldKey(name) === 'duration_ms';
+            const dataFieldOptions = (isGroupSummaryGroupBy || isDataFieldSelector || isColumnSelector || isKeyValueMapField)
+                && typeof buildWizardDataFieldOptions === 'function'
+                ? buildWizardDataFieldOptions(dependencyNodes)
+                : [];
+            const groupByFields = (Array.isArray(value) ? value : [value])
+                .flatMap(item => typeof item === 'string' ? item.split(',') : [item])
+                .map(item => String(item || '').trim())
+                .filter(Boolean)
+                .filter((item, index, items) => items.indexOf(item) === index);
+            const isStructuredReferenceField = !isGroupSummaryGroupBy
+                && !isApprovalTagField
+                && !isApprovalLevels
+                && !isBrowserTargetField
+                && !isDataFieldSelector
+                && !isColumnSelector
+                && !isKeyValueMapField
+                && (isContentReviewSourceField || type === 'array' || type === 'object');
+            const codeTextArea = !isStructuredReferenceField
+                && !isDataFieldSelector
+                && !isColumnSelector
+                && !isKeyValueMapField
+                && !isApprovalTagField
+                && !isReportPathField
+                && !isArtifactSelector
+                && (type === 'array'
                 || type === 'object'
                 || isContentReviewRecords
-                || /rows|sections|sql|json/i.test(fieldName);
+                || /rows|sections|sql|json/i.test(fieldName));
             const wideRichTextArea = /content|instructions|markdown|message|prompt/i.test(fieldName);
             const proseTextArea = /query|summary|text/i.test(fieldName);
             const useTextArea = codeTextArea || wideRichTextArea || proseTextArea;
@@ -26,10 +84,81 @@
                 ? String(Math.max(0, Number(value ?? schema.default ?? 0)) / 1000)
                 : formatWizardFieldValue(schema, value);
             const suggestions = isDatabaseConnection ? [] : buildWizardFieldSuggestions(name, schema, dependencyNodes);
-            const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].includes(toolValue(tool)) && normalizeFieldKey(name) === 'model';
+            const supportsStructuredReference = isStructuredReferenceField || isApprovalLevels || isBrowserTargetField;
+            const structuredReferenceOptions = supportsStructuredReference
+                ? [...new Map([
+                    ...suggestions
+                        .filter(item => /^\{\{nodes\./.test(String(item.token || '')))
+                        .map(item => [item.token, { token: item.token, label: item.label }]),
+                    ...dependencyNodes.flatMap(depNode => {
+                        const title = depNode.title || depNode.id;
+                        return [
+                            { token: `{{nodes.${depNode.id}.output}}`, label: `${title} · 完整结果` },
+                            { token: `{{nodes.${depNode.id}.output.rows}}`, label: `${title} · 数据行` },
+                            { token: `{{nodes.${depNode.id}.output.data}}`, label: `${title} · data` },
+                            { token: `{{nodes.${depNode.id}.output.items}}`, label: `${title} · items` },
+                            { token: `{{nodes.${depNode.id}.output.structuredContent.rows}}`, label: `${title} · structuredContent.rows` }
+                        ];
+                    })
+                ].map(item => [item.token, item])).values()]
+                : [];
+            const hasManualStructuredValue = Array.isArray(value)
+                ? value.length > 0
+                : (value && typeof value === 'object' ? Object.keys(value).length > 0 : Boolean(String(value || '').trim()));
+            const isKnownStructuredReference = structuredReferenceOptions.some(item => item.token === fieldValue);
+            const visualStructureReference = isKnownStructuredReference
+                ? fieldValue
+                : (typeof value === 'string' && value.trim() ? '__custom__' : '');
+            const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].some(matchesTool) && normalizeFieldKey(name) === 'model';
             const modelOptions = isLlmModelField ? workflowModelOptions() : [];
             const isSelect = isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
+            const isStaticConfigurationField = /^(name|label|bindingid|workflowid|version|credentialref|credentialsecret|eventtype|idempotencykey|callbackcredential|imserverid|imtargettype)$/i.test(fieldName);
+            const isExecutionTuningField = /^(?:limit|outputlimit|max(?:steps|tokens|records|summarychars|width|height)|timeout(?:ms|hours)?|concurrency|retrylimit|samplerows|chunktokens|overlaptokens|temperature|height|width|maxwidth|maxheight)$/i.test(fieldName);
+            const allowsVisualReference = !isStructuredReferenceField
+                && !isGroupSummaryGroupBy
+                && !isDataFieldSelector
+                && !isColumnSelector
+                && !isKeyValueMapField
+                && !isApprovalLevels
+                && !isBrowserTargetField
+                && !isReportPathField
+                && !isArtifactSelector
+                && !isDatabaseConnection
+                && !isSubworkflowSelector
+                && !isLlmModelField
+                && !isEnum
+                && type !== 'boolean'
+                && !isNumber
+                && !isExecutionTuningField
+                && !isDelayDuration
+                && !isStaticConfigurationField
+                && !/^(code|sql)$/i.test(fieldName);
+            const fieldReferenceOptions = allowsVisualReference
+                ? [...new Map([
+                    { token: '{{goal}}', label: '运行上下文 · 任务目标' },
+                    { token: '{{inputs}}', label: '运行上下文 · 全部运行输入' },
+                    ...dependencyNodes.flatMap(depNode => {
+                        const title = depNode.title || depNode.id;
+                        const common = [
+                            { token: `{{nodes.${depNode.id}.output}}`, label: `${title} · 完整结果` },
+                            { token: `{{nodes.${depNode.id}.output.text}}`, label: `${title} · 文本结果` },
+                            { token: `{{nodes.${depNode.id}.output.content}}`, label: `${title} · 内容` },
+                            { token: `{{nodes.${depNode.id}.output.data}}`, label: `${title} · data` },
+                            { token: `{{nodes.${depNode.id}.output.rows}}`, label: `${title} · 数据行` },
+                            { token: `{{nodes.${depNode.id}.output.items}}`, label: `${title} · items` },
+                            { token: `{{nodes.${depNode.id}.output.matched}}`, label: `${title} · 条件是否满足` }
+                        ];
+                        const schemaFields = typeof buildSchemaReferenceTokens === 'function'
+                            ? buildSchemaReferenceTokens(depNode, 12).map(item => ({ token: item.token, label: `${title} · ${item.label}` }))
+                            : [];
+                        return [...common, ...schemaFields];
+                    })
+                ].map(item => [item.token, item])).values()].slice(0, 48)
+                : [];
+            const hasExactReference = typeof value === 'string' && /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/.test(value);
+            const hasKnownFieldReference = fieldReferenceOptions.some(item => item.token === fieldValue);
+            const initialReferenceValue = hasKnownFieldReference ? fieldValue : (hasExactReference ? '__custom__' : '');
             const fieldClasses = [
                 'pivot-dag-wizard-field',
                 useTextArea ? 'is-textarea' : '',
@@ -40,10 +169,204 @@
                 isSelect ? 'is-select' : '',
                 isNumber ? 'is-number' : '',
                 type === 'boolean' ? 'is-boolean' : '',
+                isGroupSummaryGroupBy ? 'is-group-fields' : '',
+                isApprovalTagField ? 'is-group-fields is-wide' : '',
+                isApprovalLevels || isBrowserTargetField ? 'is-special-fields is-wide' : '',
+                isColumnSelector || isKeyValueMapField ? 'is-special-fields is-wide' : '',
+                isDataFieldSelector ? 'is-special-fields' : '',
+                isReportPathField || isArtifactSelector ? 'is-resource-selector' : '',
+                isStructuredReferenceField ? 'is-structured-reference is-wide' : '',
+                allowsVisualReference ? 'has-visual-reference' : '',
                 isDatabaseConnection ? 'is-database-connection' : ''
             ].filter(Boolean).join(' ');
             let controlHtml = '';
-            if (isDatabaseConnection) {
+            if (isGroupSummaryGroupBy) {
+                controlHtml = `
+                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-group-fields="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-group-fields-list" data-pivot-dag-group-fields-list>
+                            ${groupByFields.length
+                                ? groupByFields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-group-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-group-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
+                                : '<span class="pivot-dag-group-fields-empty">尚未添加分组字段</span>'}
+                        </div>
+                        <div class="pivot-dag-group-fields-add">
+                            <input class="form-input" type="text" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-group-field-input placeholder="选择或输入字段名，例如 部门">
+                            <button type="button" class="btn-secondary" data-pivot-dag-group-field-add>添加字段</button>
+                        </div>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <span class="pivot-dag-group-fields-help">按字段组合分组；字段顺序会保留在结果元数据中。</span>
+                    </div>
+                `;
+            } else if (isReportPathField) {
+                controlHtml = `
+                    <div class="pivot-dag-resource-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-report-path-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-report-path-select>
+                            <option value="${dagEscapeAttr(fieldValue)}" selected>${fieldValue ? dagEscapeHtml(`当前文件：${fieldValue}`) : '读取授权文件清单后选择'}</option>
+                            <option value="__custom__">高级：自定义变量路径</option>
+                        </select>
+                        <input class="form-input pivot-dag-resource-picker-custom" data-pivot-dag-report-path-custom placeholder="例如 {{nodes.files.output.path}}">
+                        <button type="button" class="btn-secondary" data-pivot-dag-report-path-load>读取可访问文件</button>
+                        <span class="pivot-dag-structured-ref-help">只显示已由报表服务授权的文件；也可在高级参数中使用变量路径。</span>
+                    </div>
+                `;
+            } else if (isArtifactSelector) {
+                controlHtml = `
+                    <div class="pivot-dag-resource-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-artifact-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-artifact-select>
+                            <option value="${dagEscapeAttr(fieldValue)}" selected>${fieldValue ? dagEscapeHtml(`当前产物 #${fieldValue}`) : '读取当前用户产物后选择'}</option>
+                            <option value="__custom__">高级：自定义变量表达式</option>
+                        </select>
+                        <input class="form-input pivot-dag-resource-picker-custom" data-pivot-dag-artifact-custom placeholder="例如 {{nodes.document.output.artifactId}}">
+                        <button type="button" class="btn-secondary" data-pivot-dag-artifact-load>读取可用产物</button>
+                        <span class="pivot-dag-structured-ref-help">只显示当前用户可访问的产物；渲染节点仍需提供受控 Document IR。</span>
+                    </div>
+                `;
+            } else if (isApprovalLevels) {
+                const levels = Array.isArray(value) ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)).slice(0, 10) : [];
+                const renderLevel = (level = {}, index = 0) => {
+                    const userIds = Array.isArray(level.approverUserIds)
+                        ? level.approverUserIds
+                        : (Array.isArray(level.approver_user_ids) ? level.approver_user_ids : []);
+                    const units = Array.isArray(level.approverUnits)
+                        ? level.approverUnits
+                        : (Array.isArray(level.approver_units) ? level.approver_units : []);
+                    return `
+                        <article class="pivot-dag-approval-level" data-pivot-dag-approval-level>
+                            <div class="pivot-dag-approval-level-head">
+                                <strong>第 ${index + 1} 级审批</strong>
+                                <button type="button" class="btn-secondary" data-pivot-dag-approval-level-remove aria-label="删除第 ${index + 1} 级审批">删除</button>
+                            </div>
+                            <div class="pivot-dag-approval-level-grid">
+                                <label><span>本级说明</span><input class="form-input" data-pivot-dag-approval-level-title value="${dagEscapeAttr(level.title || '')}" placeholder="例如：直属负责人审批"></label>
+                                <label><span>通过规则</span><select class="form-input" data-pivot-dag-approval-level-mode><option value="any" ${String(level.mode || '').toLowerCase() !== 'all' ? 'selected' : ''}>任一人通过即可</option><option value="all" ${String(level.mode || '').toLowerCase() === 'all' ? 'selected' : ''}>所有对象均需通过</option></select></label>
+                                <label><span>审批用户 ID</span><input class="form-input" data-pivot-dag-approval-level-user-ids value="${dagEscapeAttr(userIds.join(', '))}" placeholder="多个 ID 用逗号分隔，例如 1001, 1002"></label>
+                                <label><span>审批部门</span><input class="form-input" data-pivot-dag-approval-level-units value="${dagEscapeAttr(units.join(', '))}" placeholder="多个部门用逗号分隔，例如 财务部, 法务部"></label>
+                            </div>
+                        </article>
+                    `;
+                };
+                controlHtml = `
+                    <div class="pivot-dag-approval-levels" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-approval-levels="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-structured-ref pivot-dag-approval-level-source">
+                            <select class="form-input" data-pivot-dag-approval-level-source>
+                                <option value="" ${visualStructureReference ? '' : 'selected'}>逐级可视化配置</option>
+                                ${structuredReferenceOptions.map(item => `<option value="${dagEscapeAttr(item.token)}" ${visualStructureReference === item.token ? 'selected' : ''}>${dagEscapeHtml(item.label)}</option>`).join('')}
+                                <option value="__custom__" ${visualStructureReference === '__custom__' ? 'selected' : ''}>高级：自定义变量表达式</option>
+                            </select>
+                            <input class="form-input pivot-dag-structured-ref-manual" data-pivot-dag-approval-level-custom value="${dagEscapeAttr(visualStructureReference === '__custom__' ? fieldValue : '')}" placeholder="例如 {{nodes.policy.output.approvalLevels}}">
+                        </div>
+                        <div class="pivot-dag-approval-level-list" data-pivot-dag-approval-level-list>
+                            ${levels.map(renderLevel).join('') || renderLevel({}, 0)}
+                        </div>
+                        <button type="button" class="btn-secondary" data-pivot-dag-approval-level-add>+ 添加下一审批级</button>
+                        <span class="pivot-dag-group-fields-help">逐级串签时按顺序推进；每一级至少填写一个审批用户 ID 或审批部门。</span>
+                    </div>
+                `;
+            } else if (isBrowserTargetField) {
+                const target = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+                const hasRoleTarget = Boolean(target.role || target.name);
+                const hasTextTarget = !hasRoleTarget && Boolean(target.text);
+                const targetMode = hasRoleTarget ? 'role' : (hasTextTarget ? 'text' : 'selector');
+                controlHtml = `
+                    <div class="pivot-dag-browser-target" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-browser-target="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-structured-ref pivot-dag-browser-target-source">
+                            <select class="form-input" data-pivot-dag-browser-target-source>
+                                <option value="" ${visualStructureReference ? '' : 'selected'}>手动定位页面元素</option>
+                                ${structuredReferenceOptions.map(item => `<option value="${dagEscapeAttr(item.token)}" ${visualStructureReference === item.token ? 'selected' : ''}>${dagEscapeHtml(item.label)}</option>`).join('')}
+                                <option value="__custom__" ${visualStructureReference === '__custom__' ? 'selected' : ''}>高级：自定义变量表达式</option>
+                            </select>
+                            <input class="form-input pivot-dag-structured-ref-manual" data-pivot-dag-browser-target-custom value="${dagEscapeAttr(visualStructureReference === '__custom__' ? fieldValue : '')}" placeholder="例如 {{nodes.locate.output.target}}">
+                        </div>
+                        <div class="pivot-dag-browser-target-editor" data-pivot-dag-browser-target-editor>
+                            <label><span>定位方式</span><select class="form-input" data-pivot-dag-browser-target-mode><option value="selector" ${targetMode === 'selector' ? 'selected' : ''}>CSS 选择器</option><option value="role" ${targetMode === 'role' ? 'selected' : ''}>无障碍角色和名称</option><option value="text" ${targetMode === 'text' ? 'selected' : ''}>页面可见文字</option></select></label>
+                            <label data-pivot-dag-browser-target-selector><span>CSS 选择器</span><input class="form-input" data-pivot-dag-browser-target-selector-input value="${dagEscapeAttr(target.selector || '')}" placeholder="例如 button[data-action=submit]"></label>
+                            <div class="pivot-dag-browser-target-role" data-pivot-dag-browser-target-role>
+                                <label><span>元素角色</span><input class="form-input" data-pivot-dag-browser-target-role-input value="${dagEscapeAttr(target.role || '')}" placeholder="例如 button"></label>
+                                <label><span>元素名称</span><input class="form-input" data-pivot-dag-browser-target-name-input value="${dagEscapeAttr(target.name || '')}" placeholder="例如 提交"></label>
+                            </div>
+                            <label data-pivot-dag-browser-target-text><span>页面文字</span><input class="form-input" data-pivot-dag-browser-target-text-input value="${dagEscapeAttr(target.text || '')}" placeholder="例如 提交订单"></label>
+                            <label class="pivot-dag-wizard-toggle"><input type="checkbox" data-pivot-dag-browser-target-exact ${target.exact === true ? 'checked' : ''}><span>精确匹配</span></label>
+                        </div>
+                        <span class="pivot-dag-structured-ref-help">优先使用角色/名称或可见文字；仅在页面结构稳定时使用 CSS 选择器。</span>
+                    </div>
+                `;
+            } else if (isApprovalTagField) {
+                const tags = (Array.isArray(value) ? value : [value])
+                    .map(item => String(item || '').trim())
+                    .filter(Boolean)
+                    .filter((item, index, items) => items.indexOf(item) === index);
+                const numericOnly = normalizeFieldKey(name) === 'approveruserids';
+                const targetLabel = numericOnly ? '用户 ID' : (normalizeFieldKey(name) === 'approverunits' ? '部门' : '审批人用户名或 ID');
+                controlHtml = `
+                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-approval-tags="${dagEscapeAttr(name)}" ${numericOnly ? 'data-pivot-dag-tag-numeric="1"' : ''}>
+                        <div class="pivot-dag-group-fields-list" data-pivot-dag-approval-tags-list>
+                            ${tags.length
+                                ? tags.map(tag => `<span class="pivot-dag-group-field-chip" data-pivot-dag-approval-tag-value="${dagEscapeAttr(tag)}">${dagEscapeHtml(tag)}<button type="button" class="btn-secondary" data-pivot-dag-approval-tag-remove="${dagEscapeAttr(tag)}" aria-label="移除 ${dagEscapeAttr(tag)}">×</button></span>`).join('')
+                                : '<span class="pivot-dag-group-fields-empty">尚未添加审批对象</span>'}
+                        </div>
+                        <div class="pivot-dag-group-fields-add">
+                            <input class="form-input" type="text" data-pivot-dag-approval-tag-input placeholder="输入${dagEscapeAttr(targetLabel)}后添加">
+                            <button type="button" class="btn-secondary" data-pivot-dag-approval-tag-add>添加</button>
+                        </div>
+                        <span class="pivot-dag-group-fields-help">可添加多个${dagEscapeHtml(targetLabel)}；多级审批流仍可在高级配置中设置。</span>
+                    </div>
+                `;
+            } else if (isColumnSelector) {
+                const selectedFields = (Array.isArray(value) ? value : []).map(item => String(item || '').trim()).filter(Boolean);
+                controlHtml = `
+                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-column-fields="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-group-fields-list" data-pivot-dag-column-fields-list>
+                            ${selectedFields.length
+                                ? selectedFields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-column-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-column-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
+                                : '<span class="pivot-dag-group-fields-empty">留空时将使用全部字段</span>'}
+                        </div>
+                        <div class="pivot-dag-group-fields-add">
+                            <input class="form-input" type="text" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-column-field-input placeholder="选择或输入要保留的字段">
+                            <button type="button" class="btn-secondary" data-pivot-dag-column-field-add>添加字段</button>
+                        </div>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <span class="pivot-dag-group-fields-help">字段顺序决定表格或查询结果的显示顺序。</span>
+                    </div>
+                `;
+            } else if (isDataFieldSelector) {
+                const selectedValue = dataFieldOptions.some(item => item.value === fieldValue) ? fieldValue : (fieldValue ? '__manual__' : '');
+                controlHtml = `
+                    <div class="pivot-dag-data-field-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-data-field-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-data-field-select>
+                            <option value="">请选择上游数据字段</option>
+                            ${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}" ${selectedValue === item.value ? 'selected' : ''}>${dagEscapeHtml(item.label)}</option>`).join('')}
+                            <option value="__manual__" ${selectedValue === '__manual__' ? 'selected' : ''}>手动输入字段名</option>
+                        </select>
+                        <input class="form-input pivot-dag-data-field-manual" data-pivot-dag-data-field-manual value="${dagEscapeAttr(selectedValue === '__manual__' ? fieldValue : '')}" placeholder="例如 部门">
+                        <span class="pivot-dag-structured-ref-help">可先测试上游节点，以获得实际字段候选。</span>
+                    </div>
+                `;
+            } else if (isKeyValueMapField) {
+                const entries = Object.entries(value || {});
+                controlHtml = `
+                    <div class="pivot-dag-keyvalue-map" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-map="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-keyvalue-map-list" data-pivot-dag-keyvalue-map-list>
+                            ${(entries.length ? entries : [['', '']]).map(([key, entryValue]) => `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="字段或键名"><textarea class="form-input" rows="2" data-pivot-dag-keyvalue-value placeholder="填写值或插入变量">${dagEscapeHtml(typeof entryValue === 'string' ? entryValue : JSON.stringify(entryValue))}</textarea><button type="button" class="btn-secondary" data-pivot-dag-keyvalue-remove aria-label="删除此项">×</button></div>`).join('')}
+                        </div>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <button type="button" class="btn-secondary" data-pivot-dag-keyvalue-add>+ 添加一项</button>
+                        <span class="pivot-dag-group-fields-help">可填写固定值，也可通过右侧变量引用插入上游结果。</span>
+                    </div>
+                `;
+            } else if (isStructuredReferenceField) {
+                const selectedValue = isKnownStructuredReference ? fieldValue : (hasManualStructuredValue ? '__manual__' : '');
+                const manualValue = selectedValue === '__manual__' ? fieldValue : '';
+                controlHtml = `
+                    <div class="pivot-dag-structured-ref" data-pivot-dag-structured-ref="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-structured-reference="1">
+                            <option value="">请选择上游结构化结果</option>
+                            ${structuredReferenceOptions.map(item => `<option value="${dagEscapeAttr(item.token)}" ${selectedValue === item.token ? 'selected' : ''}>${dagEscapeHtml(item.label)}</option>`).join('')}
+                            <option value="__manual__" ${selectedValue === '__manual__' ? 'selected' : ''}>高级：自定义变量或 JSON</option>
+                        </select>
+                        <textarea class="form-input pivot-dag-structured-ref-manual" data-pivot-dag-structured-manual="${dagEscapeAttr(name)}" rows="4" placeholder="仅在需要时填写 JSON 或变量表达式">${dagEscapeHtml(formatWizardFieldValue(schema, manualValue))}</textarea>
+                        <span class="pivot-dag-structured-ref-help">${dependencyNodes.length ? '优先选择上游节点的结构化输出；通常不需要手写 JSON。' : '尚未建立上游依赖；请先在画布连接上游节点，或仅在确有必要时使用高级变量。'}</span>
+                    </div>
+                `;
+            } else if (isDatabaseConnection) {
                 const options = databaseToolConnectionOptions(tool, wizardTools);
                 const selectedId = selectedDatabaseConnectionId(tool, { [name]: value }, wizardTools);
                 controlHtml = `
@@ -118,23 +441,26 @@
                 controlHtml = `<input class="form-input" type="text" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" value="${dagEscapeAttr(fieldValue)}" placeholder="${dagEscapeAttr(placeholder)}">`;
             }
 
+            const referencePickerHtml = allowsVisualReference ? `
+                <div class="pivot-dag-wizard-value-source" data-pivot-dag-value-source="${dagEscapeAttr(name)}">
+                    <span>取值方式</span>
+                    <select class="form-input" data-pivot-dag-wizard-reference-picker="${dagEscapeAttr(name)}">
+                        <option value="" ${initialReferenceValue ? '' : 'selected'}>手动填写</option>
+                        ${fieldReferenceOptions.map(item => `<option value="${dagEscapeAttr(item.token)}" ${initialReferenceValue === item.token ? 'selected' : ''}>${dagEscapeHtml(item.label)}</option>`).join('')}
+                        <option value="__custom__" ${initialReferenceValue === '__custom__' ? 'selected' : ''}>高级：自定义变量表达式</option>
+                    </select>
+                    <input class="form-input pivot-dag-wizard-reference-custom" data-pivot-dag-wizard-reference-custom="${dagEscapeAttr(name)}" value="${dagEscapeAttr(initialReferenceValue === '__custom__' ? fieldValue : '')}" placeholder="例如 {{nodes.query.output.total}}">
+                    <small>选择后将使用运行时结果替代手动值；需要混合文字时请保持“手动填写”。</small>
+                </div>
+            ` : '';
+
             const usageHint = type === 'array' || type === 'object'
                 ? '适合填结构化数据，也可以直接插入上游结果行。'
                 : isTextualSchemaField(name, schema)
                     ? '适合填写文字、提示词、查询语句或格式化文本。'
                     : '可以直接填写，必要时也能插入变量。';
-            const suggestionHtml = suggestions.length
-                ? `
-                    <div class="pivot-dag-wizard-field-suggestions">
-                        <span class="pivot-dag-wizard-field-suggestions-label">推荐引用</span>
-                        <div class="pivot-dag-wizard-field-suggestions-list">
-                            ${suggestions.map(item => `
-                                <button type="button" class="pivot-dag-token-btn pivot-dag-wizard-suggestion-btn" data-pivot-dag-wizard-token="${dagEscapeAttr(item.token)}" data-pivot-dag-wizard-target="${dagEscapeAttr(name)}" title="${dagEscapeAttr(item.token)}">${dagEscapeHtml(item.label)}</button>
-                            `).join('')}
-                        </div>
-                    </div>
-                `
-                : '';
+            // 运行时引用由字段本身的选择器和右侧变量面板承担，避免在每个参数下重复展示全局按钮。
+            const suggestionHtml = '';
 
             return `
                 <label class="${fieldClasses}" data-pivot-dag-wizard-field-wrap="${dagEscapeAttr(name)}">
@@ -145,7 +471,8 @@
                             ${required ? '<em class="is-required">必填</em>' : '<em>可选</em>'}
                         </span>
                     </span>
-                    ${controlHtml}
+                    ${referencePickerHtml}
+                    <div class="pivot-dag-wizard-manual-control${initialReferenceValue ? ' is-reference-active' : ''}" data-pivot-dag-wizard-manual-control="${dagEscapeAttr(name)}">${controlHtml}</div>
                     ${description ? `<span class="pivot-dag-wizard-field-desc">${dagEscapeHtml(description)}</span>` : ''}
                     <span class="pivot-dag-wizard-field-usage">${dagEscapeHtml(fieldUsageHint(name, schema, tool) || usageHint)}</span>
                     ${suggestionHtml}

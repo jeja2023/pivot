@@ -232,6 +232,7 @@ const ROUTE_NAME_MAP = {
     '/chat/dag-query-builder.js': 'DAG 可视化查询脚本',
     '/chat/dag-wizard-input.js': 'DAG 向导输入脚本',
     '/chat/dag-wizard-fields.js': 'DAG 向导字段脚本',
+    '/chat/dag-wizard-special-fields.js': 'DAG 向导专用字段脚本',
     '/chat/dag-wizard-stats.js': 'DAG 向导统计脚本',
     '/chat/dag-wizard.js': 'DAG 向导主脚本',
     '/chat/dag-variable-picker.js': 'DAG 变量选择器脚本',
@@ -299,4 +300,3 @@ function describeMonitorRoute(routePath) {
     if (key.startsWith('/common/styles/') && key.endsWith('.css')) return `公共样式 · ${raw.replace(/^\/common\/styles\//i, '')}`;
     return raw;
 }
-

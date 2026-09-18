@@ -420,7 +420,7 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
         },
         'data.group_summary': {
             rows: '通常引用上游查询节点的数据行。',
-            groupBy: '选择要分组的字段。',
+            groupBy: '添加一个或多个分组字段；每个字段组合会形成一个汇总分组。',
             valueField: '求和或平均值时选择数值字段；计数时可留空。',
             aggregation: '选择计数、求和、平均值、最小值或最大值。'
         },

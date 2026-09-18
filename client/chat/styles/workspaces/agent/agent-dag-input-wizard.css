@@ -348,6 +348,333 @@
     transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 
+.pivot-dag-structured-ref {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    width: 100%;
+}
+
+.pivot-dag-structured-ref .pivot-dag-structured-ref-manual {
+    display: none;
+    min-height: 96px;
+    resize: vertical;
+    background: var(--bg-main);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+}
+
+.pivot-dag-structured-ref .pivot-dag-structured-ref-manual.is-visible {
+    display: block;
+}
+
+.pivot-dag-structured-ref-help {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.pivot-dag-group-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.pivot-dag-group-fields-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+}
+
+.pivot-dag-group-field-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 27px;
+    padding: 3px 5px 3px 9px;
+    border: 1px solid var(--primary);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--primary);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.pivot-dag-group-field-chip .btn-secondary {
+    width: 19px;
+    height: 19px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.pivot-dag-group-field-chip .btn-secondary:hover {
+    background: var(--bg-side);
+}
+
+.pivot-dag-group-fields-empty,
+.pivot-dag-group-fields-help {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.pivot-dag-group-fields-add {
+    display: flex;
+    gap: 8px;
+}
+
+.pivot-dag-group-fields-add .form-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.pivot-dag-group-fields-add .btn-secondary {
+    flex: 0 0 auto;
+    height: 38px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-data-field-picker,
+.pivot-dag-keyvalue-map,
+.pivot-dag-resource-picker,
+.pivot-dag-approval-levels,
+.pivot-dag-browser-target {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.pivot-dag-data-field-picker .pivot-dag-data-field-manual {
+    display: none;
+}
+
+.pivot-dag-data-field-picker .pivot-dag-data-field-manual.is-visible {
+    display: block;
+}
+
+.pivot-dag-keyvalue-map-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.pivot-dag-keyvalue-map-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 7px;
+}
+
+.pivot-dag-keyvalue-map-row textarea.form-input {
+    min-height: 58px;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+.pivot-dag-keyvalue-map-row .btn-secondary {
+    width: 34px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0;
+    color: var(--danger);
+}
+
+.pivot-dag-keyvalue-map > .btn-secondary {
+    align-self: flex-start;
+    height: 34px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-resource-picker {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.pivot-dag-resource-picker .pivot-dag-structured-ref-help {
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-resource-picker-custom {
+    display: none;
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-resource-picker-custom.is-visible {
+    display: block;
+}
+
+.pivot-dag-resource-picker .btn-secondary {
+    min-height: 38px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-approval-level-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pivot-dag-approval-level {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-side);
+}
+
+.pivot-dag-approval-level-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pivot-dag-approval-level-head strong {
+    color: var(--text-main);
+    font-size: 0.76rem;
+}
+
+.pivot-dag-approval-level-head .btn-secondary {
+    min-height: 30px;
+    padding: 0 9px;
+    color: var(--danger);
+    font-size: 0.7rem;
+}
+
+.pivot-dag-approval-level-grid,
+.pivot-dag-browser-target-role {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.pivot-dag-approval-level-grid label,
+.pivot-dag-browser-target-editor > label,
+.pivot-dag-browser-target-role label {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.pivot-dag-approval-levels > .btn-secondary {
+    align-self: flex-start;
+    min-height: 34px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-approval-levels.is-reference-active > .pivot-dag-approval-level-list,
+.pivot-dag-approval-levels.is-reference-active > .btn-secondary,
+.pivot-dag-approval-levels.is-reference-active > .pivot-dag-group-fields-help,
+.pivot-dag-browser-target-editor.is-reference-active {
+    display: none;
+}
+
+.pivot-dag-browser-target-editor {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-side);
+}
+
+.pivot-dag-browser-target-editor > .pivot-dag-wizard-toggle {
+    align-self: end;
+    min-height: 38px;
+}
+
+@media (max-width: 760px) {
+    .pivot-dag-keyvalue-map-row {
+        grid-template-columns: 1fr auto;
+    }
+
+    .pivot-dag-keyvalue-map-row textarea.form-input {
+        grid-column: 1 / -1;
+    }
+
+    .pivot-dag-approval-level-grid,
+    .pivot-dag-browser-target-editor,
+    .pivot-dag-browser-target-role {
+        grid-template-columns: 1fr;
+    }
+}
+
+.pivot-dag-wizard-value-source {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px 10px;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.pivot-dag-wizard-value-source > span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 750;
+}
+
+.pivot-dag-wizard-value-source .form-input {
+    width: 100%;
+    min-height: 36px;
+    margin: 0;
+    padding: 7px 10px;
+    font-size: 0.78rem;
+}
+
+.pivot-dag-wizard-reference-custom,
+.pivot-dag-wizard-value-source > small {
+    display: none;
+    grid-column: 2;
+}
+
+.pivot-dag-wizard-reference-custom.is-visible {
+    display: block;
+}
+
+.pivot-dag-wizard-value-source:has(.pivot-dag-wizard-reference-custom.is-visible) > small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.pivot-dag-wizard-manual-control.is-reference-active {
+    display: none;
+}
+
 .pivot-dag-wizard-field .form-input::placeholder,
 .pivot-dag-wizard-assist .form-input::placeholder {
     color: #94a3b8;

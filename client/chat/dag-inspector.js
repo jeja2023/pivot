@@ -1,5 +1,4 @@
 /* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
-
 function createDagInspectorController(ctx) {
     const inspector = ctx.inspector;
     const onNodeSelectionChange = ctx.onNodeSelectionChange;
@@ -377,7 +376,6 @@ function createDagInspectorController(ctx) {
         modal.classList.remove('hidden');
         requestAnimationFrame(() => textareaEl?.focus?.({ preventScroll: true }));
     };
-
     const openNodeContractEditor = (nodeId) => {
         const node = ctx.spec.nodes.find(n => n.id === nodeId);
         if (!node) return;
@@ -451,10 +449,13 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-danger-outline" data-pivot-contract-close="1">关闭</button>
                 </div>
                 <div class="pivot-dag-contract-editor-body">
-                    <label>
+                    <section class="pivot-dag-contract-pane pivot-dag-contract-input-pane">
+                    <label class="pivot-dag-contract-field">
                         <span><strong>输入契约</strong><em>留空时自动使用工具参数契约</em></span>
-                        <textarea class="form-input" data-pivot-contract-input spellcheck="false">${dagEscapeHtml(JSON.stringify(node.inputSchema || {}, null, 2))}</textarea>
+                        <textarea class="form-input pivot-dag-contract-code" data-pivot-contract-input spellcheck="false">${dagEscapeHtml(JSON.stringify(node.inputSchema || {}, null, 2))}</textarea>
                     </label>
+                    </section>
+                    <section class="pivot-dag-contract-pane pivot-dag-contract-output-pane">
                     <div class="pivot-dag-schema-builder-wrap">
                         <div class="pivot-dag-schema-builder-head">
                             <span><strong>输出契约</strong><em>用字段和类型定义 JSON 输出，运行时会自动校验</em></span>
@@ -465,13 +466,14 @@ function createDagInspectorController(ctx) {
                         <pre class="pivot-dag-schema-preview" data-pivot-schema-preview></pre>
                         <details class="pivot-dag-schema-raw">
                             <summary>高级 JSON Schema</summary>
-                            <textarea class="form-input" data-pivot-contract-output spellcheck="false"></textarea>
+                            <textarea class="form-input pivot-dag-contract-code" data-pivot-contract-output spellcheck="false"></textarea>
                             <button type="button" class="btn-secondary" data-pivot-schema-import="1">从 JSON 同步</button>
                         </details>
                     </div>
+                    </section>
                 </div>
                 <div class="pivot-dag-json-error" data-pivot-contract-error></div>
-                <div class="agent-workflow-create-actions pivot-dag-json-actions">
+                <div class="agent-workflow-create-actions pivot-dag-json-actions pivot-dag-contract-actions">
                     <button type="button" class="btn-secondary" data-pivot-contract-sync="1">同步工具输入契约</button>
                     <button type="button" class="btn-secondary" data-pivot-contract-format="1">格式化</button>
                     <button type="button" class="btn-primary" data-pivot-contract-apply="1">应用契约</button>
@@ -526,9 +528,9 @@ function createDagInspectorController(ctx) {
             const type = outputSchema.type;
             PivotSafeHtml.setHtml(builderEl, `
                 <label class="pivot-dag-schema-root-type"><span>根类型</span>
-                    <select data-pivot-schema-root-type>${schemaTypes.map(item => `<option value="${item}" ${item === type ? 'selected' : ''}>${item === 'object' ? '对象' : item === 'array' ? '列表' : item === 'string' ? '文本' : item === 'boolean' ? '布尔值' : item === 'integer' ? '整数' : '数值'}</option>`).join('')}</select>
+                    <select class="form-input" data-pivot-schema-root-type>${schemaTypes.map(item => `<option value="${item}" ${item === type ? 'selected' : ''}>${item === 'object' ? '对象' : item === 'array' ? '列表' : item === 'string' ? '文本' : item === 'boolean' ? '布尔值' : item === 'integer' ? '整数' : '数值'}</option>`).join('')}</select>
                 </label>
-                ${type === 'object' ? renderObjectFields(outputSchema) : type === 'array' ? `<label class="pivot-dag-schema-item-type"><span>列表项类型</span><select data-pivot-schema-item-type>${schemaTypes.map(item => `<option value="${item}" ${item === outputSchema.items?.type ? 'selected' : ''}>${item}</option>`).join('')}</select></label>${outputSchema.items?.type === 'object' ? renderObjectFields(outputSchema.items, ['@items']) : ''}` : '<div class="pivot-dag-schema-empty">基础类型不需要额外字段。</div>'}
+                ${type === 'object' ? renderObjectFields(outputSchema) : type === 'array' ? `<label class="pivot-dag-schema-item-type"><span>列表项类型</span><select class="form-input" data-pivot-schema-item-type>${schemaTypes.map(item => `<option value="${item}" ${item === outputSchema.items?.type ? 'selected' : ''}>${item}</option>`).join('')}</select></label>${outputSchema.items?.type === 'object' ? renderObjectFields(outputSchema.items, ['@items']) : ''}` : '<div class="pivot-dag-schema-empty">基础类型不需要额外字段。</div>'}
             `);
             syncOutputRaw();
             const sample = sampleForSchema(outputSchema);
@@ -672,7 +674,6 @@ function createDagInspectorController(ctx) {
         modal.classList.remove('hidden');
         requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
     };
-
     // ── when 条件规则（Dify 风格条件分支）─────────────────
     const WHEN_OPERATORS = [
         { value: 'equals', label: '等于' },
@@ -886,10 +887,9 @@ function createDagInspectorController(ctx) {
             </details>
             <details class="pivot-dag-contract-panel">
                 <summary class="pivot-dag-contract-panel-head">
-                    <strong>高级：数据契约</strong>
-                    <span>输入 / 输出运行时校验</span>
+                    <span class="pivot-dag-contract-panel-title"><strong>高级：数据契约</strong><em>输入 / 输出运行时校验</em></span>
                 </summary>
-                <button type="button" class="btn-secondary" data-pivot-dag-edit-contract="1">编辑契约</button>
+                <button type="button" class="btn-secondary pivot-dag-contract-edit-action" data-pivot-dag-edit-contract="1">编辑契约</button>
                 <div class="pivot-dag-contract-grid">
                     <div class="pivot-dag-contract-card ${inputContract.configured ? 'is-ready' : 'is-warning'}">
                         <span>输入</span>

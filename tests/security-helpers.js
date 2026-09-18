@@ -612,6 +612,7 @@ function createAgentWorkbenchSandbox() {
         'dag-wizard-db.js',
         'dag-wizard-input.js',
         'dag-wizard-fields.js',
+        'dag-wizard-special-fields.js',
         'dag-wizard-stats.js',
         'dag-wizard.js',
         'agents-dag-editor.js',

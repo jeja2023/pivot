@@ -1,4 +1,5 @@
 /* Agent DAG 参数与预设工作流向导（拆自 agents-dag-editor.js） */
+/* global createDagWizardSpecialFieldControls */
 /* global partitionWizardFields, isWizardFieldRelevant */
 
 
@@ -15,10 +16,17 @@ function createDagWizardController(ctx) {
             const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
             const required = new Set(Array.isArray(schema.required) ? schema.required : []);
             const isVisualSqlQuery = isVisualSqlQueryTool(tool);
+            const isRuntimeParameterDeclaration = toolShortName(tool) === 'workflow.input';
             const fieldEntries = Object.entries(properties).filter(([name]) => !isVisualSqlQuery || !['sql', 'limit'].includes(name));
             const fieldGroups = partitionWizardFields(fieldEntries, required, tool);
             const fields = fieldGroups.all;
-            const dependencyNodes = buildWizardDependencyNodes(node, ctx.spec.nodes);
+            const nodeTestOutputs = typeof ctx.getNodeTestOutputSnapshots === 'function'
+                ? ctx.getNodeTestOutputSnapshots()
+                : new Map();
+            const dependencyNodes = buildWizardDependencyNodes(node, ctx.spec.nodes).map(item => ({
+                ...item,
+                _testOutput: nodeTestOutputs.get(String(item.id || ''))?.output
+            }));
             let modal = document.getElementById('pivot-dag-input-wizard');
             if (!modal) {
                 modal = document.createElement('div');
@@ -44,7 +52,7 @@ function createDagWizardController(ctx) {
             let wizardBaseInput = cloneDagInput(currentInput);
             const renderFieldEntries = (entries) => entries
                 .filter(([name]) => isWizardFieldRelevant(name, initialInput, tool))
-                .map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools)).join('');
+                .map(([name, fieldSchema]) => renderWizardField(name, fieldSchema, initialInput[name], required.has(name), dependencyNodes, tool, wizardTools, node.tool, node.title)).join('');
             const primaryFieldMarkup = fieldGroups.primary.length
                 ? renderFieldEntries(fieldGroups.primary)
                 : '<div class="pivot-dag-wizard-empty">当前工具不需要配置参数，直接应用即可。</div>';
@@ -65,7 +73,7 @@ function createDagWizardController(ctx) {
                             <section class="pivot-dag-wizard-overview">
                                 <div class="pivot-dag-wizard-overview-head">
                                     <strong>当前配置</strong>
-                                    <span>表单会保存到节点参数；需要填写复杂结构时再打开高级参数编辑。</span>
+                                    <span>${isRuntimeParameterDeclaration ? '这是可选的参数声明，不是流程起点；只有需要类型、默认值或必填校验时才配置。' : '表单会保存到节点参数；需要填写复杂结构时再打开高级参数编辑。'}</span>
                                 </div>
                                 <div class="pivot-dag-wizard-overview-body">
                                     ${renderInputSummary(initialInput, tool, wizardTools)}
@@ -123,6 +131,26 @@ function createDagWizardController(ctx) {
                 if (!fieldName) return;
                 fieldsByName.set(fieldName, control);
             });
+            const referencePickerFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-picker="${fieldName}"]`);
+            const referenceCustomFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-custom="${fieldName}"]`);
+            const manualControlFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-manual-control="${fieldName}"]`);
+            const { approvalLevelsFromControl, approvalTagsFromControl, browserTargetFromControl, columnFieldsFromControl, groupFieldsFromControl, keyValueMapFromControl, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, syncApprovalLevelSource, syncBrowserTargetMode, syncResourcePicker } = createDagWizardSpecialFieldControls();
+            const syncReferencePicker = (fieldName, nextValue) => {
+                const picker = referencePickerFor(fieldName);
+                if (!picker) return;
+                const options = [...picker.options].map(option => option.value);
+                const exactReference = typeof nextValue === 'string' && /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/.test(nextValue);
+                const selected = typeof nextValue === 'string' && options.includes(nextValue)
+                    ? nextValue
+                    : (exactReference ? '__custom__' : '');
+                picker.value = selected;
+                const custom = referenceCustomFor(fieldName);
+                if (custom) {
+                    custom.value = selected === '__custom__' ? String(nextValue || '') : '';
+                    custom.classList.toggle('is-visible', selected === '__custom__');
+                }
+                manualControlFor(fieldName)?.classList.toggle('is-reference-active', Boolean(selected));
+            };
 
             const populateFields = (draftInput = {}) => {
                 fields.forEach(([name, fieldSchema]) => {
@@ -130,6 +158,82 @@ function createDagWizardController(ctx) {
                     if (!control) return;
                     const nextValue = draftInput[name];
                     const type = normalizeSchemaType(fieldSchema);
+                    if (control.dataset.pivotDagGroupFields) {
+                        renderGroupFields(control, nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagColumnFields) {
+                        renderColumnFields(control, nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagApprovalTags) {
+                        renderApprovalTags(control, nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagApprovalLevels) {
+                        const source = control.querySelector('[data-pivot-dag-approval-level-source]');
+                        const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
+                        const options = source ? [...source.options].map(option => option.value) : [];
+                        const selected = typeof nextValue === 'string' && options.includes(nextValue)
+                            ? nextValue
+                            : (typeof nextValue === 'string' && nextValue ? '__custom__' : '');
+                        if (source) source.value = selected;
+                        if (custom) custom.value = selected === '__custom__' ? String(nextValue || '') : '';
+                        renderApprovalLevels(control, selected ? [] : nextValue);
+                        syncApprovalLevelSource(control);
+                        return;
+                    }
+                    if (control.dataset.pivotDagBrowserTarget) {
+                        const source = control.querySelector('[data-pivot-dag-browser-target-source]');
+                        const custom = control.querySelector('[data-pivot-dag-browser-target-custom]');
+                        const options = source ? [...source.options].map(option => option.value) : [];
+                        const selected = typeof nextValue === 'string' && options.includes(nextValue)
+                            ? nextValue
+                            : (typeof nextValue === 'string' && nextValue ? '__custom__' : '');
+                        if (source) source.value = selected;
+                        if (custom) custom.value = selected === '__custom__' ? String(nextValue || '') : '';
+                        const target = nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue) ? nextValue : {};
+                        const mode = target.role || target.name ? 'role' : (target.text ? 'text' : 'selector');
+                        const modeControl = control.querySelector('[data-pivot-dag-browser-target-mode]');
+                        if (modeControl) modeControl.value = mode;
+                        const assign = (selector, value) => {
+                            const input = control.querySelector(selector);
+                            if (input) input.value = value || '';
+                        };
+                        assign('[data-pivot-dag-browser-target-selector-input]', target.selector);
+                        assign('[data-pivot-dag-browser-target-role-input]', target.role);
+                        assign('[data-pivot-dag-browser-target-name-input]', target.name);
+                        assign('[data-pivot-dag-browser-target-text-input]', target.text);
+                        const exact = control.querySelector('[data-pivot-dag-browser-target-exact]');
+                        if (exact) exact.checked = target.exact === true;
+                        syncBrowserTargetMode(control);
+                        return;
+                    }
+                    if (control.dataset.pivotDagReportPathPicker) {
+                        syncResourcePicker(control, nextValue, '请选择可访问文件', path => `当前文件：${path}`);
+                        return;
+                    }
+                    if (control.dataset.pivotDagArtifactPicker) {
+                        syncResourcePicker(control, nextValue, '请选择可用产物', id => `当前产物 #${id}`);
+                        return;
+                    }
+                    if (control.dataset.pivotDagDataFieldPicker) {
+                        renderDataFieldPicker(control, nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagKeyvalueMap) {
+                        renderKeyValueRows(control, nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagStructuredReference === '1') {
+                        const optionValues = [...control.options].map(option => option.value);
+                        const selected = typeof nextValue === 'string' && optionValues.includes(nextValue) ? nextValue : (nextValue ? '__manual__' : '');
+                        control.value = selected;
+                        const manual = modal.querySelector(`[data-pivot-dag-structured-manual="${name}"]`);
+                        if (manual) manual.value = selected === '__manual__' ? formatWizardFieldValue(fieldSchema, nextValue) : '';
+                        return;
+                    }
+                    syncReferencePicker(name, nextValue);
                     if (control.type === 'checkbox') {
                         control.checked = Boolean(nextValue);
                     } else if (type === 'boolean') {
@@ -146,10 +250,61 @@ function createDagWizardController(ctx) {
 
             const getFieldValue = (control, fieldSchema, fieldName = '') => {
                 const type = normalizeSchemaType(fieldSchema);
+                if (control.dataset.pivotDagGroupFields) {
+                    const fields = groupFieldsFromControl(control);
+                    return fields.length ? fields : undefined;
+                }
+                if (control.dataset.pivotDagColumnFields) {
+                    const fields = columnFieldsFromControl(control);
+                    return fields.length ? fields : undefined;
+                }
+                if (control.dataset.pivotDagApprovalTags) {
+                    const tags = approvalTagsFromControl(control);
+                    if (!tags.length) return undefined;
+                    return control.dataset.pivotDagTagNumeric === '1'
+                        ? tags.map(value => Number.parseInt(value, 10)).filter(Number.isSafeInteger)
+                        : tags;
+                }
+                if (control.dataset.pivotDagApprovalLevels) {
+                    return approvalLevelsFromControl(control);
+                }
+                if (control.dataset.pivotDagBrowserTarget) {
+                    return browserTargetFromControl(control);
+                }
+                if (control.dataset.pivotDagReportPathPicker) {
+                    const selected = String(control.querySelector('[data-pivot-dag-report-path-select]')?.value || '').trim();
+                    if (selected === '__custom__') return String(control.querySelector('[data-pivot-dag-report-path-custom]')?.value || '').trim() || undefined;
+                    return selected || undefined;
+                }
+                if (control.dataset.pivotDagArtifactPicker) {
+                    const selected = String(control.querySelector('[data-pivot-dag-artifact-select]')?.value || '').trim();
+                    if (selected === '__custom__') return String(control.querySelector('[data-pivot-dag-artifact-custom]')?.value || '').trim() || undefined;
+                    const value = Number.parseInt(selected, 10);
+                    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+                }
+                if (control.dataset.pivotDagDataFieldPicker) {
+                    const selected = String(control.querySelector('[data-pivot-dag-data-field-select]')?.value || '').trim();
+                    if (!selected) return undefined;
+                    if (selected !== '__manual__') return selected;
+                    return String(control.querySelector('[data-pivot-dag-data-field-manual]')?.value || '').trim() || undefined;
+                }
+                if (control.dataset.pivotDagKeyvalueMap) {
+                    return keyValueMapFromControl(control);
+                }
                 if (control.type === 'checkbox' || type === 'boolean') return Boolean(control.checked);
-                const raw = String(control.value ?? '').trim();
+                const referencePicker = referencePickerFor(fieldName);
+                if (referencePicker?.value) {
+                    if (referencePicker.value !== '__custom__') return referencePicker.value;
+                    const customReference = String(referenceCustomFor(fieldName)?.value || '').trim();
+                    if (!customReference) return undefined;
+                    return customReference;
+                }
+                let raw = String(control.value ?? '').trim();
+                if (control.dataset.pivotDagStructuredReference === '1' && raw === '__manual__') {
+                    raw = String(modal.querySelector(`[data-pivot-dag-structured-manual="${fieldName}"]`)?.value || '').trim();
+                }
                 if (!raw) return undefined;
-                if (toolValue(tool) === 'agent.content_review' && normalizeFieldKey(fieldName) === 'records') {
+                if (toolShortName(tool) === 'agent.content_review' && normalizeFieldKey(fieldName) === 'records') {
                     if (/^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/.test(raw)) return raw;
                     try {
                         const parsed = JSON.parse(raw);
@@ -162,7 +317,7 @@ function createDagWizardController(ctx) {
                 if (type === 'integer') {
                     const value = Number.parseInt(raw, 10);
                     if (!Number.isFinite(value)) return undefined;
-                    return toolValue(tool) === 'workflow.delay' && normalizeFieldKey(fieldName) === 'duration_ms'
+                    return toolShortName(tool) === 'workflow.delay' && normalizeFieldKey(fieldName) === 'duration_ms'
                         ? value * 1000
                         : value;
                 }
@@ -184,6 +339,7 @@ function createDagWizardController(ctx) {
             };
 
             let activeFieldControl = null;
+            let activeKeyValueInput = null;
             const setActiveField = (control) => {
                 activeFieldControl = control;
             };
@@ -192,6 +348,72 @@ function createDagWizardController(ctx) {
                 const control = targetFieldName ? fieldsByName.get(targetFieldName) : activeFieldControl;
                 if (!token || !control) return;
                 setActiveField(control);
+                if (control.dataset.pivotDagKeyvalueMap) {
+                    const target = activeKeyValueInput && control.contains(activeKeyValueInput)
+                        ? activeKeyValueInput
+                        : control.querySelector('[data-pivot-dag-keyvalue-value]');
+                    if (!target) return;
+                    const start = target.selectionStart ?? target.value.length;
+                    const end = target.selectionEnd ?? target.value.length;
+                    target.value = `${target.value.slice(0, start)}${token}${target.value.slice(end)}`;
+                    target.focus?.({ preventScroll: true });
+                    return;
+                }
+                if (control.dataset.pivotDagDataFieldPicker) {
+                    const select = control.querySelector('[data-pivot-dag-data-field-select]');
+                    const manual = control.querySelector('[data-pivot-dag-data-field-manual]');
+                    if (select) select.value = '__manual__';
+                    if (manual) {
+                        manual.value = token;
+                        manual.classList.add('is-visible');
+                        manual.focus?.({ preventScroll: true });
+                    }
+                    return;
+                }
+                if (control.dataset.pivotDagApprovalLevels) {
+                    const source = control.querySelector('[data-pivot-dag-approval-level-source]');
+                    const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
+                    const hasOption = [...(source?.options || [])].some(option => option.value === token);
+                    if (source) source.value = hasOption ? token : '__custom__';
+                    if (!hasOption && custom) custom.value = token;
+                    syncApprovalLevelSource(control);
+                    return;
+                }
+                if (control.dataset.pivotDagBrowserTarget) {
+                    const source = control.querySelector('[data-pivot-dag-browser-target-source]');
+                    const custom = control.querySelector('[data-pivot-dag-browser-target-custom]');
+                    const hasOption = [...(source?.options || [])].some(option => option.value === token);
+                    if (source) source.value = hasOption ? token : '__custom__';
+                    if (!hasOption && custom) custom.value = token;
+                    syncBrowserTargetMode(control);
+                    return;
+                }
+                if (control.dataset.pivotDagStructuredReference === '1') {
+                    const hasOption = [...control.options].some(option => option.value === token);
+                    const manual = modal.querySelector(`[data-pivot-dag-structured-manual="${targetFieldName || control.dataset.pivotDagWizardField || ''}"]`);
+                    control.value = hasOption ? token : '__manual__';
+                    if (!hasOption && manual) {
+                        manual.value = token;
+                        manual.classList.add('is-visible');
+                    }
+                    control.dispatchEvent(new Event('input', { bubbles: true }));
+                    control.dispatchEvent(new Event('change', { bubbles: true }));
+                    control.focus?.({ preventScroll: true });
+                    return;
+                }
+                const referencePicker = targetFieldName ? referencePickerFor(targetFieldName) : null;
+                if (referencePicker && /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/.test(token)) {
+                    const hasOption = [...referencePicker.options].some(option => option.value === token);
+                    referencePicker.value = hasOption ? token : '__custom__';
+                    const custom = referenceCustomFor(targetFieldName);
+                    if (!hasOption && custom) {
+                        custom.value = token;
+                        custom.classList.add('is-visible');
+                    }
+                    manualControlFor(targetFieldName)?.classList.add('is-reference-active');
+                    referencePicker.dispatchEvent(new Event('change', { bubbles: true }));
+                    return;
+                }
                 if (control.tagName === 'TEXTAREA' || (control.tagName === 'INPUT' && ['text', 'search', 'url', 'email', 'password'].includes(control.type))) {
                     const start = control.selectionStart ?? control.value.length;
                     const end = control.selectionEnd ?? control.value.length;
@@ -306,10 +528,15 @@ function createDagWizardController(ctx) {
             const collectWizardInput = () => {
                 const nextInput = cloneDagInput(wizardBaseInput);
                 const missing = [];
+                let invalidField = '';
                 fields.forEach(([name, fieldSchema]) => {
                     const control = fieldsByName.get(name);
                     if (!control) return;
                     const value = getFieldValue(control, fieldSchema, name);
+                    if (value === null) {
+                        invalidField = invalidField || name;
+                        return;
+                    }
                     if (value === undefined) {
                         if (required.has(name)) missing.push(name);
                         else delete nextInput[name];
@@ -317,6 +544,12 @@ function createDagWizardController(ctx) {
                     }
                     nextInput[name] = value;
                 });
+                if (invalidField) {
+                    const control = fieldsByName.get(invalidField);
+                    control?.focus?.({ preventScroll: true });
+                    window.Pivot.legacy.showToast?.(`请检查“${friendlyFieldLabel(invalidField, properties[invalidField], tool)}”中的无效配置。`, 'error');
+                    return null;
+                }
                 if (tool?.databaseTool) {
                     const connectionId = databaseConnectionInputValue(nextInput);
                     delete nextInput.connection_id;
@@ -414,6 +647,320 @@ function createDagWizardController(ctx) {
                 control.addEventListener('click', () => setActiveField(control));
                 control.addEventListener('input', () => setActiveField(control));
                 control.addEventListener('change', () => setActiveField(control));
+            });
+            modal.querySelectorAll('[data-pivot-dag-wizard-reference-picker]').forEach(picker => {
+                const fieldName = picker.dataset.pivotDagWizardReferencePicker || '';
+                const custom = referenceCustomFor(fieldName);
+                const manualControl = manualControlFor(fieldName);
+                const syncSourceMode = () => {
+                    const selected = String(picker.value || '');
+                    manualControl?.classList.toggle('is-reference-active', Boolean(selected));
+                    if (custom) custom.classList.toggle('is-visible', selected === '__custom__');
+                    if (!selected) fieldsByName.get(fieldName)?.focus?.({ preventScroll: true });
+                    else if (selected === '__custom__') custom?.focus?.({ preventScroll: true });
+                };
+                picker.addEventListener('change', syncSourceMode);
+                syncSourceMode();
+                custom?.addEventListener('input', () => setActiveField(fieldsByName.get(fieldName)));
+            });
+            modal.querySelectorAll('[data-pivot-dag-group-fields]').forEach(control => {
+                const addInput = control.querySelector('[data-pivot-dag-group-field-input]');
+                const addField = () => {
+                    const next = String(addInput?.value || '').trim();
+                    if (!next) return;
+                    const fields = groupFieldsFromControl(control);
+                    if (fields.includes(next)) {
+                        window.Pivot.legacy.showToast?.('该分组字段已存在。', 'warning');
+                        return;
+                    }
+                    if (fields.length >= 12) {
+                        window.Pivot.legacy.showToast?.('分组字段最多 12 个。', 'warning');
+                        return;
+                    }
+                    renderGroupFields(control, [...fields, next]);
+                    addInput.value = '';
+                    addInput.focus?.({ preventScroll: true });
+                };
+                control.querySelector('[data-pivot-dag-group-field-add]')?.addEventListener('click', addField);
+                addInput?.addEventListener('keydown', event => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    addField();
+                });
+                control.addEventListener('click', event => {
+                    const remove = event.target.closest('[data-pivot-dag-group-field-remove]');
+                    if (!remove) return;
+                    const field = String(remove.dataset.pivotDagGroupFieldRemove || '').trim();
+                    renderGroupFields(control, groupFieldsFromControl(control).filter(item => item !== field));
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-column-fields]').forEach(control => {
+                const addInput = control.querySelector('[data-pivot-dag-column-field-input]');
+                const addField = () => {
+                    const next = String(addInput?.value || '').trim();
+                    if (!next) return;
+                    const fields = columnFieldsFromControl(control);
+                    if (fields.includes(next)) {
+                        window.Pivot.legacy.showToast?.('该字段已存在。', 'warning');
+                        return;
+                    }
+                    if (fields.length >= 50) {
+                        window.Pivot.legacy.showToast?.('最多选择 50 个字段。', 'warning');
+                        return;
+                    }
+                    renderColumnFields(control, [...fields, next]);
+                    addInput.value = '';
+                    addInput.focus?.({ preventScroll: true });
+                };
+                control.querySelector('[data-pivot-dag-column-field-add]')?.addEventListener('click', addField);
+                addInput?.addEventListener('keydown', event => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    addField();
+                });
+                control.addEventListener('click', event => {
+                    const remove = event.target.closest('[data-pivot-dag-column-field-remove]');
+                    if (!remove) return;
+                    const field = String(remove.dataset.pivotDagColumnFieldRemove || '').trim();
+                    renderColumnFields(control, columnFieldsFromControl(control).filter(item => item !== field));
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-approval-tags]').forEach(control => {
+                const addInput = control.querySelector('[data-pivot-dag-approval-tag-input]');
+                const numericOnly = control.dataset.pivotDagTagNumeric === '1';
+                const addTag = () => {
+                    const next = String(addInput?.value || '').trim();
+                    if (!next) return;
+                    if (numericOnly && !Number.isSafeInteger(Number.parseInt(next, 10))) {
+                        window.Pivot.legacy.showToast?.('审批用户 ID 必须是正整数。', 'warning');
+                        return;
+                    }
+                    const tags = approvalTagsFromControl(control);
+                    if (tags.includes(next)) {
+                        window.Pivot.legacy.showToast?.('该审批对象已存在。', 'warning');
+                        return;
+                    }
+                    if (tags.length >= 50) {
+                        window.Pivot.legacy.showToast?.('审批对象最多 50 个。', 'warning');
+                        return;
+                    }
+                    renderApprovalTags(control, [...tags, next]);
+                    addInput.value = '';
+                    addInput.focus?.({ preventScroll: true });
+                };
+                control.querySelector('[data-pivot-dag-approval-tag-add]')?.addEventListener('click', addTag);
+                addInput?.addEventListener('keydown', event => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    addTag();
+                });
+                control.addEventListener('click', event => {
+                    const remove = event.target.closest('[data-pivot-dag-approval-tag-remove]');
+                    if (!remove) return;
+                    const tag = String(remove.dataset.pivotDagApprovalTagRemove || '').trim();
+                    renderApprovalTags(control, approvalTagsFromControl(control).filter(item => item !== tag));
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-approval-levels]').forEach(control => {
+                const source = control.querySelector('[data-pivot-dag-approval-level-source]');
+                const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
+                source?.addEventListener('change', () => {
+                    syncApprovalLevelSource(control);
+                    if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
+                });
+                custom?.addEventListener('input', () => setActiveField(control));
+                control.querySelector('[data-pivot-dag-approval-level-add]')?.addEventListener('click', () => {
+                    const current = approvalLevelsFromControl(control);
+                    if (current === null) return;
+                    if (typeof current === 'string') {
+                        source.value = '';
+                        custom.value = '';
+                        syncApprovalLevelSource(control);
+                    }
+                    const levels = Array.isArray(current) ? current : [];
+                    if (levels.length >= 10) {
+                        window.Pivot.legacy.showToast?.('审批级别最多 10 级。', 'warning');
+                        return;
+                    }
+                    renderApprovalLevels(control, [...levels, {}]);
+                });
+                control.addEventListener('click', event => {
+                    const remove = event.target.closest('[data-pivot-dag-approval-level-remove]');
+                    if (!remove) return;
+                    const level = remove.closest('[data-pivot-dag-approval-level]');
+                    level?.remove();
+                    const remaining = [...control.querySelectorAll('[data-pivot-dag-approval-level]')];
+                    if (!remaining.length) {
+                        renderApprovalLevels(control, [{}]);
+                        return;
+                    }
+                    remaining.forEach((item, index) => {
+                        const position = index + 1;
+                        const heading = item.querySelector('.pivot-dag-approval-level-head strong');
+                        const button = item.querySelector('[data-pivot-dag-approval-level-remove]');
+                        if (heading) heading.textContent = `第 ${position} 级审批`;
+                        if (button) button.setAttribute('aria-label', `删除第 ${position} 级审批`);
+                    });
+                });
+                control.addEventListener('focusin', () => setActiveField(control));
+                syncApprovalLevelSource(control);
+            });
+            modal.querySelectorAll('[data-pivot-dag-browser-target]').forEach(control => {
+                const source = control.querySelector('[data-pivot-dag-browser-target-source]');
+                const custom = control.querySelector('[data-pivot-dag-browser-target-custom]');
+                const mode = control.querySelector('[data-pivot-dag-browser-target-mode]');
+                source?.addEventListener('change', () => {
+                    syncBrowserTargetMode(control);
+                    if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
+                });
+                mode?.addEventListener('change', () => syncBrowserTargetMode(control));
+                control.addEventListener('focusin', () => setActiveField(control));
+                syncBrowserTargetMode(control);
+            });
+            modal.querySelectorAll('[data-pivot-dag-data-field-picker]').forEach(control => {
+                const select = control.querySelector('[data-pivot-dag-data-field-select]');
+                const manual = control.querySelector('[data-pivot-dag-data-field-manual]');
+                const sync = () => {
+                    const manualMode = select?.value === '__manual__';
+                    manual?.classList.toggle('is-visible', manualMode);
+                    if (manualMode) manual?.focus?.({ preventScroll: true });
+                };
+                select?.addEventListener('change', sync);
+                sync();
+            });
+            modal.querySelectorAll('[data-pivot-dag-keyvalue-map]').forEach(control => {
+                const commitAndRender = () => {
+                    const value = keyValueMapFromControl(control);
+                    if (value === null) return false;
+                    renderKeyValueRows(control, value);
+                    return true;
+                };
+                control.querySelector('[data-pivot-dag-keyvalue-add]')?.addEventListener('click', () => {
+                    const value = keyValueMapFromControl(control);
+                    if (value === null) return;
+                    const nextKey = `field_${Object.keys(value).length + 1}`;
+                    value[nextKey] = '';
+                    renderKeyValueRows(control, value);
+                    control.querySelector(`[data-pivot-dag-keyvalue-key][value="${nextKey}"]`)?.focus?.({ preventScroll: true });
+                });
+                control.addEventListener('focusin', event => {
+                    const valueInput = event.target.closest('[data-pivot-dag-keyvalue-value]');
+                    if (valueInput) activeKeyValueInput = valueInput;
+                });
+                control.addEventListener('click', event => {
+                    if (event.target.closest('[data-pivot-dag-keyvalue-remove]')) {
+                        event.target.closest('.pivot-dag-keyvalue-map-row')?.remove();
+                        commitAndRender();
+                    }
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-report-path-picker]').forEach(control => {
+                const select = control.querySelector('[data-pivot-dag-report-path-select]');
+                const custom = control.querySelector('[data-pivot-dag-report-path-custom]');
+                const loadButton = control.querySelector('[data-pivot-dag-report-path-load]');
+                const syncCustom = () => {
+                    const active = select?.value === '__custom__';
+                    custom?.classList.toggle('is-visible', active);
+                    if (active) custom?.focus?.({ preventScroll: true });
+                };
+                select?.addEventListener('change', () => {
+                    setActiveField(control);
+                    syncCustom();
+                });
+                custom?.addEventListener('input', () => setActiveField(control));
+                syncCustom();
+                loadButton?.addEventListener('click', async () => {
+                    const listTool = wizardTools.find(item => toolShortName(item) === 'reports.list_files');
+                    if (!listTool) {
+                        window.Pivot.legacy.showToast?.('当前工作流没有可用的“列出报表文件”权限。', 'warning');
+                        return;
+                    }
+                    const originalText = loadButton.textContent;
+                    loadButton.disabled = true;
+                    loadButton.textContent = '正在读取…';
+                    try {
+                        const result = await callWizardTool(listTool, { limit: 100 });
+                        const files = Array.isArray(result?.files) ? result.files : (Array.isArray(result) ? result : []);
+                        const entries = files.map(file => {
+                            const value = typeof file === 'string'
+                                ? file
+                                : (file?.relativePath || file?.relative_path || file?.path || file?.name || '');
+                            const name = typeof file === 'string' ? file : (file?.name || value);
+                            const size = Number(file?.size || file?.sizeBytes || 0);
+                            return { value, label: size > 0 ? `${name} · ${Math.ceil(size / 1024)} KB` : name };
+                        });
+                        renderResourceOptions(
+                            select,
+                            entries,
+                            select?.value || '',
+                            '请选择可访问文件',
+                            path => `当前文件：${path}`
+                        );
+                        window.Pivot.legacy.showToast?.(entries.length ? `已读取 ${entries.length} 个可访问文件。` : '没有读取到可访问文件。', entries.length ? 'success' : 'warning');
+                    } catch (error) {
+                        window.Pivot.legacy.showToast?.(error.message || '读取可访问文件失败。', 'error');
+                    } finally {
+                        loadButton.disabled = false;
+                        loadButton.textContent = originalText;
+                    }
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-artifact-picker]').forEach(control => {
+                const select = control.querySelector('[data-pivot-dag-artifact-select]');
+                const custom = control.querySelector('[data-pivot-dag-artifact-custom]');
+                const loadButton = control.querySelector('[data-pivot-dag-artifact-load]');
+                const syncCustom = () => {
+                    const active = select?.value === '__custom__';
+                    custom?.classList.toggle('is-visible', active);
+                    if (active) custom?.focus?.({ preventScroll: true });
+                };
+                select?.addEventListener('change', () => {
+                    setActiveField(control);
+                    syncCustom();
+                });
+                custom?.addEventListener('input', () => setActiveField(control));
+                syncCustom();
+                loadButton?.addEventListener('click', async () => {
+                    const originalText = loadButton.textContent;
+                    loadButton.disabled = true;
+                    loadButton.textContent = '正在读取…';
+                    try {
+                        const response = await apiFetch(`${API_BASE}/agents/artifacts?limit=100`, { cache: 'no-store' });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) throw new Error(data.error || '读取可用产物失败。');
+                        const artifacts = Array.isArray(data.data) ? data.data : [];
+                        const entries = artifacts.map(artifact => {
+                            const title = String(artifact.title || `产物 #${artifact.id}`).trim();
+                            const details = [artifact.type, artifact.current_version ? `版本 ${artifact.current_version}` : ''].filter(Boolean).join(' · ');
+                            return { value: artifact.id, label: details ? `${title} · ${details}` : title };
+                        });
+                        renderResourceOptions(
+                            select,
+                            entries,
+                            select?.value || '',
+                            '请选择可用产物',
+                            id => `当前产物 #${id}`
+                        );
+                        window.Pivot.legacy.showToast?.(entries.length ? `已读取 ${entries.length} 个可用产物。` : '没有可用产物。', entries.length ? 'success' : 'warning');
+                    } catch (error) {
+                        window.Pivot.legacy.showToast?.(error.message || '读取可用产物失败。', 'error');
+                    } finally {
+                        loadButton.disabled = false;
+                        loadButton.textContent = originalText;
+                    }
+                });
+            });
+            modal.querySelectorAll('[data-pivot-dag-structured-reference]').forEach(control => {
+                const manual = modal.querySelector(`[data-pivot-dag-structured-manual="${control.dataset.pivotDagStructuredReference}"]`);
+                const syncManual = () => {
+                    const advanced = control.value === '__manual__';
+                    if (manual) manual.classList.toggle('is-visible', advanced);
+                    if (!advanced && manual) manual.value = '';
+                };
+                control.addEventListener('change', syncManual);
+                syncManual();
+                manual?.addEventListener('focus', () => setActiveField(control));
+                manual?.addEventListener('input', () => setActiveField(control));
             });
             modal.querySelectorAll('[data-pivot-dag-wizard-token]').forEach(btn => {
                 btn.addEventListener('click', () => insertWizardToken(btn.dataset.pivotDagWizardToken || '', btn.dataset.pivotDagWizardTarget || ''));

@@ -110,6 +110,7 @@ function readDagEditorSourceBundle() {
         'dag-wizard-db.js',
         'dag-wizard-input.js',
         'dag-wizard-fields.js',
+        'dag-wizard-special-fields.js',
         'dag-wizard-stats.js',
         'dag-wizard.js',
         'dag-inspector.js',

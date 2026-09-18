@@ -54,14 +54,15 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
             const key = normalizeFieldKey(name);
             if (isDatabaseConnectionField(name, tool)) return '选择要执行该数据库工具的连接；读取表/字段会跟随这个选择。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
+            if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '添加一个或多个字段；每个字段组合会形成一个汇总分组。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
             if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
                 ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'
                 : '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
             if (key === 'query' || key === 'prompt') return '可直接输入，也可以插入任务目标或上游节点输出作为上下文。';
-            if (toolValue(tool) === 'agent.content_review' && key === 'records') return '请选择上游查询节点的结构化结果或记录行；支持 structuredContent、rows、data 和数组。';
-            if (toolValue(tool) === 'agent.content_review' && ['id_field', 'title_field', 'content_field'].includes(key)) return '填写上游记录里的实际字段名；字段不存在时会尝试常见别名。';
-            if (toolValue(tool) === 'agent.content_review' && ['chunk_tokens', 'overlap_tokens', 'max_tokens', 'concurrency'].includes(key)) return '这是高级处理参数；默认值已兼顾上下文完整性、速度和模型输出稳定性。';
+            if (toolShortName(tool) === 'agent.content_review' && ['records', 'rows', 'data'].includes(key)) return '请选择上游查询节点的结构化结果或记录行；支持 structuredContent、rows、data 和数组。';
+            if (toolShortName(tool) === 'agent.content_review' && ['id_field', 'title_field', 'content_field'].includes(key)) return '填写上游记录里的实际字段名；字段不存在时会尝试常见别名。';
+            if (toolShortName(tool) === 'agent.content_review' && ['chunk_tokens', 'overlap_tokens', 'max_tokens', 'concurrency'].includes(key)) return '这是高级处理参数；默认值已兼顾上下文完整性、速度和模型输出稳定性。';
             if (key === 'rows' || key === 'columns' || key === 'filters') return '适合引用上游结构化结果；手动填写时请保持结构化格式。';
             if (key === 'model' || key === 'temperature' || key === 'max_tokens') return '属于模型调用控制参数，不确定时保持默认或留空。';
             const type = normalizeSchemaType(schema);
@@ -152,6 +153,49 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
             };
             walk(schema);
             return tokens;
+        };
+
+        const buildWizardDataFieldOptions = (dependencyNodes = [], max = 80) => {
+            const result = [];
+            const add = (field, node, source) => {
+                const value = String(field || '').trim();
+                if (!value || result.some(item => item.value === value)) return;
+                result.push({
+                    value,
+                    label: `${value} · ${node?.title || node?.id || '上游数据'}${source ? `（${source}）` : ''}`,
+                    source
+                });
+            };
+            const rowsFromValue = (value, depth = 0) => {
+                if (depth > 3 || value === null || value === undefined) return [];
+                if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object' && !Array.isArray(item));
+                if (typeof value !== 'object') return [];
+                const candidates = [
+                    value.rows, value.data, value.items,
+                    value.structuredContent?.rows, value.structuredContent?.data, value.structuredContent?.items,
+                    value.result?.rows, value.result?.data, value.result?.items
+                ];
+                for (const candidate of candidates) {
+                    const rows = rowsFromValue(candidate, depth + 1);
+                    if (rows.length) return rows;
+                }
+                return [];
+            };
+            const schemaFields = (schema = {}) => {
+                const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+                const containers = ['rows', 'data', 'items', 'records'];
+                for (const name of containers) {
+                    const fields = properties[name]?.items?.properties;
+                    if (fields && typeof fields === 'object') return Object.keys(fields);
+                }
+                return [];
+            };
+            dependencyNodes.forEach(node => {
+                const sampleRows = rowsFromValue(node?._testOutput);
+                sampleRows.slice(0, 100).forEach(row => Object.keys(row || {}).forEach(field => add(field, node, '测试样本')));
+                schemaFields(node?.outputSchema || {}).forEach(field => add(field, node, '输出契约'));
+            });
+            return result.slice(0, max);
         };
 
         const buildWizardReferenceGroups = (node, dependencyNodes = buildWizardDependencyNodes(node)) => {

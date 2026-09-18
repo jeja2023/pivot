@@ -432,6 +432,7 @@
 }
 
 .pivot-dag-contract-panel {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -615,7 +616,7 @@
 
 .pivot-dag-schema-root-type select,
 .pivot-dag-schema-item-type select {
-    min-height: 30px;
+    min-height: 38px;
 }
 
 .pivot-dag-schema-fields {
@@ -638,7 +639,7 @@
 
 .pivot-dag-schema-field {
     display: grid;
-    grid-template-columns: minmax(110px, 1fr) 92px minmax(120px, 1.2fr) auto auto;
+    grid-template-columns: minmax(120px, 1fr) minmax(112px, 0.78fr) minmax(150px, 1.2fr) auto auto;
     align-items: center;
     gap: 6px;
     padding: 7px;
@@ -649,9 +650,9 @@
 
 .pivot-dag-schema-field .form-input {
     min-width: 0;
-    min-height: 28px;
-    padding: 4px 7px;
-    font-size: 0.68rem;
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 0.82rem;
 }
 
 .pivot-dag-schema-required {
@@ -659,14 +660,14 @@
     align-items: center;
     gap: 3px;
     color: #475569;
-    font-size: 0.64rem;
+    font-size: 0.76rem;
     white-space: nowrap;
 }
 
 .pivot-dag-schema-field .btn-danger-outline {
-    min-height: 26px;
-    padding: 3px 7px;
-    font-size: 0.64rem;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.76rem;
 }
 
 .pivot-dag-schema-empty {
@@ -733,21 +734,45 @@
 }
 
 .pivot-dag-contract-panel-head {
-    justify-content: space-between;
     cursor: pointer;
+    padding-right: 104px;
 }
 
-.pivot-dag-contract-panel-head span { color: #64748b; font-size: 0.68rem; font-weight: 500; }
+.pivot-dag-contract-panel-title {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pivot-dag-contract-panel-title em {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-style: normal;
+    font-weight: 500;
+}
 
 .pivot-dag-contract-panel-head strong {
     color: #0f172a;
     font-size: 0.76rem;
 }
 
-.pivot-dag-contract-panel-head .btn-secondary {
-    height: 26px;
-    padding: 0 8px;
-    font-size: 0.68rem;
+.pivot-dag-contract-edit-action {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    min-height: 32px;
+    padding: 0 11px;
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.pivot-dag-contract-edit-action:hover,
+.pivot-dag-contract-edit-action:focus-visible {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
 }
 
 .pivot-dag-contract-grid {
@@ -817,20 +842,32 @@
 }
 
 .pivot-dag-contract-editor {
-    width: min(980px, calc(100vw - 32px));
-    max-height: min(780px, calc(100vh - 32px));
+    display: flex;
+    width: min(1180px, calc(100vw - 32px));
+    height: min(88vh, 820px);
+    max-height: calc(100vh - 32px);
+    flex-direction: column;
+    gap: 0;
     overflow: hidden;
+}
+
+.pivot-dag-contract-editor .pivot-dag-input-head {
+    margin-inline: 18px;
+    padding-bottom: 10px;
 }
 
 .pivot-dag-contract-editor-body {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    padding: 14px;
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: minmax(260px, 0.78fr) minmax(440px, 1.22fr);
+    gap: 14px;
+    padding: 16px 18px;
     overflow: auto;
 }
 
-.pivot-dag-contract-editor-body label,
+.pivot-dag-contract-pane,
+.pivot-dag-contract-field,
 .pivot-dag-contract-editor-body label > span {
     display: flex;
     flex-direction: column;
@@ -838,27 +875,109 @@
     min-width: 0;
 }
 
+.pivot-dag-contract-pane {
+    min-height: 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-main);
+}
+
+.pivot-dag-contract-input-pane {
+    background: var(--surface);
+}
+
+.pivot-dag-contract-output-pane {
+    background: var(--surface);
+}
+
 .pivot-dag-contract-editor-body label > span strong {
-    color: #0f172a;
-    font-size: 0.78rem;
+    color: var(--text-main);
+    font-size: 0.88rem;
 }
 
 .pivot-dag-contract-editor-body label > span em {
-    color: #64748b;
-    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-size: 0.78rem;
     font-style: normal;
 }
 
-.pivot-dag-contract-editor-body textarea {
-    min-height: 360px;
+.pivot-dag-contract-code {
+    flex: 1 1 auto;
+    min-height: 300px;
     resize: vertical;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
+    font-size: 0.82rem;
     line-height: 1.5;
 }
 
-.pivot-dag-contract-editor-body .pivot-dag-schema-raw textarea {
+.pivot-dag-contract-output-pane .pivot-dag-schema-raw textarea {
     min-height: 130px;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-builder-head,
+.pivot-dag-contract-editor .pivot-dag-schema-preview-head {
+    align-items: flex-start;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-builder-head strong,
+.pivot-dag-contract-editor .pivot-dag-schema-preview-head strong {
+    color: var(--text-main);
+    font-size: 0.88rem;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-builder-head em,
+.pivot-dag-contract-editor .pivot-dag-schema-preview-head span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-builder-head .btn-secondary,
+.pivot-dag-contract-editor .pivot-dag-schema-raw .btn-secondary,
+.pivot-dag-contract-editor .pivot-dag-schema-add-nested {
+    min-height: 34px;
+    padding: 0 11px;
+    font-size: 0.78rem;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-root-type,
+.pivot-dag-contract-editor .pivot-dag-schema-item-type {
+    max-width: 100%;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-root-type .form-input,
+.pivot-dag-contract-editor .pivot-dag-schema-item-type .form-input {
+    width: min(220px, 100%);
+    height: 34px;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.82rem;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-field .form-input {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.8rem;
+}
+
+.pivot-dag-contract-editor .pivot-dag-schema-field select.form-input {
+    padding-right: 30px;
+}
+
+.pivot-dag-contract-actions {
+    flex: 0 0 auto;
+    min-height: 62px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.pivot-dag-contract-actions .btn-secondary,
+.pivot-dag-contract-actions .btn-primary {
+    min-height: 38px;
+    padding: 0 14px;
+    font-size: 0.84rem;
 }
 
 @media (max-width: 720px) {
@@ -883,7 +1002,15 @@
         grid-template-columns: 1fr;
     }
 
-    .pivot-dag-contract-editor-body textarea {
+    .pivot-dag-contract-editor {
+        height: min(92vh, 920px);
+    }
+
+    .pivot-dag-contract-editor-body {
+        padding: 12px;
+    }
+
+    .pivot-dag-contract-code {
         min-height: 220px;
     }
 }

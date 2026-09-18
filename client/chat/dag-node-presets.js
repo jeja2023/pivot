@@ -24,12 +24,6 @@ const NODE_PRESET_GROUPS = [
         group: '起始与交付',
         items: [
             {
-                base: 'input', title: '工作流输入', svgIcon: 'log-in', theme: 'input',
-                desc: '声明可填写、校验和复用的运行参数', toolName: 'workflow.input',
-                input: { name: 'input', label: '输入参数', type: 'text', required: true, defaultValue: '', description: '' },
-                outputSchema: { type: 'object', required: ['name', 'value'], properties: { name: { type: 'string' }, value: {}, text: { type: 'string' } } }
-            },
-            {
                 base: 'output', title: '工作流输出', svgIcon: 'log-out', theme: 'output',
                 desc: '明确指定工作流最终交付结果', toolName: 'workflow.output',
                 getInput: ({ selectedNode }) => ({
@@ -73,6 +67,13 @@ const NODE_PRESET_GROUPS = [
                         text: { type: 'string' }
                     }
                 }
+            },
+            {
+                base: 'input', title: '声明运行参数', svgIcon: 'log-in', theme: 'input', advanced: true,
+                desc: '仅在需要类型、默认值或必填校验时声明；它不是流程起点，也不是每个工作流必配。', toolName: 'workflow.input',
+                input: { name: '', label: '', type: 'text', required: false, defaultValue: '', description: '' },
+                standalone: true, openWizard: true,
+                outputSchema: { type: 'object', required: ['name', 'value'], properties: { name: { type: 'string' }, value: {}, text: { type: 'string' } } }
             },
             {
                 base: 'embed_code', title: '网站嵌入代码', svgIcon: 'code', theme: 'code', advanced: true,
@@ -237,7 +238,7 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db', advanced: true,
                 desc: '按字段分组并计算数量、求和或平均值', toolName: 'data.group_summary',
-                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: '', valueField: '', aggregation: 'count', limit: 100 })
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: [], valueField: '', aggregation: 'count', limit: 100 })
             },
             {
                 base: 'profile_rows', title: '分析表格字段', svgIcon: 'table', theme: 'db', advanced: true,
@@ -465,6 +466,8 @@ function buildPreset(preset, context = {}) {
         title: preset.title,
         toolName: preset.toolName || '',
         patterns: preset.patterns || [],
+        standalone: preset.standalone === true,
+        openWizard: preset.openWizard === true,
         input: input && typeof input === 'object' && !Array.isArray(input) ? structuredCloneSafe(input) : {},
         inputSchema: structuredCloneSafe(preset.inputSchema || {}),
         outputSchema: structuredCloneSafe(preset.outputSchema || {})

@@ -607,6 +607,7 @@ if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
     window.Pivot.registerModule('agent.dagCore', {
         getUpstreamNodes,
         getAvailableVariableOptions,
+        getNodeTestOutputSnapshots,
         setDagNodeTestOutput,
         alignNodes
     });
@@ -634,6 +635,7 @@ if (typeof module !== 'undefined' && module.exports) {
         readJson,
         getUpstreamNodes,
         getAvailableVariableOptions,
+        getNodeTestOutputSnapshots,
         setDagNodeTestOutput,
         alignNodes
     };

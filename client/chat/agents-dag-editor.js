@@ -27,7 +27,6 @@
 /* global createDagIcon, placeNewNode, clampDagCoordinate */
 (function () {
 if (window.Pivot.legacy.PivotDagEditor) return;
-
 const raf = typeof globalThis.requestAnimationFrame === 'function'
     ? callback => globalThis.requestAnimationFrame(callback)
     : callback => setTimeout(callback, 16);
@@ -109,7 +108,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 }
             }));
         };
-
         const root = makeSvgEl('svg', {
             class: 'pivot-dag-svg',
             xmlns: SVG_NS,
@@ -148,7 +146,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             canvas.appendChild(wrap);
             return { wrap, svg: mini, nodesLayer: miniNodes, viewport };
         })();
-
         const updateMinimap = () => {
             if (!minimap) return;
             const bounds = contentBounds();
@@ -178,7 +175,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             minimap.viewport.setAttribute('width', vbWidth);
             minimap.viewport.setAttribute('height', vbHeight);
         };
-
         // 点击小地图：把视口中心移到点击位置
         const minimapClickHandler = (event) => {
             const rect = minimap.svg.getBoundingClientRect();
@@ -369,7 +365,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         viewportHint.className = 'pivot-dag-viewport-hint';
         viewportHint.textContent = '拖拽空白处平移 · 滚轮缩放 · 空格 + 拖拽抓手移动';
         canvas.appendChild(viewportHint);
-
         const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
         const dagCoreApi = window.Pivot?.moduleApi?.('agent.dagCore') || {};
         const getUpstreamNodes = (...args) => dagCoreApi.getUpstreamNodes?.(...args) || [];
@@ -501,6 +496,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             getDependencyCandidateNodes,
             wouldCreateCycle,
             getUpstreamNodes,
+            getNodeTestOutputSnapshots: () => dagCoreApi.getNodeTestOutputSnapshots?.() || new Map(),
             getRunStates: () => globalThis.Pivot?.legacy?.dagNodeRunStates || new Map(),
             getDagInputs: () => typeof collectAgentDagInputs === 'function' ? collectAgentDagInputs() : {},
             getAvailableVariableOptions,
@@ -674,6 +670,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const baseId = uniqueId(spec.nodes.map(n => n.id), preset.base || 'node');
             const selectedNode = spec.nodes.find(n => n.id === selectedId);
             const materialized = registry?.build(preset, { selectedId, selectedNode, baseId }) || preset;
+            const anchorId = materialized.standalone ? '' : selectedId;
             const inputTemplate = typeof materialized.input === 'function'
                 ? materialized.input({ selectedId, selectedNode, baseId })
                 : (materialized.input || {});
@@ -684,7 +681,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 input: { ...inputTemplate },
                 inputSchema: materialized.inputSchema && typeof materialized.inputSchema === 'object' ? materialized.inputSchema : {},
                 outputSchema: materialized.outputSchema && typeof materialized.outputSchema === 'object' ? materialized.outputSchema : {},
-                dependsOn: selectedId ? [selectedId] : [],
+                dependsOn: anchorId ? [anchorId] : [],
                 condition: 'success',
                 retryLimit: 0,
                 timeoutMs: 0,
@@ -692,13 +689,16 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             };
             spec.nodes.push(node);
             syncExplicitEdgesForDependencies();
-            placeNewNode(spec.nodes, node, selectedId);
+            placeNewNode(spec.nodes, node, anchorId);
             setSelection([node.id], node.id);
             render();
             if (wasEmpty) fitToContent();
             flushOut();
+            if (materialized.openWizard) requestAnimationFrame(() => openNodeInputWizard(node.id));
             window.Pivot.legacy.showToast?.(
-                selectedNode
+                materialized.standalone
+                    ? `已添加${node.title}；它不会成为业务流程起点`
+                    : selectedNode
                     ? `已在「${selectedNode.title || selectedNode.id}」后添加${node.title}`
                     : `已添加${node.title}起始节点`,
                 'success'
