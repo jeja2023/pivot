@@ -1,4 +1,5 @@
 /* Agent DAG 工具栏工具元数据辅助函数（拆自 dag-toolbar.js） */
+/* global agentToolTitle, agentToolDescription */
 
 const TOOL_DISPLAY_OVERRIDES = {
         'agent.llm': ['大模型节点', '调用指定大模型，对上游结果进行分析、改写、抽取或生成内容。'],
@@ -43,7 +44,39 @@ const TOOL_DISPLAY_OVERRIDES = {
         'im.list_allowed_targets': ['列出通知目标', '列出当前允许通知的局域网即时通讯目标。'],
         'im.send_user_message': ['发送用户消息', '向允许的局域网即时通讯用户发送纯文本消息。'],
         'im.send_group_message': ['发送群组消息', '向允许的局域网即时通讯群组发送纯文本消息。'],
-        'im.send_markdown': ['发送格式化消息', '向允许的局域网消息目标发送格式化内容。']
+        'im.send_markdown': ['发送格式化消息', '向允许的局域网消息目标发送格式化内容。'],
+        'browser.open': ['打开本机浏览器页面', '在当前设备已授权的隔离浏览器中打开页面，用户可自行完成登录。'],
+        'browser.inspect': ['读取本机网页内容', '在当前设备已授权的隔离浏览器中读取标题和受限正文。'],
+        'browser.click': ['点击本机网页元素', '在当前设备已授权的隔离浏览器中点击目标，须经本机确认。'],
+        'browser.screenshot': ['截取本机网页', '在当前设备已授权的隔离浏览器中截取页面，须经本机确认。'],
+        'browser.navigate': ['浏览器访问页面', '在受控浏览器沙箱中打开目标页面。'],
+        'browser.extract_text': ['网页内容提取', '提取当前网页的正文结构与关键文本。'],
+        'code.python_execute': ['Python 脚本执行', '在隔离沙箱中执行 Python 数据处理与建模脚本。'],
+        'code.duckdb_query': ['DuckDB 高性能查询', '使用 DuckDB 列式引擎对多格式数据进行快速 SQL 分析。'],
+        'filesystem.read_workspace': ['读取工作区文件', '读取任务受控工作区内的文件内容。'],
+        'filesystem.write_workspace': ['写入工作区文件', '在任务受控工作区内安全保存生成的文件。'],
+        'workflow.input': ['工作流输入', '声明并读取运行参数，支持类型转换与默认值。'],
+        'workflow.template': ['文本模板', '使用工作流变量拼接确定性文本，不调用模型。'],
+        'workflow.notify': ['受控通知', '通过已配置的企业微信、飞书或钉钉渠道绑定排队发送通知。'],
+        'workflow.output': ['工作流输出', '声明工作流最终输出，便于按名称读取交付结果。'],
+        'workflow.condition': ['条件路由', '比较输入值并返回匹配路由，供下游条件分支引用。'],
+        'workflow.approval': ['人工审批', '暂停工作流等待指定人员审批，支持多级审批与超时策略。'],
+        'workflow.foreach': ['循环 / 批处理', '在独立受控 Worker 沙箱中并发遍历处理集合项。'],
+        'workflow.subworkflow': ['子工作流', '调用另一个已发布工作流并获取其最终输出。'],
+        'workflow.delay': ['延时等待', '挂起工作流到指定时间后继续执行。'],
+        'workflow.embed_page': ['嵌入页面', '在工作流结果中展示受限页面嵌入。'],
+        'workflow.embed_image': ['嵌入图片', '在工作流结果中展示图片资源。'],
+        'workflow.embed_video': ['嵌入视频', '在工作流结果中展示带控件的视频资源。'],
+        'workflow.embed_audio': ['嵌入音频', '在工作流结果中展示带控件的音频资源。'],
+        'workflow.link_card': ['链接卡片', '生成安全的链接卡片并在新窗口打开。'],
+        'workflow.embed_code': ['网站嵌入代码', '生成可复制到其它网站页面的 HTML iframe 代码。'],
+        'agent.code': ['代码执行', '在独立受控 Worker 沙箱中运行脚本；服务端不直接执行代码。'],
+        'agent.http': ['HTTP 请求', '调用外部 REST API 并返回状态码与响应数据。'],
+        'agent.browser': ['浏览器自动化', '在受控浏览器沙箱中打开目标页面并提取关键内容。'],
+        'agent.merge': ['变量聚合', '把多个上游节点的输出合并为一个结构化对象。'],
+        'artifact.render': ['文档渲染', '将受控 Document IR 渲染为正式文档。'],
+        'artifact.list_renditions': ['渲染结果列表', '列出某个产物已有的渲染结果。'],
+        'knowledge.graph.query': ['知识图谱查询', '查询知识图谱中的实体与关联关系。']
     };
 
 const TOOL_GROUPS = [
@@ -55,7 +88,7 @@ const TOOL_GROUPS = [
         { key: 'data', label: '数据处理', test: name => /^data\./.test(name) },
         { key: 'document', label: '文档处理', test: name => /^doc\./.test(name) },
         { key: 'format', label: '格式转换', test: name => /^format\./.test(name) },
-        { key: 'notify', label: '消息通知', test: name => /^im\./.test(name) },
+        { key: 'notify', label: '消息通知', test: name => /^(im\.|workflow\.notify$)/.test(name) },
         { key: 'system', label: '系统诊断', test: name => /^(models|system)\./.test(name) },
         { key: 'external', label: '外部能力', test: name => /^mcp\./.test(name) },
         { key: 'other', label: '其他工具', test: () => true }
@@ -70,13 +103,26 @@ function toolShortName(tool) {
 function friendlyToolTitle(tool) {
         const shortName = toolShortName(tool);
         const override = TOOL_DISPLAY_OVERRIDES[shortName] || TOOL_DISPLAY_OVERRIDES[toolValue(tool)];
-        return override?.[0] || tool?.title || shortName || toolValue(tool) || '未命名工具';
+        if (override?.[0]) return override[0];
+        if (typeof agentToolTitle === 'function') {
+                const title = agentToolTitle(tool);
+                if (title && title !== shortName && title !== toolValue(tool) && title !== '工具') return title;
+        }
+        if (typeof tool === 'object' && tool?.title && tool.title !== shortName && tool.title !== toolValue(tool) && !/^[a-z_]+(?:\.[a-z0-9_-]+)+$/i.test(tool.title)) {
+                return tool.title;
+        }
+        return tool?.title || shortName || toolValue(tool) || '未命名工具';
     }
 
 function friendlyToolDescription(tool) {
         const shortName = toolShortName(tool);
         const override = TOOL_DISPLAY_OVERRIDES[shortName] || TOOL_DISPLAY_OVERRIDES[toolValue(tool)];
-        return override?.[1] || tool?.description || '暂无说明。';
+        if (override?.[1]) return override[1];
+        if (typeof agentToolDescription === 'function') {
+                const desc = agentToolDescription(tool);
+                if (desc) return desc;
+        }
+        return tool?.description || '暂无说明。';
     }
 
 function toolSourceLabel(tool) {

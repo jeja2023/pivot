@@ -10,6 +10,19 @@ const {
 } = require('./agent-validators');
 const { normalizeToolContract } = require('./agent-contracts');
 
+const KNOWN_MCP_TOOL_TITLES = {
+    'browser.open': '打开本机浏览器页面',
+    'browser.inspect': '读取本机网页内容',
+    'browser.click': '点击本机网页元素',
+    'browser.screenshot': '截取本机网页',
+    'browser.navigate': '浏览器访问页面',
+    'browser.extract_text': '网页内容提取',
+    'code.python_execute': 'Python 脚本执行',
+    'code.duckdb_query': 'DuckDB 高性能查询',
+    'filesystem.read_workspace': '读取工作区文件',
+    'filesystem.write_workspace': '写入工作区文件'
+};
+
 async function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
@@ -58,22 +71,28 @@ async function formatToolList(user, options = {}) {
         .filter(Boolean);
     const mcpTools = cachedMcpTools
         .filter(tool => tool.serverType !== 'database')
-        .map(tool => ({
-            name: tool.fullName,
-            title: tool.title || tool.name,
-            description: `[${tool.serverName}] ${tool.description || tool.name}`,
-            input_schema: tool.input_schema,
-            ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
-            source: 'mcp',
-            risk: tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high'),
-            requiresApproval: Boolean(tool.localBrowserConnector === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
-            governance: tool.governance || {},
-            serverName: tool.serverName,
-            owner: tool.owner || null,
-            localDevice: tool.localDevice || null,
-            localBrowserConnector: tool.localBrowserConnector === true,
-            ...(tool.localBrowserConnector === true ? { network: false } : {})
-        }))
+        .map(tool => {
+            const shortName = String(tool.name || '').replace(/^(?:mcp\.\d+\.)?/, '');
+            const title = (tool.title && tool.title !== tool.name)
+                ? tool.title
+                : (KNOWN_MCP_TOOL_TITLES[shortName] || tool.title || tool.name);
+            return {
+                name: tool.fullName,
+                title,
+                description: `[${tool.serverName}] ${tool.description || tool.name}`,
+                input_schema: tool.input_schema,
+                ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
+                source: 'mcp',
+                risk: tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high'),
+                requiresApproval: Boolean(tool.localBrowserConnector === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
+                governance: tool.governance || {},
+                serverName: tool.serverName,
+                owner: tool.owner || null,
+                localDevice: tool.localDevice || null,
+                localBrowserConnector: tool.localBrowserConnector === true,
+                ...(tool.localBrowserConnector === true ? { network: false } : {})
+            };
+        })
         .filter(tool => isAllowed(tool.name, 'mcp'));
     return [...builtIns, ...databaseTools, ...mcpTools].map(tool => {
         const contract = normalizeToolContract(tool);

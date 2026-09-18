@@ -150,10 +150,10 @@ function localBrowserToolDefinitions() {
         required: ['url']
     };
     return [
-        { name: 'browser.open', description: '在当前设备授权的隔离浏览器中打开页面，用户可在本机完成登录；不读取日常浏览器凭据。', inputSchema: common },
-        { name: 'browser.inspect', description: '在当前设备授权的隔离浏览器中读取页面标题和受限正文文本。', inputSchema: common },
-        { name: 'browser.click', description: '在当前设备授权的隔离浏览器中点击页面目标；桌面端会要求用户确认。', inputSchema: { ...common, properties: { ...common.properties, target: { type: 'object', description: '目标元素，支持 selector、role/name 或 text。' } }, required: ['url', 'target'] } },
-        { name: 'browser.screenshot', description: '截取当前设备授权浏览器中的页面截图；桌面端会要求用户确认。', inputSchema: common }
+        { name: 'browser.open', title: '打开本机浏览器页面', description: '在当前设备授权的隔离浏览器中打开页面，用户可在本机完成登录；不读取日常浏览器凭据。', inputSchema: common },
+        { name: 'browser.inspect', title: '读取本机网页内容', description: '在当前设备授权的隔离浏览器中读取页面标题和受限正文文本。', inputSchema: common },
+        { name: 'browser.click', title: '点击本机网页元素', description: '在当前设备授权的隔离浏览器中点击页面目标；桌面端会要求用户确认。', inputSchema: { ...common, properties: { ...common.properties, target: { type: 'object', description: '目标元素，支持 selector、role/name 或 text。' } }, required: ['url', 'target'] } },
+        { name: 'browser.screenshot', title: '截取本机网页', description: '截取当前设备授权浏览器中的页面截图；桌面端会要求用户确认。', inputSchema: common }
     ];
 }
 

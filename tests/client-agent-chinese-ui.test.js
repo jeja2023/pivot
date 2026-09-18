@@ -185,6 +185,10 @@ test('所有工作流与智能体工具标题本地化', () => {
         ['im.send_user_message', '发送私聊消息'],
         ['code.python_execute', 'Python 脚本执行'],
         ['browser.navigate', '浏览器访问页面'],
+        ['browser.open', '打开本机浏览器页面'],
+        ['browser.inspect', '读取本机网页内容'],
+        ['browser.click', '点击本机网页元素'],
+        ['browser.screenshot', '截取本机网页'],
         ['filesystem.read_workspace', '读取工作区文件']
     ];
 
@@ -192,3 +196,44 @@ test('所有工作流与智能体工具标题本地化', () => {
         assert.strictEqual(env.agentToolTitle(toolName), expectedTitle, `工具 ${toolName} 必须有中文标题`);
     }
 });
+
+test('DAG 工具选择器外部能力与本机浏览器工具全面中文化', () => {
+    const sandbox = {
+        console,
+        window: { Pivot: { legacy: {} } },
+        document: {
+            getElementById: () => null,
+            querySelectorAll: () => []
+        },
+        dagEscapeAttr: text => String(text ?? '').replace(/"/g, '&quot;'),
+        dagEscapeHtml: text => String(text ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+        toolValue: tool => (typeof tool === 'string' ? tool : tool?.fullName || tool?.name || ''),
+        databaseConnectionsFromTool: () => []
+    };
+    vm.createContext(sandbox);
+    const dagToolbarToolsCode = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-toolbar-tools.js'), 'utf8');
+    vm.runInContext(dagToolbarToolsCode, sandbox);
+
+    assert.equal(sandbox.friendlyToolTitle({ name: 'mcp.1.browser.click' }), '点击本机网页元素');
+    assert.equal(sandbox.friendlyToolTitle({ name: 'mcp.1.browser.inspect' }), '读取本机网页内容');
+    assert.equal(sandbox.friendlyToolTitle({ name: 'mcp.1.browser.open' }), '打开本机浏览器页面');
+    assert.equal(sandbox.friendlyToolTitle({ name: 'mcp.1.browser.screenshot' }), '截取本机网页');
+
+    const tools = [
+        { name: 'mcp.1.browser.click', fullName: 'mcp.1.browser.click', serverName: '本机浏览器连接器' },
+        { name: 'mcp.1.browser.inspect', fullName: 'mcp.1.browser.inspect', serverName: '本机浏览器连接器' },
+        { name: 'mcp.1.browser.open', fullName: 'mcp.1.browser.open', serverName: '本机浏览器连接器' },
+        { name: 'mcp.1.browser.screenshot', fullName: 'mcp.1.browser.screenshot', serverName: '本机浏览器连接器' }
+    ];
+    const optionsHtml = sandbox.renderToolOptions(tools, '');
+    assert.ok(optionsHtml.includes('外部能力'));
+    assert.ok(optionsHtml.includes('点击本机网页元素'));
+    assert.ok(optionsHtml.includes('读取本机网页内容'));
+    assert.ok(optionsHtml.includes('打开本机浏览器页面'));
+    assert.ok(optionsHtml.includes('截取本机网页'));
+    assert.ok(!optionsHtml.includes('>browser.click<'));
+    assert.ok(!optionsHtml.includes('>browser.inspect<'));
+    assert.ok(!optionsHtml.includes('>browser.open<'));
+    assert.ok(!optionsHtml.includes('>browser.screenshot<'));
+});
+
