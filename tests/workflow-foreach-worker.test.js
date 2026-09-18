@@ -144,6 +144,7 @@ test('workflow.notify is a governed side-effect tool backed by channel bindings'
     const tool = getBuiltInToolDefinitions({ id: 1 }).find(item => item.name === 'workflow.notify');
     assert.equal(tool?.side_effect, true);
     assert.equal(tool?.alwaysRequiresApproval, true);
+    assert.deepEqual(tool?.input_schema?.required, ['bindingId', 'body']);
     assert.deepEqual(BUILTIN_TOOL_CAPABILITIES['workflow.notify'], ['network.http_request']);
     assert.match(tool.description, /不接受裸 Webhook URL/);
 });

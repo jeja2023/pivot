@@ -672,6 +672,7 @@ module.exports = {
     buildFallbackDataQueryInput,
     buildDeterministicBrowserFallback,
     detectBrowserVisitIntent,
+    detectExplicitMcpCapabilityIntent,
     detectReportFileInventoryIntent,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,

@@ -420,7 +420,7 @@ body.dark-mode .pivot-node-library-advanced-toggle,
     left: 50%;
     z-index: 3;
     display: flex;
-    max-width: 320px;
+    max-width: 420px;
     flex-direction: column;
     align-items: center;
     gap: 6px;
@@ -428,7 +428,7 @@ body.dark-mode .pivot-node-library-advanced-toggle,
     border: 1px dashed rgba(148, 163, 184, 0.5);
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.86);
-    pointer-events: none;
+    pointer-events: auto;
     text-align: center;
     transform: translate(-50%, -50%);
 }
@@ -454,6 +454,23 @@ body.dark-mode .pivot-node-library-advanced-toggle,
     color: #64748b;
     font-size: 0.72rem;
     line-height: 1.5;
+}
+
+.pivot-dag-empty-hint-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 4px;
+}
+
+.pivot-dag-empty-hint-actions .btn-primary,
+.pivot-dag-empty-hint-actions .btn-secondary {
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    font-weight: 700;
 }
 
 body.dark-mode .pivot-dag-empty-hint,

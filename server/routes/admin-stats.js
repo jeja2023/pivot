@@ -10,6 +10,7 @@ const { getGpuMonitorStatus } = require('../services/gpu-monitor');
 const { getMaintenanceStatus } = require('../services/maintenance');
 const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getRagOperationsOverview } = require('../services/rag-operations-observability');
+const { getChatRouteMetricBuckets } = require('../services/chat-route-observability');
 const {
     getObservabilitySettings,
     listObservabilityEvents,
@@ -101,6 +102,7 @@ function createAdminStatsRouter({
             chunksIndexed: await getMonitorKnowledgeChunkCount()
         };
         const ragOperations = await getRagOperationsOverview();
+        const chatRouting = await getChatRouteMetricBuckets({ minutes: 24 * 60 });
         const observabilityEvents = await listObservabilityEvents({ limit: 12 });
 
         const observabilityOpen = await query(`
@@ -227,6 +229,7 @@ function createAdminStatsRouter({
             modelEndpoints,
             rag: ragMetrics,
             ragOperations,
+            chatRouting,
             observability: {
                 events: observabilityEvents,
                 openByType: observabilityOpen,
@@ -261,6 +264,10 @@ function createAdminStatsRouter({
             status: req.query.status,
             limit: req.query.limit
         }) });
+    }));
+
+    router.get('/observability/chat-routing', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        res.json(await getChatRouteMetricBuckets({ minutes: req.query?.minutes }));
     }));
 
     router.put('/observability/events/:id/status', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {

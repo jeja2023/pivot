@@ -49,8 +49,14 @@ function renderAgentWorkflowLifecycle() {
     if (!target) return;
     const workflow = selectedAgentWorkflow();
     const draftSummary = summarizeAgentDagSpec();
+    const readinessIssue = window.Pivot?.moduleApi?.('agent.dagReadiness')?.inspectDagReadiness?.(
+        draftSummary.spec?.nodes || [],
+        typeof agentToolsCache !== 'undefined' && Array.isArray(agentToolsCache) ? agentToolsCache : [],
+        draftSummary.spec?.edges || []
+    )?.issues?.[0]?.message || '';
     const draftMatchesSaved = workflow ? currentWorkflowMatchesSelected(workflow) : false;
     const structureText = draftSummary.valid ? '' : '结构需修正';
+    const readinessText = readinessIssue ? '待完善配置' : '';
     const saveText = workflow
         ? (draftMatchesSaved ? '已保存' : '有未保存修改')
         : '未保存';
@@ -59,10 +65,10 @@ function renderAgentWorkflowLifecycle() {
         : '未发布';
     const state = !draftSummary.valid
         ? 'is-error'
-        : (!draftMatchesSaved ? 'is-draft' : (workflow?.published_version ? 'is-ready' : ''));
-    const statusTitle = [structureText, saveText, publishedText].filter(Boolean).join(' · ');
-    const primaryText = structureText || saveText;
-    const secondarySaveText = structureText ? `<em>${agentEscape(saveText)}</em>` : '';
+        : (readinessText ? 'is-error' : (!draftMatchesSaved ? 'is-draft' : (workflow?.published_version ? 'is-ready' : '')));
+    const statusTitle = [structureText, readinessIssue, saveText, publishedText].filter(Boolean).join(' · ');
+    const primaryText = structureText || readinessText || saveText;
+    const secondarySaveText = structureText || readinessText ? `<em>${agentEscape(saveText)}</em>` : '';
     PivotSafeHtml.setHtml(target, `
         <span class="agent-workflow-lifecycle-summary ${state}" title="${agentEscapeAttr(statusTitle)}">
             <span class="agent-workflow-status-dot" aria-hidden="true"></span>

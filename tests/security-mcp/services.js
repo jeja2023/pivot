@@ -23,6 +23,73 @@ const {
     upsertCapabilityPackage
 } = require('../../server/services/capability-market');
 const { flushAllWrites } = require('../../server/services/db-write-queue');
+const { normalizeMcpListCursor } = require('../../server/routes/mcp');
+
+test('MCP Resources 列表游标只接受受限的数字偏移', () => {
+    assert.equal(normalizeMcpListCursor(''), 0);
+    assert.equal(normalizeMcpListCursor('20'), 20);
+    assert.equal(normalizeMcpListCursor('-1'), 0);
+    assert.equal(normalizeMcpListCursor('20;DROP'), 0);
+    assert.equal(normalizeMcpListCursor('99999'), 10000);
+});
+
+test('MCP 知识库 Resources 仅列出并读取当前用户可访问的 Collection', async () => {
+    const suffix = Date.now().toString(36);
+    const ownerInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_resource_owner_${suffix}`, 'hash', 'Resource Owner', 'QA', 'user', 'active');
+    const outsiderInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_resource_outsider_${suffix}`, 'hash', 'Resource Outsider', 'Other', 'user', 'active');
+    const owner = { id: Number(ownerInfo.lastInsertRowid), username: `mcp_resource_owner_${suffix}`, role: 'user', unit: 'QA' };
+    const outsider = { id: Number(outsiderInfo.lastInsertRowid), username: `mcp_resource_outsider_${suffix}`, role: 'user', unit: 'Other' };
+    const now = getBeijingTimestamp();
+    const collectionInfo = db.prepare(`
+        INSERT INTO knowledge_collections (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
+        VALUES (?, ?, ?, 'personal', '', '', ?, ?)
+    `).run(owner.id, `MCP Resource ${suffix}`, '仅所有者可见', now, now);
+    const collectionId = Number(collectionInfo.lastInsertRowid);
+    db.prepare(`
+        INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, indexed_chunks, progress, created_at, updated_at)
+        VALUES (?, ?, ?, 'ready', 1, 1, 1, 100, ?, ?)
+    `).run(owner.id, collectionId, '私有制度.md', now, now);
+
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => next(),
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const rpcRoute = router.stack.find(layer => layer.route?.path === '/mcp/rpc' && layer.route?.methods?.post);
+    assert.ok(rpcRoute);
+    const handlers = rpcRoute.route.stack.map(layer => layer.handle);
+    const makeRes = () => ({ json(body) { this.body = body; return this; } });
+    try {
+        const ownerList = makeRes();
+        await runExpressHandlers(handlers, { user: owner, body: { id: 1, method: 'resources/list', params: {} } }, ownerList);
+        assert.equal(ownerList.body.result.resources.some(resource => resource.uri === `pivot-rag://collection/${collectionId}`), true);
+
+        const outsiderList = makeRes();
+        await runExpressHandlers(handlers, { user: outsider, body: { id: 2, method: 'resources/list', params: {} } }, outsiderList);
+        assert.equal(outsiderList.body.result.resources.some(resource => resource.uri === `pivot-rag://collection/${collectionId}`), false);
+
+        const ownerRead = makeRes();
+        await runExpressHandlers(handlers, { user: owner, body: { id: 3, method: 'resources/read', params: { uri: `pivot-rag://collection/${collectionId}` } } }, ownerRead);
+        const content = JSON.parse(ownerRead.body.result.contents[0].text);
+        assert.equal(content.collection.id, collectionId);
+        assert.equal(content.documents[0].name, '私有制度.md');
+
+        const outsiderRead = makeRes();
+        await runExpressHandlers(handlers, { user: outsider, body: { id: 4, method: 'resources/read', params: { uri: `pivot-rag://collection/${collectionId}` } } }, outsiderRead);
+        assert.equal(outsiderRead.body.error.code, -32002);
+        assert.doesNotMatch(outsiderRead.body.error.message, /MCP Resource|私有制度/);
+    } finally {
+        db.prepare('DELETE FROM knowledge_docs WHERE collection_id = ?').run(collectionId);
+        db.prepare('DELETE FROM knowledge_collections WHERE id = ?').run(collectionId);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(owner.id, outsider.id);
+    }
+});
 
 test('admin tool policy routes manage only global tool packages', async () => {
     const suffix = Date.now().toString(36);

@@ -291,6 +291,89 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.doesNotMatch(limitMarkup, /取值方式/);
     assert.doesNotMatch(limitMarkup, /推荐引用/);
 
+    const inputDefaultMarkup = sandbox.renderWizardField(
+        'defaultValue',
+        {},
+        '默认订单',
+        false,
+        [{ id: 'query', title: '数据查询', tool: 'db.run_readonly_query' }],
+        { name: 'workflow.input' }
+    );
+    assert.doesNotMatch(inputDefaultMarkup, /取值方式/);
+    assert.doesNotMatch(inputDefaultMarkup, /运行上下文/);
+
+    const typedInputDefaultMarkup = sandbox.renderWizardField(
+        'defaultValue',
+        {},
+        { department: '财务部' },
+        false,
+        [],
+        { name: 'workflow.input' }
+    );
+    assert.match(typedInputDefaultMarkup, /data-pivot-dag-workflow-input-default/);
+    assert.match(typedInputDefaultMarkup, /data-pivot-dag-input-default-editor="boolean"/);
+    assert.match(typedInputDefaultMarkup, /data-pivot-dag-input-default-editor="json"/);
+
+    const handoffAgentMarkup = sandbox.renderWizardField(
+        'fromAgent',
+        { type: 'string' },
+        'Researcher',
+        true,
+        [{ id: 'query', title: '数据查询', tool: 'db.run_readonly_query' }],
+        { name: 'agent.handoff' }
+    );
+    assert.doesNotMatch(handoffAgentMarkup, /取值方式/);
+
+    const notifyBodyMarkup = sandbox.renderWizardField(
+        'body',
+        { type: 'string' },
+        '处理完成：{{nodes.query.output.count}}',
+        true,
+        [{ id: 'query', title: '数据查询', tool: 'db.run_readonly_query' }],
+        { name: 'workflow.notify' }
+    );
+    assert.match(notifyBodyMarkup, /取值方式/);
+
+    const notifyBindingMarkup = sandbox.renderWizardField(
+        'bindingId',
+        { type: 'string' },
+        '',
+        true,
+        [],
+        { name: 'workflow.notify' }
+    );
+    assert.match(notifyBindingMarkup, /data-pivot-dag-channel-binding-picker/);
+    assert.match(notifyBindingMarkup, /刷新可用渠道/);
+    assert.doesNotMatch(notifyBindingMarkup, /取值方式/);
+
+    const credentialMarkup = sandbox.renderWizardField(
+        'credentialSecret',
+        { type: 'string' },
+        '',
+        false,
+        [],
+        { name: 'agent.http' }
+    );
+    assert.match(credentialMarkup, /data-pivot-dag-credential-picker/);
+    assert.match(credentialMarkup, /刷新凭据/);
+    assert.doesNotMatch(credentialMarkup, /取值方式/);
+
+    const chartGroupMarkup = sandbox.renderWizardField(
+        'groupBy',
+        { type: 'string' },
+        '',
+        false,
+        [{ id: 'rows', title: '数据行', tool: 'data.filter_rows' }],
+        { name: 'viz.build_chart' }
+    );
+    assert.match(chartGroupMarkup, /data-pivot-dag-data-field-picker/);
+    assert.match(chartGroupMarkup, /请选择上游数据字段/);
+
+    const fieldHelpers = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-toolbar-fields.js'), 'utf8');
+    assert.match(fieldHelpers, /'workflow\.notify': \['platform'\]/);
+    assert.match(fieldHelpers, /'workflow\.output': \['name', 'value', 'presentation'/);
+    assert.doesNotMatch(fieldHelpers, /'workflow\.output': \['format', 'presentation'\]/);
+
     const reportMarkup = sandbox.renderWizardField(
         'path',
         { type: 'string' },
@@ -302,6 +385,63 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(reportMarkup, /data-pivot-dag-report-path-picker/);
     assert.match(reportMarkup, /读取可访问文件/);
     assert.match(reportMarkup, /data-pivot-dag-report-path-custom/);
+
+    const reportSheetMarkup = sandbox.renderWizardField(
+        'sheet',
+        { type: 'string' },
+        '明细',
+        false,
+        [],
+        { name: 'reports.query_table' }
+    );
+    assert.match(reportSheetMarkup, /data-pivot-dag-report-sheet-picker/);
+    assert.match(reportSheetMarkup, /读取工作表和字段/);
+    assert.match(reportSheetMarkup, /pivot-dag-report-sheet-manual is-visible/);
+
+    const compareSheetMarkup = sandbox.renderWizardField(
+        'sheet',
+        { type: 'string' },
+        '',
+        false,
+        [],
+        { name: 'reports.compare_files' }
+    );
+    assert.match(compareSheetMarkup, /读取共同工作表/);
+
+    const reportColumnsMarkup = sandbox.renderWizardField(
+        'columns',
+        { type: 'array', items: { type: 'string' } },
+        ['部门'],
+        false,
+        [],
+        { name: 'reports.query_table' }
+    );
+    assert.match(reportColumnsMarkup, /data-pivot-dag-report-columns="1"/);
+    assert.match(reportColumnsMarkup, /data-pivot-dag-report-columns-list/);
+
+    const reportFiltersMarkup = sandbox.renderWizardField(
+        'filters',
+        { type: 'object' },
+        {},
+        false,
+        [],
+        { name: 'reports.query_table' }
+    );
+    assert.match(reportFiltersMarkup, /data-pivot-dag-report-filter-fields-list/);
+    assert.match(reportFiltersMarkup, /data-pivot-dag-report-filter-fields-hint/);
+
+    const reportAssist = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard-report-assist.js'), 'utf8');
+    assert.match(reportAssist, /请先选择一份具体的授权报表文件/);
+    assert.match(reportAssist, /reports\.read_file_summary/);
+    assert.match(reportAssist, /report-filter-fields-list/);
+    assert.match(reportAssist, /共同工作表/);
+
+    const specialFields = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard-special-fields.js'), 'utf8');
+    assert.match(specialFields, /bindConditionCompareField/);
+    assert.match(specialFields, /bindBrowserTargetVisibility/);
+    assert.match(specialFields, /bindCredentialPicker/);
+    assert.match(specialFields, /bindOutputPresentationFields/);
+    assert.match(specialFields, /bindWorkflowInputDefault/);
 
     const artifactMarkup = sandbox.renderWizardField(
         'artifactId',
@@ -328,6 +468,18 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(approvalLevelsMarkup, /data-pivot-dag-approval-level-user-ids/);
     assert.doesNotMatch(approvalLevelsMarkup, /pivot-dag-wizard-textarea/);
 
+    const handoffFindingsMarkup = sandbox.renderWizardField(
+        'findings',
+        { type: 'array', items: { type: 'string' } },
+        ['已完成核验'],
+        false,
+        [],
+        { name: 'agent.handoff' }
+    );
+    assert.match(handoffFindingsMarkup, /data-pivot-dag-tag-list/);
+    assert.match(handoffFindingsMarkup, /添加条目/);
+    assert.doesNotMatch(handoffFindingsMarkup, /pivot-dag-wizard-textarea/);
+
     const browserTargetMarkup = sandbox.renderWizardField(
         'target',
         { type: 'object' },
@@ -353,5 +505,118 @@ test('数据契约编辑器使用统一表单控件，并将编辑入口放在�
     assert.match(css, /\.pivot-dag-contract-edit-action\s*\{[\s\S]*?position:\s*absolute;/);
     assert.match(css, /\.pivot-dag-contract-editor-body\s*\{[\s\S]*?grid-template-columns:\s*minmax\(260px, 0\.78fr\) minmax\(440px, 1\.22fr\);/);
     assert.match(css, /\.pivot-dag-contract-editor \.pivot-dag-input-head\s*\{[\s\S]*?margin-inline:\s*18px;/);
+    assert.match(css, /\.pivot-dag-contract-editor \.pivot-dag-input-head\s*\{[\s\S]*?text-align:\s*left;/);
+    assert.match(css, /\.pivot-dag-contract-editor\s*\{[\s\S]*?text-align:\s*left;/);
     assert.match(css, /\.pivot-dag-contract-editor \.pivot-dag-schema-field \.form-input\s*\{[\s\S]*?min-height:\s*34px;/);
+});
+
+test('编辑期可运行性检查能定位节点缺失必填参数和重复运行参数声明', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-readiness.js'), 'utf8');
+    const sandbox = {
+        window: { Pivot: { exposeModule: (_name, value) => { sandbox.api = value; } } }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+    const report = sandbox.api.inspectDagReadiness([
+        { id: 'group', title: '分组', tool: 'mcp.8.data.group_summary', input: { rows: '{{nodes.query.output.rows}}', groupBy: [] } },
+        { id: 'notify', title: '通知', tool: 'workflow.notify', input: { body: '{{goal}}' } },
+        { id: 'input_a', title: '参数 A', tool: 'workflow.input', input: { name: 'orderNo' } },
+        { id: 'input_b', title: '参数 B', tool: 'workflow.input', input: { name: 'orderNo' } },
+        { id: 'output_a', title: '交付 A', tool: 'workflow.output', input: { value: '{{goal}}' } },
+        { id: 'output_b', title: '交付 B', tool: 'workflow.output', input: { value: '{{goal}}' } }
+    ], [
+        { fullName: 'mcp.8.data.group_summary', inputSchema: { required: ['rows', 'groupBy'] } },
+        { name: 'workflow.notify', input_schema: { required: ['bindingId', 'body'] } },
+        { name: 'workflow.input', input_schema: { required: ['name'] } },
+        { name: 'workflow.output', input_schema: { required: ['name', 'value'], properties: { name: { default: 'result' } } } }
+    ]);
+    assert.equal(report.valid, false);
+    assert.ok(report.issues.some(issue => issue.nodeId === 'group' && issue.field === 'groupBy'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'notify' && issue.field === 'bindingId'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'input_b' && issue.type === 'duplicate_workflow_input'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'output_b' && issue.type === 'duplicate_workflow_output'));
+
+    const exclusive = sandbox.api.inspectDagReadiness([
+        { id: 'condition', title: '判断', tool: 'workflow.condition', input: { operator: 'not_empty' } },
+        { id: 'yes', title: '成功交付', tool: 'workflow.output', input: { value: '{{goal}}' } },
+        { id: 'no', title: '失败交付', tool: 'workflow.output', input: { value: '{{goal}}' } }
+    ], [
+        { name: 'workflow.condition', input_schema: { properties: { operator: { default: 'not_empty' } } } },
+        { name: 'workflow.output', input_schema: { required: ['name', 'value'], properties: { name: { default: 'result' } } } }
+    ], [
+        { from: 'condition', to: 'yes', route: 'true' },
+        { from: 'condition', to: 'no', route: 'false' }
+    ]);
+    assert.ok(!exclusive.issues.some(issue => issue.type === 'duplicate_workflow_output'));
+});
+
+test('编辑期可运行性检查覆盖常见节点的语义配置和 schema 边界', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-readiness.js'), 'utf8');
+    const sandbox = {
+        window: { Pivot: { exposeModule: (_name, value) => { sandbox.api = value; } } }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+    const report = sandbox.api.inspectDagReadiness([
+        { id: 'summary', title: '汇总', tool: 'data.group_summary', input: { rows: '{{nodes.query.output.rows}}', groupBy: [''], aggregation: 'sum' } },
+        { id: 'route', title: '判断', tool: 'workflow.condition', input: { operator: 'equals', value: '' } },
+        { id: 'browser', title: '点击', tool: 'agent.browser', input: { url: 'https://example.com', action: 'click' } },
+        { id: 'input', title: '输入', tool: 'workflow.input', input: { name: '9-invalid' } },
+        { id: 'search', title: '检索', tool: 'rag.search', input: { query: '合同', topK: 12 } },
+        { id: 'dynamic', title: '动态数量', tool: 'rag.search', input: { query: '合同', topK: '{{inputs.topK}}' } }
+    ], [
+        { name: 'data.group_summary', input_schema: { required: ['rows', 'groupBy'], properties: { rows: { type: 'array' }, groupBy: { type: 'array', minItems: 1 }, aggregation: { type: 'string', enum: ['count', 'sum'] }, valueField: { type: 'string' } } } },
+        { name: 'workflow.condition', input_schema: { properties: { operator: { type: 'string', enum: ['equals', 'not_empty'] }, value: {}, compareTo: {} } } },
+        { name: 'agent.browser', input_schema: { required: ['url'], properties: { url: { type: 'string' }, action: { type: 'string', enum: ['inspect', 'click'] }, target: { type: 'object' } } } },
+        { name: 'workflow.input', input_schema: { required: ['name'], properties: { name: { type: 'string' } } } },
+        { name: 'rag.search', input_schema: { required: ['query'], properties: { query: { type: 'string' }, topK: { type: 'integer', minimum: 1, maximum: 10 } } } }
+    ]);
+    assert.equal(report.valid, false);
+    assert.ok(report.issues.some(issue => issue.nodeId === 'summary' && issue.type === 'missing_group_fields'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'summary' && issue.type === 'missing_aggregation_field'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'route' && issue.type === 'missing_condition_value'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'route' && issue.type === 'missing_condition_compare_to'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'browser' && issue.type === 'missing_browser_target'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'input' && issue.type === 'invalid_workflow_input_name'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'search' && issue.type === 'number_too_large'));
+    assert.ok(!report.issues.some(issue => issue.nodeId === 'dynamic' && issue.field === 'topK'));
+});
+
+test('受控通知绑定在检查器中使用可用渠道下拉框', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-inspector-special-fields.js'), 'utf8');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderField = renderDagInspectorChannelBindingField;`, sandbox);
+    const markup = sandbox.renderField({
+        value: 'channel_1',
+        bindings: [
+            { id: 'channel_1', status: 'active', channelKey: '日报群', config: { platform: 'wecom' } },
+            { id: 'channel_2', status: 'paused', channelKey: '停用群', config: { platform: 'feishu' } }
+        ],
+        escapeAttr: value => String(value),
+        escapeHtml: value => String(value)
+    });
+    assert.match(markup, /<select class="form-input"/);
+    assert.match(markup, /企业微信 · 日报群/);
+    assert.doesNotMatch(markup, /停用群/);
+    assert.match(markup, /平台由所选绑定自动确定/);
+});
+
+test('检查器就地显示节点配置问题，并让条件判断使用中文且按需显示比较值', () => {
+    const inspector = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-inspector.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent', 'agent-dag-drawer-inspector.css'), 'utf8');
+
+    assert.match(inspector, /getReadinessIssues/);
+    assert.match(inspector, /pivot-dag-config-issues/);
+    assert.match(inspector, /\['equals', '等于'\]/);
+    assert.match(inspector, /key === 'compareTo' && !comparisonNeeded/);
+    assert.match(inspector, /replace\(\/\^mcp\\\./);
+    assert.match(css, /\.pivot-dag-config-issues\s*\{/);
+});
+
+test('条件比较值和工作流输出的按需字段在切换模式后无需重新打开向导', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard-input.js'), 'utf8');
+
+    assert.match(source, /shortName === 'workflow\.output' && \['table_title', 'table_columns', 'file_ref'\]\.includes\(key\)\) return true/);
+    assert.match(source, /shortName === 'workflow\.condition' && key === 'compare_to'\) return true/);
 });

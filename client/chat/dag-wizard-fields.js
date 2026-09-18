@@ -12,6 +12,7 @@
             const placeholder = friendlyFieldPlaceholder(name, schema, required, tool);
             const isEnum = Array.isArray(schema.enum) && schema.enum.length > 0;
             const fieldName = String(name || '');
+            const fieldKey = normalizeFieldKey(name);
             const shortToolName = toolShortName(tool);
             const normalizedToolNames = [...new Set([
                 nodeToolName,
@@ -36,14 +37,25 @@
                     || Array.isArray(value));
             const isApprovalTagField = matchesTool('workflow.approval')
                 && ['approvers', 'approveruserids', 'approverunits'].includes(normalizeFieldKey(name));
+            const isHandoffTagField = matchesTool('agent.handoff')
+                && type === 'array'
+                && ['findings', 'evidence', 'risks', 'open_questions', 'openquestions'].includes(fieldKey);
+            const isWorkflowInputDefaultField = matchesTool('workflow.input') && ['default_value', 'defaultvalue'].includes(fieldKey);
             const isApprovalLevels = matchesTool('workflow.approval')
                 && normalizeFieldKey(name) === 'approvallevels';
+            const isChannelBindingField = matchesTool('workflow.notify') && /^(?:binding_id|bindingid)$/.test(fieldKey);
             const isBrowserTargetField = ['agent.browser', 'browser.click'].includes(shortToolName)
                 && normalizeFieldKey(name) === 'target';
             const isReportPathField = ['reports.read_file_summary', 'reports.query_table', 'reports.compare_files'].includes(shortToolName)
                 && ['path', 'leftpath', 'rightpath'].includes(normalizeFieldKey(name));
+            const isReportSheetField = ['reports.read_file_summary', 'reports.query_table', 'reports.compare_files'].includes(shortToolName)
+                && fieldKey === 'sheet';
+            const isReportQueryColumns = shortToolName === 'reports.query_table' && fieldKey === 'columns';
+            const isReportQueryFilters = shortToolName === 'reports.query_table' && fieldKey === 'filters';
             const isArtifactSelector = /^artifactid$/i.test(fieldName) && /^artifact\./.test(shortToolName);
-            const isDataFieldSelector = /^(valuefield|xaxis|yaxis|idfield|titlefield|contentfield)$/i.test(fieldName);
+            const isWorkflowCredentialField = matchesTool('agent.http') && /^(?:credential_secret|credentialsecret)$/.test(fieldKey);
+            const isDataFieldSelector = /^(valuefield|xaxis|yaxis|idfield|titlefield|contentfield)$/i.test(fieldName)
+                || (matchesTool('viz.build_chart') && fieldKey === 'groupby');
             const isColumnSelector = /^(columns|tablecolumns)$/i.test(fieldName) && type === 'array';
             const isKeyValueMapField = type === 'object'
                 && /^(filters|renamemap|fields|headers|body|vars|inputs|sections)$/i.test(fieldName)
@@ -60,6 +72,8 @@
                 .filter((item, index, items) => items.indexOf(item) === index);
             const isStructuredReferenceField = !isGroupSummaryGroupBy
                 && !isApprovalTagField
+                && !isHandoffTagField
+                && !isWorkflowInputDefaultField
                 && !isApprovalLevels
                 && !isBrowserTargetField
                 && !isDataFieldSelector
@@ -71,7 +85,10 @@
                 && !isColumnSelector
                 && !isKeyValueMapField
                 && !isApprovalTagField
+                && !isHandoffTagField
+                && !isWorkflowInputDefaultField
                 && !isReportPathField
+                && !isReportSheetField
                 && !isArtifactSelector
                 && (type === 'array'
                 || type === 'object'
@@ -111,10 +128,11 @@
                 : (typeof value === 'string' && value.trim() ? '__custom__' : '');
             const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].some(matchesTool) && normalizeFieldKey(name) === 'model';
             const modelOptions = isLlmModelField ? workflowModelOptions() : [];
-            const isSelect = isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
+            const isSelect = isChannelBindingField || isWorkflowCredentialField || isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
-            const isStaticConfigurationField = /^(name|label|bindingid|workflowid|version|credentialref|credentialsecret|eventtype|idempotencykey|callbackcredential|imserverid|imtargettype)$/i.test(fieldName);
+            const isStaticConfigurationField = /^(name|label|default_value|description|binding_id|workflow_id|version|credential_ref|credential_secret|credential_header|credential_prefix|event_type|callback_base_url|callback_credential|im_server_id|im_target_type|agent_name|from_agent|to_agent|role|task_id)$/i.test(fieldKey);
             const isExecutionTuningField = /^(?:limit|outputlimit|max(?:steps|tokens|records|summarychars|width|height)|timeout(?:ms|hours)?|concurrency|retrylimit|samplerows|chunktokens|overlaptokens|temperature|height|width|maxwidth|maxheight)$/i.test(fieldName);
+            const isRuntimeContentField = /^(prompt|system_prompt|instructions|task|context|summary|body|message|markdown|template|text|query|url|value|compare_to|goal|reason|subject|title|subtitle|footer|im_target|idempotency_key)$/i.test(fieldKey);
             const allowsVisualReference = !isStructuredReferenceField
                 && !isGroupSummaryGroupBy
                 && !isDataFieldSelector
@@ -133,6 +151,7 @@
                 && !isExecutionTuningField
                 && !isDelayDuration
                 && !isStaticConfigurationField
+                && isRuntimeContentField
                 && !/^(code|sql)$/i.test(fieldName);
             const fieldReferenceOptions = allowsVisualReference
                 ? [...new Map([
@@ -171,10 +190,15 @@
                 type === 'boolean' ? 'is-boolean' : '',
                 isGroupSummaryGroupBy ? 'is-group-fields' : '',
                 isApprovalTagField ? 'is-group-fields is-wide' : '',
+                isHandoffTagField ? 'is-special-fields is-wide' : '',
+                isWorkflowInputDefaultField ? 'is-special-fields' : '',
                 isApprovalLevels || isBrowserTargetField ? 'is-special-fields is-wide' : '',
                 isColumnSelector || isKeyValueMapField ? 'is-special-fields is-wide' : '',
                 isDataFieldSelector ? 'is-special-fields' : '',
+                isChannelBindingField ? 'is-channel-binding' : '',
+                isWorkflowCredentialField ? 'is-credential-picker' : '',
                 isReportPathField || isArtifactSelector ? 'is-resource-selector' : '',
+                isReportSheetField ? 'is-resource-selector' : '',
                 isStructuredReferenceField ? 'is-structured-reference is-wide' : '',
                 allowsVisualReference ? 'has-visual-reference' : '',
                 isDatabaseConnection ? 'is-database-connection' : ''
@@ -194,6 +218,41 @@
                         </div>
                         <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
                         <span class="pivot-dag-group-fields-help">按字段组合分组；字段顺序会保留在结果元数据中。</span>
+                    </div>
+                `;
+            } else if (isWorkflowInputDefaultField) {
+                controlHtml = `
+                    <div class="pivot-dag-workflow-input-default" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-workflow-input-default="${dagEscapeAttr(name)}">
+                        <input class="form-input" type="text" data-pivot-dag-input-default-editor="text" placeholder="不填则由运行时输入决定">
+                        <input class="form-input" type="number" step="any" data-pivot-dag-input-default-editor="number" placeholder="例如 100">
+                        <select class="form-input" data-pivot-dag-input-default-editor="boolean"><option value="">不设置默认值</option><option value="true">是</option><option value="false">否</option></select>
+                        <textarea class="form-input" rows="4" spellcheck="false" data-pivot-dag-input-default-editor="json" placeholder="填写合法 JSON，例如 {&quot;department&quot;:&quot;财务部&quot;}"></textarea>
+                        <span class="pivot-dag-structured-ref-help" data-pivot-dag-workflow-input-default-hint>默认值会跟随参数类型显示对应控件。</span>
+                    </div>
+                `;
+            } else if (isWorkflowCredentialField) {
+                const resources = typeof window !== 'undefined'
+                    ? window.Pivot?.moduleApi?.('agent.automationResources')
+                    : null;
+                const credentialList = typeof resources?.listCredentials === 'function' ? resources.listCredentials() : [];
+                const credentials = Array.isArray(credentialList) ? credentialList : [];
+                const currentCredential = String(fieldValue || '').trim();
+                const knownCurrent = credentials.some(credential => String(credential?.slug || '').trim() === currentCredential);
+                controlHtml = `
+                    <div class="pivot-dag-credential-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-credential-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-credential-select>
+                            <option value="">不使用受控凭据</option>
+                            ${credentials.map(credential => {
+                                const slug = String(credential?.slug || '').trim();
+                                if (!slug) return '';
+                                const label = `${credential.name || slug} · ${slug}`;
+                                return `<option value="${dagEscapeAttr(slug)}" ${slug === currentCredential ? 'selected' : ''}>${dagEscapeHtml(label)}</option>`;
+                            }).join('')}
+                            <option value="__manual__" ${currentCredential && !knownCurrent ? 'selected' : ''}>${currentCredential && !knownCurrent ? '当前引用（未在凭据库中）' : '兼容：手动填写引用名'}</option>
+                        </select>
+                        <input class="form-input pivot-dag-credential-manual${currentCredential && !knownCurrent ? ' is-visible' : ''}" data-pivot-dag-credential-manual value="${dagEscapeAttr(currentCredential && !knownCurrent ? currentCredential : '')}" placeholder="例如 ERP_API_KEY">
+                        <button type="button" class="btn-secondary" data-pivot-dag-credential-load>刷新凭据</button>
+                        <span class="pivot-dag-structured-ref-help">选择已授权的凭据引用；密钥内容不会显示、不会写入工作流。旧版环境变量引用可在兼容模式下保留。</span>
                     </div>
                 `;
             } else if (isReportPathField) {
@@ -218,6 +277,20 @@
                         <input class="form-input pivot-dag-resource-picker-custom" data-pivot-dag-artifact-custom placeholder="例如 {{nodes.document.output.artifactId}}">
                         <button type="button" class="btn-secondary" data-pivot-dag-artifact-load>读取可用产物</button>
                         <span class="pivot-dag-structured-ref-help">只显示当前用户可访问的产物；渲染节点仍需提供受控 Document IR。</span>
+                    </div>
+                `;
+            } else if (isReportSheetField) {
+                const selectedSheet = fieldValue ? '__manual__' : '';
+                const compareSheets = shortToolName === 'reports.compare_files';
+                controlHtml = `
+                    <div class="pivot-dag-report-sheet-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-report-sheet-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-report-sheet-select>
+                            <option value="" ${selectedSheet ? '' : 'selected'}>使用文件默认工作表</option>
+                            <option value="__manual__" ${selectedSheet === '__manual__' ? 'selected' : ''}>手动填写工作表名称</option>
+                        </select>
+                        <input class="form-input pivot-dag-report-sheet-manual${selectedSheet ? ' is-visible' : ''}" data-pivot-dag-report-sheet-manual value="${dagEscapeAttr(fieldValue)}" placeholder="例如 Sheet1">
+                        <button type="button" class="btn-secondary" data-pivot-dag-report-sheet-load>${compareSheets ? '读取共同工作表' : '读取工作表和字段'}</button>
+                        <span class="pivot-dag-structured-ref-help" data-pivot-dag-report-sheet-status>${compareSheets ? '先选择两份具体文件，再读取它们的共同工作表。' : '先选择具体文件，再读取其工作表和字段。'}</span>
                     </div>
                 `;
             } else if (isApprovalLevels) {
@@ -310,10 +383,29 @@
                         <span class="pivot-dag-group-fields-help">可添加多个${dagEscapeHtml(targetLabel)}；多级审批流仍可在高级配置中设置。</span>
                     </div>
                 `;
+            } else if (isHandoffTagField) {
+                const tags = (Array.isArray(value) ? value : [value])
+                    .map(item => String(item || '').trim())
+                    .filter(Boolean)
+                    .filter((item, index, items) => items.indexOf(item) === index);
+                controlHtml = `
+                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-tag-list="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-group-fields-list" data-pivot-dag-tag-list-list>
+                            ${tags.length
+                                ? tags.map(tag => `<span class="pivot-dag-group-field-chip" data-pivot-dag-tag-list-value="${dagEscapeAttr(tag)}">${dagEscapeHtml(tag)}<button type="button" class="btn-secondary" data-pivot-dag-tag-list-remove="${dagEscapeAttr(tag)}" aria-label="移除 ${dagEscapeAttr(tag)}">×</button></span>`).join('')
+                                : '<span class="pivot-dag-group-fields-empty">尚未添加条目</span>'}
+                        </div>
+                        <div class="pivot-dag-group-fields-add">
+                            <input class="form-input" type="text" data-pivot-dag-tag-list-input placeholder="输入一条内容后添加">
+                            <button type="button" class="btn-secondary" data-pivot-dag-tag-list-add>添加条目</button>
+                        </div>
+                        <span class="pivot-dag-group-fields-help">逐条添加交接要点；需要整体引用上游数组时，可在高级参数中设置。</span>
+                    </div>
+                `;
             } else if (isColumnSelector) {
                 const selectedFields = (Array.isArray(value) ? value : []).map(item => String(item || '').trim()).filter(Boolean);
                 controlHtml = `
-                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-column-fields="${dagEscapeAttr(name)}">
+                    <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-column-fields="${dagEscapeAttr(name)}" ${isReportQueryColumns ? 'data-pivot-dag-report-columns="1"' : ''}>
                         <div class="pivot-dag-group-fields-list" data-pivot-dag-column-fields-list>
                             ${selectedFields.length
                                 ? selectedFields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-column-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-column-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
@@ -323,8 +415,8 @@
                             <input class="form-input" type="text" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-column-field-input placeholder="选择或输入要保留的字段">
                             <button type="button" class="btn-secondary" data-pivot-dag-column-field-add>添加字段</button>
                         </div>
-                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
-                        <span class="pivot-dag-group-fields-help">字段顺序决定表格或查询结果的显示顺序。</span>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}" ${isReportQueryColumns ? 'data-pivot-dag-report-columns-list' : ''}>${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <span class="pivot-dag-group-fields-help" ${isReportQueryColumns ? 'data-pivot-dag-report-columns-hint' : ''}>${isReportQueryColumns ? '选定报表文件后，可通过“读取工作表和字段”加载候选项。' : '字段顺序决定表格或查询结果的显示顺序。'}</span>
                     </div>
                 `;
             } else if (isDataFieldSelector) {
@@ -343,13 +435,13 @@
             } else if (isKeyValueMapField) {
                 const entries = Object.entries(value || {});
                 controlHtml = `
-                    <div class="pivot-dag-keyvalue-map" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-map="${dagEscapeAttr(name)}">
+                    <div class="pivot-dag-keyvalue-map" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-map="${dagEscapeAttr(name)}" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields="1"' : ''}>
                         <div class="pivot-dag-keyvalue-map-list" data-pivot-dag-keyvalue-map-list>
                             ${(entries.length ? entries : [['', '']]).map(([key, entryValue]) => `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="字段或键名"><textarea class="form-input" rows="2" data-pivot-dag-keyvalue-value placeholder="填写值或插入变量">${dagEscapeHtml(typeof entryValue === 'string' ? entryValue : JSON.stringify(entryValue))}</textarea><button type="button" class="btn-secondary" data-pivot-dag-keyvalue-remove aria-label="删除此项">×</button></div>`).join('')}
                         </div>
-                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields-list' : ''}>${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
                         <button type="button" class="btn-secondary" data-pivot-dag-keyvalue-add>+ 添加一项</button>
-                        <span class="pivot-dag-group-fields-help">可填写固定值，也可通过右侧变量引用插入上游结果。</span>
+                        <span class="pivot-dag-group-fields-help" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields-hint' : ''}>${isReportQueryFilters ? '选定报表文件后，可读取字段并按字段添加筛选条件。' : '可填写固定值，也可通过右侧变量引用插入上游结果。'}</span>
                     </div>
                 `;
             } else if (isStructuredReferenceField) {
@@ -364,6 +456,31 @@
                         </select>
                         <textarea class="form-input pivot-dag-structured-ref-manual" data-pivot-dag-structured-manual="${dagEscapeAttr(name)}" rows="4" placeholder="仅在需要时填写 JSON 或变量表达式">${dagEscapeHtml(formatWizardFieldValue(schema, manualValue))}</textarea>
                         <span class="pivot-dag-structured-ref-help">${dependencyNodes.length ? '优先选择上游节点的结构化输出；通常不需要手写 JSON。' : '尚未建立上游依赖；请先在画布连接上游节点，或仅在确有必要时使用高级变量。'}</span>
+                    </div>
+                `;
+            } else if (isChannelBindingField) {
+                const platformLabels = { wecom: '企业微信', feishu: '飞书', dingtalk: '钉钉' };
+                const bindings = typeof window !== 'undefined'
+                    ? (window.Pivot?.modules?.agentChannelBindings?.() || [])
+                    : [];
+                const activeBindings = bindings.filter(binding => {
+                    const platform = String(binding?.config?.platform || '').trim().toLowerCase();
+                    return binding?.status === 'active' && Object.hasOwn(platformLabels, platform);
+                });
+                const knownCurrent = activeBindings.some(binding => String(binding.id) === String(fieldValue));
+                controlHtml = `
+                    <div class="pivot-dag-channel-binding-picker" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-channel-binding-picker="${dagEscapeAttr(name)}">
+                        <select class="form-input" data-pivot-dag-channel-binding-select="1" ${activeBindings.length || fieldValue ? '' : 'disabled aria-disabled="true"'}>
+                            <option value="">${activeBindings.length ? '请选择受控渠道绑定' : '暂无可用渠道绑定'}</option>
+                            ${fieldValue && !knownCurrent ? `<option value="${dagEscapeAttr(fieldValue)}" selected>${dagEscapeHtml(`当前绑定（不可用）：${fieldValue}`)}</option>` : ''}
+                            ${activeBindings.map(binding => {
+                                const platform = String(binding?.config?.platform || '').trim().toLowerCase();
+                                const label = `${platformLabels[platform] || platform} · ${binding.channelKey || binding.id}`;
+                                return `<option value="${dagEscapeAttr(binding.id)}" data-pivot-dag-channel-platform="${dagEscapeAttr(platform)}" ${String(binding.id) === String(fieldValue) ? 'selected' : ''}>${dagEscapeHtml(label)}</option>`;
+                            }).join('')}
+                        </select>
+                        <button type="button" class="btn-secondary" data-pivot-dag-channel-binding-load>刷新可用渠道</button>
+                        <span class="pivot-dag-structured-ref-help">通知只能选择当前用户已启用的受控渠道；平台需与所选绑定一致。</span>
                     </div>
                 `;
             } else if (isDatabaseConnection) {

@@ -66,7 +66,8 @@
             costTime: record.cost_time,
             tps: record.tokens_per_sec,
             tokenCount: record.token_count,
-            modelName: record.model_name || record.model_api_name || ''
+            modelName: record.model_name || record.model_api_name || '',
+            routeMetadata: record.route_metadata || null
         };
     }
 

@@ -58,6 +58,30 @@ function getAssistantTraceEventCopy(event = {}) {
     const sourceCount = Number(event?.sourceCount || sources.length || 0);
     const citationCount = Number(event?.citationCount || 0);
 
+    if (type === 'route') {
+        const rag = event?.rag && typeof event.rag === 'object' ? event.rag : {};
+        const tools = event?.tools && typeof event.tools === 'object' ? event.tools : {};
+        const collections = Array.isArray(rag.collections) ? rag.collections : [];
+        const candidates = Array.isArray(tools.candidates) ? tools.candidates : [];
+        const ragNames = collections.map(item => String(item?.name || '').trim()).filter(Boolean).slice(0, 2);
+        const toolNames = candidates.map(item => String(item?.name || '').trim()).filter(Boolean).slice(0, 3);
+        const parts = [];
+        if (rag.action === 'retrieve' && ragNames.length) parts.push(`知识库：${ragNames.join('、')}`);
+        else if (rag.action === 'skip' && rag.reasonCode === 'conversation_only') parts.push('知识库：本轮无需检索');
+        if (tools.action === 'propose' && toolNames.length) parts.push(`工具候选：${toolNames.join('、')}`);
+        else if (tools.action === 'candidate_only') parts.push('工具：需要先开启并授权工具库');
+        if (!parts.length) parts.push('本轮按普通对话处理');
+        const shadow = status === 'shadow' || event.shadow === true;
+        return {
+            tool: 'route',
+            label: shadow ? '智能路由（评估）' : '智能路由',
+            tone: tools.action === 'candidate_only' ? 'warning' : shadow ? 'quiet' : 'info',
+            text: shadow ? `仅评估，未改变本轮执行：${parts.join('；')}` : parts.join('；'),
+            action: tools.action === 'candidate_only' ? 'mcp-consent' : '',
+            actionLabel: tools.action === 'candidate_only' ? '启用工具库' : ''
+        };
+    }
+
     if (type === 'rag') {
         if (status === 'hit') {
             const sourceText = sources.length ? `：${sources.join('、')}` : '';
@@ -217,6 +241,19 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
     panel.classList.remove('hidden');
 }
 
+function renderAssistantRouteMetadata(messageContent, routeMetadata = null) {
+    let metadata = routeMetadata;
+    if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (_) { metadata = null; }
+    }
+    if (!metadata || typeof metadata !== 'object') return;
+    renderAssistantTraceEvent(messageContent, {
+        type: 'route',
+        status: metadata.shadow ? 'shadow' : 'resolved',
+        ...metadata
+    });
+}
+
 function handleAssistantTraceAction(event) {
     const action = event.target.closest?.('[data-chat-trace-action]');
     if (!action) return;
@@ -224,6 +261,7 @@ function handleAssistantTraceAction(event) {
     const target = action.dataset.chatTraceAction;
     if (target === 'rag') window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
     if (target === 'mcp') window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
+    if (target === 'mcp-consent') window.Pivot.moduleApi('chat.inputMenu').enableMcpFromRouteTrace?.();
 }
 
 document.addEventListener('click', handleAssistantTraceAction);
@@ -464,6 +502,7 @@ async function readChatErrorMessage(response) {
 
 
 window.Pivot.exposeModule('chat.streaming', {
+    renderAssistantRouteMetadata,
     renderAssistantTraceEvent,
     stripStreamingThoughtContent,
     estimateStreamingAnswerTokenCount,
@@ -479,6 +518,7 @@ window.Pivot.exposeModule('chat.streaming', {
     refreshCurrentContextUsage,
     readChatErrorMessage
 }, [
+    'renderAssistantRouteMetadata',
     'renderAssistantTraceEvent',
     'stripStreamingThoughtContent',
     'estimateStreamingAnswerTokenCount',

@@ -160,6 +160,7 @@ function renderDagToolbar(ctx) {
             };
 
             const lintWorkflow = () => {
+                if (typeof ctx.showValidationResult === 'function') return ctx.showValidationResult();
                 const gov = window.Pivot?.moduleApi?.('agent.dagGovernance');
                 const report = gov?.lintDagGraph?.(ctx.spec || { nodes: [] });
                 if (!report) return;

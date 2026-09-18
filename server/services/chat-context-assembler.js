@@ -13,6 +13,7 @@ const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
 const { maybeBuildMcpChatContext } = require('./chat-mcp-context');
+const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent } = require('./semantic-router');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
 const {
@@ -82,10 +83,62 @@ async function assembleChatContext({
     const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
     const memoryQuery = effectiveUserPrompt || modelContent;
 
-    const shouldRetrieveRag = ragEnabled && typeof retrieveContext === 'function' && typeof isRagEnabled === 'function' && isRagEnabled() && Boolean(effectiveUserPrompt);
+    // 工具目录的可见性、治理与白名单在路由前完成；路由器只能缩小该集合，
+    // 永远不能重新引入无权或用户未允许的工具。
+    let accessibleMcpTools = [];
+    if (mcpEnabled || state.autoRouteEnabled === true) {
+        try {
+            const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
+            accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist);
+        } catch (error) {
+            req.log.warn({ sessionId, userId, err: error.message }, '读取工具目录失败，已按无工具候选继续');
+        }
+    }
+
+    let routePlan;
+    try {
+        routePlan = await resolveRoutePlan({
+            prompt: effectiveUserPrompt || modelContent,
+            user: req.user,
+            state,
+            availableMcpTools: accessibleMcpTools,
+            signal
+        });
+        writeSse(JSON.stringify(buildRouteSseEvent(routePlan)));
+    } catch (error) {
+        // 路由是增强层，任何初始化或外部 Embedding 异常均不可中断原有聊天。
+        req.log.warn({ sessionId, userId, err: error.message }, '自适应路由不可用，已回退原有聊天链路');
+        routePlan = {
+            mode: 'legacy',
+            shadow: false,
+            rag: { action: ragEnabled ? 'retrieve' : 'skip', scope: ragScope || {}, collections: [], confidence: 0, reasonCode: 'router_fallback' },
+            tools: { action: mcpEnabled ? 'propose' : 'skip', candidates: [], candidateTools: accessibleMcpTools, confidence: 0, reasonCode: 'router_fallback' },
+            execution: {
+                rag: { shouldRetrieve: Boolean(ragEnabled), scope: ragScope || {}, queryVector: null },
+                tools: { shouldPlan: Boolean(mcpEnabled), candidates: accessibleMcpTools }
+            },
+            timing: { routeDurationMs: 0, embeddingDurationMs: 0 }
+        };
+        writeSse(JSON.stringify(buildRouteSseEvent(routePlan)));
+    }
+
+    const effectiveRagScope = routePlan.execution?.rag?.scope || ragScope || {};
+    const routeQueryVector = Array.isArray(routePlan.execution?.rag?.queryVector)
+        ? routePlan.execution.rag.queryVector
+        : null;
+
+    const shouldRetrieveRag = Boolean(routePlan.execution?.rag?.shouldRetrieve)
+        && typeof retrieveContext === 'function'
+        && typeof isRagEnabled === 'function'
+        && isRagEnabled()
+        && Boolean(effectiveUserPrompt);
     const [memoryResult, ragResult] = await Promise.allSettled([
         memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user }) : Promise.resolve([]),
-        shouldRetrieveRag ? retrieveContext(userId, effectiveUserPrompt, null, { user: req.user, scope: ragScope }) : Promise.resolve(null)
+        shouldRetrieveRag ? retrieveContext(userId, effectiveUserPrompt, null, {
+            user: req.user,
+            scope: effectiveRagScope,
+            ...(routeQueryVector?.length ? { queryVector: routeQueryVector } : {})
+        }) : Promise.resolve(null)
     ]);
 
     if (memoryQuery) {
@@ -112,7 +165,7 @@ async function assembleChatContext({
 
     if (shouldRetrieveRag) {
         const ragContext = ragResult.status === 'fulfilled' ? ragResult.value : null;
-        const ragScoped = hasRagScopeFilter(ragScope);
+        const ragScoped = hasRagScopeFilter(effectiveRagScope);
         const ragScopeText = ragScoped ? '（当前选择范围）' : '';
         if (ragContext) {
             const ragSourceSummary = summarizeRagContextSources(ragContext);
@@ -175,8 +228,9 @@ async function assembleChatContext({
 
     let chatMcpTools = [];
     if (mcpEnabled) {
-        const accessibleMcpTools = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
-        const mcpTools = filterChatMcpToolsByAllowlist(accessibleMcpTools, mcpToolAllowlist);
+        const mcpTools = Array.isArray(routePlan.execution?.tools?.candidates)
+            ? routePlan.execution.tools.candidates
+            : accessibleMcpTools;
         chatMcpTools = mcpTools;
         const mcpContext = await maybeBuildMcpChatContext({
             modelCfg,
@@ -208,6 +262,7 @@ async function assembleChatContext({
                 ragEnabled: Boolean(ragEnabled),
                 mcpEnabled: Boolean(mcpEnabled),
                 mcpToolAllowlist: Array.isArray(mcpToolAllowlist) ? mcpToolAllowlist : [],
+                route: buildRouteMetadata(routePlan),
                 historyMessageCount: history.length,
                 networkPolicy: { enabled: true }
             },
@@ -286,7 +341,8 @@ async function assembleChatContext({
         visionHistory,
         effectiveUserPrompt,
         disableChatThinking,
-        chatStepContext
+        chatStepContext,
+        routePlan
     };
 }
 

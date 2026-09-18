@@ -60,6 +60,7 @@ const {
 const { createObservabilityTrace, withObservabilitySpan } = require('../../services/observability');
 const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
 const { assembleChatContext } = require('../../services/chat-context-assembler');
+const { buildRouteMetadata } = require('../../services/semantic-router');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
@@ -69,6 +70,7 @@ const {
     prepareChatAgentContext
 } = require('../../services/chat-agent-bridge');
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
+const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
@@ -134,7 +136,19 @@ function createChatRouter({
 
     router.get('/chat/capabilities', authMiddleware, (_req, res) => {
         const enabled = readAgentExecutionEnabled();
-        res.json({ success: true, defaultMode: 'normal', modes: enabled ? ['normal', 'agent'] : ['normal'], agentExecutionEnabled: enabled });
+        const autoRoute = getChatAutoRouteConfig();
+        res.json({
+            success: true,
+            defaultMode: 'normal',
+            modes: enabled ? ['normal', 'agent'] : ['normal'],
+            agentExecutionEnabled: enabled,
+            autoRoute: {
+                enabled: autoRoute.enabled,
+                rag: autoRoute.autoRagEnabled,
+                toolDiscovery: autoRoute.autoToolDiscoveryEnabled,
+                shadow: autoRoute.shadowMode
+            }
+        });
     });
 
     router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
@@ -576,7 +590,7 @@ function createChatRouter({
             signal: abortController.signal
         }), { ragEnabled, mcpEnabled });
         if (contextResult.errorEnded) return res.end();
-        let { visionHistory, disableChatThinking } = contextResult;
+        let { visionHistory, disableChatThinking, routePlan } = contextResult;
 
         try {
             const { response } = await withObservabilitySpan(chatTrace, 'model_stream_open', () => openChatModelStream({
@@ -733,6 +747,7 @@ function createChatRouter({
                     const assistantTokens = stats.assistantTokens;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
+                    if (routePlan) routePlan.providerUsage = apiUsage || providerSnapshot.usage?.raw || null;
                     const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
                         sessionId,
                         userId,
@@ -743,7 +758,8 @@ function createChatRouter({
                         assistantContent,
                         assistantTokens,
                         costTime,
-                        tps: tokensPerSec
+                        tps: tokensPerSec,
+                        routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
                     });
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
@@ -770,7 +786,8 @@ function createChatRouter({
                         tokenCount: assistantTokens,
                         costTime,
                         tps: tokensPerSec,
-                        content: assistantContent
+                        content: assistantContent,
+                        routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
                     }));
                     writeSse('[DONE]');
                     res.end();

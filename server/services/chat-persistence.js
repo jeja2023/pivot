@@ -12,14 +12,16 @@ async function persistAssistantTurn({
     assistantContent = '',
     assistantTokens = 0,
     costTime = null,
-    tps = null
+    tps = null,
+    routeMetadata = null
 }) {
     const assistantMessageResult = await saveAssistantMessage({
         sessionId,
         userId,
         content: assistantContent,
         tokenCount: assistantTokens,
-        modelId: modelCfg.id
+        modelId: modelCfg.id,
+        routeMetadata: routeMetadata ? JSON.stringify(routeMetadata) : null
     });
     const assistantMessageId = Number(assistantMessageResult?.lastInsertRowid || 0) || null;
     if (costTime !== null || tps !== null) {

@@ -231,22 +231,22 @@ const NODE_PRESET_GROUPS = [
                 input: { leftPath: '', rightPath: '', sheet: '', sampleRows: 20 }
             },
             {
-                base: 'filter_rows', title: '筛选数据行', svgIcon: 'table', theme: 'db', advanced: true,
+                base: 'filter_rows', title: '筛选数据行', svgIcon: 'table', theme: 'db',
                 desc: '按字段和值筛选上游表格数据', toolName: 'data.filter_rows',
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], filters: {}, matchMode: 'exact', limit: 200 })
             },
             {
-                base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db', advanced: true,
+                base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db',
                 desc: '按字段分组并计算数量、求和或平均值', toolName: 'data.group_summary',
-                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: [], valueField: '', aggregation: 'count', limit: 100 })
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: [], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 })
             },
             {
-                base: 'profile_rows', title: '分析表格字段', svgIcon: 'table', theme: 'db', advanced: true,
+                base: 'profile_rows', title: '分析表格字段', svgIcon: 'table', theme: 'db',
                 desc: '查看字段类型、填写率和样本值，帮助决定后续处理方式', toolName: 'data.profile_rows',
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], limit: 500 })
             },
             {
-                base: 'normalize_fields', title: '规范表格字段', svgIcon: 'table', theme: 'db', advanced: true,
+                base: 'normalize_fields', title: '规范表格字段', svgIcon: 'table', theme: 'db',
                 desc: '批量重命名字段并清理文本首尾空格', toolName: 'data.normalize_fields',
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], renameMap: {}, trimStrings: true, limit: 1000 })
             },
@@ -297,7 +297,7 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'notify', title: '受控通知', svgIcon: 'message', theme: 'http',
                 desc: '通过已配置的企业微信、飞书或钉钉渠道发送通知', toolName: 'workflow.notify',
-                input: { bindingId: '', platform: 'wecom', subject: '', body: '{{goal}}', format: 'text' },
+                input: { bindingId: '', subject: '', body: '{{goal}}', format: 'text' },
                 outputSchema: { type: 'object', required: ['queued', 'deliveryId', 'bindingId', 'status', 'platform', 'idempotencyKey'], properties: { queued: { type: 'boolean' }, deliveryId: { type: 'integer' }, bindingId: { type: 'string' }, status: { type: 'string' }, platform: { type: 'string' }, idempotencyKey: { type: 'string' } } }
             },
             {

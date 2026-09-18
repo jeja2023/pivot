@@ -78,6 +78,7 @@ function coreTablesSql() {
             compressed_at DATETIME,
             model_id INTEGER,
             agent_run_id TEXT,
+            route_metadata TEXT DEFAULT '{}',
             cost_time REAL,
             tokens_per_sec REAL,
             deleted_at DATETIME,

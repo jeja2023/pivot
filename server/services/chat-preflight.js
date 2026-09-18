@@ -5,13 +5,21 @@ const {
     fitMessagesToContextBudget
 } = require('./context-budget');
 const { normalizeRegenerateFlag } = require('./chat-route-helpers');
+const { normalizeRouteOverrides } = require('./semantic-router');
 const sessionsRepository = require('../repositories/sessions');
+
+function normalizeCapabilityPreference(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['auto', 'enabled', 'disabled'].includes(normalized) ? normalized : '';
+}
 
 function buildChatRequestState(req) {
     const body = req.body || {};
     const content = body.content;
     const displayContent = body.displayContent;
     const modelContent = String(content || '').trim();
+    const autoRouteEnabled = body.autoRouteEnabled !== false;
+    const ragPreference = normalizeCapabilityPreference(body.ragPreference);
     const mcpToolAllowlist = Array.isArray(body.mcpToolAllowlist)
         ? [...new Set(body.mcpToolAllowlist
             .map(value => String(value || '').trim())
@@ -23,9 +31,14 @@ function buildChatRequestState(req) {
         displayContent,
         regenerate: normalizeRegenerateFlag(body.regenerate),
         chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
+        autoRouteEnabled,
+        routeOverrides: normalizeRouteOverrides(body.routeOverrides),
+        ragPreference,
         mcpEnabled: Boolean(body.mcpEnabled) && Boolean(body.mcpConfirmed),
         mcpToolAllowlist,
-        ragEnabled: body.ragEnabled !== false,
+        // `auto` 是新版客户端的默认值：它允许路由器决定是否检索，而不是把
+        // 旧按钮的初始视觉状态误解成用户明确关闭知识库。
+        ragEnabled: ragPreference === 'disabled' ? false : (ragPreference === 'auto' ? true : body.ragEnabled !== false),
         ragScope: body.ragScope && typeof body.ragScope === 'object' ? body.ragScope : {},
         sessionId: String(body.sessionId || '').trim(),
         modelId: body.modelId ? parseInt(body.modelId, 10) : null,

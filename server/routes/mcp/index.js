@@ -12,6 +12,8 @@ const {
 const { getSystemHealthSnapshot } = require('../../services/system-health');
 const { safeJsonGet } = require('../../services/safe-http-client');
 const { debugRetrieveContext } = require('../../services/rag-index');
+const { listKnowledgeCollections, getKnowledgeCollectionForUser } = require('../../services/rag-documents');
+const { listCollectionResourceDocuments } = require('../../repositories/knowledge');
 const {
     executeMcpTool,
     recordMcpCallLog,
@@ -116,6 +118,13 @@ function sendJsonRpc(res, id, result, error = null) {
         });
     }
     return res.json({ jsonrpc: '2.0', id: id ?? null, result });
+}
+
+function normalizeMcpListCursor(value, { max = 10_000 } = {}) {
+    const text = String(value || '').trim();
+    if (!text) return 0;
+    if (!/^\d{1,5}$/.test(text)) return 0;
+    return Math.min(Number.parseInt(text, 10) || 0, max);
 }
 
 function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
@@ -302,11 +311,39 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                 });
             }
             if (method === 'resources/list') {
+                const cursor = normalizeMcpListCursor(params?.cursor);
+                const pageSize = 100;
+                const allCollections = (await listKnowledgeCollections(req.user))
+                    .filter(collection => Number(collection.ready_count || 0) > 0)
+                    .map(collection => ({
+                        uri: `pivot-rag://collection/${Number(collection.id)}`,
+                        name: String(collection.name || '知识库').slice(0, 160),
+                        title: String(collection.name || '知识库').slice(0, 160),
+                        description: String(collection.description || 'Pivot 知识库集合').slice(0, 300),
+                        mimeType: 'application/json'
+                    }));
+                const collections = allCollections.slice(cursor, cursor + pageSize);
+                const nextCursor = cursor + collections.length < allCollections.length
+                    ? String(cursor + collections.length)
+                    : undefined;
                 return sendJsonRpc(res, id, {
                     resources: [
-                        { uri: 'pivot://system/health', name: 'System Health', mimeType: 'application/json' },
-                        { uri: 'pivot://knowledge/search', name: 'Knowledge Search', mimeType: 'application/json' }
-                    ]
+                        ...(isSuperAdmin(req.user) ? [{ uri: 'pivot://system/health', name: 'System Health', mimeType: 'application/json' }] : []),
+                        { uri: 'pivot://knowledge/search', name: 'Knowledge Search', mimeType: 'application/json' },
+                        ...collections
+                    ],
+                    ...(nextCursor ? { nextCursor } : {})
+                });
+            }
+            if (method === 'resources/templates/list') {
+                return sendJsonRpc(res, id, {
+                    resourceTemplates: [{
+                        uriTemplate: 'pivot-rag://collection/{collectionId}',
+                        name: 'Pivot Knowledge Collection',
+                        title: 'Pivot 知识库集合',
+                        description: '读取当前用户有权访问的知识库集合元数据与文档目录。',
+                        mimeType: 'application/json'
+                    }]
                 });
             }
             if (method === 'resources/read') {
@@ -320,6 +357,39 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
                     const result = await debugRetrieveContext(req.user.id, String(params?.query || ''), { user: req.user });
                     return sendJsonRpc(res, id, {
                         contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(result, null, 2) }]
+                    });
+                }
+                const collectionMatch = String(params?.uri || '').match(/^pivot-rag:\/\/collection\/(\d+)$/);
+                if (collectionMatch) {
+                    const collectionId = Number.parseInt(collectionMatch[1], 10);
+                    const collection = await getKnowledgeCollectionForUser(collectionId, req.user);
+                    if (!collection) {
+                        const error = new Error('知识库资源不存在或无权读取。');
+                        error.code = -32002;
+                        throw error;
+                    }
+                    const docs = await listCollectionResourceDocuments(collectionId, req.user, 100);
+                    logAction(req, '读取 MCP 知识库资源', `知识库集合: ${collectionId}`);
+                    return sendJsonRpc(res, id, {
+                        contents: [{
+                            uri: params.uri,
+                            mimeType: 'application/json',
+                            text: JSON.stringify({
+                                collection: {
+                                    id: Number(collection.id),
+                                    name: String(collection.name || ''),
+                                    description: String(collection.description || ''),
+                                    updatedAt: collection.updated_at || null
+                                },
+                                documents: docs.map(doc => ({
+                                    id: Number(doc.id),
+                                    name: String(doc.name || ''),
+                                    status: String(doc.status || ''),
+                                    chunkCount: Number(doc.chunk_count || 0),
+                                    updatedAt: doc.updated_at || null
+                                }))
+                            }, null, 2)
+                        }]
                     });
                 }
             }
@@ -337,4 +407,4 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     return router;
 }
 
-module.exports = { createMcpRouter };
+module.exports = { createMcpRouter, normalizeMcpListCursor };

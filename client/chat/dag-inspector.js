@@ -1,4 +1,5 @@
 /* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
+/* global renderDagInspectorChannelBindingField */
 function createDagInspectorController(ctx) {
     const inspector = ctx.inspector;
     const onNodeSelectionChange = ctx.onNodeSelectionChange;
@@ -9,6 +10,7 @@ function createDagInspectorController(ctx) {
     const renderInputSummary = (...args) => ctx.renderInputSummary?.(...args) || '';
     const getUpstreamNodes = (...args) => ctx.getUpstreamNodes?.(...args) || [];
     const getRunStates = () => ctx.getRunStates?.() || new Map();
+    const getReadinessIssues = () => ctx.getReadinessIssues?.() || [];
     const getDagInputs = () => ctx.getDagInputs?.() || {};
     const showDagToast = (...args) => ctx.showToast?.(...args);
     const showVariablePicker = (...args) => ctx.showVariablePicker?.(...args);
@@ -34,7 +36,7 @@ function createDagInspectorController(ctx) {
         'workflow.condition': ['value', 'operator', 'compareTo'],
         'agent.merge': ['fields'],
         'workflow.template': ['template', 'trim', 'missingVariable'],
-        'workflow.notify': ['bindingId', 'platform', 'subject', 'body', 'format']
+        'workflow.notify': ['bindingId', 'subject', 'body', 'format']
     };
     const quickFieldLabels = {
         name: '参数名', label: '展示名称', defaultValue: '默认值', model: '模型', prompt: '提示词',
@@ -51,13 +53,12 @@ function createDagInspectorController(ctx) {
         return refs;
     };
     const quickFieldMarkup = (node, tool) => {
-        const toolName = String(node?.tool || tool?.name || tool?.fullName || '');
+        const toolName = String(node?.tool || tool?.name || tool?.fullName || '').replace(/^mcp\.[^.]+\./i, '');
         const isImNotification = /(?:^|\.)im\.send_/.test(toolName);
         const fields = quickFieldGroups[toolName] || (isImNotification ? ['target', toolName.includes('markdown') ? 'markdown' : 'message'] : []);
         if (!fields.length) return '';
         const input = node.input && typeof node.input === 'object' ? node.input : {};
         const imTargetListId = `pivot-dag-im-targets-${String(node.id || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
-        const channelListId = `pivot-dag-channel-bindings-${String(node.id || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
         const channelBindings = toolName === 'workflow.notify' && typeof window !== 'undefined'
             ? (window.Pivot?.modules?.agentChannelBindings?.() || [])
             : [];
@@ -94,23 +95,28 @@ function createDagInspectorController(ctx) {
             if (type === 'checkbox') return `<label class="pivot-dag-inline-field pivot-dag-inline-check"><span>${label}</span><input class="form-input" type="checkbox" data-pivot-dag-input-field="${key}" ${value !== false ? 'checked' : ''}></label>`;
             if (key === 'model') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${modelOptions(key)}</select></label>`;
             if (key === 'method') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(item => `<option value="${item}" ${String(value || 'GET') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
-            if (key === 'operator') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['equals','not_equals','contains','not_contains','greater_than','less_than','is_empty','not_empty','is_true','is_false'].map(item => `<option value="${item}" ${String(value || 'not_empty') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
+            if (key === 'operator') {
+                const options = [['equals', '等于'], ['not_equals', '不等于'], ['contains', '包含'], ['not_contains', '不包含'], ['greater_than', '大于'], ['less_than', '小于'], ['is_empty', '为空'], ['not_empty', '不为空'], ['is_true', '为是'], ['is_false', '为否']];
+                return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${options.map(([item, text]) => `<option value="${item}" ${String(value || 'not_empty') === item ? 'selected' : ''}>${text}</option>`).join('')}</select></label>`;
+            }
             if (key === 'missingVariable') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['keep','empty','error'].map(item => `<option value="${item}" ${String(value || 'keep') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
             if (key === 'platform') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${[['wecom','企业微信'],['feishu','飞书'],['dingtalk','钉钉']].map(([item,title]) => `<option value="${item}" ${String(value || 'wecom') === item ? 'selected' : ''}>${title}</option>`).join('')}</select></label>`;
             if (key === 'format') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}"><option value="text" ${String(value || 'text') === 'text' ? 'selected' : ''}>文本</option><option value="markdown" ${String(value || '') === 'markdown' ? 'selected' : ''}>富文本</option></select></label>`;
+            if (key === 'bindingId' && toolName === 'workflow.notify') return renderDagInspectorChannelBindingField({ fieldName: key, label, value, bindings: channelBindings, escapeAttr: escape, escapeHtml: dagEscapeHtml });
             const json = typeof value === 'object';
             const variableButton = `<button type="button" class="btn-secondary pivot-dag-inline-var" data-pivot-dag-inline-pick-var="${key}" title="插入变量">+{x}</button>`;
-            const listMarkup = key === 'bindingId' ? `list="${channelListId}"` : isImNotification && key === 'target' ? `list="${imTargetListId}"` : '';
-            return `<label class="pivot-dag-inline-field ${type === 'textarea' ? 'is-wide' : ''}"><span>${label}${variableButton}</span>${type === 'textarea' ? `<textarea class="form-input" rows="${key === 'prompt' || key === 'template' ? 4 : 3}" data-pivot-dag-input-field="${key}" ${json ? 'data-pivot-dag-input-json="1"' : ''}>${dagEscapeHtml(valueText(key, value))}</textarea>` : `<input class="form-input" type="text" data-pivot-dag-input-field="${key}" ${listMarkup} value="${escape(valueText(key, value))}">`}</label>`;
+            const listMarkup = isImNotification && key === 'target' ? `list="${imTargetListId}"` : '';
+            const comparisonNeeded = ['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than'].includes(String(input.operator || 'not_empty'));
+            const hidden = toolName === 'workflow.condition' && key === 'compareTo' && !comparisonNeeded ? ' hidden aria-hidden="true"' : '';
+            return `<label class="pivot-dag-inline-field ${type === 'textarea' ? 'is-wide' : ''}"${hidden}><span>${label}${variableButton}</span>${type === 'textarea' ? `<textarea class="form-input" rows="${key === 'prompt' || key === 'template' ? 4 : 3}" data-pivot-dag-input-field="${key}" ${json ? 'data-pivot-dag-input-json="1"' : ''}>${dagEscapeHtml(valueText(key, value))}</textarea>` : `<input class="form-input" type="text" data-pivot-dag-input-field="${key}" ${listMarkup} value="${escape(valueText(key, value))}">`}</label>`;
         };
         const imTargetsMarkup = isImNotification ? `<datalist id="${imTargetListId}">${cachedImTargets.map(target => `<option value="${escape(target)}"></option>`).join('')}</datalist><button type="button" class="btn-secondary pivot-dag-im-target-load" data-pivot-dag-im-target-load>读取允许通知目标</button>` : '';
-        const channelBindingsMarkup = toolName === 'workflow.notify' ? `<datalist id="${channelListId}">${channelBindings.map(binding => `<option value="${escape(binding.id)}">${dagEscapeHtml(`${binding.channelType} · ${binding.channelKey}`)}</option>`).join('')}</datalist><small class="pivot-dag-inline-help">渠道绑定在通知设置中配置，工作流只引用绑定 ID。</small>` : '';
         const refs = [...inputNodeReferences(node.input)];
         const missingDeps = refs.filter(ref => ctx.spec?.nodes?.some(candidate => candidate.id === ref) && !(node.dependsOn || []).includes(ref));
         const hint = missingDeps.length
             ? `<div class="pivot-dag-inline-hint is-warning">检测到 ${missingDeps.length} 个未声明的数据依赖：${missingDeps.join('、')}。可在“上游节点”中勾选，或点击下方按钮。</div><button type="button" class="btn-secondary pivot-dag-add-referenced-deps" data-pivot-dag-add-referenced-deps>添加引用依赖</button>`
             : '';
-        return `<section class="pivot-dag-inline-edit"><div class="pivot-dag-inline-edit-head"><strong>常用参数</strong><span>可直接编辑，复杂配置仍可打开向导</span></div><div class="pivot-dag-inline-edit-grid">${fields.map(renderControl).join('')}</div>${imTargetsMarkup}${channelBindingsMarkup}${hint}</section>`;
+        return `<section class="pivot-dag-inline-edit"><div class="pivot-dag-inline-edit-head"><strong>常用参数</strong><span>可直接编辑，复杂配置仍可打开向导</span></div><div class="pivot-dag-inline-edit-grid">${fields.map(renderControl).join('')}</div>${imTargetsMarkup}${hint}</section>`;
     };
     const testNode = async (node) => {
         const button = inspector.querySelector('[data-pivot-dag-test-node]');
@@ -121,7 +127,6 @@ function createDagInspectorController(ctx) {
         result.hidden = false;
         result.className = 'pivot-dag-test-result is-running';
         result.textContent = '正在执行当前节点…';
-
         // 收集所有拓扑上游节点最新运行快照
         const upstreamNodes = getUpstreamNodes(ctx.spec?.nodes || [], node.id);
         const runStates = getRunStates();
@@ -137,7 +142,6 @@ function createDagInspectorController(ctx) {
             nodes: ctx.spec?.nodes || [],
             states: upstreamStates
         };
-
         try {
             const response = await apiFetch(`${API_BASE}/agents/tools/test`, {
                 method: 'POST',
@@ -185,7 +189,7 @@ function createDagInspectorController(ctx) {
         return { configured: true, text: `${label}${fieldCount ? ` · ${fieldCount} 个字段` : ''}${requiredCount ? ` · ${requiredCount} 项必填` : ''}` };
     };
     const renderOutputPanel = (node) => {
-        const toolName = String(node?.tool || '');
+        const toolName = String(node?.tool || '').replace(/^mcp\.[^.]+\./i, '');
         const isLlm = toolName === 'agent.llm';
         const isWorkflowOutput = toolName === 'workflow.output';
         if (!isLlm && !isWorkflowOutput) return '';
@@ -262,7 +266,6 @@ function createDagInspectorController(ctx) {
             tool: node.tool
         } : null);
     };
-
     const openNodeJsonEditor = (nodeId) => {
         const node = ctx.spec.nodes.find(n => n.id === nodeId);
         if (!node) return;
@@ -695,7 +698,6 @@ function createDagInspectorController(ctx) {
     ];
     // 这些操作符只看变量本身，不需要比较值。
     const WHEN_UNARY_OPERATORS = ['empty', 'not_empty', 'exists', 'not_exists', 'is_true', 'is_false'];
-
     const renderWhenPanel = (node) => {
         const when = node.when && typeof node.when === 'object' ? node.when : null;
         const enabled = Boolean(when && String(when.source || '').trim());
@@ -755,7 +757,6 @@ function createDagInspectorController(ctx) {
             </div>
         `;
     };
-
     const bindWhenPanelEvents = (node) => {
         inspector.querySelector('[data-pivot-dag-when-enabled]')?.addEventListener('change', (e) => {
             ctx.recordHistory?.();
@@ -803,7 +804,6 @@ function createDagInspectorController(ctx) {
             });
         });
     };
-
     const renderInspector = () => {
         if (!inspector) return;
         inspector.classList.toggle('is-readonly', ctx.readOnly === true);
@@ -834,6 +834,7 @@ function createDagInspectorController(ctx) {
         const selectedTool = resolveToolForNode(tools, node.tool);
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
+        const nodeReadinessIssues = getReadinessIssues().filter(issue => String(issue?.nodeId || '') === String(node.id));
         const upstreamNodes = getDependencyCandidateNodes(node);
         const referencedNodes = [...inputNodeReferences(node.input)];
         const missingDependencyRefs = referencedNodes.filter(ref => ctx.spec.nodes.some(candidate => candidate.id === ref) && !(node.dependsOn || []).includes(ref));
@@ -870,6 +871,7 @@ function createDagInspectorController(ctx) {
             </div>
             ${renderWhenPanel(node)}
             ${renderSelectedToolMeta(selectedTool)}
+            ${nodeReadinessIssues.length ? `<section class="pivot-dag-config-issues" role="alert"><strong>需要完善配置</strong><ul>${nodeReadinessIssues.slice(0, 4).map(issue => `<li>${dagEscapeHtml(issue.message)}</li>`).join('')}</ul><span>可点击下方“配置参数”逐项完成。</span></section>` : ''}
             ${renderOutputPanel(node)}
             <details class="pivot-dag-runtime-settings">
                 <summary><strong>失败与重试</strong><span>一般无需修改</span></summary>
@@ -986,7 +988,6 @@ function createDagInspectorController(ctx) {
                 ctx.flushOut?.();
             });
         });
-
         inspector.querySelectorAll('[data-pivot-dag-field]').forEach(input => {
             if (input.dataset.pivotDagField === 'title') {
                 input.addEventListener('input', (e) => handleInspectorEdit(e.target, { deferCommit: true }));
@@ -1170,7 +1171,6 @@ function createDagInspectorController(ctx) {
             inspector.querySelector(`[data-pivot-dag-depend="${cssEscape(focusSnapshot.depend)}"]`)?.focus?.({ preventScroll: true });
         }
     };
-
     const applyToolInputTemplate = (nodeId) => {
         const node = ctx.spec.nodes.find(n => n.id === nodeId);
         if (!node) return;
@@ -1182,7 +1182,6 @@ function createDagInspectorController(ctx) {
         ctx.flushOut?.();
         showDagToast('已套用工具参数模板', 'success');
     };
-
     const handleInspectorEdit = (input, options = {}) => {
         const node = ctx.spec.nodes.find(n => n.id === ctx.selectedId);
         if (!node) return;

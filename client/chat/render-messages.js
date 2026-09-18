@@ -150,6 +150,9 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
     target.appendChild(div);
     if (!mountOptions?.disableImagePinning) attachMessageImageLoadPinning(div);
     if (role === 'assistant') bindThoughtStateTracking(div.querySelector('.text-body'));
+    if (role === 'assistant' && stats?.routeMetadata) {
+        window.Pivot.legacy.renderAssistantRouteMetadata?.(div.querySelector('.message-content'), stats.routeMetadata);
+    }
     // 首次出现代码或公式时按需加载 vendor；加载后只重绘当前消息，避免全页刷新。
     const optionalVendorLoad = typeof window.Pivot.moduleApi?.('chat.markdownVendors')?.ensureOptionalMarkdownVendors === 'function'
         ? window.Pivot.moduleApi('chat.markdownVendors').ensureOptionalMarkdownVendors(displayContent)

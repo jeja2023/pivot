@@ -1,12 +1,8 @@
 /* Agent DAG 参数与预设工作流向导（拆自 agents-dag-editor.js） */
-/* global createDagWizardSpecialFieldControls */
+/* global createDagWizardSpecialFieldControls, createDagWizardReportAssist */
 /* global partitionWizardFields, isWizardFieldRelevant */
-
-
-
 function createDagWizardController(ctx) {
         const currentTools = () => typeof ctx.currentTools === 'function' ? (ctx.currentTools() || []) : [];
-
         const openNodeInputWizard = (nodeId) => {
             const node = ctx.spec.nodes.find(n => n.id === nodeId);
             if (!node) return;
@@ -98,7 +94,6 @@ function createDagWizardController(ctx) {
                     </div>
                 </div>
             `);
-
             const wizardHeader = modal.querySelector('.pivot-dag-input-head > div');
             if (wizardHeader) {
                 const meta = document.createElement('div');
@@ -114,7 +109,6 @@ function createDagWizardController(ctx) {
             if (wizardDesc) {
                 wizardDesc.textContent = [wizardDesc.textContent, node.title || node.id].filter(Boolean).join(' · ');
             }
-
             const wizardSources = modal.querySelector('.pivot-dag-wizard-sources');
             if (wizardSources) {
                 const help = document.createElement('div');
@@ -124,7 +118,6 @@ function createDagWizardController(ctx) {
                 if (title) title.insertAdjacentElement('afterend', help);
                 else wizardSources.prepend(help);
             }
-
             const fieldsByName = new Map();
             modal.querySelectorAll('[data-pivot-dag-wizard-field]').forEach(control => {
                 const fieldName = control.dataset.pivotDagWizardField || '';
@@ -134,7 +127,9 @@ function createDagWizardController(ctx) {
             const referencePickerFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-picker="${fieldName}"]`);
             const referenceCustomFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-custom="${fieldName}"]`);
             const manualControlFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-manual-control="${fieldName}"]`);
-            const { approvalLevelsFromControl, approvalTagsFromControl, browserTargetFromControl, columnFieldsFromControl, groupFieldsFromControl, keyValueMapFromControl, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, syncApprovalLevelSource, syncBrowserTargetMode, syncResourcePicker } = createDagWizardSpecialFieldControls();
+            const { approvalLevelsFromControl, approvalTagsFromControl, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
+            const { bindReportSheetPicker, hydrateSheet, setManualSheet, sheetValue } = createDagWizardReportAssist();
+            let syncBrowserTargetVisibility = () => {}, syncConditionCompareField = () => {}, syncOutputPresentationFields = () => {};
             const syncReferencePicker = (fieldName, nextValue) => {
                 const picker = referencePickerFor(fieldName);
                 if (!picker) return;
@@ -151,7 +146,6 @@ function createDagWizardController(ctx) {
                 }
                 manualControlFor(fieldName)?.classList.toggle('is-reference-active', Boolean(selected));
             };
-
             const populateFields = (draftInput = {}) => {
                 fields.forEach(([name, fieldSchema]) => {
                     const control = fieldsByName.get(name);
@@ -170,6 +164,8 @@ function createDagWizardController(ctx) {
                         renderApprovalTags(control, nextValue);
                         return;
                     }
+                    if (control.dataset.pivotDagTagList) { renderTagList(control, nextValue); return; }
+                    if (control.dataset.pivotDagWorkflowInputDefault) { hydrateWorkflowInputDefault(control, fieldsByName.get('type')?.value || 'text', nextValue); return; }
                     if (control.dataset.pivotDagApprovalLevels) {
                         const source = control.querySelector('[data-pivot-dag-approval-level-source]');
                         const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
@@ -209,6 +205,13 @@ function createDagWizardController(ctx) {
                         syncBrowserTargetMode(control);
                         return;
                     }
+                    if (control.dataset.pivotDagChannelBindingPicker) {
+                        const select = control.querySelector('[data-pivot-dag-channel-binding-select]');
+                        if (select) select.value = nextValue === undefined || nextValue === null ? '' : String(nextValue);
+                        return;
+                    }
+                    if (control.dataset.pivotDagCredentialPicker) { syncCredentialPicker(control, nextValue); return; }
+                    if (control.dataset.pivotDagReportSheetPicker) { hydrateSheet(control, nextValue); return; }
                     if (control.dataset.pivotDagReportPathPicker) {
                         syncResourcePicker(control, nextValue, '请选择可访问文件', path => `当前文件：${path}`);
                         return;
@@ -246,8 +249,8 @@ function createDagWizardController(ctx) {
                         control.value = nextValue === undefined || nextValue === null ? '' : String(nextValue);
                     }
                 });
+                syncConditionCompareField(); syncBrowserTargetVisibility(); syncOutputPresentationFields();
             };
-
             const getFieldValue = (control, fieldSchema, fieldName = '') => {
                 const type = normalizeSchemaType(fieldSchema);
                 if (control.dataset.pivotDagGroupFields) {
@@ -265,12 +268,19 @@ function createDagWizardController(ctx) {
                         ? tags.map(value => Number.parseInt(value, 10)).filter(Number.isSafeInteger)
                         : tags;
                 }
+                if (control.dataset.pivotDagTagList) { const tags = tagListValuesFromControl(control); return tags.length ? tags : undefined; }
+                if (control.dataset.pivotDagWorkflowInputDefault) return workflowInputDefaultFromControl(control, fieldsByName.get('type')?.value || 'text');
                 if (control.dataset.pivotDagApprovalLevels) {
                     return approvalLevelsFromControl(control);
                 }
                 if (control.dataset.pivotDagBrowserTarget) {
                     return browserTargetFromControl(control);
                 }
+                if (control.dataset.pivotDagChannelBindingPicker) {
+                    return String(control.querySelector('[data-pivot-dag-channel-binding-select]')?.value || '').trim() || undefined;
+                }
+                if (control.dataset.pivotDagCredentialPicker) return credentialValueFromControl(control);
+                if (control.dataset.pivotDagReportSheetPicker) return sheetValue(control);
                 if (control.dataset.pivotDagReportPathPicker) {
                     const selected = String(control.querySelector('[data-pivot-dag-report-path-select]')?.value || '').trim();
                     if (selected === '__custom__') return String(control.querySelector('[data-pivot-dag-report-path-custom]')?.value || '').trim() || undefined;
@@ -337,13 +347,11 @@ function createDagWizardController(ctx) {
                 }
                 return raw;
             };
-
             let activeFieldControl = null;
             let activeKeyValueInput = null;
             const setActiveField = (control) => {
                 activeFieldControl = control;
             };
-
             const insertWizardToken = (token, targetFieldName = '') => {
                 const control = targetFieldName ? fieldsByName.get(targetFieldName) : activeFieldControl;
                 if (!token || !control) return;
@@ -368,6 +376,11 @@ function createDagWizardController(ctx) {
                         manual.classList.add('is-visible');
                         manual.focus?.({ preventScroll: true });
                     }
+                    return;
+                }
+                if (control.dataset.pivotDagCredentialPicker) return;
+                if (control.dataset.pivotDagReportSheetPicker) {
+                    setManualSheet(control, token);
                     return;
                 }
                 if (control.dataset.pivotDagApprovalLevels) {
@@ -429,14 +442,12 @@ function createDagWizardController(ctx) {
                 control.dispatchEvent(new Event('change', { bubbles: true }));
                 control.focus?.({ preventScroll: true });
             };
-
             const setAssistStatus = (message, type = '') => {
                 const status = modal.querySelector('[data-pivot-dag-assist-status]');
                 if (!status) return;
                 status.textContent = message || '';
                 status.className = `pivot-dag-wizard-assist-status ${type}`;
             };
-
             const syncAssistValue = (fieldName, value) => {
                 const control = fieldsByName.get(fieldName);
                 if (!control) return;
@@ -444,13 +455,11 @@ function createDagWizardController(ctx) {
                 control.dispatchEvent(new Event('input', { bubbles: true }));
                 control.dispatchEvent(new Event('change', { bubbles: true }));
             };
-
             const currentDatabaseConnectionId = () => {
                 const selector = modal.querySelector('[data-pivot-dag-db-connection-select]');
                 const selected = String(selector?.value || '').trim();
                 return selected || modal.querySelector('[data-pivot-dag-db-assist]')?.dataset.pivotDagDbAssist || '';
             };
-
             const queryBuilder = isVisualSqlQuery
                 ? mountVisualSqlBuilder({
                     modal,
@@ -461,12 +470,10 @@ function createDagWizardController(ctx) {
                     callTool: callWizardTool
                 })
                 : null;
-
             const assistEntry = () => {
                 const serverId = currentDatabaseConnectionId();
                 return databaseWizardConnections(wizardTools).find(entry => entry.serverId === serverId) || null;
             };
-
             const syncAssistConnection = () => {
                 const serverId = currentDatabaseConnectionId();
                 const assist = modal.querySelector('[data-pivot-dag-db-assist]');
@@ -479,7 +486,6 @@ function createDagWizardController(ctx) {
                 if (columnList) PivotSafeHtml.setHtml(columnList, '');
                 setAssistStatus(serverId ? '已切换数据库连接，可重新读取表或字段。' : '请选择数据库连接。', serverId ? '' : 'warn');
             };
-
             const loadAssistTables = async () => {
                 syncAssistConnection();
                 const entry = assistEntry();
@@ -499,7 +505,6 @@ function createDagWizardController(ctx) {
                     setAssistStatus(e.message || '读取数据表失败。', 'error');
                 }
             };
-
             const loadAssistColumns = async () => {
                 syncAssistConnection();
                 const entry = assistEntry();
@@ -524,7 +529,6 @@ function createDagWizardController(ctx) {
                     setAssistStatus(e.message || '读取字段失败。', 'error');
                 }
             };
-
             const collectWizardInput = () => {
                 const nextInput = cloneDagInput(wizardBaseInput);
                 const missing = [];
@@ -559,6 +563,8 @@ function createDagWizardController(ctx) {
                     delete nextInput.mcp_server_id;
                     if (connectionId) nextInput.connectionId = connectionId;
                 }
+                // 平台由受控渠道绑定决定；编辑过的旧通知节点不再保存冗余平台字段。
+                if (toolShortName(tool) === 'workflow.notify') delete nextInput.platform;
                 if (queryBuilder) {
                     const built = queryBuilder.collect();
                     if (built.error) {
@@ -590,7 +596,6 @@ function createDagWizardController(ctx) {
                 });
                 return nextInput;
             };
-
             const syncFormWithDraft = (draftInput = {}) => {
                 populateFields(draftInput);
                 const firstField = fieldsByName.get(fields[0]?.[0] || '');
@@ -599,11 +604,9 @@ function createDagWizardController(ctx) {
                     requestAnimationFrame(() => firstField.focus?.({ preventScroll: true }));
                 }
             };
-
             const closeWizard = () => {
                 modal.classList.add('hidden');
             };
-
             const applyWizard = () => {
                 const nextInput = collectWizardInput();
                 if (!nextInput) return;
@@ -634,14 +637,11 @@ function createDagWizardController(ctx) {
                     renderError ? 'warning' : 'success'
                 );
             };
-
-
             const resetWizard = (draftInput = {}) => {
                 wizardBaseInput = cloneDagInput(draftInput);
                 syncFormWithDraft(draftInput);
                 queryBuilder?.hydrate(draftInput);
             };
-
             modal.querySelectorAll('[data-pivot-dag-wizard-field]').forEach(control => {
                 control.addEventListener('focus', () => setActiveField(control));
                 control.addEventListener('click', () => setActiveField(control));
@@ -761,6 +761,8 @@ function createDagWizardController(ctx) {
                     renderApprovalTags(control, approvalTagsFromControl(control).filter(item => item !== tag));
                 });
             });
+            modal.querySelectorAll('[data-pivot-dag-tag-list]').forEach(control => bindTagList({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
+            modal.querySelectorAll('[data-pivot-dag-workflow-input-default]').forEach(control => bindWorkflowInputDefault({ control, typeControl: fieldsByName.get('type'), setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-approval-levels]').forEach(control => {
                 const source = control.querySelector('[data-pivot-dag-approval-level-source]');
                 const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
@@ -854,6 +856,15 @@ function createDagWizardController(ctx) {
                     }
                 });
             });
+            modal.querySelectorAll('[data-pivot-dag-channel-binding-picker]').forEach(control => bindChannelBindingPicker({
+                control, setActiveField, apiFetchFn: apiFetch, apiBase: API_BASE,
+                showToast: (...args) => window.Pivot.legacy.showToast?.(...args)
+            }));
+            modal.querySelectorAll('[data-pivot-dag-credential-picker]').forEach(control => bindCredentialPicker({ control, setActiveField, apiFetchFn: apiFetch, apiBase: API_BASE, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
+            syncConditionCompareField = bindConditionCompareField({ fieldsByName, setActiveField });
+            syncBrowserTargetVisibility = bindBrowserTargetVisibility({ fieldsByName, setActiveField });
+            syncOutputPresentationFields = bindOutputPresentationFields({ fieldsByName, setActiveField });
+            modal.querySelectorAll('[data-pivot-dag-report-sheet-picker]').forEach(control => bindReportSheetPicker({ control, fieldsByName, properties, tool, wizardTools, callTool: callWizardTool, getFieldValue, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-report-path-picker]').forEach(control => {
                 const select = control.querySelector('[data-pivot-dag-report-path-select]');
                 const custom = control.querySelector('[data-pivot-dag-report-path-custom]');
@@ -976,13 +987,10 @@ function createDagWizardController(ctx) {
             modal.querySelector('[data-pivot-dag-wizard-apply]')?.addEventListener('click', applyWizard);
             modal.querySelector('[data-pivot-dag-wizard-clear]')?.addEventListener('click', () => resetWizard({}));
             modal.querySelector('[data-pivot-dag-wizard-template]')?.addEventListener('click', () => resetWizard(templateInput));
-
             syncFormWithDraft(initialInput);
             modal.classList.remove('hidden');
         };
-
         const { openStatsChartWizard } = createDagWizardStatsController(ctx);
-
         return {
             renderInputSummary,
             openNodeInputWizard,

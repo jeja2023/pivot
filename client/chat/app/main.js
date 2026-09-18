@@ -192,26 +192,21 @@ bind('new-chat-btn', async () => {
 });
 bind('send-btn', () => window.Pivot.legacy.sendMessage());
 bind('stop-btn', () => window.Pivot.legacy.cancelCurrentChatAgent?.() || currentAbortController?.abort());
-bind('upload-btn', () => {
-    const modelId = document.getElementById('model-selector').value;
-    const model = (window.Pivot.legacy._cachedModels || []).find(m => String(m.id) === String(modelId));
-    if (!model || Number(model.supports_vision || 0) !== 1) {
-        return showToast('当前选中的模型不具备视觉或文档分析能力', 'error');
-    }
-    const panel = document.getElementById('upload-choice-panel');
-    const button = document.getElementById('upload-btn');
-    if (!panel || !button) return document.getElementById('file-input')?.click();
-    const shouldOpen = panel.hidden;
-    document.querySelectorAll('#chat-tools-menu-panel .chat-tool-subpanel').forEach(subpanel => { subpanel.hidden = true; });
-    document.querySelectorAll('#chat-tools-menu-panel [aria-expanded="true"]').forEach(trigger => trigger.setAttribute('aria-expanded', 'false'));
-    panel.hidden = !shouldOpen;
-    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
-});
+function canSelectChatAttachment() {
+    const modelId = document.getElementById('model-selector')?.value;
+    const model = (window.Pivot.legacy._cachedModels || [])
+        .find(item => String(item.id) === String(modelId));
+    if (model && Number(model.supports_vision || 0) === 1) return true;
+    showToast('当前选中的模型不具备视觉或文档分析能力', 'error');
+    return false;
+}
 bind('upload-file-choice', () => {
+    if (!canSelectChatAttachment()) return;
     window.Pivot.modules['chat.inputMenu']?.setOpen?.(false);
     document.getElementById('file-input')?.click();
 });
 bind('upload-folder-choice', () => {
+    if (!canSelectChatAttachment()) return;
     window.Pivot.modules['chat.inputMenu']?.setOpen?.(false);
     document.getElementById('folder-input')?.click();
 });

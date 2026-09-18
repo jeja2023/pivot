@@ -56,10 +56,10 @@ const TOOL_PRIMARY_FIELD_NAMES = {
         'agent.http': ['url', 'method', 'body', 'credentialSecret'],
         'agent.browser': ['url', 'action', 'target', 'screenshot'],
         'agent.merge': ['fields'],
-        'workflow.input': ['label', 'name', 'type', 'required', 'defaultValue', 'description'],
+        'workflow.input': ['name', 'label', 'type', 'required', 'defaultValue', 'description'],
         'workflow.template': ['template', 'trim', 'missingVariable'],
-        'workflow.notify': ['bindingId', 'platform', 'subject', 'body', 'format'],
-        'workflow.output': ['name', 'value', 'tableTitle', 'tableColumns', 'fileRef'],
+        'workflow.notify': ['bindingId', 'subject', 'body', 'format'],
+        'workflow.output': ['name', 'value', 'presentation', 'tableTitle', 'tableColumns', 'fileRef'],
         'workflow.condition': ['value', 'operator', 'compareTo'],
         'workflow.approval': ['title', 'summary', 'instructions', 'approvers', 'approverUnits', 'mode', 'timeoutHours', 'timeoutAction'],
         'workflow.foreach': ['items', 'code', 'vars', 'stopOnError'],
@@ -89,7 +89,7 @@ const TOOL_PRIMARY_FIELD_NAMES = {
         'artifact.render': ['artifactId', 'format', 'ir'],
         'artifact.list_renditions': ['artifactId'],
         'data.filter_rows': ['rows', 'filters', 'matchMode', 'limit'],
-        'data.group_summary': ['rows', 'groupBy', 'valueField', 'aggregation', 'limit'],
+        'data.group_summary': ['rows', 'groupBy', 'valueField', 'aggregation', 'outputLimit'],
         'data.profile_rows': ['rows', 'limit'],
         'data.normalize_fields': ['rows', 'renameMap', 'trimStrings', 'limit']
     };
@@ -97,8 +97,9 @@ const TOOL_PRIMARY_FIELD_NAMES = {
 const TOOL_HIDDEN_FIELD_NAMES = {
         'agent.llm': ['responseFormat'],
         'agent.content_review': ['rows', 'data'],
-        'workflow.output': ['format', 'presentation'],
+        'workflow.output': ['format'],
         'workflow.approval': ['timeoutMs'],
+        'workflow.notify': ['platform'],
         'workflow.subworkflow': ['version']
     };
 
@@ -220,6 +221,16 @@ function friendlyEnumOptionLabel(name, option) {
             'mode:lower': '转小写',
             'mode:plain': '保持原样',
             'mode:upper': '转大写',
+            'operator:contains': '包含',
+            'operator:equals': '等于',
+            'operator:greater_than': '大于',
+            'operator:is_empty': '为空',
+            'operator:is_false': '为否',
+            'operator:is_true': '为是',
+            'operator:less_than': '小于',
+            'operator:not_contains': '不包含',
+            'operator:not_empty': '不为空',
+            'operator:not_equals': '不等于',
             'response_format:json': '结构化数据',
             'response_format:markdown': '格式化文本',
             'response_format:text': '纯文本',

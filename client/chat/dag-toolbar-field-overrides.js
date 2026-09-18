@@ -59,6 +59,7 @@ const FIELD_LABEL_OVERRIDES = {
         message: '消息内容',
         method: '请求方法',
         mode: '处理模式',
+        operator: '判断方式',
         role: '专家角色',
         model: '模型',
         path: '文件路径',
@@ -233,6 +234,15 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             group_by: '分组统计字段',
             limit: '分组数量上限'
         },
+        'data.group_summary': {
+            rows: '参与汇总的数据行',
+            groupBy: '分组字段',
+            valueField: '指标字段',
+            aggregation: '聚合方式',
+            limit: '参与计算行数',
+            outputLimit: '返回分组数',
+            output_limit: '返回分组数'
+        },
         'viz.build_chart': {
             rows: '图表数据行',
             xAxis: '横轴字段',
@@ -382,8 +392,11 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
         },
         'workflow.condition': {
             value: '通常引用上游节点结果，再选择判断方式。',
-            operator: '选择要使用的判断方式。',
-            compareTo: '仅在等于、包含或大小比较时填写。'
+            operator: '选择判断方式；“为空 / 不为空 / 为是 / 为否”不需要填写比较值。',
+            compareTo: '仅在等于、包含或大小比较时填写；可引用运行输入或上游字段。'
+        },
+        'agent.http': {
+            credentialSecret: '优先选择受控凭据引用。凭据内容不会显示或写入工作流；仅为兼容旧部署时才手动填写环境变量引用名。'
         },
         'workflow.template': {
             template: '可混排 {{goal}}、{{inputs.*}} 和上游节点输出；不调用模型。',
@@ -422,7 +435,10 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             rows: '通常引用上游查询节点的数据行。',
             groupBy: '添加一个或多个分组字段；每个字段组合会形成一个汇总分组。',
             valueField: '求和或平均值时选择数值字段；计数时可留空。',
-            aggregation: '选择计数、求和、平均值、最小值或最大值。'
+            aggregation: '选择计数、求和、平均值、最小值或最大值。',
+            limit: '最多参与汇总的输入行数；数据量较大时用它控制计算范围。',
+            outputLimit: '最多返回多少个分组结果；不影响参与计算的输入行数。',
+            output_limit: '最多返回多少个分组结果；不影响参与计算的输入行数。'
         },
         'rag.search': {
             query: '输入要从知识库里检索的问题或关键词。',
@@ -470,6 +486,8 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
         },
         'viz.build_chart': {
             rows: '图表来源数据，通常引用上游查询或统计节点的 rows 输出。',
+            groupBy: '可选。选择该字段后，会将同类数据拆分为多个图表系列。',
+            group_by: '可选。选择该字段后，会将同类数据拆分为多个图表系列。',
             yAxis: '用于绘制高度、数值或占比的字段；饼图可使用数量字段。',
             y_axis: '用于绘制高度、数值或占比的字段；饼图可使用数量字段。'
         }

@@ -293,6 +293,11 @@ const renderEdges = () => {
             ctx.nodesLayer.replaceChildren();
             const tools = ctx.currentTools();
             const viewport = dagViewport(ctx);
+            const configurationIssues = new Map(
+                (typeof ctx.getReadinessIssues === 'function' ? (ctx.getReadinessIssues() || []) : [])
+                    .filter(issue => issue?.nodeId && issue?.severity !== 'warning')
+                    .map(issue => [String(issue.nodeId), issue])
+            );
             ctx.spec.nodes.forEach(node => {
                 if (!dagNodeIntersectsViewport(node, viewport)) return;
                 const llmNode = isLlmNode(node);
@@ -300,12 +305,14 @@ const renderEdges = () => {
                 const runState = window.Pivot.legacy.dagNodeRunStates.get(node.id);
                 const runStatus = runState?.status || '';
                 const hasVisualIcon = Boolean(visual.svgIcon || visual.iconText);
+                const configurationIssue = configurationIssues.get(String(node.id));
 
                 const group = makeSvgEl('g', {
                     class: [
                         'pivot-dag-node',
                         (ctx.isNodeSelected?.(node.id) || ctx.selectedId === node.id) ? 'is-selected' : '',
                         node.tool ? '' : 'has-warning',
+                        configurationIssue ? 'has-config-error' : '',
                         llmNode ? 'is-llm' : '',
                         visual.theme !== 'default' ? `is-${visual.theme}` : '',
                         runState?.cached ? 'run-cached' : (runStatus ? `run-${runStatus}` : '')
@@ -314,8 +321,13 @@ const renderEdges = () => {
                     'data-pivot-dag-id': node.id,
                     tabindex: '0',
                     role: 'button',
-                    'aria-label': `${node.title || node.id}，${visual.label || node.tool || '未选择工具'}`
+                    'aria-label': `${node.title || node.id}，${visual.label || node.tool || '未选择工具'}${configurationIssue ? `，配置未完成：${configurationIssue.message}` : ''}`
                 });
+                if (configurationIssue) {
+                    const title = makeSvgEl('title');
+                    title.textContent = configurationIssue.message;
+                    group.appendChild(title);
+                }
 
                 group.appendChild(makeSvgEl('rect', {
                     class: 'pivot-dag-node-body',
@@ -378,6 +390,22 @@ const renderEdges = () => {
                 }
                 toolWrap.appendChild(toolBody);
                 group.appendChild(toolWrap);
+
+                if (configurationIssue) {
+                    const issueWrap = makeSvgEl('foreignObject', {
+                        class: 'pivot-dag-config-badge-foreign',
+                        x: NODE_WIDTH - 19,
+                        y: NODE_HEIGHT - 20,
+                        width: 16,
+                        height: 16
+                    });
+                    const issue = document.createElement('div');
+                    issue.className = 'pivot-dag-config-badge';
+                    issue.textContent = '!';
+                    issue.title = configurationIssue.message;
+                    issueWrap.appendChild(issue);
+                    group.appendChild(issueWrap);
+                }
 
                 // 运行状态徽章：右上角叠加
                 if (runStatus || runState?.cached) {

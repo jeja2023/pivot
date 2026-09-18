@@ -36,23 +36,20 @@ const isTextualSchemaField = (name, schema = {}) => {
             return String(value);
         };
 
-const isWizardFieldRelevant = (name, input = {}, tool = null) => {
+const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
             const key = normalizeFieldKey(name);
             const shortName = toolShortName(tool);
-            if (shortName === 'workflow.output') {
-                const presentation = String(input.presentation || 'default');
-                if (key === 'table_title' || key === 'table_columns') return presentation === 'table';
-                if (key === 'file_ref') return presentation === 'file';
-            }
-            if (shortName === 'workflow.condition' && key === 'compare_to') {
-                return !['is_empty', 'not_empty', 'is_true', 'is_false'].includes(String(input.operator || 'not_empty'));
-            }
+            // 与当前选择有关的字段仍需保留在 DOM 中：专用控件会按当前模式隐藏它们，
+            // 这样用户切换条件运算符或交付方式时无需重新打开向导。
+            if (shortName === 'workflow.output' && ['table_title', 'table_columns', 'file_ref'].includes(key)) return true;
+            if (shortName === 'workflow.condition' && key === 'compare_to') return true;
             return true;
         };
 
         const fieldUsageHint = (name, schema = {}, tool = null) => {
             const key = normalizeFieldKey(name);
             if (isDatabaseConnectionField(name, tool)) return '选择要执行该数据库工具的连接；读取表/字段会跟随这个选择。';
+            if (toolShortName(tool) === 'workflow.input' && ['default_value', 'defaultvalue'].includes(key)) return '默认值会跟随当前参数类型校验；对象和数组请填写合法 JSON。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
             if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '添加一个或多个字段；每个字段组合会形成一个汇总分组。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';

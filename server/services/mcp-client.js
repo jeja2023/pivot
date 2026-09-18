@@ -44,6 +44,7 @@ const {
 } = require('./unit-visibility');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { enqueueMcpCallLog } = require('./db-write-queue');
+const { invalidate: invalidateMcpToolCatalog } = require('./mcp-tool-catalog-index');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
@@ -767,6 +768,7 @@ async function refreshMcpTools(server, user = null) {
             throw new Error('外部工具服务存在工具 Schema 缺失或格式不正确，请修正后再刷新。');
         }
         await upsertToolCache(server.id, normalizedTools);
+        invalidateMcpToolCatalog();
         await execute('UPDATE mcp_servers SET last_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?', [
             '', getBeijingTimestamp(), getBeijingTimestamp(), server.id
         ]);

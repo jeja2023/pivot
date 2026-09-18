@@ -283,13 +283,15 @@ function selectDropdownModel(id, shouldClose = true) {
     });
 
     // 更新上传按钮状态
-    const uploadBtn = document.getElementById('upload-btn');
+    const uploadBtn = document.getElementById('chat-tools-menu-btn');
     if (uploadBtn) {
         if (hasVision) {
+            uploadBtn.disabled = false;
             uploadBtn.style.opacity = '1';
             uploadBtn.style.cursor = 'pointer';
-            uploadBtn.title = '上传附件 (图片、文档)';
+            uploadBtn.title = '添加文件或文件夹';
         } else {
+            uploadBtn.disabled = true;
             uploadBtn.style.opacity = '0.4';
             uploadBtn.style.cursor = 'not-allowed';
             uploadBtn.title = '当前模型不支持附件 (请切换至视觉模型)';

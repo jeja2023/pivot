@@ -284,7 +284,7 @@ function getBuiltInToolDefinitions(user) {
                 format: { type: 'string', enum: ['text', 'markdown'], default: 'text' },
                 eventType: { type: 'string', maxLength: 80 },
                 idempotencyKey: { type: 'string', maxLength: 255 }
-            }, ['bindingId', 'platform', 'body']),
+            }, ['bindingId', 'body']),
             output_schema: {
                 type: 'object',
                 required: ['queued', 'deliveryId', 'bindingId', 'status', 'idempotencyKey'],

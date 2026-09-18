@@ -321,25 +321,22 @@ async function executeWorkflowForeach(input = {}, context = {}) {
 
 async function executeWorkflowNotify(input = {}, user = null, context = {}) {
     const bindingId = String(input.bindingId || input.binding_id || '').trim();
-    const platform = String(input.platform || '').trim().toLowerCase();
     const body = String(input.body ?? input.message ?? '').trim();
     if (!bindingId) throw new Error('通知节点需要选择已配置的渠道绑定。');
-    if (!['wecom', 'feishu', 'dingtalk'].includes(platform)) throw new Error('通知节点必须选择企业微信、飞书或钉钉平台。');
     if (!body) throw new Error('通知节点消息内容不能为空。');
     if (!user?.id) throw new Error('通知节点需要有效的运行用户。');
     const { enqueueChannelDelivery } = require('./agent-channel-adapters');
     const idempotencyKey = String(input.idempotencyKey || input.idempotency_key || `${context.run?.id || context.runId || 'workflow'}:${context.node?.id || 'notify'}`).slice(0, 255);
     const delivery = await enqueueChannelDelivery(user, {
         bindingId,
-        platform,
+        platform: '',
         requirePlatform: true,
         eventType: String(input.eventType || 'workflow.notify').slice(0, 80),
         subject: String(input.subject || input.title || '').slice(0, 255),
         body,
         idempotencyKey,
         interaction: {
-            format: String(input.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text',
-            platform
+            format: String(input.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text'
         }
     });
     if (!delivery) throw new Error('通知渠道不存在、未启用或当前用户无权使用。');
@@ -348,7 +345,7 @@ async function executeWorkflowNotify(input = {}, user = null, context = {}) {
         deliveryId: delivery.id,
         bindingId,
         status: delivery.status || 'queued',
-        platform: delivery.bindingPlatform || platform,
+        platform: delivery.bindingPlatform || '',
         idempotencyKey
     };
 }

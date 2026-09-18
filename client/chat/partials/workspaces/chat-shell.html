@@ -164,87 +164,21 @@
                         accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx">
                     <input type="file" id="folder-input" class="hidden" webkitdirectory directory multiple
                         accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf,.txt,.md,.csv,.doc,.docx,.xls,.xlsx">
-                    <textarea id="user-input" class="form-input" placeholder="输入消息..."></textarea>
+                    <textarea id="user-input" class="form-input" placeholder="输入消息… 需要指定资料或工具时可输入 @"></textarea>
+                    <div id="chat-route-mention-menu" class="chat-route-mention-menu" role="listbox" aria-label="选择知识库或工具" hidden></div>
                     <div class="input-actions left">
                         <div id="chat-tools-menu" class="chat-tools-menu">
-                        <button type="button" id="chat-tools-menu-btn" class="btn-secondary chat-tools-menu-trigger" aria-label="添加附件、工具或知识库" aria-expanded="false" aria-controls="chat-tools-menu-panel" title="添加">
+                        <button type="button" id="chat-tools-menu-btn" class="btn-secondary chat-tools-menu-trigger" aria-label="添加文件或文件夹" aria-expanded="false" aria-controls="chat-tools-menu-panel" title="添加文件或文件夹">
                             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
                         </button>
-                        <div id="chat-tools-menu-panel" class="chat-tools-menu-panel" role="menu" aria-label="添加选项" hidden>
-                        <div class="chat-tool-entry chat-upload-entry">
-                        <button type="button" id="upload-btn" class="btn-secondary btn-icon has-tooltip chat-tool-menu-item" data-menu-label="文件和文件夹" data-menu-description="选择文件或整个文件夹" data-tooltip="上传文件或文件夹中的支持文件" aria-expanded="false" aria-controls="upload-choice-panel">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path
-                                    d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                            </svg>
-                        </button>
-                        <div id="upload-choice-panel" class="chat-tool-subpanel upload-choice-panel" role="menu" aria-label="上传方式" hidden>
+                        <div id="chat-tools-menu-panel" class="chat-tools-menu-panel chat-attachment-menu-panel" role="menu" aria-label="添加文件或文件夹" hidden>
                             <button type="button" id="upload-file-choice" class="btn-secondary chat-tool-subpanel-item" role="menuitem">选择文件</button>
                             <button type="button" id="upload-folder-choice" class="btn-secondary chat-tool-subpanel-item" role="menuitem">选择文件夹</button>
                         </div>
                         </div>
-                        <div class="chat-tool-entry chat-rag-entry">
-                        <button type="button" id="chat-rag-enabled" class="btn-secondary chat-tool-toggle chat-tool-rag chat-tool-menu-item" data-chat-tool-toggle="rag" data-menu-label="知识库" data-menu-description="让知识库参与本轮回答" data-tooltip="让知识库参与本轮回答" aria-label="让知识库参与本轮回答" aria-pressed="false">
-                            <span class="chat-tool-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                                    <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path>
-                                    <path d="M8 7h8"></path>
-                                    <path d="M8 11h6"></path>
-                                </svg>
-                            </span>
-                        </button>
-                        <button type="button" class="btn-secondary chat-tool-config-trigger" data-chat-tool-config="rag" aria-label="筛选知识库" aria-expanded="false">›</button>
-                        <div id="chat-rag-subpanel" class="chat-tool-subpanel chat-rag-subpanel" role="region" aria-label="知识库筛选" hidden>
-                        <div id="chat-rag-readiness" class="chat-tool-subpanel-status is-checking" aria-live="polite">正在检查知识库...</div>
-                        <input id="chat-rag-scope-search" class="form-input chat-tool-filter-input" type="search" placeholder="搜索知识库" aria-label="搜索知识库">
-                        <select id="chat-rag-collection-scope" class="form-input chat-rag-scope hidden" title="知识库范围" aria-label="知识库范围" aria-hidden="true" disabled>
-                            <option value="">全部知识库</option>
-                        </select>
-                        <select id="chat-rag-tag-scope" class="form-input chat-rag-scope hidden" title="知识库标签" aria-label="知识库标签" aria-hidden="true" disabled>
-                            <option value="">全部标签</option>
-                        </select>
-                        <div class="chat-tool-subpanel-hint">可按知识库和标签缩小本轮检索范围</div>
-                        <div class="chat-tool-subpanel-actions"><button type="button" class="btn-secondary" data-chat-tool-reset="rag">重置</button><button type="button" class="btn-primary" data-chat-tool-done="rag">完成</button></div>
-                        </div>
-                        </div>
-                        <div class="chat-tool-entry chat-mcp-entry">
-                        <button type="button" id="chat-mcp-enabled" class="btn-secondary chat-tool-toggle chat-tool-mcp chat-tool-menu-item" data-menu-label="工具" data-menu-description="按需调用工具库能力" data-chat-tool-toggle="mcp" data-tooltip="允许本轮对话按需调用工具库工具" aria-label="允许本轮对话按需调用工具库工具" aria-pressed="false">
-                            <span class="chat-tool-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
-                                    <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
-                                    <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
-                                    <path d="M10 6.5h4"></path>
-                                    <path d="M6.5 10v4"></path>
-                                    <path d="M10 17.5h3.5a3.5 3.5 0 0 0 3.5-3.5V10"></path>
-                                </svg>
-                            </span>
-                        </button>
-                        <button type="button" class="btn-secondary chat-tool-config-trigger" data-chat-tool-config="mcp" aria-label="筛选工具" aria-expanded="false">›</button>
-                        <div id="chat-mcp-subpanel" class="chat-tool-subpanel chat-mcp-subpanel" role="region" aria-label="工具筛选" hidden>
-                            <div class="chat-tool-mode-options" role="radiogroup" aria-label="工具选择方式">
-                                <label class="chat-tool-mode-option">
-                                    <input id="chat-mcp-mode-auto" type="radio" name="chat-mcp-mode" value="auto" checked>
-                                    <span><strong>模型自动选择</strong><small>根据问题从可用工具中按需调用</small></span>
-                                </label>
-                                <label class="chat-tool-mode-option">
-                                    <input id="chat-mcp-mode-manual" type="radio" name="chat-mcp-mode" value="manual">
-                                    <span><strong>手动限制范围</strong><small>仅允许模型使用勾选的工具</small></span>
-                                </label>
-                            </div>
-                            <div id="chat-mcp-tool-summary" class="chat-tool-subpanel-status chat-mcp-selection-summary" aria-live="polite">模型将按需选择可用工具</div>
-                            <div id="chat-mcp-manual-controls" class="chat-mcp-manual-controls" hidden>
-                                <input id="chat-mcp-tool-search" class="form-input chat-tool-filter-input" type="search" placeholder="搜索工具" aria-label="搜索工具">
-                                <label class="chat-tool-all-row"><input id="chat-mcp-all-tools" type="checkbox"> 选择全部</label>
-                                <div id="chat-mcp-tool-list" class="chat-mcp-tool-list"><div class="chat-tool-subpanel-hint">展开后加载工具列表</div></div>
-                            </div>
-                            <div class="chat-tool-subpanel-actions"><button type="button" class="btn-secondary" data-chat-tool-reset="mcp">重置</button><button type="button" class="btn-primary" data-chat-tool-done="mcp">完成</button></div>
-                        </div>
-                        </div>
-                        <div id="chat-tool-status" class="chat-tool-status hidden" aria-live="polite"></div>
-                        </div>
+                        <div id="chat-route-override-state" hidden aria-hidden="true">
+                            <select id="chat-rag-collection-scope" class="form-input" disabled tabindex="-1"><option value="">全部知识库</option></select>
+                            <select id="chat-rag-tag-scope" class="form-input" disabled tabindex="-1"><option value="">全部标签</option></select>
                         </div>
                         <div id="chat-mode-selector" class="chat-mode-selector">
                             <button type="button" id="chat-mode-trigger" class="chat-mode-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="chat-mode-panel" title="切换回答模式">

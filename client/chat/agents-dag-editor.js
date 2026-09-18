@@ -24,7 +24,7 @@
  *   - CSP 兼容：所有事件都用 addEventListener，无内联 onclick
  *   - 多次 mount 同一容器幂等：先 destroy 旧实例
  */
-/* global createDagIcon, placeNewNode, clampDagCoordinate */
+/* global createDagEmptyCanvasHint, createDagIcon, placeNewNode, clampDagCoordinate */
 (function () {
 if (window.Pivot.legacy.PivotDagEditor) return;
 const raf = typeof globalThis.requestAnimationFrame === 'function'
@@ -56,7 +56,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
         const viewState = { x: 0, y: 0, scale: DEFAULT_VIEW_SCALE };
         let refreshDagViewport = null;
-
         const snapshot = () => JSON.stringify(serialize(spec));
         const recordHistory = () => {
             const current = snapshot();
@@ -415,6 +414,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const toolNames = new Set(tools.map(toolValue).filter(Boolean));
             const errors = [];
             const warnings = [];
+            const readiness = window.Pivot?.moduleApi?.('agent.dagReadiness')?.inspectDagReadiness?.(spec.nodes, tools, spec.edges || []) || { issues: [] };
             const byId = new Map(spec.nodes.map(node => [node.id, node]));
             const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
             const explicitEdges = Array.isArray(spec.edges) ? spec.edges : [];
@@ -459,7 +459,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const endCount = spec.nodes.filter(node => !dependencyTargets.has(node.id)).length;
             if (spec.nodes.length > 1 && startCount === 0) errors.push('缺少起始节点');
             if (spec.nodes.length > 1 && endCount === 0) warnings.push('缺少结束节点');
-            return { errors, warnings, nodeCount: spec.nodes.length, edgeCount, startCount, endCount };
+            readiness.issues.forEach(issue => errors.push(issue.message));
+            return { errors, warnings, readinessIssues: readiness.issues, nodeCount: spec.nodes.length, edgeCount, startCount, endCount };
         };
 
         const renderToolbarStatus = () => {
@@ -478,6 +479,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const showValidationResult = () => {
             const report = validateWorkflow();
             const message = report.errors[0] || report.warnings[0] || '工作流校验通过';
+            const firstReadinessIssue = report.readinessIssues?.[0];
+            if (firstReadinessIssue?.nodeId) selectNode(firstReadinessIssue.nodeId, false);
             window.Pivot.legacy.showToast?.(message, report.errors.length ? 'error' : report.warnings.length ? 'warning' : 'success');
             renderToolbarStatus();
         };
@@ -498,6 +501,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             getUpstreamNodes,
             getNodeTestOutputSnapshots: () => dagCoreApi.getNodeTestOutputSnapshots?.() || new Map(),
             getRunStates: () => globalThis.Pivot?.legacy?.dagNodeRunStates || new Map(),
+            getReadinessIssues: () => validateWorkflow().readinessIssues || [],
             getDagInputs: () => typeof collectAgentDagInputs === 'function' ? collectAgentDagInputs() : {},
             getAvailableVariableOptions,
             showToast: (...args) => window.Pivot?.legacy?.showToast?.(...args),
@@ -792,6 +796,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             get spec() { return spec; },
             get selectedId() { return selectedId; },
             isNodeSelected: id => selectedIds.has(id),
+            getReadinessIssues: () => validateWorkflow().readinessIssues || [],
             get selectedEdge() { return selectedEdge; }
         });
         refreshDagViewport = () => {
@@ -799,7 +804,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             renderNodes();
         };
 
-        // 空画布引导：无节点时在画布中央提示从左侧节点库开始
         let emptyHintEl = null;
         const renderEmptyHint = () => {
             const isEmpty = !spec.nodes.length;
@@ -809,17 +813,15 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 return;
             }
             if (emptyHintEl?.isConnected) return;
-            emptyHintEl = document.createElement('div');
-            emptyHintEl.className = 'pivot-dag-empty-hint';
-            const icon = document.createElement('span');
-            icon.className = 'pivot-dag-empty-hint-icon';
-            icon.setAttribute('aria-hidden', 'true');
-            icon.appendChild(createDagIcon('puzzle'));
-            const title = document.createElement('strong');
-            title.textContent = '画布还是空的';
-            const desc = document.createElement('small');
-            desc.textContent = '从左侧「节点」面板点选类型即可添加，拖动节点端口可连成依赖。也可用工具栏「模板」一键生成。';
-            emptyHintEl.append(icon, title, desc);
+            const addStarterPreset = base => {
+                const preset = window.Pivot?.moduleApi?.('agent.dagNodePresets')?.all?.().find(item => item.base === base);
+                if (preset) addPresetNode(preset);
+            };
+            emptyHintEl = createDagEmptyCanvasHint({
+                createIcon: iconName => createDagIcon(iconName),
+                onAddPreset: addStarterPreset,
+                onOpenStatsTemplate: openStatsChartWizard
+            });
             canvas.appendChild(emptyHintEl);
         };
 
@@ -897,7 +899,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         root.addEventListener('dblclick', onDoubleClick);
         root.addEventListener('wheel', onWheel, { passive: false });
 
-        // —— 工具栏 ——
         toolbarStatus = renderDagToolbar({
             toolbar,
             readOnly,
@@ -925,7 +926,6 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             onOpenJson
         });
 
-        // —— textarea 外部改动同步回画布 ——
         const onTextareaInput = () => {
             if (suppressTextareaSync) return;
             const parsed = readJson(textarea.value);

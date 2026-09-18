@@ -30,6 +30,7 @@ const agentChannelDeliveryClaimMigrations = require('./agent-channel-delivery-cl
 const modelUsageEventsFkeySoftenMigrations = require('./model-usage-events-fkey-soften');
 const apiCallLogsFkeySoftenMigrations = require('./api-call-logs-fkey-soften');
 const agentRunMetadataJsonbCompatibilityMigrations = require('./agent-run-metadata-jsonb-compatibility');
+const chatAdaptiveRoutingMigrations = require('./chat-adaptive-routing');
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
     if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) return false;
@@ -984,7 +985,8 @@ const migrations = [
     ...refreshTokenReuseDetectionMigrations,
     ...modelUsageEventsFkeySoftenMigrations,
     ...apiCallLogsFkeySoftenMigrations,
-    ...agentRunMetadataJsonbCompatibilityMigrations
+    ...agentRunMetadataJsonbCompatibilityMigrations,
+    ...chatAdaptiveRoutingMigrations
 ];
 
 module.exports = migrations;

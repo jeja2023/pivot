@@ -70,6 +70,13 @@ function validateAgentWorkflowRunSettings(settings) {
     return '';
 }
 
+function workflowReadinessError(spec) {
+    const inspector = window.Pivot?.moduleApi?.('agent.dagReadiness')?.inspectDagReadiness;
+    if (typeof inspector !== 'function') return '';
+    const tools = typeof agentToolsCache !== 'undefined' && Array.isArray(agentToolsCache) ? agentToolsCache : [];
+    return inspector(spec?.nodes || [], tools, spec?.edges || [])?.issues?.[0]?.message || '';
+}
+
 function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverride = null) {
     const workflow = workflowOverride || selectedAgentWorkflow();
     const sourceMode = ['draft', 'current', 'published'].includes(source) ? source : 'draft';
@@ -95,6 +102,12 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
     };
     if (!payload.goal) {
         showToast('请先填写任务目标或工作流名称', 'error');
+        payload._invalid = true;
+        return payload;
+    }
+    const readinessError = workflowReadinessError(summaryForSettings.spec);
+    if (readinessError) {
+        showToast(`请先完善节点配置：${readinessError}`, 'error');
         payload._invalid = true;
         return payload;
     }

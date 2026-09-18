@@ -491,6 +491,15 @@ const loadMonitorSummary = async function(options = {}) {
             const embedding = ragOperations.embedding || {};
             const embeddingSummary = embedding.summary || {};
             const diagnostics = ragOperations.diagnostics || {};
+            const routingRows = Array.isArray(data.chatRouting?.rows) ? data.chatRouting.rows : [];
+            const routing = routingRows.reduce((summary, row) => ({
+                requests: summary.requests + Number(row.request_count || 0),
+                errors: summary.errors + Number(row.error_count || 0),
+                durationMs: summary.durationMs + Number(row.total_route_duration_ms || 0),
+                embeddingMs: summary.embeddingMs + Number(row.total_embedding_duration_ms || 0),
+                ragCandidates: summary.ragCandidates + Number(row.total_rag_candidates || 0),
+                toolCandidates: summary.toolCandidates + Number(row.total_tool_candidates || 0)
+            }), { requests: 0, errors: 0, durationMs: 0, embeddingMs: 0, ragCandidates: 0, toolCandidates: 0 });
             const storageData = data.storage || {};
             const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
             PivotSafeHtml.setHtml(ragStorageEl, [
@@ -513,6 +522,10 @@ const loadMonitorSummary = async function(options = {}) {
                 `<div class="monitor-row monitor-split-row">
                     <div><span>数据库</span><strong>${formatBytes(storageData.db)}</strong></div>
                     <div><span>附件存储</span><strong>${formatBytes(storageData.uploads)}</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>智能路由（24h）</span><strong title="请求 ${formatMetricNumber(routing.requests)} 次，错误 ${formatMetricNumber(routing.errors)} 次">${formatMetricNumber(routing.requests)} 次 / ${routing.requests ? formatMetricNumber(routing.durationMs / routing.requests, 1) : '0.0'} ms</strong></div>
+                    <div><span>平均候选</span><strong title="知识库 ${formatMetricNumber(routing.ragCandidates)}，工具 ${formatMetricNumber(routing.toolCandidates)}">知识 ${routing.requests ? formatMetricNumber(routing.ragCandidates / routing.requests, 1) : '0'} / 工具 ${routing.requests ? formatMetricNumber(routing.toolCandidates / routing.requests, 1) : '0'}</strong></div>
                 </div>`
             ].join(''));
             renderRagEmbeddingLatencyTrend(document.getElementById('monitor-rag-latency-trend'), embedding);

@@ -28,6 +28,13 @@
     flex: 0 0 auto;
     margin-bottom: 0;
     padding-bottom: 12px;
+    text-align: left;
+}
+
+.pivot-dag-input-head > div,
+.pivot-dag-input-head h3,
+.pivot-dag-input-head .model-modal-desc {
+    text-align: left;
 }
 
 .pivot-dag-input-head h3 {
@@ -451,6 +458,7 @@
 .pivot-dag-data-field-picker,
 .pivot-dag-keyvalue-map,
 .pivot-dag-resource-picker,
+.pivot-dag-workflow-input-default,
 .pivot-dag-approval-levels,
 .pivot-dag-browser-target {
     display: flex;
@@ -469,6 +477,19 @@
 
 .pivot-dag-data-field-picker .pivot-dag-data-field-manual.is-visible {
     display: block;
+}
+
+.pivot-dag-workflow-input-default [data-pivot-dag-input-default-editor] {
+    display: none;
+}
+
+.pivot-dag-workflow-input-default [data-pivot-dag-input-default-editor].is-visible {
+    display: block;
+}
+
+.pivot-dag-workflow-input-default textarea.form-input {
+    min-height: 86px;
+    resize: vertical;
 }
 
 .pivot-dag-keyvalue-map-list {
@@ -528,6 +549,49 @@
     min-height: 38px;
     padding: 0 11px;
     font-size: 0.76rem;
+}
+
+.pivot-dag-report-sheet-picker,
+.pivot-dag-credential-picker {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.pivot-dag-report-sheet-manual,
+.pivot-dag-credential-manual {
+    display: none;
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-report-sheet-manual.is-visible,
+.pivot-dag-credential-manual.is-visible {
+    display: block;
+}
+
+.pivot-dag-report-sheet-picker .pivot-dag-structured-ref-help,
+.pivot-dag-credential-picker .pivot-dag-structured-ref-help {
+    grid-column: 1 / -1;
+}
+
+.pivot-dag-report-sheet-picker .btn-secondary,
+.pivot-dag-credential-picker .btn-secondary {
+    min-height: 38px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+}
+
+.pivot-dag-channel-binding-picker {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 7px;
 }
 
 .pivot-dag-approval-level-list {

@@ -415,4 +415,33 @@ test('workflow node presets are organized into approved 6 business categories', 
     assert.equal(parameterDeclaration.openWizard, true);
     assert.equal(parameterDeclaration.title, '声明运行参数');
     assert.equal(parameterDeclaration.input.name, '');
+
+    ['filter_rows', 'group_summary', 'profile_rows', 'normalize_fields'].forEach(base => {
+        assert.equal(groups.flatMap(group => group.items).find(item => item.base === base)?.advanced, undefined, `${base} 应作为常用数据处理节点显示`);
+    });
+    const groupSummary = sandbox.exported.groups.flatMap(group => group.items).find(item => item.base === 'group_summary');
+    assert.deepEqual(JSON.parse(JSON.stringify(groupSummary.getInput({ selectedNode: null }))), { rows: [], groupBy: [], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 });
+});
+
+test('空画布提供可操作的业务起步路径', () => {
+    const editor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    const emptyCanvas = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-empty-canvas.js'), 'utf8');
+
+    assert.match(editor, /createDagEmptyCanvasHint/);
+    assert.match(editor, /addStarterPreset/);
+    assert.match(emptyCanvas, /从任务开始/);
+    assert.match(emptyCanvas, /查询数据/);
+    assert.match(emptyCanvas, /统计图模板/);
+});
+
+test('画布直接标记缺少配置的节点，避免只在工具栏提示错误', () => {
+    const render = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-render.js'), 'utf8');
+    const editor = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'agents-dag-editor.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'styles', 'workspaces', 'agent', 'agent-dag-svg.css'), 'utf8');
+
+    assert.match(render, /getReadinessIssues/);
+    assert.match(render, /has-config-error/);
+    assert.match(render, /pivot-dag-config-badge/);
+    assert.match(editor, /getReadinessIssues: \(\) => validateWorkflow\(\)\.readinessIssues/);
+    assert.match(css, /\.pivot-dag-node\.has-config-error/);
 });

@@ -111,7 +111,11 @@ function readDagEditorSourceBundle() {
         'dag-wizard-input.js',
         'dag-wizard-fields.js',
         'dag-wizard-special-fields.js',
+        'dag-wizard-report-assist.js',
         'dag-wizard-stats.js',
+        'dag-readiness.js',
+        'dag-empty-canvas.js',
+        'dag-inspector-special-fields.js',
         'dag-wizard.js',
         'dag-inspector.js',
         'agents-dag-editor.js'

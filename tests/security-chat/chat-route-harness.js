@@ -257,7 +257,7 @@ async function postChat(port, body) {
 // 读取会话内消息，供断言用户消息与助手消息的落库结果。
 function readSessionMessages(fixture) {
     return db.prepare(`
-        SELECT id, role, content, token_count
+        SELECT id, role, content, token_count, route_metadata
         FROM messages
         WHERE session_id = ? AND user_id = ?
         ORDER BY id ASC

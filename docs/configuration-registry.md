@@ -44,3 +44,20 @@
 | `PIVOT_ELECTRON_LOCALES` | csv | `zh-CN,en-US` | 逗号分隔的语言标记 | 桌面安装包保留的 Electron 语言包。 |
 | `PIVOT_CHROMIUM_LOCALES` | csv | `zh-CN,en-US` | 逗号分隔的语言标记 | 本地 Agent Chromium 运行时保留的语言包。 |
 
+## 对话自适应路由
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_CHAT_AUTO_ROUTE_ENABLED` | boolean | `true` | true / false | 是否启用对话的统一自适应路由总开关。关闭后保留原有 RAG 与 MCP 流程。 |
+| `PIVOT_CHAT_AUTO_RAG_ENABLED` | boolean | `true` | true / false | 是否允许路由器自动缩小知识库 Collection 范围。 |
+| `PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED` | boolean | `true` | true / false | 是否允许路由器自动缩小已授权 MCP 工具候选集合。 |
+| `PIVOT_CHAT_ROUTE_SHADOW_MODE` | boolean | `false` | true / false | 是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。 |
+| `PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES` | integer | `4` | 1–12 | 自动工具发现传给 MCP Planner 的最大候选工具数。 |
+| `PIVOT_CHAT_ROUTE_MAX_COLLECTIONS` | integer | `2` | 1–8 | 自动知识库路由选取的最大 Collection 数。 |
+| `PIVOT_CHAT_ROUTE_RAG_THRESHOLD` | number | `0.58` | 0–1 | 自动定向检索 Collection 所需的高置信度阈值。 |
+| `PIVOT_CHAT_ROUTE_RAG_GRAY_THRESHOLD` | number | `0.38` | 0–1 | 知识库路由的低置信度阈值；低于该值时跳过自动检索。 |
+| `PIVOT_CHAT_ROUTE_TOOL_THRESHOLD` | number | `0.34` | 0–1 | 无强规则命中时，工具候选进入 MCP Planner 的最低综合分。 |
+| `PIVOT_CHAT_ROUTE_EMBEDDING_TIMEOUT_MS` | integer | `2500` | 100–30000 | 对话路由等待 Query Embedding 的最大时长；超时后安全降级。 |
+| `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
+| `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
+

@@ -19,7 +19,19 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PG_ANALYZE_TOTAL_TIMEOUT_MS: { group: 'PostgreSQL 维护', type: 'integer', defaultValue: 600_000, min: 60_000, max: 3_600_000, description: '单轮 ANALYZE 的总时限；到期后从进度游标继续。' },
     PIVOT_EMBED_ALLOWED_ORIGINS: { group: '安全', type: 'csv', defaultValue: '', description: '工作流页面、媒体和 iframe 可使用的外部 Origin 白名单；留空时仅允许同源资源。' },
     PIVOT_ELECTRON_LOCALES: { group: '桌面交付', type: 'csv', defaultValue: 'zh-CN,en-US', itemPattern: /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/, description: '桌面安装包保留的 Electron 语言包。' },
-    PIVOT_CHROMIUM_LOCALES: { group: '桌面交付', type: 'csv', defaultValue: 'zh-CN,en-US', itemPattern: /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/, description: '本地 Agent Chromium 运行时保留的语言包。' }
+    PIVOT_CHROMIUM_LOCALES: { group: '桌面交付', type: 'csv', defaultValue: 'zh-CN,en-US', itemPattern: /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/, description: '本地 Agent Chromium 运行时保留的语言包。' },
+    PIVOT_CHAT_AUTO_ROUTE_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否启用对话的统一自适应路由总开关。关闭后保留原有 RAG 与 MCP 流程。' },
+    PIVOT_CHAT_AUTO_RAG_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许路由器自动缩小知识库 Collection 范围。' },
+    PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许路由器自动缩小已授权 MCP 工具候选集合。' },
+    PIVOT_CHAT_ROUTE_SHADOW_MODE: { group: '对话自适应路由', type: 'boolean', defaultValue: false, description: '是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。' },
+    PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES: { group: '对话自适应路由', type: 'integer', defaultValue: 4, min: 1, max: 12, description: '自动工具发现传给 MCP Planner 的最大候选工具数。' },
+    PIVOT_CHAT_ROUTE_MAX_COLLECTIONS: { group: '对话自适应路由', type: 'integer', defaultValue: 2, min: 1, max: 8, description: '自动知识库路由选取的最大 Collection 数。' },
+    PIVOT_CHAT_ROUTE_RAG_THRESHOLD: { group: '对话自适应路由', type: 'number', defaultValue: 0.58, min: 0, max: 1, description: '自动定向检索 Collection 所需的高置信度阈值。' },
+    PIVOT_CHAT_ROUTE_RAG_GRAY_THRESHOLD: { group: '对话自适应路由', type: 'number', defaultValue: 0.38, min: 0, max: 1, description: '知识库路由的低置信度阈值；低于该值时跳过自动检索。' },
+    PIVOT_CHAT_ROUTE_TOOL_THRESHOLD: { group: '对话自适应路由', type: 'number', defaultValue: 0.34, min: 0, max: 1, description: '无强规则命中时，工具候选进入 MCP Planner 的最低综合分。' },
+    PIVOT_CHAT_ROUTE_EMBEDDING_TIMEOUT_MS: { group: '对话自适应路由', type: 'integer', defaultValue: 2500, min: 100, max: 30000, description: '对话路由等待 Query Embedding 的最大时长；超时后安全降级。' },
+    PIVOT_CHAT_PROMPT_CACHE_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。' },
+    PIVOT_CHAT_PROMPT_CACHE_TTL: { group: '对话自适应路由', type: 'enum', defaultValue: '30m', values: ['30m'], description: 'Responses API Prompt Cache 的最短复用时间。' }
 });
 
 function normalizeInteger(value, definition) {
@@ -27,6 +39,21 @@ function normalizeInteger(value, definition) {
     const fallback = Number(definition.defaultValue);
     const candidate = Number.isFinite(parsed) ? parsed : fallback;
     return Math.min(definition.max, Math.max(definition.min, candidate));
+}
+
+function normalizeNumber(value, definition) {
+    const parsed = Number.parseFloat(value);
+    const fallback = Number(definition.defaultValue);
+    const candidate = Number.isFinite(parsed) ? parsed : fallback;
+    return Math.min(definition.max, Math.max(definition.min, candidate));
+}
+
+function normalizeBoolean(value, definition) {
+    if (value === undefined || value === null || String(value).trim() === '') return Boolean(definition.defaultValue);
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return Boolean(definition.defaultValue);
 }
 
 function normalizeCsv(value, definition) {
@@ -41,6 +68,8 @@ function readTypedEnv(name, env = process.env) {
     if (!definition) throw new Error(`未登记的类型化环境变量：${name}`);
     const raw = env[name];
     if (definition.type === 'integer') return normalizeInteger(raw, definition);
+    if (definition.type === 'number') return normalizeNumber(raw, definition);
+    if (definition.type === 'boolean') return normalizeBoolean(raw, definition);
     if (definition.type === 'csv') return normalizeCsv(raw, definition);
     if (definition.type === 'enum') {
         const value = String(raw || definition.defaultValue || '').trim();
@@ -88,9 +117,9 @@ function renderRegistryDocumentation() {
     groups.forEach((entries, group) => {
         lines.push(`## ${group}`, '', '| 环境变量 | 类型 | 默认值 | 校验 | 说明 |', '| --- | --- | --- | --- | --- |');
         entries.forEach(([name, definition]) => {
-            const validation = definition.type === 'integer'
+            const validation = ['integer', 'number'].includes(definition.type)
                 ? `${definition.min}–${definition.max}`
-                : definition.type === 'enum' ? definition.values.join('、') : '逗号分隔的语言标记';
+                : definition.type === 'enum' ? definition.values.join('、') : definition.type === 'boolean' ? 'true / false' : '逗号分隔的语言标记';
             lines.push(`| \`${name}\` | ${definition.type} | \`${formatDefault(definition)}\` | ${validation} | ${definition.description} |`);
         });
         lines.push('');

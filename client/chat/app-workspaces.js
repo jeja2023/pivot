@@ -1,5 +1,4 @@
 /* 智枢前端主程序 */
-
 // --- 输入框自适应 ---
 const userInput = document.getElementById('user-input');
 const CHAT_MCP_TOOL_ALLOWLIST_KEY = 'pivot_chat_mcp_tool_allowlist';
@@ -54,13 +53,11 @@ async function loadChatModeCapabilities() {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || '聊天模式状态读取失败');
         chatAgentExecutionEnabled = data.agentExecutionEnabled !== false;
-    } catch (_error) {
-        chatAgentExecutionEnabled = true;
-    }
+        window.Pivot.moduleApi('chat.autoRoute').setAvailable?.(data.autoRoute?.enabled !== false);
+    } catch (_error) { chatAgentExecutionEnabled = true; }
     applyChatModeState();
     return chatAgentExecutionEnabled;
 }
-
 function setChatToolsMenuOpen(open) {
     const trigger = document.getElementById('chat-tools-menu-btn');
     const panel = document.getElementById('chat-tools-menu-panel');
@@ -73,7 +70,6 @@ function setChatToolsMenuOpen(open) {
         document.querySelectorAll('#chat-tools-menu-panel [aria-expanded="true"]').forEach(button => button.setAttribute('aria-expanded', 'false'));
     }
 }
-
 function readChatMcpToolAllowlist() {
     try {
         const stored = localStorage.getItem(CHAT_MCP_TOOL_ALLOWLIST_KEY);
@@ -84,18 +80,15 @@ function readChatMcpToolAllowlist() {
         return null;
     }
 }
-
 function getChatMcpToolMode() {
     const storedMode = localStorage.getItem(CHAT_MCP_TOOL_MODE_KEY);
     if (storedMode === 'auto' || storedMode === 'manual') return storedMode;
     return readChatMcpToolAllowlist() === null ? 'auto' : 'manual';
 }
-
 function getChatMcpToolAllowlist() {
     if (getChatMcpToolMode() === 'auto') return null;
     return readChatMcpToolAllowlist() || [];
 }
-
 function setChatMcpToolMode(mode) {
     const normalizedMode = mode === 'manual' ? 'manual' : 'auto';
     try {
@@ -106,7 +99,6 @@ function setChatMcpToolMode(mode) {
     } catch (e) {}
     renderChatMcpToolFilter();
 }
-
 function setChatMcpToolAllowlist(allowlist) {
     try {
         if (allowlist === null) {
@@ -349,10 +341,13 @@ function initChatToolsMenu() {
             const collection = document.getElementById('chat-rag-collection-scope');
             const tag = document.getElementById('chat-rag-tag-scope');
             const search = document.getElementById('chat-rag-scope-search');
+            window.Pivot.moduleApi('chat.autoRoute').setRagPreference?.('auto');
+            setChatToolToggleState(document.getElementById('chat-rag-enabled'), false, { refreshReadiness: false });
             if (collection) collection.value = '';
             if (tag) tag.value = '';
             if (search) search.value = '';
             filterChatRagCollectionOptions();
+            window.Pivot.moduleApi('chat.autoRoute').syncState?.();
             await window.Pivot.legacy.handleRagCollectionScopeChange?.('chat');
             window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
         });
@@ -366,10 +361,18 @@ function initChatToolsMenu() {
     syncChatToolsMenuLabels();
     updateChatMcpToolSummary();
     applyChatModeState();
+    window.Pivot.moduleApi('chat.autoRoute').syncState?.();
 }
 initChatToolsMenu();
 document.addEventListener('DOMContentLoaded', initChatToolsMenu);
+loadChatModeCapabilities().catch(() => {});
 window.Pivot.exposeModule('chat.inputMenu', {
+    isAutoRouteAvailable: () => window.Pivot.moduleApi('chat.autoRoute').isAvailable?.() !== false,
+    getAutoRouteEnabled: () => window.Pivot.moduleApi('chat.autoRoute').getAutoRouteEnabled?.() !== false,
+    getRagPreference: () => window.Pivot.moduleApi('chat.autoRoute').getRagPreference?.() || 'auto',
+    getRouteOverrides: prompt => window.Pivot.moduleApi('chat.autoRoute').getOverrides?.(prompt) || {},
+    clearRouteOverrides: () => window.Pivot.moduleApi('chat.autoRoute').clearOverrides?.(),
+    enableMcpFromRouteTrace: () => window.Pivot.moduleApi('chat.autoRoute').enableMcpFromRouteTrace?.(),
     getMcpToolAllowlist: getChatMcpToolAllowlist,
     getChatMode,
     setChatMode,
@@ -387,7 +390,13 @@ window.Pivot.legacy.resizeUserInput = () => {
     }
 };
 userInput?.addEventListener('input', window.Pivot.legacy.resizeUserInput);
-userInput && (userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); window.Pivot.legacy.sendMessage(); } });
+userInput && (userInput.onkeydown = (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        window.Pivot.legacy.sendMessage();
+    }
+});
 
 const CHAT_TOOL_TOGGLE_STORAGE = {
     rag: 'pivot_chat_rag_enabled',
@@ -428,22 +437,13 @@ function findChatToolToggle(target) {
 
 function getChatToolName(button) {
     if (!button) return '';
-    if (button.dataset?.chatToolToggle) return button.dataset.chatToolToggle;
-    if (button.id === 'chat-rag-enabled' || button.querySelector?.('#chat-rag-enabled')) return 'rag';
-    if (button.id === 'chat-mcp-enabled' || button.querySelector?.('#chat-mcp-enabled')) return 'mcp';
-    return '';
+    return button.dataset?.chatToolToggle || (button.id === 'chat-rag-enabled' || button.querySelector?.('#chat-rag-enabled') ? 'rag' : '') || (button.id === 'chat-mcp-enabled' || button.querySelector?.('#chat-mcp-enabled') ? 'mcp' : '');
 }
 
 function syncChatRagScopeControls() {
-    const ragButton = document.getElementById('chat-rag-enabled') || document.querySelector('[data-chat-tool-toggle="rag"]');
-    const pressed = ragButton?.getAttribute('aria-pressed');
-    const enabled = Boolean(ragButton) && (pressed === 'true' || (pressed !== 'false' && (ragButton.dataset.enabled === 'true' || ragButton.classList.contains('is-active') || ragButton.checked === true)));
-    document.body?.classList.toggle('chat-rag-scope-open', enabled);
-    document.querySelectorAll('#chat-rag-collection-scope, #chat-rag-tag-scope').forEach(select => {
-        select.classList.remove('hidden');
-        select.disabled = false;
-        select.setAttribute('aria-hidden', 'false');
-    });
+    // 聊天页默认走自适应路由。此处的隐藏 select 仅供 @ 指定、历史恢复和
+    // 既有 RAG 数据加载兼容使用，不能重新暴露为输入区一级控制项。
+    document.body?.classList.add('chat-rag-scope-open');
 }
 
 function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {}) {
@@ -460,17 +460,14 @@ function setChatToolToggleState(button, enabled, { refreshReadiness = true } = {
     button.dataset.enabled = enabled ? 'true' : 'false';
     button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
     button.classList.toggle('is-active', enabled);
-    if (tool === 'rag') syncChatRagScopeControls();
-    if (refreshReadiness && typeof window.Pivot.legacy.updateChatToolReadiness === 'function') window.Pivot.legacy.updateChatToolReadiness({ silent: true });
+    if (tool === 'rag') { syncChatRagScopeControls(); window.Pivot.moduleApi('chat.autoRoute').syncState?.(); }
+    if (refreshReadiness) window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
 }
 
 function syncChatToolToggles() {
-    document.querySelectorAll('[data-chat-tool-toggle], #chat-rag-enabled, #chat-mcp-enabled').forEach(button => {
-        const tool = getChatToolName(button);
-        const storageKey = CHAT_TOOL_TOGGLE_STORAGE[tool];
-        setChatToolToggleState(button, storageKey ? localStorage.getItem(storageKey) === 'true' : button.dataset.enabled === 'true', { refreshReadiness: false });
-    });
+    document.querySelectorAll('[data-chat-tool-toggle], #chat-rag-enabled, #chat-mcp-enabled').forEach(button => setChatToolToggleState(button, CHAT_TOOL_TOGGLE_STORAGE[getChatToolName(button)] ? localStorage.getItem(CHAT_TOOL_TOGGLE_STORAGE[getChatToolName(button)]) === 'true' : button.dataset.enabled === 'true', { refreshReadiness: false }));
     syncChatRagScopeControls();
+    window.Pivot.moduleApi('chat.autoRoute').syncState?.();
     if (typeof window.Pivot.legacy.updateChatToolReadiness === 'function') window.Pivot.legacy.updateChatToolReadiness({ silent: true });
 }
 
@@ -621,6 +618,7 @@ async function toggleChatTool(button) {
             return;
         }
     }
+    if (tool === 'rag') window.Pivot.moduleApi('chat.autoRoute').setRagPreference?.(enabled ? 'enabled' : 'disabled');
     setChatToolToggleState(button, enabled);
     if (storageKey) localStorage.setItem(storageKey, enabled ? 'true' : 'false');
     await updateChatToolReadiness();
@@ -688,7 +686,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
         '/chat/dag-toolbar-tools.js', '/chat/dag-toolbar-db.js', '/chat/dag-toolbar.js', '/chat/dag-toolbar-field-overrides.js',
         '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
-        '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-inspector.js',
+        '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-report-assist.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-readiness.js', '/chat/dag-empty-canvas.js', '/chat/dag-inspector-special-fields.js', '/chat/dag-inspector.js',
         '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
         '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
         '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-harness.js',

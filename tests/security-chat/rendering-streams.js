@@ -249,7 +249,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(adminSettings, /updateRagChunkOverlapLimit/);
     assert.match(ragCore, /data-rag-debug-chat/);
     assert.match(ragCore, /pivot_chat_rag_enabled/);
-    assert.match(chatShellPartial, /chat-tool-status/);
+    assert.doesNotMatch(chatShellPartial, /chat-tool-status/);
     assert.match(chatShellPartial, /id="chat-mode-trigger"/);
     assert.match(chatShellPartial, /data-chat-mode-option="normal"/);
     assert.match(chatShellPartial, /data-chat-mode-option="agent"/);
@@ -262,7 +262,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(appWorkspaces, /打开知识库/);
     assert.match(appWorkspaces, /打开工具库/);
     assert.match(appWorkspaces, /pivot_chat_mcp_enabled/);
-    assert.match(chatShellPartial, /data-chat-tool-toggle="mcp"/);
+    assert.doesNotMatch(chatShellPartial, /data-chat-tool-toggle="mcp"/);
     assert.doesNotMatch(mcpWorkbench, /mcp-next-step-card/);
     assert.doesNotMatch(mcpPartial, /mcp-onboarding-panel/);
     assert.match(mcpPartial, /mcp-edit-helper/);

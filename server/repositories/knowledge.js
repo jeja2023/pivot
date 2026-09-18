@@ -102,6 +102,23 @@ async function listDocumentTags(docId, user) {
     return rows.map(row => row.tag);
 }
 
+function listCollectionResourceDocuments(collectionId, user, limit = 100) {
+    const normalizedId = Number.parseInt(collectionId, 10);
+    if (!Number.isSafeInteger(normalizedId) || normalizedId <= 0) return Promise.resolve([]);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 100);
+    const access = buildDocumentAccessFilter(user, 'd', 'c');
+    return query(`
+        SELECT d.id, d.name, d.status, d.chunk_count, d.updated_at
+        FROM knowledge_docs d
+        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+        WHERE d.collection_id = ?
+          AND d.deleted_at IS NULL
+          AND ${access.sql}
+        ORDER BY d.updated_at DESC, d.id DESC
+        LIMIT ?
+    `, [normalizedId, ...access.params, safeLimit]);
+}
+
 function listDocumentChunks(docId, limit, offset) {
     return query(`
         SELECT id, content, chunk_index, char_start, char_end, LENGTH(content) AS length
@@ -243,6 +260,7 @@ module.exports = {
     upsertTags,
     getDocumentForUser,
     listDocumentTags,
+    listCollectionResourceDocuments,
     listDocumentChunks,
     countDocumentChunks,
     listAllDocumentChunks,

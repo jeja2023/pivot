@@ -10,6 +10,22 @@ const {
 } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
 const { isChatThinkingEnabled, buildThinkingControlPayload } = require('./models');
+const { getChatAutoRouteConfig } = require('./chat-route-config');
+
+function buildChatPromptCache(modelCfg, { sessionId, userId, env = process.env } = {}) {
+    const config = getChatAutoRouteConfig(env);
+    if (!config.promptCacheEnabled || !sessionId || !userId || !modelCfg?.id) return null;
+    return {
+        prompt_cache_key: `pivot:chat:${Number(modelCfg.id)}:user:${Number(userId)}:session:${String(sessionId).slice(0, 128)}`,
+        prompt_cache_options: { mode: 'implicit', ttl: config.promptCacheTtl }
+    };
+}
+
+function isPromptCacheUnsupported(error) {
+    const status = Number(error?.response?.status || error?.status || 0);
+    const detail = `${error?.message || ''} ${typeof error?.response?.data === 'string' ? error.response.data : JSON.stringify(error?.response?.data || {})}`.toLowerCase();
+    return status === 400 && /prompt_cache|cache[_ ]?(?:key|option|retention)|unknown.*cache|unsupported.*cache/.test(detail);
+}
 
 function buildChatRequestData(modelCfg, modelName) {
     const runtimeSampling = getGlobalSamplingRuntimeConfig();
@@ -46,6 +62,7 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
         : buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
     const headers = buildModelHeaders(modelCfg, { acceptJson: true });
     const requestData = buildChatRequestData(modelCfg, modelName);
+    const promptCache = isResponsesApi ? buildChatPromptCache(modelCfg, { sessionId, userId }) : null;
 
     log.info({
         userId,
@@ -71,6 +88,7 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
         log.info({ inputSummary }, '请求体结构');
         try {
             requestData.input = responsesHistory;
+            if (promptCache) Object.assign(requestData, promptCache);
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
                 data: requestData, stream: true, timeout: 180000,
@@ -80,10 +98,23 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             return { response, modelName, targetUrl, mode: 'responses', requestData };
         } catch (err) {
             const status = err.response?.status;
+            if (promptCache && isPromptCacheUnsupported(err)) {
+                log.warn({ status }, '模型端点不支持 Prompt Cache，已在同一 Responses API 安全降级重试');
+                delete requestData.prompt_cache_key;
+                delete requestData.prompt_cache_options;
+                const response = await forwardChatCompletion({
+                    modelCfg, user, url: targetUrl, headers,
+                    data: requestData, stream: true, timeout: 180000,
+                    signal
+                });
+                return { response, modelName, targetUrl, mode: 'responses_cache_fallback', requestData };
+            }
             if (![404, 405, 502, 503].includes(status)) throw err;
             log.warn({ status }, 'Responses API 暂不可用，正在自动回退到常规接口');
             targetUrl = buildChatCompletionsUrl(baseUrl, { appendV1ForLocal: false });
             delete requestData.input;
+            delete requestData.prompt_cache_key;
+            delete requestData.prompt_cache_options;
             requestData.messages = visionHistory;
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
@@ -107,6 +138,8 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
 }
 
 module.exports = {
+    buildChatPromptCache,
     buildChatRequestData,
+    isPromptCacheUnsupported,
     openChatModelStream
 };

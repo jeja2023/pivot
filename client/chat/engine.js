@@ -465,9 +465,18 @@ async function runSendMessage(shouldRegenerate) {
     }
     const sentAttachments = window.Pivot.legacy.pendingAttachments.map(item => ({ ...item }));
 
-    const ragEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
-    const chatMode = window.Pivot.modules['chat.inputMenu']?.getChatMode?.() || 'normal';
-    let mcpEnabled = isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
+    const chatInputMenu = window.Pivot.modules['chat.inputMenu'];
+    const autoRouteEnabled = chatInputMenu?.isAutoRouteAvailable?.() !== false
+        && chatInputMenu?.getAutoRouteEnabled?.() !== false;
+    const ragPreference = chatInputMenu?.getRagPreference?.() || 'auto';
+    const manualRagEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
+    const ragEnabled = ragPreference === 'disabled' ? false : (ragPreference === 'enabled' || autoRouteEnabled || manualRagEnabled);
+    const routeOverrides = chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {};
+    const chatMode = chatInputMenu?.getChatMode?.() || 'normal';
+    // 旧版本保存的工具启用状态不应绕过本会话的明确授权。
+    // 只有用户在路由提示中完成授权后，才将 MCP 候选交给执行链路。
+    let mcpEnabled = window.Pivot.legacy.hasChatMcpConsent?.() === true
+        && isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
     let localMcpBridge = null;
     let localMcpBridgeDebug = null;
@@ -537,6 +546,9 @@ async function runSendMessage(shouldRegenerate) {
                 modelId,
                 chatMode,
                 regenerate: shouldRegenerate,
+                autoRouteEnabled,
+                ragPreference,
+                routeOverrides,
                 ragEnabled,
                 ragScope: window.Pivot.legacy.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
@@ -547,6 +559,7 @@ async function runSendMessage(shouldRegenerate) {
             }),
             signal: currentAbortController.signal
         });
+        chatInputMenu?.clearRouteOverrides?.();
 
         if (!response.ok) throw new Error(await readChatErrorMessage(response));
 
@@ -751,6 +764,11 @@ async function runSendMessage(shouldRegenerate) {
                     }
                     return;
                 }
+                if (data.type === 'route') {
+                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
+                    if (data.status !== 'shadow') updateAssistantStatus('正在分析本轮关联的知识库和工具');
+                    return;
+                }
                 if (data.type === 'mcp') {
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在处理工具库工具');
@@ -781,6 +799,7 @@ async function runSendMessage(shouldRegenerate) {
                         window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
                         window.Pivot.legacy.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
                         renderPersistedAssistantContent(data.content);
+                        if (data.routeMetadata) window.Pivot.legacy.renderAssistantRouteMetadata?.(aiMsgEl, data.routeMetadata);
                         if (data.tokenCount !== undefined || data.costTime !== undefined || data.tps !== undefined) {
                             hasServerFinalStats = data.costTime !== undefined && data.tps !== undefined;
                             renderFinalAssistantStats(statsEl, {

@@ -157,6 +157,34 @@ test('普通回答模式不会因消息内容创建持久化 Agent', async () =>
     }
 });
 
+test('聊天会透出并持久化安全的自适应路由摘要，不保存 Query Vector', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['路由摘要已持久化。'] });
+    const fixture = createChatFixture({ prefix: 'chat_route_metadata', upstreamUrl: upstream.url });
+    const routeServer = await startChatRouteServer({ fixture, retrieveContext: async () => '', isRagEnabled: () => true });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '你好',
+            modelId: fixture.modelId,
+            autoRouteEnabled: true,
+            ragPreference: 'auto'
+        });
+        const route = result.findByType('route');
+        assert.equal(route?.mode, 'auto');
+        assert.equal(route?.rag?.reasonCode, 'conversation_only');
+        assert.equal(JSON.stringify(route).includes('queryVector'), false);
+        const assistant = readSessionMessages(fixture).find(message => message.role === 'assistant');
+        const stored = JSON.parse(assistant.route_metadata || '{}');
+        assert.equal(stored.mode, 'auto');
+        assert.equal(stored.rag.reasonCode, 'conversation_only');
+        assert.equal(JSON.stringify(stored).includes('queryVector'), false);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
 test('管理员关闭聊天 Agent 执行许可时拒绝显式 Agent 模式', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['普通模型流回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_auto_agent_disabled', upstreamUrl: upstream.url });

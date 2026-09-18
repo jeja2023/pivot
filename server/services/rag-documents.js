@@ -25,6 +25,8 @@ const {
 } = require('./unit-visibility');
 const { isAdmin } = require('../permissions');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
+const { invalidateCollection: invalidateKnowledgeCatalogCollection } = require('./knowledge-catalog-index');
+const { getRagFeedbackSummary, recordRagFeedback } = require('./rag-feedback');
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -40,6 +42,9 @@ const allowedExtensions = new Set([
 const activeIndexes = new Set();
 const pendingIndexes = new Map();
 let runningIndexCount = 0;
+function invalidateKnowledgeCatalog(collectionId) {
+    try { invalidateKnowledgeCatalogCollection(collectionId); } catch (_) {}
+}
 function getMaxConcurrentIndexes() {
     return getBackgroundRuntimeConfig().ragIndexMaxConcurrent;
 }
@@ -121,7 +126,9 @@ async function createKnowledgeCollection({ userId, name, description = '' }) {
         VALUES (?, ?, ?, ?, ?)
         RETURNING id
     `, [userId, normalizedName, normalizeKnowledgeCollectionDescription(description), now, now]);
-    return await getKnowledgeCollectionForUser(row?.id, userId);
+    const collection = await getKnowledgeCollectionForUser(row?.id, userId);
+    invalidateKnowledgeCatalog(collection?.id);
+    return collection;
 }
 async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
     const collection = await getKnowledgeCollectionForUser(collectionId, user);
@@ -155,6 +162,7 @@ async function updateKnowledgeCollectionSharing({ collectionId, user, body = {} 
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id]);
     clearRagCacheForUser(normalizeKnowledgeUser(user).id);
+    invalidateKnowledgeCatalog(normalizedId);
     return await getKnowledgeCollectionForUser(normalizedId, user);
 }
 async function createKnowledgeTag({ userId, tag }) {
@@ -195,6 +203,7 @@ async function setKnowledgeDocumentTags({ docId, userId, tags = [] }) {
         await trx.execute('UPDATE knowledge_docs SET updated_at = ? WHERE id = ? AND user_id = ?', [now, normalizedDocId, userId]);
     });
     clearRagCacheForUser(userId);
+    invalidateKnowledgeCatalog(doc.collection_id);
     return safeTags;
 }
 async function getKnowledgeDocumentTags({ docId, userId }) {
@@ -354,6 +363,7 @@ async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = 
             WHERE id = ? AND user_id = ?
         `, [savedFile.sourcePath, savedFile.sourceSize, savedFile.sourceHash || '', getBeijingTimestamp(), docId, userId]);
         clearRagCacheForUser(userId);
+        invalidateKnowledgeCatalog(resolvedCollectionId);
         return { docId, collectionId: resolvedCollectionId, tags: assignedTags, ...savedFile };
     } catch (e) {
         await markKnowledgeDocumentError({ docId, userId, error: e });
@@ -491,6 +501,7 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         }
         await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash });
         clearRagCacheForUser(userId);
+        invalidateKnowledgeCatalog(doc.collection_id);
         return { docId: normalizedDocId, chunkCount };
     } catch (e) {
         await discardKnowledgeIndexStage(stageId);
@@ -524,6 +535,10 @@ async function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
     `, [enabled ? 1 : 0, getBeijingTimestamp(), normalizedDocId, userId]);
     const changed = Number(result || 0) > 0;
     if (changed) clearRagCacheForUser(userId);
+    if (changed) {
+        const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
+        invalidateKnowledgeCatalog(doc?.collection_id);
+    }
     return changed;
 }
 
@@ -568,54 +583,6 @@ async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     return { requested: ids.length, scheduled, skipped, alreadyProcessing, items };
 }
 
-async function recordRagFeedback({ userId, query: userQuery, chunkId, docName, score, helpful, note }) {
-    const safeQuery = String(userQuery || '').trim().slice(0, 1000);
-    if (!safeQuery) return null;
-    const safeChunkId = normalizeKnowledgeDocId(chunkId);
-    const now = getBeijingTimestamp();
-    const row = await queryOne(`
-        INSERT INTO rag_feedback (user_id, query, chunk_id, doc_name, score, helpful, note, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-    `, [
-        userId,
-        safeQuery,
-        safeChunkId,
-        String(docName || '').slice(0, 255),
-        Number.isFinite(Number(score)) ? Number(score) : null,
-        helpful ? 1 : 0,
-        String(note || '').slice(0, 1000),
-        now
-    ]);
-    // 反馈会直接影响同问题的排序；主动清缓存不依赖时间戳精度，确保下一次检索立即生效。
-    clearRagCacheForUser(userId);
-    return { id: row?.id };
-}
-
-async function getRagFeedbackSummary(userId) {
-    const rows = await query(`
-        SELECT doc_name, helpful, COUNT(*) AS count
-        FROM rag_feedback
-        WHERE user_id = ?
-        GROUP BY doc_name, helpful
-    `, [userId]);
-    const summary = { helpful: 0, unhelpful: 0, byDoc: [] };
-    const byDoc = new Map();
-    for (const row of rows) {
-        const count = Number(row.count || 0);
-        const isHelpful = row.helpful === true || Number(row.helpful) === 1 || String(row.helpful) === '1' || String(row.helpful).toLowerCase() === 'true';
-        if (isHelpful) summary.helpful += count;
-        else summary.unhelpful += count;
-        const name = row.doc_name || '未知文档';
-        const item = byDoc.get(name) || { docName: name, helpful: 0, unhelpful: 0 };
-        if (isHelpful) item.helpful += count;
-        else item.unhelpful += count;
-        byDoc.set(name, item);
-    }
-    summary.byDoc = Array.from(byDoc.values()).sort((a, b) => b.unhelpful - a.unhelpful).slice(0, 10);
-    return summary;
-}
-
 async function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return null;
@@ -633,6 +600,8 @@ async function setKnowledgeDocumentCollection({ docId, userId, collectionId = nu
         await execute('UPDATE knowledge_collections SET updated_at = ? WHERE id = ? AND user_id = ?', [now, resolvedCollectionId, userId]);
     }
     clearRagCacheForUser(userId);
+    invalidateKnowledgeCatalog(doc.collection_id);
+    invalidateKnowledgeCatalog(resolvedCollectionId);
     return await getKnowledgeDocumentForUser(normalizedDocId, userId);
 }
 
@@ -954,7 +923,10 @@ async function deleteKnowledgeDocument({ docId, userId }) {
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [now, userId, now, normalizedDocId, userId]);
     const changed = Number(result || 0) > 0;
-    if (changed) clearRagCacheForUser(userId);
+    if (changed) {
+        clearRagCacheForUser(userId);
+        invalidateKnowledgeCatalog(doc.collection_id);
+    }
     return changed;
 }
 

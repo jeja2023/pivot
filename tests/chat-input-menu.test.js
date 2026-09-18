@@ -53,20 +53,31 @@ test('聊天请求工具白名单会去重、清理空值并限制数量', () =>
     assert.equal(state.mcpToolAllowlist.length, 300);
 });
 
-test('聊天工具面板默认由模型自动选择并把知识库状态放进二级面板', () => {
+test('聊天输入框默认使用智能自适应，并将资料和工具控制收敛到 @ 与授权流程', () => {
     const shell = fs.readFileSync(path.resolve(__dirname, '../client/chat/partials/workspaces/chat-shell.html'), 'utf8');
     const workspace = fs.readFileSync(path.resolve(__dirname, '../client/chat/app-workspaces.js'), 'utf8');
+    const autoRoute = fs.readFileSync(path.resolve(__dirname, '../client/chat/chat-auto-route.js'), 'utf8');
+    const main = fs.readFileSync(path.resolve(__dirname, '../client/chat/app/main.js'), 'utf8');
 
-    assert.match(shell, /id="chat-mcp-mode-auto"[^>]+value="auto" checked/);
-    assert.match(shell, /模型自动选择/);
-    assert.doesNotMatch(shell, /id="chat-mcp-all-tools"[^>]+checked/);
-    assert.match(shell, /id="chat-rag-subpanel"[\s\S]*id="chat-rag-readiness"/);
-    assert.match(shell, /id="chat-mcp-tool-summary"[^>]+aria-live="polite"/);
+    assert.match(shell, /placeholder="输入消息… 需要指定资料或工具时可输入 @"/);
+    assert.match(shell, /id="chat-route-mention-menu"/);
+    assert.match(shell, /id="chat-route-override-state" hidden/);
+    assert.match(shell, /id="upload-file-choice"/);
+    assert.match(shell, /id="upload-folder-choice"/);
+    assert.doesNotMatch(shell, /id="chat-auto-route-enabled"/);
+    assert.doesNotMatch(shell, /id="chat-rag-enabled"/);
+    assert.doesNotMatch(shell, /id="chat-mcp-enabled"/);
+    assert.doesNotMatch(shell, /id="chat-rag-subpanel"/);
+    assert.doesNotMatch(shell, /id="chat-mcp-subpanel"/);
+    assert.match(autoRoute, /const getAutoRouteEnabled = \(\) => true/);
+    assert.match(autoRoute, /本会话已允许使用工具/);
+    assert.match(autoRoute, /MENTION_CATEGORY_LIMIT = 4/);
+    assert.match(autoRoute, /mentionQuery\(input\(\)\?\.value \|\| ''\) === null/);
+    assert.match(autoRoute, /当前白名单内的工具/);
+    assert.match(autoRoute, /allowlist\.has\(item\.fullName\)/);
+    assert.doesNotMatch(autoRoute, /pivot_chat_auto_route_enabled/);
+    assert.match(main, /function canSelectChatAttachment\(\)/);
     assert.equal(workspace.includes("if (getChatMcpToolMode() === 'auto') return null;"), true);
-    assert.match(workspace, /已选择 \${allowlist\.length} \/ \${total} 个工具/);
-    assert.match(workspace, /visibleItems = items\.filter\(item => !\['rag', 'mcp'\]\.includes\(item\.tool\)\)/);
-    assert.match(workspace, /function positionChatToolSubpanel\(target\)/);
-    assert.match(workspace, /viewportHeight - viewportMargin - panelRect\.height/);
     assert.match(workspace, /window\.Pivot\.exposeModule\('chat\.inputMenu'/);
 });
 

@@ -578,44 +578,56 @@ test.describe('Pivot browser smoke', () => {
         expect(newest.distanceFromBottom).toBeLessThanOrEqual(5);
     });
 
-    test('chat knowledge and tool subpanels stay visible and show the selected tool count', async ({ page }) => {
-        await page.setViewportSize({ width: 1024, height: 520 });
+   test('chat input defaults to adaptive routing and keeps the plus menu for attachments only', async ({ page }) => {
+       await page.setViewportSize({ width: 1024, height: 520 });
+        await page.addInitScript(() => {
+            localStorage.setItem('pivot_chat_mcp_tool_mode', 'manual');
+            localStorage.setItem('pivot_chat_mcp_tool_allowlist', JSON.stringify(['mcp.17.report.read_report']));
+        });
         await page.route('**/api/mcp/tools', route => route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
                 tools: [
-                    { fullName: 'mcp.1.db.count_tables', name: 'db.count_tables', serverName: 'Database' },
-                    { fullName: 'mcp.1.db.list_tables', name: 'db.list_tables', serverName: 'Database' },
-                    { fullName: 'mcp.1.db.describe_table', name: 'db.describe_table', serverName: 'Database' }
+                    { fullName: 'mcp.17.report.read_report', name: 'report.read_report', title: '读取报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.delete_report', name: 'report.delete_report', title: '删除报表', serverName: '报表工具' }
                 ]
             })
         }));
-        await ensureBrowserSession(page);
+       await ensureBrowserSession(page);
+
+        await expect(page.locator('#chat-auto-route-enabled')).toHaveCount(0);
+        await expect(page.locator('#chat-rag-enabled')).toHaveCount(0);
+        await expect(page.locator('#chat-mcp-enabled')).toHaveCount(0);
+        await expect(page.locator('#user-input')).toHaveAttribute('placeholder', '输入消息… 需要指定资料或工具时可输入 @');
+        await expect.poll(() => page.evaluate(() => (
+            window.Pivot.moduleApi('chat.inputMenu').getAutoRouteEnabled()
+        ))).toBe(true);
 
         await page.locator('#chat-tools-menu-btn').click();
-        await page.locator('[data-chat-tool-config="rag"]').click();
-        await expect(page.locator('#chat-rag-subpanel')).toBeVisible();
-        const ragBounds = await page.locator('#chat-rag-subpanel').evaluate(panel => {
+        await expect(page.locator('#chat-tools-menu-panel')).toBeVisible();
+        await expect(page.locator('#upload-file-choice')).toBeVisible();
+        await expect(page.locator('#upload-folder-choice')).toBeVisible();
+        await expect(page.locator('#chat-tools-menu-panel button')).toHaveCount(2);
+        const attachmentMenuBounds = await page.locator('#chat-tools-menu-panel').evaluate(panel => {
             const rect = panel.getBoundingClientRect();
             return { top: rect.top, bottom: rect.bottom, viewportHeight: window.innerHeight };
         });
-        expect(ragBounds.top).toBeGreaterThanOrEqual(11.5);
-        expect(ragBounds.bottom).toBeLessThanOrEqual(ragBounds.viewportHeight - 11.5);
+       expect(attachmentMenuBounds.top).toBeGreaterThanOrEqual(11.5);
+       expect(attachmentMenuBounds.bottom).toBeLessThanOrEqual(attachmentMenuBounds.viewportHeight - 11.5);
 
-        await page.locator('[data-chat-tool-config="mcp"]').click();
-        await expect(page.locator('#chat-mcp-tool-summary')).toHaveText('3 个工具可用，模型按需选择');
-        await expect(page.locator('#chat-tool-status')).toBeHidden();
-        await page.locator('#chat-mcp-mode-manual').check();
-        await expect(page.locator('#chat-mcp-tool-summary')).toHaveText('已选择 0 / 3 个工具');
-        await page.locator('#chat-mcp-tool-list input[type="checkbox"]').first().check();
-        await expect(page.locator('#chat-mcp-tool-summary')).toHaveText('已选择 1 / 3 个工具');
-        const toolBounds = await page.locator('#chat-mcp-subpanel').evaluate(panel => {
-            const rect = panel.getBoundingClientRect();
-            return { top: rect.top, bottom: rect.bottom, viewportHeight: window.innerHeight };
-        });
-        expect(toolBounds.top).toBeGreaterThanOrEqual(11.5);
-        expect(toolBounds.bottom).toBeLessThanOrEqual(toolBounds.viewportHeight - 11.5);
-    });
+        // 裸 @ 同时加载知识库和当前执行白名单内的工具；选中工具仅形成显式候选，
+        // 不会绕过后续的本会话授权与重新发送步骤。
+        await page.locator('#user-input').fill('@');
+        const allowedTool = page.locator('.chat-route-mention-item', { hasText: '@读取报表' });
+        await expect(allowedTool).toBeVisible();
+        await expect(page.locator('#chat-route-mention-menu')).toContainText('工具 · 报表工具');
+        await expect(page.locator('.chat-route-mention-item', { hasText: '@删除报表' })).toHaveCount(0);
+        await allowedTool.click();
+        await expect(page.locator('#user-input')).toHaveValue('@读取报表 ');
+        await expect.poll(() => page.evaluate(() => (
+            window.Pivot.moduleApi('chat.inputMenu').getRouteOverrides(document.getElementById('user-input').value)
+        ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'] });
+   });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
         await page.route('**/api/agents/runs/run-lazy-detail', route => route.fulfill({

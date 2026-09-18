@@ -239,6 +239,7 @@
     border-radius: 6px; background: var(--bg-primary); color: var(--text-main); font-size: 0.75rem; line-height: 1.35;
 }
 .pivot-dag-inline-field textarea { resize: vertical; min-height: 54px; }
+.pivot-dag-inline-channel-binding small { color: var(--text-muted); font-size: 0.64rem; line-height: 1.35; }
 .pivot-dag-inline-check { flex-direction: row; align-items: center; justify-content: space-between; padding-top: 20px; }
 .pivot-dag-inline-check input { width: 16px; height: 16px; }
 .pivot-dag-inline-field input.is-invalid, .pivot-dag-inline-field textarea.is-invalid { border-color: var(--danger); background: var(--bg-secondary); }
@@ -440,6 +441,34 @@
     border: 1px solid rgba(148, 163, 184, 0.25);
     border-radius: 8px;
     background: #f8fafc;
+}
+
+.pivot-dag-config-issues {
+    padding: 10px 11px;
+    border: 1px solid var(--danger-border, rgba(239, 68, 68, 0.32));
+    border-radius: 8px;
+    background: var(--danger-light, #fff7f7);
+    color: var(--danger-text, #991b1b);
+}
+
+.pivot-dag-config-issues strong {
+    display: block;
+    font-size: 0.77rem;
+}
+
+.pivot-dag-config-issues ul {
+    display: grid;
+    gap: 3px;
+    margin: 6px 0;
+    padding-left: 18px;
+    font-size: 0.71rem;
+    line-height: 1.45;
+}
+
+.pivot-dag-config-issues span {
+    color: var(--warning-text, #b45309);
+    font-size: 0.68rem;
+    font-weight: 600;
 }
 
 .pivot-dag-output-panel {
@@ -849,11 +878,19 @@
     flex-direction: column;
     gap: 0;
     overflow: hidden;
+    text-align: left;
 }
 
 .pivot-dag-contract-editor .pivot-dag-input-head {
     margin-inline: 18px;
     padding-bottom: 10px;
+    text-align: left;
+}
+
+.pivot-dag-contract-editor .pivot-dag-input-head > div,
+.pivot-dag-contract-editor .pivot-dag-input-head h3,
+.pivot-dag-contract-editor .pivot-dag-input-head .model-modal-desc {
+    text-align: left;
 }
 
 .pivot-dag-contract-editor-body {
@@ -873,6 +910,7 @@
     flex-direction: column;
     gap: 4px;
     min-width: 0;
+    text-align: left;
 }
 
 .pivot-dag-contract-pane {

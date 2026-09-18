@@ -201,7 +201,8 @@ async function selectSession(id, title, options = {}) {
                 tps: m.tokens_per_sec,
                 tokenCount: m.token_count,
                 modelName: m.model_name || m.model_api_name || '',
-                agentRunId: m.agent_run_id || ''
+                agentRunId: m.agent_run_id || '',
+                routeMetadata: m.route_metadata || null
             }, { target: fragment, deferRender: true });
             if (m.role === 'assistant' && contentEl) assistantContentNodes.push(contentEl);
         });

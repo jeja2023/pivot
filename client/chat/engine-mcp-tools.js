@@ -67,25 +67,3 @@ function isChatToolEnabled(id, storageKey) {
     if (typeof button?.checked === 'boolean') return button.checked;
     return localStorage.getItem(storageKey) === 'true';
 }
-
-function shouldAutoEnableMcpForPrompt(value = '') {
-    const text = String(value || '').toLowerCase();
-    if (!text.trim()) return false;
-    const hasDataSource = /数据库|数据表|表中|表里|table[_a-z0-9]*|select\s|from\s+\w+|group\s+by|order\s+by|db\.|sql/i.test(text);
-    const hasDataAction = /查询|统计|分组|汇总|数量|计数|分布|排行|排名|count|sum|avg|group|字段|列|column/i.test(text);
-    const hasVisualAction = /图表|柱状图|折线图|饼图|面积图|可视化|画图|绘图|chart|plot|graph/i.test(text);
-    return hasDataSource && (hasDataAction || hasVisualAction);
-}
-
-function activateChatMcpToggle() {
-    const button = document.getElementById('chat-mcp-enabled');
-    window.Pivot.legacy.setChatToolToggleState?.(button, true);
-    try {
-        localStorage.setItem('pivot_chat_mcp_enabled', 'true');
-    } catch (e) {
-        // 忽略浏览器存储限制，本轮请求仍会携带启用状态。
-    }
-}
-
-window.Pivot.legacy.shouldAutoEnableMcpForPrompt = shouldAutoEnableMcpForPrompt;
-window.Pivot.legacy.activateChatMcpToggle = activateChatMcpToggle;
