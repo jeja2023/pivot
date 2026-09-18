@@ -1,4 +1,8 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { normalizeWorkflowEmbedUrl } = require('./workflow-embed-policy');
+const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
 
 /**
  * server/services/agent-tools-workflow-nodes.js
@@ -159,6 +163,29 @@ function executeWorkflowInput(input = {}, context = {}) {
     return { name, label: String(input.label || name), type, value: value ?? null, supplied, text: renderWorkflowValue(value) };
 }
 
+function executeWorkflowTemplate(input = {}) {
+    const template = (typeof input.template === 'string' ? input.template : renderWorkflowValue(input.template)).slice(0, 50000);
+    const missingVariable = ['keep', 'empty', 'error'].includes(String(input.missingVariable || 'keep'))
+        ? String(input.missingVariable || 'keep')
+        : 'keep';
+    const missingVariables = [...new Set([...template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => String(match[1] || '').trim()).filter(Boolean))];
+    if (missingVariables.length && missingVariable === 'error') {
+        throw new Error(`文本模板存在未解析变量：${missingVariables.slice(0, 5).join('、')}`);
+    }
+    let text = template;
+    if (missingVariables.length && missingVariable === 'empty') {
+        text = text.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
+            return missingVariables.includes(String(expression || '').trim()) ? '' : match;
+        });
+    }
+    if (input.trim !== false) text = text.trim();
+    return {
+        text,
+        charCount: text.length,
+        missingVariables: missingVariable === 'keep' ? missingVariables : []
+    };
+}
+
 function executeWorkflowOutput(input = {}) {
     const name = String(input.name || 'result').trim() || 'result';
     const value = input.value;
@@ -228,12 +255,102 @@ function executeWorkflowCondition(input = {}) {
     return { matched, value, compareTo, operator, route: matched ? 'matched' : 'unmatched', text: matched ? 'matched' : 'unmatched' };
 }
 
-async function executeWorkflowForeach(_input = {}) {
-    const error = new Error('动态代码只能在独立 Worker 沙箱中执行，服务端循环执行已关闭。');
-    error.code = 'AGENT_SANDBOX_REQUIRED';
-    error.category = 'policy';
-    error.status = 403;
-    throw error;
+async function executeWorkflowForeach(input = {}, context = {}) {
+    if (String(process.env.AGENT_FOREACH_WORKER_ENABLED || 'true').toLowerCase() === 'false') {
+        const error = new Error('工作流循环 Worker 已由部署策略停用。');
+        error.code = 'AGENT_FOREACH_WORKER_DISABLED';
+        error.category = 'policy';
+        error.status = 503;
+        throw error;
+    }
+    if (context.sandboxExecution !== true) {
+        const error = new Error('动态代码只能在独立 Worker 沙箱中执行，当前入口未授权受控 Worker。');
+        error.code = 'AGENT_SANDBOX_REQUIRED';
+        error.category = 'policy';
+        error.status = 403;
+        throw error;
+    }
+    const items = Array.isArray(input.items) ? input.items : [];
+    if (items.length > 1000) throw new Error('循环节点最多处理 1000 项。');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-foreach-'));
+    const taskId = String(context.run?.id || context.runId || context.node?.id || 'foreach').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'foreach';
+    const jail = createWorkspaceJail(root, taskId);
+    const workerScript = jail.resolve('foreach-worker.js');
+    try {
+        fs.copyFileSync(path.join(__dirname, 'agent-foreach-worker.js'), workerScript);
+        const timeoutMs = Math.max(1000, Math.min(Number(context.timeoutMs || input.timeoutMs || 120000), 10 * 60 * 1000));
+        const result = await runSandboxedProcess(process.execPath, [workerScript], {
+            jail,
+            timeoutMs,
+            maxBufferBytes: 2 * 1024 * 1024,
+            input: JSON.stringify({
+                items,
+                code: String(input.code || 'return item;'),
+                vars: input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? input.vars : {},
+                concurrency: input.concurrency,
+                stopOnError: input.stopOnError,
+                retryLimit: input.retryLimit,
+                itemTimeoutMs: input.itemTimeoutMs,
+                approvedByControlPlane: true
+            }),
+            env: { PIVOT_AGENT_FOREACH_WORKER: '1', PIVOT_AGENT_WORKSPACE: jail.workspace },
+            inheritEnv: false,
+            networkDisabled: true,
+            signal: context.signal || null
+        });
+        let message;
+        try { message = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).pop() || '{}'); } catch (_) { message = null; }
+        if (!message?.ok) {
+            const error = new Error(message?.error?.message || result.stderr || '循环 Worker 执行失败。');
+            error.code = message?.error?.code || 'AGENT_FOREACH_WORKER_FAILED';
+            throw error;
+        }
+        return {
+            ...message.result,
+            worker: {
+                code: result.code,
+                timedOut: Boolean(result.timedOut),
+                truncated: Boolean(result.truncated),
+                isolation: result.isolation || jail.metadata
+            }
+        };
+    } finally {
+        try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+async function executeWorkflowNotify(input = {}, user = null, context = {}) {
+    const bindingId = String(input.bindingId || input.binding_id || '').trim();
+    const platform = String(input.platform || '').trim().toLowerCase();
+    const body = String(input.body ?? input.message ?? '').trim();
+    if (!bindingId) throw new Error('通知节点需要选择已配置的渠道绑定。');
+    if (!['wecom', 'feishu', 'dingtalk'].includes(platform)) throw new Error('通知节点必须选择企业微信、飞书或钉钉平台。');
+    if (!body) throw new Error('通知节点消息内容不能为空。');
+    if (!user?.id) throw new Error('通知节点需要有效的运行用户。');
+    const { enqueueChannelDelivery } = require('./agent-channel-adapters');
+    const idempotencyKey = String(input.idempotencyKey || input.idempotency_key || `${context.run?.id || context.runId || 'workflow'}:${context.node?.id || 'notify'}`).slice(0, 255);
+    const delivery = await enqueueChannelDelivery(user, {
+        bindingId,
+        platform,
+        requirePlatform: true,
+        eventType: String(input.eventType || 'workflow.notify').slice(0, 80),
+        subject: String(input.subject || input.title || '').slice(0, 255),
+        body,
+        idempotencyKey,
+        interaction: {
+            format: String(input.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text',
+            platform
+        }
+    });
+    if (!delivery) throw new Error('通知渠道不存在、未启用或当前用户无权使用。');
+    return {
+        queued: true,
+        deliveryId: delivery.id,
+        bindingId,
+        status: delivery.status || 'queued',
+        platform: delivery.bindingPlatform || platform,
+        idempotencyKey
+    };
 }
 
 async function executeWorkflowDelay(input = {}, context = {}) {
@@ -278,6 +395,8 @@ module.exports = {
     executeWorkflowDelay,
     executeWorkflowForeach,
     executeWorkflowInput,
+    executeWorkflowNotify,
+    executeWorkflowTemplate,
     executeWorkflowOutput,
     executeWorkflowLinkCard,
     getWorkflowPresentationToolDefinitions,

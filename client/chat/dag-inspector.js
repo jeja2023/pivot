@@ -8,6 +8,111 @@ function createDagInspectorController(ctx) {
     const wouldCreateCycle = (...args) => Boolean(ctx.wouldCreateCycle?.(...args));
     const openNodeInputWizard = (...args) => ctx.openNodeInputWizard?.(...args);
     const renderInputSummary = (...args) => ctx.renderInputSummary?.(...args) || '';
+    const getUpstreamNodes = (...args) => ctx.getUpstreamNodes?.(...args) || [];
+    const getRunStates = () => ctx.getRunStates?.() || new Map();
+    const getDagInputs = () => ctx.getDagInputs?.() || {};
+    const showDagToast = (...args) => ctx.showToast?.(...args);
+    const showVariablePicker = (...args) => ctx.showVariablePicker?.(...args);
+    const setDagNodeTestOutput = (...args) => ctx.setDagNodeTestOutput?.(...args);
+    const imAllowedTargets = new Map();
+    const snapshotValue = (value, depth = 0) => {
+        if (depth > 5) return '[已省略深层字段]';
+        if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') return value;
+        if (typeof value === 'string') return /token|secret|password|authorization|api[-_]?key/i.test(value)
+            ? '[已脱敏]'
+            : value.slice(0, 4000);
+        if (Array.isArray(value)) return value.slice(0, 100).map(item => snapshotValue(item, depth + 1));
+        if (typeof value === 'object') return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [
+            key,
+            /token|secret|password|authorization|api[-_]?key/i.test(key) ? '[已脱敏]' : snapshotValue(item, depth + 1)
+        ]));
+        return String(value).slice(0, 4000);
+    };
+    const quickFieldGroups = {
+        'workflow.input': ['name', 'label', 'defaultValue'],
+        'agent.llm': ['model', 'prompt'],
+        'agent.http': ['method', 'url'],
+        'workflow.condition': ['value', 'operator', 'compareTo'],
+        'agent.merge': ['fields'],
+        'workflow.template': ['template', 'trim', 'missingVariable'],
+        'workflow.notify': ['bindingId', 'platform', 'subject', 'body', 'format']
+    };
+    const quickFieldLabels = {
+        name: '参数名', label: '展示名称', defaultValue: '默认值', model: '模型', prompt: '提示词',
+        method: '请求方法', url: '请求地址', value: '判断值', operator: '判断方式', compareTo: '比较目标',
+        fields: '字段映射', template: '模板内容', trim: '清除首尾空白', missingVariable: '缺失变量', bindingId: '渠道绑定', platform: '通知平台', subject: '通知标题', body: '通知正文', format: '消息格式'
+    };
+    const inputNodeReferences = (value, refs = new Set()) => {
+        if (typeof value === 'string') {
+            const pattern = /\{\{\s*(?:nodes|node)\.([A-Za-z0-9_-]+)\./g;
+            let match;
+            while ((match = pattern.exec(value)) !== null) refs.add(match[1]);
+        } else if (Array.isArray(value)) value.forEach(item => inputNodeReferences(item, refs));
+        else if (value && typeof value === 'object') Object.values(value).forEach(item => inputNodeReferences(item, refs));
+        return refs;
+    };
+    const quickFieldMarkup = (node, tool) => {
+        const toolName = String(node?.tool || tool?.name || tool?.fullName || '');
+        const isImNotification = /(?:^|\.)im\.send_/.test(toolName);
+        const fields = quickFieldGroups[toolName] || (isImNotification ? ['target', toolName.includes('markdown') ? 'markdown' : 'message'] : []);
+        if (!fields.length) return '';
+        const input = node.input && typeof node.input === 'object' ? node.input : {};
+        const imTargetListId = `pivot-dag-im-targets-${String(node.id || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+        const channelListId = `pivot-dag-channel-bindings-${String(node.id || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+        const channelBindings = toolName === 'workflow.notify' && typeof window !== 'undefined'
+            ? (window.Pivot?.modules?.agentChannelBindings?.() || [])
+            : [];
+        const cachedImTargets = isImNotification && typeof window !== 'undefined'
+            ? (imAllowedTargets.get(String(node.tool || '')) || [])
+            : [];
+        const escape = value => typeof dagEscapeAttr === 'function' ? dagEscapeAttr(String(value ?? '')) : String(value ?? '').replace(/"/g, '&quot;');
+        const valueText = (key, value) => {
+            if (value === undefined || value === null) return '';
+            if (typeof value === 'object') {
+                try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
+            }
+            return String(value);
+        };
+        const modelOptions = key => key === 'model' && typeof workflowModelOptions === 'function'
+            ? `<option value="">自动选择</option>${workflowModelOptions().map(model => `<option value="${escape(model.id)}" ${String(model.id) === String(input[key] || '') ? 'selected' : ''}>${dagEscapeHtml(model.name || model.model_name || model.id)}</option>`).join('')}`
+            : '';
+        if (toolName === 'agent.merge') {
+            const fieldsValue = input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields) ? input.fields : {};
+            const entries = Object.entries(fieldsValue);
+            const rows = (entries.length ? entries : [['', '']]).map(([key, value], index) => `
+                <div class="pivot-dag-merge-row" data-pivot-dag-merge-row="${index}">
+                    <input class="form-input" type="text" value="${escape(key)}" placeholder="字段名" data-pivot-dag-merge-key>
+                    <textarea class="form-input" rows="2" placeholder="插入上游变量" data-pivot-dag-merge-value>${dagEscapeHtml(valueText(key, value))}</textarea>
+                    <button type="button" class="btn-secondary" data-pivot-dag-merge-pick-var title="插入变量">+{x}</button>
+                    <button type="button" class="btn-secondary" data-pivot-dag-merge-remove title="删除字段">×</button>
+                </div>`).join('');
+            return `<section class="pivot-dag-inline-edit pivot-dag-merge-edit"><div class="pivot-dag-inline-edit-head"><strong>聚合字段</strong><span>为每个上游结果起一个可引用的字段名</span></div><div class="pivot-dag-merge-rows">${rows}</div><button type="button" class="btn-secondary pivot-dag-merge-add" data-pivot-dag-merge-add>+ 添加字段</button></section>`;
+        }
+        const renderControl = key => {
+            const value = input[key];
+            const label = quickFieldLabels[key] || key;
+            const type = key === 'trim' ? 'checkbox' : key === 'prompt' || key === 'template' || key === 'fields' || key === 'message' || key === 'markdown' || key === 'body' ? 'textarea' : 'text';
+            if (type === 'checkbox') return `<label class="pivot-dag-inline-field pivot-dag-inline-check"><span>${label}</span><input class="form-input" type="checkbox" data-pivot-dag-input-field="${key}" ${value !== false ? 'checked' : ''}></label>`;
+            if (key === 'model') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${modelOptions(key)}</select></label>`;
+            if (key === 'method') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(item => `<option value="${item}" ${String(value || 'GET') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
+            if (key === 'operator') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['equals','not_equals','contains','not_contains','greater_than','less_than','is_empty','not_empty','is_true','is_false'].map(item => `<option value="${item}" ${String(value || 'not_empty') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
+            if (key === 'missingVariable') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${['keep','empty','error'].map(item => `<option value="${item}" ${String(value || 'keep') === item ? 'selected' : ''}>${item}</option>`).join('')}</select></label>`;
+            if (key === 'platform') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}">${[['wecom','企业微信'],['feishu','飞书'],['dingtalk','钉钉']].map(([item,title]) => `<option value="${item}" ${String(value || 'wecom') === item ? 'selected' : ''}>${title}</option>`).join('')}</select></label>`;
+            if (key === 'format') return `<label class="pivot-dag-inline-field"><span>${label}</span><select class="form-input" data-pivot-dag-input-field="${key}"><option value="text" ${String(value || 'text') === 'text' ? 'selected' : ''}>文本</option><option value="markdown" ${String(value || '') === 'markdown' ? 'selected' : ''}>富文本</option></select></label>`;
+            const json = typeof value === 'object';
+            const variableButton = `<button type="button" class="btn-secondary pivot-dag-inline-var" data-pivot-dag-inline-pick-var="${key}" title="插入变量">+{x}</button>`;
+            const listMarkup = key === 'bindingId' ? `list="${channelListId}"` : isImNotification && key === 'target' ? `list="${imTargetListId}"` : '';
+            return `<label class="pivot-dag-inline-field ${type === 'textarea' ? 'is-wide' : ''}"><span>${label}${variableButton}</span>${type === 'textarea' ? `<textarea class="form-input" rows="${key === 'prompt' || key === 'template' ? 4 : 3}" data-pivot-dag-input-field="${key}" ${json ? 'data-pivot-dag-input-json="1"' : ''}>${dagEscapeHtml(valueText(key, value))}</textarea>` : `<input class="form-input" type="text" data-pivot-dag-input-field="${key}" ${listMarkup} value="${escape(valueText(key, value))}">`}</label>`;
+        };
+        const imTargetsMarkup = isImNotification ? `<datalist id="${imTargetListId}">${cachedImTargets.map(target => `<option value="${escape(target)}"></option>`).join('')}</datalist><button type="button" class="btn-secondary pivot-dag-im-target-load" data-pivot-dag-im-target-load>读取允许通知目标</button>` : '';
+        const channelBindingsMarkup = toolName === 'workflow.notify' ? `<datalist id="${channelListId}">${channelBindings.map(binding => `<option value="${escape(binding.id)}">${dagEscapeHtml(`${binding.channelType} · ${binding.channelKey}`)}</option>`).join('')}</datalist><small class="pivot-dag-inline-help">渠道绑定在通知设置中配置，工作流只引用绑定 ID。</small>` : '';
+        const refs = [...inputNodeReferences(node.input)];
+        const missingDeps = refs.filter(ref => ctx.spec?.nodes?.some(candidate => candidate.id === ref) && !(node.dependsOn || []).includes(ref));
+        const hint = missingDeps.length
+            ? `<div class="pivot-dag-inline-hint is-warning">检测到 ${missingDeps.length} 个未声明的数据依赖：${missingDeps.join('、')}。可在“上游节点”中勾选，或点击下方按钮。</div><button type="button" class="btn-secondary pivot-dag-add-referenced-deps" data-pivot-dag-add-referenced-deps>添加引用依赖</button>`
+            : '';
+        return `<section class="pivot-dag-inline-edit"><div class="pivot-dag-inline-edit-head"><strong>常用参数</strong><span>可直接编辑，复杂配置仍可打开向导</span></div><div class="pivot-dag-inline-edit-grid">${fields.map(renderControl).join('')}</div>${imTargetsMarkup}${channelBindingsMarkup}${hint}</section>`;
+    };
     const testNode = async (node) => {
         const button = inspector.querySelector('[data-pivot-dag-test-node]');
         const result = inspector.querySelector('[data-pivot-dag-test-result]');
@@ -19,9 +124,8 @@ function createDagInspectorController(ctx) {
         result.textContent = '正在执行当前节点…';
 
         // 收集所有拓扑上游节点最新运行快照
-        const getUpstream = window.Pivot?.moduleApi?.('agent.dagCore')?.getUpstreamNodes || window.Pivot?.legacy?.getUpstreamNodes;
-        const upstreamNodes = typeof getUpstream === 'function' ? getUpstream(ctx.spec?.nodes || [], node.id) : [];
-        const runStates = window.Pivot?.legacy?.dagNodeRunStates || new Map();
+        const upstreamNodes = getUpstreamNodes(ctx.spec?.nodes || [], node.id);
+        const runStates = getRunStates();
         const upstreamStates = [];
         upstreamNodes.forEach(up => {
             const state = runStates.get(up.id);
@@ -30,7 +134,7 @@ function createDagInspectorController(ctx) {
             }
         });
         const upstreamContext = {
-            goal: window.Pivot?.legacy?.collectAgentDagInputs?.()?.goal || '',
+            goal: String(getDagInputs()?.goal || ''),
             nodes: ctx.spec?.nodes || [],
             states: upstreamStates
         };
@@ -42,13 +146,22 @@ function createDagInspectorController(ctx) {
                 body: JSON.stringify({
                     tool: node.tool,
                     input: node.input || {},
-                    dagInputs: window.Pivot.legacy.collectAgentDagInputs?.() || {},
+                    dagInputs: getDagInputs(),
                     upstreamContext
                 })
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '节点测试失败');
             result.className = 'pivot-dag-test-result is-success';
+            if (typeof window !== 'undefined') {
+                if (typeof setDagNodeTestOutput === 'function') setDagNodeTestOutput(String(node.id), {
+                    output: snapshotValue(data.output),
+                    resolvedInput: snapshotValue(data.resolvedInput || node.input || {}),
+                    createdAt: Date.now(),
+                    expiresAt: Date.now() + 15 * 60 * 1000,
+                    source: 'test'
+                });
+            }
             const snapshotNotice = upstreamStates.length ? ` · 已注入 ${upstreamStates.length} 个上游运行快照` : '';
             const resolvedInfo = data.resolvedInput && JSON.stringify(data.resolvedInput) !== JSON.stringify(node.input || {})
                 ? `\n[解析后入参]:\n${JSON.stringify(data.resolvedInput, null, 2)}\n\n[输出结果]:\n`
@@ -162,7 +275,7 @@ function createDagInspectorController(ctx) {
             modal.className = 'modal-overlay hidden pivot-dag-json-input-overlay';
             document.body.appendChild(modal);
         }
-        const getVarOptions = window.Pivot?.legacy?.getAvailableVariableOptions;
+        const getVarOptions = ctx.getAvailableVariableOptions;
         const variableGroups = typeof getVarOptions === 'function'
             ? getVarOptions(ctx.spec?.nodes || [], node.id, currentTools())
             : [];
@@ -238,7 +351,7 @@ function createDagInspectorController(ctx) {
             ctx.render?.();
             ctx.flushOut?.();
             closeJson();
-            window.Pivot.legacy.showToast?.('高级参数已更新', 'success');
+            showDagToast('高级参数已更新', 'success');
         };
         const insertToken = token => {
             if (!token || !textareaEl) return;
@@ -554,7 +667,7 @@ function createDagInspectorController(ctx) {
             ctx.render?.();
             ctx.flushOut?.();
             close();
-            window.Pivot.legacy.showToast?.('节点契约已更新', 'success');
+            showDagToast('节点契约已更新', 'success');
         });
         modal.classList.remove('hidden');
         requestAnimationFrame(() => inputEl?.focus?.({ preventScroll: true }));
@@ -593,9 +706,14 @@ function createDagInspectorController(ctx) {
             { label: '运行输入', value: 'inputs' },
             ...(node.dependsOn || []).flatMap(dep => ([
                 { label: `${dep} 输出`, value: `nodes.${dep}.output` },
-                { label: `${dep} 状态`, value: `nodes.${dep}.status` }
+                { label: `${dep} 状态`, value: `nodes.${dep}.status` },
+                { label: `${dep} 是否满足条件`, value: `nodes.${dep}.output.matched` }
             ]))
         ];
+        const conditionDependencies = (node.dependsOn || []).filter(dep => {
+            const source = ctx.spec?.nodes?.find(candidate => candidate.id === dep);
+            return source?.tool === 'workflow.condition';
+        });
         return `
             <div class="pivot-dag-when-panel ${enabled ? 'is-active' : ''}">
                 <div class="pivot-dag-when-head">
@@ -632,6 +750,7 @@ function createDagInspectorController(ctx) {
                         ? `可用变量：${suggestions.slice(2, 6).map(s => `<code>${dagEscapeHtml(s.value)}</code>`).join('、')}`
                         : '连接上游节点后可引用其输出作为判断变量'}
                 </div>` : ''}
+                ${conditionDependencies.length ? `<div class="pivot-dag-when-routes"><span>条件快捷路由</span>${conditionDependencies.map(dep => `<button type="button" class="btn-secondary" data-pivot-dag-when-route="true" data-pivot-dag-when-source="${dagEscapeAttr(dep)}">${dagEscapeHtml(dep)} 为真</button><button type="button" class="btn-secondary" data-pivot-dag-when-route="false" data-pivot-dag-when-source="${dagEscapeAttr(dep)}">${dagEscapeHtml(dep)} 为假</button>`).join('')}</div>` : ''}
             </div>
         `;
     };
@@ -668,6 +787,20 @@ function createDagInspectorController(ctx) {
                 field.addEventListener('input', (e) => commit(e.target));
             }
         });
+        inspector.querySelectorAll('[data-pivot-dag-when-route]').forEach(button => {
+            button.addEventListener('click', () => {
+                const sourceId = String(button.dataset.pivotDagWhenSource || '').trim();
+                if (!sourceId) return;
+                ctx.recordHistory?.();
+                node.when = {
+                    source: `nodes.${sourceId}.output.matched`,
+                    operator: button.dataset.pivotDagWhenRoute === 'false' ? 'is_false' : 'is_true',
+                    value: ''
+                };
+                ctx.render?.();
+                ctx.flushOut?.();
+            });
+        });
     };
 
     const renderInspector = () => {
@@ -677,6 +810,7 @@ function createDagInspectorController(ctx) {
         const active = document.activeElement;
         const focusSnapshot = active && inspector.contains(active) ? {
             field: active.dataset?.pivotDagField || '',
+            inputField: active.dataset?.pivotDagInputField || '',
             depend: active.dataset?.pivotDagDepend || '',
             start: null,
             end: null
@@ -700,6 +834,8 @@ function createDagInspectorController(ctx) {
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
         const upstreamNodes = getDependencyCandidateNodes(node);
+        const referencedNodes = [...inputNodeReferences(node.input)];
+        const missingDependencyRefs = referencedNodes.filter(ref => ctx.spec.nodes.some(candidate => candidate.id === ref) && !(node.dependsOn || []).includes(ref));
         const dependsChecks = upstreamNodes.map(upstreamNode => `
             <label class="pivot-dag-depends-item">
                 <input type="checkbox" data-pivot-dag-depend="${dagEscapeAttr(upstreamNode.id)}" ${node.dependsOn.includes(upstreamNode.id) ? 'checked' : ''}>
@@ -780,6 +916,7 @@ function createDagInspectorController(ctx) {
                     <span>本节点会等待这些前置节点完成，并可引用其输出</span>
                 </div>
                 <div class="pivot-dag-inspector-depends-list">${dependsChecks}</div>
+                ${missingDependencyRefs.length ? `<button type="button" class="btn-secondary pivot-dag-add-referenced-deps" data-pivot-dag-add-referenced-deps>添加 ${missingDependencyRefs.length} 个变量引用依赖</button>` : ''}
             </div>
             <div class="pivot-dag-input-overview">
                 <div class="pivot-dag-input-overview-head">
@@ -789,6 +926,7 @@ function createDagInspectorController(ctx) {
                     </div>
                 </div>
                 <div class="pivot-dag-input-overview-summary">${renderInputSummary(node.input, selectedTool, tools)}</div>
+                ${quickFieldMarkup(node, selectedTool)}
                 <div class="pivot-dag-input-overview-actions">
                     <button type="button" class="btn-primary" data-pivot-dag-open-wizard="1">配置参数</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-open-json="1">编辑高级参数</button>
@@ -868,10 +1006,8 @@ function createDagInspectorController(ctx) {
         });
         inspector.querySelector('[data-pivot-dag-apply-template]')?.addEventListener('click', () => applyToolInputTemplate(node.id));
         inspector.querySelector('[data-pivot-dag-pick-var]')?.addEventListener('click', (e) => {
-            const picker = window.Pivot?.moduleApi?.('agent.dagVariablePicker')?.showVariablePickerPopover
-                || window.Pivot?.legacy?.showVariablePickerPopover;
-            if (typeof picker === 'function') {
-                picker({
+            if (typeof ctx.showVariablePicker === 'function') {
+                showVariablePicker({
                     anchorEl: e.currentTarget,
                     nodeId: node.id,
                     nodes: ctx.spec?.nodes || [],
@@ -880,7 +1016,147 @@ function createDagInspectorController(ctx) {
             }
         });
         inspector.querySelector('[data-pivot-dag-test-node]')?.addEventListener('click', () => testNode(node));
-        if (focusSnapshot?.field) {
+        inspector.querySelectorAll('[data-pivot-dag-input-field]').forEach(input => {
+            const commitInput = ({ rerender = false } = {}) => {
+                const key = input.dataset.pivotDagInputField;
+                if (!key) return;
+                node.input = node.input && typeof node.input === 'object' ? node.input : {};
+                if (input.dataset.pivotDagHistoryRecorded !== '1') {
+                    ctx.recordHistory?.();
+                    input.dataset.pivotDagHistoryRecorded = '1';
+                }
+                let value = input.type === 'checkbox' ? input.checked : input.value;
+                if (input.dataset.pivotDagInputJson === '1' && String(value || '').trim()) {
+                    try { value = JSON.parse(value); input.classList.remove('is-invalid'); } catch (_) { input.classList.add('is-invalid'); return; }
+                }
+                node.input[key] = value;
+                ctx.flushOut?.();
+                if (rerender) ctx.render?.();
+            };
+            input.addEventListener('input', () => commitInput());
+            input.addEventListener('change', () => commitInput({ rerender: input.tagName === 'SELECT' || input.type === 'checkbox' }));
+            input.addEventListener('blur', () => ctx.render?.());
+        });
+        const commitMergeFields = (rerender = false) => {
+            const rows = [...inspector.querySelectorAll('[data-pivot-dag-merge-row]')];
+            const fields = {};
+            let invalid = false;
+            rows.forEach(row => {
+                const keyInput = row.querySelector('[data-pivot-dag-merge-key]');
+                const valueInput = row.querySelector('[data-pivot-dag-merge-value]');
+                const key = String(keyInput?.value || '').trim();
+                const value = String(valueInput?.value || '').trim();
+                keyInput?.classList.remove('is-invalid');
+                if (!key && !value) return;
+                if (!/^[A-Za-z_][A-Za-z0-9_-]{0,79}$/.test(key) || Object.hasOwn(fields, key)) {
+                    keyInput?.classList.add('is-invalid');
+                    invalid = true;
+                    return;
+                }
+                fields[key] = value;
+            });
+            if (invalid) return false;
+            node.input = node.input && typeof node.input === 'object' ? node.input : {};
+            node.input.fields = fields;
+            ctx.flushOut?.();
+            if (rerender) ctx.render?.();
+            return true;
+        };
+        inspector.querySelectorAll('[data-pivot-dag-merge-key], [data-pivot-dag-merge-value]').forEach(input => {
+            input.addEventListener('input', () => {
+                if (input.dataset.pivotDagHistoryRecorded !== '1') {
+                    ctx.recordHistory?.();
+                    input.dataset.pivotDagHistoryRecorded = '1';
+                }
+                commitMergeFields();
+            });
+            input.addEventListener('blur', () => commitMergeFields(true));
+        });
+        inspector.querySelector('[data-pivot-dag-merge-add]')?.addEventListener('click', () => {
+            if (!commitMergeFields()) return;
+            ctx.recordHistory?.();
+            node.input.fields = { ...(node.input.fields || {}), [`field_${Object.keys(node.input.fields || {}).length + 1}`]: '' };
+            ctx.render?.();
+            ctx.flushOut?.();
+        });
+        inspector.querySelectorAll('[data-pivot-dag-merge-remove]').forEach(button => {
+            button.addEventListener('click', () => {
+                const row = button.closest('[data-pivot-dag-merge-row]');
+                row?.remove();
+                ctx.recordHistory?.();
+                commitMergeFields(true);
+            });
+        });
+        inspector.querySelectorAll('[data-pivot-dag-merge-pick-var]').forEach(button => {
+            button.addEventListener('click', event => {
+                const targetInput = event.currentTarget.closest('[data-pivot-dag-merge-row]')?.querySelector('[data-pivot-dag-merge-value]');
+                if (targetInput) showVariablePicker({ anchorEl: event.currentTarget, targetInput, nodeId: node.id, nodes: ctx.spec?.nodes || [], tools: currentTools() });
+            });
+        });
+        inspector.querySelector('[data-pivot-dag-add-referenced-deps]')?.addEventListener('click', () => {
+            const deps = new Set(node.dependsOn || []);
+            missingDependencyRefs.forEach(ref => deps.add(ref));
+            ctx.recordHistory?.();
+            node.dependsOn = [...deps];
+            if (Array.isArray(ctx.spec.edges)) {
+                missingDependencyRefs.forEach(ref => {
+                    if (!ctx.spec.edges.some(edge => edge.from === ref && edge.to === node.id)) {
+                        ctx.spec.edges.push({ from: ref, to: node.id, route: 'default' });
+                    }
+                });
+            }
+            ctx.render?.();
+            ctx.flushOut?.();
+            showDagToast('已添加变量引用所需的上游依赖', 'success');
+        });
+        inspector.querySelectorAll('[data-pivot-dag-inline-pick-var]').forEach(button => {
+            button.addEventListener('click', event => {
+                const field = event.currentTarget.dataset.pivotDagInlinePickVar;
+                const targetInput = inspector.querySelector(`[data-pivot-dag-input-field="${cssEscape(field)}"]`);
+                if (targetInput) showVariablePicker({ anchorEl: event.currentTarget, targetInput, nodeId: node.id, nodes: ctx.spec?.nodes || [], tools: currentTools() });
+            });
+        });
+        inspector.querySelector('[data-pivot-dag-im-target-load]')?.addEventListener('click', async (event) => {
+            const allTools = currentTools();
+            const currentName = String(node.tool || '');
+            const prefix = /^(mcp\.\d+)\./.exec(currentName)?.[1] || '';
+            const listTool = allTools.find(candidate => {
+                const name = String(candidate?.fullName || candidate?.name || '');
+                return name.endsWith('im.list_allowed_targets') && (!prefix || name.startsWith(`${prefix}.`));
+            });
+            if (!listTool) {
+                showDagToast('当前未配置可读取目标的 IM 通知服务', 'warning');
+                return;
+            }
+            const button = event.currentTarget;
+            button.disabled = true;
+            button.textContent = '读取中…';
+            try {
+                const response = await apiFetch(`${API_BASE}/agents/tools/test`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tool: String(listTool.fullName || listTool.name), input: {} })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || '读取通知目标失败');
+                const targets = Array.isArray(data.output?.allowedTargets) ? data.output.allowedTargets.map(item => String(item || '').trim()).filter(Boolean).slice(0, 100) : [];
+                imAllowedTargets.set(String(node.tool || ''), targets);
+                if (!node.input.target && data.output?.defaultTarget) node.input.target = String(data.output.defaultTarget);
+                ctx.render?.();
+                ctx.flushOut?.();
+                showDagToast(targets.length ? `已读取 ${targets.length} 个允许通知目标` : '当前通知服务未返回固定目标列表', 'success');
+            } catch (error) {
+                showDagToast(error.message || '读取通知目标失败', 'error');
+            } finally {
+                if (button.isConnected) { button.disabled = false; button.textContent = '读取允许通知目标'; }
+            }
+        });
+        if (focusSnapshot?.inputField) {
+            const next = inspector.querySelector(`[data-pivot-dag-input-field="${cssEscape(focusSnapshot.inputField)}"]`);
+            next?.focus?.({ preventScroll: true });
+            if (next && focusSnapshot.start !== null && typeof next.setSelectionRange === 'function') {
+                try { next.setSelectionRange(focusSnapshot.start, focusSnapshot.end ?? focusSnapshot.start); } catch (_) {}
+            }
+        } else if (focusSnapshot?.field) {
             const next = inspector.querySelector(`[data-pivot-dag-field="${cssEscape(focusSnapshot.field)}"]`);
             next?.focus?.({ preventScroll: true });
             if (next && focusSnapshot.start !== null && typeof next.setSelectionRange === 'function') {
@@ -904,7 +1180,7 @@ function createDagInspectorController(ctx) {
         node.input = { ...template };
         ctx.render?.();
         ctx.flushOut?.();
-        window.Pivot.legacy.showToast?.('已套用工具参数模板', 'success');
+        showDagToast('已套用工具参数模板', 'success');
     };
 
     const handleInspectorEdit = (input, options = {}) => {
@@ -968,7 +1244,7 @@ function createDagInspectorController(ctx) {
         if (checkbox.checked) {
             if (wouldCreateCycle(dep, node.id)) {
                 checkbox.checked = false;
-                window.Pivot.legacy.showToast?.('不能添加循环依赖', 'error');
+                showDagToast('不能添加循环依赖', 'error');
                 return;
             }
             deps.add(dep);
@@ -977,6 +1253,15 @@ function createDagInspectorController(ctx) {
         }
         ctx.recordHistory?.();
         node.dependsOn = [...deps];
+        if (Array.isArray(ctx.spec.edges)) {
+            if (checkbox.checked) {
+                if (!ctx.spec.edges.some(edge => edge.from === dep && edge.to === node.id)) {
+                    ctx.spec.edges.push({ from: dep, to: node.id, route: 'default' });
+                }
+            } else {
+                ctx.spec.edges = ctx.spec.edges.filter(edge => !(edge.from === dep && edge.to === node.id));
+            }
+        }
         clampDependsOn(ctx.spec.nodes);
         ctx.render?.();
         ctx.flushOut?.();

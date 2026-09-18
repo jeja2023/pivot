@@ -215,6 +215,53 @@
 .pivot-dag-test-result.is-error { border-color: #f87171; color: #fecaca; }
 .pivot-dag-test-result.is-success { border-color: #34d399; }
 
+.pivot-dag-inline-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+.pivot-dag-inline-edit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pivot-dag-inline-edit-head strong { color: var(--text-main); font-size: 0.76rem; }
+.pivot-dag-inline-edit-head span { color: var(--text-muted); font-size: 0.66rem; }
+.pivot-dag-inline-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pivot-dag-inline-field { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.pivot-dag-inline-field.is-wide { grid-column: 1 / -1; }
+.pivot-dag-inline-field > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
+.pivot-dag-inline-var { min-width: 32px; height: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-primary); color: var(--primary); font-size: 0.61rem; font-weight: 800; cursor: pointer; }
+.pivot-dag-inline-var:hover, .pivot-dag-inline-var:focus-visible { border-color: var(--primary); background: var(--bg-secondary); outline: none; }
+.pivot-dag-inline-field input, .pivot-dag-inline-field select, .pivot-dag-inline-field textarea {
+    width: 100%; min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg-primary); color: var(--text-main); font-size: 0.75rem; line-height: 1.35;
+}
+.pivot-dag-inline-field textarea { resize: vertical; min-height: 54px; }
+.pivot-dag-inline-check { flex-direction: row; align-items: center; justify-content: space-between; padding-top: 20px; }
+.pivot-dag-inline-check input { width: 16px; height: 16px; }
+.pivot-dag-inline-field input.is-invalid, .pivot-dag-inline-field textarea.is-invalid { border-color: var(--danger); background: var(--bg-secondary); }
+.pivot-dag-inline-hint { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.68rem; line-height: 1.4; }
+.pivot-dag-inline-hint.is-warning { color: var(--warning); }
+.pivot-dag-inline-help { display: block; color: var(--text-muted); font-size: 0.65rem; line-height: 1.35; }
+.pivot-dag-inline-edit > .pivot-dag-add-referenced-deps { align-self: flex-start; height: 28px; padding: 0 9px; font-size: 0.68rem; }
+.pivot-dag-merge-rows { display: grid; gap: 6px; }
+.pivot-dag-merge-row { display: grid; grid-template-columns: minmax(86px, 0.42fr) minmax(0, 1fr) auto auto; gap: 5px; align-items: start; }
+.pivot-dag-merge-row input, .pivot-dag-merge-row textarea { width: 100%; min-width: 0; margin: 0; padding: 6px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); font-size: 0.72rem; line-height: 1.35; }
+.pivot-dag-merge-row textarea { resize: vertical; min-height: 42px; }
+.pivot-dag-merge-row .btn-secondary, .pivot-dag-merge-add { min-width: 28px; height: 29px; padding: 0 7px; font-size: 0.67rem; }
+.pivot-dag-merge-add { align-self: flex-start; }
+.pivot-dag-when-routes { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.pivot-dag-when-routes > span { flex: 1 1 100%; color: var(--text-muted); font-size: 0.66rem; font-weight: 700; }
+.pivot-dag-when-routes .btn-secondary { height: 27px; padding: 0 8px; border-color: var(--border); color: var(--primary); font-size: 0.67rem; }
+@media (max-width: 640px) {
+    .pivot-dag-inline-edit-grid { grid-template-columns: 1fr; }
+    .pivot-dag-inline-field.is-wide { grid-column: auto; }
+    .pivot-dag-merge-row { grid-template-columns: 1fr auto auto; }
+    .pivot-dag-merge-row textarea { grid-column: 1 / -1; }
+}
+
 .pivot-dag-tool-meta {
     display: flex;
     flex-direction: column;

@@ -85,6 +85,10 @@ test('DAG 节点级智能缓存契约', async (t) => {
 
         assert.equal(isCacheableDagTool('workflow.approval'), false);
         assert.equal(isCacheableDagTool('workflow.delay'), false);
+        assert.equal(isCacheableDagTool('workflow.notify'), false);
+        assert.equal(isCacheableDagTool('workflow.foreach'), false);
+        assert.equal(isCacheableDagTool('agent.http'), false);
+        assert.equal(isCacheableDagTool('agent.code'), false);
         assert.equal(isCacheableDagTool('file.delete_document'), false);
         assert.equal(isCacheableDagTool('channel.send_email'), false);
     });

@@ -278,6 +278,11 @@ document.addEventListener('click', async (event) => {
         window.Pivot.legacy.setTaskComposerOpen?.(true);
         return;
     }
+    const focusDagNodeButton = event.target.closest('[data-agent-dag-focus-node]');
+    if (focusDagNodeButton) {
+        await focusAgentDagSnapshotNode(focusDagNodeButton.dataset.agentDagFocusNode || '');
+        return;
+    }
     const editBtn = event.target.closest('[data-agent-run-edit], [data-agent-edit-run]');
     if (editBtn) {
         const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun;

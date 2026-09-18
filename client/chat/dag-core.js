@@ -23,6 +23,7 @@ const SCALE_MAX = 2.5;
 const MIN_CONTENT_WIDTH = 960;
 
 const MIN_CONTENT_HEIGHT = 360;
+const dagNodeTestOutputs = new Map();
 
 // 工作流是无限画布：允许节点越过默认原点向左、向上布局，同时保留足够大的
 // 安全边界，避免异常数据把 SVG / 小地图扩展到不可渲染的尺寸。
@@ -151,7 +152,27 @@ function ensureDefaults(spec) {
         } else {
             missingPositionNodes.forEach(node => placeNewNode(nodes, node, node.dependsOn?.[0] || ''));
         }
-        return { nodes };
+        const rawEdges = Array.isArray(spec?.edges) ? spec.edges : [];
+        const hasEdgeModel = rawEdges.length > 0 || spec?.schemaVersion === 'pivot.dag.v2';
+        const edges = rawEdges
+            .map(edge => ({
+                from: String(edge?.from ?? edge?.source ?? '').trim(),
+                to: String(edge?.to ?? edge?.target ?? '').trim(),
+                route: String(edge?.route || 'default').toLowerCase() || 'default'
+            }))
+            ;
+        nodes.forEach(node => {
+            edges.filter(edge => edge.to === node.id).forEach(edge => {
+                if (edge.from && edge.from !== edge.to && ['default', 'true', 'false'].includes(edge.route) && !node.dependsOn.includes(edge.from)) node.dependsOn.push(edge.from);
+            });
+        });
+        if (hasEdgeModel) nodes.forEach(node => (node.dependsOn || []).forEach(from => {
+            if (!edges.some(edge => edge.from === from && edge.to === node.id)) edges.push({ from, to: node.id, route: 'default' });
+        }));
+        return {
+            ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
+            nodes
+        };
     }
 
 function serialize(spec) {
@@ -177,8 +198,23 @@ function serialize(spec) {
         const layout = Object.fromEntries(spec.nodes
             .filter(node => Number.isFinite(node._x) && Number.isFinite(node._y))
             .map(node => [node.id, { x: clampDagCoordinate(node._x), y: clampDagCoordinate(node._y) }]));
-        return { nodes, layout };
-    }
+        const edges = Array.isArray(spec.edges)
+            ? spec.edges.map(edge => ({
+                from: String(edge?.from || '').trim(),
+                to: String(edge?.to || '').trim(),
+                route: String(edge?.route || 'default').toLowerCase() || 'default'
+            }))
+            : [];
+        const hasEdgeModel = Array.isArray(spec.edges) || spec.schemaVersion === 'pivot.dag.v2';
+        if (hasEdgeModel) nodes.forEach(node => (node.dependsOn || []).forEach(from => {
+            if (!edges.some(edge => edge.from === from && edge.to === node.id)) edges.push({ from, to: node.id, route: 'default' });
+        }));
+        return {
+            ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
+            nodes,
+            layout
+        };
+}
 
 function readJson(text) {
         const raw = String(text || '').trim();
@@ -341,8 +377,39 @@ function getUpstreamNodes(nodes = [], targetNodeId = '') {
     return nodes.filter(n => visited.has(String(n.id)));
 }
 
+function flattenVariableProperties(properties, prefix = '', max = 24) {
+    const result = [];
+    if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return result;
+    Object.entries(properties).forEach(([key, meta]) => {
+        if (result.length >= max) return;
+        const path = prefix ? `${prefix}.${key}` : key;
+        result.push({ path, meta: meta && typeof meta === 'object' ? meta : {} });
+        if (meta?.properties) result.push(...flattenVariableProperties(meta.properties, path, max - result.length));
+        if (meta?.type === 'array' && meta?.items?.properties) {
+            result.push(...flattenVariableProperties(meta.items.properties, `${path}.0`, max - result.length));
+        }
+    });
+    return result.slice(0, max);
+}
+
+function getNodeTestOutputSnapshots() {
+    const now = Date.now();
+    [...dagNodeTestOutputs.entries()].forEach(([nodeId, snapshot]) => {
+        if (snapshot?.expiresAt && Number(snapshot.expiresAt) <= now) dagNodeTestOutputs.delete(nodeId);
+    });
+    return new Map(dagNodeTestOutputs);
+}
+
+function setDagNodeTestOutput(nodeId, snapshot = {}) {
+    const key = String(nodeId || '').trim();
+    if (!key || !snapshot || typeof snapshot !== 'object') return false;
+    dagNodeTestOutputs.set(key, snapshot);
+    return true;
+}
+
 function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = []) {
     const upstream = getUpstreamNodes(nodes, targetNodeId);
+    const inputNodes = nodes.filter(node => node?.tool === 'workflow.input');
     const groups = [
         {
             group: '全局变量',
@@ -352,6 +419,23 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
             ]
         }
     ];
+    if (inputNodes.length) {
+        groups.push({
+            group: '工作流输入',
+            items: inputNodes.map(node => {
+                const input = node.input && typeof node.input === 'object' ? node.input : {};
+                const name = String(input.name || '').trim();
+                const label = String(input.label || name || node.title || node.id);
+                return {
+                    expression: name ? `{{inputs.${name}}}` : '{{inputs}}',
+                    label: `${label}${name ? ` (${name})` : ''}`,
+                    description: `${input.type || 'text'}${input.required ? ' · 必填' : ''}${input.description ? ` · ${input.description}` : ''}`,
+                    type: input.type || 'text',
+                    source: 'workflow_input'
+                };
+            }).filter(item => item.expression !== '{{inputs}}')
+        });
+    }
 
     if (upstream.length > 0) {
         upstream.forEach(upNode => {
@@ -365,11 +449,13 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
             const schema = upNode.outputSchema && typeof upNode.outputSchema === 'object' ? upNode.outputSchema : {};
             const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : null;
             if (props && Object.keys(props).length > 0) {
-                Object.entries(props).forEach(([propKey, propMeta]) => {
+                flattenVariableProperties(props).forEach(({ path, meta: propMeta }) => {
                     items.push({
-                        expression: `{{nodes.${nodeId}.output.${propKey}}}`,
-                        label: `${nodeTitle} · ${propMeta.title || propMeta.description || propKey}`,
-                        description: `类型: ${propMeta.type || 'any'}`
+                        expression: `{{nodes.${nodeId}.output.${path}}}`,
+                        label: `${nodeTitle} · ${propMeta.title || propMeta.description || path}`,
+                        description: `类型: ${propMeta.type || 'any'}`,
+                        type: propMeta.type || 'any',
+                        source: 'schema'
                     });
                 });
             } else {
@@ -386,7 +472,46 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
                 } else if (tool.startsWith('official_writing.')) {
                     items.push({ expression: `{{nodes.${nodeId}.output.content}}`, label: `${nodeTitle} · 公文正文 (content)`, description: '公文生成的正文文本' });
                     items.push({ expression: `{{nodes.${nodeId}.output.title}}`, label: `${nodeTitle} · 公文标题 (title)`, description: '公文拟定标题' });
+                } else if (tool === 'workflow.input') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.value}}`, label: `${nodeTitle} · 实际值 (value)`, description: '工作流输入的原始类型值', type: 'any', source: 'tool' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.text}}`, label: `${nodeTitle} · 文本值 (text)`, description: '工作流输入的文本表示', type: 'string', source: 'tool' });
+                } else if (tool === 'workflow.condition') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.matched}}`, label: `${nodeTitle} · 是否满足 (matched)`, description: '条件判断结果', type: 'boolean', source: 'tool' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.route}}`, label: `${nodeTitle} · 路由 (route)`, description: 'matched / unmatched', type: 'string', source: 'tool' });
+                } else if (tool === 'agent.http') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.statusCode}}`, label: `${nodeTitle} · 状态码 (statusCode)`, description: 'HTTP 响应状态码', type: 'integer', source: 'tool' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.data}}`, label: `${nodeTitle} · 响应数据 (data)`, description: 'HTTP 响应体', type: 'any', source: 'tool' });
+                    items.push({ expression: `{{nodes.${nodeId}.output.headers}}`, label: `${nodeTitle} · 响应头 (headers)`, description: 'HTTP 响应头', type: 'object', source: 'tool' });
+                } else if (tool === 'agent.merge') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.merged}}`, label: `${nodeTitle} · 聚合对象 (merged)`, description: '聚合后的对象，字段位于 merged 下', type: 'object', source: 'tool' });
+                    const fields = upNode.input?.fields && typeof upNode.input.fields === 'object' && !Array.isArray(upNode.input.fields)
+                        ? upNode.input.fields
+                        : {};
+                    Object.keys(fields).filter(key => /^[A-Za-z_][A-Za-z0-9_-]{0,79}$/.test(String(key))).slice(0, 24).forEach(key => {
+                        items.push({ expression: `{{nodes.${nodeId}.output.merged.${key}}}`, label: `${nodeTitle} · ${key}`, description: '变量聚合字段', type: 'any', source: 'tool' });
+                    });
+                } else if (tool === 'workflow.template') {
+                    items.push({ expression: `{{nodes.${nodeId}.output.text}}`, label: `${nodeTitle} · 模板文本 (text)`, description: '渲染后的文本', type: 'string', source: 'tool' });
                 }
+            }
+
+            const snapshot = getNodeTestOutputSnapshots().get(String(nodeId));
+            const sampleOutput = snapshot?.output;
+            const sampleObject = sampleOutput && typeof sampleOutput === 'object' ? sampleOutput : null;
+            const sampleProps = sampleObject && !Array.isArray(sampleObject)
+                ? (sampleObject.properties || sampleObject.structuredContent || sampleObject)
+                : null;
+            if (sampleProps && typeof sampleProps === 'object' && !Array.isArray(sampleProps)) {
+                flattenVariableProperties(Object.fromEntries(Object.entries(sampleProps).map(([key, value]) => [key, { type: typeof value, sample: value }])) , '', 12).forEach(({ path, meta }) => {
+                    if (items.some(item => item.expression === `{{nodes.${nodeId}.output.${path}}}`)) return;
+                    items.push({
+                        expression: `{{nodes.${nodeId}.output.${path}}}`,
+                        label: `${nodeTitle} · ${path}（测试样本）`,
+                        description: '来自最近一次节点测试的采样字段，不替代输出契约',
+                        type: meta.type || 'any',
+                        source: 'sample'
+                    });
+                });
             }
 
             groups.push({
@@ -482,6 +607,7 @@ if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
     window.Pivot.registerModule('agent.dagCore', {
         getUpstreamNodes,
         getAvailableVariableOptions,
+        setDagNodeTestOutput,
         alignNodes
     });
 }
@@ -508,6 +634,7 @@ if (typeof module !== 'undefined' && module.exports) {
         readJson,
         getUpstreamNodes,
         getAvailableVariableOptions,
+        setDagNodeTestOutput,
         alignNodes
     };
 }

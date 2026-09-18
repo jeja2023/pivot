@@ -26,6 +26,8 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'agent.browser': ['network.browser_visit'],
     'agent.merge': ['agent.execute'],
     'workflow.input': ['workflow.control'],
+    'workflow.template': ['workflow.control'],
+    'workflow.notify': ['network.http_request'],
     'workflow.output': ['workflow.control'],
     'workflow.condition': ['workflow.control'],
     'workflow.approval': ['workflow.approval'],

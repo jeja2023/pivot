@@ -55,6 +55,8 @@ const agentToolDisplayMap = {
     'agent.browser': { title: '浏览器自动化', description: '在受控浏览器沙箱中打开目标页面并提取关键内容。' },
     'agent.merge': { title: '变量聚合', description: '把多个上游节点的输出合并为一个结构化对象。' },
     'workflow.input': { title: '工作流输入', description: '声明并读取运行参数，支持类型转换与默认值。' },
+    'workflow.template': { title: '文本模板', description: '使用工作流变量拼接确定性文本，不调用模型。' },
+    'workflow.notify': { title: '受控通知', description: '通过已配置的企业微信、飞书或钉钉渠道绑定排队发送通知。' },
     'workflow.output': { title: '工作流输出', description: '声明工作流最终输出，便于按名称读取交付结果。' },
     'workflow.condition': { title: '条件路由', description: '比较输入值并返回匹配路由，供下游条件分支引用。' },
     'workflow.approval': { title: '人工审批', description: '暂停工作流等待指定人员审批，支持多级审批与超时策略。' },

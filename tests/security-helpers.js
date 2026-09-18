@@ -623,6 +623,7 @@ function createAgentWorkbenchSandbox() {
         'agent-run-step-renderers.js',
         'agent-run-visuals.js',
         'agent-run-loaders.js',
+        'agent-run-dag-focus.js',
         'agent-run-detail.js',
         'agent-run-realtime.js',
         'agent-run-actions.js',

@@ -396,7 +396,7 @@ test('workflow node presets are organized into approved 6 business categories', 
     ]);
 
     const totalPresets = groups.reduce((sum, g) => sum + g.items.length, 0);
-    assert.equal(totalPresets, 43);
+    assert.equal(totalPresets, 48);
 
     // 验证各分类预设节点数量
     const counts = Object.fromEntries(groups.map(g => [g.group, g.items.length]));
@@ -404,6 +404,6 @@ test('workflow node presets are organized into approved 6 business categories', 
     assert.equal(counts['AI 与智能体'], 4);
     assert.equal(counts['知识与检索'], 6);
     assert.equal(counts['数据与文档'], 11);
-    assert.equal(counts['流程与控制'], 9);
+    assert.equal(counts['流程与控制'], 14);
     assert.equal(counts['呈现与多媒体'], 10);
 });

@@ -64,8 +64,19 @@
     /**
      * 工作流静态体检与拓扑死锁/孤立节点自检 (Preflight Graph Linting)
      */
-    function lintDagGraph(nodes = []) {
-        const list = Array.isArray(nodes) ? nodes : [];
+    function normalizeGraphInput(value) {
+        if (Array.isArray(value)) return { nodes: value, edges: [] };
+        if (value && typeof value === 'object') return {
+            nodes: Array.isArray(value.nodes) ? value.nodes : [],
+            edges: Array.isArray(value.edges) ? value.edges : []
+        };
+        return { nodes: [], edges: [] };
+    }
+
+    function lintDagGraph(value = []) {
+        const graph = normalizeGraphInput(value);
+        const list = graph.nodes;
+        const edges = graph.edges;
         const errors = [];
         const warnings = [];
 
@@ -86,6 +97,34 @@
             (n.dependsOn || []).forEach(depId => {
                 outDegrees.set(depId, (outDegrees.get(depId) || 0) + 1);
             });
+        });
+
+        const routeTargets = new Map();
+        edges.forEach(edge => {
+            const from = String(edge?.from || '').trim();
+            const to = String(edge?.to || '').trim();
+            const route = String(edge?.route || 'default').trim().toLowerCase();
+            if (!nodeMap.has(from) || !nodeMap.has(to)) {
+                errors.push({ type: 'invalid_route_edge', nodeId: to || from, message: `路由边引用了不存在的节点：${from} → ${to}` });
+            }
+            if (!['default', 'true', 'false'].includes(route)) {
+                errors.push({ type: 'invalid_route', nodeId: to || from, message: `路由边分支无效：${route}` });
+            }
+            if (route !== 'default' && nodeMap.get(from)?.tool !== 'workflow.condition') {
+                errors.push({ type: 'invalid_route_source', nodeId: from, message: `只有条件节点才能使用 True/False 路由：${from}` });
+            }
+            const key = `${from}→${to}`;
+            if (!routeTargets.has(key)) routeTargets.set(key, new Set());
+            routeTargets.get(key).add(route);
+            const target = nodeMap.get(to);
+            if (target && !(target.dependsOn || []).includes(from)) {
+                warnings.push({ type: 'route_dependency_mismatch', nodeId: to, message: `路由边 ${from} → ${to} 未同步到 dependsOn。` });
+            }
+        });
+        routeTargets.forEach((routes, key) => {
+            if (routes.has('true') && routes.has('false')) {
+                errors.push({ type: 'ambiguous_routes', nodeId: key.split('→')[1], message: `同一目标不能同时连接 True 和 False 路由：${key}` });
+            }
         });
 
         // 1. 循环依赖检测
@@ -123,7 +162,11 @@
             });
 
             // 4. 输入参数中的模板变量引用自检
-            const referencedNodes = extractNodeIdReferences(node.input);
+            const whenReference = node.when?.source ? `{{${String(node.when.source).trim()}}}` : '';
+            const referencedNodes = [...new Set([
+                ...extractNodeIdReferences(node.input),
+                ...extractNodeIdReferences(whenReference)
+            ])];
             referencedNodes.forEach(refId => {
                 if (!nodeMap.has(refId)) {
                     errors.push({
@@ -161,8 +204,10 @@
      * 工作流版本对比 (Workflow Version Diff)
      */
     function computeDagDiff(v1Nodes = [], v2Nodes = []) {
-        const list1 = Array.isArray(v1Nodes) ? v1Nodes : [];
-        const list2 = Array.isArray(v2Nodes) ? v2Nodes : [];
+        const graph1 = normalizeGraphInput(v1Nodes);
+        const graph2 = normalizeGraphInput(v2Nodes);
+        const list1 = graph1.nodes;
+        const list2 = graph2.nodes;
 
         const map1 = new Map(list1.map(n => [n.id, n]));
         const map2 = new Map(list2.map(n => [n.id, n]));
@@ -171,6 +216,7 @@
         const removed = [];
         const modified = [];
         const dependencyChanges = [];
+        const routeChanges = [];
 
         list2.forEach(n2 => {
             if (!map1.has(n2.id)) {
@@ -217,15 +263,20 @@
             }
         });
 
-        const hasDifferences = added.length > 0 || removed.length > 0 || modified.length > 0 || dependencyChanges.length > 0;
+        const routes1 = JSON.stringify(graph1.edges.map(edge => ({ from: edge.from, to: edge.to, route: edge.route || 'default' })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+        const routes2 = JSON.stringify(graph2.edges.map(edge => ({ from: edge.from, to: edge.to, route: edge.route || 'default' })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+        if (routes1 !== routes2) routeChanges.push({ from: graph1.edges, to: graph2.edges });
+
+        const hasDifferences = added.length > 0 || removed.length > 0 || modified.length > 0 || dependencyChanges.length > 0 || routeChanges.length > 0;
 
         return {
             hasDifferences,
-            summary: `新增 ${added.length} 个节点，删除 ${removed.length} 个节点，修改 ${modified.length} 个节点，调整连线 ${dependencyChanges.length} 处`,
+            summary: `新增 ${added.length} 个节点，删除 ${removed.length} 个节点，修改 ${modified.length} 个节点，调整连线 ${dependencyChanges.length + routeChanges.length} 处`,
             added,
             removed,
             modified,
-            dependencyChanges
+            dependencyChanges,
+            routeChanges
         };
     }
 
@@ -248,8 +299,9 @@
             _y: Math.round(Number(n._y) || 0)
         }));
 
+        const edges = Array.isArray(spec.edges) ? spec.edges.map(edge => ({ from: edge.from, to: edge.to, route: edge.route || 'default' })) : [];
         return {
-            schemaVersion: 'pivot.dag.v1',
+            schemaVersion: edges.length ? 'pivot.dag.v2' : 'pivot.dag.v1',
             exportedAt: new Date().toISOString(),
             metadata: {
                 name: metadata.name || '导出工作流',
@@ -258,7 +310,8 @@
             },
             spec: {
                 cacheEnabled: spec.cacheEnabled !== false,
-                nodes: cleanNodes
+                nodes: cleanNodes,
+                ...(edges.length ? { edges } : {})
             }
         };
     }
@@ -288,7 +341,8 @@
         }
 
         // 执行静态体检
-        const lint = lintDagGraph(nodes);
+        const edges = Array.isArray(parsed?.spec?.edges) ? parsed.spec.edges : (Array.isArray(parsed?.edges) ? parsed.edges : []);
+        const lint = lintDagGraph({ nodes, edges });
         if (!lint.valid) {
             return {
                 ok: false,
@@ -300,16 +354,22 @@
             ok: true,
             spec: {
                 cacheEnabled: parsed.spec?.cacheEnabled !== false,
-                nodes
+                nodes,
+                ...(edges.length ? { schemaVersion: 'pivot.dag.v2', edges } : {})
             },
             metadata: parsed.metadata || {},
             warnings: lint.warnings
         };
     }
 
+    function validateWorkflowRoutes(nodes = [], edges = []) {
+        return lintDagGraph({ nodes, edges });
+    }
+
     if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
         window.Pivot.registerModule('agent.dagGovernance', {
             lintDagGraph,
+            validateWorkflowRoutes,
             computeDagDiff,
             exportDagWorkflowSpec,
             importDagWorkflowSpec

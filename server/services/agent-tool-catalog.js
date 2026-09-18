@@ -25,6 +25,7 @@ async function formatToolList(user, options = {}) {
         title: tool.title,
         description: tool.description,
         input_schema: tool.input_schema,
+        ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
         source: 'builtin',
         risk: 'low',
         // 工具契约里显式声明的 capabilities 必须透传，否则 normalizeToolContract 会退回登记表结果，
@@ -32,7 +33,16 @@ async function formatToolList(user, options = {}) {
         ...(Array.isArray(tool.capabilities) ? { capabilities: tool.capabilities } : {}),
         requiresApproval: Boolean(tool.alwaysRequiresApproval),
         alwaysRequiresApproval: Boolean(tool.alwaysRequiresApproval),
-        ...(tool.requiresSandbox ? { requiresSandbox: true, sandboxAvailable: false } : {}),
+        ...(tool.side_effect !== undefined ? { side_effect: Boolean(tool.side_effect) } : {}),
+        ...(tool.network !== undefined ? { network: Boolean(tool.network) } : {}),
+        ...(tool.idempotent !== undefined ? { idempotent: Boolean(tool.idempotent) } : {}),
+        ...(tool.cancellable !== undefined ? { cancellable: Boolean(tool.cancellable) } : {}),
+        ...(tool.concurrency !== undefined ? { concurrency: tool.concurrency } : {}),
+        ...(tool.timeout && typeof tool.timeout === 'object' ? { timeout: tool.timeout } : {}),
+        ...(tool.requiresSandbox ? {
+            requiresSandbox: true,
+            sandboxAvailable: tool.name === 'workflow.foreach' && String(process.env.AGENT_FOREACH_WORKER_ENABLED || 'true').toLowerCase() !== 'false'
+        } : {}),
         admin: Boolean(tool.admin)
     })).filter(tool => isAllowed(tool.name, 'builtin'));
     // 内置工具已统一提供 viz.build_chart 等能力；当用户另外添加了系统可视化等内置 MCP 服务时，
@@ -53,6 +63,7 @@ async function formatToolList(user, options = {}) {
             title: tool.title || tool.name,
             description: `[${tool.serverName}] ${tool.description || tool.name}`,
             input_schema: tool.input_schema,
+            ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
             source: 'mcp',
             risk: tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high'),
             requiresApproval: Boolean(tool.localBrowserConnector === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
@@ -78,7 +89,7 @@ async function formatToolList(user, options = {}) {
             network: contract.network,
             approval_required: contract.approval_required,
             timeout: contract.timeout,
-            output_schema: contract.output_schema
+            ...(tool.output_schema || tool.outputSchema ? { output_schema: contract.output_schema } : {})
         };
     });
 }

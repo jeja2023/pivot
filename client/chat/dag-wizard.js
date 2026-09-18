@@ -28,6 +28,14 @@ function createDagWizardController(ctx) {
             }
             const templateInput = buildToolInputTemplate(tool);
             const currentInput = cloneDagInput(node.input);
+            // 变量来源仅保存在向导局部副本，避免把会话对象挂到可持久化的节点上。
+            const referenceNode = {
+                ...node,
+                _workflowNodes: ctx.spec.nodes,
+                _workflowInputNodes: ctx.spec.nodes
+                .filter(item => item?.tool === 'workflow.input' && item.id !== node.id)
+                .map(item => ({ id: item.id, title: item.title, tool: item.tool, input: cloneDagInput(item.input) }))
+            };
             if (tool?.databaseTool && !databaseConnectionInputValue(currentInput)) {
                 const legacyConnectionId = databaseConnectionIdFromToolValue(node.tool);
                 if (legacyConnectionId) currentInput.connectionId = legacyConnectionId;
@@ -72,7 +80,7 @@ function createDagWizardController(ctx) {
                         </div>
                         <aside class="pivot-dag-wizard-sources">
                             <div class="pivot-dag-wizard-sources-title">变量引用</div>
-                            ${renderWizardFieldSources(node, dependencyNodes)}
+                            ${renderWizardFieldSources(referenceNode, dependencyNodes)}
                         </aside>
                     </div>
                     <div class="agent-workflow-create-actions pivot-dag-wizard-actions">

@@ -73,14 +73,18 @@ function createDagInteractionController(ctx) {
             if (!node) return;
             const ghost = makeSvgEl('path', { class: 'pivot-dag-edge pivot-dag-edge-ghost' });
             ctx.edgesLayer.appendChild(ghost);
-            connecting = { fromId: node.id, ghost };
+            connecting = { fromId: node.id, route: String(target.dataset.pivotDagRoute || 'default'), ghost };
             ctx.root.setPointerCapture?.(event.pointerId);
             return;
         }
         const edge = target.closest?.('[data-pivot-dag-edge-to]');
         if (edge) {
             event.preventDefault();
-            ctx.selectedEdge = { fromId: edge.dataset.pivotDagEdgeFrom, toId: edge.dataset.pivotDagEdgeTo };
+            ctx.selectedEdge = {
+                fromId: edge.dataset.pivotDagEdgeFrom,
+                toId: edge.dataset.pivotDagEdgeTo,
+                route: edge.dataset.pivotDagEdgeRoute || 'default'
+            };
             ctx.render();
             return;
         }
@@ -127,7 +131,7 @@ function createDagInteractionController(ctx) {
             if (!node) return;
             const pointer = pointFromEvent(event);
             const startX = node._x + NODE_WIDTH;
-            const startY = node._y + NODE_HEIGHT / 2;
+            const startY = node._y + NODE_HEIGHT / 2 + (connecting.route === 'true' ? -9 : connecting.route === 'false' ? 9 : 0);
             connecting.ghost.setAttribute('d', `M ${startX},${startY} C ${startX + 60},${startY} ${pointer.x - 60},${pointer.y} ${pointer.x},${pointer.y}`);
             return;
         }
@@ -177,11 +181,40 @@ function createDagInteractionController(ctx) {
             const targetId = inPort?.dataset?.pivotDagId;
             if (targetId && targetId !== connecting.fromId) {
                 const targetNode = ctx.spec.nodes.find(item => item.id === targetId);
-                if (targetNode && !targetNode.dependsOn.includes(connecting.fromId)) {
+                if (targetNode && (!targetNode.dependsOn.includes(connecting.fromId) || connecting.route !== 'default')) {
                     if (ctx.wouldCreateCycle(connecting.fromId, targetId)) window.Pivot.legacy.showToast?.('不能添加循环依赖', 'error');
                     else {
+                        const oppositeRoute = connecting.route === 'true' ? 'false' : connecting.route === 'false' ? 'true' : '';
+                        if (oppositeRoute && Array.isArray(ctx.spec.edges)
+                            && ctx.spec.edges.some(edge => edge.from === connecting.fromId && edge.to === targetId && edge.route === oppositeRoute)) {
+                            window.Pivot.legacy.showToast?.('同一目标不能同时连接条件节点的 True 和 False 路由', 'warning');
+                            connecting.ghost.remove();
+                            connecting = null;
+                            ctx.render();
+                            return;
+                        }
                         ctx.recordHistory();
-                        targetNode.dependsOn.push(connecting.fromId);
+                        if (!targetNode.dependsOn.includes(connecting.fromId)) targetNode.dependsOn.push(connecting.fromId);
+                        if (connecting.route !== 'default' || Array.isArray(ctx.spec.edges)) {
+                            if (!Array.isArray(ctx.spec.edges)) {
+                                ctx.spec.edges = ctx.spec.nodes.flatMap(candidate => (candidate.dependsOn || [])
+                                    .filter(dep => !(dep === connecting.fromId && candidate.id === targetId && connecting.route !== 'default'))
+                                    .map(dep => ({ from: dep, to: candidate.id, route: 'default' })));
+                            }
+                            const oppositeRoute = connecting.route === 'true' ? 'false' : connecting.route === 'false' ? 'true' : '';
+                            if (oppositeRoute && ctx.spec.edges.some(edge => edge.from === connecting.fromId && edge.to === targetId && edge.route === oppositeRoute)) {
+                                window.Pivot.legacy.showToast?.('同一目标不能同时连接条件节点的 True 和 False 路由', 'error');
+                                connecting.ghost.remove();
+                                connecting = null;
+                                ctx.render();
+                                return;
+                            }
+                            if (connecting.route !== 'default') {
+                                ctx.spec.edges = ctx.spec.edges.filter(edge => !(edge.from === connecting.fromId && edge.to === targetId && edge.route === 'default'));
+                            }
+                            const exists = ctx.spec.edges.some(edge => edge.from === connecting.fromId && edge.to === targetId && edge.route === connecting.route);
+                            if (!exists) ctx.spec.edges.push({ from: connecting.fromId, to: targetId, route: connecting.route });
+                        }
                         clampDependsOn(ctx.spec.nodes);
                         ctx.flushOut();
                     }

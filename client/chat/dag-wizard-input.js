@@ -155,6 +155,17 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
         };
 
         const buildWizardReferenceGroups = (node, dependencyNodes = buildWizardDependencyNodes(node)) => {
+            const getOptions = typeof window !== 'undefined'
+                ? (window.Pivot?.moduleApi?.('agent.dagCore')?.getAvailableVariableOptions || window.Pivot?.legacy?.getAvailableVariableOptions)
+                : null;
+            const workflowNodes = Array.isArray(node?._workflowNodes) ? node._workflowNodes : [];
+            if (typeof getOptions === 'function' && workflowNodes.length) {
+                return getOptions(workflowNodes, node.id).map(group => ({
+                    label: group.group,
+                    note: group.group === '工作流输入' ? '来自画布上的输入节点。' : '',
+                    tokens: (group.items || []).map(item => ({ label: item.label, token: item.expression }))
+                }));
+            }
             const groups = [
                 {
                     label: '运行上下文',
@@ -165,6 +176,19 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
                     ]
                 }
             ];
+            const inputNodes = Array.isArray(node?._workflowInputNodes) ? node._workflowInputNodes : [];
+            if (inputNodes.length) {
+                groups.push({
+                    label: '工作流输入',
+                    note: '来自画布上的输入节点，可直接插入运行参数引用。',
+                    tokens: inputNodes.map(inputNode => {
+                        const input = inputNode.input && typeof inputNode.input === 'object' ? inputNode.input : {};
+                        const name = String(input.name || '').trim();
+                        if (!name) return null;
+                        return { label: `${input.label || name}（${name}）`, token: `{{inputs.${name}}}` };
+                    }).filter(Boolean)
+                });
+            }
             if (dependencyNodes.length) {
                 dependencyNodes.forEach(depNode => {
                     const depLabel = depNode.title || depNode.id;
@@ -175,8 +199,6 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
                         tokens: [
                             { label: '完整结果', token: `{{nodes.${depNode.id}.output}}` },
                             { label: '结构化结果', token: `{{nodes.${depNode.id}.output.structuredContent}}` },
-                            { label: '结果行', token: `{{nodes.${depNode.id}.output.rows}}` },
-                            { label: '结构化行', token: `{{nodes.${depNode.id}.output.structuredContent.rows}}` },
                             { label: '状态', token: `{{nodes.${depNode.id}.status}}` },
                             { label: '错误', token: `{{nodes.${depNode.id}.error}}` },
                             ...schemaTokens
@@ -206,12 +228,17 @@ const isWizardFieldRelevant = (name, input = {}, tool = null) => {
             const primaryDep = dependencyNodes[0];
             if (primaryDep) {
                 const depLabel = primaryDep.title || primaryDep.id;
-                suggestions.push(isListLike
-                    ? { label: `${depLabel} 结果行`, token: `{{nodes.${primaryDep.id}.output.rows}}` }
+                const tool = String(primaryDep.tool || '');
+                const properties = primaryDep.outputSchema?.properties && typeof primaryDep.outputSchema.properties === 'object'
+                    ? primaryDep.outputSchema.properties
+                    : {};
+                const firstArrayField = Object.entries(properties).find(([, meta]) => meta?.type === 'array')?.[0] || '';
+                const preferredField = isListLike
+                    ? (firstArrayField || (tool.startsWith('db.') ? 'rows' : tool === 'agent.http' ? 'data' : tool === 'workflow.foreach' ? 'items' : tool === 'workflow.output' ? 'table.rows' : ''))
+                    : (tool === 'workflow.input' ? 'value' : tool === 'workflow.condition' ? 'matched' : tool === 'agent.http' ? 'data' : tool === 'agent.merge' ? 'merged' : tool === 'workflow.template' || tool === 'agent.llm' ? 'text' : '');
+                suggestions.push(preferredField
+                    ? { label: `${depLabel} · ${preferredField}`, token: `{{nodes.${primaryDep.id}.output.${preferredField}}}` }
                     : { label: `${depLabel} 完整结果`, token: `{{nodes.${primaryDep.id}.output}}` });
-                suggestions.push(isListLike
-                    ? { label: `${depLabel} 结构化行`, token: `{{nodes.${primaryDep.id}.output.structuredContent.rows}}` }
-                    : { label: `${depLabel} 结构化结果`, token: `{{nodes.${primaryDep.id}.output.structuredContent}}` });
                 buildSchemaReferenceTokens(primaryDep, 12).forEach(item => {
                     suggestions.push({ label: `${depLabel} · ${item.label}`, token: item.token });
                 });

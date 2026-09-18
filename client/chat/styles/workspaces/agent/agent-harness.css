@@ -3371,7 +3371,7 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 .agent-channel-form-row {
     display: grid;
-    grid-template-columns: 160px 1fr 160px 1fr;
+    grid-template-columns: 130px 130px 1fr 160px 1fr;
     gap: 8px;
     align-items: end;
 }
@@ -3777,4 +3777,3 @@ body.dark-mode .agent-goal-template-chip .chip-name,
 .dark-mode .agent-goal-template-chip .chip-name {
     color: #f8fafc;
 }
-

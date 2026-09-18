@@ -95,6 +95,10 @@ const FIELD_LABEL_OVERRIDES = {
         target_type: '接收对象类型',
         temperature: '随机性',
         text: '文本内容',
+        template: '文本模板',
+        trim: '清除首尾空白',
+        missingVariable: '缺失变量处理',
+        missing_variable: '缺失变量处理',
         title: '标题',
         task: '委派任务',
         tools: '工具列表',
@@ -338,6 +342,10 @@ const FIELD_DESCRIPTION_OVERRIDES = {
         target_type: '选择目标是用户还是群组。',
         temperature: '控制模型回复随机性，数值越高越发散。',
         text: '待处理的普通文本或格式化内容。',
+        template: '支持工作流变量的文本模板。',
+        trim: '清除首尾空白',
+        missingVariable: '缺失变量处理方式',
+        missing_variable: '缺失变量处理方式',
         title: '输出内容、图表、报告或消息标题。',
         tools: '可供模型或下游步骤调用的工具列表，填写结构化数组。',
         topK: '最终返回给下游节点的片段数量。',
@@ -376,6 +384,14 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             value: '通常引用上游节点结果，再选择判断方式。',
             operator: '选择要使用的判断方式。',
             compareTo: '仅在等于、包含或大小比较时填写。'
+        },
+        'workflow.template': {
+            template: '可混排 {{goal}}、{{inputs.*}} 和上游节点输出；不调用模型。',
+            trim: '开启后自动清除最终文本首尾空白。',
+            missingVariable: '保留表示继续显示未解析变量；为空表示替换为空文本；报错会阻止运行。'
+        },
+        'workflow.notify': {
+            bindingId: '渠道绑定', platform: '通知平台', subject: '通知标题', body: '通知正文', format: '消息格式'
         },
         'reports.read_file_summary': {
             path: '选择或填写允许访问目录中的报表文件。',

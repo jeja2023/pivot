@@ -283,10 +283,36 @@ const NODE_PRESET_GROUPS = [
             },
             {
                 base: 'merge', title: '变量聚合', iconText: '+', theme: 'merge',
-                advanced: true,
                 desc: '把多个上游输出映射为统一对象', toolName: 'agent.merge',
                 getInput: ({ selectedNode }) => ({ fields: selectedNode ? { [selectedNode.id]: `{{nodes.${selectedNode.id}.output}}` } : {} }),
                 outputSchema: { type: 'object', properties: { merged: { type: 'object' }, keys: { type: 'array' }, count: { type: 'integer' } } }
+            },
+            {
+                base: 'template', title: '文本模板', svgIcon: 'file-text', theme: 'format',
+                desc: '使用变量拼接确定性文本，不调用模型', toolName: 'workflow.template',
+                getInput: ({ selectedNode }) => ({ template: selectedNode ? `{{nodes.${selectedNode.id}.output.text}}` : '{{goal}}', trim: true, missingVariable: 'keep' }),
+                outputSchema: { type: 'object', required: ['text', 'charCount', 'missingVariables'], properties: { text: { type: 'string' }, charCount: { type: 'integer' }, missingVariables: { type: 'array', items: { type: 'string' } } } }
+            },
+            {
+                base: 'notify', title: '受控通知', svgIcon: 'message', theme: 'http',
+                desc: '通过已配置的企业微信、飞书或钉钉渠道发送通知', toolName: 'workflow.notify',
+                input: { bindingId: '', platform: 'wecom', subject: '', body: '{{goal}}', format: 'text' },
+                outputSchema: { type: 'object', required: ['queued', 'deliveryId', 'bindingId', 'status', 'platform', 'idempotencyKey'], properties: { queued: { type: 'boolean' }, deliveryId: { type: 'integer' }, bindingId: { type: 'string' }, status: { type: 'string' }, platform: { type: 'string' }, idempotencyKey: { type: 'string' } } }
+            },
+            {
+                base: 'im_markdown', title: '发送 Markdown 通知', svgIcon: 'message', theme: 'http',
+                desc: '使用已配置且允许的 IM 目标发送 Markdown 通知', patterns: ['im.send_markdown'],
+                input: { target: '', targetType: 'group', title: '', markdown: '{{goal}}' }
+            },
+            {
+                base: 'im_message', title: '发送群组消息', svgIcon: 'message', theme: 'http',
+                desc: '向已配置且允许的 IM 群组发送文本消息', patterns: ['im.send_group_message'],
+                input: { target: '', title: '', message: '{{goal}}' }
+            },
+            {
+                base: 'im_user_message', title: '发送用户消息', svgIcon: 'message', theme: 'http',
+                desc: '向已配置且允许的 IM 用户发送文本消息', patterns: ['im.send_user_message'],
+                input: { target: '', title: '', message: '{{goal}}' }
             },
             {
                 base: 'subworkflow', title: '子工作流', svgIcon: 'workflow', theme: 'subflow',
@@ -298,8 +324,8 @@ const NODE_PRESET_GROUPS = [
                 base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',
                 advanced: true, requiresSandbox: true,
                 desc: '需独立受控 Worker 沙箱，服务端不会直接执行循环代码', toolName: 'workflow.foreach',
-                getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true }),
-                outputSchema: { type: 'object', required: ['items', 'count'], properties: { items: { type: 'array' }, count: { type: 'integer' }, errors: { type: 'array' } } }
+                getInput: ({ selectedNode }) => ({ items: selectedNode ? `{{nodes.${selectedNode.id}.output}}` : [], code: 'return item;', concurrency: 4, stopOnError: true, retryLimit: 0, itemTimeoutMs: 1000 }),
+                outputSchema: { type: 'object', required: ['items', 'count', 'inputCount', 'errors', 'audit'], properties: { items: { type: 'array' }, count: { type: 'integer' }, inputCount: { type: 'integer' }, errors: { type: 'array' }, stoppedOnError: { type: 'boolean' }, audit: { type: 'object' } } }
             },
             {
                 base: 'delay', title: '延时', svgIcon: 'clock', theme: 'delay',

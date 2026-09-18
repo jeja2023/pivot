@@ -277,6 +277,9 @@ function normalizeDagSpec(value) {
     const rawLayout = !Array.isArray(parsed) && parsed?.layout && typeof parsed.layout === 'object' && !Array.isArray(parsed.layout)
         ? parsed.layout
         : {};
+    const rawEdges = !Array.isArray(parsed) && Array.isArray(parsed?.edges) ? parsed.edges : [];
+    const requestedSchemaVersion = String(parsed?.schemaVersion || parsed?.schema_version || '').trim();
+    const hasEdgeModel = rawEdges.length > 0 || requestedSchemaVersion === 'pivot.dag.v2';
     const nodes = rawNodes.map((node, index) => {
         const key = String(node.id || node.key || `node_${index + 1}`).trim().replace(/[^\w.-]/g, '_').slice(0, 60) || `node_${index + 1}`;
         const dependsOn = Array.isArray(node.dependsOn || node.depends_on)
@@ -314,10 +317,32 @@ function normalizeDagSpec(value) {
         .filter(node => node._layout)
         .map(node => [node.id, node._layout]));
     const cleanNodes = nodes.map(({ _layout, ...node }) => node);
-    return {
+    const edges = rawEdges.slice(0, MAX_DAG_NODES * MAX_DAG_DEPENDENCIES).map(edge => {
+        const from = String(edge?.from ?? edge?.source ?? '').trim();
+        const to = String(edge?.to ?? edge?.target ?? '').trim();
+        const route = String(edge?.route ?? 'default').trim().toLowerCase() || 'default';
+        return { from, to, route };
+    });
+    const nodeById = new Map(nodes.map(node => [node.id, node]));
+    edges.forEach(edge => {
+        const target = nodeById.get(edge.to);
+        if (!target || !edge.from || edge.from === edge.to || !['default', 'true', 'false'].includes(edge.route)) return;
+        if (!target.dependsOn.includes(edge.from)) target.dependsOn.push(edge.from);
+    });
+    if (hasEdgeModel) {
+        nodes.forEach(node => (node.dependsOn || []).forEach(from => {
+            if (!edges.some(edge => edge.from === from && edge.to === node.id)) edges.push({ from, to: node.id, route: 'default' });
+        }));
+    }
+    const result = {
         nodes: cleanNodes,
         layout
     };
+    if (hasEdgeModel) {
+        result.schemaVersion = 'pivot.dag.v2';
+        result.edges = edges;
+    }
+    return result;
 }
 
 function inspectDagTopology(value) {
@@ -331,6 +356,33 @@ function inspectDagTopology(value) {
     nodes.forEach(node => counts.set(node.id, (counts.get(node.id) || 0) + 1));
     [...counts.entries()].filter(([, count]) => count > 1).forEach(([id]) => blockers.push(`节点 ID 重复：${id}`));
     const ids = new Set(nodes.map(node => node.id));
+    const edges = Array.isArray(dag.edges) ? dag.edges : [];
+    const seenEdges = new Set();
+    edges.forEach(edge => {
+        const from = String(edge?.from || '').trim();
+        const to = String(edge?.to || '').trim();
+        const route = String(edge?.route || 'default').trim().toLowerCase();
+        const key = `${from}\u0000${to}\u0000${route}`;
+        if (seenEdges.has(key)) blockers.push(`存在重复路由边：${from} → ${to}（${route}）`);
+        seenEdges.add(key);
+        if (!from || !to) blockers.push('路由边必须指定来源节点和目标节点。');
+        if (from && from === to) blockers.push(`路由边不能连接节点自身：${from}`);
+        if (!ids.has(from) || !ids.has(to)) blockers.push(`路由边引用了不存在的节点：${from} → ${to}`);
+        if (!['default', 'true', 'false'].includes(route)) blockers.push(`路由边使用了不支持的分支：${route}`);
+        const sourceNode = nodes.find(node => node.id === from);
+        if (route !== 'default' && sourceNode?.tool !== 'workflow.condition') {
+            blockers.push(`只有条件节点才能使用 True/False 路由：${from}`);
+        }
+    });
+    const routeTargets = new Map();
+    edges.forEach(edge => {
+        const key = `${edge.from}\u0000${edge.to}`;
+        if (!routeTargets.has(key)) routeTargets.set(key, new Set());
+        routeTargets.get(key).add(String(edge.route || 'default'));
+    });
+    routeTargets.forEach((routes, key) => {
+        if (routes.has('true') && routes.has('false')) blockers.push(`同一目标不能同时连接条件节点的 True 和 False 路由：${key.replace('\u0000', ' → ')}`);
+    });
     nodes.forEach(node => {
         if (!String(node.tool || '').trim()) blockers.push(`节点“${node.title || node.id}”未选择工具。`);
         const dependencies = Array.isArray(node.dependsOn) ? node.dependsOn : [];

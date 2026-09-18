@@ -37,6 +37,8 @@ const {
     executeWorkflowEmbedCode,
     executeWorkflowForeach,
     executeWorkflowInput,
+    executeWorkflowNotify,
+    executeWorkflowTemplate,
     executeWorkflowLinkCard,
     executeWorkflowOutput,
     getWorkflowPresentationToolDefinitions,
@@ -51,8 +53,10 @@ const MAX_TEXT = 12000;
 // 都必须在这里统一拒绝，不能依赖调用方自行传入 autonomous 标志。
 const IN_PROCESS_DYNAMIC_CODE_TOOLS = new Set(['agent.code', 'workflow.foreach']);
 
-function assertDynamicCodeExecutionIsSandboxed(toolName) {
-    if (!IN_PROCESS_DYNAMIC_CODE_TOOLS.has(String(toolName || '').trim())) return;
+function assertDynamicCodeExecutionIsSandboxed(toolName, context = {}) {
+    const name = String(toolName || '').trim();
+    if (!IN_PROCESS_DYNAMIC_CODE_TOOLS.has(name)) return;
+    if (name === 'workflow.foreach' && context.sandboxExecution === true && context.approvalGranted === true) return;
     const error = new Error('动态代码只能在独立 Worker 沙箱中执行，当前服务端执行入口已拒绝。');
     error.code = 'AGENT_SANDBOX_REQUIRED';
     error.category = 'policy';
@@ -186,7 +190,15 @@ function getBuiltInToolDefinitions(user) {
                 credentialPrefix: { type: 'string', default: 'Bearer ', description: '凭据值前缀。' },
                 body: { type: 'object', description: 'POST/PUT/PATCH 的 JSON 请求体。' },
                 timeoutMs: { type: 'integer', minimum: 1000, maximum: 30000, default: 10000 }
-            }, ['url'])
+            }, ['url']),
+            output_schema: {
+                type: 'object',
+                required: ['statusCode', 'ok', 'headers', 'data', 'text'],
+                properties: {
+                    statusCode: { type: 'integer' }, ok: { type: 'boolean' },
+                    headers: { type: 'object' }, data: {}, text: { type: 'string' }
+                }
+            }
         },
         {
             name: 'agent.browser',
@@ -208,7 +220,14 @@ function getBuiltInToolDefinitions(user) {
             description: '把多个上游节点的输出合并成一个对象，便于下游节点用统一的字段名引用。',
             input_schema: asJsonSchema({
                 fields: { type: 'object', description: '字段映射，键为目标字段名，值支持 {{nodes.*.output}} 模板引用。' }
-            })
+            }),
+            output_schema: {
+                type: 'object',
+                required: ['merged', 'keys', 'count'],
+                properties: {
+                    merged: { type: 'object' }, keys: { type: 'array', items: { type: 'string' } }, count: { type: 'integer' }
+                }
+            }
         },
         {
             name: 'workflow.input',
@@ -221,7 +240,59 @@ function getBuiltInToolDefinitions(user) {
                 required: { type: 'boolean', default: false },
                 defaultValue: { description: '未提供参数时使用的默认值。' },
                 description: { type: 'string' }
-            }, ['name'])
+            }, ['name']),
+            output_schema: {
+                type: 'object',
+                required: ['name', 'label', 'type', 'value', 'supplied', 'text'],
+                properties: {
+                    name: { type: 'string' }, label: { type: 'string' }, type: { type: 'string' },
+                    value: {}, supplied: { type: 'boolean' }, text: { type: 'string' }
+                }
+            }
+        },
+        {
+            name: 'workflow.template',
+            title: '文本模板',
+            description: '使用工作流变量拼接确定性文本，不调用模型、不执行代码。',
+            input_schema: asJsonSchema({
+                template: { type: 'string', maxLength: 50000, description: '支持 {{goal}}、{{inputs.*}} 和 {{nodes.*.output.*}}。' },
+                trim: { type: 'boolean', default: true },
+                missingVariable: { type: 'string', enum: ['keep', 'empty', 'error'], default: 'keep' }
+            }, ['template']),
+            output_schema: {
+                type: 'object',
+                required: ['text', 'charCount', 'missingVariables'],
+                properties: {
+                    text: { type: 'string' },
+                    charCount: { type: 'integer' },
+                    missingVariables: { type: 'array', items: { type: 'string' } }
+                }
+            }
+        },
+        {
+            name: 'workflow.notify',
+            title: '受控通知',
+            description: '通过已配置的企业微信、飞书或钉钉渠道绑定排队发送文本/Markdown 通知；不接受裸 Webhook URL。',
+            side_effect: true,
+            network: true,
+            alwaysRequiresApproval: true,
+            input_schema: asJsonSchema({
+                bindingId: { type: 'string', maxLength: 128, description: '已配置的渠道绑定 ID。' },
+                platform: { type: 'string', enum: ['wecom', 'feishu', 'dingtalk'] },
+                subject: { type: 'string', maxLength: 255 },
+                body: { type: 'string', maxLength: 20000, description: '消息正文，支持工作流变量。' },
+                format: { type: 'string', enum: ['text', 'markdown'], default: 'text' },
+                eventType: { type: 'string', maxLength: 80 },
+                idempotencyKey: { type: 'string', maxLength: 255 }
+            }, ['bindingId', 'platform', 'body']),
+            output_schema: {
+                type: 'object',
+                required: ['queued', 'deliveryId', 'bindingId', 'status', 'idempotencyKey'],
+                properties: {
+                    queued: { type: 'boolean' }, deliveryId: { type: 'integer' }, bindingId: { type: 'string' },
+                    status: { type: 'string' }, platform: { type: 'string', enum: ['wecom', 'feishu', 'dingtalk'] }, idempotencyKey: { type: 'string' }
+                }
+            }
         },
         {
             name: 'workflow.output',
@@ -245,7 +316,12 @@ function getBuiltInToolDefinitions(user) {
                 value: { description: '待判断的值。' },
                 operator: { type: 'string', enum: ['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than', 'is_empty', 'not_empty', 'is_true', 'is_false'], default: 'not_empty' },
                 compareTo: { description: '比较目标值。' }
-            }, ['operator'])
+            }, ['operator']),
+            output_schema: {
+                type: 'object',
+                required: ['matched', 'route', 'text'],
+                properties: { matched: { type: 'boolean' }, value: {}, compareTo: {}, operator: { type: 'string' }, route: { type: 'string' }, text: { type: 'string' } }
+            }
         },
         {
             name: 'workflow.approval',
@@ -275,14 +351,26 @@ function getBuiltInToolDefinitions(user) {
             name: 'workflow.foreach',
             title: '循环 / 批处理',
             requiresSandbox: true,
+            cancellable: true,
+            timeout: { default_seconds: 120, max_seconds: 600 },
             description: '仅允许在独立受控 Worker 沙箱中对数组逐项执行 JavaScript 转换，并汇总结果和错误。',
             input_schema: asJsonSchema({
                 items: { type: 'array' },
                 code: { type: 'string', default: 'return item;' },
                 vars: { type: 'object' },
                 concurrency: { type: 'integer', minimum: 1, maximum: 20, default: 4 },
-                stopOnError: { type: 'boolean', default: true }
-            }, ['items', 'code'])
+                stopOnError: { type: 'boolean', default: true },
+                retryLimit: { type: 'integer', minimum: 0, maximum: 3, default: 0 },
+                itemTimeoutMs: { type: 'integer', minimum: 50, maximum: 5000, default: 1000 }
+            }, ['items', 'code']),
+            output_schema: {
+                type: 'object',
+                required: ['items', 'count', 'inputCount', 'errors', 'audit'],
+                properties: {
+                    items: { type: 'array' }, count: { type: 'integer' }, inputCount: { type: 'integer' },
+                    errors: { type: 'array' }, stoppedOnError: { type: 'boolean' }, worker: { type: 'object' }, audit: { type: 'object' }
+                }
+            }
         },
         {
             name: 'workflow.subworkflow',
@@ -833,7 +921,7 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
-    assertDynamicCodeExecutionIsSandboxed(name);
+    assertDynamicCodeExecutionIsSandboxed(name, context);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
@@ -848,13 +936,15 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         return executeAgentHandoff(input);
     }
     if (name === 'workflow.input') return executeWorkflowInput(input, context);
+    if (name === 'workflow.template') return executeWorkflowTemplate(input);
+    if (name === 'workflow.notify') return executeWorkflowNotify(input, user, context);
     if (name === 'workflow.output') return executeWorkflowOutput(input);
     if (name === 'workflow.condition') return executeWorkflowCondition(input);
     if (name === 'workflow.approval') {
         if (context.workflowApprovalResult) return context.workflowApprovalResult;
         return { approved: true, summary: input.summary ?? '', text: renderWorkflowValue(input.summary) };
     }
-    if (name === 'workflow.foreach') return executeWorkflowForeach(input);
+    if (name === 'workflow.foreach') return executeWorkflowForeach(input, context);
     if (name === 'workflow.subworkflow') {
         if (typeof context.executeSubworkflow !== 'function') throw new Error('当前运行环境不支持子工作流。');
         return context.executeSubworkflow(input);

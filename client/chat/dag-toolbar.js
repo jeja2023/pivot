@@ -161,7 +161,7 @@ function renderDagToolbar(ctx) {
 
             const lintWorkflow = () => {
                 const gov = window.Pivot?.moduleApi?.('agent.dagGovernance');
-                const report = gov?.lintDagGraph?.(ctx.spec?.nodes || []);
+                const report = gov?.lintDagGraph?.(ctx.spec || { nodes: [] });
                 if (!report) return;
                 if (!report.valid) {
                     const first = report.errors[0];

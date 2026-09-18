@@ -172,10 +172,12 @@ function runSandboxedProcess(command, args = [], options = {}) {
             error.stderr = Buffer.concat(stderr).toString('utf8');
             pendingTerminationError = error;
         };
+        let abortHandler = null;
         const finish = (error, result) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            if (abortHandler && options.signal) options.signal.removeEventListener?.('abort', abortHandler);
             activeSandboxProcesses.delete(child);
             try { isolationHelper?.kill(); } catch (_) {}
             isolation.cleanup();
@@ -193,6 +195,20 @@ function runSandboxedProcess(command, args = [], options = {}) {
             isolation.cleanup();
             finish(error);
             return;
+        }
+        if (options.signal) {
+            abortHandler = () => {
+                terminateChild();
+                const error = options.signal.reason instanceof Error ? options.signal.reason : new Error('沙箱进程已取消。');
+                if (!error.code) error.code = 'AGENT_SANDBOX_CANCELLED';
+                error.category = error.category || 'cancelled';
+                finish(error);
+            };
+            if (options.signal.aborted) {
+                abortHandler();
+                return;
+            }
+            options.signal.addEventListener('abort', abortHandler, { once: true });
         }
         child.stdout.on('data', chunk => {
             const bytes = appendOutput(stdout, chunk, stdoutBytes + stderrBytes);

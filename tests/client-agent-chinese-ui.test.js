@@ -168,6 +168,8 @@ test('所有工作流与智能体工具标题本地化', () => {
         ['workflow.condition', '条件路由'],
         ['workflow.approval', '人工审批'],
         ['workflow.foreach', '循环 / 批处理'],
+        ['workflow.template', '文本模板'],
+        ['workflow.notify', '受控通知'],
         ['workflow.subworkflow', '子工作流'],
         ['workflow.delay', '延时等待'],
         ['workflow.embed_page', '嵌入页面'],

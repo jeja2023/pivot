@@ -34,12 +34,15 @@ function normalizeBindingInput(input = {}) {
     const channelKey = String(input.channelKey || input.channel_key || input.address || '').trim().slice(0, 160);
     if (!channelKey) throw invalid('渠道绑定标识不能为空。');
     const config = input.config && typeof input.config === 'object' ? input.config : {};
+    const platform = String(config.platform || '').trim().toLowerCase();
+    if (platform && !['wecom', 'feishu', 'dingtalk'].includes(platform)) throw invalid('受控 IM 平台只能是企业微信、飞书或钉钉。');
+    if (channelType === 'im' && platform && !String(config.url || config.endpoint || '').trim()) throw invalid('受控 IM 渠道必须配置 Webhook Endpoint。');
     const notificationPolicy = input.notificationPolicy || input.notification_policy;
     return {
         channelType,
         channelKey,
         credentialRef: String(input.credentialRef || input.credential_ref || '').trim().slice(0, 255),
-        config: Object.fromEntries(Object.entries(config).slice(0, 32)),
+        config: Object.fromEntries(Object.entries({ ...config, ...(platform ? { platform } : {}) }).slice(0, 32)),
         notificationPolicy: notificationPolicy && typeof notificationPolicy === 'object' ? notificationPolicy : {},
         status: input.status === 'paused' ? 'paused' : 'active'
     };

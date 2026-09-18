@@ -16,10 +16,16 @@ const nodeCacheStore = new Map();
 const UNCACHEABLE_TOOL_PATTERNS = [
     'workflow.approval',
     'workflow.delay',
+    'workflow.notify',
+    'workflow.foreach',
+    'agent.code',
+    'agent.http',
+    'agent.browser',
     'delete',
     'remove',
     'create_order',
     'send_email',
+    'im.send',
     'publish'
 ];
 

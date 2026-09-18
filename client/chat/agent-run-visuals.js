@@ -215,6 +215,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
         ? window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, outputDiscKey, false)
         : false;
     const outputOpen = isOutputRecordedOpen ? ' open' : '';
+    const canFocusInCanvas = ['error', 'skipped'].includes(status) && nodeKey;
 
     return `
         <div class="agent-dag-node ${agentEscape(status)}" data-dag-node-key="${agentEscape(nodeKey)}">
@@ -249,6 +250,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
                             </div>
                         ` : ''}
                     </details>
+                    ${canFocusInCanvas ? `<button type="button" class="btn-secondary agent-dag-node-focus" data-agent-dag-focus-node="${agentEscape(nodeKey)}">在画布中定位</button>` : ''}
                     ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">只重试这一步</button>` : ''}
                 </div>
             </details>
@@ -256,7 +258,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
     `;
 }
 
-function renderAgentDagRunGraph(dagNodes) {
+function renderAgentDagRunGraph(dagNodes, run = null) {
     if (!dagNodes.length) return '';
     const NODE_W = 116, NODE_H = 36, GAP_X = 46, GAP_Y = 26, PAD = 20;
     const MIN_VIEW_W = 860, MIN_VIEW_H = 135;
@@ -275,6 +277,13 @@ function renderAgentDagRunGraph(dagNodes) {
     dagNodes.forEach(n => {
         depMap.set(n.node_key, (n.depends_on || []).filter(d => allIds.has(d)));
     });
+    const sourceRun = run || (typeof currentRunDetailRecord !== 'undefined' ? currentRunDetailRecord : null) || {};
+    let metadata = sourceRun?.metadata || {};
+    if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; }
+    }
+    const routeEdges = Array.isArray(metadata?.dagSpec?.edges) ? metadata.dagSpec.edges : [];
+    const routeMap = new Map(routeEdges.map(edge => [`${String(edge.from || '')}\u0000${String(edge.to || '')}`, String(edge.route || 'default').toLowerCase()]));
     // 拓扑分层布局
     const layers = [];
     const placed = new Set();
@@ -317,10 +326,13 @@ function renderAgentDagRunGraph(dagNodes) {
         (depMap.get(n.node_key) || []).forEach(fromId => {
             const from = positions.get(fromId);
             if (from && to) {
-                const sx = from.x + NODE_W, sy = from.y + NODE_H / 2;
+                const route = routeMap.get(`${fromId}\u0000${n.node_key}`) || 'default';
+                const routeColor = route === 'true' ? 'var(--primary)' : 'var(--text-muted)';
+                const sx = from.x + NODE_W, sy = from.y + NODE_H / 2 + (route === 'true' ? -5 : route === 'false' ? 5 : 0);
                 const tx = to.x, ty = to.y + NODE_H / 2;
                 const cx = sx + (tx - sx) / 2;
-                edges.push(`<path d="M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}" stroke="#94a3b8" stroke-width="1.5" fill="none" marker-end="url(#dag-run-arrow)"/>`);
+                edges.push(`<path d="M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty}" stroke="${routeColor}" stroke-width="1.5" fill="none" marker-end="url(#dag-run-arrow)"/>`);
+                if (route !== 'default') edges.push(`<text x="${cx}" y="${Math.min(sy, ty) - 5}" text-anchor="middle" fill="${routeColor}" font-size="8" font-weight="700">${route === 'true' ? '满足' : '不满足'}</text>`);
             }
         });
     });

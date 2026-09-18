@@ -144,6 +144,8 @@
     fill: #3b82f6;
     stroke: #2563eb;
 }
+.pivot-dag-port-out[data-pivot-dag-route="true"] { fill: var(--primary-light); stroke: var(--success); }
+.pivot-dag-port-out[data-pivot-dag-route="false"] { fill: var(--bg-secondary); stroke: var(--text-muted); }
 
 .pivot-dag-edge {
     fill: none;
@@ -169,6 +171,8 @@
     stroke: #2563eb;
     stroke-width: 2.5;
 }
+.pivot-dag-edge-group.is-route-true .pivot-dag-edge { stroke: var(--success); }
+.pivot-dag-edge-group.is-route-false .pivot-dag-edge { stroke: var(--text-muted); stroke-dasharray: 5 3; }
 
 .pivot-dag-edge-label {
     fill: #64748b;

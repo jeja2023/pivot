@@ -286,7 +286,7 @@
             const chListHtml = state.channels.length
                 ? `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:100px">渠道类型</th><th>目标地址 / 用户标识</th><th style="width:130px">凭据引用</th><th style="width:80px" class="tc">状态</th><th style="width:60px" class="tc">操作</th></tr></thead><tbody>${state.channels.map((ch, i) => `<tr><td class="tc font-mono">${i + 1}</td><td>${escape(ch.channelType)}</td><td title="${escapeAttr(ch.channelKey)}">${escape(ch.channelKey)}</td><td class="mono">${escape(ch.credentialRef || '—')}</td><td class="tc">${chStatusBadge(ch.status)}</td><td class="tc"><div class="aht-actions"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(ch.id)}">测试</button></div></td></tr>`).join('')}</tbody></table></div>`
                 : '<div class="agent-harness-empty-card">暂无活跃外部通知渠道</div>';
-            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">Webhook</option><option value="im">企业 IM (企微/钉钉/飞书)</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="Webhook URL 或接收人标识"></label><label class="modal-form-field"><span>凭据引用 (可选)</span><input id="agent-channel-credential" class="form-input" placeholder="secret_key 等凭据别名"></label><label class="modal-form-field"><span>网关 Endpoint (可选)</span><input id="agent-channel-endpoint" class="form-input" placeholder="自定义 endpoint"></label></div><div class="agent-channel-form-actions"><span class="agent-channel-form-hint">填写类型与目标地址后点击添加</span><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${chListHtml}`);
+            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">外部推送</option><option value="im">企业 IM（企微/钉钉/飞书）</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>平台</span><select id="agent-channel-platform" class="form-input"><option value="wecom">企业微信</option><option value="feishu">飞书</option><option value="dingtalk">钉钉</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="受控 Endpoint 或接收人标识"></label><label class="modal-form-field"><span>凭据引用（可选）</span><input id="agent-channel-credential" class="form-input" placeholder="凭据别名"></label><label class="modal-form-field"><span>网关 Endpoint（可选）</span><input id="agent-channel-endpoint" class="form-input" placeholder="受控 HTTPS Endpoint"></label></div><div class="agent-channel-form-actions"><span class="agent-channel-form-hint">IM 渠道的平台、Endpoint 和凭据由受控绑定保存；工作流节点只引用绑定 ID。</span><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${chListHtml}`);
         }
         if (reliabilityPanel) {
             const page = Math.max(1, Number(state.reliabilityPage || 1));
@@ -345,6 +345,8 @@
             state.reliability = Array.isArray(reliability.signals) ? reliability.signals : [];
             state.quality = quality.dashboard || null;
             state.channels = Array.isArray(channels.data) ? channels.data : [];
+            window.Pivot.modules = window.Pivot.modules || {};
+            window.Pivot.modules.agentChannelBindings = () => state.channels.slice();
             renderAgentControlPlane();
             let currentSub = 'inbox';
             try { currentSub = sessionStorage.getItem('pivot.agent.cp_subview') || 'inbox'; } catch (_) {}
@@ -1226,7 +1228,12 @@
         });
         document.getElementById('agent-channels-panel')?.addEventListener('click', event => {
             const create = event.target.closest('[data-agent-channel-create]');
-            if (create) apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType: document.getElementById('agent-channel-type')?.value, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint: document.getElementById('agent-channel-endpoint')?.value } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
+            if (create) {
+                const channelType = document.getElementById('agent-channel-type')?.value;
+                const endpoint = document.getElementById('agent-channel-endpoint')?.value;
+                const platform = document.getElementById('agent-channel-platform')?.value;
+                apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint, url: endpoint, ...(channelType === 'im' ? { platform } : {}) } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
+            }
             const test = event.target.closest('[data-agent-channel-test]');
             if (test) apiJson(`${API_BASE}/agents/channels/${encodeURIComponent(test.dataset.agentChannelTest)}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Pivot 渠道连通性测试' }) }).then(() => setNotice('渠道测试已提交。', 'success')).catch(error => setNotice(error.message, 'error'));
         });

@@ -128,3 +128,28 @@ test('captureAgentRunDisclosureState 与 restoreAgentRunDisclosureState 支持�
     assert.strictEqual(newDetails[0].open, true);
     assert.strictEqual(newDetails[1].open, true);
 });
+
+test('条件路由在运行详情中可定位并显示 True/False 边标签', () => {
+    const sandbox = createAgentWorkbenchSandbox();
+    const skippedHtml = sandbox.agentDagNodeMarkup({
+        node_key: 'no_branch', title: '不满足分支', tool_name: 'workflow.template', status: 'skipped',
+        depends_on: ['condition'], condition: 'success', output: { reason: 'route_not_matched', routeSource: ['condition'] }
+    }, 1, 'route-run');
+    assert.match(skippedHtml, /data-agent-dag-focus-node="no_branch"/);
+    const graph = sandbox.renderAgentDagRunGraph([
+        { node_key: 'condition', title: '判断', tool_name: 'workflow.condition', status: 'completed', depends_on: [] },
+        { node_key: 'yes_branch', title: '满足', tool_name: 'workflow.template', status: 'completed', depends_on: ['condition'] },
+        { node_key: 'no_branch', title: '不满足', tool_name: 'workflow.template', status: 'skipped', depends_on: ['condition'] }
+    ], {
+        metadata: {
+            dagSpec: {
+                edges: [
+                    { from: 'condition', to: 'yes_branch', route: 'true' },
+                    { from: 'condition', to: 'no_branch', route: 'false' }
+                ]
+            }
+        }
+    });
+    assert.match(graph, />满足</);
+    assert.match(graph, />不满足</);
+});

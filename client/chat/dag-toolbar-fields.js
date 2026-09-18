@@ -57,6 +57,8 @@ const TOOL_PRIMARY_FIELD_NAMES = {
         'agent.browser': ['url', 'action', 'target', 'screenshot'],
         'agent.merge': ['fields'],
         'workflow.input': ['label', 'name', 'type', 'required', 'defaultValue', 'description'],
+        'workflow.template': ['template', 'trim', 'missingVariable'],
+        'workflow.notify': ['bindingId', 'platform', 'subject', 'body', 'format'],
         'workflow.output': ['name', 'value', 'tableTitle', 'tableColumns', 'fileRef'],
         'workflow.condition': ['value', 'operator', 'compareTo'],
         'workflow.approval': ['title', 'summary', 'instructions', 'approvers', 'approverUnits', 'mode', 'timeoutHours', 'timeoutAction'],

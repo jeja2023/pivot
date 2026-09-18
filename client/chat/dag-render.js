@@ -116,6 +116,8 @@ const DAG_NODE_VISUAL = {
     'agent.http':     { svgIcon: 'globe',     theme: 'http',     label: '网络请求' },
     'agent.merge':    { iconText: '⊕',        theme: 'merge',    label: '变量聚合' },
     'workflow.input': { svgIcon: 'log-in',    theme: 'input',    label: '工作流输入' },
+    'workflow.template': { svgIcon: 'file-text', theme: 'report', label: '文本模板' },
+    'workflow.notify': { svgIcon: 'message', theme: 'http', label: '受控通知' },
     'workflow.output':{ svgIcon: 'log-out',   theme: 'output',   label: '工作流输出' },
     'workflow.condition': { svgIcon: 'git-branch', theme: 'condition', label: '条件路由' },
     'workflow.approval': { svgIcon: 'user-check', theme: 'approval', label: '人工审批' },
@@ -148,6 +150,7 @@ function dagNodeVisual(toolName) {
     if (key.startsWith('sessions.'))   return { svgIcon: 'message',   theme: 'session', label: '会话' };
     if (key.startsWith('knowledge.'))  return { svgIcon: 'book-open', theme: 'rag',     label: '知识库' };
     if (key.startsWith('report.'))     return { svgIcon: 'file-text', theme: 'report',  label: '报告' };
+    if (key.includes('.im.send_'))     return { svgIcon: 'message',  theme: 'http',    label: '即时通讯' };
     if (key.startsWith('mcp.'))        return { svgIcon: 'plug',      theme: 'mcp',     label: '外部工具' };
     return { iconText: '▸', theme: 'default', label: '' };
 }
@@ -186,9 +189,10 @@ function dagNodeIntersectsViewport(node, viewport) {
     );
 }
 
-function createEdgePath(fromNode, toNode) {
+function createEdgePath(fromNode, toNode, route = 'default') {
         const startX = fromNode._x + NODE_WIDTH;
-        const startY = fromNode._y + NODE_HEIGHT / 2;
+        const routeName = String(route || 'default').toLowerCase();
+        const startY = fromNode._y + NODE_HEIGHT / 2 + (routeName === 'true' ? -9 : routeName === 'false' ? 9 : 0);
         const endX = toNode._x;
         const endY = toNode._y + NODE_HEIGHT / 2;
         const c1x = startX + Math.max(40, (endX - startX) / 2);
@@ -207,12 +211,18 @@ const renderEdges = () => {
             ctx.edgesLayer.replaceChildren();
             const byId = new Map(ctx.spec.nodes.map(n => [n.id, n]));
             const viewport = dagViewport(ctx);
-            ctx.spec.nodes.forEach(node => {
-                (node.dependsOn || []).forEach(depId => {
+            const edgeEntries = Array.isArray(ctx.spec.edges) && ctx.spec.edges.length
+                ? ctx.spec.edges
+                : ctx.spec.nodes.flatMap(node => (node.dependsOn || []).map(depId => ({ from: depId, to: node.id, route: 'default' })));
+            edgeEntries.forEach(edge => {
+                    const depId = edge.from;
+                    const node = byId.get(edge.to);
                     const from = byId.get(depId);
-                    if (!from) return;
+                    if (!from || !node) return;
                     if (viewport && !dagNodeIntersectsViewport(from, viewport) && !dagNodeIntersectsViewport(node, viewport)) return;
-                    const selected = ctx.selectedEdge?.fromId === depId && ctx.selectedEdge?.toId === node.id;
+                    const route = String(edge.route || 'default').toLowerCase();
+                    const selected = ctx.selectedEdge?.fromId === depId && ctx.selectedEdge?.toId === node.id
+                        && String(ctx.selectedEdge?.route || 'default') === route;
                     const fromState = window.Pivot?.legacy?.dagNodeRunStates?.get(depId);
                     const toState = window.Pivot?.legacy?.dagNodeRunStates?.get(node.id);
                     const isStreaming = Boolean((fromState?.status === 'completed' || fromState?.cached) && toState?.status === 'running');
@@ -223,6 +233,7 @@ const renderEdges = () => {
                     const group = makeSvgEl('g', {
                         class: [
                             'pivot-dag-edge-group',
+                            route === 'true' ? 'is-route-true' : route === 'false' ? 'is-route-false' : '',
                             selected ? 'is-selected' : '',
                             isStreaming ? 'is-streaming' : '',
                             isStreamDone ? 'is-stream-completed' : '',
@@ -233,20 +244,23 @@ const renderEdges = () => {
                         'data-pivot-dag-edge-to': node.id,
                         tabindex: '0',
                         role: 'button',
-                        'aria-label': `依赖连线：${from.title || from.id} 到 ${node.title || node.id}`
+                        'data-pivot-dag-edge-route': route,
+                        'aria-label': `依赖连线：${from.title || from.id} 到 ${node.title || node.id}${route !== 'default' ? `（${route === 'true' ? '满足条件' : '不满足条件'}）` : ''}`
                     });
-                    const d = createEdgePath(from, node);
+                    const d = createEdgePath(from, node, route);
                     const hit = makeSvgEl('path', {
                         class: 'pivot-dag-edge-hit',
                         d,
                         'data-pivot-dag-edge-from': depId,
                         'data-pivot-dag-edge-to': node.id
+                        ,'data-pivot-dag-edge-route': route
                     });
                     const path = makeSvgEl('path', {
                         class: 'pivot-dag-edge',
                         d,
                         'data-pivot-dag-edge-from': depId,
                         'data-pivot-dag-edge-to': node.id,
+                        'data-pivot-dag-edge-route': route,
                         'marker-end': 'url(#pivot-dag-arrow)'
                     });
                     group.append(hit, path);
@@ -257,7 +271,11 @@ const renderEdges = () => {
                         });
                         group.appendChild(stream);
                     }
-                    const conditionLabel = node.when ? '条件' : node.condition === 'failure' ? '失败' : node.condition === 'always' ? '始终' : '';
+                    const conditionLabel = route === 'true'
+                        ? '满足'
+                        : route === 'false'
+                            ? '不满足'
+                            : node.when ? '条件' : node.condition === 'failure' ? '失败' : node.condition === 'always' ? '始终' : '';
                     if (conditionLabel) {
                         const label = makeSvgEl('text', {
                             class: 'pivot-dag-edge-label',
@@ -269,7 +287,6 @@ const renderEdges = () => {
                     }
                     ctx.edgesLayer.appendChild(group);
                 });
-            });
         };
 
         const renderNodes = () => {
@@ -411,15 +428,31 @@ const renderEdges = () => {
                 }
 
                 // 出端口（拖出去创建依赖）
+                const conditionNode = node.tool === 'workflow.condition';
                 const outPort = makeSvgEl('circle', {
                     class: 'pivot-dag-port pivot-dag-port-out',
                     cx: NODE_WIDTH,
-                    cy: NODE_HEIGHT / 2,
+                    cy: conditionNode ? NODE_HEIGHT / 2 - 9 : NODE_HEIGHT / 2,
                     r: 5,
                     'data-pivot-dag-port': 'out',
-                    'data-pivot-dag-id': node.id
+                    'data-pivot-dag-id': node.id,
+                    'data-pivot-dag-route': conditionNode ? 'true' : 'default',
+                    'aria-label': conditionNode ? '满足条件出口' : '输出端口'
                 });
                 group.appendChild(outPort);
+                if (conditionNode) {
+                    const falsePort = makeSvgEl('circle', {
+                        class: 'pivot-dag-port pivot-dag-port-out is-false',
+                        cx: NODE_WIDTH,
+                        cy: NODE_HEIGHT / 2 + 9,
+                        r: 5,
+                        'data-pivot-dag-port': 'out',
+                        'data-pivot-dag-id': node.id,
+                        'data-pivot-dag-route': 'false',
+                        'aria-label': '不满足条件出口'
+                    });
+                    group.appendChild(falsePort);
+                }
                 // 入端口（接收依赖的连接落点）
                 const inPort = makeSvgEl('circle', {
                     class: 'pivot-dag-port pivot-dag-port-in',

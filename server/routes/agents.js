@@ -220,6 +220,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         if (['workflow.approval', 'workflow.delay', 'workflow.subworkflow'].includes(toolName)) {
             return res.status(400).json({ error: '人工审批、延时和子工作流节点需要在完整工作流中测试。' });
         }
+        const isImTargetDiscovery = /(?:^|\.)im\.list_allowed_targets$/.test(toolName);
+        if (!isImTargetDiscovery && (tool.side_effect === true || tool.sideEffect === true || tool.requiresApproval === true || tool.alwaysRequiresApproval === true)) {
+            return res.status(400).json({ error: '为避免产生真实副作用，此节点不能单独测试；请使用完整工作流并按审批策略运行。' });
+        }
 
         let resolvedInput = input;
         const rawContext = req.body?.upstreamContext;

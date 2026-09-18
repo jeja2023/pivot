@@ -247,6 +247,35 @@ function dagConditionSatisfied(condition, dependencyStatuses = []) {
     return dependencyStatuses.every(status => ['completed', 'continued_error'].includes(status));
 }
 
+// 边级路由是增量能力：未声明 `edges` 的旧 DAG 保持原有 dependsOn + when 语义。
+// 带路由的目标节点在全部依赖结束后，至少需要一条入边处于激活状态。
+function getDagIncomingEdges(dagSpec = {}, nodeId = '') {
+    const edges = Array.isArray(dagSpec?.edges) ? dagSpec.edges : [];
+    return edges.filter(edge => String(edge?.to || '').trim() === String(nodeId || '').trim());
+}
+
+function getDagNodeRouteState(node, dagSpec, states) {
+    const incoming = getDagIncomingEdges(dagSpec, node?.id);
+    if (!incoming.length) return { routed: false, active: true, activeEdges: [], inactiveEdges: [] };
+    const activeEdges = [];
+    const inactiveEdges = [];
+    incoming.forEach(edge => {
+        const route = String(edge.route || 'default').trim().toLowerCase();
+        if (route === 'default') {
+            activeEdges.push(edge);
+            return;
+        }
+        const sourceState = states?.get?.(edge.from) || {};
+        const rawMatched = sourceState.output?.matched ?? sourceState.output?.structuredContent?.matched;
+        // 条件结果失败或格式异常时不能被当作 false，避免 onError=continue 后误激活假分支。
+        const hasMatch = typeof rawMatched === 'boolean';
+        const matched = hasMatch ? rawMatched : null;
+        const active = hasMatch && (route === 'true' ? matched : !matched);
+        (active ? activeEdges : inactiveEdges).push({ ...edge, matched });
+    });
+    return { routed: true, active: activeEdges.length > 0, activeEdges, inactiveEdges };
+}
+
 function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs, tool = null) {
     const defaultTimeout = normalizePositiveInt(
         run.tool_timeout_ms,
@@ -269,6 +298,7 @@ module.exports = {
     DAG_WHEN_OPERATOR_LABELS,
     dagConditionSatisfied,
     evaluateDagWhen,
+    getDagNodeRouteState,
     getPathValue,
     normalizeDagNodePolicy,
     resolveDagInputValue,

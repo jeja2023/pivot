@@ -42,12 +42,29 @@ function deliveryIdempotencyKey(input = {}) {
 async function enqueueChannelDelivery(user, input = {}) {
     const binding = await queryOne("SELECT * FROM agent_channel_bindings WHERE id = ? AND user_id = ? AND status = 'active'", [String(input.bindingId || ''), user.id]);
     if (!binding) return null;
+    const bindingConfig = parseJson(binding.config, {});
+    const requestedPlatform = String(input.platform || input.interaction?.platform || '').trim().toLowerCase();
+    const boundPlatform = String(bindingConfig.platform || '').trim().toLowerCase();
+    if (requestedPlatform && requestedPlatform !== boundPlatform) {
+        const error = new Error('通知节点选择的平台与渠道绑定不一致。');
+        error.code = 'CHANNEL_PLATFORM_MISMATCH';
+        error.status = 400;
+        throw error;
+    }
+    if (input.requirePlatform === true && !['wecom', 'feishu', 'dingtalk'].includes(boundPlatform)) {
+        const error = new Error('通知节点只能使用企业微信、飞书或钉钉的受控渠道绑定。');
+        error.code = 'CHANNEL_PLATFORM_REQUIRED';
+        error.status = 400;
+        throw error;
+    }
     const attachments = normalizeAttachments(input.attachments);
     if (attachments.some(item => item.bytes > MAX_ATTACHMENT_BYTES)) throw Object.assign(new Error('附件超过渠道允许的大小。'), { status: 413, code: 'CHANNEL_ATTACHMENT_TOO_LARGE' });
     const key = deliveryIdempotencyKey(input);
     const now = getBeijingTimestamp();
     const row = await queryOne(`INSERT INTO agent_channel_deliveries (binding_id, user_id, tenant_id, idempotency_key, event_type, subject, body, attachments, interaction, status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?) ON CONFLICT(binding_id, idempotency_key) DO UPDATE SET updated_at = agent_channel_deliveries.updated_at RETURNING id`, [binding.id, user.id, binding.tenant_id || user.tenant_id || input.tenantId || null, key, String(input.eventType || 'agent.event').slice(0, 80), String(input.subject || '').slice(0, 255), String(input.body || '').slice(0, MAX_BODY_CHARS), JSON.stringify(attachments), JSON.stringify(input.interaction && typeof input.interaction === 'object' ? input.interaction : {}), now, now, now]);
-    return queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [row?.id]);
+    const delivery = await queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [row?.id]);
+    if (delivery) delivery.bindingPlatform = boundPlatform;
+    return delivery;
 }
 
 function chunkText(body, limit = 3500) {
@@ -127,6 +144,10 @@ function sendSmtpMessage(options = {}) {
 
 async function deliverIm(binding, delivery, user) {
     const config = parseJson(binding.config, {});
+    const platform = String(config.platform || '').trim().toLowerCase();
+    if (['wecom', 'feishu', 'dingtalk'].includes(platform)) {
+        return deliverPlatformIm(binding, delivery, user, platform);
+    }
     if (config.driver === 'builtinIm' || config.driver === 'pivot-im') {
         const targetType = String(config.targetType || 'user').toLowerCase() === 'group' ? 'group' : 'user';
         const target = validateImTarget({ ...config, defaultTarget: binding.channel_key }, binding.channel_key, targetType);
@@ -142,6 +163,55 @@ async function deliverIm(binding, delivery, user) {
     await assertSafeMcpOutboundUrl(endpoint, user);
     const chunks = chunkText(delivery.body, Number(config.chunkSize || 3000));
     for (let index = 0; index < chunks.length; index += 1) await safeJsonRequest({ method: 'post', url: endpoint, data: { target: binding.channel_key, title: delivery.subject, message: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, interaction: parseJson(delivery.interaction, {}) }, user, assertUrl: assertSafeMcpOutboundUrl, createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), headers: config.headers || {}, timeout: 30000, validateStatus: status => status >= 200 && status < 300 });
+}
+
+function appendQuery(url, values = {}) {
+    const parsed = new URL(url);
+    Object.entries(values).forEach(([key, value]) => parsed.searchParams.set(key, String(value)));
+    return parsed.toString();
+}
+
+function buildPlatformImPayload(platform, delivery, config = {}) {
+    const interaction = parseJson(delivery.interaction, {});
+    const format = String(interaction.format || config.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text';
+    const body = String(delivery.body || '').slice(0, 20000);
+    const subject = String(delivery.subject || '').slice(0, 255);
+    if (platform === 'wecom') {
+        if (format === 'markdown') return { msgtype: 'markdown', markdown: { content: body } };
+        return { msgtype: 'text', text: { content: body, ...(Array.isArray(config.mentionedList) ? { mentioned_list: config.mentionedList.slice(0, 100) } : {}) } };
+    }
+    if (platform === 'feishu') {
+        if (format === 'markdown') return { msg_type: 'post', content: { post: { zh_cn: { title: subject, content: [[{ tag: 'text', text: body }]] } } } };
+        return { msg_type: 'text', content: { text: subject ? `${subject}\n${body}` : body } };
+    }
+    if (format === 'markdown') return { msgtype: 'markdown', markdown: { title: subject || 'Pivot 工作流通知', text: body }, ...(config.at && typeof config.at === 'object' ? { at: config.at } : {}) };
+    return { msgtype: 'text', text: { content: subject ? `${subject}\n${body}` : body }, ...(config.at && typeof config.at === 'object' ? { at: config.at } : {}) };
+}
+
+async function deliverPlatformIm(binding, delivery, user, platform) {
+    const config = parseJson(binding.config, {});
+    const endpoint = String(config.url || config.endpoint || '').trim();
+    if (!endpoint) throw Object.assign(new Error(`${platform} 通知渠道缺少 Webhook URL。`), { code: 'CHANNEL_PLATFORM_URL_MISSING' });
+    const credential = binding.credential_ref ? await resolveCredentialSecret(binding.credential_ref, user) : null;
+    let url = endpoint;
+    if (platform === 'dingtalk' && credential?.value) {
+        const timestamp = Date.now();
+        const sign = crypto.createHmac('sha256', credential.value).update(`${timestamp}\n${credential.value}`).digest('base64');
+        url = appendQuery(endpoint, { timestamp, sign });
+    }
+    await assertSafeMcpOutboundUrl(url, user);
+    const payload = buildPlatformImPayload(platform, delivery, config);
+    return safeJsonRequest({
+        method: 'post',
+        url,
+        data: payload,
+        user,
+        assertUrl: assertSafeMcpOutboundUrl,
+        createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }),
+        headers: { 'Content-Type': 'application/json', ...(config.headers && typeof config.headers === 'object' ? config.headers : {}) },
+        timeout: Math.min(Number(config.timeoutMs || 30000), 30000),
+        validateStatus: status => status >= 200 && status < 300
+    });
 }
 
 async function reclaimExpiredChannelDeliveryClaims() {
@@ -169,7 +239,7 @@ async function deliverChannelDelivery(deliveryId, options = {}) {
     const claimToken = String(options.claimToken || crypto.randomUUID()).trim().slice(0, 128);
     const claimed = await claimChannelDelivery(deliveryId, claimToken);
     if (!claimed) return null;
-    const loadedDelivery = await queryOne('SELECT d.*, b.channel_type, b.channel_key, b.config FROM agent_channel_deliveries d JOIN agent_channel_bindings b ON b.id = d.binding_id WHERE d.id = ?', [claimed.id]);
+    const loadedDelivery = await queryOne('SELECT d.*, b.channel_type, b.channel_key, b.credential_ref, b.config, b.notification_policy FROM agent_channel_deliveries d JOIN agent_channel_bindings b ON b.id = d.binding_id WHERE d.id = ?', [claimed.id]);
     // 外键正常情况下会保证 binding 存在；仍以认领行作为失败回写目标，避免
     // 历史脏数据或人工删除关联记录时留下永不回收的 delivering 状态。
     const delivery = loadedDelivery || claimed;
@@ -212,4 +282,4 @@ async function dispatchChannelDeliveries(limit = 50, options = {}) {
     return { processed: rows.length };
 }
 
-module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, chunkText, claimChannelDelivery, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, normalizeAttachments, reclaimExpiredChannelDeliveryClaims };
+module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, buildPlatformImPayload, chunkText, claimChannelDelivery, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, normalizeAttachments, reclaimExpiredChannelDeliveryClaims };

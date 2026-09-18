@@ -5,7 +5,7 @@ const { calculateDagRetryDelayMs, waitForDagRetry } = require('./agent-dag-retry
 const { resolveDagToolApproval, stableDagOperationKey } = require('./agent-dag-approval');
 const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
-const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied } = require('./agent-dag-utils');
+const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied, getDagNodeRouteState } = require('./agent-dag-utils');
 const { listDagNodes, listSteps } = require('./agent-runs');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
@@ -320,6 +320,15 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
                 states.set(node.id, { status: 'skipped', skipReason: when.reason });
                 continue;
             }
+            const routeState = getDagNodeRouteState(node, dagSpec, states);
+            if (routeState.routed && !routeState.active) {
+                states.set(node.id, {
+                    status: 'skipped',
+                    skipReason: 'route_not_matched',
+                    route: routeState.inactiveEdges.map(edge => edge.route).join(',')
+                });
+                continue;
+            }
             const selectedTool = findAgentToolByName(node.tool, toolList);
             if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
             const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap }), {
@@ -403,6 +412,9 @@ async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, dea
 }
 
 async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, deps) {
+    const readDagNodes = deps.listDagNodes || listDagNodes;
+    const readSteps = deps.listSteps || listSteps;
+    const writeDagNode = deps.upsertDagNode || upsertDagNode;
     const metadata = deps.getRunMetadata(run);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
     const dagInputs = normalizeDagRunInputs(metadata.dagInputs || metadata.inputs || {});
@@ -414,11 +426,11 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     if (topology.blockers.length) throw new Error(`DAG 拒绝执行：${topology.blockers[0]}`);
     assertWorkflowLlmNodesConfigured(dagSpec);
 
-    const persistedDagNodes = new Map((await listDagNodes(run.id)).map(node => [node.node_key, node]));
+    const persistedDagNodes = new Map((await readDagNodes(run.id)).map(node => [node.node_key, node]));
     for (const node of dagSpec.nodes) {
         const existing = persistedDagNodes.get(node.id);
         if (existing && ['completed', 'continued_error', 'skipped', 'waiting_approval'].includes(existing.status)) continue;
-        await upsertDagNode(run.id, node, { status: 'pending' });
+        await writeDagNode(run.id, node, { status: 'pending' });
     }
     const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
     const states = new Map(dagSpec.nodes.map(node => {
@@ -445,7 +457,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
     });
     const observations = [];
-    let stepIndex = (await listSteps(run.id)).length + 1;
+    let stepIndex = (await readSteps(run.id)).length + 1;
     const rootWorkflowId = Number.parseInt(metadata.workflowId || metadata.workflow_id, 10);
     const subworkflowStack = rootWorkflowId ? [rootWorkflowId] : [];
 
@@ -471,7 +483,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     ? 'dependency_not_failed'
                     : 'dependency_not_completed';
                 states.set(node.id, { status: 'skipped', skipReason: reason });
-                await upsertDagNode(run.id, node, {
+                await writeDagNode(run.id, node, {
                     status: 'skipped',
                     output: { status: 'skipped', reason, condition: node.condition },
                     completedAt: getBeijingTimestamp()
@@ -496,7 +508,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             });
             if (whenResult.skipped) {
                 states.set(node.id, { status: 'skipped', skipReason: 'when_not_matched', skipDetail: whenResult.reason });
-                await upsertDagNode(run.id, node, {
+                await writeDagNode(run.id, node, {
                     status: 'skipped',
                     output: {
                         status: 'skipped',
@@ -519,6 +531,31 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     toolName: node.tool,
                     input: node.input,
                     output: { status: 'skipped', reason: whenResult.reason, when: whenResult }
+                });
+                stepIndex += 1;
+                continue;
+            }
+            const routeState = getDagNodeRouteState(node, dagSpec, states);
+            if (routeState.routed && !routeState.active) {
+                const routeDetail = {
+                    status: 'skipped',
+                    reason: 'route_not_matched',
+                    route: routeState.inactiveEdges.map(edge => edge.route).join(','),
+                    routeSource: routeState.inactiveEdges.map(edge => edge.from)
+                };
+                states.set(node.id, { status: 'skipped', skipReason: 'route_not_matched', output: routeDetail });
+                await writeDagNode(run.id, node, {
+                    status: 'skipped',
+                    output: routeDetail,
+                    completedAt: getBeijingTimestamp()
+                });
+                await deps.insertStep(run.id, stepIndex, {
+                    type: 'dag',
+                    nodeId: node.id,
+                    title: `路由未命中，跳过节点：${node.title || node.id}`,
+                    toolName: node.tool,
+                    input: node.input,
+                    output: routeDetail
                 });
                 stepIndex += 1;
                 continue;
@@ -557,7 +594,10 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             const inputSchema = schemaHasRules(explicitInputSchema)
                 ? explicitInputSchema
                 : normalizeJsonSchema(selectedTool?.input_schema || selectedTool?.inputSchema || selectedTool?.parameters || {});
-            const outputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
+            const explicitOutputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
+            const outputSchema = schemaHasRules(explicitOutputSchema)
+                ? explicitOutputSchema
+                : normalizeJsonSchema(selectedTool?.output_schema || selectedTool?.outputSchema || {});
             const inputContractIssues = [];
             validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, inputContractIssues);
             validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, inputContractIssues);
@@ -582,7 +622,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 signal: batchSignal
             });
             states.set(node.id, { status: 'running', input: resolvedInput });
-            await upsertDagNode(run.id, node, {
+            await writeDagNode(run.id, node, {
                 status: 'running',
                 input: resolvedInput,
                 inputSchema,
@@ -652,9 +692,11 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     contextHash: stepContext?.contextHash || '',
                     workflowApprovalResult,
                     workflowDelayResult,
+                    timeoutMs: policy.timeoutMs,
                     executeSubworkflow: childInput => executeSubworkflowDag({
                         input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: subworkflowStack
-                    })
+                    }),
+                    sandboxExecution: node.tool === 'workflow.foreach'
                 };
                 let result = null;
                 const dependsOnOutputs = {};
@@ -711,7 +753,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     cached: Boolean(result.cached),
                     durationMs: result.durationMs
                 });
-                await upsertDagNode(run.id, node, {
+                await writeDagNode(run.id, node, {
                     status: 'completed',
                     input: resolvedInput,
                     output: preparedOutput.value,
@@ -806,7 +848,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     attemptCount,
                     onError: policy.onError
                 });
-                await upsertDagNode(run.id, node, {
+                await writeDagNode(run.id, node, {
                     status,
                     input: resolvedInput,
                     output: failureOutput,

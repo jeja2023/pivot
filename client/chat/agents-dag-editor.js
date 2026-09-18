@@ -48,6 +48,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         let selectedIds = new Set();
         let selectedEdge = null;
         let clipboardNodes = [];
+        let clipboardEdges = [];
         const undoStack = [];
         const redoStack = [];
         let pendingFlush = null;
@@ -98,6 +99,15 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             selectedId = null;
             selectedIds = new Set();
             selectedEdge = null;
+        };
+        const syncExplicitEdgesForDependencies = () => {
+            if (!Array.isArray(spec.edges)) return;
+            spec.schemaVersion = 'pivot.dag.v2';
+            spec.nodes.forEach(node => (node.dependsOn || []).forEach(from => {
+                if (!spec.edges.some(edge => edge.from === from && edge.to === node.id)) {
+                    spec.edges.push({ from, to: node.id, route: 'default' });
+                }
+            }));
         };
 
         const root = makeSvgEl('svg', {
@@ -361,6 +371,15 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         canvas.appendChild(viewportHint);
 
         const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
+        const dagCoreApi = window.Pivot?.moduleApi?.('agent.dagCore') || {};
+        const getUpstreamNodes = (...args) => dagCoreApi.getUpstreamNodes?.(...args) || [];
+        const getAvailableVariableOptions = (...args) => dagCoreApi.getAvailableVariableOptions?.(...args) || [];
+        const collectAgentDagInputs = () => window.Pivot?.legacy?.collectAgentDagInputs?.() || {};
+        const showVariablePickerPopover = (...args) => (
+            window.Pivot?.moduleApi?.('agent.dagVariablePicker')?.showVariablePickerPopover?.(...args)
+            || window.Pivot?.legacy?.showVariablePickerPopover?.(...args)
+        );
+        const setDagNodeTestOutput = (nodeId, snapshotValue) => window.Pivot?.moduleApi?.('agent.dagCore')?.setDagNodeTestOutput?.(nodeId, snapshotValue);
 
         const {
             renderInputSummary,
@@ -403,6 +422,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const warnings = [];
             const byId = new Map(spec.nodes.map(node => [node.id, node]));
             const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
+            const explicitEdges = Array.isArray(spec.edges) ? spec.edges : [];
             if (!spec.nodes.length) errors.push('至少需要 1 个节点');
             if (spec.nodes.length > 100) errors.push(`节点数量超过上限（100），当前为 ${spec.nodes.length}`);
             const idCounts = new Map();
@@ -420,6 +440,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                     if (dep === node.id) errors.push(`${node.title || node.id} 不能依赖自身`);
                 });
             });
+            const routeGovernance = window.Pivot?.moduleApi?.('agent.dagGovernance')?.validateWorkflowRoutes;
+            if (typeof routeGovernance === 'function') {
+                const routeReport = routeGovernance(spec.nodes, explicitEdges);
+                routeReport.errors.forEach(error => errors.push(error.message));
+                routeReport.warnings.forEach(warning => warnings.push(warning.message));
+            }
             const visiting = new Set();
             const visited = new Set();
             const hasCycle = (id) => {
@@ -474,6 +500,13 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             renderInputSummary,
             getDependencyCandidateNodes,
             wouldCreateCycle,
+            getUpstreamNodes,
+            getRunStates: () => globalThis.Pivot?.legacy?.dagNodeRunStates || new Map(),
+            getDagInputs: () => typeof collectAgentDagInputs === 'function' ? collectAgentDagInputs() : {},
+            getAvailableVariableOptions,
+            showToast: (...args) => window.Pivot?.legacy?.showToast?.(...args),
+            showVariablePicker: (...args) => typeof showVariablePickerPopover === 'function' ? showVariablePickerPopover(...args) : undefined,
+            setDagNodeTestOutput,
             render: () => render(),
             flushOut: () => flushOut(),
             recordHistory
@@ -484,6 +517,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             recordHistory();
             spec.nodes = spec.nodes.filter(n => n.id !== id);
             clampDependsOn(spec.nodes);
+            if (Array.isArray(spec.edges)) spec.edges = spec.edges.filter(edge => edge.from !== id && edge.to !== id);
             selectedIds.delete(id);
             if (selectedId === id) selectedId = [...selectedIds][0] || null;
             render();
@@ -496,7 +530,14 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 const target = spec.nodes.find(node => node.id === selectedEdge.toId);
                 if (!target) return;
                 recordHistory();
-                target.dependsOn = (target.dependsOn || []).filter(dep => dep !== selectedEdge.fromId);
+                if (Array.isArray(spec.edges)) {
+                    spec.edges = spec.edges.filter(edge => !(edge.from === selectedEdge.fromId && edge.to === selectedEdge.toId && (!selectedEdge.route || edge.route === selectedEdge.route)));
+                    if (!spec.edges.some(edge => edge.from === selectedEdge.fromId && edge.to === selectedEdge.toId)) {
+                        target.dependsOn = (target.dependsOn || []).filter(dep => dep !== selectedEdge.fromId);
+                    }
+                } else {
+                    target.dependsOn = (target.dependsOn || []).filter(dep => dep !== selectedEdge.fromId);
+                }
                 selectedEdge = null;
                 render();
                 flushOut();
@@ -508,6 +549,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             recordHistory();
             spec.nodes = spec.nodes.filter(node => !ids.has(node.id));
             clampDependsOn(spec.nodes);
+            if (Array.isArray(spec.edges)) spec.edges = spec.edges.filter(edge => !ids.has(edge.from) && !ids.has(edge.to));
             clearSelection();
             render();
             flushOut();
@@ -517,6 +559,9 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const ids = new Set(selectedIds);
             if (!ids.size && selectedId) ids.add(selectedId);
             clipboardNodes = spec.nodes.filter(node => ids.has(node.id)).map(node => JSON.parse(JSON.stringify(node)));
+            clipboardEdges = Array.isArray(spec.edges)
+                ? spec.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to)).map(edge => JSON.parse(JSON.stringify(edge)))
+                : [];
             window.Pivot.legacy.showToast?.(clipboardNodes.length ? `已复制 ${clipboardNodes.length} 个节点` : '请先选择节点', clipboardNodes.length ? 'success' : 'warning');
         };
 
@@ -539,8 +584,23 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 _y: Number(node._y || 0) + 40
             }));
             spec.nodes.push(...pasted);
+            if (Array.isArray(spec.edges)) {
+                clipboardEdges.forEach(edge => {
+                    const from = idMap.get(edge.from);
+                    const to = idMap.get(edge.to);
+                    if (from && to && !spec.edges.some(candidate => candidate.from === from && candidate.to === to && candidate.route === edge.route)) {
+                        spec.edges.push({ from, to, route: edge.route || 'default' });
+                    }
+                });
+                syncExplicitEdgesForDependencies();
+            }
             setSelection(pasted.map(node => node.id), pasted[0]?.id);
             clipboardNodes = pasted.map(node => JSON.parse(JSON.stringify(node)));
+            clipboardEdges = clipboardEdges.map(edge => ({
+                from: idMap.get(edge.from) || edge.from,
+                to: idMap.get(edge.to) || edge.to,
+                route: edge.route || 'default'
+            }));
             render();
             flushOut();
         };
@@ -590,6 +650,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const anchorId = selectedId;
             const anchorNode = spec.nodes.find(n => n.id === anchorId);
             spec.nodes.push(node);
+            syncExplicitEdgesForDependencies();
             placeNewNode(spec.nodes, node, anchorId);
             setSelection([node.id], node.id);
             render();
@@ -630,6 +691,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 onError: 'skip_dependents'
             };
             spec.nodes.push(node);
+            syncExplicitEdgesForDependencies();
             placeNewNode(spec.nodes, node, selectedId);
             setSelection([node.id], node.id);
             render();
@@ -705,6 +767,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 dependsOn: [researcherId, reviewerId], condition: 'success', retryLimit: 0, timeoutMs: 0, onError: 'stop'
             };
             spec.nodes.push(...delegates, supervisor);
+            syncExplicitEdgesForDependencies();
             autoLayout(spec.nodes);
             setSelection([supervisorId], supervisorId);
             render();
@@ -919,6 +982,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             clearSelection: () => {
                 clearSelection();
                 render();
+            },
+            selectNode: (id) => {
+                if (!spec.nodes.some(node => node.id === id)) return false;
+                setSelection([id], id);
+                render();
+                return true;
             },
             deleteSelectedNode: () => {
                 if (!selectedId) return false;

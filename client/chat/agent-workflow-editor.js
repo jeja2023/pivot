@@ -39,6 +39,17 @@ window.Pivot.legacy.refreshAgentDagEditor = () => {
     dagEditorInstance?.fitToContent?.();
 };
 
+const focusAgentDagNode = (nodeId) => {
+    const selected = dagEditorInstance?.selectNode?.(String(nodeId || ''));
+    if (selected) {
+        dagEditorInstance?.fitToContent?.();
+        return true;
+    }
+    return false;
+};
+
+window.Pivot.exposeModule('agent.workflowEditor', { focusAgentDagNode });
+
 function refreshAgentDagInputsPanel() {
     const workflowWorkbench = document.getElementById('agent-dag-workbench-modal');
     const workflowWorkbenchOpen = Boolean(workflowWorkbench && !workflowWorkbench.classList.contains('hidden'));
