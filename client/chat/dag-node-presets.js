@@ -241,8 +241,8 @@ const NODE_PRESET_GROUPS = [
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? '{{nodes.' + selectedNode.id + '.output.rows}}' : [], metrics: [{ field: '', aggregation: 'count', alias: '总数' }], valueField: '', aggregation: 'count', limit: 1000 })
             },
             {
-                base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db',
-                desc: '按字段分组后计算一个或多个统计指标', toolName: 'data.group_summary',
+                base: 'group_summary', title: '表格分组汇总', svgIcon: 'chart', theme: 'db',
+                desc: '对上游表格行按字段分组后计算一个或多个统计指标', toolName: 'data.group_summary',
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? '{{nodes.' + selectedNode.id + '.output.rows}}' : [], groupBy: [], metrics: [{ field: '', aggregation: 'count', alias: '数量' }], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 })
             },
             {

@@ -41,15 +41,15 @@ const resolveToolShortName = tool => {
                 && ['records', 'rows', 'data'].includes(normalizeFieldKey(name));
             const isGroupSummaryGroupBy = normalizeFieldKey(name) === 'groupby'
                 && (matchesTool('data.group_summary')
-                    || /^(?:数据)?分组汇总(?:数据)?$/.test(String(tool?.title || '').trim())
-                    || /^(?:数据)?分组汇总(?:数据)?$/.test(String(nodeTitle || '').trim())
+                    || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(tool?.title || '').trim())
+                    || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(nodeTitle || '').trim())
                     || /一个或多个分组字段|多个字段组合/.test(String(schema?.description || ''))
                     || Array.isArray(value));
             const isAggregationMetrics = fieldKey === 'metrics'
                 && (matchesTool('data.aggregate')
                     || matchesTool('data.group_summary')
-                    || /^(?:数据)?(?:分组)?汇总(?:数据)?$/.test(String(tool?.title || '').trim())
-                    || /^(?:数据)?(?:分组)?汇总(?:数据)?$/.test(String(nodeTitle || '').trim()));
+                    || /^(?:(?:数据|表格)?(?:分组)?汇总(?:数据)?)$/.test(String(tool?.title || '').trim())
+                    || /^(?:(?:数据|表格)?(?:分组)?汇总(?:数据)?)$/.test(String(nodeTitle || '').trim()));
             const isApprovalTagField = matchesTool('workflow.approval')
                 && ['approvers', 'approveruserids', 'approverunits'].includes(normalizeFieldKey(name));
             const isHandoffTagField = matchesTool('agent.handoff')

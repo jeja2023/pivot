@@ -229,9 +229,9 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             limit: '最大返回行数'
         },
         'db.group_count': {
-            table: '统计数据表',
-            groupBy: '分组统计字段',
-            group_by: '分组统计字段',
+            table: '要查询的数据库表',
+            groupBy: '数据库分组字段',
+            group_by: '数据库分组字段',
             limit: '分组数量上限'
         },
         'data.aggregate': {
@@ -310,8 +310,8 @@ const FIELD_DESCRIPTION_OVERRIDES = {
         collection: 'MongoDB 集合名称。',
         columns: '需要读取、展示或输出的字段列表，可填写结构化数组。',
         filters: '按字段设置筛选条件，可填写结构化对象。',
-        groupBy: '选择要按哪个字段分组统计。',
-        group_by: '选择要按哪个字段分组统计。',
+            groupBy: '选择要按哪个字段分组并统计每组数量。',
+            group_by: '选择要按哪个字段分组并统计每组数量。',
         groupAlias: '结果里分组字段的输出名称，通常保持默认即可。',
         group_alias: '结果里分组字段的输出名称，通常保持默认即可。',
         input: '传给工具或模型的主要输入内容。',
@@ -496,8 +496,8 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             query: '输入要查找的历史会话关键词或问题。'
         },
         'db.group_count': {
-            table: '要做分布统计的数据表。',
-            groupBy: '按这个字段分组并统计每组数量。',
+            table: '要直接查询并统计的数据库表。',
+            groupBy: '按这个数据库字段分组并统计每组数量。',
             group_by: '按这个字段分组并统计每组数量。'
         },
         'viz.build_chart': {

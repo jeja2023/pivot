@@ -345,14 +345,20 @@
             button.className = 'btn-secondary personal-shortcut';
             button.dataset.personalShortcut = key;
 
+            // 功能分类图标容器
             const icon = document.createElement('span');
-            icon.className = 'personal-shortcut-icon';
+            icon.className = `personal-shortcut-icon personal-shortcut-icon-${key}`;
             PivotSafeHtml.setHtml(icon, shortcut.iconSvg);
             icon.setAttribute('aria-hidden', 'true');
-
             button.appendChild(icon);
-            appendText(button, 'strong', 'personal-shortcut-title', shortcut.label);
-            appendText(button, 'span', 'personal-shortcut-hint', shortcut.hint);
+
+            // 底部：入口标题与功能简介说明
+            const info = document.createElement('div');
+            info.className = 'personal-shortcut-info';
+            appendText(info, 'strong', 'personal-shortcut-title', shortcut.label);
+            appendText(info, 'span', 'personal-shortcut-hint', shortcut.hint);
+            button.appendChild(info);
+
             container.appendChild(button);
         });
 
@@ -364,14 +370,20 @@
             addBtn.dataset.personalAction = 'edit-shortcuts';
             addBtn.setAttribute('aria-label', '增加入口');
 
+            // 加号图标容器
             const addIcon = document.createElement('span');
-            addIcon.className = 'personal-shortcut-icon';
+            addIcon.className = 'personal-shortcut-icon personal-shortcut-icon-add';
             PivotSafeHtml.setHtml(addIcon, ICONS.plus);
             addIcon.setAttribute('aria-hidden', 'true');
-
             addBtn.appendChild(addIcon);
-            appendText(addBtn, 'strong', 'personal-shortcut-title', '增加入口');
-            appendText(addBtn, 'span', 'personal-shortcut-hint', '自定义常用入口');
+
+            // 底部：入口标题与提示
+            const info = document.createElement('div');
+            info.className = 'personal-shortcut-info';
+            appendText(info, 'strong', 'personal-shortcut-title', '增加入口');
+            appendText(info, 'span', 'personal-shortcut-hint', '自定义常用入口');
+            addBtn.appendChild(info);
+
             container.appendChild(addBtn);
         }
     }

@@ -386,8 +386,8 @@ const mcpToolDisplayMap = {
         prompt: '请用只读查询统计我关心的数据，并给出简短结论。'
     },
     'db.group_count': {
-        title: '分组统计分布',
-        description: '按指定字段统计数量，适合生成分布表、排行榜和图表前置数据。',
+        title: '数据库分组计数',
+        description: '直接查询数据库表，按指定字段统计每组数量，适合生成分布表、排行榜和图表前置数据。',
         prompt: '请按关键字段做数量分布统计，并把结果整理成适合生成图表的数据。'
     },
     'db.list_collections': {
@@ -519,8 +519,8 @@ Object.assign(mcpToolDisplayMap, {
         prompt: '请统计这份数据的总记录数、总金额和平均金额。'
     },
     'data.group_summary': {
-        title: '分组汇总数据',
-        description: '按字段分组后计算一个或多个统计指标。',
+        title: '表格分组汇总',
+        description: '对上游表格行按字段分组后计算一个或多个统计指标。',
         prompt: '请按关键字段分组汇总这份数据，并指出最高和最低的组。'
     },
     'data.normalize_fields': {
@@ -743,4 +743,3 @@ async function withMcpActionLock(key, button, busyText, action) {
         }
     }
 }
-

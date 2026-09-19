@@ -282,6 +282,20 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(titleMatchedGroupByMarkup, /data-pivot-dag-group-field-add/);
     assert.doesNotMatch(titleMatchedGroupByMarkup, /value="\[\]"/);
 
+    const tableTitleGroupByMarkup = sandbox.renderWizardField(
+        'groupBy',
+        { type: 'string' },
+        [],
+        true,
+        [],
+        { name: 'unrelated.tool', title: '表格分组汇总' },
+        [],
+        'mcp.cached.unknown',
+        '表格分组汇总'
+    );
+    assert.match(tableTitleGroupByMarkup, /data-pivot-dag-group-fields/);
+    assert.match(tableTitleGroupByMarkup, /data-pivot-dag-group-field-add/);
+
     const aggregationMarkup = sandbox.renderWizardField(
         'aggregation',
         { type: 'string', enum: ['count', 'sum', 'avg'] },

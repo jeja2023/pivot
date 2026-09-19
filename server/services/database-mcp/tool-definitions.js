@@ -49,8 +49,8 @@ const SQL_TOOL_DEFINITIONS = [
     },
     {
         name: 'db.group_count',
-        title: '分组统计',
-        description: '按指定表字段分组并统计数量，适合普通用户生成分布图，系统会自动生成安全只读 SQL。',
+        title: '数据库分组计数',
+        description: '直接查询数据库表，按指定字段分组并统计每组数量；适合生成分布图，系统会自动生成安全只读 SQL。',
         inputSchema: {
             type: 'object',
             required: ['table', 'groupBy'],

@@ -70,8 +70,8 @@ function listDataProcessingTools() {
         },
         {
             name: 'data.group_summary',
-            title: '分组汇总数据',
-            description: '按指定字段对表格行分组，并计算计数、求和、均值、最小值或最大值。',
+            title: '表格分组汇总',
+            description: '对上游表格行按指定字段分组，并计算一个或多个计数、求和、均值、最小值或最大值指标。',
             inputSchema: {
                 type: 'object',
                 properties: {

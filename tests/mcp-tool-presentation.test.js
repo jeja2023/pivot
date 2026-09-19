@@ -26,6 +26,17 @@ test('MCP 工具展示中文化不改变内部名称或完整调用标识', () =
     assert.equal(presented.searchAliases.includes('mcp.0.reports.read_file_summary'), true);
 });
 
+test('两种分组工具展示数据来源与计算范围，内部标识保持不变', () => {
+    const databaseCount = presentMcpTool({ name: 'db.group_count', title: 'group count' });
+    const tableSummary = presentMcpTool({ name: 'data.group_summary', title: 'group summary' });
+    assert.equal(databaseCount.name, 'db.group_count');
+    assert.equal(databaseCount.displayTitle, '数据库分组计数');
+    assert.match(databaseCount.displayDescription, /数据库表/);
+    assert.equal(tableSummary.name, 'data.group_summary');
+    assert.equal(tableSummary.displayTitle, '表格分组汇总');
+    assert.match(tableSummary.displayDescription, /上游表格行/);
+});
+
 test('未登记的英文 MCP 名称提供中文兜底且保留英文搜索别名', () => {
     const presented = getMcpToolPresentation({
         name: 'read_file_summary',

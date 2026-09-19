@@ -51,12 +51,12 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
             if (isDatabaseConnectionField(name, tool)) return '选择要执行该数据库工具的连接；读取表/字段会跟随这个选择。';
             if (toolShortName(tool) === 'workflow.input' && ['default_value', 'defaultvalue'].includes(key)) return '默认值会跟随当前参数类型校验；对象和数组请填写合法 JSON。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
-            if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '添加一个或多个字段；每个字段组合会形成一个汇总分组。';
+            if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '从上游表格行添加一个或多个字段；每个字段组合会形成一个汇总分组。';
             if (name === 'metrics' && ['data.aggregate', 'data.group_summary'].includes(toolShortName(tool))) return '可逐项设置统计方式、指标字段和结果名称；计数不需要字段。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
             if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
                 ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'
-                : '适合精确查询；需要统计图时优先使用统计图模板或分组统计工具。';
+                : '适合精确查询；需要统计图时优先使用统计图模板或数据库分组计数工具。';
             if (key === 'query' || key === 'prompt') return '可直接输入，也可以插入任务目标或上游节点输出作为上下文。';
             if (toolShortName(tool) === 'agent.content_review' && ['records', 'rows', 'data'].includes(key)) return '请选择上游查询节点的结构化结果或记录行；支持 structuredContent、rows、data 和数组。';
             if (toolShortName(tool) === 'agent.content_review' && ['id_field', 'title_field', 'content_field'].includes(key)) return '填写上游记录里的实际字段名；字段不存在时会尝试常见别名。';

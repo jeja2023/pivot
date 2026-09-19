@@ -87,7 +87,7 @@ const agentToolDisplayMap = {
     'db.count_tables': { title: '统计数据表数量', description: '统计当前数据库中可查询的数据表和视图数量。' },
     'db.describe_table': { title: '查看表结构', description: '查看表字段、类型和可空性。' },
     'db.run_readonly_query': { title: '只读数据查询', description: '执行安全的只读查询，并遵守权限和返回数量限制。' },
-    'db.group_count': { title: '分组统计', description: '按指定表字段分组并统计数量。' },
+    'db.group_count': { title: '数据库分组计数', description: '直接查询数据库表，按指定字段分组并统计每组数量。' },
     'db.list_collections': { title: '列出集合', description: '列出 MongoDB 数据库集合。' },
     'db.count_collections': { title: '统计集合数量', description: '统计 MongoDB 数据库中的集合数量。' },
     'db.sample_collection': { title: '读取集合样本', description: '读取 MongoDB 集合的小样本，辅助理解字段结构。' },
@@ -109,7 +109,7 @@ const agentToolDisplayMap = {
     'data.profile_rows': { title: '数据画像分析', description: '分析表格数据行结构，生成字段名、类型分布、填充率及样本值画像。' },
     'data.filter_rows': { title: '筛选表格行', description: '使用精确匹配或包含匹配规则筛选表格数据行。' },
     'data.aggregate': { title: '数据汇总', description: '对全部数据计算一个或多个计数、求和、均值、最小值或最大值。' },
-    'data.group_summary': { title: '分组汇总数据', description: '按指定字段分组后计算一个或多个统计指标。' },
+    'data.group_summary': { title: '表格分组汇总', description: '对上游表格行按指定字段分组后计算一个或多个统计指标。' },
     'data.normalize_fields': { title: '规整字段名称与内容', description: '重命名字段、修剪字符串首尾空白，并规范化表格数据结构。' },
 
     // 文档解析

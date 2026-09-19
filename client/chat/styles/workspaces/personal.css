@@ -745,85 +745,213 @@ body.dark-mode .personal-empty-action:hover,
 .personal-shortcuts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    padding: 8px 12px;
+    gap: 10px;
+    padding: 10px 14px 12px;
     flex: 1;
     align-content: stretch;
 }
 
 .personal-shortcut {
+    position: relative;
     min-width: 0;
-    min-height: 52px;
+    min-height: 80px;
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     align-items: flex-start;
-    justify-content: center;
-    gap: 3px;
-    padding: 8px 10px;
+    padding: 12px 14px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
     background: var(--surface);
     color: var(--text-main);
     text-align: left;
     cursor: pointer;
-    transition: all 0.2s ease;
+    overflow: hidden;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.2s ease,
+                background-color 0.2s ease;
+    box-shadow: var(--shadow-sm);
 }
 
 .personal-shortcut:hover {
     border-color: var(--primary);
     background: var(--bg-side);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
 }
 
+/* 分类图标容器：分类图标与微交互 */
 .personal-shortcut-icon {
-    width: 18px;
-    height: 18px;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     color: var(--primary);
+    background: var(--personal-shortcut-default-bg, rgba(16, 163, 127, 0.08));
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
+}
+
+.personal-shortcut:hover .personal-shortcut-icon {
+    transform: scale(1.05);
 }
 
 .personal-shortcut-icon svg {
-    width: 18px;
-    height: 18px;
+    width: 19px;
+    height: 19px;
+}
+
+/* 入口色彩分类：精选低饱和渐润底色与主题色 */
+.personal-shortcut-icon-official-writing {
+    background: var(--personal-shortcut-writing-bg, rgba(99, 102, 241, 0.1));
+    color: var(--personal-shortcut-writing-color, #4f46e5);
+}
+
+.personal-shortcut-icon-data-analysis {
+    background: var(--personal-shortcut-analysis-bg, rgba(16, 185, 129, 0.12));
+    color: var(--personal-shortcut-analysis-color, #059669);
+}
+
+.personal-shortcut-icon-regulations {
+    background: var(--personal-shortcut-regulations-bg, rgba(217, 119, 6, 0.1));
+    color: var(--personal-shortcut-regulations-color, #d97706);
+}
+
+.personal-shortcut-icon-ocr {
+    background: var(--personal-shortcut-ocr-bg, rgba(139, 92, 246, 0.1));
+    color: var(--personal-shortcut-ocr-color, #7c3aed);
+}
+
+.personal-shortcut-icon-pdf-tools {
+    background: var(--personal-shortcut-pdf-bg, rgba(225, 29, 72, 0.1));
+    color: var(--personal-shortcut-pdf-color, #e11d48);
+}
+
+.personal-shortcut-icon-workflows {
+    background: var(--personal-shortcut-workflow-bg, rgba(2, 132, 199, 0.1));
+    color: var(--personal-shortcut-workflow-color, #0284c7);
+}
+
+.personal-shortcut-icon-add {
+    background: var(--personal-shortcut-add-bg, rgba(16, 163, 127, 0.08));
+    color: var(--primary);
+}
+
+/* 卡片文本信息区域 */
+.personal-shortcut-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    min-width: 0;
+    margin-top: 10px;
 }
 
 .personal-shortcut-title {
-    font-size: 0.78rem;
+    font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-main);
-    line-height: 1.2;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .personal-shortcut-hint {
     color: var(--text-muted);
-    font-size: 0.66rem;
-    line-height: 1.2;
+    font-size: 0.68rem;
+    line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     width: 100%;
+    display: block;
 }
 
+/* “增加入口”卡片虚线样式与悬浮反馈 */
 .personal-shortcut-add {
     border: 1px dashed var(--border);
     background: transparent;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 3px;
+    box-shadow: none;
 }
 
 .personal-shortcut-add:hover {
     border-color: var(--primary);
-    border-style: solid;
-    background: rgba(16, 163, 127, 0.04);
+    border-style: dashed;
+    background: var(--personal-shortcut-add-hover-bg, rgba(16, 163, 127, 0.04));
+    box-shadow: var(--shadow-sm);
 }
 
-.personal-shortcut-add .personal-shortcut-icon {
+/* 深色模式适配 */
+body.dark-mode .personal-shortcut,
+.dark-mode .personal-shortcut {
+    background: var(--personal-card-bg-dark, rgba(30, 41, 59, 0.45));
+    border-color: var(--personal-border-dark, rgba(148, 163, 184, 0.14));
+}
+
+body.dark-mode .personal-shortcut:hover,
+.dark-mode .personal-shortcut:hover {
+    background: var(--personal-card-hover-dark, rgba(30, 41, 59, 0.85));
+    border-color: var(--primary);
+    box-shadow: var(--shadow-md);
+}
+
+body.dark-mode .personal-shortcut-icon-official-writing,
+.dark-mode .personal-shortcut-icon-official-writing {
+    background: var(--personal-shortcut-writing-bg-dark, rgba(99, 102, 241, 0.18));
+    color: var(--personal-shortcut-writing-color-dark, #818cf8);
+}
+
+body.dark-mode .personal-shortcut-icon-data-analysis,
+.dark-mode .personal-shortcut-icon-data-analysis {
+    background: var(--personal-shortcut-analysis-bg-dark, rgba(16, 185, 129, 0.18));
+    color: var(--personal-shortcut-analysis-color-dark, #34d399);
+}
+
+body.dark-mode .personal-shortcut-icon-regulations,
+.dark-mode .personal-shortcut-icon-regulations {
+    background: var(--personal-shortcut-regulations-bg-dark, rgba(245, 158, 11, 0.18));
+    color: var(--personal-shortcut-regulations-color-dark, #fbbf24);
+}
+
+body.dark-mode .personal-shortcut-icon-ocr,
+.dark-mode .personal-shortcut-icon-ocr {
+    background: var(--personal-shortcut-ocr-bg-dark, rgba(139, 92, 246, 0.18));
+    color: var(--personal-shortcut-ocr-color-dark, #a78bfa);
+}
+
+body.dark-mode .personal-shortcut-icon-pdf-tools,
+.dark-mode .personal-shortcut-icon-pdf-tools {
+    background: var(--personal-shortcut-pdf-bg-dark, rgba(244, 63, 94, 0.18));
+    color: var(--personal-shortcut-pdf-color-dark, #fb7185);
+}
+
+body.dark-mode .personal-shortcut-icon-workflows,
+.dark-mode .personal-shortcut-icon-workflows {
+    background: var(--personal-shortcut-workflow-bg-dark, rgba(14, 165, 233, 0.18));
+    color: var(--personal-shortcut-workflow-color-dark, #38bdf8);
+}
+
+body.dark-mode .personal-shortcut-icon-add,
+.dark-mode .personal-shortcut-icon-add {
+    background: var(--personal-shortcut-add-bg-dark, rgba(16, 163, 127, 0.15));
     color: var(--primary);
+}
+
+body.dark-mode .personal-shortcut-add,
+.dark-mode .personal-shortcut-add {
+    border-color: var(--personal-border-dashed-dark, rgba(148, 163, 184, 0.24));
+    background: transparent;
+}
+
+body.dark-mode .personal-shortcut-add:hover,
+.dark-mode .personal-shortcut-add:hover {
+    border-color: var(--primary);
+    background: var(--personal-shortcut-add-hover-bg-dark, rgba(16, 163, 127, 0.08));
 }
 
 

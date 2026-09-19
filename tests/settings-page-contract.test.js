@@ -101,7 +101,8 @@ test('审计日志读取不会等待整个异步写入队列', () => {
 
 test('工具策略卡片具备工具名称与简介全量中文化映射', () => {
     const toolPolicy = read('client/chat/tool-policy.js');
-    assert.match(toolPolicy, /'data\.group_summary':\s*'分组汇总数据'/);
+    assert.match(toolPolicy, /'data\.group_summary':\s*'表格分组汇总'/);
+    assert.match(toolPolicy, /'db\.group_count':\s*'数据库分组计数'/);
     assert.match(toolPolicy, /'format\.extract_json':\s*'提取 JSON'/);
     assert.match(toolPolicy, /'data\.filter_rows':\s*'筛选表格行'/);
     assert.match(toolPolicy, /function toolPolicyToolTitle/);

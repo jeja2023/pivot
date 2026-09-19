@@ -148,7 +148,7 @@ function createDagWizardStatsController(ctx) {
                     '工作流目标：',
                     '{{goal}}',
                     '',
-                    '分组统计结果：',
+                    '数据库分组计数结果：',
                     '{{nodes.group_count.output.rows}}',
                     '',
                     `图表类型：${chartType}`,
@@ -160,7 +160,7 @@ function createDagWizardStatsController(ctx) {
                 nodes: [
                     {
                         id: 'group_count',
-                        title: '分组统计',
+                        title: '数据库分组计数',
                         tool: toolShortName(queryTool),
                         input: queryInput,
                         dependsOn: [],
