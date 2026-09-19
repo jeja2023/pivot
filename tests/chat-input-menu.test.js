@@ -71,9 +71,12 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.doesNotMatch(shell, /id="chat-mcp-subpanel"/);
     assert.match(autoRoute, /const getAutoRouteEnabled = \(\) => true/);
     assert.match(autoRoute, /本会话已允许使用工具/);
-    assert.match(autoRoute, /MENTION_CATEGORY_LIMIT = 4/);
-    assert.match(autoRoute, /mentionQuery\(input\(\)\?\.value \|\| ''\) === null/);
-    assert.match(autoRoute, /当前白名单内的工具/);
+    assert.match(autoRoute, /MENTION_PAGE_SIZE = 6/);
+    assert.match(autoRoute, /chat-route-mention-scope/);
+    assert.match(autoRoute, /chat-route-mention-result-summary/);
+    assert.match(autoRoute, /chat-route-mention-pager/);
+    assert.match(autoRoute, /已显示 \$\{start \+ 1\}–\$\{start \+ candidates\.length\} \/ \$\{total\}/);
+    assert.match(autoRoute, /mentionScope !== 'tool'/);
     assert.match(autoRoute, /allowlist\.has\(item\.fullName\)/);
     assert.doesNotMatch(autoRoute, /pivot_chat_auto_route_enabled/);
     assert.match(main, /function canSelectChatAttachment\(\)/);

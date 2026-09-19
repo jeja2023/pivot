@@ -579,16 +579,30 @@ test.describe('Pivot browser smoke', () => {
     });
 
    test('chat input defaults to adaptive routing and keeps the plus menu for attachments only', async ({ page }) => {
-       await page.setViewportSize({ width: 1024, height: 520 });
+        await page.setViewportSize({ width: 1024, height: 520 });
         await page.addInitScript(() => {
-            localStorage.setItem('pivot_chat_mcp_tool_mode', 'manual');
-            localStorage.setItem('pivot_chat_mcp_tool_allowlist', JSON.stringify(['mcp.17.report.read_report']));
+            window.localStorage.setItem('pivot_chat_mcp_tool_mode', 'manual');
+            window.localStorage.setItem('pivot_chat_mcp_tool_allowlist', JSON.stringify([
+                'mcp.17.report.read_report',
+                'mcp.17.report.list_reports',
+                'mcp.17.report.export_report',
+                'mcp.17.report.share_report',
+                'mcp.17.report.refresh_report',
+                'mcp.17.report.archive_report',
+                'mcp.17.report.seventh_report'
+            ]));
         });
         await page.route('**/api/mcp/tools', route => route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
                 tools: [
                     { fullName: 'mcp.17.report.read_report', name: 'report.read_report', title: '读取报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.list_reports', name: 'report.list_reports', title: '列出报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.export_report', name: 'report.export_report', title: '导出报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.share_report', name: 'report.share_report', title: '共享报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.refresh_report', name: 'report.refresh_report', title: '刷新报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.archive_report', name: 'report.archive_report', title: '归档报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.seventh_report', name: 'report.seventh_report', title: '第七报表工具', serverName: '报表工具' },
                     { fullName: 'mcp.17.report.delete_report', name: 'report.delete_report', title: '删除报表', serverName: '报表工具' }
                 ]
             })
@@ -618,6 +632,19 @@ test.describe('Pivot browser smoke', () => {
         // 裸 @ 同时加载知识库和当前执行白名单内的工具；选中工具仅形成显式候选，
         // 不会绕过后续的本会话授权与重新发送步骤。
         await page.locator('#user-input').fill('@');
+        await expect(page.locator('[data-route-mention-scope]')).toHaveCount(2);
+        await expect(page.locator('.chat-route-mention-item')).toHaveCount(0);
+        await page.locator('[data-route-mention-scope="tool"]').click();
+        const mentionSearch = page.locator('.chat-route-mention-search');
+        await expect(mentionSearch).toBeVisible();
+        await expect(page.locator('.chat-route-mention-result-summary')).toHaveText('已显示 1–6 / 7');
+        await expect(page.locator('.chat-route-mention-item')).toHaveCount(6);
+        await page.locator('.chat-route-mention-pager button', { hasText: '下一页' }).click();
+        await expect(page.locator('.chat-route-mention-result-summary')).toHaveText('已显示 7–7 / 7');
+        await expect(page.locator('.chat-route-mention-item', { hasText: '@第七报表工具' })).toBeVisible();
+        await page.locator('.chat-route-mention-pager button', { hasText: '上一页' }).click();
+        await expect(page.locator('.chat-route-mention-result-summary')).toHaveText('已显示 1–6 / 7');
+        await mentionSearch.fill('读取');
         const allowedTool = page.locator('.chat-route-mention-item', { hasText: '@读取报表' });
         await expect(allowedTool).toBeVisible();
         await expect(page.locator('#chat-route-mention-menu')).toContainText('工具 · 报表工具');

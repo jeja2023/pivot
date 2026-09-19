@@ -1,11 +1,14 @@
 /* 对话自适应路由前端状态、@ 显式覆盖与工具授权引导。 */
 (() => {
     const RAG_PREFERENCE_KEY = 'pivot_chat_rag_preference';
-    const MENTION_CATEGORY_LIMIT = 4;
+    const MENTION_PAGE_SIZE = 6;
     let available = true;
     let selections = [];
     let tools = [];
     let toolsLoading = null;
+    let mentionScope = '';
+    let mentionSearchQuery = '';
+    let mentionPage = 0;
 
     const input = () => document.getElementById('user-input');
     // 输入区不再提供开关：在服务端能力开关允许时，普通会话始终采用自适应路由。
@@ -85,6 +88,9 @@
     const closeMentionMenu = () => {
         const menu = document.getElementById('chat-route-mention-menu');
         if (!menu) return;
+        mentionScope = '';
+        mentionSearchQuery = '';
+        mentionPage = 0;
         menu.hidden = true;
         window.Pivot.legacy.PivotSafeHtml?.setHtml(menu, '');
     };
@@ -106,60 +112,202 @@
         window.Pivot.legacy.resizeUserInput?.();
         closeMentionMenu();
     };
-    const renderMentionMenu = () => {
-        const query = mentionQuery(input()?.value || '');
-        if (query === null) return closeMentionMenu();
+    const appendMentionCandidate = (menu, candidate, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chat-route-mention-item';
+        button.dataset.routeMentionIndex = String(index);
+        button.setAttribute('role', 'option');
+        const name = document.createElement('strong');
+        name.textContent = `@${candidate.name}`;
+        const detail = document.createElement('small');
+        detail.textContent = candidate.detail;
+        button.append(name, detail);
+        const select = event => { event.preventDefault(); applyMention(candidate); };
+        button.addEventListener('mousedown', select);
+        button.addEventListener('click', event => { if (event.detail === 0) select(event); });
+        menu.appendChild(button);
+    };
+    const setMentionScope = scope => {
+        mentionScope = scope === 'tool' ? 'tool' : 'collection';
+        // 用户先输入 @关键词 再选择类别时，保留关键词继续搜索。
+        mentionSearchQuery = mentionQuery(input()?.value || '') || '';
+        mentionPage = 0;
+        if (mentionScope === 'tool') ensureMentionTools().catch(() => {});
+        renderMentionMenu({ focusSearch: true });
+    };
+    const appendScopeOption = (menu, scope, label, description) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chat-route-mention-scope';
+        button.dataset.routeMentionScope = scope;
+        button.setAttribute('role', 'option');
+        const text = document.createElement('span');
+        const title = document.createElement('strong');
+        title.textContent = label;
+        const detail = document.createElement('small');
+        detail.textContent = description;
+        text.append(title, detail);
+        const arrow = document.createElement('span');
+        arrow.className = 'chat-route-mention-scope-arrow';
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = '›';
+        button.append(text, arrow);
+        const select = event => { event.preventDefault(); setMentionScope(scope); };
+        button.addEventListener('mousedown', select);
+        button.addEventListener('click', event => { if (event.detail === 0) select(event); });
+        menu.appendChild(button);
+    };
+    const renderMentionScopePicker = (menu, typedQuery = '') => {
+        const hint = document.createElement('div');
+        hint.className = 'chat-route-mention-picker-hint';
+        hint.textContent = typedQuery
+            ? `已输入“${typedQuery}”，请选择要搜索的类型`
+            : '选择要引用的能力';
+        menu.appendChild(hint);
+        appendScopeOption(menu, 'collection', '知识库', '搜索有权访问的资料库');
+        appendScopeOption(menu, 'tool', '工具', '搜索当前允许使用的工具');
+    };
+    const renderMentionSearch = (menu, { focusSearch = false } = {}) => {
+        const isToolScope = mentionScope === 'tool';
+        const query = String(mentionSearchQuery || '').trim().toLowerCase();
+        const header = document.createElement('div');
+        header.className = 'chat-route-mention-search-header';
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'chat-route-mention-back';
+        back.setAttribute('aria-label', '返回类型选择');
+        back.textContent = '‹';
+        back.addEventListener('mousedown', event => {
+            event.preventDefault();
+            mentionScope = '';
+            mentionSearchQuery = '';
+            mentionPage = 0;
+            renderMentionMenu();
+            input()?.focus();
+        });
+        const title = document.createElement('strong');
+        title.textContent = isToolScope ? '搜索工具' : '搜索知识库';
+        header.append(back, title);
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'chat-route-mention-search';
+        search.placeholder = isToolScope ? '输入工具名称或服务' : '输入知识库名称';
+        search.value = mentionSearchQuery;
+        search.setAttribute('aria-label', title.textContent);
+        search.addEventListener('input', event => {
+            mentionSearchQuery = String(event.target.value || '').toLowerCase();
+            mentionPage = 0;
+            renderMentionMenu({ focusSearch: true });
+        });
+        search.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                mentionScope = '';
+                mentionSearchQuery = '';
+                mentionPage = 0;
+                renderMentionMenu();
+                input()?.focus();
+                return;
+            }
+            if (event.key === 'Enter') {
+                const candidate = menu.querySelector('.chat-route-mention-item');
+                if (candidate) {
+                    event.preventDefault();
+                    candidate.click();
+                }
+            }
+        });
+        menu.append(header, search);
+        if (isToolScope && toolsLoading) {
+            const loading = document.createElement('div');
+            loading.className = 'chat-route-mention-empty';
+            loading.textContent = '正在加载当前可用工具...';
+            menu.appendChild(loading);
+        } else {
+            const allCandidates = isToolScope ? toolCandidates(query) : collectionCandidates(query);
+            const total = allCandidates.length;
+            const pageCount = Math.max(1, Math.ceil(total / MENTION_PAGE_SIZE));
+            const page = Math.min(Math.max(0, mentionPage), pageCount - 1);
+            mentionPage = page;
+            const start = page * MENTION_PAGE_SIZE;
+            const candidates = allCandidates.slice(start, start + MENTION_PAGE_SIZE);
+            if (!candidates.length) {
+                const empty = document.createElement('div');
+                empty.className = 'chat-route-mention-empty';
+                empty.textContent = query
+                    ? `未找到匹配的${isToolScope ? '工具' : '知识库'}`
+                    : `暂无可引用的${isToolScope ? '工具' : '知识库'}`;
+                menu.appendChild(empty);
+            } else {
+                const summary = document.createElement('div');
+                summary.className = 'chat-route-mention-result-summary';
+                summary.textContent = `已显示 ${start + 1}–${start + candidates.length} / ${total}`;
+                menu.appendChild(summary);
+                candidates.forEach((candidate, index) => appendMentionCandidate(menu, candidate, start + index));
+                if (pageCount > 1) {
+                    const pager = document.createElement('div');
+                    pager.className = 'chat-route-mention-pager';
+                    const previous = document.createElement('button');
+                    previous.type = 'button';
+                    previous.textContent = '上一页';
+                    previous.disabled = page === 0;
+                    const goPrevious = event => {
+                        event.preventDefault();
+                        mentionPage = Math.max(0, page - 1);
+                        renderMentionMenu({ focusSearch: true });
+                    };
+                    previous.addEventListener('mousedown', goPrevious);
+                    previous.addEventListener('click', event => { if (event.detail === 0) goPrevious(event); });
+                    const pageText = document.createElement('span');
+                    pageText.textContent = `${page + 1} / ${pageCount}`;
+                    const next = document.createElement('button');
+                    next.type = 'button';
+                    next.textContent = '下一页';
+                    next.disabled = page >= pageCount - 1;
+                    const goNext = event => {
+                        event.preventDefault();
+                        mentionPage = Math.min(pageCount - 1, page + 1);
+                        renderMentionMenu({ focusSearch: true });
+                    };
+                    next.addEventListener('mousedown', goNext);
+                    next.addEventListener('click', event => { if (event.detail === 0) goNext(event); });
+                    pager.append(previous, pageText, next);
+                    menu.appendChild(pager);
+                }
+            }
+        }
+        if (focusSearch) {
+            (window.queueMicrotask || window.setTimeout)(() => {
+                search.focus();
+                search.setSelectionRange(search.value.length, search.value.length);
+            }, 0);
+        }
+    };
+    const renderMentionMenu = ({ focusSearch = false } = {}) => {
+        const typedQuery = mentionQuery(input()?.value || '');
+        if (typedQuery === null) return closeMentionMenu();
         const menu = document.getElementById('chat-route-mention-menu');
         if (!menu) return;
-        // 裸 @ 必须同时给出两类能力。分组限额避免 Collection 数量较多时
-        // 把工具候选完全挤出首屏。
-        const candidates = [
-            ...collectionCandidates(query).slice(0, MENTION_CATEGORY_LIMIT),
-            ...toolCandidates(query).slice(0, MENTION_CATEGORY_LIMIT)
-        ];
         window.Pivot.legacy.PivotSafeHtml?.setHtml(menu, '');
-        if (!candidates.length) {
-            const empty = document.createElement('div');
-            empty.className = 'chat-route-mention-empty';
-            empty.textContent = toolsLoading
-                ? '正在加载当前可用工具...'
-                : '未找到可引用的知识库或当前白名单内的工具';
-            menu.appendChild(empty);
-        } else {
-            candidates.forEach((candidate, index) => {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'chat-route-mention-item';
-                button.dataset.routeMentionIndex = String(index);
-                button.setAttribute('role', 'option');
-                const name = document.createElement('strong');
-                name.textContent = `@${candidate.name}`;
-                const detail = document.createElement('small');
-                detail.textContent = candidate.detail;
-                button.append(name, detail);
-                const select = event => { event.preventDefault(); applyMention(candidate); };
-                button.addEventListener('mousedown', select);
-                button.addEventListener('click', event => { if (event.detail === 0) select(event); });
-                menu.appendChild(button);
-            });
-        }
+        if (mentionScope) renderMentionSearch(menu, { focusSearch });
+        else renderMentionScopePicker(menu, typedQuery);
         menu.hidden = false;
     };
     const ensureMentionTools = async () => {
-        // 空字符串是裸 @，仍应加载工具；只有没有 @ 时才跳过。
-        if (tools.length || toolsLoading || mentionQuery(input()?.value || '') === null) return toolsLoading;
+        if (tools.length || toolsLoading || mentionScope !== 'tool') return toolsLoading;
         toolsLoading = (async () => {
             const response = await apiFetch(`${API_BASE}/mcp/tools`);
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '工具目录加载失败');
             tools = Array.isArray(data.tools) ? data.tools : [];
-            renderMentionMenu();
+            renderMentionMenu({ focusSearch: true });
         })().catch(() => {
             // 工具目录不可用时仍让知识库候选可用，不把加载错误当成权限结论。
-            renderMentionMenu();
+            renderMentionMenu({ focusSearch: true });
         }).finally(() => {
             toolsLoading = null;
-            renderMentionMenu();
+            renderMentionMenu({ focusSearch: true });
         });
         return toolsLoading;
     };
@@ -176,19 +324,30 @@
     };
     const setAvailable = value => { available = value !== false; syncState(); };
 
-    input()?.addEventListener('input', () => { renderMentionMenu(); ensureMentionTools().catch(() => {}); });
+    input()?.addEventListener('input', () => {
+        if (mentionQuery(input()?.value || '') === null) {
+            mentionScope = '';
+            mentionSearchQuery = '';
+            mentionPage = 0;
+        }
+        renderMentionMenu();
+    });
     input()?.addEventListener('keydown', event => {
         const menu = document.getElementById('chat-route-mention-menu');
         if (!menu?.hidden && event.key === 'Escape') {
             event.preventDefault();
             closeMentionMenu();
         } else if (!menu?.hidden && event.key === 'Enter' && !event.shiftKey) {
-            const candidate = menu.querySelector('.chat-route-mention-item');
+            const candidate = menu.querySelector('.chat-route-mention-item, .chat-route-mention-scope');
             if (candidate) {
                 event.preventDefault();
                 candidate.click();
             }
         }
+    });
+    document.addEventListener('click', event => {
+        if (event.target.closest?.('#chat-route-mention-menu') || event.target === input()) return;
+        closeMentionMenu();
     });
     window.Pivot.exposeModule('chat.autoRoute', {
         clearOverrides,
