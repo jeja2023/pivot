@@ -127,7 +127,7 @@ function createDagWizardController(ctx) {
             const referencePickerFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-picker="${fieldName}"]`);
             const referenceCustomFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-custom="${fieldName}"]`);
             const manualControlFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-manual-control="${fieldName}"]`);
-            const { approvalLevelsFromControl, approvalTagsFromControl, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
+            const { aggregationMetricsFromControl, approvalLevelsFromControl, approvalTagsFromControl, bindAggregationMetrics, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderAggregationMetrics, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
             const { bindReportSheetPicker, hydrateSheet, setManualSheet, sheetValue } = createDagWizardReportAssist();
             let syncBrowserTargetVisibility = () => {}, syncConditionCompareField = () => {}, syncOutputPresentationFields = () => {};
             const syncReferencePicker = (fieldName, nextValue) => {
@@ -152,10 +152,8 @@ function createDagWizardController(ctx) {
                     if (!control) return;
                     const nextValue = draftInput[name];
                     const type = normalizeSchemaType(fieldSchema);
-                    if (control.dataset.pivotDagGroupFields) {
-                        renderGroupFields(control, nextValue);
-                        return;
-                    }
+                    if (control.dataset.pivotDagAggregationMetrics) { renderAggregationMetrics(control, nextValue); return; }
+                    if (control.dataset.pivotDagGroupFields) { renderGroupFields(control, nextValue); return; }
                     if (control.dataset.pivotDagColumnFields) {
                         renderColumnFields(control, nextValue);
                         return;
@@ -253,6 +251,7 @@ function createDagWizardController(ctx) {
             };
             const getFieldValue = (control, fieldSchema, fieldName = '') => {
                 const type = normalizeSchemaType(fieldSchema);
+                if (control.dataset.pivotDagAggregationMetrics) { const metrics = aggregationMetricsFromControl(control); return metrics.length ? metrics : undefined; }
                 if (control.dataset.pivotDagGroupFields) {
                     const fields = groupFieldsFromControl(control);
                     return fields.length ? fields : undefined;
@@ -663,6 +662,7 @@ function createDagWizardController(ctx) {
                 syncSourceMode();
                 custom?.addEventListener('input', () => setActiveField(fieldsByName.get(fieldName)));
             });
+            modal.querySelectorAll('[data-pivot-dag-aggregation-metrics]').forEach(control => bindAggregationMetrics({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-group-fields]').forEach(control => {
                 const addInput = control.querySelector('[data-pivot-dag-group-field-input]');
                 const addField = () => {

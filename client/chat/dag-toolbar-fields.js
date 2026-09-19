@@ -89,7 +89,8 @@ const TOOL_PRIMARY_FIELD_NAMES = {
         'artifact.render': ['artifactId', 'format', 'ir'],
         'artifact.list_renditions': ['artifactId'],
         'data.filter_rows': ['rows', 'filters', 'matchMode', 'limit'],
-        'data.group_summary': ['rows', 'groupBy', 'valueField', 'aggregation', 'outputLimit'],
+        'data.aggregate': ['rows', 'metrics', 'valueField', 'aggregation', 'limit'],
+        'data.group_summary': ['rows', 'groupBy', 'metrics', 'valueField', 'aggregation', 'outputLimit'],
         'data.profile_rows': ['rows', 'limit'],
         'data.normalize_fields': ['rows', 'renameMap', 'trimStrings', 'limit']
     };

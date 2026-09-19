@@ -60,8 +60,8 @@ const mcpSystemServices = [
         title: '数据处理',
         badge: '系统服务',
         description: '对表格行进行字段画像、筛选、聚合统计和字段标准化处理。',
-        usage: '适合“按部门汇总”“筛选异常行”。',
-        tools: ['data.profile_rows', 'data.filter_rows', 'data.group_summary', 'data.normalize_fields']
+        usage: '适合“统计总额”“按部门汇总”“筛选异常行”。',
+        tools: ['data.profile_rows', 'data.filter_rows', 'data.aggregate', 'data.group_summary', 'data.normalize_fields']
     },
     {
         type: 'format',
@@ -513,9 +513,14 @@ Object.assign(mcpToolDisplayMap, {
         description: '按字段条件对表格行进行精确或包含匹配筛选。',
         prompt: '请按我的条件筛选表格行，并说明筛选结果。'
     },
+    'data.aggregate': {
+        title: '数据汇总',
+        description: '不分组地计算总数、总和、平均值、最小值或最大值，可同时返回多个指标。',
+        prompt: '请统计这份数据的总记录数、总金额和平均金额。'
+    },
     'data.group_summary': {
         title: '分组汇总数据',
-        description: '按字段分组后计算数量、求和、平均值、最小值或最大值。',
+        description: '按字段分组后计算一个或多个统计指标。',
         prompt: '请按关键字段分组汇总这份数据，并指出最高和最低的组。'
     },
     'data.normalize_fields': {
@@ -738,5 +743,4 @@ async function withMcpActionLock(key, button, busyText, action) {
         }
     }
 }
-
 

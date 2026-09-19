@@ -90,7 +90,18 @@ function dagReadinessValidateSemantics(issues, node, nodeName, input) {
             dagReadinessIssue(issues, node, 'name', '的参数名只能使用字母、数字、下划线和短横线，且不能以数字开头。', 'invalid_workflow_input_name');
         }
     }
-    if (nodeName === 'data.group_summary') {
+    if (nodeName === 'data.group_summary' || nodeName === 'data.aggregate') {
+        const metrics = Array.isArray(get('metrics'))
+            ? get('metrics').filter(item => item && typeof item === 'object' && !Array.isArray(item))
+            : [];
+        metrics.forEach((metric, index) => {
+            const aggregation = String(metric.aggregation || 'count').toLowerCase();
+            const field = String(metric.field || metric.valueField || '').trim();
+            if (['sum', 'avg', 'min', 'max'].includes(aggregation) && !field) {
+                dagReadinessIssue(issues, node, 'metrics', `第 ${index + 1} 个统计指标使用“${aggregation}”时需要指定指标字段。`, 'missing_metric_field');
+            }
+        });
+        if (nodeName === 'data.aggregate') return;
         const groupBy = (Array.isArray(get('groupBy')) ? get('groupBy') : [get('groupBy')])
             .flatMap(value => typeof value === 'string' ? value.split(',') : [value])
             .map(value => String(value || '').trim())
@@ -99,7 +110,7 @@ function dagReadinessValidateSemantics(issues, node, nodeName, input) {
             dagReadinessIssue(issues, node, 'groupBy', '至少需要选择一个分组字段。', 'missing_group_fields');
         }
         const aggregation = String(get('aggregation') || 'count').toLowerCase();
-        if (['sum', 'avg', 'min', 'max'].includes(aggregation) && dagReadinessValueMissing(get('valueField'))) {
+        if (!metrics.length && ['sum', 'avg', 'min', 'max'].includes(aggregation) && dagReadinessValueMissing(get('valueField'))) {
             dagReadinessIssue(issues, node, 'valueField', `选择“${aggregation}”聚合方式时需要指定指标字段。`, 'missing_aggregation_field');
         }
     }

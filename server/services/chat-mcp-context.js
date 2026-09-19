@@ -43,6 +43,7 @@ const MCP_CHAT_TOOL_TITLES = {
     'doc.chunk_text': '切分文档文本',
     'data.profile_rows': '分析表格字段',
     'data.filter_rows': '筛选表格行',
+    'data.aggregate': '数据汇总',
     'data.group_summary': '分组汇总数据',
     'data.normalize_fields': '标准化字段',
     'format.to_markdown_table': '转换 Markdown 表格',

@@ -45,6 +45,11 @@ const resolveToolShortName = tool => {
                     || /^(?:数据)?分组汇总(?:数据)?$/.test(String(nodeTitle || '').trim())
                     || /一个或多个分组字段|多个字段组合/.test(String(schema?.description || ''))
                     || Array.isArray(value));
+            const isAggregationMetrics = fieldKey === 'metrics'
+                && (matchesTool('data.aggregate')
+                    || matchesTool('data.group_summary')
+                    || /^(?:数据)?(?:分组)?汇总(?:数据)?$/.test(String(tool?.title || '').trim())
+                    || /^(?:数据)?(?:分组)?汇总(?:数据)?$/.test(String(nodeTitle || '').trim()));
             const isApprovalTagField = matchesTool('workflow.approval')
                 && ['approvers', 'approveruserids', 'approverunits'].includes(normalizeFieldKey(name));
             const isHandoffTagField = matchesTool('agent.handoff')
@@ -71,7 +76,7 @@ const resolveToolShortName = tool => {
                 && /^(filters|renamemap|fields|headers|body|vars|inputs|sections)$/i.test(fieldName)
                 && (!value || (typeof value === 'object' && !Array.isArray(value)));
             const isDelayDuration = matchesTool('workflow.delay') && normalizeFieldKey(name) === 'duration_ms';
-            const dataFieldOptions = (isGroupSummaryGroupBy || isDataFieldSelector || isColumnSelector || isKeyValueMapField)
+            const dataFieldOptions = (isGroupSummaryGroupBy || isAggregationMetrics || isDataFieldSelector || isColumnSelector || isKeyValueMapField)
                 && typeof buildWizardDataFieldOptions === 'function'
                 ? buildWizardDataFieldOptions(dependencyNodes)
                 : [];
@@ -80,7 +85,11 @@ const resolveToolShortName = tool => {
                 .map(item => String(item || '').trim())
                 .filter(Boolean)
                 .filter((item, index, items) => items.indexOf(item) === index);
+            const aggregationMetrics = Array.isArray(value)
+                ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)).slice(0, 20)
+                : [];
             const isStructuredReferenceField = !isGroupSummaryGroupBy
+                && !isAggregationMetrics
                 && !isApprovalTagField
                 && !isHandoffTagField
                 && !isWorkflowInputDefaultField
@@ -91,6 +100,7 @@ const resolveToolShortName = tool => {
                 && !isKeyValueMapField
                 && (isContentReviewSourceField || type === 'array' || type === 'object');
             const codeTextArea = !isStructuredReferenceField
+                && !isAggregationMetrics
                 && !isDataFieldSelector
                 && !isColumnSelector
                 && !isKeyValueMapField
@@ -201,6 +211,7 @@ const resolveToolShortName = tool => {
                 isNumber ? 'is-number' : '',
                 type === 'boolean' ? 'is-boolean' : '',
                 isGroupSummaryGroupBy ? 'is-group-fields' : '',
+                isAggregationMetrics ? 'is-special-fields is-wide' : '',
                 isApprovalTagField ? 'is-group-fields is-wide' : '',
                 isHandoffTagField ? 'is-special-fields is-wide' : '',
                 isWorkflowInputDefaultField ? 'is-special-fields' : '',
@@ -216,7 +227,40 @@ const resolveToolShortName = tool => {
                 isDatabaseConnection ? 'is-database-connection' : ''
             ].filter(Boolean).join(' ');
             let controlHtml = '';
-            if (isGroupSummaryGroupBy) {
+            if (isAggregationMetrics) {
+                const renderMetric = (metric = {}, index = 0) => {
+                    const aggregation = ['count', 'sum', 'avg', 'min', 'max'].includes(String(metric.aggregation || '').toLowerCase())
+                        ? String(metric.aggregation).toLowerCase()
+                        : 'count';
+                    return `
+                        <div class="pivot-dag-aggregation-metric-row" data-pivot-dag-aggregation-metric-row>
+                            <select class="form-input" data-pivot-dag-aggregation-metric-aggregation aria-label="统计方式">
+                                <option value="count" ${aggregation === 'count' ? 'selected' : ''}>计数</option>
+                                <option value="sum" ${aggregation === 'sum' ? 'selected' : ''}>求和</option>
+                                <option value="avg" ${aggregation === 'avg' ? 'selected' : ''}>平均值</option>
+                                <option value="min" ${aggregation === 'min' ? 'selected' : ''}>最小值</option>
+                                <option value="max" ${aggregation === 'max' ? 'selected' : ''}>最大值</option>
+                            </select>
+                            <input class="form-input" type="text" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-aggregation-metric-field value="${dagEscapeAttr(metric.field || '')}" placeholder="指标字段（计数可留空）" aria-label="指标字段">
+                            <input class="form-input" type="text" data-pivot-dag-aggregation-metric-alias value="${dagEscapeAttr(metric.alias || '')}" placeholder="结果名称，例如 销售额" aria-label="结果名称">
+                            <button type="button" class="btn-secondary" data-pivot-dag-aggregation-metric-remove aria-label="删除第 ${index + 1} 个汇总指标">×</button>
+                        </div>
+                    `;
+                };
+                controlHtml = `
+                    <div class="pivot-dag-aggregation-metrics" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-aggregation-metrics="${dagEscapeAttr(name)}">
+                        <div class="pivot-dag-aggregation-metrics-head"><span>统计方式</span><span>指标字段</span><span>结果名称</span></div>
+                        <div class="pivot-dag-aggregation-metrics-list" data-pivot-dag-aggregation-metrics-list>
+                            ${aggregationMetrics.length
+                                ? aggregationMetrics.map(renderMetric).join('')
+                                : '<div class="pivot-dag-aggregation-metrics-empty">尚未添加统计指标；旧版单指标配置会继续保留。</div>'}
+                        </div>
+                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        <button type="button" class="btn-secondary" data-pivot-dag-aggregation-metric-add>+ 添加统计指标</button>
+                        <span class="pivot-dag-group-fields-help">计数不需要指标字段；求和、平均值、最小值和最大值应选择数值字段。结果名称将作为后续节点可引用的字段名。</span>
+                    </div>
+                `;
+            } else if (isGroupSummaryGroupBy) {
                 controlHtml = `
                     <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-group-fields="${dagEscapeAttr(name)}">
                         <div class="pivot-dag-group-fields-list" data-pivot-dag-group-fields-list>

@@ -457,6 +457,7 @@
 
 .pivot-dag-data-field-picker,
 .pivot-dag-keyvalue-map,
+.pivot-dag-aggregation-metrics,
 .pivot-dag-resource-picker,
 .pivot-dag-workflow-input-default,
 .pivot-dag-approval-levels,
@@ -496,6 +497,49 @@
     display: flex;
     flex-direction: column;
     gap: 7px;
+}
+
+.pivot-dag-aggregation-metrics-head,
+.pivot-dag-aggregation-metric-row {
+    display: grid;
+    grid-template-columns: minmax(94px, 0.72fr) minmax(140px, 1fr) minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+}
+
+.pivot-dag-aggregation-metrics-head {
+    padding: 0 4px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.pivot-dag-aggregation-metrics-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.pivot-dag-aggregation-metric-row .btn-secondary {
+    width: 34px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0;
+    color: var(--danger);
+}
+
+.pivot-dag-aggregation-metrics-empty {
+    padding: 8px 2px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.pivot-dag-aggregation-metrics > .btn-secondary {
+    align-self: flex-start;
+    height: 34px;
+    padding: 0 11px;
+    font-size: 0.76rem;
 }
 
 .pivot-dag-keyvalue-map-row {
@@ -676,6 +720,19 @@
 }
 
 @media (max-width: 760px) {
+    .pivot-dag-aggregation-metrics-head {
+        display: none;
+    }
+
+    .pivot-dag-aggregation-metric-row {
+        grid-template-columns: 1fr auto;
+    }
+
+    .pivot-dag-aggregation-metric-row [data-pivot-dag-aggregation-metric-field],
+    .pivot-dag-aggregation-metric-row [data-pivot-dag-aggregation-metric-alias] {
+        grid-column: 1 / -1;
+    }
+
     .pivot-dag-keyvalue-map-row {
         grid-template-columns: 1fr auto;
     }

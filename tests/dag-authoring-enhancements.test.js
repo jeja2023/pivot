@@ -226,6 +226,20 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(groupByMarkup, /状态/);
     assert.match(groupByMarkup, /添加字段/);
 
+    const aggregateMetricsMarkup = sandbox.renderWizardField(
+        'metrics',
+        { type: 'array', items: { type: 'object' } },
+        [{ field: '金额', aggregation: 'sum', alias: '总金额' }],
+        false,
+        [{ id: 'query', title: '数据查询', tool: 'db.run_readonly_query' }],
+        { name: 'data.aggregate' }
+    );
+    assert.match(aggregateMetricsMarkup, /data-pivot-dag-aggregation-metrics/);
+    assert.match(aggregateMetricsMarkup, /总金额/);
+    assert.match(aggregateMetricsMarkup, /统计方式/);
+    assert.match(aggregateMetricsMarkup, /添加统计指标/);
+    assert.doesNotMatch(aggregateMetricsMarkup, /pivot-dag-wizard-textarea/);
+
     const prefixedGroupByMarkup = sandbox.renderWizardField(
         'groupBy',
         { type: ['array', 'string'], items: { type: 'string' } },
@@ -559,6 +573,7 @@ test('编辑期可运行性检查覆盖常见节点的语义配置和 schema 边
     vm.runInContext(source, sandbox);
     const report = sandbox.api.inspectDagReadiness([
         { id: 'summary', title: '汇总', tool: 'data.group_summary', input: { rows: '{{nodes.query.output.rows}}', groupBy: [''], aggregation: 'sum' } },
+        { id: 'aggregate', title: '整体汇总', tool: 'data.aggregate', input: { rows: '{{nodes.query.output.rows}}', metrics: [{ aggregation: 'sum', alias: '总金额' }] } },
         { id: 'route', title: '判断', tool: 'workflow.condition', input: { operator: 'equals', value: '' } },
         { id: 'browser', title: '点击', tool: 'agent.browser', input: { url: 'https://example.com', action: 'click' } },
         { id: 'input', title: '输入', tool: 'workflow.input', input: { name: '9-invalid' } },
@@ -566,6 +581,7 @@ test('编辑期可运行性检查覆盖常见节点的语义配置和 schema 边
         { id: 'dynamic', title: '动态数量', tool: 'rag.search', input: { query: '合同', topK: '{{inputs.topK}}' } }
     ], [
         { name: 'data.group_summary', input_schema: { required: ['rows', 'groupBy'], properties: { rows: { type: 'array' }, groupBy: { type: 'array', minItems: 1 }, aggregation: { type: 'string', enum: ['count', 'sum'] }, valueField: { type: 'string' } } } },
+        { name: 'data.aggregate', input_schema: { required: ['rows'], properties: { rows: { type: 'array' }, metrics: { type: 'array' } } } },
         { name: 'workflow.condition', input_schema: { properties: { operator: { type: 'string', enum: ['equals', 'not_empty'] }, value: {}, compareTo: {} } } },
         { name: 'agent.browser', input_schema: { required: ['url'], properties: { url: { type: 'string' }, action: { type: 'string', enum: ['inspect', 'click'] }, target: { type: 'object' } } } },
         { name: 'workflow.input', input_schema: { required: ['name'], properties: { name: { type: 'string' } } } },
@@ -574,6 +590,7 @@ test('编辑期可运行性检查覆盖常见节点的语义配置和 schema 边
     assert.equal(report.valid, false);
     assert.ok(report.issues.some(issue => issue.nodeId === 'summary' && issue.type === 'missing_group_fields'));
     assert.ok(report.issues.some(issue => issue.nodeId === 'summary' && issue.type === 'missing_aggregation_field'));
+    assert.ok(report.issues.some(issue => issue.nodeId === 'aggregate' && issue.type === 'missing_metric_field'));
     assert.ok(report.issues.some(issue => issue.nodeId === 'route' && issue.type === 'missing_condition_value'));
     assert.ok(report.issues.some(issue => issue.nodeId === 'route' && issue.type === 'missing_condition_compare_to'));
     assert.ok(report.issues.some(issue => issue.nodeId === 'browser' && issue.type === 'missing_browser_target'));

@@ -234,9 +234,17 @@ const TOOL_FIELD_LABEL_OVERRIDES = {
             group_by: '分组统计字段',
             limit: '分组数量上限'
         },
+        'data.aggregate': {
+            rows: '参与汇总的数据行',
+            metrics: '汇总指标',
+            valueField: '兼容模式指标字段',
+            aggregation: '兼容模式聚合方式',
+            limit: '参与计算行数'
+        },
         'data.group_summary': {
             rows: '参与汇总的数据行',
             groupBy: '分组字段',
+            metrics: '汇总指标',
             valueField: '指标字段',
             aggregation: '聚合方式',
             limit: '参与计算行数',
@@ -431,9 +439,17 @@ const TOOL_FIELD_DESCRIPTION_OVERRIDES = {
             filters: '填写要筛选的字段和值。',
             matchMode: '精确匹配适合状态/编号，包含匹配适合名称/描述。'
         },
+        'data.aggregate': {
+            rows: '通常引用上游查询节点的数据行。',
+            metrics: '可添加多个指标；计数不需要字段，求和、平均值、最小值和最大值需要数值字段。',
+            valueField: '兼容旧版的单个指标字段；优先使用“汇总指标”。',
+            aggregation: '兼容旧版的单个聚合方式；优先使用“汇总指标”。',
+            limit: '最多参与汇总的输入行数。'
+        },
         'data.group_summary': {
             rows: '通常引用上游查询节点的数据行。',
             groupBy: '添加一个或多个分组字段；每个字段组合会形成一个汇总分组。',
+            metrics: '可添加多个指标；计数不需要字段，求和、平均值、最小值和最大值需要数值字段。',
             valueField: '求和或平均值时选择数值字段；计数时可留空。',
             aggregation: '选择计数、求和、平均值、最小值或最大值。',
             limit: '最多参与汇总的输入行数；数据量较大时用它控制计算范围。',

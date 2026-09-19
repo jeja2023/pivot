@@ -18,6 +18,70 @@ function createDagWizardSpecialFieldControls() {
             ? fields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-group-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-group-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
             : '<span class="pivot-dag-group-fields-empty">尚未添加分组字段</span>');
     };
+    const normalizeAggregationMetrics = value => (Array.isArray(value) ? value : [])
+        .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+        .slice(0, 20)
+        .map(item => ({
+            field: String(item.field || item.valueField || '').trim(),
+            aggregation: ['count', 'sum', 'avg', 'min', 'max'].includes(String(item.aggregation || '').toLowerCase())
+                ? String(item.aggregation).toLowerCase()
+                : 'count',
+            alias: String(item.alias || '').trim()
+        }));
+    const aggregationMetricsFromControl = control => [...control.querySelectorAll('[data-pivot-dag-aggregation-metric-row]')]
+        .map(row => ({
+            field: String(row.querySelector('[data-pivot-dag-aggregation-metric-field]')?.value || '').trim(),
+            aggregation: String(row.querySelector('[data-pivot-dag-aggregation-metric-aggregation]')?.value || 'count').toLowerCase(),
+            alias: String(row.querySelector('[data-pivot-dag-aggregation-metric-alias]')?.value || '').trim()
+        }))
+        .slice(0, 20);
+    const renderAggregationMetrics = (control, value) => {
+        const metrics = normalizeAggregationMetrics(value);
+        const list = control.querySelector('[data-pivot-dag-aggregation-metrics-list]');
+        if (!list) return;
+        const fieldName = String(control.dataset.pivotDagAggregationMetrics || '').trim();
+        const dataListId = 'pivot-dag-data-field-options-' + fieldName;
+        const renderMetric = (metric = {}, index = 0) => {
+            const aggregation = metric.aggregation || 'count';
+            return `<div class="pivot-dag-aggregation-metric-row" data-pivot-dag-aggregation-metric-row>
+                <select class="form-input" data-pivot-dag-aggregation-metric-aggregation aria-label="统计方式">
+                    <option value="count" ${aggregation === 'count' ? 'selected' : ''}>计数</option>
+                    <option value="sum" ${aggregation === 'sum' ? 'selected' : ''}>求和</option>
+                    <option value="avg" ${aggregation === 'avg' ? 'selected' : ''}>平均值</option>
+                    <option value="min" ${aggregation === 'min' ? 'selected' : ''}>最小值</option>
+                    <option value="max" ${aggregation === 'max' ? 'selected' : ''}>最大值</option>
+                </select>
+                <input class="form-input" type="text" list="${dagEscapeAttr(dataListId)}" data-pivot-dag-aggregation-metric-field value="${dagEscapeAttr(metric.field || '')}" placeholder="指标字段（计数可留空）" aria-label="指标字段">
+                <input class="form-input" type="text" data-pivot-dag-aggregation-metric-alias value="${dagEscapeAttr(metric.alias || '')}" placeholder="结果名称，例如 销售额" aria-label="结果名称">
+                <button type="button" class="btn-secondary" data-pivot-dag-aggregation-metric-remove aria-label="删除第 ${index + 1} 个汇总指标">×</button>
+            </div>`;
+        };
+        PivotSafeHtml.setHtml(list, metrics.length
+            ? metrics.map(renderMetric).join('')
+            : '<div class="pivot-dag-aggregation-metrics-empty">尚未添加统计指标；旧版单指标配置会继续保留。</div>');
+    };
+    const bindAggregationMetrics = ({ control, setActiveField, showToast }) => {
+        const addMetric = () => {
+            const metrics = aggregationMetricsFromControl(control);
+            if (metrics.length >= 20) {
+                showToast?.('最多添加 20 个统计指标。', 'warning');
+                return;
+            }
+            renderAggregationMetrics(control, [...metrics, { field: '', aggregation: 'count', alias: '' }]);
+            control.querySelectorAll('[data-pivot-dag-aggregation-metric-field]')?.item(-1)?.focus?.({ preventScroll: true });
+            setActiveField(control);
+        };
+        control.querySelector('[data-pivot-dag-aggregation-metric-add]')?.addEventListener('click', addMetric);
+        control.addEventListener('click', event => {
+            if (!event.target.closest('[data-pivot-dag-aggregation-metric-remove]')) return;
+            const row = event.target.closest('[data-pivot-dag-aggregation-metric-row]');
+            const next = aggregationMetricsFromControl(control).filter((_, index) => index !== [...control.querySelectorAll('[data-pivot-dag-aggregation-metric-row]')].indexOf(row));
+            renderAggregationMetrics(control, next);
+            setActiveField(control);
+        });
+        control.addEventListener('input', () => setActiveField(control));
+        control.addEventListener('change', () => setActiveField(control));
+    };
     const columnFieldsFromControl = control => [...control.querySelectorAll('[data-pivot-dag-column-field-value]')]
         .map(item => String(item.dataset.pivotDagColumnFieldValue || '').trim())
         .filter(Boolean);
@@ -513,9 +577,11 @@ function createDagWizardSpecialFieldControls() {
         bindCredentialPicker,
         bindBrowserTargetVisibility,
         bindOutputPresentationFields,
+        bindAggregationMetrics,
         bindTagList,
         bindWorkflowInputDefault,
         browserTargetFromControl,
+        aggregationMetricsFromControl,
         columnFieldsFromControl,
         credentialValueFromControl,
         groupFieldsFromControl,
@@ -525,6 +591,7 @@ function createDagWizardSpecialFieldControls() {
         renderTagList,
         renderColumnFields,
         renderDataFieldPicker,
+        renderAggregationMetrics,
         renderGroupFields,
         renderKeyValueRows,
         renderResourceOptions,

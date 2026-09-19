@@ -194,6 +194,50 @@ test('数据分组汇总支持多个字段组合分组，并兼容旧版单字�
     assert.deepEqual(legacy.groupByFields, ['部门']);
 });
 
+test('数据汇总与分组汇总支持多个命名统计指标，并保留旧版 value 输出', () => {
+    const overall = executeDataProcessingTool(null, 'data.aggregate', {
+        rows: SAMPLE_ROWS,
+        metrics: [
+            { aggregation: 'count', alias: '记录数' },
+            { field: '金额', aggregation: 'sum', alias: '总金额' },
+            { field: '金额', aggregation: 'avg', alias: '平均金额' }
+        ]
+    });
+    assert.equal(overall.type, 'data_aggregate');
+    assert.equal(overall.rowCount, 1);
+    assert.deepEqual(overall.rows[0], {
+        记录数: 3,
+        总金额: 400,
+        平均金额: 400 / 3,
+        value: 3,
+        count: 3,
+        group: {}
+    });
+
+    const grouped = executeDataProcessingTool(null, 'data.group_summary', {
+        rows: SAMPLE_ROWS,
+        groupBy: '部门',
+        metrics: [
+            { aggregation: 'count', alias: '记录数' },
+            { field: '金额', aggregation: 'sum', alias: '总金额' }
+        ]
+    });
+    const finance = grouped.rows.find(row => row.部门 === '财务部');
+    assert.equal(grouped.metrics.length, 2);
+    assert.equal(finance.记录数, 2);
+    assert.equal(finance.总金额, 200);
+    assert.equal(finance.value, 2);
+    assert.equal(finance.count, 2);
+
+    assert.throws(
+        () => executeDataProcessingTool(null, 'data.aggregate', {
+            rows: SAMPLE_ROWS,
+            metrics: [{ aggregation: 'sum', alias: '缺少字段' }]
+        }),
+        error => error.status === 400
+    );
+});
+
 test('报表目录工具只列出授权根目录内的白名单文件', async () => {
     const sandbox = createReportSandbox();
     try {

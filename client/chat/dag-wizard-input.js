@@ -52,6 +52,7 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
             if (toolShortName(tool) === 'workflow.input' && ['default_value', 'defaultvalue'].includes(key)) return '默认值会跟随当前参数类型校验；对象和数组请填写合法 JSON。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
             if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '添加一个或多个字段；每个字段组合会形成一个汇总分组。';
+            if (name === 'metrics' && ['data.aggregate', 'data.group_summary'].includes(toolShortName(tool))) return '可逐项设置统计方式、指标字段和结果名称；计数不需要字段。';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
             if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
                 ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'

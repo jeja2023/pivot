@@ -396,14 +396,14 @@ test('workflow node presets are organized into approved 6 business categories', 
     ]);
 
     const totalPresets = groups.reduce((sum, g) => sum + g.items.length, 0);
-    assert.equal(totalPresets, 48);
+    assert.equal(totalPresets, 49);
 
     // 验证各分类预设节点数量
     const counts = Object.fromEntries(groups.map(g => [g.group, g.items.length]));
     assert.equal(counts['起始与交付'], 3);
     assert.equal(counts['AI 与智能体'], 4);
     assert.equal(counts['知识与检索'], 6);
-    assert.equal(counts['数据与文档'], 11);
+    assert.equal(counts['数据与文档'], 12);
     assert.equal(counts['流程与控制'], 14);
     assert.equal(counts['呈现与多媒体'], 10);
 
@@ -416,11 +416,27 @@ test('workflow node presets are organized into approved 6 business categories', 
     assert.equal(parameterDeclaration.title, '声明运行参数');
     assert.equal(parameterDeclaration.input.name, '');
 
-    ['filter_rows', 'group_summary', 'profile_rows', 'normalize_fields'].forEach(base => {
+    ['filter_rows', 'aggregate', 'group_summary', 'profile_rows', 'normalize_fields'].forEach(base => {
         assert.equal(groups.flatMap(group => group.items).find(item => item.base === base)?.advanced, undefined, `${base} 应作为常用数据处理节点显示`);
     });
+    const aggregate = sandbox.exported.groups.flatMap(group => group.items).find(item => item.base === 'aggregate');
+    assert.deepEqual(JSON.parse(JSON.stringify(aggregate.getInput({ selectedNode: null }))), {
+        rows: [],
+        metrics: [{ field: '', aggregation: 'count', alias: '总数' }],
+        valueField: '',
+        aggregation: 'count',
+        limit: 1000
+    });
     const groupSummary = sandbox.exported.groups.flatMap(group => group.items).find(item => item.base === 'group_summary');
-    assert.deepEqual(JSON.parse(JSON.stringify(groupSummary.getInput({ selectedNode: null }))), { rows: [], groupBy: [], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 });
+    assert.deepEqual(JSON.parse(JSON.stringify(groupSummary.getInput({ selectedNode: null }))), {
+        rows: [],
+        groupBy: [],
+        metrics: [{ field: '', aggregation: 'count', alias: '数量' }],
+        valueField: '',
+        aggregation: 'count',
+        limit: 1000,
+        outputLimit: 100
+    });
 });
 
 test('空画布提供可操作的业务起步路径', () => {

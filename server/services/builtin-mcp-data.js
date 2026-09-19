@@ -41,6 +41,34 @@ function listDataProcessingTools() {
             }
         },
         {
+            name: 'data.aggregate',
+            title: '数据汇总',
+            description: '对全部表格行执行整体计数、求和、均值、最小值或最大值，不进行分组。',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    rows: { type: 'array', items: { type: 'object' } },
+                    metrics: {
+                        type: 'array',
+                        maxItems: 20,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                field: { type: 'string' },
+                                aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                                alias: { type: 'string' }
+                            }
+                        },
+                        description: '可同时配置多个统计指标；计数指标可以不填写 field。'
+                    },
+                    valueField: { type: 'string', description: '兼容旧版的单个指标字段。' },
+                    aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                    limit: { type: 'number', minimum: 1, maximum: 5000, description: '最多参与计算的输入行数。' }
+                },
+                required: ['rows']
+            }
+        },
+        {
             name: 'data.group_summary',
             title: '分组汇总数据',
             description: '按指定字段对表格行分组，并计算计数、求和、均值、最小值或最大值。',
@@ -53,6 +81,19 @@ function listDataProcessingTools() {
                         items: { type: 'string' },
                         minItems: 1,
                         description: '一个或多个分组字段；兼容旧版单个字段字符串。'
+                    },
+                    metrics: {
+                        type: 'array',
+                        maxItems: 20,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                field: { type: 'string' },
+                                aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                                alias: { type: 'string' }
+                            }
+                        },
+                        description: '可同时配置多个统计指标；计数指标可以不填写 field。'
                     },
                     valueField: { type: 'string' },
                     aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
@@ -78,6 +119,54 @@ function listDataProcessingTools() {
             }
         }
     ];
+}
+
+function normalizeAggregationMetrics(input = {}) {
+    const legacyValueField = String(input.valueField || input.value_field || '').trim();
+    const legacyAggregation = String(input.aggregation || (legacyValueField ? 'sum' : 'count')).toLowerCase();
+    const rawMetrics = Array.isArray(input.metrics) && input.metrics.length
+        ? input.metrics
+        : [{ field: legacyValueField, aggregation: legacyAggregation }];
+    const usedAliases = new Set();
+    return rawMetrics.slice(0, 20).map((metric, index) => {
+        const field = String(metric?.field || metric?.valueField || '').trim();
+        const aggregation = ['count', 'sum', 'avg', 'min', 'max'].includes(String(metric?.aggregation || '').toLowerCase())
+            ? String(metric.aggregation).toLowerCase()
+            : 'count';
+        const defaultAlias = aggregation === 'count' ? 'count' : aggregation + '_' + (field || 'value');
+        let alias = String(metric?.alias || '').trim() || defaultAlias;
+        alias = alias.replace(/[^\u3400-\u9fffA-Za-z0-9_-]/gu, '_').replace(/^_+|_+$/g, '') || ('metric_' + (index + 1));
+        const baseAlias = alias;
+        let suffix = 2;
+        while (usedAliases.has(alias)) alias = baseAlias + '_' + suffix++;
+        usedAliases.add(alias);
+        return { field, aggregation, alias };
+    });
+}
+
+function calculateAggregationMetric(groupRows, metric) {
+    if (metric.aggregation === 'count') return groupRows.length;
+    const values = groupRows
+        .map(item => toFiniteNumber(item?.row?.[metric.field]))
+        .filter(Number.isFinite);
+    if (metric.aggregation === 'sum') return values.reduce((sum, item) => sum + item, 0);
+    if (metric.aggregation === 'avg') return values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0;
+    if (metric.aggregation === 'min') return values.length ? Math.min(...values) : 0;
+    if (metric.aggregation === 'max') return values.length ? Math.max(...values) : 0;
+    return groupRows.length;
+}
+
+function metricOutputValues(groupRows, metrics) {
+    return Object.fromEntries(metrics.map(metric => [metric.alias, calculateAggregationMetric(groupRows, metric)]));
+}
+
+function validateAggregationMetrics(input = {}) {
+    if (!Array.isArray(input.metrics) || !input.metrics.length) return;
+    const invalid = normalizeAggregationMetrics(input).find(metric => metric.aggregation !== 'count' && !metric.field);
+    if (!invalid) return;
+    const err = new Error(`聚合方式 ${invalid.aggregation} 需要指定指标字段。`);
+    err.status = 400;
+    throw err;
 }
 
 function executeDataProcessingTool(_server, name, input = {}) {
@@ -120,6 +209,32 @@ function executeDataProcessingTool(_server, name, input = {}) {
         }));
         return { type: 'data_filter', source: buildInlineDataSource(), rowCount: filtered.length, originalRowCount: requestedRows, limitApplied: rows.length < requestedRows, warnings: rows.length < requestedRows ? ['输入行数超过工具上限，已截断。'] : [], rows: filtered };
     }
+    if (name === 'data.aggregate') {
+        const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
+        const rows = normalizeInputRows(input.rows, input.limit || 1000);
+        validateAggregationMetrics(input);
+        const metrics = normalizeAggregationMetrics(input);
+        const groupRows = rows.map(row => ({ row, groupValues: [] }));
+        const values = metricOutputValues(groupRows, metrics);
+        const firstMetric = metrics[0] || { field: '', aggregation: 'count' };
+        const resultRow = {
+            ...values,
+            value: values[firstMetric.alias],
+            count: groupRows.length,
+            group: {}
+        };
+        return {
+            type: 'data_aggregate', source: buildInlineDataSource(),
+            metrics,
+            valueField: firstMetric.field,
+            aggregation: firstMetric.aggregation,
+            rowCount: 1,
+            originalRowCount: requestedRows,
+            limitApplied: rows.length < requestedRows,
+            warnings: rows.length < requestedRows ? ['输入行数超过工具上限，已截断。'] : [],
+            rows: [resultRow]
+        };
+    }
     if (name === 'data.group_summary') {
         const requestedRows = Array.isArray(input.rows) ? input.rows.length : 0;
         const rows = normalizeInputRows(input.rows, input.limit || 1000);
@@ -134,6 +249,45 @@ function executeDataProcessingTool(_server, name, input = {}) {
             const err = new Error('分组字段 groupBy 不能为空。');
             err.status = 400;
             throw err;
+        }
+        if (Array.isArray(input.metrics) && input.metrics.length) {
+            validateAggregationMetrics(input);
+            const metrics = normalizeAggregationMetrics(input);
+            const grouped = new Map();
+            rows.forEach(row => {
+                const groupValues = groupByFields.map(field => row[field] ?? '');
+                const key = JSON.stringify(groupValues);
+                const bucket = grouped.get(key) || [];
+                bucket.push({ row, groupValues });
+                grouped.set(key, bucket);
+            });
+            const items = Array.from(grouped.values()).map(groupRows => {
+                const group = Object.fromEntries(groupByFields.map((field, index) => [field, groupRows[0]?.groupValues[index] ?? '']));
+                const values = metricOutputValues(groupRows, metrics);
+                const firstMetric = metrics[0] || { field: '', aggregation: 'count' };
+                return {
+                    ...group,
+                    ...values,
+                    value: values[firstMetric.alias],
+                    count: groupRows.length,
+                    group
+                };
+            });
+            const outputLimit = Math.min(Math.max(Number(input.outputLimit || input.output_limit) || 5000, 1), 5000);
+            const firstMetric = metrics[0] || { field: '', aggregation: 'count' };
+            return {
+                type: 'data_group_summary', source: buildInlineDataSource(),
+                groupBy: groupByFields.length === 1 ? groupByFields[0] : groupByFields,
+                groupByFields,
+                metrics,
+                valueField: firstMetric.field,
+                aggregation: firstMetric.aggregation,
+                rowCount: Math.min(items.length, outputLimit),
+                originalRowCount: requestedRows,
+                limitApplied: rows.length < requestedRows || items.length > outputLimit,
+                warnings: rows.length < requestedRows || items.length > outputLimit ? ['结果受输入或输出行数上限限制。'] : [],
+                rows: items.slice(0, outputLimit)
+            };
         }
         const valueField = String(input.valueField || input.value_field || '').trim();
         const aggregation = String(input.aggregation || (valueField ? 'sum' : 'count')).toLowerCase();

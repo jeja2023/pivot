@@ -10,6 +10,7 @@ const TOOL_POLICY_KNOWN_TITLES = {
     // 数据处理
     'data.profile_rows': '数据画像分析',
     'data.filter_rows': '筛选表格行',
+    'data.aggregate': '数据汇总',
     'data.group_summary': '分组汇总数据',
     'data.normalize_fields': '标准化字段',
     // 文档解析
@@ -91,7 +92,8 @@ const TOOL_POLICY_KNOWN_DESCRIPTIONS = {
     // 数据处理
     'data.profile_rows': '分析表格数据行结构，生成字段名、类型分布、填充率及样本值画像。',
     'data.filter_rows': '使用精确匹配或包含匹配规则筛选表格数据行。',
-    'data.group_summary': '按指定字段对表格行分组，并计算计数、求和、均值、最小值或最大值。',
+    'data.aggregate': '对全部表格行计算一个或多个计数、求和、均值、最小值或最大值。',
+    'data.group_summary': '按指定字段分组后计算一个或多个统计指标。',
     'data.normalize_fields': '重命名表格字段名称并去除字符串首尾空白字符。',
     // 文档解析
     'doc.extract_outline': '从纯文本或 Markdown 内容中轻量提取标题层级与大纲结构。',

@@ -108,7 +108,8 @@ const agentToolDisplayMap = {
     // 数据处理
     'data.profile_rows': { title: '数据画像分析', description: '分析表格数据行结构，生成字段名、类型分布、填充率及样本值画像。' },
     'data.filter_rows': { title: '筛选表格行', description: '使用精确匹配或包含匹配规则筛选表格数据行。' },
-    'data.group_summary': { title: '分组汇总数据', description: '按指定字段对表格行分组，并计算计数、求和、均值、最小值或最大值。' },
+    'data.aggregate': { title: '数据汇总', description: '对全部数据计算一个或多个计数、求和、均值、最小值或最大值。' },
+    'data.group_summary': { title: '分组汇总数据', description: '按指定字段分组后计算一个或多个统计指标。' },
     'data.normalize_fields': { title: '规整字段名称与内容', description: '重命名字段、修剪字符串首尾空白，并规范化表格数据结构。' },
 
     // 文档解析

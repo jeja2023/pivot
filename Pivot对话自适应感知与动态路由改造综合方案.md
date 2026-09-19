@@ -3,7 +3,9 @@
 > **文档定位**：Pivot (智枢) AI 智能中枢核心对话体验升级规范  
 > **制定日期**：2026年9月  
 > **文档状态**：综合架构设计定稿 / 实施指南  
-> **适用范围**：Pivot 对话中枢 (`server/routes/chat/`、`server/services/`、`desktop/agent-runtime/`、`client/chat/`)
+> **适用范围**：Pivot 对话中枢（server/routes/chat、server/services、desktop/agent-runtime、client/chat）
+>
+> **实施更新（v0.1.149）**：对话层已经默认启用智能自适应路由，并通过 @ 入口支持知识库和工具的可浏览选择。本次同步补全工作流数据工具：新增整体“数据汇总”能力，升级“数据分组汇总”为多指标模式。它们沿用工具目录、权限策略、中文展示、参数 Schema 与审计链路，不改变动态工具发现的授权边界。
 
 ---
 

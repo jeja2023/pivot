@@ -236,9 +236,14 @@ const NODE_PRESET_GROUPS = [
                 getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], filters: {}, matchMode: 'exact', limit: 200 })
             },
             {
+                base: 'aggregate', title: '数据汇总', svgIcon: 'chart', theme: 'db',
+                desc: '对全部数据计算总数、求和、平均值、最小值或最大值', toolName: 'data.aggregate',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? '{{nodes.' + selectedNode.id + '.output.rows}}' : [], metrics: [{ field: '', aggregation: 'count', alias: '总数' }], valueField: '', aggregation: 'count', limit: 1000 })
+            },
+            {
                 base: 'group_summary', title: '数据分组汇总', svgIcon: 'chart', theme: 'db',
-                desc: '按字段分组并计算数量、求和或平均值', toolName: 'data.group_summary',
-                getInput: ({ selectedNode }) => ({ rows: selectedNode ? `{{nodes.${selectedNode.id}.output.rows}}` : [], groupBy: [], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 })
+                desc: '按字段分组后计算一个或多个统计指标', toolName: 'data.group_summary',
+                getInput: ({ selectedNode }) => ({ rows: selectedNode ? '{{nodes.' + selectedNode.id + '.output.rows}}' : [], groupBy: [], metrics: [{ field: '', aggregation: 'count', alias: '数量' }], valueField: '', aggregation: 'count', limit: 1000, outputLimit: 100 })
             },
             {
                 base: 'profile_rows', title: '分析表格字段', svgIcon: 'table', theme: 'db',
