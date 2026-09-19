@@ -41,6 +41,7 @@ function loadWizardFieldRenderer(models = []) {
         friendlyFieldPlaceholder: () => '',
         isDatabaseConnectionField: () => false,
         toolValue: tool => tool?.fullName || tool?.name || '',
+        toolShortName: tool => String(tool?.fullName || tool?.name || '').replace(/^mcp\.[^.]+\./i, ''),
         normalizeFieldKey: name => String(name || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(),
         formatWizardFieldValue: (_schema, value) => value == null ? '' : (typeof value === 'string' ? value : JSON.stringify(value, null, 2)),
         buildWizardFieldSuggestions: () => [],
@@ -104,7 +105,8 @@ test('content review wizard always renders a model selector and preserves unavai
 test('content review wizard uses structured records input and numeric schema bounds', () => {
     const render = loadWizardFieldRenderer([{ id: 1, name: 'Model' }]);
     const recordsHtml = render('records', {}, '{{nodes.query.output.structuredContent}}', true, [], { name: 'agent.content_review' }, []);
-    assert.match(recordsHtml, /<textarea[^>]+data-pivot-dag-wizard-field="records"/);
+    assert.match(recordsHtml, /data-pivot-dag-structured-reference="1"/);
+    assert.match(recordsHtml, /<textarea[^>]+data-pivot-dag-structured-manual="records"/);
     const structuredHtml = render('records', {}, { structuredContent: { rows: [{ id: 1 }] } }, true, [], { name: 'agent.content_review' }, []);
     assert.match(structuredHtml, /&quot;structuredContent&quot;/);
     const numberHtml = render('maxRecords', { type: 'integer', minimum: 1, maximum: 200 }, 50, false, [], { name: 'agent.content_review' }, []);

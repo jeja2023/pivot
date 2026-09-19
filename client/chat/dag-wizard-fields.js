@@ -1,8 +1,18 @@
 /* DAG 输入向导字段渲染（拆自 dag-wizard-input.js） */
-/* global buildSchemaReferenceTokens, buildWizardDataFieldOptions */
+/* global buildSchemaReferenceTokens, buildWizardDataFieldOptions, toolShortName */
 
-
-
+const resolveToolShortName = tool => {
+    if (typeof toolShortName === 'function') {
+        try {
+            return toolShortName(tool);
+        } catch {
+            // fallback below
+        }
+    }
+    const raw = String(tool?.fullName || tool?.full_name || tool?.toolName || tool?.name || '').trim();
+    const match = raw.match(/^(?:mcp\.[^.]+\.)?(.+)$/i);
+    return match ? match[1] : raw;
+};
 
         const renderWizardField = (name, schema = {}, value, required = false, dependencyNodes = [], tool = null, wizardTools = [], nodeToolName = '', nodeTitle = '') => {
             const type = normalizeSchemaType(schema);
@@ -13,7 +23,7 @@
             const isEnum = Array.isArray(schema.enum) && schema.enum.length > 0;
             const fieldName = String(name || '');
             const fieldKey = normalizeFieldKey(name);
-            const shortToolName = toolShortName(tool);
+            const shortToolName = resolveToolShortName(tool);
             const normalizedToolNames = [...new Set([
                 nodeToolName,
                 tool?.fullName,
@@ -598,7 +608,7 @@
         };
 
         const renderDatabaseAssistPanel = (node, tool, initialInput = {}, wizardTools = []) => {
-            const shortName = toolShortName(tool);
+            const shortName = resolveToolShortName(tool);
             if (!shortName.startsWith('db.')) return '';
             const selectedServerId = selectedDatabaseConnectionId(tool, initialInput, wizardTools);
             const entries = databaseWizardConnections(wizardTools);
