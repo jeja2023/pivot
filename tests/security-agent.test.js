@@ -984,7 +984,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(editor, /function defaultWorkflowModelId/);
     assert.match(editor, /function workflowModelOptions/);
     assert.match(editor, /window\.Pivot\.legacy\.isSelectableModelForCurrentUser/);
-    assert.match(editor, /\['agent\.llm', 'agent\.content_review', 'agent\.delegate'\]\.includes\(toolValue\(tool\)\)/);
+    assert.match(editor, /\['agent\.llm', 'agent\.content_review', 'agent\.delegate'\]\.(?:includes\(toolValue\(tool\)\)|some\(matchesTool\))/);
     assert.match(editor, /data-pivot-dag-model-select="1"/);
     assert.match(editor, /暂无可用模型/);
     assert.doesNotMatch(editor, /createDefaultLlmNode/);

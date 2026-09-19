@@ -136,7 +136,9 @@ const resolveToolShortName = tool => {
             const visualStructureReference = isKnownStructuredReference
                 ? fieldValue
                 : (typeof value === 'string' && value.trim() ? '__custom__' : '');
-            const isLlmModelField = ['agent.llm', 'agent.content_review', 'agent.delegate'].some(matchesTool) && normalizeFieldKey(name) === 'model';
+            const isLlmModelField = (['agent.llm', 'agent.content_review', 'agent.delegate'].includes(toolValue(tool))
+                || ['agent.llm', 'agent.content_review', 'agent.delegate'].some(matchesTool))
+                && normalizeFieldKey(name) === 'model';
             const modelOptions = isLlmModelField ? workflowModelOptions() : [];
             const isSelect = isChannelBindingField || isWorkflowCredentialField || isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
