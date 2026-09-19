@@ -149,7 +149,7 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
         isDatabaseConnectionField: () => false,
         toolValue: tool => tool?.name || '',
         toolShortName: tool => String(tool?.name || '').replace(/^mcp\.\d+\./, ''),
-        normalizeFieldKey: value => String(value || '').toLowerCase(),
+        normalizeFieldKey: value => String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(),
         isTextualSchemaField: () => true,
         formatWizardFieldValue: (_schema, value) => value === undefined || value === null ? '' : String(value),
         fieldUsageHint: () => '',
@@ -225,6 +225,12 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(groupByMarkup, /部门/);
     assert.match(groupByMarkup, /状态/);
     assert.match(groupByMarkup, /添加字段/);
+    assert.match(groupByMarkup, /data-pivot-dag-group-field-option="部门"/);
+    assert.match(groupByMarkup, /点击字段即可加入分组/);
+    assert.doesNotMatch(groupByMarkup, /list="pivot-dag-data-field-options-groupBy"/);
+    assert.doesNotMatch(groupByMarkup, /data-pivot-dag-structured-reference/);
+    assert.doesNotMatch(groupByMarkup, /字段候选项来自上游查询配置/);
+    assert.doesNotMatch(groupByMarkup, /从上游表格行添加一个或多个字段/);
 
     const aggregateMetricsMarkup = sandbox.renderWizardField(
         'metrics',
@@ -239,6 +245,8 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(aggregateMetricsMarkup, /统计方式/);
     assert.match(aggregateMetricsMarkup, /添加统计指标/);
     assert.doesNotMatch(aggregateMetricsMarkup, /pivot-dag-wizard-textarea/);
+    assert.match(aggregateMetricsMarkup, /计数可留空；其他方式请选择数值字段并填写结果名称/);
+    assert.doesNotMatch(aggregateMetricsMarkup, /可逐项设置统计方式、指标字段和结果名称/);
 
     const prefixedGroupByMarkup = sandbox.renderWizardField(
         'groupBy',
@@ -458,6 +466,23 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(reportFiltersMarkup, /data-pivot-dag-report-filter-fields-list/);
     assert.match(reportFiltersMarkup, /data-pivot-dag-report-filter-fields-hint/);
 
+    const filterRowsMarkup = sandbox.renderWizardField(
+        'filters',
+        { type: 'object' },
+        { 部门: '财务' },
+        false,
+        [{ id: 'query', title: '数据查询', tool: 'db.run_readonly_query' }],
+        { name: 'data.filter_rows', title: '筛选表格行' }
+    );
+    assert.match(filterRowsMarkup, /data-pivot-dag-filter-field="1"/);
+    assert.match(filterRowsMarkup, /is-filter-mode/);
+    assert.match(filterRowsMarkup, /pivot-dag-keyvalue-map-head/);
+    assert.match(filterRowsMarkup, /筛选字段/);
+    assert.match(filterRowsMarkup, /匹配值 \/ 引用变量/);
+    assert.match(filterRowsMarkup, /\+ 添加筛选条件/);
+    assert.match(filterRowsMarkup, /data-pivot-dag-filter-field-chip="部门"/);
+    assert.doesNotMatch(filterRowsMarkup, /<textarea/);
+
     const reportAssist = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard-report-assist.js'), 'utf8');
     assert.match(reportAssist, /请先选择一份具体的授权报表文件/);
     assert.match(reportAssist, /reports\.read_file_summary/);
@@ -470,6 +495,7 @@ test('结构化数组字段优先使用上游引用选择器，手写 JSON 仅�
     assert.match(specialFields, /bindCredentialPicker/);
     assert.match(specialFields, /bindOutputPresentationFields/);
     assert.match(specialFields, /bindWorkflowInputDefault/);
+    assert.match(specialFields, /bindKeyValueMap/);
 
     const artifactMarkup = sandbox.renderWizardField(
         'artifactId',
@@ -650,4 +676,58 @@ test('条件比较值和工作流输出的按需字段在切换模式后无需�
 
     assert.match(source, /shortName === 'workflow\.output' && \['table_title', 'table_columns', 'file_ref'\]\.includes\(key\)\) return true/);
     assert.match(source, /shortName === 'workflow\.condition' && key === 'compare_to'\) return true/);
+});
+
+test('分组字段候选项可从上游查询配置、SQL 返回列、测试样本和输出契约中直接生成', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-wizard-input.js'), 'utf8');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.buildWizardDataFieldOptions = buildWizardDataFieldOptions;`, sandbox);
+
+    const options = sandbox.buildWizardDataFieldOptions([
+        {
+            id: 'query',
+            title: '数据查询',
+            input: {
+                queryBuilder: { columns: ['部门', '状态'] },
+                sql: 'SELECT amount AS 总额, region FROM sales'
+            },
+            _testOutput: { rows: [{ 订单号: 'SO-001', 部门: '销售部' }] },
+            outputSchema: {
+                type: 'object',
+                properties: {
+                    rows: {
+                        type: 'array',
+                        items: { type: 'object', properties: { 客户等级: { type: 'string' } } }
+                    }
+                }
+            }
+        }
+    ]);
+
+    assert.equal(
+        Array.from(options, item => item.value).join(','),
+        '订单号,部门,客户等级,状态,总额,region'
+    );
+    assert.equal(options.find(item => item.value === '状态')?.source, '查询配置');
+    assert.equal(options.find(item => item.value === '总额')?.source, 'SQL 返回列');
+    assert.match(source, /configuredQueryFields/);
+    assert.match(source, /SQL 返回列/);
+});
+
+test('数据分组汇总在工具目录暂缺契约时仍保留可视化参数编辑', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-toolbar-tools.js'), 'utf8');
+    const sandbox = {
+        toolValue: tool => String(tool?.name || tool?.fullName || ''),
+        findGenericDatabaseToolForFullName: () => null
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveToolForNode = resolveToolForNode;`, sandbox);
+
+    const fallback = sandbox.resolveToolForNode([], 'data.group_summary');
+    assert.equal(fallback.input_schema.required.join(','), 'rows,groupBy');
+    assert.equal(fallback.input_schema.properties.groupBy.type[0], 'array');
+
+    const incompleteCatalogTool = sandbox.resolveToolForNode([{ name: 'data.group_summary', title: '表格分组汇总' }], 'data.group_summary');
+    assert.ok(incompleteCatalogTool.input_schema.properties.metrics);
 });

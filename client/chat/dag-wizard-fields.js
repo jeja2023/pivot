@@ -34,20 +34,21 @@ const resolveToolShortName = tool => {
                 shortToolName
             ].map(item => String(item || '').trim().replace(/^mcp\.[^.]+\./i, '')).filter(Boolean))];
             const matchesTool = toolName => normalizedToolNames.includes(toolName);
+            const isGroupSummaryTool = matchesTool('data.group_summary')
+                || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(tool?.title || '').trim())
+                || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(nodeTitle || '').trim());
             const isDatabaseConnection = isDatabaseConnectionField(name, tool);
-            const isSubworkflowSelector = matchesTool('workflow.subworkflow') && normalizeFieldKey(name) === 'workflowid';
-            const isContentReviewRecords = matchesTool('agent.content_review') && normalizeFieldKey(name) === 'records';
+            const isSubworkflowSelector = matchesTool('workflow.subworkflow') && ['workflow_id', 'workflowid'].includes(fieldKey);
+            const isContentReviewRecords = matchesTool('agent.content_review') && fieldKey === 'records';
             const isContentReviewSourceField = matchesTool('agent.content_review')
                 && ['records', 'rows', 'data'].includes(normalizeFieldKey(name));
-            const isGroupSummaryGroupBy = normalizeFieldKey(name) === 'groupby'
-                && (matchesTool('data.group_summary')
-                    || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(tool?.title || '').trim())
-                    || /^(?:(?:数据|表格)?分组汇总(?:数据)?)$/.test(String(nodeTitle || '').trim())
+            const isGroupSummaryGroupBy = ['groupby', 'group_by'].includes(fieldKey)
+                && (isGroupSummaryTool
                     || /一个或多个分组字段|多个字段组合/.test(String(schema?.description || ''))
                     || Array.isArray(value));
             const isAggregationMetrics = fieldKey === 'metrics'
                 && (matchesTool('data.aggregate')
-                    || matchesTool('data.group_summary')
+                    || isGroupSummaryTool
                     || /^(?:(?:数据|表格)?(?:分组)?汇总(?:数据)?)$/.test(String(tool?.title || '').trim())
                     || /^(?:(?:数据|表格)?(?:分组)?汇总(?:数据)?)$/.test(String(nodeTitle || '').trim()));
             const isApprovalTagField = matchesTool('workflow.approval')
@@ -57,10 +58,10 @@ const resolveToolShortName = tool => {
                 && ['findings', 'evidence', 'risks', 'open_questions', 'openquestions'].includes(fieldKey);
             const isWorkflowInputDefaultField = matchesTool('workflow.input') && ['default_value', 'defaultvalue'].includes(fieldKey);
             const isApprovalLevels = matchesTool('workflow.approval')
-                && normalizeFieldKey(name) === 'approvallevels';
+                && ['approval_levels', 'approvallevels'].includes(fieldKey);
             const isChannelBindingField = matchesTool('workflow.notify') && /^(?:binding_id|bindingid)$/.test(fieldKey);
             const isBrowserTargetField = ['agent.browser', 'browser.click'].includes(shortToolName)
-                && normalizeFieldKey(name) === 'target';
+                && fieldKey === 'target';
             const isReportPathField = ['reports.read_file_summary', 'reports.query_table', 'reports.compare_files'].includes(shortToolName)
                 && ['path', 'leftpath', 'rightpath'].includes(normalizeFieldKey(name));
             const isReportSheetField = ['reports.read_file_summary', 'reports.query_table', 'reports.compare_files'].includes(shortToolName)
@@ -70,12 +71,15 @@ const resolveToolShortName = tool => {
             const isArtifactSelector = /^artifactid$/i.test(fieldName) && /^artifact\./.test(shortToolName);
             const isWorkflowCredentialField = matchesTool('agent.http') && /^(?:credential_secret|credentialsecret)$/.test(fieldKey);
             const isDataFieldSelector = /^(valuefield|xaxis|yaxis|idfield|titlefield|contentfield)$/i.test(fieldName)
-                || (matchesTool('viz.build_chart') && fieldKey === 'groupby');
+                || (matchesTool('viz.build_chart') && ['group_by', 'groupby'].includes(fieldKey));
+            const isGroupSummaryValueField = isGroupSummaryTool && ['value_field', 'valuefield'].includes(fieldKey);
+            const isGroupSummaryCoreField = isGroupSummaryTool
+                && ['rows', 'group_by', 'groupby', 'metrics', 'value_field', 'valuefield', 'aggregation'].includes(fieldKey);
             const isColumnSelector = /^(columns|tablecolumns)$/i.test(fieldName) && type === 'array';
             const isKeyValueMapField = type === 'object'
                 && /^(filters|renamemap|fields|headers|body|vars|inputs|sections)$/i.test(fieldName)
                 && (!value || (typeof value === 'object' && !Array.isArray(value)));
-            const isDelayDuration = matchesTool('workflow.delay') && normalizeFieldKey(name) === 'duration_ms';
+            const isDelayDuration = matchesTool('workflow.delay') && fieldKey === 'duration_ms';
             const dataFieldOptions = (isGroupSummaryGroupBy || isAggregationMetrics || isDataFieldSelector || isColumnSelector || isKeyValueMapField)
                 && typeof buildWizardDataFieldOptions === 'function'
                 ? buildWizardDataFieldOptions(dependencyNodes)
@@ -148,7 +152,7 @@ const resolveToolShortName = tool => {
                 : (typeof value === 'string' && value.trim() ? '__custom__' : '');
             const isLlmModelField = (['agent.llm', 'agent.content_review', 'agent.delegate'].includes(toolValue(tool))
                 || ['agent.llm', 'agent.content_review', 'agent.delegate'].some(matchesTool))
-                && normalizeFieldKey(name) === 'model';
+                && fieldKey === 'model';
             const modelOptions = isLlmModelField ? workflowModelOptions() : [];
             const isSelect = isChannelBindingField || isWorkflowCredentialField || isDatabaseConnection || isSubworkflowSelector || isLlmModelField || isEnum;
             const isNumber = type === 'integer' || type === 'number';
@@ -257,7 +261,7 @@ const resolveToolShortName = tool => {
                         </div>
                         <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
                         <button type="button" class="btn-secondary" data-pivot-dag-aggregation-metric-add>+ 添加统计指标</button>
-                        <span class="pivot-dag-group-fields-help">计数不需要指标字段；求和、平均值、最小值和最大值应选择数值字段。结果名称将作为后续节点可引用的字段名。</span>
+                        <span class="pivot-dag-group-fields-help">计数可留空；其他方式请选择数值字段并填写结果名称。</span>
                     </div>
                 `;
             } else if (isGroupSummaryGroupBy) {
@@ -268,12 +272,18 @@ const resolveToolShortName = tool => {
                                 ? groupByFields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-group-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-group-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
                                 : '<span class="pivot-dag-group-fields-empty">尚未添加分组字段</span>'}
                         </div>
+                        <div class="pivot-dag-group-field-options" data-pivot-dag-group-field-options aria-label="可选上游字段">
+                            <div class="pivot-dag-group-field-options-head"><strong>上游字段</strong><span>点击字段即可加入分组</span></div>
+                            <div class="pivot-dag-group-field-options-list">
+                                ${dataFieldOptions.length
+                                    ? dataFieldOptions.map(item => `<button type="button" class="btn-secondary pivot-dag-group-field-option" data-pivot-dag-group-field-option="${dagEscapeAttr(item.value)}" title="${dagEscapeAttr(item.label)}"><strong>${dagEscapeHtml(item.value)}</strong><small>${dagEscapeHtml(item.label.replace(/^.*? · /, ''))}</small></button>`).join('')
+                                    : '<span class="pivot-dag-group-fields-empty">尚未从上游节点发现字段。可先在数据查询中选择返回字段，或运行一次上游节点；也可以在下方手动填写。</span>'}
+                            </div>
+                        </div>
                         <div class="pivot-dag-group-fields-add">
-                            <input class="form-input" type="text" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-group-field-input placeholder="选择或输入字段名，例如 部门">
+                            <input class="form-input" type="text" data-pivot-dag-group-field-input placeholder="手动输入字段名，例如 部门">
                             <button type="button" class="btn-secondary" data-pivot-dag-group-field-add>添加字段</button>
                         </div>
-                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}">${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
-                        <span class="pivot-dag-group-fields-help">按字段组合分组；字段顺序会保留在结果元数据中。</span>
                     </div>
                 `;
             } else if (isWorkflowInputDefaultField) {
@@ -423,8 +433,8 @@ const resolveToolShortName = tool => {
                     .map(item => String(item || '').trim())
                     .filter(Boolean)
                     .filter((item, index, items) => items.indexOf(item) === index);
-                const numericOnly = normalizeFieldKey(name) === 'approveruserids';
-                const targetLabel = numericOnly ? '用户 ID' : (normalizeFieldKey(name) === 'approverunits' ? '部门' : '审批人用户名或 ID');
+                const numericOnly = ['approver_user_ids', 'approveruserids'].includes(fieldKey);
+                const targetLabel = numericOnly ? '用户 ID' : (['approver_units', 'approverunits'].includes(fieldKey) ? '部门' : '审批人用户名或 ID');
                 controlHtml = `
                     <div class="pivot-dag-group-fields" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-approval-tags="${dagEscapeAttr(name)}" ${numericOnly ? 'data-pivot-dag-tag-numeric="1"' : ''}>
                         <div class="pivot-dag-group-fields-list" data-pivot-dag-approval-tags-list>
@@ -485,18 +495,40 @@ const resolveToolShortName = tool => {
                             <option value="__manual__" ${selectedValue === '__manual__' ? 'selected' : ''}>手动输入字段名</option>
                         </select>
                         <input class="form-input pivot-dag-data-field-manual" data-pivot-dag-data-field-manual value="${dagEscapeAttr(selectedValue === '__manual__' ? fieldValue : '')}" placeholder="例如 部门">
-                        <span class="pivot-dag-structured-ref-help">可先测试上游节点，以获得实际字段候选。</span>
+                        <span class="pivot-dag-structured-ref-help">${isGroupSummaryValueField ? '计数可留空；求和、平均值等请选择数值字段。' : '可先测试上游节点，以获得实际字段候选。'}</span>
                     </div>
                 `;
             } else if (isKeyValueMapField) {
                 const entries = Object.entries(value || {});
+                const isFilterField = fieldKey === 'filters' || isReportQueryFilters;
+                const keyPlaceholder = isFilterField ? '选择或输入字段名' : '字段或键名';
+                const valPlaceholder = isFilterField ? '输入匹配值或插入变量' : '填写值或插入变量';
+                const addBtnLabel = isFilterField ? '+ 添加筛选条件' : '+ 添加一项';
+                const rows = entries.length ? entries : [['', '']];
+                const dataListId = `pivot-dag-data-field-options-${dagEscapeAttr(name)}`;
                 controlHtml = `
-                    <div class="pivot-dag-keyvalue-map" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-map="${dagEscapeAttr(name)}" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields="1"' : ''}>
-                        <div class="pivot-dag-keyvalue-map-list" data-pivot-dag-keyvalue-map-list>
-                            ${(entries.length ? entries : [['', '']]).map(([key, entryValue]) => `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="pivot-dag-data-field-options-${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="字段或键名"><textarea class="form-input" rows="2" data-pivot-dag-keyvalue-value placeholder="填写值或插入变量">${dagEscapeHtml(typeof entryValue === 'string' ? entryValue : JSON.stringify(entryValue))}</textarea><button type="button" class="btn-secondary" data-pivot-dag-keyvalue-remove aria-label="删除此项">×</button></div>`).join('')}
+                    <div class="pivot-dag-keyvalue-map${isFilterField ? ' is-filter-mode' : ''}" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-keyvalue-map="${dagEscapeAttr(name)}" ${isFilterField ? 'data-pivot-dag-filter-field="1"' : ''} ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields="1"' : ''}>
+                        <div class="pivot-dag-keyvalue-map-head">
+                            <span>${isFilterField ? '筛选字段' : '字段或键名'}</span>
+                            <span>${isFilterField ? '匹配值 / 引用变量' : '填写值 / 引用变量'}</span>
+                            <span class="pivot-dag-keyvalue-map-head-action">操作</span>
                         </div>
-                        <datalist id="pivot-dag-data-field-options-${dagEscapeAttr(name)}" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields-list' : ''}>${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
-                        <button type="button" class="btn-secondary" data-pivot-dag-keyvalue-add>+ 添加一项</button>
+                        <div class="pivot-dag-keyvalue-map-list" data-pivot-dag-keyvalue-map-list>
+                            ${rows.map(([key, entryValue]) => `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="${dataListId}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="${dagEscapeAttr(keyPlaceholder)}"><input class="form-input" type="text" data-pivot-dag-keyvalue-value value="${dagEscapeAttr(typeof entryValue === 'string' ? entryValue : (entryValue !== undefined && entryValue !== null ? JSON.stringify(entryValue) : ''))}" placeholder="${dagEscapeAttr(valPlaceholder)}"><button type="button" class="btn-secondary pivot-dag-keyvalue-remove" data-pivot-dag-keyvalue-remove aria-label="删除此项" title="删除此项">×</button></div>`).join('')}
+                        </div>
+                        <datalist id="${dataListId}" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields-list' : ''}>${dataFieldOptions.map(item => `<option value="${dagEscapeAttr(item.value)}">${dagEscapeHtml(item.label)}</option>`).join('')}</datalist>
+                        ${(isFilterField && dataFieldOptions.length) ? `
+                            <div class="pivot-dag-filter-field-suggestions" data-pivot-dag-filter-suggestions>
+                                <span class="pivot-dag-filter-field-suggestions-label">可选上游字段：</span>
+                                <div class="pivot-dag-filter-field-suggestions-chips">
+                                    ${dataFieldOptions.slice(0, 16).map(item => `<button type="button" class="btn-secondary pivot-dag-filter-field-chip" data-pivot-dag-filter-field-chip="${dagEscapeAttr(item.value)}" title="${dagEscapeAttr(item.label)}">+ ${dagEscapeHtml(item.value)}</button>`).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        <div class="pivot-dag-keyvalue-map-footer">
+                            <button type="button" class="btn-secondary" data-pivot-dag-keyvalue-add>${dagEscapeHtml(addBtnLabel)}</button>
+                            ${isFilterField ? '<span class="pivot-dag-keyvalue-map-tip">提示：可在值中引用右侧上游变量；匹配方式请在下方选择</span>' : ''}
+                        </div>
                         <span class="pivot-dag-group-fields-help" ${isReportQueryFilters ? 'data-pivot-dag-report-filter-fields-hint' : ''}>${isReportQueryFilters ? '选定报表文件后，可读取字段并按字段添加筛选条件。' : '可填写固定值，也可通过右侧变量引用插入上游结果。'}</span>
                     </div>
                 `;
@@ -634,6 +666,12 @@ const resolveToolShortName = tool => {
                     : '可以直接填写，必要时也能插入变量。';
             // 运行时引用由字段本身的选择器和右侧变量面板承担，避免在每个参数下重复展示全局按钮。
             const suggestionHtml = '';
+            const fieldDescriptionHtml = description && !isGroupSummaryCoreField
+                ? `<span class="pivot-dag-wizard-field-desc">${dagEscapeHtml(description)}</span>`
+                : '';
+            const fieldUsageHtml = isGroupSummaryTool
+                ? ''
+                : `<span class="pivot-dag-wizard-field-usage">${dagEscapeHtml(fieldUsageHint(name, schema, tool) || usageHint)}</span>`;
 
             return `
                 <label class="${fieldClasses}" data-pivot-dag-wizard-field-wrap="${dagEscapeAttr(name)}">
@@ -646,8 +684,8 @@ const resolveToolShortName = tool => {
                     </span>
                     ${referencePickerHtml}
                     <div class="pivot-dag-wizard-manual-control${initialReferenceValue ? ' is-reference-active' : ''}" data-pivot-dag-wizard-manual-control="${dagEscapeAttr(name)}">${controlHtml}</div>
-                    ${description ? `<span class="pivot-dag-wizard-field-desc">${dagEscapeHtml(description)}</span>` : ''}
-                    <span class="pivot-dag-wizard-field-usage">${dagEscapeHtml(fieldUsageHint(name, schema, tool) || usageHint)}</span>
+                    ${fieldDescriptionHtml}
+                    ${fieldUsageHtml}
                     ${suggestionHtml}
                 </label>
             `;

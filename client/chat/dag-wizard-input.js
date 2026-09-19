@@ -51,8 +51,8 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
             if (isDatabaseConnectionField(name, tool)) return '选择要执行该数据库工具的连接；读取表/字段会跟随这个选择。';
             if (toolShortName(tool) === 'workflow.input' && ['default_value', 'defaultvalue'].includes(key)) return '默认值会跟随当前参数类型校验；对象和数组请填写合法 JSON。';
             if (name === 'schema') return '不确定时保持为空，工具会使用当前连接的默认数据库范围。';
-            if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '从上游表格行添加一个或多个字段；每个字段组合会形成一个汇总分组。';
-            if (name === 'metrics' && ['data.aggregate', 'data.group_summary'].includes(toolShortName(tool))) return '可逐项设置统计方式、指标字段和结果名称；计数不需要字段。';
+            if (name === 'groupBy' && toolShortName(tool) === 'data.group_summary') return '';
+            if (name === 'metrics' && ['data.aggregate', 'data.group_summary'].includes(toolShortName(tool))) return '';
             if (name === 'table' || name === 'groupBy' || name === 'collection') return '可手动输入，也可用上方数据库辅助读取候选项。';
             if (name === 'sql') return toolShortName(tool) === 'db.run_readonly_query'
                 ? '普通查询请使用可视化配置；多表关联等复杂场景再切换到高级查询。'
@@ -164,6 +164,107 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
                     source
                 });
             };
+            const unquoteIdentifier = value => String(value || '').trim()
+                .replace(/^(?:`|"|\[)/, '')
+                .replace(/(?:`|"|\])$/, '')
+                .trim();
+            const simpleFieldName = value => {
+                const text = String(value || '').trim();
+                if (!text || text === '*') return '';
+                const lastPart = text.split('.').pop() || '';
+                const normalized = unquoteIdentifier(lastPart);
+                return /^[\p{L}_$][\p{L}\p{N}_$-]{0,127}$/u.test(normalized) ? normalized : '';
+            };
+            const splitSqlProjection = value => {
+                const parts = [];
+                let start = 0;
+                let depth = 0;
+                let quote = '';
+                const text = String(value || '');
+                for (let index = 0; index < text.length; index += 1) {
+                    const char = text[index];
+                    const next = text[index + 1] || '';
+                    if (quote) {
+                        if (char === quote) {
+                            if ((quote === '\'' || quote === '"') && next === quote) {
+                                index += 1;
+                            } else {
+                                quote = '';
+                            }
+                        }
+                        continue;
+                    }
+                    if (char === '\'' || char === '"' || char === '`') {
+                        quote = char;
+                        continue;
+                    }
+                    if (char === '[') {
+                        quote = ']';
+                        continue;
+                    }
+                    if (char === '(') depth += 1;
+                    else if (char === ')' && depth > 0) depth -= 1;
+                    else if (char === ',' && depth === 0) {
+                        parts.push(text.slice(start, index));
+                        start = index + 1;
+                    }
+                }
+                parts.push(text.slice(start));
+                return parts;
+            };
+            const findTopLevelSqlKeyword = (value, keyword, from = 0) => {
+                const text = String(value || '');
+                const target = String(keyword || '').toLowerCase();
+                let depth = 0;
+                let quote = '';
+                for (let index = Math.max(0, from); index < text.length; index += 1) {
+                    const char = text[index];
+                    const next = text[index + 1] || '';
+                    if (quote) {
+                        if (char === quote) {
+                            if ((quote === '\'' || quote === '"') && next === quote) index += 1;
+                            else quote = '';
+                        }
+                        continue;
+                    }
+                    if (char === '\'' || char === '"' || char === '`') {
+                        quote = char;
+                        continue;
+                    }
+                    if (char === '[') {
+                        quote = ']';
+                        continue;
+                    }
+                    if (char === '(') {
+                        depth += 1;
+                        continue;
+                    }
+                    if (char === ')' && depth > 0) {
+                        depth -= 1;
+                        continue;
+                    }
+                    if (depth !== 0 || text.slice(index, index + target.length).toLowerCase() !== target) continue;
+                    const before = text[index - 1] || ' ';
+                    const after = text[index + target.length] || ' ';
+                    if (!/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after)) return index;
+                }
+                return -1;
+            };
+            const sqlProjectionFields = sql => {
+                const selectAt = findTopLevelSqlKeyword(sql, 'select');
+                if (selectAt < 0) return [];
+                const fromAt = findTopLevelSqlKeyword(sql, 'from', selectAt + 6);
+                if (fromAt < 0) return [];
+                return splitSqlProjection(String(sql).slice(selectAt + 6, fromAt))
+                    .map(item => String(item || '').trim().replace(/^(?:distinct|all)\s+/i, ''))
+                    .map(item => {
+                        const asMatch = item.match(/\s+as\s+((?:`[^`]+`)|(?:"[^"]+")|(?:\[[^\]]+\])|[\p{L}_$][\p{L}\p{N}_$-]*)\s*$/iu);
+                        if (asMatch) return simpleFieldName(asMatch[1]);
+                        const trailingAlias = item.match(/\s+((?:`[^`]+`)|(?:"[^"]+")|(?:\[[^\]]+\])|[\p{L}_$][\p{L}\p{N}_$-]*)\s*$/iu);
+                        return trailingAlias ? simpleFieldName(trailingAlias[1]) : simpleFieldName(item);
+                    })
+                    .filter(Boolean);
+            };
             const rowsFromValue = (value, depth = 0) => {
                 if (depth > 3 || value === null || value === undefined) return [];
                 if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object' && !Array.isArray(item));
@@ -179,6 +280,24 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
                 }
                 return [];
             };
+            const configuredQueryFields = node => {
+                const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input)
+                    ? node.input
+                    : {};
+                const queryBuilder = input.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
+                    ? input.queryBuilder
+                    : {};
+                const columns = [
+                    ...(Array.isArray(queryBuilder.columns) ? queryBuilder.columns : []),
+                    ...(Array.isArray(input.columns) ? input.columns : [])
+                ];
+                columns.map(simpleFieldName).filter(Boolean).forEach(field => add(field, node, '查询配置'));
+                if (queryBuilder.aggregation) {
+                    if (queryBuilder.groupBy) add('group_value', node, '查询配置汇总结果');
+                    add('metric_value', node, '查询配置汇总结果');
+                }
+                sqlProjectionFields(input.sql).forEach(field => add(field, node, 'SQL 返回列'));
+            };
             const schemaFields = (schema = {}) => {
                 const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
                 const containers = ['rows', 'data', 'items', 'records'];
@@ -192,6 +311,7 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
                 const sampleRows = rowsFromValue(node?._testOutput);
                 sampleRows.slice(0, 100).forEach(row => Object.keys(row || {}).forEach(field => add(field, node, '测试样本')));
                 schemaFields(node?.outputSchema || {}).forEach(field => add(field, node, '输出契约'));
+                configuredQueryFields(node);
             });
             return result.slice(0, max);
         };

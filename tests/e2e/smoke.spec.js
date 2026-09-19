@@ -225,6 +225,53 @@ test.describe('Pivot browser smoke', () => {
         }).toBe(true);
     });
 
+    test('表格分组汇总通过可点击上游字段选择器保存分组字段', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ editor: true }); });
+        await expect(page.locator('#agent-dag-editor-canvas')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(() => {
+            const textarea = document.getElementById('agent-dag-spec');
+            textarea.value = JSON.stringify({
+                nodes: [
+                    {
+                        id: 'query', title: '数据查询', tool: 'db.run_readonly_query', dependsOn: [],
+                        input: {
+                            queryBuilder: { columns: ['部门', '状态'] },
+                            sql: 'SELECT department AS 部门, status AS 状态 FROM employees'
+                        }
+                    },
+                    {
+                        id: 'group', title: '表格分组汇总', tool: 'data.group_summary', dependsOn: ['query'],
+                        input: { rows: '{{nodes.query.output.rows}}', groupBy: [], metrics: [{ field: '', aggregation: 'count', alias: '数量' }] }
+                    }
+                ],
+                layout: { query: { x: 80, y: 80 }, group: { x: 400, y: 80 } }
+            });
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            window.mountAgentDagEditor?.();
+        });
+
+        const groupNode = page.locator('.pivot-dag-node[data-pivot-dag-id="group"]');
+        await groupNode.click();
+        await page.locator('[data-pivot-dag-open-wizard]').click();
+        const wizard = page.locator('#pivot-dag-input-wizard');
+        const department = wizard.locator('[data-pivot-dag-group-field-option="部门"]');
+        await expect(department).toBeVisible();
+        await expect(wizard).toContainText('点击字段即可加入分组');
+        await expect(wizard).not.toContainText('字段候选项来自上游查询配置');
+        await expect(wizard).not.toContainText('从上游表格行添加一个或多个字段');
+        await expect(wizard).toContainText('计数可留空；其他方式请选择数值字段并填写结果名称');
+        await department.click();
+        await expect(wizard.locator('[data-pivot-dag-group-field-value="部门"]')).toBeVisible();
+        await expect(department).toBeDisabled();
+        await wizard.locator('[data-pivot-dag-wizard-apply]').click();
+        await expect(wizard).toHaveClass(/hidden/);
+        await expect.poll(() => page.evaluate(() => {
+            const spec = JSON.parse(document.getElementById('agent-dag-spec').value);
+            return spec.nodes.find(node => node.id === 'group')?.input?.groupBy || [];
+        })).toEqual(['部门']);
+    });
+
     test('应用、知识库、工具库和设置工作区均在首次打开时按需挂载', async ({ page }) => {
         await ensureBrowserSession(page);
         const workspaces = [
@@ -294,6 +341,35 @@ test.describe('Pivot browser smoke', () => {
                 await expect(page.locator(`#${panelId}`)).toBeHidden();
             }
         }
+    });
+
+    test('系统设置首次进入会等待设置样式完成后再展示画布', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/chat/chat.workspace.settings.css**', async route => {
+            await new Promise(resolve => setTimeout(resolve, 6_000));
+            await route.continue();
+        });
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 20_000 });
+
+        await expect.poll(() => page.evaluate(() => {
+            const link = document.querySelector('link[data-pivot-workspace-style="/chat/chat.workspace.settings.css"]');
+            const content = document.querySelector('.settings-workspace-view .admin-content');
+            const panels = document.querySelector('#tab-content-monitor .monitor-panels');
+            const canvas = document.querySelector('#settings-scale-canvas');
+            return {
+                styleLoaded: link?.dataset.loaded === 'true' && Boolean(link.sheet),
+                contentDisplay: content ? window.getComputedStyle(content).display : '',
+                panelsDisplay: panels ? window.getComputedStyle(panels).display : '',
+                canvasPosition: canvas ? window.getComputedStyle(canvas).position : ''
+            };
+        })).toEqual({
+            styleLoaded: true,
+            contentDisplay: 'flex',
+            panelsDisplay: 'grid',
+            canvasPosition: 'absolute'
+        });
     });
 
     test('工作区样式资源短暂失败时，知识库仍会挂载并保持关闭控件可点击', async ({ page }) => {

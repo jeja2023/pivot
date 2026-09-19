@@ -127,7 +127,7 @@ function createDagWizardController(ctx) {
             const referencePickerFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-picker="${fieldName}"]`);
             const referenceCustomFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-custom="${fieldName}"]`);
             const manualControlFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-manual-control="${fieldName}"]`);
-            const { aggregationMetricsFromControl, approvalLevelsFromControl, approvalTagsFromControl, bindAggregationMetrics, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderAggregationMetrics, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
+            const { aggregationMetricsFromControl, approvalLevelsFromControl, approvalTagsFromControl, bindAggregationMetrics, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindKeyValueMap, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderAggregationMetrics, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
             const { bindReportSheetPicker, hydrateSheet, setManualSheet, sheetValue } = createDagWizardReportAssist();
             let syncBrowserTargetVisibility = () => {}, syncConditionCompareField = () => {}, syncOutputPresentationFields = () => {};
             const syncReferencePicker = (fieldName, nextValue) => {
@@ -356,9 +356,13 @@ function createDagWizardController(ctx) {
                 if (!token || !control) return;
                 setActiveField(control);
                 if (control.dataset.pivotDagKeyvalueMap) {
-                    const target = activeKeyValueInput && control.contains(activeKeyValueInput)
+                    let target = activeKeyValueInput && control.contains(activeKeyValueInput)
                         ? activeKeyValueInput
                         : control.querySelector('[data-pivot-dag-keyvalue-value]');
+                    if (!target) {
+                        renderKeyValueRows(control, { '': token });
+                        target = control.querySelector('[data-pivot-dag-keyvalue-value]');
+                    }
                     if (!target) return;
                     const start = target.selectionStart ?? target.value.length;
                     const end = target.selectionEnd ?? target.value.length;
@@ -665,8 +669,18 @@ function createDagWizardController(ctx) {
             modal.querySelectorAll('[data-pivot-dag-aggregation-metrics]').forEach(control => bindAggregationMetrics({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-group-fields]').forEach(control => {
                 const addInput = control.querySelector('[data-pivot-dag-group-field-input]');
-                const addField = () => {
-                    const next = String(addInput?.value || '').trim();
+                const syncCandidateState = () => {
+                    const selected = new Set(groupFieldsFromControl(control));
+                    control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
+                        const value = String(option.dataset.pivotDagGroupFieldOption || '').trim();
+                        const isSelected = selected.has(value);
+                        option.classList.toggle('is-selected', isSelected);
+                        option.disabled = isSelected;
+                        option.setAttribute('aria-pressed', String(isSelected));
+                    });
+                };
+                const addField = (value = addInput?.value) => {
+                    const next = String(value || '').trim();
                     if (!next) return;
                     const fields = groupFieldsFromControl(control);
                     if (fields.includes(next)) {
@@ -679,9 +693,13 @@ function createDagWizardController(ctx) {
                     }
                     renderGroupFields(control, [...fields, next]);
                     addInput.value = '';
+                    syncCandidateState();
                     addInput.focus?.({ preventScroll: true });
                 };
                 control.querySelector('[data-pivot-dag-group-field-add]')?.addEventListener('click', addField);
+                control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
+                    option.addEventListener('click', () => addField(option.dataset.pivotDagGroupFieldOption));
+                });
                 addInput?.addEventListener('keydown', event => {
                     if (event.key !== 'Enter') return;
                     event.preventDefault();
@@ -692,7 +710,9 @@ function createDagWizardController(ctx) {
                     if (!remove) return;
                     const field = String(remove.dataset.pivotDagGroupFieldRemove || '').trim();
                     renderGroupFields(control, groupFieldsFromControl(control).filter(item => item !== field));
+                    syncCandidateState();
                 });
+                syncCandidateState();
             });
             modal.querySelectorAll('[data-pivot-dag-column-fields]').forEach(control => {
                 const addInput = control.querySelector('[data-pivot-dag-column-field-input]');
@@ -830,32 +850,11 @@ function createDagWizardController(ctx) {
                 select?.addEventListener('change', sync);
                 sync();
             });
-            modal.querySelectorAll('[data-pivot-dag-keyvalue-map]').forEach(control => {
-                const commitAndRender = () => {
-                    const value = keyValueMapFromControl(control);
-                    if (value === null) return false;
-                    renderKeyValueRows(control, value);
-                    return true;
-                };
-                control.querySelector('[data-pivot-dag-keyvalue-add]')?.addEventListener('click', () => {
-                    const value = keyValueMapFromControl(control);
-                    if (value === null) return;
-                    const nextKey = `field_${Object.keys(value).length + 1}`;
-                    value[nextKey] = '';
-                    renderKeyValueRows(control, value);
-                    control.querySelector(`[data-pivot-dag-keyvalue-key][value="${nextKey}"]`)?.focus?.({ preventScroll: true });
-                });
-                control.addEventListener('focusin', event => {
-                    const valueInput = event.target.closest('[data-pivot-dag-keyvalue-value]');
-                    if (valueInput) activeKeyValueInput = valueInput;
-                });
-                control.addEventListener('click', event => {
-                    if (event.target.closest('[data-pivot-dag-keyvalue-remove]')) {
-                        event.target.closest('.pivot-dag-keyvalue-map-row')?.remove();
-                        commitAndRender();
-                    }
-                });
-            });
+            modal.querySelectorAll('[data-pivot-dag-keyvalue-map]').forEach(control => bindKeyValueMap({
+                control,
+                setActiveField,
+                onActiveInput: input => { activeKeyValueInput = input; }
+            }));
             modal.querySelectorAll('[data-pivot-dag-channel-binding-picker]').forEach(control => bindChannelBindingPicker({
                 control, setActiveField, apiFetchFn: apiFetch, apiBase: API_BASE,
                 showToast: (...args) => window.Pivot.legacy.showToast?.(...args)

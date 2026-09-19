@@ -241,6 +241,24 @@ function withSettingsTimeout(task, timeoutMs = SETTINGS_OPERATION_TIMEOUT_MS) {
     });
 }
 
+async function waitForSettingsWorkspaceStyles() {
+    const styleLoader = window.Pivot.moduleApi?.('workspaces.styleLoader');
+    if (!styleLoader) return true;
+    if (styleLoader.isWorkspaceStyleLoaded?.('settings') === true) return true;
+
+    const waitForStyles = styleLoader.whenWorkspaceStylesLoaded || styleLoader.ensureWorkspaceStyles;
+    if (typeof waitForStyles !== 'function') return true;
+    try {
+        await waitForStyles.call(styleLoader, 'settings');
+    } catch (error) {
+        // 样式请求最终失败时仍允许设置功能进入，避免把网络异常变成死锁；
+        // 正常首进则必须等到样式表完成后再计算监控画布。
+        console.warn('系统设置工作区样式加载失败，继续保留功能入口：', error);
+        return false;
+    }
+    return styleLoader.isWorkspaceStyleLoaded?.('settings') !== false;
+}
+
 const loadScriptOnce = (src) => {
     if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
     return Promise.reject(new Error(`脚本加载器不可用: ${src}`));
@@ -277,19 +295,9 @@ async function openAdminPanel(options = {}) {
         showToast(error.message || '设置模块加载失败', 'error');
         return;
     }
-    const whenStyles = window.Pivot.moduleApi?.('workspaces.styleLoader')?.whenWorkspaceStylesLoaded;
-    if (typeof whenStyles === 'function') {
-        try {
-            // 给设置工作区专属样式包充分就绪窗口（最多 2500ms），确保首帧渲染具备完整样式与画布尺寸，
-            // 杜绝无样式布局导致画布计算偏窄、高度撑大出现滚动条与留白；若超时则平滑降级继续渲染
-            await Promise.race([
-                whenStyles('settings'),
-                new Promise(resolve => setTimeout(resolve, 2500))
-            ]);
-        } catch (e) {
-            // 样式加载异常由 styleLoader 告警，此处平滑降级不阻塞功能
-        }
-    }
+    // 设置工作区的 CSS 同时包含监控仪表盘与自适应画布规则。
+    // 首次进入时不能在 2500ms 超时后先渲染无样式监控页，否则后续只会留下错误的首帧尺寸。
+    await waitForSettingsWorkspaceStyles();
     const adminContainer = document.getElementById('admin-container');
     window.Pivot.moduleApi?.('settings.events')?.bindAdminSettingsEvents?.();
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('settings');
@@ -357,6 +365,11 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
     }
     const requestedTab = String(tab || '').trim();
     tab = normalizeSettingsTab(requestedTab);
+    if (tab === 'monitor') {
+        // 用户可能在设置工作区首进尚未完成时立即点击“系统监控”。
+        // 先等待同一份样式包完成，再切换 Tab 和测量画布，避免只应用到部分规则。
+        await waitForSettingsWorkspaceStyles();
+    }
     if (tab !== 'ops') {
         window.Pivot.legacy.cancelOpsSummaryLoad?.();
     }

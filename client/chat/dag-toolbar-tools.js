@@ -80,6 +80,40 @@ const TOOL_DISPLAY_OVERRIDES = {
         'knowledge.graph.query': ['知识图谱查询', '查询知识图谱中的实体与关联关系。']
     };
 
+// 工作流草稿可能来自导入、历史版本，或来自尚未同步工具契约的内置 MCP 服务。
+// 这些节点仍须有可编辑的最小参数契约，不能因为当前目录暂时缺少 schema 而退化成“0 个参数”。
+const FALLBACK_NODE_INPUT_SCHEMAS = Object.freeze({
+    'data.group_summary': {
+        type: 'object',
+        properties: {
+            rows: { type: 'array', items: { type: 'object' }, description: '参与汇总的数据行。' },
+            groupBy: {
+                type: ['array', 'string'],
+                items: { type: 'string' },
+                minItems: 1,
+                description: '一个或多个分组字段；每个字段组合形成一个汇总分组。'
+            },
+            metrics: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        field: { type: 'string' },
+                        aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                        alias: { type: 'string' }
+                    }
+                },
+                description: '可添加多个汇总指标；计数指标可不填写字段。'
+            },
+            valueField: { type: 'string', description: '兼容旧版的单个指标字段。' },
+            aggregation: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+            limit: { type: 'number', minimum: 1, maximum: 5000 },
+            outputLimit: { type: 'number', minimum: 1, maximum: 5000 }
+        },
+        required: ['rows', 'groupBy']
+    }
+});
+
 const TOOL_GROUPS = [
         { key: 'llm', label: '大模型', test: name => /^(agent\.(llm|content_review|delegate|handoff)|llm\.|model\.generate)/.test(name) },
         { key: 'knowledge', label: '知识与会话', test: name => /^(rag|sessions|knowledge)\./.test(name) },
@@ -252,8 +286,12 @@ function isKnownToolValue(tools, value) {
 function resolveToolForNode(tools, value) {
         const list = Array.isArray(tools) ? tools : [];
         const found = list.find(tool => toolValue(tool) === value) || findGenericDatabaseToolForFullName(list, value);
-        if (found) return found;
-        return value ? { name: value, title: '' } : null;
+        const shortName = String(value || '').trim().replace(/^mcp\.[^.]+\./i, '');
+        const fallbackSchema = FALLBACK_NODE_INPUT_SCHEMAS[shortName];
+        const schema = found?.input_schema || found?.inputSchema || found?.parameters;
+        const hasProperties = schema?.properties && typeof schema.properties === 'object' && Object.keys(schema.properties).length > 0;
+        if (found) return fallbackSchema && !hasProperties ? { ...found, input_schema: fallbackSchema } : found;
+        return value ? { name: value, title: '', ...(fallbackSchema ? { input_schema: fallbackSchema } : {}) } : null;
     }
 
 function buildNodeToolDisplay(tools, value) {

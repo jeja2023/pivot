@@ -17,6 +17,14 @@ function createDagWizardSpecialFieldControls() {
         PivotSafeHtml.setHtml(list, fields.length
             ? fields.map(field => `<span class="pivot-dag-group-field-chip" data-pivot-dag-group-field-value="${dagEscapeAttr(field)}">${dagEscapeHtml(field)}<button type="button" class="btn-secondary" data-pivot-dag-group-field-remove="${dagEscapeAttr(field)}" aria-label="移除字段 ${dagEscapeAttr(field)}">×</button></span>`).join('')
             : '<span class="pivot-dag-group-fields-empty">尚未添加分组字段</span>');
+        const selected = new Set(fields);
+        control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
+            const field = String(option.dataset.pivotDagGroupFieldOption || '').trim();
+            const isSelected = selected.has(field);
+            option.classList.toggle('is-selected', isSelected);
+            option.disabled = isSelected;
+            option.setAttribute('aria-pressed', String(isSelected));
+        });
     };
     const normalizeAggregationMetrics = value => (Array.isArray(value) ? value : [])
         .filter(item => item && typeof item === 'object' && !Array.isArray(item))
@@ -354,9 +362,101 @@ function createDagWizardSpecialFieldControls() {
         const entries = Object.entries(value && typeof value === 'object' && !Array.isArray(value) ? value : {});
         const list = control.querySelector('[data-pivot-dag-keyvalue-map-list]');
         if (!list) return;
-        const rows = entries.length ? entries : [['', '']];
         const dataListId = `pivot-dag-data-field-options-${String(control.dataset.pivotDagKeyvalueMap || '')}`;
-        PivotSafeHtml.setHtml(list, rows.map(([key, item]) => `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="${dagEscapeAttr(dataListId)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="字段或键名"><textarea class="form-input" rows="2" data-pivot-dag-keyvalue-value placeholder="填写值或插入变量">${dagEscapeHtml(typeof item === 'string' ? item : JSON.stringify(item))}</textarea><button type="button" class="btn-secondary" data-pivot-dag-keyvalue-remove aria-label="删除此项">×</button></div>`).join(''));
+        const isFilter = control.dataset.pivotDagKeyvalueMap === 'filters' || control.dataset.pivotDagFilterField === '1';
+        const keyPlaceholder = isFilter ? '选择或输入字段名' : '字段或键名';
+        const valPlaceholder = isFilter ? '输入匹配值或插入变量' : '填写值或插入变量';
+        if (!entries.length) {
+            PivotSafeHtml.setHtml(list, isFilter
+                ? `<div class="pivot-dag-keyvalue-map-empty">尚未添加筛选条件（默认保留全部数据行）</div>`
+                : `<div class="pivot-dag-keyvalue-map-row"><input class="form-input" list="${dagEscapeAttr(dataListId)}" data-pivot-dag-keyvalue-key value="" placeholder="${dagEscapeAttr(keyPlaceholder)}"><input class="form-input" type="text" data-pivot-dag-keyvalue-value value="" placeholder="${dagEscapeAttr(valPlaceholder)}"><button type="button" class="btn-secondary pivot-dag-keyvalue-remove" data-pivot-dag-keyvalue-remove aria-label="删除此项" title="删除此项">×</button></div>`
+            );
+            return;
+        }
+        PivotSafeHtml.setHtml(list, entries.map(([key, item]) => `
+            <div class="pivot-dag-keyvalue-map-row">
+                <input class="form-input" list="${dagEscapeAttr(dataListId)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(key)}" placeholder="${dagEscapeAttr(keyPlaceholder)}">
+                <input class="form-input" type="text" data-pivot-dag-keyvalue-value value="${dagEscapeAttr(typeof item === 'string' ? item : (item !== undefined && item !== null ? JSON.stringify(item) : ''))}" placeholder="${dagEscapeAttr(valPlaceholder)}">
+                <button type="button" class="btn-secondary pivot-dag-keyvalue-remove" data-pivot-dag-keyvalue-remove aria-label="删除此项" title="删除此项">×</button>
+            </div>
+        `).join(''));
+    };
+    const bindKeyValueMap = ({ control, setActiveField, onActiveInput }) => {
+        if (!control) return;
+        const addKeyValueRow = (fieldKey = '', fieldValue = '') => {
+            const list = control.querySelector('[data-pivot-dag-keyvalue-map-list]');
+            if (!list) return null;
+            list.querySelector('.pivot-dag-keyvalue-map-empty')?.remove();
+            const dataListId = `pivot-dag-data-field-options-${String(control.dataset.pivotDagKeyvalueMap || '')}`;
+            const isFilter = control.dataset.pivotDagKeyvalueMap === 'filters' || control.dataset.pivotDagFilterField === '1';
+            const keyPlaceholder = isFilter ? '选择或输入字段名' : '字段或键名';
+            const valPlaceholder = isFilter ? '输入匹配值或插入变量' : '填写值或插入变量';
+            const row = document.createElement('div');
+            row.className = 'pivot-dag-keyvalue-map-row';
+            PivotSafeHtml.setHtml(row, `
+                <input class="form-input" list="${dagEscapeAttr(dataListId)}" data-pivot-dag-keyvalue-key value="${dagEscapeAttr(fieldKey)}" placeholder="${dagEscapeAttr(keyPlaceholder)}">
+                <input class="form-input" type="text" data-pivot-dag-keyvalue-value value="${dagEscapeAttr(fieldValue)}" placeholder="${dagEscapeAttr(valPlaceholder)}">
+                <button type="button" class="btn-secondary pivot-dag-keyvalue-remove" data-pivot-dag-keyvalue-remove aria-label="删除此项" title="删除此项">×</button>
+            `);
+            list.appendChild(row);
+            if (!fieldKey) {
+                row.querySelector('[data-pivot-dag-keyvalue-key]')?.focus?.({ preventScroll: true });
+            } else {
+                row.querySelector('[data-pivot-dag-keyvalue-value]')?.focus?.({ preventScroll: true });
+            }
+            return row;
+        };
+
+        control.querySelector('[data-pivot-dag-keyvalue-add]')?.addEventListener('click', () => {
+            addKeyValueRow('', '');
+        });
+
+        control.addEventListener('click', event => {
+            if (event.target.closest('[data-pivot-dag-keyvalue-remove]')) {
+                const row = event.target.closest('.pivot-dag-keyvalue-map-row');
+                if (row) {
+                    row.remove();
+                    const list = control.querySelector('[data-pivot-dag-keyvalue-map-list]');
+                    if (list && !list.querySelector('.pivot-dag-keyvalue-map-row')) {
+                        const isFilter = control.dataset.pivotDagKeyvalueMap === 'filters' || control.dataset.pivotDagFilterField === '1';
+                        PivotSafeHtml.setHtml(list, `<div class="pivot-dag-keyvalue-map-empty">${isFilter ? '尚未添加筛选条件（默认保留全部数据行）' : '尚未添加键值项'}</div>`);
+                    }
+                }
+                return;
+            }
+            const chip = event.target.closest('[data-pivot-dag-filter-field-chip]');
+            if (chip) {
+                const fieldName = String(chip.dataset.pivotDagFilterFieldChip || '').trim();
+                if (!fieldName) return;
+                const rows = [...control.querySelectorAll('.pivot-dag-keyvalue-map-row')];
+                const emptyRow = rows.find(r => {
+                    const k = String(r.querySelector('[data-pivot-dag-keyvalue-key]')?.value || '').trim();
+                    const v = String(r.querySelector('[data-pivot-dag-keyvalue-value]')?.value || '').trim();
+                    return !k && !v;
+                });
+                if (emptyRow) {
+                    const keyInput = emptyRow.querySelector('[data-pivot-dag-keyvalue-key]');
+                    if (keyInput) keyInput.value = fieldName;
+                    emptyRow.querySelector('[data-pivot-dag-keyvalue-value]')?.focus?.({ preventScroll: true });
+                } else {
+                    addKeyValueRow(fieldName, '');
+                }
+            }
+        });
+
+        control.addEventListener('focusin', event => {
+            setActiveField?.(control);
+            const valueInput = event.target.closest('[data-pivot-dag-keyvalue-value]');
+            if (valueInput) onActiveInput?.(valueInput);
+        });
+
+        control.addEventListener('input', event => {
+            if (event.target.matches('[data-pivot-dag-keyvalue-key]')) {
+                event.target.classList.remove('is-invalid');
+            }
+        });
+
+        return { addKeyValueRow };
     };
     const syncResourcePicker = (control, value, emptyLabel, currentLabel) => {
         const select = control.querySelector('select');
@@ -578,6 +678,7 @@ function createDagWizardSpecialFieldControls() {
         bindBrowserTargetVisibility,
         bindOutputPresentationFields,
         bindAggregationMetrics,
+        bindKeyValueMap,
         bindTagList,
         bindWorkflowInputDefault,
         browserTargetFromControl,
