@@ -846,17 +846,17 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         // Pane 4: Artifacts
         const paneArtifacts = document.getElementById('agent-pane-artifacts');
         if (paneArtifacts) {
-            PivotSafeHtml.setHtml(paneArtifacts, visualOutputs ? `<div class="agent-artifacts-pane"><div class="agent-tool-section-head"><strong>生成的可视化图表与格式化产物</strong></div><div class="agent-visual-outputs">${visualOutputs}</div></div>` : `<div class="empty-state agent-empty-state"><p>该任务尚未生成独立结构化图表或报表产物。</p><div style="margin-top: 8px;"><button type="button" class="btn-secondary btn-xs" data-agent-export-md>导出 Markdown 运行摘要</button></div></div>`);
+            PivotSafeHtml.setHtml(paneArtifacts, visualOutputs ? `<div class="agent-artifacts-pane"><div class="agent-tool-section-head"><strong>生成的可视化图表与格式化产物</strong></div><div class="agent-visual-outputs">${visualOutputs}</div></div>` : `<div class="empty-state agent-empty-state agent-artifacts-empty"><p>该任务尚未生成独立结构化图表或报表产物。</p><div class="agent-artifacts-empty-actions"><button type="button" class="btn-secondary btn-xs" data-agent-export-md>导出 Markdown 运行摘要</button></div></div>`);
         }
         // Pane 5: Approvals & Errors
         const paneApprovals = document.getElementById('agent-pane-approvals');
         if (paneApprovals) {
             let approvalsHtml = '';
             if (run.status === 'approval_required') {
-                approvalsHtml += `<div class="agent-approval-card" style="padding: 14px; border: 1px solid var(--primary); border-radius: 8px; background: rgba(16, 185, 129, 0.05); margin-bottom: 12px;"><h4 style="margin: 0 0 6px; color: var(--text-main); font-size: 0.88rem;">待人工授权执行</h4><p style="margin: 0 0 10px; font-size: 0.78rem; color: var(--text-muted);">智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p><div style="display: flex; gap: 8px;"><button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button><button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button></div></div>`;
+                approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>待人工授权执行</h4><p>智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p><div class="agent-run-approval-actions"><button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button><button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button></div></div>`;
             }
             if (run.error_message) {
-                approvalsHtml += `<div class="error-detail" style="margin-bottom: 12px;"><strong>执行异常原因：</strong><div style="margin-top: 4px;">${agentEscape(run.error_message)}</div><div style="margin-top: 10px; display: flex; gap: 8px;"><button type="button" class="btn-secondary btn-xs" data-agent-rerun>重试整项任务</button>${checkpoints?.total ? `<button type="button" class="btn-secondary btn-xs" data-agent-resume>从检查点恢复</button>` : ''}</div></div>`;
+                approvalsHtml += `<div class="error-detail agent-run-error-card"><strong>执行异常原因：</strong><div class="agent-run-error-message">${agentEscape(run.error_message)}</div><div class="agent-run-error-actions"><button type="button" class="btn-secondary btn-xs" data-agent-rerun>重试整项任务</button>${checkpoints?.total ? `<button type="button" class="btn-secondary btn-xs" data-agent-resume>从检查点恢复</button>` : ''}</div></div>`;
             }
             if (!run.error_message && run.status !== 'approval_required') {
                 approvalsHtml += `<div class="empty-state agent-empty-state"><p>当前任务无待处理的人工审批或执行异常。</p></div>`;

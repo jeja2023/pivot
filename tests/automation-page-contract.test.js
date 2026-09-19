@@ -358,6 +358,21 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
     assert.match(html, /id="agent-breadcrumb-parent-label"/);
 });
 
+test('运行详情的审批、异常与产物操作区使用 Agent 工作区样式类，不内联静态样式', () => {
+    const detailJs = read('client/chat/agent-run-detail.js');
+    const detailCss = read('client/chat/styles/workspaces/agent/agent-run-detail.css');
+
+    assert.match(detailJs, /agent-artifacts-empty-actions/);
+    assert.match(detailJs, /agent-run-approval-card/);
+    assert.match(detailJs, /agent-run-error-card/);
+    assert.doesNotMatch(detailJs, /style="margin-top: 8px;"/);
+    assert.doesNotMatch(detailJs, /agent-approval-card" style=/);
+    assert.doesNotMatch(detailJs, /error-detail" style="margin-bottom: 12px;/);
+    assert.match(detailCss, /\.agent-artifacts-empty-actions\s*\{/);
+    assert.match(detailCss, /\.agent-run-approval-card\s*\{/);
+    assert.match(detailCss, /\.agent-run-error-card\s*\{/);
+});
+
 test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {
     const ragJs = read('client/chat/rag.js');
     const graphControllerJs = read('client/chat/rag-graph-controller.js');

@@ -1218,3 +1218,64 @@
     color: #dc2626;
     font-weight: 650;
 }
+
+/* 运行详情中的产物、审批与异常操作区：统一交由 Agent 工作区样式维护。 */
+.agent-artifacts-empty-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.agent-run-approval-card {
+    margin-bottom: 12px;
+    padding: 14px;
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--primary) 5%, var(--surface, #ffffff));
+}
+
+.agent-run-approval-card h4 {
+    margin: 0 0 6px;
+    color: var(--text-main);
+    font-size: 0.88rem;
+}
+
+.agent-run-approval-card p {
+    margin: 0 0 10px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.agent-run-approval-actions,
+.agent-run-error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.agent-run-error-card {
+    display: block;
+    margin-bottom: 12px;
+}
+
+.agent-run-error-message {
+    margin-top: 4px;
+}
+
+.agent-run-error-actions {
+    margin-top: 10px;
+}
+
+@media (max-width: 480px) {
+    .agent-run-approval-actions,
+    .agent-run-error-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .agent-run-approval-actions .btn-primary,
+    .agent-run-approval-actions .btn-danger-outline,
+    .agent-run-error-actions .btn-secondary {
+        width: 100%;
+    }
+}
