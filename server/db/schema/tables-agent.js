@@ -177,6 +177,7 @@ function agentTablesSql() {
             eval_run_id TEXT NOT NULL,
             case_id INTEGER NOT NULL,
             agent_run_id TEXT,
+            case_snapshot TEXT,
             status TEXT DEFAULT 'queued',
             score REAL DEFAULT 0,
             passed INTEGER DEFAULT 0,
@@ -395,7 +396,9 @@ function agentTablesSql() {
             condition TEXT,
             status TEXT DEFAULT 'pending',
             output TEXT,
+            reused_from_run_id TEXT,
             error_message TEXT,
+            error_info TEXT DEFAULT '{}',
             contract_status TEXT DEFAULT 'unchecked',
             contract_issues TEXT,
             attempt_count INTEGER DEFAULT 0,
@@ -405,6 +408,63 @@ function agentTablesSql() {
             completed_at DATETIME,
             UNIQUE(run_id, node_key),
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflow_invocations (
+            invocation_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            parent_invocation_id TEXT,
+            caller_node_key TEXT NOT NULL DEFAULT '',
+            workflow_id INTEGER NOT NULL,
+            workflow_version_id INTEGER,
+            workflow_version INTEGER,
+            invocation_path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            input_json TEXT NOT NULL DEFAULT '{}',
+            output_json TEXT,
+            error_message TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            UNIQUE(run_id, invocation_path),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_run_concurrency_leases (
+            run_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            lease_owner TEXT NOT NULL,
+            lease_expires_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_api_operations (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            operation_id TEXT NOT NULL DEFAULT '',
+            method TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            path_template TEXT NOT NULL,
+            parameter_schema TEXT NOT NULL DEFAULT '{}',
+            body_schema TEXT NOT NULL DEFAULT '{}',
+            response_schema TEXT NOT NULL DEFAULT '{}',
+            credential_slug TEXT DEFAULT '',
+            credential_header TEXT DEFAULT 'Authorization',
+            credential_prefix TEXT DEFAULT 'Bearer ',
+            side_effect INTEGER NOT NULL DEFAULT 0,
+            idempotent INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active',
+            source_digest TEXT NOT NULL DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            deleted_at DATETIME,
+            UNIQUE(user_id, name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS agent_approval_requests (

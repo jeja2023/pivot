@@ -1,4 +1,4 @@
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const {
     parseJsonObject,
@@ -257,7 +257,7 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
     if (!isOwner) {
         if (requested === 'current' || !requested) {
             requested = 'published';
-        } else if (requested !== 'published') {
+        } else if (requested !== 'published' && options.allowPinnedVersion !== true) {
             const err = new Error('共享工作流只能运行已发布版本。');
             err.status = 403;
             throw err;
@@ -331,18 +331,20 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
 async function createAgentWorkflow(user, body = {}) {
     const data = await normalizeWorkflowPayload(body, {}, user);
     const now = getBeijingTimestamp();
-    const workflowInfo = await queryOne(`
-        INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-    `, [user.id, data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, now]);
-    const workflowId = workflowInfo.id;
-    const versionInfo = await queryOne(`
-        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        RETURNING id
-    `, [workflowId, 1, JSON.stringify(data.dagSpec), data.note, user.id, now]);
-    await execute('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?', [versionInfo.id, workflowId]);
+    const workflowId = await transaction(async trx => {
+        const workflowInfo = await trx.queryOne(`
+            INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [user.id, data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, now, now]);
+        const versionInfo = await trx.queryOne(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [workflowInfo.id, 1, JSON.stringify(data.dagSpec), data.note, user.id, now]);
+        await trx.execute('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?', [versionInfo.id, workflowInfo.id]);
+        return workflowInfo.id;
+    });
     return await getAgentWorkflowForUser(workflowId, user);
 }
 
@@ -350,36 +352,45 @@ async function updateAgentWorkflow(workflowId, user, body = {}) {
     const current = await findOwnedWorkflowRow(workflowId, user);
     if (!current) return null;
     const data = await normalizeWorkflowPayload(body, current, user);
-    const currentVersion = await workflowRepository.getWorkflowVersionById(current.id, current.current_version_id);
     const expectedVersion = Number.parseInt(body.expectedVersion ?? body.expected_version, 10);
-    if (Number.isInteger(expectedVersion) && expectedVersion > 0 && Number(currentVersion?.version || 0) !== expectedVersion) {
-        const error = new Error('工作流已被其他窗口更新，请重新加载后再保存。');
-        error.status = 409;
-        error.code = 'WORKFLOW_VERSION_CONFLICT';
-        throw error;
-    }
-    const shareUnchanged = normalizeShareScope(current.scope) === data.scope
-        && String(current.allowed_units || '') === data.allowedUnits
-        && String(current.allowed_user_ids || '') === data.allowedUserIds;
-    const unchanged = currentVersion
-        && shareUnchanged
-        && String(current.name || '') === data.name
-        && String(current.description || '') === data.description
-        && JSON.stringify(normalizeDagSpec(parseJsonObject(currentVersion.dag_spec) || {})) === JSON.stringify(data.dagSpec);
-    if (unchanged) return await getAgentWorkflowForUser(current.id, user);
     const now = getBeijingTimestamp();
-    const nextRow = await queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?', [current.id]);
-    const nextVersion = Number(nextRow?.next || 1);
-    const versionInfo = await queryOne(`
-        INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        RETURNING id
-    `, [current.id, nextVersion, JSON.stringify(data.dagSpec), data.note, user.id, now]);
-    await execute(`
-        UPDATE agent_workflows
-        SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, current_version_id = ?, updated_at = ?
-        WHERE id = ?
-    `, [data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.id, now, current.id]);
+    const saved = await transaction(async trx => {
+        const locked = await trx.queryOne(`
+            SELECT w.*, v.version AS current_version, v.dag_spec AS current_dag_spec
+            FROM agent_workflows w
+            LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
+            WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
+            FOR UPDATE
+        `, [current.id, user.id]);
+        if (!locked) return null;
+        if (Number.isInteger(expectedVersion) && expectedVersion > 0 && Number(locked.current_version || 0) !== expectedVersion) {
+            const error = new Error('工作流已被其他窗口更新，请重新加载后再保存。');
+            error.status = 409;
+            error.code = 'WORKFLOW_VERSION_CONFLICT';
+            throw error;
+        }
+        const shareUnchanged = normalizeShareScope(locked.scope) === data.scope
+            && String(locked.allowed_units || '') === data.allowedUnits
+            && String(locked.allowed_user_ids || '') === data.allowedUserIds;
+        const unchanged = shareUnchanged
+            && String(locked.name || '') === data.name
+            && String(locked.description || '') === data.description
+            && stableWorkflowJson(normalizeDagSpec(parseJsonObject(locked.current_dag_spec) || {})) === stableWorkflowJson(data.dagSpec);
+        if (unchanged) return { workflowId: locked.id, changed: false };
+        const nextRow = await trx.queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS next FROM agent_workflow_versions WHERE workflow_id = ?', [locked.id]);
+        const versionInfo = await trx.queryOne(`
+            INSERT INTO agent_workflow_versions (workflow_id, version, dag_spec, note, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [locked.id, Number(nextRow?.next || 1), JSON.stringify(data.dagSpec), data.note, user.id, now]);
+        await trx.execute(`
+            UPDATE agent_workflows
+            SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, current_version_id = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+        `, [data.name, data.description, data.scope, data.allowedUnits, data.allowedUserIds, versionInfo.id, now, locked.id, user.id]);
+        return { workflowId: locked.id, changed: true };
+    });
+    if (!saved) return null;
     return await getAgentWorkflowForUser(current.id, user);
 }
 
@@ -490,6 +501,7 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
         err.code = 'WORKFLOW_EVALUATION_GATE_FAILED';
         throw err;
     }
+    if (options.dryRun === true) return resolved;
     const now = getBeijingTimestamp();
     await execute(`
         UPDATE agent_workflows
@@ -540,13 +552,103 @@ async function restoreAgentWorkflowVersion(workflowId, user, version) {
     return await getAgentWorkflowForUser(workflow.id, user);
 }
 
-function normalizeWorkflowNodesForDiff(spec = {}) {
+function normalizeWorkflowGraphForDiff(spec = {}) {
     const dag = normalizeDagSpec(spec || {});
-    return new Map(dag.nodes.map(node => [node.id, node]));
+    return {
+        dag,
+        nodes: new Map(dag.nodes.map(node => [node.id, node]))
+    };
+}
+
+function stableWorkflowJson(value) {
+    if (value === null || value === undefined) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableWorkflowJson).join(',')}]`;
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableWorkflowJson(value[key])}`).join(',')}}`;
 }
 
 function sameJsonValue(left, right) {
-    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+    return stableWorkflowJson(left ?? null) === stableWorkflowJson(right ?? null);
+}
+
+function comparableWorkflowNode(node = {}) {
+    return {
+        title: node.title,
+        tool: node.tool,
+        input: node.input,
+        inputSchema: node.inputSchema,
+        outputSchema: node.outputSchema,
+        dependsOn: node.dependsOn,
+        condition: node.condition,
+        when: node.when || null,
+        retryLimit: node.retryLimit,
+        timeoutMs: node.timeoutMs,
+        onError: node.onError,
+        fallbackOutput: node.fallbackOutput ?? null,
+        joinMode: node.joinMode || 'all',
+        cache: node.cache !== false
+    };
+}
+
+function buildWorkflowVersionDiff(fromSpec = {}, toSpec = {}) {
+    const fromGraph = normalizeWorkflowGraphForDiff(fromSpec);
+    const toGraph = normalizeWorkflowGraphForDiff(toSpec);
+    const fromNodes = fromGraph.nodes;
+    const toNodes = toGraph.nodes;
+    const added = [];
+    const removed = [];
+    const changed = [];
+    const workflowChanges = [];
+    toNodes.forEach((node, id) => {
+        const before = fromNodes.get(id);
+        if (!before) {
+            added.push({ id, title: node.title, tool: node.tool });
+            return;
+        }
+        const changes = [];
+        if (before.title !== node.title) changes.push('标题');
+        if (before.tool !== node.tool) changes.push('工具');
+        if (!sameJsonValue(before.input, node.input)) changes.push('输入');
+        if (!sameJsonValue(before.inputSchema, node.inputSchema)) changes.push('输入契约');
+        if (!sameJsonValue(before.outputSchema, node.outputSchema)) changes.push('输出契约');
+        if (!sameJsonValue(before.dependsOn, node.dependsOn)) changes.push('依赖');
+        if (before.condition !== node.condition) changes.push('条件');
+        if (!sameJsonValue(before.when || null, node.when || null)) changes.push('条件表达式');
+        if (before.retryLimit !== node.retryLimit) changes.push('重试');
+        if (before.timeoutMs !== node.timeoutMs) changes.push('超时');
+        if (before.onError !== node.onError) changes.push('失败策略');
+        if (!sameJsonValue(before.fallbackOutput ?? null, node.fallbackOutput ?? null)) changes.push('兜底输出');
+        if ((before.joinMode || 'all') !== (node.joinMode || 'all')) changes.push('汇聚方式');
+        if ((before.cache !== false) !== (node.cache !== false)) changes.push('缓存');
+        if (changes.length) {
+            changed.push({
+                id,
+                before: comparableWorkflowNode(before),
+                after: comparableWorkflowNode(node),
+                changes
+            });
+        }
+    });
+    fromNodes.forEach((node, id) => {
+        if (!toNodes.has(id)) removed.push({ id, title: node.title, tool: node.tool });
+    });
+    if (!sameJsonValue(fromGraph.dag.edges || [], toGraph.dag.edges || [])) {
+        workflowChanges.push({ label: '路由边', before: fromGraph.dag.edges || [], after: toGraph.dag.edges || [] });
+    }
+    if ((fromGraph.dag.cacheEnabled !== false) !== (toGraph.dag.cacheEnabled !== false)) {
+        workflowChanges.push({ label: '工作流缓存', before: fromGraph.dag.cacheEnabled !== false, after: toGraph.dag.cacheEnabled !== false });
+    }
+    return {
+        summary: {
+            added: added.length,
+            removed: removed.length,
+            changed: changed.length + workflowChanges.length
+        },
+        added,
+        removed,
+        changed,
+        workflowChanges
+    };
 }
 
 async function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersion = 'current') {
@@ -563,47 +665,12 @@ async function diffAgentWorkflowVersions(workflowId, user, fromVersion, toVersio
     const fromRow = (rows || []).find(row => Number(row.version) === from);
     const toRow = (rows || []).find(row => Number(row.version) === to);
     if (!fromRow || !toRow) return null;
-    const fromNodes = normalizeWorkflowNodesForDiff(parseJsonObject(fromRow.dag_spec) || {});
-    const toNodes = normalizeWorkflowNodesForDiff(parseJsonObject(toRow.dag_spec) || {});
-    const added = [];
-    const removed = [];
-    const changed = [];
-    toNodes.forEach((node, id) => {
-        const before = fromNodes.get(id);
-        if (!before) {
-            added.push({ id, title: node.title, tool: node.tool });
-            return;
-        }
-        const changes = [];
-        if (before.title !== node.title) changes.push('标题');
-        if (before.tool !== node.tool) changes.push('工具');
-        if (!sameJsonValue(before.input, node.input)) changes.push('输入');
-        if (!sameJsonValue(before.dependsOn, node.dependsOn)) changes.push('依赖');
-        if (before.condition !== node.condition) changes.push('条件');
-        if (changes.length) {
-            changed.push({
-                id,
-                before: { title: before.title, tool: before.tool, dependsOn: before.dependsOn, condition: before.condition, input: before.input },
-                after: { title: node.title, tool: node.tool, dependsOn: node.dependsOn, condition: node.condition, input: node.input },
-                changes
-            });
-        }
-    });
-    fromNodes.forEach((node, id) => {
-        if (!toNodes.has(id)) removed.push({ id, title: node.title, tool: node.tool });
-    });
+    const content = buildWorkflowVersionDiff(parseJsonObject(fromRow.dag_spec) || {}, parseJsonObject(toRow.dag_spec) || {});
     return {
         workflow: { id: workflow.id, name: workflow.name },
         from: { version: fromRow.version, note: fromRow.note || '', created_at: fromRow.created_at },
         to: { version: toRow.version, note: toRow.note || '', created_at: toRow.created_at },
-        summary: {
-            added: added.length,
-            removed: removed.length,
-            changed: changed.length
-        },
-        added,
-        removed,
-        changed
+        ...content
     };
 }
 
@@ -635,6 +702,7 @@ async function restoreAgentWorkflow(workflowId, user) {
 module.exports = {
     assertWorkflowAccess,
     assertWorkflowLlmNodesConfigured,
+    buildWorkflowVersionDiff,
     createAgentWorkflow,
     deleteAgentWorkflow,
     diffAgentWorkflowVersions,

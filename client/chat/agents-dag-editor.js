@@ -364,10 +364,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         viewportHint.className = 'pivot-dag-viewport-hint';
         viewportHint.textContent = '拖拽空白处平移 · 滚轮缩放 · 空格 + 拖拽抓手移动';
         canvas.appendChild(viewportHint);
-        const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : [];
-        const dagCoreApi = window.Pivot?.moduleApi?.('agent.dagCore') || {};
-        const getUpstreamNodes = (...args) => dagCoreApi.getUpstreamNodes?.(...args) || [];
-        const getAvailableVariableOptions = (...args) => dagCoreApi.getAvailableVariableOptions?.(...args) || [];
+        const currentTools = () => typeof getTools === 'function' ? (getTools() || []) : []; const dagCoreApi = window.Pivot?.moduleApi?.('agent.dagCore') || {};
+        const getUpstreamNodes = (...args) => dagCoreApi.getUpstreamNodes?.(...args) || []; const getAvailableVariableOptions = (...args) => dagCoreApi.getAvailableVariableOptions?.(...args) || [];
         const collectAgentDagInputs = () => window.Pivot?.legacy?.collectAgentDagInputs?.() || {};
         const showVariablePickerPopover = (...args) => (
             window.Pivot?.moduleApi?.('agent.dagVariablePicker')?.showVariablePickerPopover?.(...args)
@@ -500,6 +498,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             wouldCreateCycle,
             getUpstreamNodes,
             getNodeTestOutputSnapshots: () => dagCoreApi.getNodeTestOutputSnapshots?.() || new Map(),
+            setDagNodeTestOverride: (...args) => dagCoreApi.setDagNodeTestOverride?.(...args),
+            resetDagNodeTestOverride: (...args) => dagCoreApi.resetDagNodeTestOverride?.(...args),
             getRunStates: () => globalThis.Pivot?.legacy?.dagNodeRunStates || new Map(),
             getReadinessIssues: () => validateWorkflow().readinessIssues || [],
             getDagInputs: () => typeof collectAgentDagInputs === 'function' ? collectAgentDagInputs() : {},

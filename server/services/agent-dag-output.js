@@ -1,5 +1,7 @@
 const { clampText } = require('./agent-tool-runtime');
 const { parseJsonObject } = require('./agent-validators');
+const { assertTenantContext } = require('./agent-tenant-context');
+const { putBuffer, readBuffer } = require('./agent-artifact-cas');
 
 const DAG_PERSISTED_OUTPUT_MAX_CHARS = Math.max(
     120000,
@@ -29,7 +31,7 @@ function preparePersistedDagOutput(value) {
             text: `${text.slice(0, DAG_PERSISTED_OUTPUT_MAX_CHARS)}\n...[truncated]`,
             warning: '节点完整输出超过持久化上限，恢复运行时只能使用截断预览。'
         };
-        return { value: truncated, serialized: JSON.stringify(truncated) };
+        return { value: truncated, serialized: JSON.stringify(truncated), fullSerialized: serialized };
     }
     const keptRows = [];
     let used = 0;
@@ -56,7 +58,89 @@ function preparePersistedDagOutput(value) {
         text: '节点输出过大，已按完整记录保留前 ' + keptRows.length + '/' + rows.length + ' 条。',
         warning: '恢复运行时只能使用已持久化的完整记录。'
     };
-    return { value: truncated, serialized: JSON.stringify(truncated) };
+    return { value: truncated, serialized: JSON.stringify(truncated), fullSerialized: serialized };
+}
+
+function isPersistedDagOutputPartial(value) {
+    return Boolean(value && typeof value === 'object' && (
+        value.__partial === true || value?.structuredContent?.__partial === true
+    ));
+}
+
+function attachDagOutputReference(preview, object) {
+    const reference = {
+        outputRef: object.ref,
+        outputDigest: object.contentDigest,
+        outputBytes: object.byteSize,
+        outputMimeType: object.mimeType,
+        outputComplete: false
+    };
+    if (preview && typeof preview === 'object' && !Array.isArray(preview)) return { ...preview, ...reference };
+    return {
+        __partial: true,
+        text: typeof preview === 'string' ? preview : String(preview || ''),
+        warning: '节点完整输出已保存为受控产物引用；当前仅展示预览。',
+        ...reference
+    };
+}
+
+async function persistDagOutput(value, { user = {}, retentionDays = 30 } = {}) {
+    const prepared = preparePersistedDagOutput(value);
+    if (!isPersistedDagOutputPartial(prepared.value)) {
+        return { ...prepared, complete: true, outputRef: null };
+    }
+    if (!prepared.serialized || !user?.id) return { ...prepared, complete: false, outputRef: null };
+    try {
+        const tenant = await assertTenantContext(user);
+        const object = await putBuffer({
+            buffer: Buffer.from(prepared.fullSerialized || prepared.serialized, 'utf8'),
+            mimeType: 'application/json; charset=utf-8',
+            tenantId: tenant.tenantId,
+            ownerUserId: user.id,
+            kind: 'dag_output',
+            retentionDays
+        });
+        const valueWithReference = attachDagOutputReference(prepared.value, object);
+        return {
+            value: valueWithReference,
+            serialized: JSON.stringify(valueWithReference),
+            complete: false,
+            outputRef: object.ref,
+            outputDigest: object.contentDigest,
+            outputBytes: object.byteSize
+        };
+    } catch (error) {
+        // 原有截断预览仍是可审计降级结果；存储不可用不能让一个已完成节点被写成成功且完整。
+        const valueWithWarning = attachDagOutputReference(prepared.value, {
+            ref: '', contentDigest: '', byteSize: 0, mimeType: ''
+        });
+        valueWithWarning.outputRef = null;
+        valueWithWarning.outputStorageError = String(error?.message || '完整输出持久化失败').slice(0, 300);
+        return {
+            value: valueWithWarning,
+            serialized: JSON.stringify(valueWithWarning),
+            complete: false,
+            outputRef: null,
+            outputStorageError: valueWithWarning.outputStorageError
+        };
+    }
+}
+
+async function resolvePersistedDagOutput(value, { user = {} } = {}) {
+    if (!isPersistedDagOutputPartial(value)) return { value, complete: true, source: 'inline' };
+    const ref = String(value?.outputRef || '').trim();
+    if (!ref || !user?.id) return { value, complete: false, source: 'preview' };
+    try {
+        const tenant = await assertTenantContext(user);
+        const result = await readBuffer({ ref, tenantId: tenant.tenantId, userId: user.id });
+        const text = result.buffer.toString('utf8');
+        let parsed;
+        try { parsed = JSON.parse(text); } catch (_) { parsed = undefined; }
+        if (parsed === undefined || isPersistedDagOutputPartial(parsed)) return { value, complete: false, source: 'preview' };
+        return { value: parsed, complete: true, source: 'artifact', object: result.object };
+    } catch (_) {
+        return { value, complete: false, source: 'preview' };
+    }
 }
 
 function persistedDagOutput(value) {
@@ -147,7 +231,9 @@ function extractReadableDagOutput(output) {
 }
 
 module.exports = {
-    preparePersistedDagOutput,
+    persistDagOutput,
+    resolvePersistedDagOutput,
+    isPersistedDagOutputPartial,
     persistedDagOutput,
     compactPreparedDagOutput,
     extractReadableDagOutput

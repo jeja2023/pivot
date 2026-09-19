@@ -4,6 +4,7 @@ const { estimateTokens } = require('../llm');
 const { getModelContextBudget } = require('./context-budget');
 const { defaultToolOrchestrator } = require('./agent-tool-orchestrator');
 const { buildToolExecutionPlan } = require('./agent-tool-execution-plan');
+const { executeWorkflowApiOperation } = require('./workflow-api-operations');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -135,6 +136,11 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             }
             if (safeName.startsWith('mcp.')) {
                 return await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null });
+            }
+            if (safeName.startsWith('api.operation.')) {
+                const { executeAgentHttp } = require('./agent-http-tool');
+                const operationId = String(tool.apiOperationId || safeName.slice('api.operation.'.length));
+                return await executeWorkflowApiOperation(operationId, effectiveInput, user, context, executeAgentHttp);
             }
             if (tool.databaseTool && safeName.startsWith('db.')) {
                 const rawConnectionId = effectiveInput?.connectionId ?? effectiveInput?.connection_id ?? effectiveInput?.databaseConnectionId ?? effectiveInput?.database_connection_id ?? effectiveInput?.mcpServerId ?? effectiveInput?.mcp_server_id;

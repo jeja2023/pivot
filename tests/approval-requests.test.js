@@ -5,6 +5,7 @@ const test = require('node:test');
 const {
     decideWorkflowApprovalRequest,
     handleImApprovalCallback,
+    isSubworkflowScopedKey,
     runApprovalTimeouts,
     waitForWorkflowApproval
 } = require('../server/services/agent-approval-requests');
@@ -14,6 +15,12 @@ const { encryptSecret } = require('../server/security');
 const { getBeijingTimestamp } = require('../server/time');
 
 getAgentQueue().updateMaxConcurrent(0);
+
+test('子工作流审批键以路径前缀隔离，不能回写主 DAG 节点', () => {
+    assert.equal(isSubworkflowScopedKey('subworkflow:iterate:item:0:workflow.approval:approve'), true);
+    assert.equal(isSubworkflowScopedKey('root/subworkflow:child:workflow.approval:approve'), true);
+    assert.equal(isSubworkflowScopedKey('workflow.approval:approve'), false);
+});
 
 function cleanup(runId, requestId, credentialSlug = '') {
     if (requestId) db.prepare('DELETE FROM agent_approval_requests WHERE id = ?').run(requestId);

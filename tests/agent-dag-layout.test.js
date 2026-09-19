@@ -396,15 +396,15 @@ test('workflow node presets are organized into approved 6 business categories', 
     ]);
 
     const totalPresets = groups.reduce((sum, g) => sum + g.items.length, 0);
-    assert.equal(totalPresets, 49);
+    assert.equal(totalPresets, 52);
 
     // 验证各分类预设节点数量
     const counts = Object.fromEntries(groups.map(g => [g.group, g.items.length]));
     assert.equal(counts['起始与交付'], 3);
-    assert.equal(counts['AI 与智能体'], 4);
+    assert.equal(counts['AI 与智能体'], 6);
     assert.equal(counts['知识与检索'], 6);
     assert.equal(counts['数据与文档'], 12);
-    assert.equal(counts['流程与控制'], 14);
+    assert.equal(counts['流程与控制'], 15);
     assert.equal(counts['呈现与多媒体'], 10);
 
     const startGroup = groups.find(group => group.group === '起始与交付');

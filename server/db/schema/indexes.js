@@ -54,6 +54,9 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_agent_artifact_versions_artifact ON agent_artifact_versions(artifact_id, version);
         CREATE INDEX IF NOT EXISTS idx_official_writing_documents_user_updated ON official_writing_documents(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_invocations_run ON agent_workflow_invocations(run_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_run_concurrency_leases_user_expiry ON agent_run_concurrency_leases(user_id, lease_expires_at);
+        CREATE INDEX IF NOT EXISTS idx_workflow_api_operations_user ON workflow_api_operations(user_id, status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_run ON agent_approval_requests(run_id, request_type, status);
         CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_user ON agent_approval_requests(user_id, status, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_expires ON agent_approval_requests(status, expires_at);

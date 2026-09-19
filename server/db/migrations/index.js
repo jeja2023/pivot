@@ -30,6 +30,9 @@ const agentChannelDeliveryClaimMigrations = require('./agent-channel-delivery-cl
 const modelUsageEventsFkeySoftenMigrations = require('./model-usage-events-fkey-soften');
 const apiCallLogsFkeySoftenMigrations = require('./api-call-logs-fkey-soften');
 const agentRunMetadataJsonbCompatibilityMigrations = require('./agent-run-metadata-jsonb-compatibility');
+const agentDagReuseProvenanceMigrations = require('./agent-dag-reuse-provenance'); const agentDagOutputRefcountMigrations = require('./agent-dag-output-refcounts');
+const agentEvaluationCaseSnapshotMigrations = require('./agent-evaluation-case-snapshots'); const agentWorkflowInvocationMigrations = require('./agent-workflow-invocations');
+const workflowApiOperationMigrations = require('./workflow-api-operations'); const agentRunConcurrencyLeaseMigrations = require('./agent-run-concurrency-leases'); const agentDagErrorInfoMigrations = require('./agent-dag-error-info');
 const chatAdaptiveRoutingMigrations = require('./chat-adaptive-routing');
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -986,6 +989,8 @@ const migrations = [
     ...modelUsageEventsFkeySoftenMigrations,
     ...apiCallLogsFkeySoftenMigrations,
     ...agentRunMetadataJsonbCompatibilityMigrations,
+    ...agentDagReuseProvenanceMigrations, ...agentDagOutputRefcountMigrations, ...agentEvaluationCaseSnapshotMigrations,
+    ...agentWorkflowInvocationMigrations, ...workflowApiOperationMigrations, ...agentRunConcurrencyLeaseMigrations, ...agentDagErrorInfoMigrations,
     ...chatAdaptiveRoutingMigrations
 ];
 

@@ -64,6 +64,7 @@ const TOOL_PRIMARY_FIELD_NAMES = {
         'workflow.approval': ['title', 'summary', 'instructions', 'approvers', 'approverUnits', 'mode', 'timeoutHours', 'timeoutAction'],
         'workflow.foreach': ['items', 'code', 'vars', 'stopOnError'],
         'workflow.subworkflow': ['workflowId', 'goal', 'inputs'],
+        'workflow.iteration': ['items', 'workflowId', 'goal', 'inputs', 'concurrency', 'onItemError', 'maxItems'],
         'workflow.delay': ['durationMs', 'reason'],
         'workflow.embed_page': ['url', 'title', 'height'],
         'workflow.embed_image': ['url', 'alt', 'maxWidth', 'maxHeight'],

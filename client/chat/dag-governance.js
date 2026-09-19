@@ -283,17 +283,124 @@
     /**
      * 导出标准 JSON 规范
      */
+    const SENSITIVE_EXPORT_KEY = /(?:^|[_-])(password|passwd|token|api[_-]?key|authorization|cookie|secret|private[_-]?key)(?:$|[_-])/i;
+    const CREDENTIAL_REFERENCE_KEY = /^(?:credentialSecret|credential_secret)$/;
+    const REDACTED_VALUE = '[REDACTED: configure credential in target environment]';
+
+    function sanitizeExportValue(value, key = '', redactions = []) {
+        if (SENSITIVE_EXPORT_KEY.test(String(key)) && !CREDENTIAL_REFERENCE_KEY.test(String(key))) {
+            if (value !== undefined && value !== null && String(value).trim()) redactions.push(String(key));
+            return REDACTED_VALUE;
+        }
+        if (typeof value === 'string') {
+            try {
+                const url = new URL(value);
+                const sensitiveParams = [];
+                [...url.searchParams.keys()].forEach(param => {
+                    if (SENSITIVE_EXPORT_KEY.test(param)) {
+                        url.searchParams.set(param, REDACTED_VALUE);
+                        sensitiveParams.push(param);
+                    }
+                });
+                if (sensitiveParams.length) redactions.push(...sensitiveParams.map(param => `${key || 'url'}.${param}`));
+                return url.toString();
+            } catch (_) {
+                return value;
+            }
+        }
+        if (Array.isArray(value)) return value.map(item => sanitizeExportValue(item, '', redactions));
+        if (value && typeof value === 'object') {
+            return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, sanitizeExportValue(childValue, childKey, redactions)]));
+        }
+        return value;
+    }
+
+    function buildWorkflowPackageManifest(nodes = [], redactions = []) {
+        const add = (map, source, node) => {
+            const key = String(source || '').trim();
+            if (!key) return;
+            if (!map.has(key)) map.set(key, { source: key, nodes: [] });
+            map.get(key).nodes.push({ id: String(node.id || ''), title: String(node.title || node.id || '') });
+        };
+        const models = new Map(); const tools = new Map(); const credentials = new Map();
+        const networkTargets = new Map(); const subworkflows = new Map();
+        nodes.forEach(node => {
+            const tool = String(node.tool || '').trim();
+            const input = node.input && typeof node.input === 'object' ? node.input : {};
+            add(tools, tool, node);
+            if (['agent.llm', 'agent.content_review', 'agent.delegate'].includes(tool)) add(models, input.model || input.modelId || input.model_id, node);
+            if (tool === 'agent.http') {
+                add(credentials, input.credentialSecret || input.credential_secret, node);
+                try {
+                    const url = new URL(String(input.url || ''));
+                    add(networkTargets, url.origin, node);
+                } catch (_) {}
+            }
+            if (tool === 'workflow.subworkflow' || tool === 'workflow.iteration') {
+                const id = String(input.workflowId || input.workflow_id || '').trim();
+                if (id) {
+                    const version = String(input.version || input.workflowVersion || 'published').trim() || 'published';
+                    add(subworkflows, `${id}@${version}`, node);
+                }
+            }
+        });
+        return {
+            format: 'pivot.workflow-package.v1',
+            models: [...models.values()], tools: [...tools.values()], credentials: [...credentials.values()],
+            networkTargets: [...networkTargets.values()], subworkflows: [...subworkflows.values()],
+            redactedFields: [...new Set(redactions)].sort()
+        };
+    }
+
+    function findUnsafeSensitiveLiterals(value, _key = '', issues = [], path = 'spec') {
+        if (typeof value === 'string') {
+            try {
+                const url = new URL(value);
+                [...url.searchParams.entries()].forEach(([param, paramValue]) => {
+                    if (SENSITIVE_EXPORT_KEY.test(param) && paramValue !== REDACTED_VALUE && String(paramValue).trim()) {
+                        issues.push(`${path}.${param}`);
+                    }
+                });
+            } catch (_) {}
+            return issues;
+        }
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => findUnsafeSensitiveLiterals(item, '', issues, `${path}[${index}]`));
+            return issues;
+        }
+        if (!value || typeof value !== 'object') return issues;
+        Object.entries(value).forEach(([childKey, childValue]) => {
+            const childPath = `${path}.${childKey}`;
+            if (SENSITIVE_EXPORT_KEY.test(childKey) && !CREDENTIAL_REFERENCE_KEY.test(childKey)
+                && childValue !== REDACTED_VALUE && String(childValue ?? '').trim()) {
+                issues.push(childPath);
+                return;
+            }
+            findUnsafeSensitiveLiterals(childValue, childKey, issues, childPath);
+        });
+        return issues;
+    }
+
     function exportDagWorkflowSpec(spec = {}, metadata = {}) {
         const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
+        const redactions = [];
         const cleanNodes = nodes.map(n => ({
             id: String(n.id || ''),
             title: String(n.title || n.id || ''),
             tool: String(n.tool || ''),
-            input: n.input || {},
-            outputSchema: n.outputSchema || null,
+            input: sanitizeExportValue(n.input || {}, 'input', redactions),
+            inputSchema: n.inputSchema || n.input_schema || null,
+            outputSchema: n.outputSchema || n.output_schema || null,
             dependsOn: Array.isArray(n.dependsOn) ? n.dependsOn : [],
             condition: n.condition || 'success',
             when: n.when || '',
+            retryLimit: Number(n.retryLimit ?? n.retry_limit ?? 0),
+            timeoutMs: Number(n.timeoutMs ?? n.timeout_ms ?? 0),
+            onError: n.onError || n.on_error || 'skip_dependents',
+            ...(Object.prototype.hasOwnProperty.call(n, 'fallbackOutput') || Object.prototype.hasOwnProperty.call(n, 'fallback_output')
+                ? { fallbackOutput: n.fallbackOutput ?? n.fallback_output }
+                : {}),
+            joinMode: n.joinMode || n.join_mode || 'all',
             cache: n.cache !== false,
             _x: Math.round(Number(n._x) || 0),
             _y: Math.round(Number(n._y) || 0)
@@ -312,7 +419,8 @@
                 cacheEnabled: spec.cacheEnabled !== false,
                 nodes: cleanNodes,
                 ...(edges.length ? { edges } : {})
-            }
+            },
+            dependencies: buildWorkflowPackageManifest(cleanNodes, redactions)
         };
     }
 
@@ -340,6 +448,11 @@
             return { ok: false, error: 'JSON 中未包含合法的 spec.nodes 数组' };
         }
 
+        const unsafeLiterals = findUnsafeSensitiveLiterals({ nodes });
+        if (unsafeLiterals.length) {
+            return { ok: false, error: `导入包包含未脱敏的敏感字段：${unsafeLiterals[0]}。请改用凭据引用后重新导出。` };
+        }
+
         // 执行静态体检
         const edges = Array.isArray(parsed?.spec?.edges) ? parsed.spec.edges : (Array.isArray(parsed?.edges) ? parsed.edges : []);
         const lint = lintDagGraph({ nodes, edges });
@@ -358,7 +471,13 @@
                 ...(edges.length ? { schemaVersion: 'pivot.dag.v2', edges } : {})
             },
             metadata: parsed.metadata || {},
-            warnings: lint.warnings
+            dependencies: parsed.dependencies && typeof parsed.dependencies === 'object' ? parsed.dependencies : null,
+            warnings: [
+                ...lint.warnings,
+                ...(Array.isArray(parsed?.dependencies?.redactedFields) && parsed.dependencies.redactedFields.length
+                    ? [`导入包已脱敏 ${parsed.dependencies.redactedFields.length} 个敏感字段；请在目标环境配置凭据。`]
+                    : [])
+            ]
         };
     }
 
@@ -371,6 +490,7 @@
             lintDagGraph,
             validateWorkflowRoutes,
             computeDagDiff,
+            buildWorkflowPackageManifest,
             exportDagWorkflowSpec,
             importDagWorkflowSpec
         });
@@ -380,6 +500,7 @@
         module.exports = {
             lintDagGraph,
             computeDagDiff,
+            buildWorkflowPackageManifest,
             exportDagWorkflowSpec,
             importDagWorkflowSpec
         };

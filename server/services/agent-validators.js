@@ -307,9 +307,16 @@ function normalizeDagSpec(value) {
             ...(when ? { when } : {}),
             retryLimit: normalizePositiveInt(node.retryLimit ?? node.retry_limit, 0, 0, 5),
             timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000),
-            onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
+            onError: ['skip_dependents', 'continue', 'fallback', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
                 ? String(node.onError || node.on_error || 'skip_dependents')
                 : 'skip_dependents',
+            ...(Object.prototype.hasOwnProperty.call(node, 'fallbackOutput') || Object.prototype.hasOwnProperty.call(node, 'fallback_output')
+                ? { fallbackOutput: node.fallbackOutput ?? node.fallback_output }
+                : {}),
+            cache: node.cache !== false,
+            joinMode: ['all', 'any_active'].includes(String(node.joinMode || node.join_mode || 'all'))
+                ? String(node.joinMode || node.join_mode || 'all')
+                : 'all',
             _layout: x === null || y === null ? null : { x, y }
         };
     });
@@ -336,7 +343,8 @@ function normalizeDagSpec(value) {
     }
     const result = {
         nodes: cleanNodes,
-        layout
+        layout,
+        cacheEnabled: parsed?.cacheEnabled !== false && parsed?.cache_enabled !== false
     };
     if (hasEdgeModel) {
         result.schemaVersion = 'pivot.dag.v2';

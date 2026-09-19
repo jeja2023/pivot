@@ -18,7 +18,7 @@ const { deleteAgentPersonalData, exportAgentPersonalData } = require('../service
 const {
     approveSkillVersionForSharing, createSkillVersion, listSkillCatalogForUser, listSkillReleasesForUser, listSkillVersionsForUser,
     pauseSkillRelease, publishSkillVersion, publishWorkflowRelease, resumeSkillRelease,
-    rollbackSkillRelease, rollbackWorkflowRelease, validateSkillVersion
+    rollbackSkillRelease, rollbackWorkflowRelease, listWorkflowReleasesForUser, validateSkillVersion
 } = require('../services/agent-releases');
 const {
     createSkillVersionFromMarkdown, diffSkillVersions, exportSkillVersionMarkdown,
@@ -360,7 +360,13 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, release });
     }));
     router.get('/agents/workflows/:id/releases', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = await require('../db/client').query(`SELECT r.*, v.version, v.note FROM agent_workflow_releases r JOIN agent_workflow_versions v ON v.id = r.workflow_version_id WHERE r.workflow_id = ? ORDER BY r.published_at DESC LIMIT ?`, [req.params.id, Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 200))]);
+        const rows = await listWorkflowReleasesForUser(req.params.id, req.user, {
+            limit: req.query.limit,
+            version: req.query.version || 'current',
+            allowTenantAdmin: req.query.tenantAdmin === 'true' && ['admin', 'root'].includes(String(req.user?.role || '').toLowerCase()),
+            tenantId: req.query.tenantId
+        });
+        if (!rows) return res.status(404).json({ error: '工作流不存在或无权访问。' });
         res.json({ success: true, data: rows });
     }));
     router.post('/agents/runs/:id/evolution-proposals', authMiddleware, asyncHandler(async (req, res) => {

@@ -9,6 +9,7 @@ const {
     normalizeToolPolicy
 } = require('./agent-validators');
 const { normalizeToolContract } = require('./agent-contracts');
+const { listWorkflowApiOperations } = require('./workflow-api-operations');
 
 const KNOWN_MCP_TOOL_TITLES = {
     'browser.open': '打开本机浏览器页面',
@@ -49,6 +50,7 @@ async function formatToolList(user, options = {}) {
         ...(tool.side_effect !== undefined ? { side_effect: Boolean(tool.side_effect) } : {}),
         ...(tool.network !== undefined ? { network: Boolean(tool.network) } : {}),
         ...(tool.idempotent !== undefined ? { idempotent: Boolean(tool.idempotent) } : {}),
+        ...(tool.cacheable !== undefined ? { cacheable: Boolean(tool.cacheable) } : {}),
         ...(tool.cancellable !== undefined ? { cancellable: Boolean(tool.cancellable) } : {}),
         ...(tool.concurrency !== undefined ? { concurrency: tool.concurrency } : {}),
         ...(tool.timeout && typeof tool.timeout === 'object' ? { timeout: tool.timeout } : {}),
@@ -94,7 +96,9 @@ async function formatToolList(user, options = {}) {
             };
         })
         .filter(tool => isAllowed(tool.name, 'mcp'));
-    return [...builtIns, ...databaseTools, ...mcpTools].map(tool => {
+    const apiOperations = (await listWorkflowApiOperations(user))
+        .filter(tool => isAllowed(tool.name, 'api_operation'));
+    return [...builtIns, ...databaseTools, ...mcpTools, ...apiOperations].map(tool => {
         const contract = normalizeToolContract(tool);
         return {
             ...tool,
@@ -102,6 +106,7 @@ async function formatToolList(user, options = {}) {
             capabilities: contract.capabilities,
             risk_level: contract.risk_level,
             idempotent: contract.idempotent,
+            cacheable: contract.cacheable,
             side_effect: contract.side_effect,
             concurrency: contract.concurrency,
             cancellable: contract.cancellable,

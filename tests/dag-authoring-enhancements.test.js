@@ -4,7 +4,11 @@ const assert = require('node:assert/strict');
 const {
     ensureDefaults,
     getAvailableVariableOptions,
-    serialize
+    getNodeTestOutputSnapshots,
+    resetDagNodeTestOverride,
+    serialize,
+    setDagNodeTestOutput,
+    setDagNodeTestOverride
 } = require('../client/chat/dag-core');
 const {
     exportDagWorkflowSpec,
@@ -41,6 +45,54 @@ test('工作流变量目录包含声明输入、真实工具字段和聚合字�
     assert.equal(http?.items.some(item => item.expression === '{{nodes.request.output.status}}'), false);
     const merge = options.find(group => group.nodeId === 'merged');
     assert.ok(merge?.items.some(item => item.expression === '{{nodes.merged.output.merged.order}}'));
+});
+
+test('知识检索变量目录只展示实际输出字段', () => {
+    const nodes = [
+        {
+            id: 'search', tool: 'rag.search', title: '知识检索', dependsOn: [],
+            outputSchema: {
+                type: 'object', properties: {
+                    query: { type: 'string' },
+                    matches: { type: 'array', items: { type: 'object', properties: { content: { type: 'string' } } } },
+                    metrics: {}
+                }
+            }
+        },
+        { id: 'target', tool: 'workflow.template', title: '目标', dependsOn: ['search'], input: {} }
+    ];
+    const options = getAvailableVariableOptions(nodes, 'target').find(group => group.nodeId === 'search').items;
+    assert.ok(options.some(item => item.expression === '{{nodes.search.output.matches}}'));
+    assert.ok(options.some(item => item.expression === '{{nodes.search.output.matches.0.content}}'));
+    assert.equal(options.some(item => item.expression === '{{nodes.search.output.documents}}'), false);
+    assert.equal(options.some(item => item.expression === '{{nodes.search.output.text}}'), false);
+});
+
+test('节点测试变量覆盖只保留在当前编辑会话并可恢复', () => {
+    setDagNodeTestOutput('test_source', {
+        output: { status: 'original', rows: [{ id: 1 }] },
+        expiresAt: Date.now() + 60_000
+    });
+    assert.equal(setDagNodeTestOverride('test_source', { status: 'override', rows: [{ id: 2 }] }), true);
+    const overridden = getNodeTestOutputSnapshots().get('test_source');
+    assert.equal(overridden.source, 'override');
+    assert.equal(overridden.overridden, true);
+    assert.equal(overridden.output.rows[0].id, 2);
+    assert.equal(resetDagNodeTestOverride('test_source'), true);
+    const restored = getNodeTestOutputSnapshots().get('test_source');
+    assert.equal(restored.source, 'test');
+    assert.equal(restored.overridden, false);
+    assert.equal(restored.output.rows[0].id, 1);
+
+    setDagNodeTestOutput('mock_source', { output: { status: 'simulated' }, source: 'mock' });
+    assert.equal(getNodeTestOutputSnapshots().get('mock_source').source, 'mock');
+});
+
+test('AI 节点库提供可编辑契约的参数抽取与内容分类预设', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-node-presets.js'), 'utf8');
+    assert.match(source, /title: '参数抽取'/);
+    assert.match(source, /title: '内容分类'/);
+    assert.match(source, /responseFormat: 'json'/);
 });
 
 test('文本模板节点按缺失变量策略输出确定性结果', () => {
@@ -103,25 +155,69 @@ test('路由边会经过编辑期序列化、导入导出和静态治理', () =>
         schemaVersion: 'pivot.dag.v2',
         nodes: [
             { id: 'condition', tool: 'workflow.condition', dependsOn: [] },
-            { id: 'yes', tool: 'workflow.template', dependsOn: ['condition'] }
+            {
+                id: 'yes', tool: 'workflow.template', dependsOn: ['condition'], cache: false,
+                inputSchema: { type: 'object', properties: { template: { type: 'string' } } },
+                outputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+                retryLimit: 2, timeoutMs: 1200, onError: 'continue'
+            }
         ],
-        edges: [{ from: 'condition', to: 'yes', route: 'true' }]
+        edges: [{ from: 'condition', to: 'yes', route: 'true' }],
+        cacheEnabled: false
     });
     const serialized = serialize(draft);
     assert.equal(serialized.schemaVersion, 'pivot.dag.v2');
     assert.deepEqual(serialized.edges, [{ from: 'condition', to: 'yes', route: 'true' }]);
+    assert.equal(serialized.cacheEnabled, false);
+    assert.equal(serialized.nodes[1].cache, false);
+    assert.equal(serialized.nodes[1].retryLimit, 2);
+    assert.equal(serialized.nodes[1].timeoutMs, 1200);
+    assert.equal(serialized.nodes[1].onError, 'continue');
     const exported = exportDagWorkflowSpec(serialized, { name: '路由测试' });
     assert.equal(exported.schemaVersion, 'pivot.dag.v2');
     assert.deepEqual(exported.spec.edges, [{ from: 'condition', to: 'yes', route: 'true' }]);
     const imported = importDagWorkflowSpec(JSON.stringify(exported));
     assert.equal(imported.ok, true);
     assert.deepEqual(imported.spec.edges, [{ from: 'condition', to: 'yes', route: 'true' }]);
+    assert.equal(imported.spec.cacheEnabled, false);
+    assert.deepEqual(imported.spec.nodes[1].inputSchema, serialized.nodes[1].inputSchema);
+    assert.deepEqual(imported.spec.nodes[1].outputSchema, serialized.nodes[1].outputSchema);
+    assert.equal(imported.spec.nodes[1].cache, false);
+    assert.equal(imported.spec.nodes[1].retryLimit, 2);
     const invalid = lintDagGraph({
         nodes: draft.nodes,
         edges: [{ from: 'yes', to: 'condition', route: 'true' }]
     });
     assert.equal(invalid.valid, false);
     assert.ok(invalid.errors.some(item => item.type === 'invalid_route_source'));
+});
+
+test('工作流包导出依赖清单且不会携带 HTTP 凭据字面量，导入会预检未脱敏凭据', () => {
+    const exported = exportDagWorkflowSpec({
+        nodes: [{
+            id: 'crm', title: 'CRM 请求', tool: 'agent.http', dependsOn: [],
+            input: {
+                url: 'https://crm.example.test/api?token=private-token', credentialSecret: 'CRM_API',
+                headers: { Authorization: 'Bearer private-token', 'X-Trace': 'safe' }
+            }
+        }, {
+            id: 'iterate', title: '逐项处理', tool: 'workflow.iteration', dependsOn: [],
+            input: { workflowId: 12, version: '3' }
+        }]
+    });
+    assert.equal(exported.spec.nodes[0].input.credentialSecret, 'CRM_API');
+    assert.equal(exported.spec.nodes[0].input.headers.Authorization, '[REDACTED: configure credential in target environment]');
+    assert.match(exported.spec.nodes[0].input.url, /REDACTED/);
+    assert.equal(exported.dependencies.credentials[0].source, 'CRM_API');
+    assert.equal(exported.dependencies.networkTargets[0].source, 'https://crm.example.test');
+    assert.equal(exported.dependencies.subworkflows[0].source, '12@3');
+    assert.equal(importDagWorkflowSpec(JSON.stringify(exported)).ok, true);
+    const unsafe = JSON.parse(JSON.stringify(exported));
+    unsafe.spec.nodes[0].input.headers.Authorization = 'Bearer leaked';
+    assert.match(importDagWorkflowSpec(JSON.stringify(unsafe)).error, /未脱敏的敏感字段/);
+    unsafe.spec.nodes[0].input.headers.Authorization = '[REDACTED: configure credential in target environment]';
+    unsafe.spec.nodes[0].input.url = 'https://crm.example.test/api?token=leaked';
+    assert.match(importDagWorkflowSpec(JSON.stringify(unsafe)).error, /未脱敏的敏感字段/);
 });
 
 test('文本模板作为受治理的内置工具公开输入与输出契约', () => {

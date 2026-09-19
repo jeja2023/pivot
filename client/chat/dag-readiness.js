@@ -128,6 +128,11 @@ function dagReadinessValidateSemantics(issues, node, nodeName, input) {
         const workflowId = Number(get('workflowId'));
         if (Number.isFinite(workflowId) && workflowId <= 0) dagReadinessIssue(issues, node, 'workflowId', '的目标工作流必须是有效的已发布工作流。', 'invalid_subworkflow_id');
     }
+    if (nodeName === 'workflow.iteration') {
+        const workflowId = Number(get('workflowId'));
+        if (!Number.isFinite(workflowId) || workflowId <= 0) dagReadinessIssue(issues, node, 'workflowId', '逐项调用子工作流需要选择有效的已发布工作流。', 'invalid_iteration_workflow_id');
+        if (dagReadinessValueMissing(get('items'))) dagReadinessIssue(issues, node, 'items', '逐项调用子工作流需要指定数组输入。', 'missing_iteration_items');
+    }
 }
 
 function dagReadinessOutputsAreRouteExclusive(first, second, edges = []) {

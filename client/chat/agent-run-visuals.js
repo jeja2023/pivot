@@ -180,6 +180,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
         pending: '待执行'
     }[status] || agentStatusLabel(status);
     const contractIssues = Array.isArray(node.contract_issues) ? node.contract_issues : [];
+    const errorInfo = node.error_info && typeof node.error_info === 'object' ? node.error_info : {};
     const depText = deps.length ? deps.join(', ') : '无依赖';
     const toolName = agentToolTitle(node.tool_name || '-');
     const delegateName = node.tool_name === 'agent.delegate'
@@ -233,6 +234,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
                 <div class="agent-dag-node-body">
                     ${delegateName ? `<div class="agent-dag-node-agent">${agentEscape(delegateName)}</div>` : ''}
                     ${node.error_message ? `<div class="error-detail">${agentEscape(node.error_message)}</div>` : ''}
+                    ${errorInfo.category ? `<div class="agent-dag-contract-issues"><strong>${errorInfo.fallbackApplied ? '已使用兜底输出' : '失败诊断'} · ${agentEscape(errorInfo.category)}</strong><span>${agentEscape(errorInfo.code || '')}${errorInfo.retryable ? ' · 可在确认副作用后重试' : ''}${errorInfo.remediation ? `：${agentEscape(errorInfo.remediation)}` : ''}</span></div>` : ''}
                     ${contractIssues.length ? `<div class="agent-dag-contract-issues"><strong>结果校验未通过</strong><span>${agentEscape(contractIssues.join('；'))}</span></div>` : ''}
                     ${readableOutput ? `<section class="agent-dag-node-result"><h5>本步骤结果</h5>${readableOutput}</section>` : ''}
                     <details class="agent-dag-node-technical"${techDiscKey ? ` data-disclosure-key="${agentEscape(techDiscKey)}"` : ''}${techOpen}>

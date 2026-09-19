@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1438,
+  "total": 1469,
   "entries": [
     {
       "file": "server/auth.js",
@@ -32,6 +32,22 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-dag-error-info.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-dag-output-refcounts.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-dag-reuse-provenance.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-evaluation-case-snapshots.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/agent-goal-dispatch-lease.js",
       "count": 1
     },
@@ -46,6 +62,10 @@
     {
       "file": "server/db/migrations/agent-production-control-plane.js",
       "count": 5
+    },
+    {
+      "file": "server/db/migrations/agent-run-concurrency-leases.js",
+      "count": 1
     },
     {
       "file": "server/db/migrations/agent-run-metadata-jsonb-compatibility.js",
@@ -65,6 +85,10 @@
     },
     {
       "file": "server/db/migrations/agent-step-unique-index.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-workflow-invocations.js",
       "count": 1
     },
     {
@@ -144,6 +168,10 @@
       "count": 6
     },
     {
+      "file": "server/db/migrations/workflow-api-operations.js",
+      "count": 1
+    },
+    {
       "file": "server/db/pg-connection.js",
       "count": 1
     },
@@ -169,7 +197,7 @@
     },
     {
       "file": "server/repositories/agent-runs.js",
-      "count": 9
+      "count": 10
     },
     {
       "file": "server/repositories/agent-workflows.js",
@@ -193,7 +221,7 @@
     },
     {
       "file": "server/routes/agent-control-plane.js",
-      "count": 2
+      "count": 1
     },
     {
       "file": "server/routes/agents.js",
@@ -320,6 +348,10 @@
       "count": 3
     },
     {
+      "file": "server/services/agent-dag-subworkflow-runtime.js",
+      "count": 2
+    },
+    {
       "file": "server/services/agent-data.js",
       "count": 1
     },
@@ -389,15 +421,19 @@
     },
     {
       "file": "server/services/agent-queue.js",
-      "count": 12
+      "count": 13
     },
     {
       "file": "server/services/agent-releases.js",
-      "count": 51
+      "count": 53
     },
     {
       "file": "server/services/agent-residency.js",
       "count": 15
+    },
+    {
+      "file": "server/services/agent-run-concurrency-leases.js",
+      "count": 8
     },
     {
       "file": "server/services/agent-run-metadata-patch.js",
@@ -413,7 +449,11 @@
     },
     {
       "file": "server/services/agent-runtime/index.js",
-      "count": 6
+      "count": 7
+    },
+    {
+      "file": "server/services/agent-runtime/lease-loss.js",
+      "count": 1
     },
     {
       "file": "server/services/agent-runtime/notifications.js",
@@ -489,7 +529,7 @@
     },
     {
       "file": "server/services/agent-workflows.js",
-      "count": 18
+      "count": 19
     },
     {
       "file": "server/services/agent-world-state-store.js",
@@ -693,7 +733,7 @@
     },
     {
       "file": "server/services/storage-gc.js",
-      "count": 7
+      "count": 9
     },
     {
       "file": "server/services/system-health.js",
@@ -706,6 +746,10 @@
     {
       "file": "server/services/user-settings.js",
       "count": 5
+    },
+    {
+      "file": "server/services/workflow-api-operations.js",
+      "count": 6
     },
     {
       "file": "server/services/workflow-credentials.js",

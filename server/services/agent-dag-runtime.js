@@ -3,15 +3,20 @@ const { getBeijingTimestamp } = require('../time');
 const { approvalInputHash } = require('./agent-runtime/approvals');
 const { calculateDagRetryDelayMs, waitForDagRetry } = require('./agent-dag-retry');
 const { resolveDagToolApproval, stableDagOperationKey } = require('./agent-dag-approval');
-const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs, resolveAgentWorkflowVersion } = require('./agent-workflows');
-const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
-const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagConditionSatisfied, getDagNodeRouteState } = require('./agent-dag-utils');
+const { assertWorkflowLlmNodesConfigured, normalizeDagRunInputs } = require('./agent-workflows');
+const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagJoinConditionSatisfied, getDagNodeRouteState } = require('./agent-dag-utils');
 const { listDagNodes, listSteps } = require('./agent-runs');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeToolInput } = require('./agent-policy');
+const { createSubworkflowRuntime } = require('./agent-dag-subworkflow-runtime');
 const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
+const { parseCasRef, incrementRefCount } = require('./agent-artifact-cas');
+const {
+    recordDagCacheResult,
+    recordDagNodeResult
+} = require('./agent-governance-metrics');
 const {
     normalizeJsonSchema,
     outputValueForContract,
@@ -21,7 +26,7 @@ const {
 } = require('./agent-dag-contracts');
 
 const {
-    preparePersistedDagOutput,
+    persistDagOutput,
     persistedDagOutput,
     compactPreparedDagOutput,
     extractReadableDagOutput
@@ -58,7 +63,7 @@ function buildDagFallbackFinalAnswer(dagSpec, states) {
 
 async function upsertDagNode(runId, node, patch = {}) {
     const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
-    const existing = await queryOne('SELECT id FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
+    const existing = await queryOne('SELECT id, output FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
     const now = getBeijingTimestamp();
     const row = {
         title: patch.title ?? node.title,
@@ -71,7 +76,9 @@ async function upsertDagNode(runId, node, patch = {}) {
         status: patch.status ?? 'pending',
         output: patch.output ?? null,
         outputSerialized: patch.outputSerialized,
+        reusedFromRunId: patch.reusedFromRunId ?? patch.reused_from_run_id ?? null,
         errorMessage: patch.errorMessage ?? '',
+        errorInfo: patch.errorInfo ?? patch.error_info ?? {},
         contractStatus: patch.contractStatus ?? 'unchecked',
         contractIssues: patch.contractIssues ?? [],
         attemptCount: patch.attemptCount ?? 0,
@@ -79,14 +86,26 @@ async function upsertDagNode(runId, node, patch = {}) {
         startedAt: patch.startedAt ?? null,
         completedAt: patch.completedAt ?? null
     };
+    const extractOutputRef = value => {
+        let parsed = value;
+        if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch (_) { return null; }
+        }
+        return parseCasRef(parsed?.outputRef);
+    };
+    const previousOutputRef = extractOutputRef(existing?.output);
+    const nextOutputRef = extractOutputRef(row.output);
+    const refChanged = previousOutputRef !== nextOutputRef;
+    if (refChanged && nextOutputRef) await incrementRefCount(nextOutputRef, 1);
     if (existing) {
-        await execute(`
+        try {
+            await execute(`
             UPDATE agent_dag_nodes
             SET title = ?, tool_name = ?, input = ?, input_schema = ?, output_schema = ?, depends_on = ?, condition = ?, status = ?,
-                output = ?, error_message = ?, contract_status = ?, contract_issues = ?,
-                attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?
+                output = ?, error_message = ?, error_info = ?, contract_status = ?, contract_issues = ?,
+                attempt_count = ?, duration_ms = ?, started_at = ?, completed_at = ?, reused_from_run_id = ?
             WHERE id = ?
-        `, [
+            `, [
             row.title,
             row.toolName,
             JSON.stringify(row.input),
@@ -97,23 +116,32 @@ async function upsertDagNode(runId, node, patch = {}) {
             row.status,
             row.output === null ? null : (row.outputSerialized ?? JSON.stringify(row.output)),
             row.errorMessage,
+            JSON.stringify(row.errorInfo),
             row.contractStatus,
             JSON.stringify(row.contractIssues),
             row.attemptCount,
             row.durationMs,
             row.startedAt,
             row.completedAt,
+            row.reusedFromRunId,
             existing.id
-        ]);
+            ]);
+        } catch (error) {
+            if (refChanged && nextOutputRef) await incrementRefCount(nextOutputRef, -1).catch(() => {});
+            throw error;
+        }
+        if (refChanged && previousOutputRef) await incrementRefCount(previousOutputRef, -1).catch(() => {});
         return existing.id;
     }
-    const inserted = await queryOne(`
+    let inserted;
+    try {
+        inserted = await queryOne(`
         INSERT INTO agent_dag_nodes (
             run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, condition, status,
-            output, error_message, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            output, reused_from_run_id, error_message, error_info, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
-    `, [
+        `, [
         runId,
         nodeKey,
         row.title,
@@ -125,7 +153,9 @@ async function upsertDagNode(runId, node, patch = {}) {
         row.condition,
         row.status,
         row.output === null ? null : (row.outputSerialized ?? JSON.stringify(row.output)),
+        row.reusedFromRunId,
         row.errorMessage,
+        JSON.stringify(row.errorInfo),
         row.contractStatus,
         JSON.stringify(row.contractIssues),
         row.attemptCount,
@@ -133,8 +163,52 @@ async function upsertDagNode(runId, node, patch = {}) {
         row.startedAt,
         row.completedAt,
         now
-    ]);
+        ]);
+    } catch (error) {
+        if (refChanged && nextOutputRef) await incrementRefCount(nextOutputRef, -1).catch(() => {});
+        throw error;
+    }
     return inserted?.id;
+}
+
+function buildDagErrorInfo(error, node = {}, { attempt = 1, timedOut = false } = {}) {
+    const diagnosis = diagnoseError(error || new Error('DAG 节点执行失败'), {
+        tool: node.tool || '',
+        step: attempt
+    });
+    return {
+        category: diagnosis.category,
+        code: error?.code || diagnosis.code || 'AGENT_DAG_NODE_ERROR',
+        message: diagnosis.message,
+        nodeId: String(node.id || ''),
+        retryable: Boolean(diagnosis.retryable),
+        remediation: diagnosis.remediation,
+        attempt: Math.max(Number(attempt) || 1, 1),
+        timedOut: Boolean(timedOut)
+    };
+}
+
+function cloneDagFallbackValue(value) {
+    if (value === undefined || value === null || typeof value !== 'object') return value;
+    try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
+}
+
+/** 兜底值必须被显式配置，且通过当前节点的输出契约校验。 */
+function prepareDagFallbackOutput(node = {}, outputSchema = {}, errorInfo = {}) {
+    const hasFallback = Object.prototype.hasOwnProperty.call(node, 'fallbackOutput')
+        || Object.prototype.hasOwnProperty.call(node, 'fallback_output');
+    if (!hasFallback) return { usable: false, issues: ['节点未配置兜底输出。'] };
+    const output = cloneDagFallbackValue(node.fallbackOutput ?? node.fallback_output);
+    const issues = [];
+    if (schemaHasRules(outputSchema)) {
+        validateValueAgainstSchema(outputValueForContract(output, node), outputSchema, {}, `${node.title || node.id} 兜底输出`, issues);
+    }
+    if (issues.length) return { usable: false, output, issues };
+    return {
+        usable: true,
+        output,
+        errorInfo: { ...errorInfo, fallbackApplied: true }
+    };
 }
 
 async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex = 0, executionContext = {} }, deps) {
@@ -145,7 +219,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     const stepContext = executionContext.stepContext || await deps.captureStepContext?.({
         run,
         user,
-        turnId: `dag:${node.id}`,
+        turnId: `dag:${executionContext.executionPath ? `${executionContext.executionPath}:` : ''}${node.id}`,
         stepIndex,
         modelCfg,
         toolList,
@@ -164,7 +238,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     }
     const contextHash = stepContext?.contextHash || executionContext.contextHash || '';
     // 重试次数只能区分审计步骤，不能参与 checkpoint operation key。
-    executionContext.operationKey = executionContext.operationKey || stableDagOperationKey(run, node, resolvedInput);
+    executionContext.operationKey = executionContext.operationKey || stableDagOperationKey(run, node, resolvedInput, executionContext.executionPath);
     let lastError = null;
     let attempted = 0;
     const attempts = Math.max(1, Number(policy.retryLimit || 0) + 1);
@@ -173,7 +247,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         await deps.assertRunNotCancelled(run.id);
         try {
             executionContext.autonomous = true;
-            executionContext.stepId = `${run.id}:${node.id}:${attempt}`;
+            executionContext.stepId = `${run.id}:${executionContext.executionPath ? `${executionContext.executionPath}:` : ''}${node.id}:${attempt}`;
             executionContext.stepIndex = stepIndex;
             const remainingRunMs = Math.max(deadline - Date.now(), 1);
             const nodeOwnsDeadline = policy.timeoutMs < remainingRunMs;
@@ -189,7 +263,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             try {
                 await recordToolCall({
                     runId: run.id,
-                    stepId: `${run.id}:${node.id}:${attempt}`,
+                    stepId: executionContext.stepId,
                     toolName: node.tool,
                     input: resolvedInput,
                     output,
@@ -202,6 +276,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             } catch (auditError) {
                 throw auditError;
             }
+            recordDagNodeResult({ tool: node.tool, status: 'completed' });
             return {
                 ok: true,
                 output,
@@ -239,7 +314,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
     try {
         await recordToolCall({
             runId: run.id,
-            stepId: `${run.id}:${node.id}:${attempted || 1}`,
+            stepId: `${run.id}:${executionContext.executionPath ? `${executionContext.executionPath}:` : ''}${node.id}:${attempted || 1}`,
             toolName: node.tool,
             input: resolvedInput,
             output: { error: lastError?.message || '执行失败' },
@@ -255,6 +330,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         auditError.cause = lastError;
         throw auditError;
     }
+    recordDagNodeResult({ tool: node.tool, status: 'error' });
     return {
         ok: false,
         error: lastError || new Error('DAG 节点执行失败，但没有返回错误信息。'),
@@ -287,129 +363,14 @@ function buildIncompleteDagAnswer(dagSpec, states) {
     return lines.join('\n');
 }
 
-async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, deadline, deps, stack = [] }) {
-    const workflowId = Number.parseInt(input.workflowId ?? input.workflow_id, 10);
-    if (!workflowId) throw new Error('子工作流节点需要选择有效的工作流。');
-    if (stack.includes(workflowId)) throw new Error(`检测到子工作流循环调用：${[...stack, workflowId].join(' -> ')}`);
-    if (stack.length >= 3) throw new Error('子工作流最多允许嵌套 3 层。');
-    const sourceWorkflow = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'published');
-    if (!sourceWorkflow) throw new Error(`子工作流不存在或无权访问：${workflowId}`);
-    const resolved = await resolveAgentWorkflowDependencyBindings(sourceWorkflow, user);
-    const dagSpec = normalizeDagSpec(resolved.dagSpec);
-    const topology = inspectDagTopology(dagSpec);
-    if (topology.blockers.length) throw new Error(`子工作流结构无效：${topology.blockers[0]}`);
-    assertWorkflowLlmNodesConfigured(dagSpec);
-    const dagInputs = normalizeDagRunInputs(input.inputs || {});
-    const childRun = { ...run, goal: String(input.goal || run.goal || '') };
-    const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
-    const states = new Map(dagSpec.nodes.map(node => [node.id, { status: 'pending' }]));
-    const childStack = [...stack, workflowId];
-    while ([...states.values()].some(state => state.status === 'pending')) {
-        await deps.assertRunNotCancelled(run.id);
-        const ready = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'pending'
-            && node.dependsOn.every(dep => ['completed', 'continued_error', 'error', 'skipped'].includes(states.get(dep)?.status)));
-        if (!ready.length) throw new Error(`子工作流“${resolved.workflow.name}”执行停滞。`);
-        for (const node of ready) {
-            const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
-            if (!dagConditionSatisfied(node.condition, depStates)) {
-                states.set(node.id, { status: 'skipped' });
-                continue;
-            }
-            const when = evaluateDagWhen(node.when, { goal: childRun.goal, inputs: dagInputs, states, nodeMap });
-            if (when.skipped) {
-                states.set(node.id, { status: 'skipped', skipReason: when.reason });
-                continue;
-            }
-            const routeState = getDagNodeRouteState(node, dagSpec, states);
-            if (routeState.routed && !routeState.active) {
-                states.set(node.id, {
-                    status: 'skipped',
-                    skipReason: 'route_not_matched',
-                    route: routeState.inactiveEdges.map(edge => edge.route).join(',')
-                });
-                continue;
-            }
-            const selectedTool = findAgentToolByName(node.tool, toolList);
-            if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
-            const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap }), {
-                ...childRun,
-                model_id: childRun.model_id ?? modelCfg?.id,
-                chosen_model_id: childRun.chosen_model_id ?? modelCfg?.id
-            });
-            const approvalKey = `${node.tool}:subworkflow:${childStack.join('.')}:${node.id}`;
-            let workflowApprovalResult = null;
-            let workflowDelayResult = null;
-            if (node.tool === 'workflow.approval') {
-                workflowApprovalResult = await deps.waitForWorkflowApproval({
-                    run,
-                    user,
-                    node,
-                    input: resolvedInput,
-                    key: approvalKey
-                });
-            } else if (node.tool === 'workflow.delay') {
-                workflowDelayResult = await deps.waitForWorkflowDelay({
-                    run,
-                    node,
-                    input: resolvedInput,
-                    key: approvalKey
-                });
-            }
-            if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
-                const error = new Error('子工作流节点需要工具审批。');
-                error.code = 'AGENT_APPROVAL_REQUIRED';
-                throw error;
-            }
-            const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs, selectedTool);
-            const executionContext = {
-                dagInputs,
-                workflowApprovalResult,
-                workflowDelayResult,
-                budget: deps.taskBudget,
-                approvalKey,
-                approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
-                allowApproval: true,
-                executeSubworkflow: childInput => executeSubworkflowDag({
-                    input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack
-                })
-            };
-            const result = await executeDagNodeWithPolicy({
-                run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: 0, executionContext
-            }, deps);
-            if (result.ok) {
-                states.set(node.id, { status: 'completed', input: resolvedInput, output: result.output, compactOutput: clampText(result.output, 12000) });
-            } else if (policy.onError === 'continue') {
-                states.set(node.id, { status: 'continued_error', input: resolvedInput, error: result.error.message, output: { error: result.error.message, continued: true } });
-            } else if (policy.onError === 'stop') {
-                throw result.error;
-            } else {
-                states.set(node.id, { status: 'error', input: resolvedInput, error: result.error.message });
-            }
-        }
-    }
-    const outputs = {};
-    dagSpec.nodes.filter(node => node.tool === 'workflow.output').forEach(node => {
-        const value = states.get(node.id)?.output;
-        if (value?.name) {
-            outputs[value.name] = value.presentation === 'table'
-                ? { value: value.value, format: value.format, presentation: value.presentation, table: value.table, text: value.text }
-                : value.presentation === 'file'
-                    ? { value: value.value, format: value.format, presentation: value.presentation, file: value.file, text: value.text }
-                    : value.value;
-        }
-    });
-    const fallback = buildDagFallbackFinalAnswer(dagSpec, states);
-    const outputNames = Object.keys(outputs);
-    const output = outputNames.length === 1 ? outputs[outputNames[0]] : (outputNames.length ? outputs : fallback);
-    return {
-        workflowId,
-        workflowName: resolved.workflow.name,
-        version: resolved.version,
-        output,
-        outputs,
-        text: extractReadableDagOutput(output) || fallback
-    };
-}
+const { executeSubworkflowDag, executeWorkflowIteration } = createSubworkflowRuntime({
+    executeDagNodeWithPolicy,
+    buildDagErrorInfo,
+    prepareDagFallbackOutput,
+    buildDagFallbackFinalAnswer,
+    extractReadableDagOutput,
+    upsertDagNode
+});
 
 async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, deps) {
     const readDagNodes = deps.listDagNodes || listDagNodes;
@@ -453,9 +414,26 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             input: state?.input || {},
             output: state?.output,
             compactOutput: clampText(state?.output, 12000),
-            reused: true
+            error: state?.error || '',
+            skipReason: state?.skipReason || '',
+            reused: Boolean(state?.reusedFromRunId),
+            reusedFromRunId: state?.reusedFromRunId || null
         });
     });
+    for (const [nodeId, state] of states.entries()) {
+        if (!Object.prototype.hasOwnProperty.call(reusedDagNodes, nodeId)) continue;
+        const node = nodeMap.get(nodeId);
+        if (!node) continue;
+        await writeDagNode(run.id, node, {
+            status: state.status,
+            input: state.input,
+            output: state.output,
+            errorMessage: state.error || '',
+            contractStatus: state.status === 'error' ? 'error' : 'unchecked',
+            reusedFromRunId: state.reusedFromRunId,
+            completedAt: getBeijingTimestamp()
+        });
+    }
     const observations = [];
     let stepIndex = (await readSteps(run.id)).length + 1;
     const rootWorkflowId = Number.parseInt(metadata.workflowId || metadata.workflow_id, 10);
@@ -477,15 +455,23 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         const stopErrors = [];
         for (const node of readyNodes) {
             const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
+            const routeState = getDagNodeRouteState(node, dagSpec, states);
             // 第一道门禁：依赖状态是否满足 condition（success / failure / always）。
-            if (!dagConditionSatisfied(node.condition, depStates)) {
-                const reason = node.condition === 'failure'
-                    ? 'dependency_not_failed'
-                    : 'dependency_not_completed';
+            if (!dagJoinConditionSatisfied(node, depStates, routeState, states)) {
+                const routeNotMatched = node.joinMode === 'any_active' && routeState.routed && !routeState.active;
+                const reason = routeNotMatched
+                    ? 'route_not_matched'
+                    : node.condition === 'failure'
+                        ? 'dependency_not_failed'
+                        : 'dependency_not_completed';
+                const routeDetail = routeNotMatched ? {
+                    route: routeState.inactiveEdges.map(edge => edge.route).join(','),
+                    routeSource: routeState.inactiveEdges.map(edge => edge.from)
+                } : {};
                 states.set(node.id, { status: 'skipped', skipReason: reason });
                 await writeDagNode(run.id, node, {
                     status: 'skipped',
-                    output: { status: 'skipped', reason, condition: node.condition },
+                    output: { status: 'skipped', reason, condition: node.condition, ...routeDetail },
                     completedAt: getBeijingTimestamp()
                 });
                 await deps.insertStep(run.id, stepIndex, {
@@ -494,7 +480,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     title: `跳过 DAG 节点：${node.title || node.id}`,
                     toolName: node.tool,
                     input: node.input,
-                    output: { status: 'skipped', reason, condition: node.condition, dependsOn: node.dependsOn }
+                    output: { status: 'skipped', reason, condition: node.condition, dependsOn: node.dependsOn, ...routeDetail }
                 });
                 stepIndex += 1;
                 continue;
@@ -535,7 +521,6 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 stepIndex += 1;
                 continue;
             }
-            const routeState = getDagNodeRouteState(node, dagSpec, states);
             if (routeState.routed && !routeState.active) {
                 const routeDetail = {
                     status: 'skipped',
@@ -603,8 +588,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, inputContractIssues);
             const outputDefinitionIssues = validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, []);
             const policy = normalizeDagNodePolicy(node, run, deps.agentToolTimeoutMs, selectedTool);
-            const { approvalKey, approvalGranted } = resolveDagToolApproval({
-                run, node, selectedTool, input: resolvedInput, isApprovalGranted: deps.isApprovalGranted
+                const { approvalKey, approvalGranted } = resolveDagToolApproval({
+                    run, node, selectedTool, input: resolvedInput, isApprovalGranted: deps.isApprovalGranted, executionPath: ''
             });
             const startedAtText = getBeijingTimestamp();
             const stepContext = await deps.captureStepContext?.({
@@ -694,7 +679,25 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     workflowDelayResult,
                     timeoutMs: policy.timeoutMs,
                     executeSubworkflow: childInput => executeSubworkflowDag({
-                        input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: subworkflowStack
+                        input: childInput,
+                        run,
+                        user,
+                        modelCfg,
+                        toolList,
+                        deadline,
+                        deps,
+                        stack: subworkflowStack,
+                        invocation: { callerNodeId: node.id }
+                    }),
+                    executeIteration: iterationInput => executeWorkflowIteration({
+                        input: iterationInput,
+                        run,
+                        user,
+                        modelCfg,
+                        toolList,
+                        deadline,
+                        deps,
+                        parentContext: { dagInputs, states, nodeMap, stack: subworkflowStack, callerNodeId: node.id }
                     }),
                     sandboxExecution: node.tool === 'workflow.foreach'
                 };
@@ -704,11 +707,32 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     const s = states.get(depId);
                     if (s && s.output !== undefined) dependsOnOutputs[depId] = s.output;
                 });
-                const cacheKey = (dagSpec.cacheEnabled !== false && node.cache !== false && isCacheableDagTool(node.tool))
-                    ? computeDagNodeCacheKey({ tool: node.tool, input: resolvedInput, dependsOnOutputs, workflowId: run.workflow_id, nodeKey: node.id })
+                const workflowBinding = metadata.workflowDependencyBinding && typeof metadata.workflowDependencyBinding === 'object'
+                    ? metadata.workflowDependencyBinding
+                    : {};
+                const cacheKey = (dagSpec.cacheEnabled !== false && node.cache !== false && isCacheableDagTool(selectedTool))
+                    ? computeDagNodeCacheKey({
+                        tool: selectedTool.name || node.tool,
+                        input: resolvedInput,
+                        dependsOnOutputs,
+                        workflowId: metadata.workflowId || metadata.workflow_id || run.workflow_id,
+                        nodeKey: node.id,
+                        scope: {
+                            userId: user.id,
+                            tenantId: run.tenant_id ?? user.tenant_id ?? user.tenantId,
+                            workflowVersionId: metadata.workflowVersionId || metadata.workflow_version_id,
+                            toolVersion: selectedTool.version,
+                            modelId: modelCfg?.id || run.model_id,
+                            modelName: modelCfg?.model_name || modelCfg?.name,
+                            bindingVersionId: workflowBinding.versionId,
+                            bindingUpdatedAt: workflowBinding.updatedAt
+                        }
+                    })
                     : null;
                 const cachedHit = cacheKey ? getCachedNodeOutput(cacheKey) : null;
                 if (cachedHit && cachedHit.hit) {
+                    recordDagCacheResult('hit');
+                    recordDagNodeResult({ tool: node.tool, status: 'cached' });
                     result = {
                         ok: true,
                         output: cachedHit.output,
@@ -719,6 +743,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                         cached: true
                     };
                 } else {
+                    if (cacheKey) recordDagCacheResult('miss');
                     result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: nodeStepIndex, executionContext }, deps);
                     if (result?.ok && cacheKey) {
                         setCachedNodeOutput(cacheKey, result.output);
@@ -742,7 +767,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     contractError.dagDurationMs = result.durationMs;
                     throw contractError;
                 }
-                const preparedOutput = preparePersistedDagOutput(output);
+                const preparedOutput = await persistDagOutput(output, { user });
                 const compactOutput = compactPreparedDagOutput(output, preparedOutput.serialized, 12000);
                 states.set(node.id, {
                     status: 'completed',
@@ -832,52 +857,68 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
                 const durationMs = Number(e.dagDurationMs || 0);
                 const timedOut = e.code === 'AGENT_NODE_TIMEOUT';
-                const status = policy.onError === 'continue' ? 'continued_error' : 'error';
+                const errorInfo = buildDagErrorInfo(e, node, { attempt: attemptCount, timedOut });
+                const fallback = policy.onError === 'fallback'
+                    ? prepareDagFallbackOutput(node, outputSchema, errorInfo)
+                    : null;
+                if (fallback && !fallback.usable) {
+                    errorInfo.fallbackRejected = true;
+                    errorInfo.fallbackIssues = fallback.issues;
+                }
+                const fallbackApplied = Boolean(fallback?.usable);
+                const status = policy.onError === 'continue' || fallbackApplied ? 'continued_error' : 'error';
                 const failureOutput = {
                     error: e.message,
                     code: e.code || 'AGENT_DAG_NODE_ERROR',
                     timedOut,
                     onError: policy.onError,
+                    errorInfo,
                     ...(policy.onError === 'continue' ? { continued: true } : {})
                 };
+                const persistedOutput = fallbackApplied ? fallback.output : failureOutput;
                 states.set(node.id, {
                     status,
                     input: resolvedInput,
                     error: e.message,
-                    output: policy.onError === 'continue' ? failureOutput : undefined,
+                    errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo,
+                    fallbackApplied,
+                    output: policy.onError === 'continue' || fallbackApplied ? persistedOutput : undefined,
                     attemptCount,
                     onError: policy.onError
                 });
                 await writeDagNode(run.id, node, {
                     status,
                     input: resolvedInput,
-                    output: failureOutput,
+                    output: persistedOutput,
                     errorMessage: e.message,
+                    errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo,
                     contractStatus: timedOut ? 'timeout' : (e.contractIssues?.length ? 'invalid' : 'error'),
-                    contractIssues: e.contractIssues || [],
+                    contractIssues: [...(e.contractIssues || []), ...(fallback && !fallback.usable ? fallback.issues : [])],
                     attemptCount,
                     durationMs,
                     completedAt: getBeijingTimestamp()
                 });
-                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, code: e.code || '', timedOut, onError: policy.onError, attempts: attemptCount });
+                observations.push({ node: node.id, title: node.title, tool: node.tool, input: resolvedInput, error: e.message, errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo, fallbackApplied, code: e.code || '', timedOut, onError: policy.onError, attempts: attemptCount });
                 await deps.insertStep(run.id, nodeStepIndex, {
                     type: 'dag',
                     nodeId: node.id,
                     title: timedOut
                         ? `DAG 节点执行超时：${node.title || node.id}`
-                        : (policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`),
+                        : (fallbackApplied
+                            ? `DAG 节点失败，已使用兜底输出：${node.title || node.id}`
+                            : (policy.onError === 'continue' ? `DAG 节点失败后继续：${node.title || node.id}` : `DAG 节点执行失败：${node.title || node.id}`)),
                     toolName: node.tool,
                     input: resolvedInput,
-                    output: failureOutput,
+                    output: persistedOutput,
                     errorMessage: e.message,
                     status: 'error',
                     durationMs,
                     contextHash: stepContext?.contextHash || ''
                 });
                 deps.finishAgentTraceSpan?.(nodeSpanId, {
-                    status: 'error',
-                    output: { nodeId: node.id, code: e.code || '', timedOut, onError: policy.onError },
-                    details: { nodeId: node.id, toolName: node.tool, timedOut, contractIssues: e.contractIssues || [] },
+                    status: fallbackApplied ? 'completed' : 'error',
+                    output: { nodeId: node.id, code: e.code || '', timedOut, onError: policy.onError, fallbackApplied },
+                    details: { nodeId: node.id, toolName: node.tool, timedOut, fallbackApplied, errorInfo, contractIssues: e.contractIssues || [] },
                     errorMessage: e.message,
                     durationMs
                 });
@@ -941,11 +982,14 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
 
 module.exports = {
     calculateDagRetryDelayMs,
+    buildDagErrorInfo,
     buildDagFallbackFinalAnswer,
     buildIncompleteDagAnswer,
     executeDagNodeWithPolicy,
+    executeWorkflowIteration,
     extractReadableDagOutput,
     persistedDagOutput,
     runAgentDag,
+    prepareDagFallbackOutput,
     upsertDagNode
 };

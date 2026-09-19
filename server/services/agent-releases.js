@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { validateSkillManifest, parseSkillManifest, projectSkillReadModel } = require('./agent-skills');
 const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
@@ -660,33 +660,126 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
     }
     await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', {
         skipRelease: true,
+        dryRun: true,
         skipEvaluationGate: input.fixedEvaluationRequired === false,
         breakGlassReason: input.breakGlassReason,
         allowTenantAdmin: Boolean(tenantForAdmin),
         tenantId: tenantForAdmin
     });
-    const previous = await queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1", [resolved.workflow.id]);
     const now = getBeijingTimestamp();
-    const release = await queryOne(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET tenant_id = excluded.tenant_id, rollout_scope = excluded.rollout_scope, rollout_percent = excluded.rollout_percent, target_user_ids = excluded.target_user_ids, target_units = excluded.target_units, status = 'published', published_by = excluded.published_by, published_at = excluded.published_at RETURNING *`, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now]);
-    await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [resolved.version_id, now, now, resolved.workflow.id, resolved.workflow.user_id]);
+    const release = await transaction(async trx => {
+        const locked = await trx.queryOne(`
+            SELECT id, user_id, current_version_id
+            FROM agent_workflows
+            WHERE id = ? AND deleted_at IS NULL
+            FOR UPDATE
+        `, [resolved.workflow.id]);
+        if (!locked || (Number(locked.user_id) !== Number(user.id) && !isTenantAdmin(user))) {
+            const error = invalid('工作流不存在或无权发布。', 404, 'WORKFLOW_RELEASE_NOT_FOUND');
+            throw error;
+        }
+        const requestedVersion = String(input.version || 'current').trim().toLowerCase();
+        if (requestedVersion === 'current' && Number(locked.current_version_id) !== Number(resolved.version_id)) {
+            throw invalid('工作流已在评测或发布期间更新，请重新运行评测后发布。', 409, 'WORKFLOW_VERSION_CONFLICT');
+        }
+        const previous = await trx.queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1 FOR UPDATE", [resolved.workflow.id]);
+        const next = await trx.queryOne(`
+            INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)
+            ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET
+                tenant_id = excluded.tenant_id,
+                rollout_scope = excluded.rollout_scope,
+                rollout_percent = excluded.rollout_percent,
+                target_user_ids = excluded.target_user_ids,
+                target_units = excluded.target_units,
+                status = 'published',
+                published_by = excluded.published_by,
+                published_at = excluded.published_at
+            RETURNING *
+        `, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now]);
+        const updated = await trx.execute(`
+            UPDATE agent_workflows
+            SET published_version_id = ?, published_at = ?, updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL
+        `, [resolved.version_id, now, now, resolved.workflow.id]);
+        if (updated !== 1) throw invalid('工作流发布状态写入失败。', 409, 'WORKFLOW_RELEASE_WRITE_CONFLICT');
+        return next;
+    });
     try { await createAgentInboxEvent(user, { eventKey: `workflow.release:${release.id}`, eventType: 'release.published', sourceId: String(release.id), title: '工作流版本已发布', body: `工作流 ${resolved.workflow.name} 已进入 ${rollout.rolloutScope} 灰度。`, risk: 'medium', payload: { releaseId: release.id, workflowId: resolved.workflow.id, version: resolved.version } }); } catch (_) {}
     return release;
 }
 
 async function rollbackWorkflowRelease(id, user) {
-    const release = await queryOne("SELECT * FROM agent_workflow_releases WHERE id = ? AND status = 'published'", [id]);
+    const release = await queryOne(`
+        SELECT r.*, w.user_id AS workflow_owner_id
+        FROM agent_workflow_releases r
+        JOIN agent_workflows w ON w.id = r.workflow_id
+        WHERE r.id = ? AND r.status = 'published' AND w.deleted_at IS NULL
+    `, [id]);
     if (!release) return null;
-    if (Number(release.published_by) !== Number(user.id) && !isTenantAdmin(user)) return null;
+    const tenantId = Number.parseInt(release.tenant_id, 10) || await getPrimaryTenantId(release.workflow_owner_id);
+    const resolved = await resolveAgentWorkflowVersion(release.workflow_id, user, 'current', {
+        allowTenantAdmin: isTenantAdmin(user),
+        tenantId
+    });
+    if (!resolved || (!resolved.workflow.is_owner && !isTenantAdmin(user))) return null;
     const now = getBeijingTimestamp();
     await execute("UPDATE agent_workflow_releases SET status = 'rolled_back', rolled_back_at = ? WHERE id = ?", [now, id]);
     if (release.previous_release_id) {
         const previous = await queryOne('SELECT workflow_version_id FROM agent_workflow_releases WHERE id = ?', [release.previous_release_id]);
         await execute("UPDATE agent_workflow_releases SET status = 'published' WHERE id = ?", [release.previous_release_id]);
-        await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [previous?.workflow_version_id || null, now, now, release.workflow_id, user.id]);
+        await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL', [previous?.workflow_version_id || null, now, now, release.workflow_id]);
     } else {
-        await execute('UPDATE agent_workflows SET published_version_id = NULL, published_at = NULL, updated_at = ? WHERE id = ?', [now, release.workflow_id]);
+        await execute('UPDATE agent_workflows SET published_version_id = NULL, published_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NULL', [now, release.workflow_id]);
     }
     return queryOne('SELECT * FROM agent_workflow_releases WHERE id = ?', [id]);
+}
+
+function formatWorkflowReleaseForRead(row, { includeTargets = false } = {}) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        workflow_id: row.workflow_id,
+        workflow_version_id: row.workflow_version_id,
+        version: Number(row.version || 0),
+        note: row.note || '',
+        rollout_scope: row.rollout_scope || 'personal',
+        rollout_percent: Number(row.rollout_percent || 0),
+        ...(includeTargets ? {
+            target_user_ids: parseJson(row.target_user_ids, []),
+            target_units: parseJson(row.target_units, [])
+        } : {}),
+        status: row.status,
+        published_by: row.published_by,
+        published_at: row.published_at,
+        rolled_back_at: row.rolled_back_at || null,
+        previous_release_id: row.previous_release_id || null
+    };
+}
+
+async function listWorkflowReleasesForUser(workflowId, user, options = {}) {
+    const tenantId = options.tenantId || await getPrimaryTenantId(user.id);
+    const resolved = await resolveAgentWorkflowVersion(workflowId, user, options.version || 'current', {
+        allowTenantAdmin: isTenantAdmin(user) && options.allowTenantAdmin === true,
+        tenantId
+    });
+    if (!resolved) return null;
+    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 100, 200));
+    const rows = await query(`
+        SELECT r.*, v.version, v.note
+        FROM agent_workflow_releases r
+        JOIN agent_workflow_versions v ON v.id = r.workflow_version_id
+        WHERE r.workflow_id = ?
+        ORDER BY r.published_at DESC
+        LIMIT ?
+    `, [resolved.workflow.id, limit]);
+    const includeTargets = Boolean(resolved.workflow.is_owner || (isTenantAdmin(user) && options.allowTenantAdmin === true));
+    if (includeTargets) return rows.map(row => formatWorkflowReleaseForRead(row, { includeTargets: true }));
+
+    // 接收者只查看自己获准解析的发布版本，避免暴露其他灰度批次、目标名单与回滚链。
+    return rows
+        .filter(row => row.status === 'published' && Number(row.workflow_version_id) === Number(resolved.version_id))
+        .map(row => formatWorkflowReleaseForRead(row));
 }
 
 /**
@@ -836,6 +929,7 @@ module.exports = {
     listSkillCatalogForUser,
     listSkillReleasesForUser,
     listSkillVersionsForUser,
+    listWorkflowReleasesForUser,
     normalizeRollout,
     pauseSkillRelease,
     pauseSkillReleaseBySystem,

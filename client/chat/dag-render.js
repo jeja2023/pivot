@@ -123,6 +123,7 @@ const DAG_NODE_VISUAL = {
     'workflow.approval': { svgIcon: 'user-check', theme: 'approval', label: '人工审批' },
     'workflow.foreach': { svgIcon: 'repeat', theme: 'loop', label: '循环 / 批处理' },
     'workflow.subworkflow': { svgIcon: 'workflow', theme: 'subflow', label: '子工作流' },
+    'workflow.iteration': { svgIcon: 'repeat', theme: 'loop', label: '逐项调用子工作流' },
     'workflow.delay': { svgIcon: 'clock', theme: 'delay', label: '延时' },
     'workflow.embed_page': { svgIcon: 'globe', theme: 'http', label: '嵌入页面' },
     'workflow.embed_image': { svgIcon: 'file-text', theme: 'file', label: '嵌入图片' },

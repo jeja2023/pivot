@@ -12,27 +12,14 @@ const MAX_CACHE_ENTRIES = 1000;
 // 内存 LRU 缓存表: key -> { output, createdAt, expiresAt, hits }
 const nodeCacheStore = new Map();
 
-// 不可缓存的工具清单（具有写操作、副作用或人工交互特性）
-const UNCACHEABLE_TOOL_PATTERNS = [
-    'workflow.approval',
-    'workflow.delay',
-    'workflow.notify',
-    'workflow.foreach',
-    'agent.code',
-    'agent.http',
-    'agent.browser',
-    'delete',
-    'remove',
-    'create_order',
-    'send_email',
-    'im.send',
-    'publish'
-];
+const CACHE_KEY_VERSION = 'pivot.dag.cache.v2';
 
-function isCacheableDagTool(toolName) {
-    if (!toolName || typeof toolName !== 'string') return false;
-    const lower = toolName.toLowerCase();
-    return !UNCACHEABLE_TOOL_PATTERNS.some(pat => lower.includes(pat));
+function isCacheableDagTool(tool) {
+    if (!tool || typeof tool !== 'object') return false;
+    return tool.cacheable === true
+        && tool.side_effect !== true
+        && tool.approval_required !== true
+        && tool.requiresSandbox !== true;
 }
 
 /**
@@ -51,10 +38,27 @@ function stableStringify(value) {
 /**
  * 计算 DAG 节点的执行指纹 Cache Key
  */
-function computeDagNodeCacheKey({ tool = '', input = {}, dependsOnOutputs = {}, workflowId = '', _nodeKey = '' } = {}) {
+function normalizeCacheScope(scope = {}) {
+    return {
+        userId: String(scope.userId ?? scope.user_id ?? ''),
+        tenantId: String(scope.tenantId ?? scope.tenant_id ?? ''),
+        workflowId: String(scope.workflowId ?? scope.workflow_id ?? ''),
+        workflowVersionId: String(scope.workflowVersionId ?? scope.workflow_version_id ?? ''),
+        nodeId: String(scope.nodeId ?? scope.node_id ?? ''),
+        toolVersion: String(scope.toolVersion ?? scope.tool_version ?? ''),
+        modelId: String(scope.modelId ?? scope.model_id ?? ''),
+        modelName: String(scope.modelName ?? scope.model_name ?? ''),
+        bindingVersionId: String(scope.bindingVersionId ?? scope.binding_version_id ?? ''),
+        bindingUpdatedAt: String(scope.bindingUpdatedAt ?? scope.binding_updated_at ?? '')
+    };
+}
+
+function computeDagNodeCacheKey({ tool = '', input = {}, dependsOnOutputs = {}, workflowId = '', nodeKey = '', scope = {} } = {}) {
+    const normalizedScope = normalizeCacheScope({ workflowId, nodeId: nodeKey, ...scope });
     const serializedPayload = stableStringify({
-        workflowId: String(workflowId || ''),
+        cacheKeyVersion: CACHE_KEY_VERSION,
         tool: String(tool || ''),
+        scope: normalizedScope,
         input,
         dependsOnOutputs
     });
@@ -134,6 +138,7 @@ function getDagCacheStats() {
 
 module.exports = {
     isCacheableDagTool,
+    normalizeCacheScope,
     stableStringify,
     computeDagNodeCacheKey,
     getCachedNodeOutput,

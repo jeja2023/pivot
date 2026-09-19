@@ -237,6 +237,10 @@ function appendAgentGovernanceMetrics(lines) {
     lines.push('# TYPE pivot_agent_delivery_overwrite_total counter');
     lines.push(line('pivot_agent_delivery_overwrite_total', {}, snapshot.delivery.overwriteTotal));
     counter('pivot_agent_sandbox_limit_hit_total', 'Sandbox resource limit hits by kind.', snapshot.sandbox.limitHitTotal, 'kind');
+    counter('pivot_workflow_dag_node_total', 'Workflow DAG node terminal outcomes by tool and status.', snapshot.workflow.dagNodeTotal, 'tool_status');
+    counter('pivot_workflow_dag_cache_total', 'Workflow DAG cache outcomes.', snapshot.workflow.cacheTotal, 'result');
+    counter('pivot_workflow_invocation_total', 'Nested workflow invocation terminal outcomes.', snapshot.workflow.invocationTotal, 'status');
+    counter('pivot_workflow_iteration_item_total', 'Iteration item terminal outcomes.', snapshot.workflow.iterationItemTotal, 'status');
 }
 
 async function renderPrometheusMetrics() {
@@ -483,6 +487,7 @@ function metricsAuthMiddleware(req, res, next) {
 }
 
 module.exports = {
+    appendAgentGovernanceMetrics,
     metricsMiddleware,
     metricsAuthMiddleware,
     renderPrometheusMetrics,

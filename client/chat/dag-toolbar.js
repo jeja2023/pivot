@@ -206,10 +206,21 @@ function renderDagToolbar(ctx) {
                         const parsed = ctx.ensureDefaults(res.spec);
                         ctx.spec.nodes = parsed.nodes;
                         ctx.spec.cacheEnabled = parsed.cacheEnabled;
+                        if (Array.isArray(parsed.edges)) {
+                            ctx.spec.schemaVersion = parsed.schemaVersion || 'pivot.dag.v2';
+                            ctx.spec.edges = parsed.edges;
+                        } else {
+                            delete ctx.spec.schemaVersion;
+                            delete ctx.spec.edges;
+                        }
                     }
                     ctx.render?.();
                     ctx.flushOut?.();
-                    window.Pivot?.legacy?.showToast?.(`已导入 ${res.spec.nodes.length} 个节点`, 'success');
+                    const preflight = res.dependencies
+                        ? `；依赖：模型 ${res.dependencies.models?.length || 0}、工具 ${res.dependencies.tools?.length || 0}、凭据 ${res.dependencies.credentials?.length || 0}`
+                        : '';
+                    const warning = res.warnings?.[0] ? `（提示：${res.warnings[0]}）` : '';
+                    window.Pivot?.legacy?.showToast?.(`已导入 ${res.spec.nodes.length} 个节点${preflight}${warning}`, res.warnings?.length ? 'warning' : 'success');
                 };
                 inp.click();
             };

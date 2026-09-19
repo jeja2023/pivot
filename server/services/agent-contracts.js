@@ -53,7 +53,8 @@ function normalizeToolContract(definition = {}) {
     const inputSchema = normalizeJsonSchema(definition.input_schema || definition.inputSchema || definition.parameters || { type: 'object', properties: {} });
     const timeout = definition.timeout && typeof definition.timeout === 'object' ? definition.timeout : {};
     const toolName = String(definition.name || '');
-    const sideEffect = Boolean((definition.side_effect ?? definition.sideEffect) || /(?:write|upload|delete|export|send|message|http)/i.test(toolName));
+    const sideEffect = Boolean((definition.side_effect ?? definition.sideEffect) || /(?:write|upload|delete|export|send|message|http|insert|update|upsert|replace|publish)/i.test(toolName));
+    const approvalRequired = Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.alwaysRequiresApproval) || riskLevel >= 5);
     // Read-only tools are safe to replay after a worker crash unless a tool
     // explicitly declares otherwise. Mutating tools remain non-idempotent by default.
     const inferredIdempotent = !sideEffect && /(?:read|list|search|query|describe|inspect|metadata|fetch|get|lookup|count|analy[sz]e)/i.test(toolName);
@@ -67,6 +68,9 @@ function normalizeToolContract(definition = {}) {
         risk_level: riskLevel,
         idempotent: definition.idempotent === undefined ? inferredIdempotent : Boolean(definition.idempotent),
         side_effect: sideEffect,
+        // 缓存必须是工具作者的显式承诺。幂等只说明崩溃恢复时可以安全重放，
+        // 不代表结果在不同运行、不同授权或不同时间仍可复用。
+        cacheable: definition.cacheable === true && !sideEffect && !approvalRequired && definition.requiresSandbox !== true,
         concurrency: normalizeToolConcurrency(definition.concurrency ?? definition.concurrency_mode, sideEffect),
         cancellable: definition.cancellable === undefined ? !sideEffect : Boolean(definition.cancellable),
         // 本机浏览器连接器由桌面端按已授权 Origin 执行网络校验；服务端本身不出网，
@@ -74,7 +78,7 @@ function normalizeToolContract(definition = {}) {
         network: definition.network === false
             ? false
             : Boolean(definition.network || /(?:http|web|browser|network)/i.test(String(definition.name || '')) || source === 'mcp'),
-        approval_required: Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.alwaysRequiresApproval) || riskLevel >= 5),
+        approval_required: approvalRequired,
         localBrowserConnector: definition.localBrowserConnector === true,
         timeout: {
             default_seconds: Math.max(Number(timeout.default_seconds ?? timeout.defaultSeconds ?? definition.timeoutSeconds ?? 30) || 30, 1),

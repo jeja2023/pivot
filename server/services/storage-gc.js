@@ -1,6 +1,7 @@
 const { query, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { removeAttachmentFilesAsync } = require('../security');
+const { expireOverdueObjects } = require('./agent-artifact-cas');
 const fs = require('fs');
 const path = require('path');
 
@@ -198,6 +199,18 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         LIMIT ?
     `, [String(safeRetentionDays), safeLimit]);
 
+    // 运行记录保留审计元数据，但到期后不再保留 DAG 节点大输出。删除节点行时由
+    // PostgreSQL 触发器递减 CAS 引用；之后的 CAS 过期扫描才可安全回收文件。
+    const dagNodes = await query(`
+        SELECT n.id
+        FROM agent_dag_nodes n
+        JOIN agent_runs r ON r.id = n.run_id
+        WHERE r.deleted_at IS NOT NULL
+          AND r.deleted_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)
+        ORDER BY n.id ASC
+        LIMIT ?
+    `, [String(safeRetentionDays), safeLimit]);
+
     const [attachmentCleanupResults, knowledgeDocCleanupResults] = await Promise.all([
         removeAttachmentFilesAsync(attachments || []),
         removeAttachmentFilesAsync(knowledgeDocs || [])
@@ -208,13 +221,22 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
     const attachmentRows = await cleanupPurgedAttachmentRows(purgeableAttachments);
     const knowledgeDocRows = await cleanupPurgedKnowledgeDocs(purgeableKnowledgeDocs);
     const messageRows = await cleanupPurgedMessages(messages || []);
+    const dagNodeIds = (dagNodes || []).map(row => Number.parseInt(row.id, 10)).filter(Number.isSafeInteger);
+    let dagNodeRows = 0;
+    if (dagNodeIds.length) {
+        const placeholders = dagNodeIds.map(() => '?').join(', ');
+        dagNodeRows = await execute(`DELETE FROM agent_dag_nodes WHERE id IN (${placeholders})`, dagNodeIds);
+    }
+    const expiredDagOutputObjects = await expireOverdueObjects({ limit: safeLimit });
 
-    if (attachmentRows > 0 || knowledgeDocRows > 0 || messageRows > 0) {
+    if (attachmentRows > 0 || knowledgeDocRows > 0 || messageRows > 0 || dagNodeRows > 0 || expiredDagOutputObjects.expired > 0) {
         logger.info({
             retentionDays: safeRetentionDays,
             attachmentRows,
             knowledgeDocRows,
-            messageRows
+            messageRows,
+            dagNodeRows,
+            expiredDagOutputObjects: expiredDagOutputObjects.expired
         }, '软删除存储已清理');
     }
 
@@ -222,7 +244,9 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         retentionDays: safeRetentionDays,
         attachmentRows,
         knowledgeDocRows,
-        messageRows
+        messageRows,
+        dagNodeRows,
+        expiredDagOutputObjects: expiredDagOutputObjects.expired
     };
 }
 

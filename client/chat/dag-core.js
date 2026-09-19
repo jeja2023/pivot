@@ -140,7 +140,12 @@ function ensureDefaults(spec) {
                 : null,
             retryLimit: Math.max(0, Math.min(Number.parseInt(n.retryLimit ?? n.retry_limit ?? 0, 10) || 0, 5)),
             timeoutMs: Math.max(0, Math.min(Number.parseInt(n.timeoutMs ?? n.timeout_ms ?? 0, 10) || 0, 600000)),
-            onError: ['skip_dependents', 'continue', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
+            onError: ['skip_dependents', 'continue', 'fallback', 'stop'].includes(String(n.onError || n.on_error || 'skip_dependents')) ? String(n.onError || n.on_error || 'skip_dependents') : 'skip_dependents',
+            ...(Object.prototype.hasOwnProperty.call(n, 'fallbackOutput') || Object.prototype.hasOwnProperty.call(n, 'fallback_output')
+                ? { fallbackOutput: n.fallbackOutput ?? n.fallback_output }
+                : {}),
+            cache: n.cache !== false,
+            joinMode: ['all', 'any_active'].includes(String(n.joinMode || n.join_mode || 'all')) ? String(n.joinMode || n.join_mode || 'all') : 'all',
             // 优先读取独立布局元数据，同时兼容旧版节点内坐标。
             _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? clampDagCoordinate(savedLayout[n.id]?.x ?? n._x) : undefined,
             _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? clampDagCoordinate(savedLayout[n.id]?.y ?? n._y) : undefined
@@ -171,12 +176,13 @@ function ensureDefaults(spec) {
         }));
         return {
             ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
-            nodes
+            nodes,
+            cacheEnabled: spec?.cacheEnabled !== false && spec?.cache_enabled !== false
         };
     }
 
 function serialize(spec) {
-        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, when, retryLimit, timeoutMs, onError }) => {
+        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, when, retryLimit, timeoutMs, onError, fallbackOutput, cache, joinMode }) => {
             const node = {
                 id,
                 title,
@@ -188,7 +194,10 @@ function serialize(spec) {
                 condition,
                 retryLimit: Number(retryLimit || 0),
                 timeoutMs: Number(timeoutMs || 0),
-                onError: onError || 'skip_dependents'
+                onError: onError || 'skip_dependents',
+                ...(fallbackOutput !== undefined ? { fallbackOutput } : {}),
+                cache: cache !== false,
+                joinMode: joinMode === 'any_active' ? 'any_active' : 'all'
             };
             if (when && typeof when === 'object' && String(when.source || '').trim()) {
                 node.when = { source: String(when.source).trim(), operator: String(when.operator || 'equals').trim(), value: when.value ?? '' };
@@ -212,7 +221,8 @@ function serialize(spec) {
         return {
             ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
             nodes,
-            layout
+            layout,
+            cacheEnabled: spec?.cacheEnabled !== false
         };
 }
 
@@ -403,7 +413,44 @@ function getNodeTestOutputSnapshots() {
 function setDagNodeTestOutput(nodeId, snapshot = {}) {
     const key = String(nodeId || '').trim();
     if (!key || !snapshot || typeof snapshot !== 'object') return false;
-    dagNodeTestOutputs.set(key, snapshot);
+    const output = snapshot.output;
+    const source = snapshot.source === 'mock' ? 'mock' : 'test';
+    dagNodeTestOutputs.set(key, {
+        ...snapshot,
+        output,
+        originalOutput: snapshot.originalOutput ?? output,
+        originalSource: snapshot.originalSource ?? source,
+        source,
+        overridden: false
+    });
+    return true;
+}
+
+function setDagNodeTestOverride(nodeId, output) {
+    const key = String(nodeId || '').trim();
+    const snapshot = getNodeTestOutputSnapshots().get(key);
+    if (!key || !snapshot) return false;
+    dagNodeTestOutputs.set(key, {
+        ...snapshot,
+        output,
+        source: 'override',
+        overridden: true,
+        overriddenAt: Date.now()
+    });
+    return true;
+}
+
+function resetDagNodeTestOverride(nodeId) {
+    const key = String(nodeId || '').trim();
+    const snapshot = getNodeTestOutputSnapshots().get(key);
+    if (!key || !snapshot || snapshot.overridden !== true) return false;
+    dagNodeTestOutputs.set(key, {
+        ...snapshot,
+        output: snapshot.originalOutput,
+        source: snapshot.originalSource === 'mock' ? 'mock' : 'test',
+        overridden: false,
+        overriddenAt: null
+    });
     return true;
 }
 
@@ -506,10 +553,10 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
                     if (items.some(item => item.expression === `{{nodes.${nodeId}.output.${path}}}`)) return;
                     items.push({
                         expression: `{{nodes.${nodeId}.output.${path}}}`,
-                        label: `${nodeTitle} · ${path}（测试样本）`,
-                        description: '来自最近一次节点测试的采样字段，不替代输出契约',
+                        label: `${nodeTitle} · ${path}（${snapshot?.overridden ? '测试覆盖' : (snapshot?.source === 'mock' ? '模拟结果' : '测试样本')}）`,
+                        description: snapshot?.overridden ? '来自当前编辑会话的测试变量覆盖，不会保存到工作流或正式运行。' : (snapshot?.source === 'mock' ? '来自当前编辑会话的模拟结果，不会调用工具、保存到工作流或进入正式运行。' : '来自最近一次节点测试的采样字段，不替代输出契约'),
                         type: meta.type || 'any',
-                        source: 'sample'
+                        source: snapshot?.overridden ? 'override' : 'sample'
                     });
                 });
             }
@@ -609,6 +656,8 @@ if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
         setDagNodeTestOutput,
+        setDagNodeTestOverride,
+        resetDagNodeTestOverride,
         alignNodes
     });
 }
@@ -637,6 +686,8 @@ if (typeof module !== 'undefined' && module.exports) {
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
         setDagNodeTestOutput,
+        setDagNodeTestOverride,
+        resetDagNodeTestOverride,
         alignNodes
     };
 }

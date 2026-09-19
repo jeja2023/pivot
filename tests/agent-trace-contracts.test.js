@@ -223,6 +223,8 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
         assert.equal(batch.run.status, 'completed');
         assert.equal(batch.run.summary.passRate, 100);
         assert.equal(batch.results[0].passed, true);
+        assert.equal(batch.run.target_snapshot.cases[0].name, '风险总结');
+        assert.equal(batch.results[0].case_snapshot.name, '风险总结');
         assert.equal(await getAgentEvalRun(batch.run.id, other), null);
         assert.equal((await listRuns(user)).total, 0);
         assert.equal((await listRuns(user, { includePreview: true })).total, 1);
@@ -234,7 +236,9 @@ test('评测集按用户隔离，真实批次可回收评分且编辑不破坏�
         });
         assert.equal(updated.cases.length, 1);
         assert.equal(updated.cases[0].name, '新用例');
-        assert.equal((await getAgentEvalRun(batch.run.id, user)).results[0].case_name, '风险总结');
+        const historical = await getAgentEvalRun(batch.run.id, user);
+        assert.equal(historical.results[0].case_name, '风险总结');
+        assert.equal(historical.results[0].case_snapshot.assertions.requiredPhrases[0], '完成');
     } finally {
         db.prepare('DELETE FROM agent_eval_results WHERE eval_run_id IN (SELECT id FROM agent_eval_runs WHERE suite_id IN (SELECT id FROM agent_eval_suites WHERE user_id = ?))').run(user.id);
         db.prepare('DELETE FROM agent_eval_runs WHERE suite_id IN (SELECT id FROM agent_eval_suites WHERE user_id = ?)').run(user.id);

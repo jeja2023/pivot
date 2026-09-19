@@ -43,3 +43,14 @@ test('DAG 节点重试复用稳定 checkpoint operation key，不把 attempt 拼
         stableDagOperationKey(run, node, input)
     ]);
 });
+
+test('嵌套工作流的调用路径隔离同名节点，但新运行不会复用旧操作身份', () => {
+    const node = { id: 'approval', tool: 'workflow.approval' };
+    const input = { title: '审批' };
+    const first = stableDagOperationKey({ id: 'run-a' }, node, input, 'subworkflow:caller_a:10');
+    const sibling = stableDagOperationKey({ id: 'run-a' }, node, input, 'subworkflow:caller_b:10');
+    const rerun = stableDagOperationKey({ id: 'run-b' }, node, input, 'subworkflow:caller_a:10');
+    assert.notEqual(first, sibling);
+    assert.notEqual(first, rerun);
+    assert.equal(first, stableDagOperationKey({ id: 'run-a' }, node, input, 'subworkflow:caller_a:10'));
+});

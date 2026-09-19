@@ -19,6 +19,26 @@ const handoffOutputSchema = {
     }
 };
 
+const ragSearchOutputSchema = {
+    type: 'object',
+    required: ['query', 'matches'],
+    properties: {
+        query: { type: 'string' },
+        matches: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    docName: { type: 'string' },
+                    score: { type: 'number' },
+                    hit: {}, content: { type: 'string' }
+                }
+            }
+        },
+        metrics: {}
+    }
+};
+
 const NODE_PRESET_GROUPS = [
     {
         group: '起始与交付',
@@ -93,6 +113,37 @@ const NODE_PRESET_GROUPS = [
                     ? defaultLlmInput(selectedNode || null)
                     : { model: '', prompt: '{{goal}}', responseFormat: 'markdown', temperature: 0.2, maxTokens: 1200 },
                 outputSchema: { type: 'string' }
+            },
+            {
+                base: 'extract', title: '参数抽取', svgIcon: 'braces', theme: 'llm',
+                desc: '用模型从文本或上游结果抽取字段；请在数据契约中补齐业务字段', toolName: 'agent.llm',
+                getInput: ({ selectedNode }) => ({
+                    model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
+                    prompt: selectedNode ? `请从以下内容抽取业务字段：\n{{nodes.${selectedNode.id}.output}}` : '请从以下内容抽取业务字段：\n{{goal}}',
+                    systemPrompt: '只输出满足输出契约的合法 JSON。不能确定的字段使用 null，并在 missingFields 中列出字段名。',
+                    responseFormat: 'json', temperature: 0, maxTokens: 1200
+                }),
+                outputSchema: {
+                    type: 'object', required: ['fields', 'missingFields'], properties: {
+                        fields: { type: 'object', description: '按业务契约定义的提取字段。' },
+                        missingFields: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number' }
+                    }
+                }
+            },
+            {
+                base: 'classify', title: '内容分类', svgIcon: 'tag', theme: 'llm',
+                desc: '用结构化分类结果连接条件或路由节点', toolName: 'agent.llm',
+                getInput: ({ selectedNode }) => ({
+                    model: typeof defaultWorkflowModelId === 'function' ? defaultWorkflowModelId() : '',
+                    prompt: selectedNode ? `请分类以下内容：\n{{nodes.${selectedNode.id}.output}}` : '请分类以下内容：\n{{goal}}',
+                    systemPrompt: '只输出满足输出契约的合法 JSON。category 必须是简短、稳定的业务分类；reason 说明判断依据。',
+                    responseFormat: 'json', temperature: 0, maxTokens: 800
+                }),
+                outputSchema: {
+                    type: 'object', required: ['category', 'confidence'], properties: {
+                        category: { type: 'string' }, confidence: { type: 'number' }, reason: { type: 'string' }
+                    }
+                }
             },
             {
                 base: 'content_review', title: '富文本内容校对', svgIcon: 'file-check', theme: 'llm',
@@ -178,7 +229,8 @@ const NODE_PRESET_GROUPS = [
             {
                 base: 'search', title: '知识检索', svgIcon: 'search', theme: 'rag',
                 desc: '从知识库按语义检索相关片段', toolName: 'rag.search',
-                input: { query: '{{goal}}', topK: 5, candidateLimit: 80 }
+                input: { query: '{{goal}}', topK: 5, candidateLimit: 80 },
+                outputSchema: ragSearchOutputSchema
             },
             {
                 base: 'knowledge_graph', title: '知识关系查询', svgIcon: 'search', theme: 'rag', advanced: true,
@@ -325,6 +377,17 @@ const NODE_PRESET_GROUPS = [
                 desc: '调用另一个已发布工作流并接收其输出', toolName: 'workflow.subworkflow',
                 input: { workflowId: '', version: 'published', goal: '{{goal}}', inputs: {} },
                 outputSchema: { type: 'object', required: ['workflowId', 'output'], properties: { workflowId: { type: 'integer' }, version: { type: 'integer' }, output: {}, outputs: { type: 'object' }, text: { type: 'string' } } }
+            },
+            {
+                base: 'iteration', title: '逐项调用子工作流', svgIcon: 'repeat', theme: 'loop',
+                desc: '对数组中的每一项运行已发布子工作流，保留顺序和失败项', toolName: 'workflow.iteration',
+                getInput: ({ selectedNode }) => ({
+                    items: selectedNode ? `{{nodes.${selectedNode.id}.output.items}}` : [],
+                    workflowId: '', version: 'published', goal: '{{goal}}',
+                    inputs: { item: '{{item}}', itemIndex: '{{itemIndex}}' },
+                    concurrency: 1, onItemError: 'stop', maxItems: 1000
+                }),
+                outputSchema: { type: 'object', required: ['items', 'count', 'inputCount', 'errors', 'stoppedOnError'], properties: { items: { type: 'array' }, count: { type: 'integer' }, inputCount: { type: 'integer' }, processedCount: { type: 'integer' }, errors: { type: 'array' }, stoppedOnError: { type: 'boolean' }, workflowId: { type: 'integer' }, version: { type: 'integer' } } }
             },
             {
                 base: 'foreach', title: '循环 / 批处理', svgIcon: 'repeat', theme: 'loop',

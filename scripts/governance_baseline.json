@@ -8,9 +8,8 @@
     "client/chat/apps-workbench-editor.js": 1419,
     "server/db/migrations/legacy.js": 1285,
     "client/chat/agent-harness.js": 1257,
-    "client/chat/dag-inspector.js": 1274,
+    "client/chat/dag-inspector.js": 1243,
     "server/services/agent-tools.js": 1084,
-    "client/chat/agents-dag-editor.js": 1023,
-    "client/chat/agent-run-detail.js": 1001
+    "client/chat/agents-dag-editor.js": 1023
   }
 }

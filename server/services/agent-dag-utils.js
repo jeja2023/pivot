@@ -43,6 +43,12 @@ function resolveDagTemplateReference(expression, context) {
     if (parts[0] === 'inputs' || parts[0] === 'input') {
         return getPathValue(context.inputs || {}, parts.slice(1));
     }
+    if (parts[0] === 'item') {
+        return getPathValue(context.item, parts.slice(1));
+    }
+    if (parts[0] === 'itemIndex' || parts[0] === 'index') {
+        return parts.length === 1 ? context.itemIndex : undefined;
+    }
     if (parts[0] === 'run') {
         if (parts[1] === 'goal') return context.goal;
         if (parts[1] === 'inputs' || parts[1] === 'input') return getPathValue(context.inputs || {}, parts.slice(2));
@@ -247,6 +253,18 @@ function dagConditionSatisfied(condition, dependencyStatuses = []) {
     return dependencyStatuses.every(status => ['completed', 'continued_error'].includes(status));
 }
 
+function dagJoinConditionSatisfied(node, dependencyStatuses = [], routeState = null, states = null) {
+    const joinMode = String(node?.joinMode || node?.join_mode || 'all');
+    if (joinMode !== 'any_active' || !routeState?.routed) {
+        return dagConditionSatisfied(node?.condition, dependencyStatuses);
+    }
+    if (!routeState.active || !routeState.activeEdges.length) return false;
+    const activeStatuses = routeState.activeEdges
+        .map(edge => states?.get?.(edge.from)?.status)
+        .filter(Boolean);
+    return dagConditionSatisfied(node?.condition, activeStatuses);
+}
+
 // 边级路由是增量能力：未声明 `edges` 的旧 DAG 保持原有 dependsOn + when 语义。
 // 带路由的目标节点在全部依赖结束后，至少需要一条入边处于激活状态。
 function getDagIncomingEdges(dagSpec = {}, nodeId = '') {
@@ -261,17 +279,21 @@ function getDagNodeRouteState(node, dagSpec, states) {
     const inactiveEdges = [];
     incoming.forEach(edge => {
         const route = String(edge.route || 'default').trim().toLowerCase();
+        const sourceState = states?.get?.(edge.from) || {};
+        const sourceStatus = String(sourceState.status || '');
         if (route === 'default') {
-            activeEdges.push(edge);
+            // 默认边会承接成功、继续错误和失败分支，但不能把“路由未命中”
+            // 的 skipped 节点当成已激活路径。
+            const active = ['completed', 'continued_error', 'error'].includes(sourceStatus);
+            (active ? activeEdges : inactiveEdges).push({ ...edge, sourceStatus });
             return;
         }
-        const sourceState = states?.get?.(edge.from) || {};
         const rawMatched = sourceState.output?.matched ?? sourceState.output?.structuredContent?.matched;
         // 条件结果失败或格式异常时不能被当作 false，避免 onError=continue 后误激活假分支。
         const hasMatch = typeof rawMatched === 'boolean';
         const matched = hasMatch ? rawMatched : null;
         const active = hasMatch && (route === 'true' ? matched : !matched);
-        (active ? activeEdges : inactiveEdges).push({ ...edge, matched });
+        (active ? activeEdges : inactiveEdges).push({ ...edge, matched, sourceStatus });
     });
     return { routed: true, active: activeEdges.length > 0, activeEdges, inactiveEdges };
 }
@@ -288,7 +310,7 @@ function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs, tool = null) {
     return {
         retryLimit: unsafeReplay ? 0 : requestedRetryLimit,
         timeoutMs: normalizePositiveInt(node.timeoutMs ?? node.timeout_ms, 0, 0, 10 * 60 * 1000) || defaultTimeout,
-        onError: ['skip_dependents', 'continue', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
+        onError: ['skip_dependents', 'continue', 'fallback', 'stop'].includes(String(node.onError || node.on_error || 'skip_dependents'))
             ? String(node.onError || node.on_error || 'skip_dependents')
             : 'skip_dependents'
     };
@@ -297,6 +319,7 @@ function normalizeDagNodePolicy(node, run, defaultToolTimeoutMs, tool = null) {
 module.exports = {
     DAG_WHEN_OPERATOR_LABELS,
     dagConditionSatisfied,
+    dagJoinConditionSatisfied,
     evaluateDagWhen,
     getDagNodeRouteState,
     getPathValue,

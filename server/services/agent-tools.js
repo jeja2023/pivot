@@ -8,11 +8,10 @@ const { getRunnableModelForUserAsync, getUserRunnableModelsAsync } = require('./
 const { parsePositiveInt } = require('../number');
 const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
-const { safeJsonRequest } = require('./safe-http-client');
-const { resolveCredentialSecret } = require('./workflow-credentials');
 const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
-const { assertNetworkPolicyUrl, normalizeNetworkPolicy } = require('./agent-network-policy');
+const { normalizeNetworkPolicy } = require('./agent-network-policy');
+const { executeAgentHttp } = require('./agent-http-tool');
 const {
     clickBrowserTarget,
     closeAgentBrowserContext,
@@ -36,6 +35,7 @@ const {
     executeWorkflowEmbedVideo,
     executeWorkflowEmbedCode,
     executeWorkflowForeach,
+    executeWorkflowIteration,
     executeWorkflowInput,
     executeWorkflowNotify,
     executeWorkflowTemplate,
@@ -217,6 +217,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.merge',
             title: '变量聚合',
+            cacheable: true,
             description: '把多个上游节点的输出合并成一个对象，便于下游节点用统一的字段名引用。',
             input_schema: asJsonSchema({
                 fields: { type: 'object', description: '字段映射，键为目标字段名，值支持 {{nodes.*.output}} 模板引用。' }
@@ -253,6 +254,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.template',
             title: '文本模板',
+            cacheable: true,
             description: '使用工作流变量拼接确定性文本，不调用模型、不执行代码。',
             input_schema: asJsonSchema({
                 template: { type: 'string', maxLength: 50000, description: '支持 {{goal}}、{{inputs.*}} 和 {{nodes.*.output.*}}。' },
@@ -311,6 +313,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'workflow.condition',
             title: '条件路由',
+            cacheable: true,
             description: '比较输入值并返回 matched 与 route，供下游 when 条件引用。',
             input_schema: asJsonSchema({
                 value: { description: '待判断的值。' },
@@ -384,6 +387,32 @@ function getBuiltInToolDefinitions(user) {
             }, ['workflowId'])
         },
         {
+            name: 'workflow.iteration',
+            title: '逐项调用子工作流',
+            description: '对数组中的每一项调用已发布子工作流，保留来源、顺序与单项失败信息。',
+            side_effect: true,
+            cancellable: true,
+            input_schema: asJsonSchema({
+                items: { type: 'array', maxItems: 1000 },
+                workflowId: { type: 'integer' },
+                version: { type: 'string', default: 'published' },
+                goal: { type: 'string' },
+                inputs: { type: 'object', description: '子工作流输入映射，可使用 {{item}} 与 {{itemIndex}}。' },
+                concurrency: { type: 'integer', minimum: 1, maximum: 10, default: 1 },
+                onItemError: { type: 'string', enum: ['stop', 'continue', 'drop'], default: 'stop' },
+                maxItems: { type: 'integer', minimum: 1, maximum: 1000, default: 1000 }
+            }, ['items', 'workflowId']),
+            output_schema: {
+                type: 'object',
+                required: ['items', 'count', 'inputCount', 'errors', 'stoppedOnError'],
+                properties: {
+                    items: { type: 'array' }, count: { type: 'integer' }, inputCount: { type: 'integer' },
+                    errors: { type: 'array' }, stoppedOnError: { type: 'boolean' }, workflowId: { type: 'integer' },
+                    version: { type: 'integer' }, processedCount: { type: 'integer' }
+                }
+            }
+        },
+        {
             name: 'workflow.delay',
             title: '延时',
             description: '挂起工作流到指定时间后继续，最长 30 天，不占用运行槽。',
@@ -396,6 +425,7 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'report.compose',
             title: '报告编排',
+            cacheable: true,
             description: '将摘要和章节组装为结构化 Markdown 报告。',
             input_schema: asJsonSchema({
                 title: { type: 'string', default: '工作流报告' },
@@ -412,7 +442,27 @@ function getBuiltInToolDefinitions(user) {
                 query: { type: 'string', description: '检索问题或关键词。' },
                 topK: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
                 candidateLimit: { type: 'integer', minimum: 10, maximum: 200, default: 80 }
-            }, ['query'])
+            }, ['query']),
+            output_schema: {
+                type: 'object',
+                required: ['query', 'matches'],
+                properties: {
+                    query: { type: 'string' },
+                    matches: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                docName: { type: 'string' },
+                                score: { type: 'number' },
+                                hit: {},
+                                content: { type: 'string' }
+                            }
+                        }
+                    },
+                    metrics: {}
+                }
+            }
         },
         {
             name: 'sessions.search',
@@ -784,87 +834,6 @@ function executeAgentHandoff(input = {}) {
     };
 }
 
-// ——————————————————————————————————————————
-// agent.http：通过已有的安全 HTTP 客户端调用外部 REST API，支持 GET/POST/PUT/DELETE/PATCH。
-// ——————————————————————————————————————————
-async function executeAgentHttp(input = {}, user, context = {}) {
-    const url = String(input.url || '').trim();
-    if (!url) throw new Error('HTTP 节点需要填写请求 URL。');
-    let networkPolicy = context.run?.network_policy || context.run?.networkPolicy;
-    if (typeof networkPolicy === 'string') {
-        try { networkPolicy = JSON.parse(networkPolicy); } catch (_) { networkPolicy = null; }
-    }
-    if (context.autonomous === true && (!networkPolicy || typeof networkPolicy !== 'object')) {
-        const error = new Error('自主 Agent 网络请求必须绑定任务级网络白名单。');
-        error.code = 'AGENT_NETWORK_POLICY_REQUIRED';
-        error.category = 'policy';
-        throw error;
-    }
-    if (networkPolicy || input.networkPolicy || input.network_policy) {
-        await assertNetworkPolicyUrl(url, normalizeNetworkPolicy(networkPolicy || input.networkPolicy || input.network_policy), {
-            requireAllowlist: context.autonomous === true
-        });
-    }
-    const method = String(input.method || 'GET').trim().toLowerCase();
-    const allowedMethods = ['get', 'post', 'put', 'delete', 'patch'];
-    if (!allowedMethods.includes(method)) {
-        throw new Error(`HTTP 节点不支持该方法：${method}，允许的方法为 GET/POST/PUT/DELETE/PATCH。`);
-    }
-    const rawHeaders = input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)
-        ? input.headers
-        : {};
-    const headers = Object.fromEntries(
-        Object.entries(rawHeaders).map(([k, v]) => [String(k).trim(), String(v ?? '').trim()]).filter(([k]) => k)
-    );
-    const credentialSecret = String(input.credentialSecret || input.credential_secret || '').trim();
-    if (credentialSecret) {
-        if (!/^[A-Za-z0-9_]+$/.test(credentialSecret)) {
-            throw new Error('HTTP 凭据引用只能包含字母、数字和下划线。');
-        }
-        // 优先读取凭据库（支持免重启轮换和按部门授权），未命中时回退到历史环境变量方式
-        const envName = `PIVOT_WORKFLOW_SECRET_${credentialSecret.toUpperCase()}`;
-        const stored = await resolveCredentialSecret(credentialSecret, user);
-        const secret = stored?.value || process.env[envName];
-        if (!secret) {
-            throw new Error(`未找到 HTTP 凭据「${credentialSecret}」，请在凭据库创建，或配置环境变量 ${envName}。`);
-        }
-        const header = String(input.credentialHeader || input.credential_header || 'Authorization').trim();
-        if (!header || /[\r\n:]/.test(header)) throw new Error('HTTP 凭据请求头名称无效。');
-        headers[header] = `${String(input.credentialPrefix ?? input.credential_prefix ?? 'Bearer ')}${secret}`;
-    }
-    const hasBody = ['post', 'put', 'patch'].includes(method);
-    const bodyRaw = hasBody ? (input.body ?? input.data ?? null) : undefined;
-    const body = bodyRaw !== undefined && bodyRaw !== null && typeof bodyRaw !== 'object'
-        ? { value: bodyRaw }
-        : bodyRaw;
-    let response;
-    try {
-        response = await safeJsonRequest({
-            method,
-            url,
-            data: body,
-            headers,
-            user,
-            timeout: Math.min(parsePositiveInt(input.timeoutMs ?? input.timeout_ms, 10000, 30000), 30000),
-            signal: context.signal || null,
-            validateStatus: () => true
-        });
-    } catch (e) {
-        throw new Error(`HTTP 请求失败：${e.message}`);
-    }
-    const responseData = response.data;
-    const responseText = typeof responseData === 'string'
-        ? responseData
-        : (responseData !== null && responseData !== undefined ? JSON.stringify(responseData) : '');
-    return {
-        statusCode: response.status,
-        ok: response.status >= 200 && response.status < 300,
-        headers: response.headers || {},
-        data: responseData,
-        text: clampText(responseText, 8000)
-    };
-}
-
 async function executeAgentBrowser(input = {}, context = {}) {
     const url = String(input.url || '').trim();
     if (!url) throw new Error('浏览器节点需要填写 URL。');
@@ -949,6 +918,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         if (typeof context.executeSubworkflow !== 'function') throw new Error('当前运行环境不支持子工作流。');
         return context.executeSubworkflow(input);
     }
+    if (name === 'workflow.iteration') return executeWorkflowIteration(input, context);
     if (name === 'workflow.delay') {
         if (context.workflowDelayResult) return context.workflowDelayResult;
         return executeWorkflowDelay(input, context);
@@ -1078,6 +1048,7 @@ module.exports = {
     executeAgentDelegate,
     executeAgentHandoff,
     executeAgentBrowser,
+    executeAgentHttp,
     executeBuiltInTool,
     getBuiltInToolDefinitions
 };

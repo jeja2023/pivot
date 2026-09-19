@@ -319,6 +319,16 @@ async function executeWorkflowForeach(input = {}, context = {}) {
     }
 }
 
+async function executeWorkflowIteration(input = {}, context = {}) {
+    if (typeof context.executeIteration !== 'function') {
+        const error = new Error('当前运行环境不支持逐项调用子工作流。');
+        error.code = 'AGENT_ITERATION_UNSUPPORTED';
+        error.status = 400;
+        throw error;
+    }
+    return await context.executeIteration(input);
+}
+
 async function executeWorkflowNotify(input = {}, user = null, context = {}) {
     const bindingId = String(input.bindingId || input.binding_id || '').trim();
     const body = String(input.body ?? input.message ?? '').trim();
@@ -391,6 +401,7 @@ module.exports = {
     executeWorkflowCondition,
     executeWorkflowDelay,
     executeWorkflowForeach,
+    executeWorkflowIteration,
     executeWorkflowInput,
     executeWorkflowNotify,
     executeWorkflowTemplate,

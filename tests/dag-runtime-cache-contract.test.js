@@ -6,6 +6,7 @@ const {
     setCachedNodeOutput,
     clearDagNodeCache,
     isCacheableDagTool,
+    normalizeCacheScope,
     stableStringify
 } = require('../server/services/agent-dag-cache');
 
@@ -20,26 +21,48 @@ test('DAG 节点级智能缓存契约', async (t) => {
         assert.equal(stableStringify(objA), stableStringify(objB));
     });
 
-    await t.test('computeDagNodeCacheKey 基于入参及依赖生成稳定哈希', () => {
+    await t.test('computeDagNodeCacheKey 基于入参、依赖及授权作用域生成稳定哈希', () => {
         const key1 = computeDagNodeCacheKey({
-            tool: 'llm.generate',
+            tool: 'workflow.template',
             input: { prompt: '总结公文', maxTokens: 100 },
-            dependsOnOutputs: { node_1: { text: '原始内容' } }
+            dependsOnOutputs: { node_1: { text: '原始内容' } },
+            workflowId: 'workflow-1',
+            nodeKey: 'summary',
+            scope: { userId: 7, tenantId: 3, workflowVersionId: 9, toolVersion: '1.0.0', bindingVersionId: 12 }
         });
         const key2 = computeDagNodeCacheKey({
-            tool: 'llm.generate',
+            tool: 'workflow.template',
             input: { maxTokens: 100, prompt: '总结公文' },
-            dependsOnOutputs: { node_1: { text: '原始内容' } }
+            dependsOnOutputs: { node_1: { text: '原始内容' } },
+            workflowId: 'workflow-1',
+            nodeKey: 'summary',
+            scope: { tenantId: 3, userId: 7, toolVersion: '1.0.0', workflowVersionId: 9, bindingVersionId: 12 }
         });
         const keyDiff = computeDagNodeCacheKey({
-            tool: 'llm.generate',
+            tool: 'workflow.template',
             input: { maxTokens: 100, prompt: '修改公文' },
-            dependsOnOutputs: { node_1: { text: '原始内容' } }
+            dependsOnOutputs: { node_1: { text: '原始内容' } },
+            workflowId: 'workflow-1',
+            nodeKey: 'summary',
+            scope: { userId: 7, tenantId: 3, workflowVersionId: 9, toolVersion: '1.0.0', bindingVersionId: 12 }
+        });
+        const differentUser = computeDagNodeCacheKey({
+            tool: 'workflow.template',
+            input: { maxTokens: 100, prompt: '总结公文' },
+            dependsOnOutputs: { node_1: { text: '原始内容' } },
+            workflowId: 'workflow-1',
+            nodeKey: 'summary',
+            scope: { userId: 8, tenantId: 3, workflowVersionId: 9, toolVersion: '1.0.0', bindingVersionId: 12 }
         });
 
         assert.ok(typeof key1 === 'string' && key1.length === 64);
         assert.equal(key1, key2);
         assert.notEqual(key1, keyDiff);
+        assert.notEqual(key1, differentUser);
+        assert.deepEqual(normalizeCacheScope({ user_id: 7, tenant_id: 3, workflow_id: 'workflow-1' }), {
+            userId: '7', tenantId: '3', workflowId: 'workflow-1', workflowVersionId: '', nodeId: '',
+            toolVersion: '', modelId: '', modelName: '', bindingVersionId: '', bindingUpdatedAt: ''
+        });
     });
 
     await t.test('缓存存取与访问统计命中', () => {
@@ -77,20 +100,13 @@ test('DAG 节点级智能缓存契约', async (t) => {
         assert.equal(getCachedNodeOutput('key_a').hit, false);
     });
 
-    await t.test('isCacheableDagTool 准确区分只读分析工具与具副作用工具', () => {
-        assert.equal(isCacheableDagTool('llm.generate'), true);
-        assert.equal(isCacheableDagTool('rag.query'), true);
-        assert.equal(isCacheableDagTool('report.format_markdown_table'), true);
-        assert.equal(isCacheableDagTool('code.python_runner'), true);
-
-        assert.equal(isCacheableDagTool('workflow.approval'), false);
-        assert.equal(isCacheableDagTool('workflow.delay'), false);
-        assert.equal(isCacheableDagTool('workflow.notify'), false);
-        assert.equal(isCacheableDagTool('workflow.foreach'), false);
-        assert.equal(isCacheableDagTool('agent.http'), false);
-        assert.equal(isCacheableDagTool('agent.code'), false);
-        assert.equal(isCacheableDagTool('file.delete_document'), false);
-        assert.equal(isCacheableDagTool('channel.send_email'), false);
+    await t.test('isCacheableDagTool 只接受契约显式允许的无副作用工具', () => {
+        assert.equal(isCacheableDagTool({ name: 'workflow.template', cacheable: true, side_effect: false, approval_required: false }), true);
+        assert.equal(isCacheableDagTool({ name: 'mcp.1.db.insert', cacheable: true, side_effect: true, approval_required: false }), false);
+        assert.equal(isCacheableDagTool({ name: 'agent.http', cacheable: true, side_effect: false, approval_required: true }), false);
+        assert.equal(isCacheableDagTool({ name: 'agent.code', cacheable: true, side_effect: false, approval_required: false, requiresSandbox: true }), false);
+        assert.equal(isCacheableDagTool({ name: 'unknown.tool', side_effect: false, approval_required: false }), false);
+        assert.equal(isCacheableDagTool('rag.search'), false);
     });
 
     await t.test('computeTimelineData 准确计算执行耗时瀑布与慢节点/缓存统计', () => {

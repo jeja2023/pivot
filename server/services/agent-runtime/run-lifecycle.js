@@ -1,3 +1,5 @@
+const { isPersistedDagOutputPartial, resolvePersistedDagOutput } = require('../agent-dag-output');
+
 function createRunLifecycle(deps = {}) {
 const {
     activeRunControllers,
@@ -116,7 +118,7 @@ async function rerunAgentRun(runId, user) {
     return await createChildRunFromExisting(run, user);
 }
 
-async function buildDagResumeSpec(originalRun, startNodeId = '') {
+async function buildDagResumeSpec(originalRun, startNodeId = '', user = null) {
     const metadata = getRunMetadata(originalRun);
     const dagSpec = normalizeDagSpec(metadata.dagSpec || metadata.dag || {});
     if (!dagSpec.nodes.length) return null;
@@ -139,25 +141,68 @@ async function buildDagResumeSpec(originalRun, startNodeId = '') {
             }
         });
     }
+    const hydratedNodes = await Promise.all((dagNodes || []).map(async node => {
+        if (!user || !isPersistedDagOutputPartial(node.output)) return node;
+        const restored = await resolvePersistedDagOutput(node.output, { user });
+        return { ...node, output: restored.value, output_complete: restored.complete };
+    }));
+    const previousById = new Map(hydratedNodes.map(node => [String(node.node_key || ''), node]));
+    const outputIsPartial = output => isPersistedDagOutputPartial(output);
+    const terminalStatuses = new Set(['completed', 'continued_error', 'error', 'skipped']);
+
+    // 如果待重跑节点依赖的上游结果已被截断或没有完成状态，不能把预览当作完整输入；
+    // 将该上游连同它的下游重新纳入范围，直到所有边界输入可安全复用。
+    let expanded = true;
+    while (expanded) {
+        expanded = false;
+        dagSpec.nodes.forEach(node => {
+            if (!include.has(node.id)) return;
+            (node.dependsOn || []).forEach(depId => {
+                if (include.has(depId)) return;
+                const previous = previousById.get(String(depId));
+                const reusable = previous && terminalStatuses.has(previous.status) && !outputIsPartial(previous.output);
+                if (reusable) return;
+                include.add(depId);
+                expanded = true;
+            });
+        });
+        if (expanded) {
+            dagSpec.nodes.forEach(node => {
+                if ((node.dependsOn || []).some(dep => include.has(dep)) && !include.has(node.id)) {
+                    include.add(node.id);
+                    expanded = true;
+                }
+            });
+        }
+    }
+
     const reusable = {};
-    (dagNodes || []).forEach(node => {
-        if (include.has(node.node_key)) return;
-        if (node.status !== 'completed') return;
-        reusable[node.node_key] = {
-            status: node.status,
-            input: node.input,
-            output: node.output,
-            reusedFromRunId: originalRun.id
+    dagSpec.nodes.forEach(node => {
+        if (include.has(node.id)) return;
+        const previous = previousById.get(node.id);
+        if (previous && terminalStatuses.has(previous.status) && !outputIsPartial(previous.output)) {
+            reusable[node.id] = {
+                status: previous.status,
+                input: previous.input,
+                output: previous.output,
+                error: previous.error_message || '',
+                reusedFromRunId: originalRun.id
+            };
+            return;
+        }
+        // 已取消或未完成的旁支在新运行中保持显式跳过，不能重新变回 pending 后被误执行。
+        reusable[node.id] = {
+            status: 'skipped',
+            output: { status: 'skipped', reason: 'rerun_outside_scope' },
+            error: '',
+            skipReason: 'rerun_outside_scope'
         };
     });
-    const nodes = dagSpec.nodes.filter(node => include.has(node.id)).map(node => ({
-        ...node,
-        dependsOn: (node.dependsOn || []).filter(dep => include.has(dep))
-    }));
-    const layout = Object.fromEntries(nodes
-        .filter(node => dagSpec.layout?.[node.id])
-        .map(node => [node.id, dagSpec.layout[node.id]]));
-    return { dagSpec: { nodes, layout }, reusable };
+    return {
+        dagSpec,
+        reusable,
+        rerunNodeIds: [...include]
+    };
 }
 
 async function rerunAgentDagFromNode(runId, user, nodeId = '') {
@@ -173,7 +218,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
         err.status = 400;
         throw err;
     }
-    const resume = await buildDagResumeSpec(run, nodeId);
+    const resume = await buildDagResumeSpec(run, nodeId, user);
     if (!resume || !resume.dagSpec.nodes.length) {
         const err = new Error('没有找到可重用的工作流节点。');
         err.status = 400;
@@ -206,6 +251,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
             ...metadata,
             dagSpec: resume.dagSpec,
             reusedDagNodes: resume.reusable,
+            rerunNodeIds: resume.rerunNodeIds,
             rerunFromRunId: run.id,
             rerunFromNodeId: nodeId || '',
             workflowVersionMode: metadata.workflowVersionMode || ''
@@ -224,7 +270,7 @@ async function resumeAgentRun(runId, user) {
         throw err;
     }
     if (run.run_mode === 'dag') {
-        const dagResume = await buildDagResumeSpec(run);
+        const dagResume = await buildDagResumeSpec(run, '', user);
         if (dagResume?.dagSpec?.nodes?.length) return await rerunAgentDagFromNode(runId, user, '');
     }
     const steps = await listSteps(run.id);

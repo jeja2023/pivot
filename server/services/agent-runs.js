@@ -5,6 +5,7 @@ const {
 const { isSuperAdmin } = require('../permissions');
 const { getAgentTraceForUser } = require('./agent-traces');
 const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
+const { resolvePersistedDagOutput } = require('./agent-dag-output');
 const runRepository = require('../repositories/agent-runs');
 
 async function getRunForUser(runId, user, options = {}) {
@@ -321,6 +322,30 @@ async function listDagNodes(runId) {
     return sortDagNodesByDependencies(nodes || []);
 }
 
+async function listWorkflowInvocationsForUser(runId, user) {
+    const run = await getRunForUser(runId, user);
+    if (!run || String(run.run_mode || '') !== 'dag') return null;
+    return await runRepository.listWorkflowInvocations(run.id);
+}
+
+async function getDagNodeCompleteOutputForUser(runId, nodeId, user) {
+    const run = await getRunForUser(runId, user);
+    if (!run || String(run.run_mode || '') !== 'dag') return null;
+    const nodeKey = String(nodeId || '').trim();
+    if (!nodeKey) return null;
+    const node = (await listDagNodes(run.id)).find(item => String(item.node_key || '') === nodeKey);
+    if (!node) return null;
+    const resolved = await resolvePersistedDagOutput(node.output, { user });
+    return {
+        nodeId: node.node_key,
+        status: node.status,
+        complete: resolved.complete,
+        source: resolved.source,
+        output: resolved.value,
+        outputRef: String(node.output?.outputRef || '').trim() || null
+    };
+}
+
 function getRunProgress(run, steps = []) {
     const maxSteps = normalizeMaxSteps(run?.max_steps, run?.run_mode);
     const planCount = steps.filter(step => step.type === 'plan').length;
@@ -347,9 +372,10 @@ function getRunProgress(run, steps = []) {
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const [steps, dagNodes, trace, checkpoints] = await Promise.all([
+    const [steps, dagNodes, invocations, trace, checkpoints] = await Promise.all([
         listSteps(run.id),
         listDagNodes(run.id),
+        listWorkflowInvocationsForUser(run.id, user),
         getAgentTraceForUser(run.id, user),
         summarizeAgentCheckpoints(run.id)
     ]);
@@ -379,6 +405,7 @@ async function getRunDetailForUser(runId, user) {
         run,
         steps: steps || [],
         dagNodes: effectiveDagNodes,
+        invocations: invocations || [],
         progress: getRunProgress(run, steps || []),
         trace,
         checkpoints
@@ -393,10 +420,12 @@ async function updateAgentRunTitleAndGoalForUser(runId, user, payload = {}) {
 
 module.exports = {
     createWorkflowDraftFromRun,
+    getDagNodeCompleteOutputForUser,
     getRunDetailForUser,
     getRunForUser,
     getRunProgress,
     listDagNodes,
+    listWorkflowInvocationsForUser,
     listDeletedRunsForAdmin,
     listRuns,
     sortDagNodesByDependencies,

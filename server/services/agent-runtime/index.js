@@ -128,6 +128,11 @@ const {
     releaseChildRunReservation
 } = require('../agent-run-resources');
 const {
+    acquireRunConcurrencyLease,
+    releaseRunConcurrencyLease,
+    renewRunConcurrencyLease
+} = require('../agent-run-concurrency-leases');
+const {
     configureAgentApprovalRequests,
     runApprovalTimeouts,
     waitForWorkflowApproval,
@@ -231,7 +236,15 @@ function getAgentQueue() {
             getRunUser,
             runAgent,
             markRunError,
-            getTimestamp: getBeijingTimestamp
+            getTimestamp: getBeijingTimestamp,
+            acquireRunConcurrencyLease,
+            renewRunConcurrencyLease,
+            releaseRunConcurrencyLease,
+            onRunLeaseLost: (runId, reason) => {
+                const error = new Error(`任务执行租约已失效：${reason || 'unknown'}。`);
+                error.code = 'AGENT_RUN_LEASE_LOST';
+                activeRunControllers.get(runId)?.abort(error);
+            }
         });
     }
     return agentQueue;
@@ -341,7 +354,7 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         agentToolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
         dagNodeConcurrency: getAgentDagNodeConcurrency(),
         logger,
-        assertRunNotCancelled,
+        assertRunNotCancelled: assertRunCanContinue,
         createAgentNotification,
         getAgentRunTitle,
         getRunMetadata,
@@ -371,14 +384,7 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
 const { runAgent } = createAgentRunner({
     activeRunControllers,
     taskBudgetsBySignal,
-    assertRunNotCancelled: runId => {
-        const controller = activeRunControllers.get(runId);
-        if (controller?.signal?.aborted !== true) return;
-        if (controller.signal.reason instanceof Error) throw controller.signal.reason;
-        const error = new Error('任务已停止。');
-        error.code = 'AGENT_RUN_CANCELLED';
-        throw error;
-    },
+    assertRunNotCancelled: assertRunCanContinue,
     isRunCancelled: runId => activeRunControllers.get(runId)?.signal?.aborted === true,
     assertRunUserActive,
     AGENT_DEFAULT_TIMEOUT_MS,
@@ -459,6 +465,7 @@ const { runAgent } = createAgentRunner({
     finishAgentTraceSpan,
     syncAgentTraceFromRun,
     TERMINAL_STATUSES,
+    instanceId: AGENT_INSTANCE_ID,
     logger,
     getBeijingTimestamp,
     crypto
@@ -693,6 +700,27 @@ const {
     resumeAgentRun,
     softDeleteAgentRun
 } = lifecycle;
+
+/**
+ * 执行边界同时检查本地取消信号与持久化运行归属：其他实例取消或接管后，
+ * 当前执行器必须停止提交结果。数据库检查只作为边界确认，不替代本地信号。
+ */
+async function assertRunCanContinue(runId) {
+    assertRunNotCancelled(runId);
+    const row = await queryOne('SELECT status, locked_by FROM agent_runs WHERE id = ?', [runId]);
+    if (!row || ['cancelled', 'deleted'].includes(String(row.status || ''))) {
+        const error = new Error('任务已停止。');
+        error.code = 'AGENT_RUN_CANCELLED';
+        activeRunControllers.get(runId)?.abort(error);
+        throw error;
+    }
+    if (row.locked_by && String(row.locked_by) !== String(AGENT_INSTANCE_ID)) {
+        const error = new Error('任务执行租约已由其他实例接管。');
+        error.code = 'AGENT_RUN_LEASE_LOST';
+        activeRunControllers.get(runId)?.abort(error);
+        throw error;
+    }
+}
 
 configureAgentSchedules({
     createAgentRun,

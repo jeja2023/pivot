@@ -45,6 +45,7 @@
                 <div class="mcp-tab-pane hidden" data-mcp-pane="credentials">
                     <div class="mcp-list-wrap">
                         <div id="mcp-security-credentials" class="mcp-server-list"></div>
+                        <div id="mcp-api-operations" class="mcp-server-list"></div>
                         <div id="mcp-notifications-extensions" class="mcp-server-list"></div>
                     </div>
                 </div>
@@ -205,6 +206,32 @@
                 <button id="mcp-edit-test-im-btn" class="btn-secondary hidden" type="button">测试发送</button>
                 <button id="mcp-edit-save-btn" class="btn-primary" type="button">保存修改</button>
                 <button id="mcp-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="mcp-api-import-modal" class="modal-overlay hidden mcp-api-import-modal" aria-hidden="true">
+    <div class="modal mcp-edit-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-api-import-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-api-import-title">导入 API 操作</h3>
+                <p>仅导入 OpenAPI 3 JSON 中的内联 HTTP 操作。导入不发送请求；运行时仍受网络、凭据和审批策略控制。</p>
+            </div>
+            <button id="mcp-api-import-close-btn" class="btn-secondary workspace-modal-close" type="button">关闭</button>
+        </div>
+        <div class="mcp-edit-form">
+            <textarea id="mcp-api-import-document" class="form-input mcp-code-editor" rows="12" placeholder='粘贴 OpenAPI 3 JSON 文档，例如 {"openapi":"3.0.3", ...}' aria-label="OpenAPI JSON 文档"></textarea>
+            <input id="mcp-api-import-base-url" class="form-input" type="url" placeholder="可选：覆盖文档中的首个服务地址" aria-label="API 服务地址覆盖">
+            <div class="mcp-form-row">
+                <input id="mcp-api-import-credential-slug" class="form-input" placeholder="可选：已有凭据引用，例如 ERP_API_KEY" aria-label="凭据引用名">
+                <input id="mcp-api-import-credential-header" class="form-input" value="Authorization" placeholder="凭据请求头，默认 Authorization" aria-label="凭据请求头">
+            </div>
+            <input id="mcp-api-import-credential-prefix" class="form-input" value="Bearer " placeholder="凭据前缀，默认 Bearer 空格" aria-label="凭据前缀">
+            <div id="mcp-api-import-result" class="mcp-diagnostics-panel" aria-live="polite"></div>
+            <div class="mcp-edit-actions">
+                <button id="mcp-api-import-submit-btn" class="btn-primary" type="button">导入操作</button>
+                <button id="mcp-api-import-cancel-btn" class="btn-secondary" type="button">取消</button>
             </div>
         </div>
     </div>

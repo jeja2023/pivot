@@ -54,9 +54,13 @@ const maintenanceState = {
         lastAttachmentRows: 0,
         lastKnowledgeDocRows: 0,
         lastMessageRows: 0,
+        lastDagNodeRows: 0,
+        lastExpiredDagOutputObjects: 0,
         totalAttachmentRows: 0,
         totalKnowledgeDocRows: 0,
         totalMessageRows: 0,
+        totalDagNodeRows: 0,
+        totalExpiredDagOutputObjects: 0,
         retentionDays: 30
     },
     optimize: {
@@ -306,14 +310,18 @@ async function cleanupSoftDeletedStorageJob(days = getStorageGcRetentionDays()) 
         maintenanceState.storageGc.lastAttachmentRows = result.attachmentRows;
         maintenanceState.storageGc.lastKnowledgeDocRows = result.knowledgeDocRows;
         maintenanceState.storageGc.lastMessageRows = result.messageRows;
+        maintenanceState.storageGc.lastDagNodeRows = result.dagNodeRows || 0;
+        maintenanceState.storageGc.lastExpiredDagOutputObjects = result.expiredDagOutputObjects || 0;
         maintenanceState.storageGc.totalAttachmentRows += result.attachmentRows;
         maintenanceState.storageGc.totalKnowledgeDocRows += result.knowledgeDocRows;
         maintenanceState.storageGc.totalMessageRows += result.messageRows;
+        maintenanceState.storageGc.totalDagNodeRows += result.dagNodeRows || 0;
+        maintenanceState.storageGc.totalExpiredDagOutputObjects += result.expiredDagOutputObjects || 0;
         return result;
     } catch (e) {
         maintenanceState.storageGc.lastError = e.message;
         logger.error({ err: e.message }, '软删除存储清理失败');
-        return { retentionDays: days, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0 };
+        return { retentionDays: days, attachmentRows: 0, knowledgeDocRows: 0, messageRows: 0, dagNodeRows: 0, expiredDagOutputObjects: 0 };
     }
 }
 

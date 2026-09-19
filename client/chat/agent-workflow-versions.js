@@ -87,6 +87,15 @@ function agentWorkflowDiffMarkup(diff) {
             </details>
         </div>
     `).join('');
+    const renderWorkflowChanges = (items) => items.map(item => `
+        <div class="agent-workflow-diff-row changed">
+            <strong>${agentEscape(item.label || '工作流设置')}</strong>
+            <details>
+                <summary>查看前后配置</summary>
+                <pre>${agentEscape(JSON.stringify({ before: item.before, after: item.after }, null, 2))}</pre>
+            </details>
+        </div>
+    `).join('');
     const hasDiff = Number(summary.added || 0) || Number(summary.removed || 0) || Number(summary.changed || 0);
     if (!hasDiff) {
         return `
@@ -104,6 +113,7 @@ function agentWorkflowDiffMarkup(diff) {
             ${diff.added?.length ? `<h4>新增节点</h4>${renderSimple(diff.added, 'added')}` : ''}
             ${diff.removed?.length ? `<h4>删除节点</h4>${renderSimple(diff.removed, 'removed')}` : ''}
             ${diff.changed?.length ? `<h4>修改节点</h4>${renderChanged(diff.changed)}` : ''}
+            ${diff.workflowChanges?.length ? `<h4>工作流设置</h4>${renderWorkflowChanges(diff.workflowChanges)}` : ''}
         </section>
     `;
 }

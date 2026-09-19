@@ -62,6 +62,7 @@ const agentToolDisplayMap = {
     'workflow.approval': { title: '人工审批', description: '暂停工作流等待指定人员审批，支持多级审批与超时策略。' },
     'workflow.foreach': { title: '循环 / 批处理', description: '需要独立受控 Worker 沙箱；服务端不会直接执行循环代码。' },
     'workflow.subworkflow': { title: '子工作流', description: '调用另一个已发布工作流。' },
+    'workflow.iteration': { title: '逐项调用子工作流', description: '对数组中的每一项调用已发布子工作流。' },
     'workflow.delay': { title: '延时等待', description: '挂起工作流到指定时间后继续执行。' },
     'workflow.embed_page': { title: '嵌入页面', description: '在工作流结果中展示受限页面嵌入。' },
     'workflow.embed_image': { title: '嵌入图片', description: '在工作流结果中展示图片资源。' },

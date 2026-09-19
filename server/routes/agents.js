@@ -8,10 +8,12 @@ const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
 const {
     createWorkflowDraftFromRun,
+    getDagNodeCompleteOutputForUser,
     getRunDetailForUser,
     listDeletedRunsForAdmin,
     listRuns,
     listSteps,
+    listWorkflowInvocationsForUser,
     updateAgentRunTitleAndGoalForUser
 } = require('../services/agent-runs');
 const { preflightAgentRun } = require('../services/agent-preflight');
@@ -50,6 +52,7 @@ const {
     updateAgentEvalSuite
 } = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
+const { registerAgentApiOperationRoutes } = require('./agent-api-operations');
 const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
 const { recordAgentFeedback } = require('../services/agent-feedback');
 const { createSkillVersion } = require('../services/agent-releases');
@@ -134,6 +137,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
     router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ tools: await formatToolList(req.user) });
     }));
+
+    registerAgentApiOperationRoutes(router, { authMiddleware, automationGuard, logAction });
 
     router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: await listAgentSkillsForUser(req.user, { includeDisabled: req.query.includeDisabled === 'true' }) });
@@ -740,6 +745,18 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         const detail = await getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
+    }));
+
+    router.get('/agents/runs/:id/dag/nodes/:nodeId/output', authMiddleware, asyncHandler(async (req, res) => {
+        const output = await getDagNodeCompleteOutputForUser(req.params.id, req.params.nodeId, req.user);
+        if (!output) return res.status(404).json({ error: '工作流节点不存在或无权访问。' });
+        res.json({ success: true, ...output });
+    }));
+
+    router.get('/agents/runs/:id/invocations', authMiddleware, asyncHandler(async (req, res) => {
+        const invocations = await listWorkflowInvocationsForUser(req.params.id, req.user);
+        if (invocations === null) return res.status(404).json({ error: '工作流任务不存在或无权访问。' });
+        res.json({ success: true, data: invocations });
     }));
 
     router.get('/agents/runs/:id/trace', authMiddleware, asyncHandler(async (req, res) => {

@@ -444,7 +444,7 @@ async function expireOverdueObjects(options = {}) {
     const candidates = await query(`
         SELECT id, storage_key
         FROM agent_artifact_objects
-        WHERE expires_at IS NOT NULL AND expires_at <= ? AND kind <> ? AND storage_key <> ''
+        WHERE expires_at IS NOT NULL AND expires_at <= ? AND ref_count <= 0 AND kind <> ? AND storage_key <> ''
         ORDER BY expires_at ASC
         LIMIT ?
     `, [now, KIND_EXPIRED, limit]);
@@ -453,7 +453,7 @@ async function expireOverdueObjects(options = {}) {
         const updated = await execute(`
             UPDATE agent_artifact_objects
             SET storage_key = '', kind = ?
-            WHERE id = ? AND kind <> ?
+            WHERE id = ? AND ref_count <= 0 AND kind <> ?
         `, [KIND_EXPIRED, candidate.id, KIND_EXPIRED]);
         if (!updated) continue;
         expired += 1;

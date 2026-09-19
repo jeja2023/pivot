@@ -27,7 +27,11 @@ const state = {
     deliveryIntentTotal: createLabeledCounter(),
     deliveryDigestMismatchTotal: 0,
     deliveryOverwriteTotal: 0,
-    sandboxLimitHitTotal: createLabeledCounter()
+    sandboxLimitHitTotal: createLabeledCounter(),
+    dagNodeTotal: createLabeledCounter(),
+    dagCacheTotal: createLabeledCounter(),
+    workflowInvocationTotal: createLabeledCounter(),
+    workflowIterationItemTotal: createLabeledCounter()
 };
 
 function normalizeLabel(value, fallback = 'unknown') {
@@ -111,6 +115,22 @@ function recordSandboxLimitHit(kind = 'unknown') {
     bump(state.sandboxLimitHitTotal, kind);
 }
 
+function recordDagNodeResult({ tool = 'unknown', status = 'unknown' } = {}) {
+    bump(state.dagNodeTotal, `${normalizeLabel(tool)}|${normalizeLabel(status)}`);
+}
+
+function recordDagCacheResult(result = 'miss') {
+    bump(state.dagCacheTotal, result);
+}
+
+function recordWorkflowInvocationResult({ status = 'unknown' } = {}) {
+    bump(state.workflowInvocationTotal, status);
+}
+
+function recordWorkflowIterationItemResult({ status = 'unknown' } = {}) {
+    bump(state.workflowIterationItemTotal, status);
+}
+
 function counterToObject(counter) {
     return Object.fromEntries([...counter.entries()]);
 }
@@ -140,6 +160,12 @@ function getAgentGovernanceMetricsSnapshot() {
         },
         sandbox: {
             limitHitTotal: counterToObject(state.sandboxLimitHitTotal)
+        },
+        workflow: {
+            dagNodeTotal: counterToObject(state.dagNodeTotal),
+            cacheTotal: counterToObject(state.dagCacheTotal),
+            invocationTotal: counterToObject(state.workflowInvocationTotal),
+            iterationItemTotal: counterToObject(state.workflowIterationItemTotal)
         }
     };
 }
@@ -160,6 +186,10 @@ function resetAgentGovernanceMetrics() {
     state.deliveryDigestMismatchTotal = 0;
     state.deliveryOverwriteTotal = 0;
     state.sandboxLimitHitTotal.clear();
+    state.dagNodeTotal.clear();
+    state.dagCacheTotal.clear();
+    state.workflowInvocationTotal.clear();
+    state.workflowIterationItemTotal.clear();
 }
 
 module.exports = {
@@ -167,11 +197,15 @@ module.exports = {
     recordDeliveryDigestMismatch,
     recordDeliveryIntentState,
     recordDeliveryOverwrite,
+    recordDagCacheResult,
+    recordDagNodeResult,
     recordFontSelfcheckFailure,
     recordLegacyUnrestrictedHit,
     recordPolicyDecision,
     recordRenderResult,
     recordSandboxLimitHit,
     recordSkillReleaseResolveMiss,
+    recordWorkflowInvocationResult,
+    recordWorkflowIterationItemResult,
     resetAgentGovernanceMetrics
 };

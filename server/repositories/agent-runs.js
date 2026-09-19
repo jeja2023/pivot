@@ -244,7 +244,7 @@ async function listDagNodes(runId) {
     // condition 在 PG 中是关键字，需加引号；SQLite 同样接受双引号标识符
     const nodes = await query(`
         SELECT id, run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, "condition", status,
-               output, error_message, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
+               output, reused_from_run_id, error_message, error_info, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
         FROM agent_dag_nodes
         WHERE run_id = ?
         ORDER BY id ASC
@@ -255,8 +255,24 @@ async function listDagNodes(runId) {
         input_schema: parseJsonObject(node.input_schema) || {},
         output_schema: parseJsonObject(node.output_schema) || {},
         depends_on: parseJsonObject(node.depends_on) || [],
+        error_info: parseJsonObject(node.error_info) || {},
         contract_issues: parseJsonObject(node.contract_issues) || [],
         output: parseJsonObject(node.output) || node.output
+    }));
+}
+
+async function listWorkflowInvocations(runId) {
+    const rows = await query(`
+        SELECT invocation_id, run_id, parent_invocation_id, caller_node_key, workflow_id, workflow_version_id, workflow_version,
+               invocation_path, status, input_json, output_json, error_message, created_at, updated_at, completed_at
+        FROM agent_workflow_invocations
+        WHERE run_id = ?
+        ORDER BY created_at ASC, invocation_path ASC
+    `, [runId]);
+    return rows.map(row => ({
+        ...row,
+        input_json: parseJsonObject(row.input_json) || {},
+        output_json: parseJsonObject(row.output_json) || row.output_json || null
     }));
 }
 
@@ -281,5 +297,6 @@ module.exports = {
     listRuns,
     listDeletedRunsForAdmin,
     listSteps,
-    listDagNodes
+    listDagNodes,
+    listWorkflowInvocations
 };

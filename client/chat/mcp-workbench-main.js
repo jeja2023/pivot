@@ -184,6 +184,7 @@ function renderMcpDataManagementPanel(summary = {}) {
         </div>
     `;
 }
+
 async function openMcpDataAnalysisImport(options = {}) {
     try {
         const payload = typeof options === 'string'
@@ -207,21 +208,18 @@ async function openMcpDataAnalysisImport(options = {}) {
 }
 
 async function loadMcpServers() {
-    const dataSourcesBox = document.getElementById('mcp-data-sources');
-    const notificationsBox = document.getElementById('mcp-notifications-extensions');
-    const list = document.getElementById('mcp-server-list');
-    if (!dataSourcesBox && !notificationsBox && !list) return;
+    const dataSourcesBox = document.getElementById('mcp-data-sources'), notificationsBox = document.getElementById('mcp-notifications-extensions');
+    const apiOperationsBox = document.getElementById('mcp-api-operations'), list = document.getElementById('mcp-server-list');
+    if (!dataSourcesBox && !notificationsBox && !apiOperationsBox && !list) return;
 
     const [serverResponse, datasetSummary, localAuthorizationStatus] = await Promise.all([
         apiFetch(`${API_BASE}/mcp/servers`),
         loadMcpDatasetSummary(),
         window.Pivot.legacy.getMcpLocalAuthorizationStatus?.({ silent: true }) || Promise.resolve(null)
     ]);
-    const data = await serverResponse.json().catch(() => ({}));
-    if (!serverResponse.ok) throw new Error(data.error || '工具服务加载失败');
+    const data = await serverResponse.json().catch(() => ({})); if (!serverResponse.ok) throw new Error(data.error || '工具服务加载失败');
     mcpServersCache = data.data || [];
-    const systemTypes = new Set(mcpSystemServices.map(item => item.type));
-    const personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
+    const systemTypes = new Set(mcpSystemServices.map(item => item.type)), personalBuiltinTypes = new Set(mcpPersonalBuiltinServices.map(item => item.type));
     const userManagedServers = mcpServersCache.filter(server => !systemTypes.has(server.server_type));
     const workbenchServers = userManagedServers.filter(mcpShouldShowAsWorkbenchServer);
     const otherUserServers = userManagedServers.filter(mcpIsOtherUserServer);
@@ -303,6 +301,7 @@ async function loadMcpServers() {
     if (dataSourcesBox && notificationsBox) {
         PivotSafeHtml.setHtml(dataSourcesBox, renderMcpSection('数据来源', '先判断数据由服务器、上传文件还是我的电脑提供，再交给下游工具处理。', dataSourceCards, { beforeGridHtml: dataSourceActions }));
         PivotSafeHtml.setHtml(notificationsBox, renderMcpSection('通知与扩展', '把结果发到授权目标，或接入技术同事提供的外部工具服务。', governanceCards, { emptyText: '配置消息通知或外部工具服务后可在任务和工作流中复用。' }));
+        await window.Pivot?.moduleApi?.('mcp.apiOperations')?.loadAndRender?.(apiOperationsBox, loadMcpServers);
     } else if (list) {
         PivotSafeHtml.setHtml(list, `
             ${renderMcpSection('数据来源', '先判断数据由服务器、上传文件还是我的电脑提供，再交给下游工具处理。', dataSourceCards, { beforeGridHtml: dataSourceActions })}
@@ -1316,6 +1315,7 @@ window.Pivot?.exposeModule?.('mcp.workbench', {
     fillMcpToolSampleInput,
     loadMcpGovernance,
     openMcpDataAnalysisImport,
+    openMcpApiImportModal: (...args) => window.Pivot?.moduleApi?.('mcp.apiOperations')?.openModal?.(...args),
     openMcpShareModal,
     openMcpToolTestModal,
     refreshMcpWorkbench,

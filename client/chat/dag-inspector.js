@@ -10,11 +10,13 @@ function createDagInspectorController(ctx) {
     const renderInputSummary = (...args) => ctx.renderInputSummary?.(...args) || '';
     const getUpstreamNodes = (...args) => ctx.getUpstreamNodes?.(...args) || [];
     const getRunStates = () => ctx.getRunStates?.() || new Map();
+    const getNodeTestOutputSnapshots = () => ctx.getNodeTestOutputSnapshots?.() || new Map();
     const getReadinessIssues = () => ctx.getReadinessIssues?.() || [];
-    const getDagInputs = () => ctx.getDagInputs?.() || {};
     const showDagToast = (...args) => ctx.showToast?.(...args);
     const showVariablePicker = (...args) => ctx.showVariablePicker?.(...args);
     const setDagNodeTestOutput = (...args) => ctx.setDagNodeTestOutput?.(...args);
+    const setDagNodeTestOverride = (...args) => ctx.setDagNodeTestOverride?.(...args);
+    const resetDagNodeTestOverride = (...args) => ctx.resetDagNodeTestOverride?.(...args);
     const imAllowedTargets = new Map();
     const snapshotValue = (value, depth = 0) => {
         if (depth > 5) return '[已省略深层字段]';
@@ -29,6 +31,11 @@ function createDagInspectorController(ctx) {
         ]));
         return String(value).slice(0, 4000);
     };
+    const testControls = window.Pivot?.moduleApi?.('agent.dagInspectorTesting')?.createDagNodeTestController?.({
+        inspector, ctx, getUpstreamNodes, getRunStates, getNodeTestOutputSnapshots,
+        setDagNodeTestOutput, setDagNodeTestOverride, resetDagNodeTestOverride,
+        snapshotValue, currentTools, resolveToolForNode, showDagToast, apiBase: API_BASE
+    });
     const quickFieldGroups = {
         'workflow.input': ['name', 'label', 'defaultValue'],
         'agent.llm': ['model', 'prompt'],
@@ -117,66 +124,6 @@ function createDagInspectorController(ctx) {
             ? `<div class="pivot-dag-inline-hint is-warning">检测到 ${missingDeps.length} 个未声明的数据依赖：${missingDeps.join('、')}。可在“上游节点”中勾选，或点击下方按钮。</div><button type="button" class="btn-secondary pivot-dag-add-referenced-deps" data-pivot-dag-add-referenced-deps>添加引用依赖</button>`
             : '';
         return `<section class="pivot-dag-inline-edit"><div class="pivot-dag-inline-edit-head"><strong>常用参数</strong><span>可直接编辑，复杂配置仍可打开向导</span></div><div class="pivot-dag-inline-edit-grid">${fields.map(renderControl).join('')}</div>${imTargetsMarkup}${hint}</section>`;
-    };
-    const testNode = async (node) => {
-        const button = inspector.querySelector('[data-pivot-dag-test-node]');
-        const result = inspector.querySelector('[data-pivot-dag-test-result]');
-        if (!node?.tool || !button || !result) return;
-        button.disabled = true;
-        button.textContent = '测试中…';
-        result.hidden = false;
-        result.className = 'pivot-dag-test-result is-running';
-        result.textContent = '正在执行当前节点…';
-        // 收集所有拓扑上游节点最新运行快照
-        const upstreamNodes = getUpstreamNodes(ctx.spec?.nodes || [], node.id);
-        const runStates = getRunStates();
-        const upstreamStates = [];
-        upstreamNodes.forEach(up => {
-            const state = runStates.get(up.id);
-            if (state && state.output !== undefined) {
-                upstreamStates.push([up.id, { output: state.output, status: state.status || 'completed' }]);
-            }
-        });
-        const upstreamContext = {
-            goal: String(getDagInputs()?.goal || ''),
-            nodes: ctx.spec?.nodes || [],
-            states: upstreamStates
-        };
-        try {
-            const response = await apiFetch(`${API_BASE}/agents/tools/test`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tool: node.tool,
-                    input: node.input || {},
-                    dagInputs: getDagInputs(),
-                    upstreamContext
-                })
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || '节点测试失败');
-            result.className = 'pivot-dag-test-result is-success';
-            if (typeof window !== 'undefined') {
-                if (typeof setDagNodeTestOutput === 'function') setDagNodeTestOutput(String(node.id), {
-                    output: snapshotValue(data.output),
-                    resolvedInput: snapshotValue(data.resolvedInput || node.input || {}),
-                    createdAt: Date.now(),
-                    expiresAt: Date.now() + 15 * 60 * 1000,
-                    source: 'test'
-                });
-            }
-            const snapshotNotice = upstreamStates.length ? ` · 已注入 ${upstreamStates.length} 个上游运行快照` : '';
-            const resolvedInfo = data.resolvedInput && JSON.stringify(data.resolvedInput) !== JSON.stringify(node.input || {})
-                ? `\n[解析后入参]:\n${JSON.stringify(data.resolvedInput, null, 2)}\n\n[输出结果]:\n`
-                : '\n';
-            result.textContent = `节点执行完成 · 耗时 ${data.durationMs || 0} 毫秒${snapshotNotice}${resolvedInfo}${JSON.stringify(data.output, null, 2)}`;
-        } catch (error) {
-            result.className = 'pivot-dag-test-result is-error';
-            result.textContent = error.message || '节点测试失败';
-        } finally {
-            button.disabled = false;
-            button.textContent = '测试节点';
-        }
     };
     const schemaSummary = (schema = {}) => {
         const value = schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
@@ -832,6 +779,7 @@ function createDagInspectorController(ctx) {
         notifySelectionChange(node);
         const tools = currentTools();
         const selectedTool = resolveToolForNode(tools, node.tool);
+        const nodeTestSnapshot = getNodeTestOutputSnapshots().get(String(node.id));
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
         const nodeReadinessIssues = getReadinessIssues().filter(issue => String(issue?.nodeId || '') === String(node.id));
@@ -868,6 +816,12 @@ function createDagInspectorController(ctx) {
                         <option value="always" ${node.condition === 'always' ? 'selected' : ''}>始终执行</option>
                     </select>
                 </label>
+                ${node.dependsOn.length >= 2 ? `<label><span>汇聚方式</span>
+                    <select class="form-input" data-pivot-dag-field="joinMode">
+                        <option value="all" ${node.joinMode !== 'any_active' ? 'selected' : ''}>所有上游满足条件</option>
+                        <option value="any_active" ${node.joinMode === 'any_active' ? 'selected' : ''}>任一激活分支满足条件</option>
+                    </select>
+                </label>` : ''}
             </div>
             ${renderWhenPanel(node)}
             ${renderSelectedToolMeta(selectedTool)}
@@ -880,12 +834,14 @@ function createDagInspectorController(ctx) {
                         <select data-pivot-dag-field="onError">
                             <option value="skip_dependents" ${node.onError === 'skip_dependents' ? 'selected' : ''}>跳过后续步骤</option>
                             <option value="continue" ${node.onError === 'continue' ? 'selected' : ''}>继续执行其他步骤</option>
+                            <option value="fallback" ${node.onError === 'fallback' ? 'selected' : ''}>使用契约化兜底输出</option>
                             <option value="stop" ${node.onError === 'stop' ? 'selected' : ''}>停止整个工作流</option>
                         </select>
                     </label>
                     <label><span>自动重试</span><input type="number" min="0" max="5" data-pivot-dag-field="retryLimit" value="${Number(node.retryLimit || 0)}" placeholder="0" title="失败后自动重试次数，0 表示不重试，最多 5 次"></label>
                     <label><span>单步最长等待（秒）</span><input type="number" min="0" max="600" step="1" data-pivot-dag-field="timeoutSeconds" value="${node.timeoutMs ? Math.round(Number(node.timeoutMs) / 1000) : 0}" placeholder="自动"></label>
                 </div>
+                ${node.onError === 'fallback' ? `<label class="pivot-dag-inspector-json-field"><span>兜底输出（JSON，必须满足输出契约）</span><textarea class="form-input" data-pivot-dag-field="fallbackOutput" spellcheck="false" placeholder='例如：{"status":"unavailable"}'>${dagEscapeHtml(JSON.stringify(node.fallbackOutput, null, 2) || '')}</textarea></label>` : ''}
             </details>
             <details class="pivot-dag-contract-panel">
                 <summary class="pivot-dag-contract-panel-head">
@@ -937,6 +893,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
                 </div>
                 <pre class="pivot-dag-test-result" data-pivot-dag-test-result hidden></pre>
+                ${testControls?.renderMarkup?.(nodeTestSnapshot) || ''}
             </div>
         `);
         if (ctx.readOnly) {
@@ -1016,7 +973,7 @@ function createDagInspectorController(ctx) {
                 });
             }
         });
-        inspector.querySelector('[data-pivot-dag-test-node]')?.addEventListener('click', () => testNode(node));
+        testControls?.bind?.(node);
         inspector.querySelectorAll('[data-pivot-dag-input-field]').forEach(input => {
             const commitInput = ({ rerender = false } = {}) => {
                 const key = input.dataset.pivotDagInputField;
@@ -1208,9 +1165,22 @@ function createDagInspectorController(ctx) {
         } else if (field === 'condition') {
             ctx.recordHistory?.();
             node.condition = ['always', 'success', 'failure'].includes(input.value) ? input.value : 'success';
+        } else if (field === 'joinMode') {
+            ctx.recordHistory?.();
+            node.joinMode = input.value === 'any_active' ? 'any_active' : 'all';
         } else if (field === 'onError') {
             ctx.recordHistory?.();
-            node.onError = ['skip_dependents', 'continue', 'stop'].includes(input.value) ? input.value : 'skip_dependents';
+            node.onError = ['skip_dependents', 'continue', 'fallback', 'stop'].includes(input.value) ? input.value : 'skip_dependents';
+        } else if (field === 'fallbackOutput') {
+            try {
+                const parsed = JSON.parse(input.value || 'null');
+                ctx.recordHistory?.();
+                node.fallbackOutput = parsed;
+                input.classList.remove('is-invalid');
+            } catch (e) {
+                input.classList.add('is-invalid');
+                return;
+            }
         } else if (field === 'retryLimit') {
             ctx.recordHistory?.();
             node.retryLimit = Math.max(0, Math.min(Number.parseInt(input.value, 10) || 0, 5));

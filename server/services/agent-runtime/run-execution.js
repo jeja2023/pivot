@@ -1,4 +1,5 @@
 const { sanitizeUserVisibleText } = require('../../llm');
+const { requeueAgentRunAfterLeaseLoss } = require('./lease-loss');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -79,6 +80,7 @@ const {
     finishAgentTraceSpan,
     syncAgentTraceFromRun,
     TERMINAL_STATUSES,
+    instanceId = '',
     logger,
     getBeijingTimestamp,
 } = deps;
@@ -164,6 +166,7 @@ const {
     let runForSummary = null;
     let modelCfgForSummary = null;
     let observations = [];
+    let lostExecutionLease = false;
     try {
         await assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
@@ -175,7 +178,7 @@ const {
             modelRouter: run.model_router,
             approvalPolicy: run.approval_policy
         });
-        assertRunNotCancelled(runId);
+        await assertRunNotCancelled(runId);
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
         const budgetConfig = parseJsonObject(run.budget_config) || {};
         const effectiveBudgetConfig = { ...budgetConfig };
@@ -338,7 +341,7 @@ const {
         if (toolList.length === 0) {
             throw new Error('没有可用工具符合当前任务配置。');
         }
-        assertRunNotCancelled(runId);
+        await assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
         await updateRun(runId, {
             status: 'planning',
@@ -348,7 +351,7 @@ const {
         });
 
         if (dagRun) {
-            assertRunNotCancelled(runId);
+            await assertRunNotCancelled(runId);
             await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
             await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps(runController.signal));
             return;
@@ -404,7 +407,7 @@ const {
             taskBudget.consumeStep();
             await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
             assertRunWithinBudget();
-            assertRunNotCancelled(runId);
+            await assertRunNotCancelled(runId);
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const controlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
             if (controlMessages.length) {
@@ -553,7 +556,7 @@ const {
                 allowBudgetExceeded: true
             });
             if (!plannedUsageResult?.budgetExceeded) assertRunWithinBudget();
-            assertRunNotCancelled(runId);
+            await assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
             await insertStep(runId, step, {
                 type: 'plan',
@@ -627,7 +630,7 @@ const {
             try {
                 await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
                 await assertRunUserActive(user);
-                assertRunNotCancelled(runId);
+                await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = findAgentToolByName(plan.tool, toolList);
@@ -655,7 +658,7 @@ const {
                     `执行工具：${plan.tool}`,
                     { signal: runController.signal }
                 );
-                assertRunNotCancelled(runId);
+                await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 const compactOutput = compactToolOutputForModel(output, modelCfg);
                 await updateRun(runId, { status: 'observing', updated_at: getBeijingTimestamp() });
@@ -761,7 +764,7 @@ const {
             }
         }
 
-        assertRunNotCancelled(runId);
+        await assertRunNotCancelled(runId);
         assertRunWithinBudget();
         if (!stopReason && lastExecutedStep >= sliceEndStep) {
             const stepLimitError = Object.assign(new Error(`当前时间片已执行 ${maxSteps} 轮`), { code: 'AGENT_STEP_LIMIT' });
@@ -839,7 +842,7 @@ const {
                 }
             }
         }
-        assertRunNotCancelled(runId);
+        await assertRunNotCancelled(runId);
         answer = `注意：${limitMessage}\n\n${answer}`;
         await updateRun(runId, {
             status: 'completed_with_errors',
@@ -851,8 +854,15 @@ const {
         });
         await createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
     } catch (e) {
+        if (e.code === 'AGENT_RUN_LEASE_LOST') {
+            // 持久化取消状态和租约归属为准。旧实例失去执行权后不能提交结果；
+            // 仍归属本实例的任务会安全回到队列。
+            lostExecutionLease = true;
+            await requeueAgentRunAfterLeaseLoss({ execute, getTimestamp: getBeijingTimestamp, enqueueAgentRun, instanceId, runId, error: e })
+                .catch(error => logger.warn({ runId, err: error.message }, '执行租约失效后的安全回队失败'));
+            return;
+        }
         if (e.code === 'AGENT_RUN_CANCELLED') {
-            await updateRun(runId, { updated_at: getBeijingTimestamp() });
             return;
         }
         if (e.code === 'AGENT_APPROVAL_REQUIRED') {
@@ -967,10 +977,10 @@ const {
     } finally {
         if (deadlineTimer) clearTimeout(deadlineTimer);
         if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
-        if (taskBudget) {
+        if (taskBudget && !lostExecutionLease) {
             try { await updateRun(runId, { usage_stats: JSON.stringify(taskBudget.snapshot()), updated_at: getBeijingTimestamp() }); } catch (_) {}
         }
-        await syncAgentTraceFromRun(runId);
+        if (!lostExecutionLease) await syncAgentTraceFromRun(runId);
     }
 }
 

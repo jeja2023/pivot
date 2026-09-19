@@ -15,6 +15,10 @@ function createAgentQueue({
     runAgent,
     markRunError,
     getTimestamp,
+    acquireRunConcurrencyLease = null,
+    renewRunConcurrencyLease = null,
+    releaseRunConcurrencyLease = null,
+    onRunLeaseLost = null,
     dbRunner: injectedDbRunner = null
 }) {
     const dbRunner = injectedDbRunner || {
@@ -28,6 +32,7 @@ function createAgentQueue({
     const lockRenewTimers = new Map();
     const queuedHints = new Set();
     const activeUserCounts = new Map();
+    const activeRunUsers = new Map();
     let processScheduled = false;
     let isProcessing = false;
     let retryWakeTimer = null;
@@ -38,6 +43,9 @@ function createAgentQueue({
     const safeLockMs = Math.max(Number.parseInt(lockMs, 10) || DEFAULT_LOCK_MS, 60000);
     const lockRenewIntervalMs = Math.min(Math.max(Math.floor(safeLockMs / 3), 30000), 300000);
     const currentTimeExpr = nowExpr();
+    const persistentUserQuotaEnabled = typeof acquireRunConcurrencyLease === 'function'
+        && typeof renewRunConcurrencyLease === 'function'
+        && typeof releaseRunConcurrencyLease === 'function';
 
     const lockExpiresAt = () => getTimestamp(new Date(Date.now() + safeLockMs));
 
@@ -127,8 +135,34 @@ function createAgentQueue({
         `, [lockExpiresAt(), now, now, runId, instanceId, ...ACTIVE_RUN_STATUSES]);
         if (changes === 0) {
             logger.warn({ runId, instanceId }, '跳过智能体运行锁续期：持锁者或状态已变更');
+            await notifyLeaseLost(runId, 'run_lock_lost');
+            stopLockRenewal(runId);
+            return 0;
+        }
+        if (persistentUserQuotaEnabled) {
+            const result = await renewRunConcurrencyLease({
+                runId,
+                userId: activeRunUsers.get(runId),
+                leaseOwner: instanceId,
+                leaseMs: safeLockMs
+            });
+            if (!result?.renewed) {
+                logger.warn({ runId, instanceId, reason: result?.reason || 'lease_lost' }, '智能体全局用户并发租约续期失败');
+                await notifyLeaseLost(runId, result?.reason || 'user_quota_lease_lost');
+                stopLockRenewal(runId);
+                return 0;
+            }
         }
         return changes;
+    }
+
+    async function notifyLeaseLost(runId, reason) {
+        if (typeof onRunLeaseLost !== 'function') return;
+        try {
+            await onRunLeaseLost(runId, reason);
+        } catch (error) {
+            logger.warn({ err: error.message, runId, reason }, '通知智能体运行租约丢失失败');
+        }
     }
 
     function stopLockRenewal(runId) {
@@ -137,7 +171,8 @@ function createAgentQueue({
         lockRenewTimers.delete(runId);
     }
 
-    function startLockRenewal(runId) {
+    function startLockRenewal(runId, userId) {
+        activeRunUsers.set(runId, userId);
         stopLockRenewal(runId);
         const timer = setInterval(async () => {
             try {
@@ -157,6 +192,32 @@ function createAgentQueue({
                 lock_expires_at = NULL
             WHERE id = ? AND locked_by = ?
         `, [runId, instanceId]);
+    }
+
+    async function releasePersistentUserLease(runId, userId) {
+        if (!persistentUserQuotaEnabled) return false;
+        try {
+            return await releaseRunConcurrencyLease({ runId, userId, leaseOwner: instanceId });
+        } catch (error) {
+            logger.warn({ err: error.message, runId }, '释放智能体全局用户并发租约失败');
+            return false;
+        }
+    }
+
+    async function requeueClaimedRunForQuota(runId, reason = 'per_user_concurrency_exceeded') {
+        const retryAfter = getTimestamp(new Date(Date.now() + USER_LOOKUP_RETRY_MS));
+        const changes = await dbRunner.execute(`
+            UPDATE agent_runs
+            SET status = 'queued', locked_by = NULL, lock_expires_at = NULL,
+                retry_after = ?, updated_at = ?
+            WHERE id = ? AND status = 'running' AND locked_by = ?
+        `, [retryAfter, getTimestamp(), runId, instanceId]);
+        if (changes === 1) {
+            queuedHints.add(runId);
+            scheduleRetryWake(retryAfter);
+            logger.info({ runId, instanceId, reason, retryAfter }, '智能体运行因全局用户配额暂缓执行');
+        }
+        return changes;
     }
 
     async function requeueClaimedRunAfterUserLookupFailure(runId, error) {
@@ -196,6 +257,28 @@ function createAgentQueue({
                     break;
                 }
                 const runId = claimed.id;
+                let persistentLeaseAcquired = false;
+                if (persistentUserQuotaEnabled) {
+                    let quota;
+                    try {
+                        quota = await acquireRunConcurrencyLease({
+                            runId,
+                            userId: claimed.user_id,
+                            leaseOwner: instanceId,
+                            limit: safeMaxConcurrentPerUser,
+                            leaseMs: safeLockMs
+                        });
+                    } catch (error) {
+                        logger.warn({ err: error.message, runId }, '申请智能体全局用户并发租约失败，已安全回队');
+                        await requeueClaimedRunForQuota(runId, 'lease_store_unavailable');
+                        continue;
+                    }
+                    if (!quota?.acquired) {
+                        await requeueClaimedRunForQuota(runId, quota?.reason);
+                        continue;
+                    }
+                    persistentLeaseAcquired = true;
+                }
                 let user;
                 try {
                     user = await getRunUser(runId);
@@ -203,6 +286,7 @@ function createAgentQueue({
                     // 认领已把状态切为 running；若此处直接抛出，任务会在没有执行者时
                     // 长时间卡住。用持锁 CAS 回到 queued，并设置短暂退避避免热循环。
                     await requeueClaimedRunAfterUserLookupFailure(runId, error);
+                    if (persistentLeaseAcquired) await releasePersistentUserLease(runId, claimed.user_id);
                     break;
                 }
                 if (!user) {
@@ -211,17 +295,20 @@ function createAgentQueue({
                         await markRunError(runId, 'Agent run user no longer exists.');
                     }
                     await releaseRun(runId);
+                    if (persistentLeaseAcquired) await releasePersistentUserLease(runId, claimed.user_id);
                     continue;
                 }
 
                 activeRunIds.add(runId);
                 activeUserCounts.set(user.id, (activeUserCounts.get(user.id) || 0) + 1);
                 activeStartedAt.set(runId, Date.now());
-                startLockRenewal(runId);
+                startLockRenewal(runId, user.id);
                 queuedHints.delete(runId);
                 runAgent(runId, user).catch(async err => {
                     logger.error({ err: err.message, runId }, '智能体运行在运行时锁保护下发生异常');
-                    await markRunError(runId, err.message);
+                    if (!['AGENT_RUN_CANCELLED', 'AGENT_RUN_LEASE_LOST'].includes(err?.code)) {
+                        await markRunError(runId, err.message);
+                    }
                 }).finally(async () => {
                     activeRunIds.delete(runId);
                     const nextUserCount = Math.max((activeUserCounts.get(user.id) || 1) - 1, 0);
@@ -229,7 +316,9 @@ function createAgentQueue({
                     else activeUserCounts.set(user.id, nextUserCount);
                     activeStartedAt.delete(runId);
                     stopLockRenewal(runId);
+                    activeRunUsers.delete(runId);
                     await releaseRun(runId);
+                    if (persistentLeaseAcquired) await releasePersistentUserLease(runId, user.id);
                     scheduleProcessQueue();
                 });
             }
@@ -289,6 +378,7 @@ function createAgentQueue({
             hinted: queuedHints.size,
             maxConcurrent: safeMaxConcurrent,
             maxConcurrentPerUser: safeMaxConcurrentPerUser,
+            persistentUserQuotaEnabled,
             oldestQueuedRunId: null,
             oldestQueuedAgeMs: 0
         };
@@ -333,6 +423,7 @@ function createAgentQueue({
             hinted: queuedHints.size,
             maxConcurrent: safeMaxConcurrent,
             maxConcurrentPerUser: safeMaxConcurrentPerUser,
+            persistentUserQuotaEnabled,
             oldestQueuedRunId: oldest?.id || null,
             oldestQueuedAgeMs: queuedAgeMs(oldest?.created_at)
         };

@@ -120,6 +120,32 @@ function parseSuiteRow(row) {
     return { ...row, run_config: normalizeRunConfig(row.run_config) };
 }
 
+function snapshotEvaluationCase(value = {}) {
+    return {
+        id: Number(value.id) || null,
+        name: String(value.name || '').slice(0, 100),
+        input: String(value.input || '').slice(0, 12000),
+        inputVariables: value.input_variables && typeof value.input_variables === 'object'
+            ? value.input_variables
+            : (value.inputVariables && typeof value.inputVariables === 'object' ? value.inputVariables : {}),
+        expectedOutput: String(value.expected_output ?? value.expectedOutput ?? '').slice(0, 20000),
+        assertions: normalizeAssertions(value.assertions || {}),
+        sortOrder: Number(value.sort_order ?? value.sortOrder ?? 0) || 0
+    };
+}
+
+function evaluationCaseFromSnapshot(snapshot, fallback = {}) {
+    if (!snapshot || typeof snapshot !== 'object' || !snapshot.name) return fallback;
+    return {
+        ...fallback,
+        name: snapshot.name,
+        input: snapshot.input,
+        input_variables: snapshot.inputVariables || {},
+        expected_output: snapshot.expectedOutput || '',
+        assertions: snapshot.assertions || {}
+    };
+}
+
 async function getSuiteRow(suiteId, user) {
     return await queryOne(`
         SELECT s.*, w.name AS workflow_name, m.name AS model_name
@@ -374,7 +400,9 @@ async function reconcileAgentEvalRun(evalRunId, user) {
             continue;
         }
         run.duration_ms = Number(run.trace_duration_ms || 0);
-        const graded = gradeAgentOutput({ run, evalCase: result, passThreshold: config.passThreshold });
+        const caseSnapshot = parseJson(result.case_snapshot, null);
+        const evalCase = evaluationCaseFromSnapshot(caseSnapshot, result);
+        const graded = gradeAgentOutput({ run, evalCase, passThreshold: config.passThreshold });
         await execute(`
             UPDATE agent_eval_results
             SET status = ?, score = ?, passed = ?, grader_results = ?, actual_output = ?, error_message = ?,
@@ -409,7 +437,15 @@ async function getAgentEvalRun(evalRunId, user) {
         LEFT JOIN agent_runs r ON r.id = er.agent_run_id
         WHERE er.eval_run_id = ?
         ORDER BY c.sort_order ASC, c.id ASC
-    `, [evalRunId])).map(parseEvalResult);
+    `, [evalRunId])).map(row => {
+        const snapshot = parseJson(row.case_snapshot, null);
+        return parseEvalResult({
+            ...row,
+            case_name: snapshot?.name || row.case_name,
+            case_input: snapshot?.input || row.case_input,
+            case_snapshot: snapshot
+        });
+    });
     const previous = await queryOne(`
         SELECT summary FROM agent_eval_runs
         WHERE suite_id = ? AND user_id = ? AND status = 'completed' AND id != ? AND created_at < ?
@@ -513,7 +549,8 @@ async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
         workflowVersion: workflowVersionSnapshot?.workflowVersion || suite.workflow_version || '',
         workflowVersionId: workflowVersionSnapshot?.workflowVersionId || null,
         modelId,
-        runConfig: config
+        runConfig: config,
+        cases: detail.cases.map(snapshotEvaluationCase)
     };
     await execute(`
         INSERT INTO agent_eval_runs (id, suite_id, user_id, status, target_snapshot, summary, started_at, created_at)
@@ -521,6 +558,7 @@ async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
     `, [evalRunId, suite.id, user.id, JSON.stringify(snapshot), JSON.stringify({ total: detail.cases.length, completed: 0, pending: detail.cases.length }), now, now]);
 
     for (const evalCase of detail.cases) {
+        const caseSnapshot = snapshotEvaluationCase(evalCase);
         try {
             const run = await createAgentRun({
                 user,
@@ -533,22 +571,30 @@ async function startAgentEvaluation(suiteId, user, body = {}, createAgentRun) {
                 approvalPolicy: config.approvalPolicy,
                 maxTokenBudget: config.maxTokenBudget,
                 modelRouter: config.modelRouter,
-                dagInputs: evalCase.input_variables,
+                dagInputs: caseSnapshot.inputVariables,
                 workflowId: suite.target_type === 'workflow' ? suite.workflow_id : null,
-                workflowVersion: suite.target_type === 'workflow' ? (suite.workflow_version || 'published') : null,
-                metadata: { evaluation: { evalRunId, suiteId: suite.id, caseId: evalCase.id } }
+                workflowVersion: suite.target_type === 'workflow' ? String(workflowVersionSnapshot.workflowVersion) : null,
+                metadata: {
+                    evaluation: {
+                        evalRunId,
+                        suiteId: suite.id,
+                        caseId: evalCase.id,
+                        workflowVersionId: workflowVersionSnapshot?.workflowVersionId || null,
+                        caseSnapshot
+                    }
+                }
             });
             await execute(`
-                INSERT INTO agent_eval_results (eval_run_id, case_id, agent_run_id, status, created_at)
-                VALUES (?, ?, ?, 'queued', ?)
-            `, [evalRunId, evalCase.id, run.id, now]);
+                INSERT INTO agent_eval_results (eval_run_id, case_id, agent_run_id, case_snapshot, status, created_at)
+                VALUES (?, ?, ?, ?, 'queued', ?)
+            `, [evalRunId, evalCase.id, run.id, JSON.stringify(caseSnapshot), now]);
         } catch (error) {
-            const graded = gradeAgentOutput({ run: { status: 'error' }, evalCase, passThreshold: config.passThreshold });
+            const graded = gradeAgentOutput({ run: { status: 'error' }, evalCase: evaluationCaseFromSnapshot(caseSnapshot, evalCase), passThreshold: config.passThreshold });
             await execute(`
                 INSERT INTO agent_eval_results (
-                    eval_run_id, case_id, status, score, passed, grader_results, error_message, created_at, completed_at
-                ) VALUES (?, ?, 'error', 0, 0, ?, ?, ?, ?)
-            `, [evalRunId, evalCase.id, JSON.stringify(graded), String(error.message || error).slice(0, 4000), now, now]);
+                    eval_run_id, case_id, case_snapshot, status, score, passed, grader_results, error_message, created_at, completed_at
+                ) VALUES (?, ?, ?, 'error', 0, 0, ?, ?, ?, ?, ?)
+            `, [evalRunId, evalCase.id, JSON.stringify(caseSnapshot), JSON.stringify(graded), String(error.message || error).slice(0, 4000), now, now]);
         }
     }
     return await getAgentEvalRun(evalRunId, user);
@@ -563,6 +609,7 @@ module.exports = {
     listAgentEvalRuns,
     listAgentEvalSuites,
     normalizeAssertions,
+    snapshotEvaluationCase,
     reconcileAgentEvalRun,
     startAgentEvaluation,
     updateAgentEvalSuite

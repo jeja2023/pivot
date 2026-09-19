@@ -131,7 +131,7 @@ async function resolveCallbackSecretSlug(slug, user) {
 
 function approvalKeyFor(node = {}, input = {}, fallback = '') {
     const scopedFallback = String(fallback || '').trim();
-    if (scopedFallback.includes(':subworkflow:')) return scopedFallback.slice(0, 240);
+    if (isSubworkflowScopedKey(scopedFallback)) return scopedFallback.slice(0, 240);
     return String(
         input.approvalKey ||
         input.approval_key ||
@@ -142,9 +142,13 @@ function approvalKeyFor(node = {}, input = {}, fallback = '') {
     ).trim().slice(0, 240);
 }
 
+function isSubworkflowScopedKey(value = '') {
+    return /(?:^|[/:])subworkflow:/.test(String(value || '').trim());
+}
+
 function persistedApprovalNodeKey(node = {}, approvalKey = '') {
     const key = String(approvalKey || '').trim();
-    return key.includes(':subworkflow:') ? key.slice(0, 240) : String(node.id || key || '').trim().slice(0, 240);
+    return isSubworkflowScopedKey(key) ? key.slice(0, 240) : String(node.id || key || '').trim().slice(0, 240);
 }
 
 function delayKeyFor(node = {}, fallback = '') {
@@ -296,7 +300,7 @@ async function persistWorkflowDelay(runId, key, value) {
 }
 
 async function maybeCompleteDagNode(row, output) {
-    if (!row.node_key || String(row.node_key).includes(':subworkflow:')) return;
+    if (!row.node_key || isSubworkflowScopedKey(row.node_key)) return;
     if (typeof callbacks.upsertDagNode === 'function') {
         await callbacks.upsertDagNode(
             row.run_id,
@@ -322,7 +326,7 @@ async function maybeCompleteDagNode(row, output) {
 }
 
 async function markDagNodeWaiting(row, output) {
-    if (!row.node_key || String(row.node_key).includes(':subworkflow:')) return;
+    if (!row.node_key || isSubworkflowScopedKey(row.node_key)) return;
     if (typeof callbacks.upsertDagNode === 'function') {
         await callbacks.upsertDagNode(
             row.run_id,
@@ -921,6 +925,7 @@ module.exports = {
     decideWorkflowApprovalRequest,
     formatRequest,
     handleImApprovalCallback,
+    isSubworkflowScopedKey,
     listWorkflowApprovalRequests,
     runApprovalTimeouts,
     waitForWorkflowApproval,

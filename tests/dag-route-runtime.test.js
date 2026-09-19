@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { runAgentDag } = require('../server/services/agent-dag-runtime');
 
-function runRoutedWorkflow(matched) {
+function runRoutedWorkflow(matched, { joinMode = '' } = {}) {
     const persisted = new Map();
     const steps = [];
     const updates = [];
@@ -16,11 +16,13 @@ function runRoutedWorkflow(matched) {
         nodes: [
             { id: 'condition', title: '判断', tool: 'workflow.condition', input: { value: matched }, dependsOn: [] },
             { id: 'yes', title: '满足分支', tool: 'workflow.template', input: { template: 'yes' }, dependsOn: ['condition'] },
-            { id: 'no', title: '不满足分支', tool: 'workflow.template', input: { template: 'no' }, dependsOn: ['condition'] }
+            { id: 'no', title: '不满足分支', tool: 'workflow.template', input: { template: 'no' }, dependsOn: ['condition'] },
+            ...(joinMode ? [{ id: 'join', title: '汇聚', tool: 'workflow.template', input: { template: 'joined' }, dependsOn: ['yes', 'no'], joinMode }] : [])
         ],
         edges: [
             { from: 'condition', to: 'yes', route: 'true' },
-            { from: 'condition', to: 'no', route: 'false' }
+            { from: 'condition', to: 'no', route: 'false' },
+            ...(joinMode ? [{ from: 'yes', to: 'join', route: 'default' }, { from: 'no', to: 'join', route: 'default' }] : [])
         ]
     };
     const run = { id: `route-${matched}`, goal: '路由测试', metadata: { dagSpec }, tool_timeout_ms: 30000 };
@@ -67,4 +69,16 @@ test('DAG 运行时只执行 True/False 路由中被激活的一侧', async () =
     assert.equal(falseRun.persisted.get('yes').status, 'skipped');
     assert.equal(falseRun.persisted.get('no').status, 'completed');
     assert.equal(falseRun.persisted.get('yes').output.reason, 'route_not_matched');
+});
+
+test('显式任一激活分支汇聚忽略路由未命中的 skipped 依赖', async () => {
+    const trueRun = await runRoutedWorkflow(true, { joinMode: 'any_active' });
+    assert.equal(trueRun.persisted.get('yes').status, 'completed');
+    assert.equal(trueRun.persisted.get('no').status, 'skipped');
+    assert.equal(trueRun.persisted.get('join').status, 'completed');
+
+    const falseRun = await runRoutedWorkflow(false, { joinMode: 'any_active' });
+    assert.equal(falseRun.persisted.get('yes').status, 'skipped');
+    assert.equal(falseRun.persisted.get('no').status, 'completed');
+    assert.equal(falseRun.persisted.get('join').status, 'completed');
 });
