@@ -5,7 +5,8 @@ const migration = {
     description: 'Persist the source run for DAG nodes reused by an explicit local rerun.',
     up(db) {
         const columns = db.pragma('table_info(agent_dag_nodes)');
-        if (columns.length && !columns.some(column => column.name === 'reused_from_run_id')) {
+        if (!columns.length) return;
+        if (!columns.some(column => column.name === 'reused_from_run_id')) {
             db.exec('ALTER TABLE agent_dag_nodes ADD COLUMN reused_from_run_id TEXT');
         }
         db.exec('CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_reused_from_run ON agent_dag_nodes(reused_from_run_id)');

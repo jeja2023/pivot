@@ -5,7 +5,8 @@ const migration = {
     description: 'Freeze evaluation case inputs and assertions for each evaluation result.',
     up(db) {
         const columns = db.pragma('table_info(agent_eval_results)');
-        if (columns.length && !columns.some(column => column.name === 'case_snapshot')) {
+        if (!columns.length) return;
+        if (!columns.some(column => column.name === 'case_snapshot')) {
             db.exec("ALTER TABLE agent_eval_results ADD COLUMN case_snapshot TEXT DEFAULT '{}'");
         }
     },

@@ -5,7 +5,8 @@ const migration = {
     description: 'Persist structured DAG node failure diagnostics alongside the compatible error message.',
     up(db) {
         const columns = db.pragma('table_info(agent_dag_nodes)');
-        if (columns.length && !columns.some(column => column.name === 'error_info')) {
+        if (!columns.length) return;
+        if (!columns.some(column => column.name === 'error_info')) {
             db.exec("ALTER TABLE agent_dag_nodes ADD COLUMN error_info TEXT DEFAULT '{}'");
         }
     },
