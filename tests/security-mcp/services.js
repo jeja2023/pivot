@@ -1193,3 +1193,64 @@ test('remote desktop legacy bridge endpoints return 410 gone', async () => {
         db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
     }
 });
+
+test('外部 MCP 工具中文展示仅改变展示元数据且编辑服务后保持配置', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`mcp_presentation_${suffix}`, 'hash', 'MCP 展示维护', 'QA', 'admin', 'active');
+    const user = { id: Number(userInfo.lastInsertRowid), username: `mcp_presentation_${suffix}`, role: 'admin', unit: 'QA' };
+    const now = getBeijingTimestamp();
+    const serverInfo = db.prepare(`
+        INSERT INTO mcp_servers (user_id, name, base_url, api_key, description, config, status, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, '{}', 'active', ?, ?)
+    `).run(user.id, `Presentation MCP ${suffix}`, 'https://tools.example.test/mcp', '展示测试服务', now, now);
+    const serverId = Number(serverInfo.lastInsertRowid);
+    const toolName = 'query_table';
+    db.prepare(`
+        INSERT INTO mcp_tool_cache (server_id, name, description, input_schema, cached_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(serverId, toolName, 'query table', '{"type":"object"}', now);
+    const router = createMcpRouter({
+        authMiddleware: (req, _res, next) => { req.user = req.user || user; next(); },
+        adminMiddleware: (_req, _res, next) => next(),
+        logAction: () => {}
+    });
+    const presentationRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id/tools/:tool/presentation' && layer.route?.methods?.put);
+    const updateRoute = router.stack.find(layer => layer.route?.path === '/mcp/servers/:id' && layer.route?.methods?.put);
+    const makeRes = () => ({
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    });
+    try {
+        const presentationRes = makeRes();
+        await runExpressHandlers(presentationRoute.route.stack.map(layer => layer.handle), {
+            user,
+            params: { id: String(serverId), tool: toolName },
+            body: { displayName: '查询业务订单', displayDescription: '按订单条件查询业务数据。' }
+        }, presentationRes);
+        assert.equal(presentationRes.statusCode, 200);
+        assert.equal(presentationRes.body.tool.name, toolName);
+        assert.equal(presentationRes.body.tool.fullName, `mcp.${serverId}.${toolName}`);
+        assert.equal(presentationRes.body.tool.displayTitle, '查询业务订单');
+
+        const updateRes = makeRes();
+        await runExpressHandlers(updateRoute.route.stack.map(layer => layer.handle), {
+            user,
+            params: { id: String(serverId) },
+            body: { name: `Presentation MCP Updated ${suffix}`, base_url: 'https://tools.example.test/mcp', description: '更新服务说明' }
+        }, updateRes);
+        assert.equal(updateRes.statusCode, 200);
+        const { listCachedMcpTools } = require('../../server/services/mcp-client');
+        const listed = (await listCachedMcpTools(serverId, user)).find(tool => tool.name === toolName);
+        assert.equal(listed.displayTitle, '查询业务订单');
+        assert.equal(listed.fullName, `mcp.${serverId}.${toolName}`);
+    } finally {
+        db.prepare('DELETE FROM mcp_tool_cache WHERE server_id = ?').run(serverId);
+        db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(serverId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    }
+});
+

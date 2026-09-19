@@ -459,6 +459,32 @@
     line-clamp: 2;
     -webkit-line-clamp: 2;
 }
+.mcp-tool-technical-id {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+}
+.mcp-tool-technical-id summary {
+    width: fit-content;
+    cursor: pointer;
+    list-style: none;
+}
+.mcp-tool-technical-id summary::-webkit-details-marker { display: none; }
+.mcp-tool-technical-id summary::after {
+    content: '›';
+    display: inline-block;
+    margin-left: 3px;
+    transition: transform .16s ease;
+}
+.mcp-tool-technical-id[open] summary::after { transform: rotate(90deg); }
+.mcp-tool-technical-id code {
+    display: block;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+    color: var(--text-muted);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    font-size: 0.64rem;
+}
 
 .mcp-tool-meta {
     display: flex;

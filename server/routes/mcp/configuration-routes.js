@@ -1,3 +1,5 @@
+const { normalizeCustomPresentation } = require('../../services/mcp-tool-presentation');
+
 function mountMcpConfigurationRoutes(deps = {}) {
     const {
         router,
@@ -317,6 +319,50 @@ function mountMcpConfigurationRoutes(deps = {}) {
             logAction(req, '修改数据库工具服务', `${name}: ${connection.database_type}`);
             const updated = await queryOne('SELECT * FROM mcp_servers WHERE id = ?', [existing.id]);
             res.json({ success: true, server: await normalizeServerRowAsync(updated) });
+        }));
+
+        router.put('/mcp/servers/:id/tools/:tool/presentation', authMiddleware, asyncHandler(async (req, res) => {
+            const existing = await getAccessibleMcpServer(req.params.id, req.user);
+            if (!existing) return res.status(404).json({ error: '工具服务不存在。' });
+            if (existing.user_id === null && !isSuperAdmin(req.user)) {
+                return res.status(403).json({ error: '只有管理员可以维护全局工具服务的中文展示。' });
+            }
+            if (existing.user_id !== null && Number(existing.user_id) !== Number(req.user.id) && !isSuperAdmin(req.user)) {
+                return res.status(403).json({ error: '无权维护该工具服务的中文展示。' });
+            }
+            if (String(existing.base_url || '').startsWith('pivot-db://') || getBuiltinServiceTypeFromUrl(existing.base_url)) {
+                return res.status(400).json({ error: '系统工具已有内置中文名称，不需要单独维护。' });
+            }
+            const toolName = String(req.params.tool || '').trim();
+            if (!toolName || toolName.length > 160 || /[\u0000-\u001f]/.test(toolName)) {
+                return res.status(400).json({ error: '工具标识无效。' });
+            }
+            const availableTools = await listCachedMcpTools(existing.id, req.user);
+            if (!availableTools.some(tool => String(tool.name || '') === toolName)) {
+                return res.status(404).json({ error: '该工具不在当前服务缓存中，请先刷新工具列表。' });
+            }
+            const presentation = normalizeCustomPresentation(req.body || {});
+            const config = parseServerConfig(existing.config);
+            const current = config.toolPresentations && typeof config.toolPresentations === 'object'
+                ? { ...config.toolPresentations }
+                : {};
+            if (!presentation.displayName && !presentation.displayDescription) {
+                delete current[toolName];
+            } else {
+                if (!current[toolName] && Object.keys(current).length >= 500) {
+                    return res.status(400).json({ error: '单个工具服务最多维护 500 项中文展示。' });
+                }
+                current[toolName] = presentation;
+            }
+            const nextConfig = { ...config, toolPresentations: current };
+            await execute(
+                'UPDATE mcp_servers SET config = ?, updated_at = ? WHERE id = ?',
+                [JSON.stringify(nextConfig), getBeijingTimestamp(), existing.id]
+            );
+            logAction(req, '维护工具中文展示', String(existing.name || '') + ': ' + toolName);
+            const refreshed = await listCachedMcpTools(existing.id, req.user);
+            const tool = refreshed.find(item => String(item.name || '') === toolName) || null;
+            res.json({ success: true, presentation, tool });
         }));
 
         router.put('/mcp/servers/:id', authMiddleware, asyncHandler(async (req, res) => {

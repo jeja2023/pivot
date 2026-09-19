@@ -582,12 +582,12 @@ function mcpCleanServiceName(name) {
 }
 
 function mcpToolTitle(tool) {
-    const title = mcpToolDisplayMap[tool?.name]?.title || tool?.title || tool?.name || '工具';
+    const title = tool?.displayTitle || mcpToolDisplayMap[tool?.name]?.title || tool?.title || tool?.name || '工具';
     return mcpCleanToolTitle(title) || '工具';
 }
 
 function mcpToolDescription(tool) {
-    return mcpToolDisplayMap[tool?.name]?.description || tool?.description || tool?.serverName || '';
+    return tool?.displayDescription || mcpToolDisplayMap[tool?.name]?.description || tool?.description || tool?.serverName || '';
 }
 
 function mcpOwnerLabel(item = {}) {
@@ -738,4 +738,5 @@ async function withMcpActionLock(key, button, busyText, action) {
         }
     }
 }
+
 

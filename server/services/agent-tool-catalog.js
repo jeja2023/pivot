@@ -73,13 +73,13 @@ async function formatToolList(user, options = {}) {
         .filter(tool => tool.serverType !== 'database')
         .map(tool => {
             const shortName = String(tool.name || '').replace(/^(?:mcp\.\d+\.)?/, '');
-            const title = (tool.title && tool.title !== tool.name)
+            const title = tool.displayTitle || ((tool.title && tool.title !== tool.name)
                 ? tool.title
-                : (KNOWN_MCP_TOOL_TITLES[shortName] || tool.title || tool.name);
+                : (KNOWN_MCP_TOOL_TITLES[shortName] || tool.title || tool.name));
             return {
                 name: tool.fullName,
                 title,
-                description: `[${tool.serverName}] ${tool.description || tool.name}`,
+                description: `[${tool.serverName}] ${tool.displayDescription || tool.description || tool.name}`,
                 input_schema: tool.input_schema,
                 ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
                 source: 'mcp',

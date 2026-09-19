@@ -51,6 +51,10 @@
     resize: vertical;
 }
 
+.mcp-tool-presentation-overlay {
+    z-index: 1915;
+}
+
 #mcp-edit-modal .modal.mcp-edit-modal,
 .modal.mcp-edit-modal,
 .mcp-edit-modal {

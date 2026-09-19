@@ -52,7 +52,7 @@
     };
     const toolFullName = tool => String(tool?.fullName || tool?.full_name || tool?.name || '').trim();
     const toolLabel = tool => {
-        const title = String(tool?.title || '').trim();
+        const title = String(tool?.displayTitle || tool?.title || '').trim();
         if (title) return title;
         return String(tool?.name || toolFullName(tool) || '工具').split('.').pop().replace(/[_-]+/g, ' ');
     };
@@ -72,18 +72,19 @@
         return tools
         .map(tool => {
             const fullName = toolFullName(tool);
-            const source = String(tool?.serverName || tool?.description || '').trim();
+            const source = String(tool?.serverName || tool?.displayDescription || tool?.description || '').trim();
             return {
                 kind: 'tool',
                 fullName,
                 name: toolLabel(tool),
-                detail: source ? `工具 · ${source}` : '工具'
+                detail: source ? `工具 · ${source}` : '工具',
+                aliases: Array.isArray(tool?.searchAliases) ? tool.searchAliases : []
             };
         })
         .filter(item => item.fullName)
         // 与真正的聊天执行链路使用同一份已保存白名单；@ 只能缩小范围，不能扩大权限。
         .filter(item => !allowlist || allowlist.has(item.fullName))
-        .filter(item => !query || `${item.name} ${item.detail} ${item.fullName}`.toLowerCase().includes(query));
+        .filter(item => !query || `${item.name} ${item.detail} ${item.fullName} ${item.aliases.join(' ')}`.toLowerCase().includes(query));
     };
     const closeMentionMenu = () => {
         const menu = document.getElementById('chat-route-mention-menu');
@@ -278,7 +279,7 @@
             }
         }
         if (focusSearch) {
-            (window.queueMicrotask || window.setTimeout)(() => {
+            window.setTimeout(() => {
                 search.focus();
                 search.setSelectionRange(search.value.length, search.value.length);
             }, 0);

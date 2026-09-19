@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1437,
+  "total": 1438,
   "entries": [
     {
       "file": "server/auth.js",
@@ -217,7 +217,7 @@
     },
     {
       "file": "server/routes/mcp/configuration-routes.js",
-      "count": 32
+      "count": 33
     },
     {
       "file": "server/routes/mcp/helpers.js",
@@ -632,12 +632,12 @@
       "count": 3
     },
     {
-      "file": "server/services/rag-feedback.js",
-      "count": 2
-    },
-    {
       "file": "server/services/rag-documents.js",
       "count": 29
+    },
+    {
+      "file": "server/services/rag-feedback.js",
+      "count": 2
     },
     {
       "file": "server/services/rag-index-staging.js",

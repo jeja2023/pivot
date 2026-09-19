@@ -1,5 +1,6 @@
 const { queryOne } = require('../../db/client');
 const { isSuperAdmin } = require('../../permissions');
+const { normalizeCustomPresentation } = require('../../services/mcp-tool-presentation');
 
 const SYSTEM_MCP_SERVICES = {
     reports: {
@@ -84,6 +85,18 @@ function pickConfigValue(payload, current, snakeKey, camelKey, fallback = '') {
     return fallback;
 }
 
+function normalizeToolPresentations(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const output = {};
+    Object.entries(source).slice(0, 500).forEach(([rawName, item]) => {
+        const name = String(rawName || '').trim();
+        if (!name || name.length > 160 || /[\u0000-\u001f]/.test(name)) return;
+        const presentation = normalizeCustomPresentation(item || {});
+        if (presentation.displayName || presentation.displayDescription) output[name] = presentation;
+    });
+    return output;
+}
+
 function normalizeExternalServerConfig(payload = {}) {
     const current = parseServerConfig(payload.config);
     const authMode = String(pickConfigValue(payload, current, 'auth_mode', 'authMode', 'auto')).toLowerCase();
@@ -104,7 +117,12 @@ function normalizeExternalServerConfig(payload = {}) {
         ),
         examplePrompts: splitConfigList(pickConfigValue(payload, current, 'example_prompts', 'examplePrompts', current.examplePrompts))
             .slice(0, 12)
-            .map(item => item.slice(0, 300))
+            .map(item => item.slice(0, 300)),
+        toolPresentations: normalizeToolPresentations(
+            Object.prototype.hasOwnProperty.call(payload, 'toolPresentations')
+                ? payload.toolPresentations
+                : current.toolPresentations
+        )
     };
 }
 
@@ -166,6 +184,7 @@ module.exports = {
     sanitizeDatabaseConnectionForLog,
     parseServerConfig,
     parseBoolean,
+    normalizeToolPresentations,
     normalizeExternalServerConfig,
     buildCapabilityHealth,
     findAccessibleBuiltinService

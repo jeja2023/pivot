@@ -109,10 +109,31 @@ function normalizeCustomPresentation(input = {}) {
     };
 }
 
+function extractCustomPresentationFromTool(tool = {}) {
+    if (tool.displayName || tool.displayDescription || tool.customDisplayName || tool.customDisplayDescription) {
+        return normalizeCustomPresentation({
+            displayName: tool.displayName ?? tool.customDisplayName,
+            displayDescription: tool.displayDescription ?? tool.customDisplayDescription
+        });
+    }
+    const rawConfig = tool.serverConfig || tool.server_config;
+    if (rawConfig) {
+        try {
+            const config = typeof rawConfig === 'string' ? JSON.parse(rawConfig || '{}') : rawConfig;
+            const presentations = config?.toolPresentations;
+            if (presentations && typeof presentations === 'object') {
+                const item = presentations[String(tool.name || '')];
+                if (item) return normalizeCustomPresentation(item);
+            }
+        } catch (_) {}
+    }
+    return normalizeCustomPresentation({});
+}
+
 function getMcpToolPresentation(tool = {}) {
     const shortName = normalizeMcpToolShortName(tool);
     const known = MCP_TOOL_PRESENTATIONS[shortName];
-    const custom = normalizeCustomPresentation(tool);
+    const custom = extractCustomPresentationFromTool(tool);
     const providerTitle = cleanDisplayText(tool.providerTitle ?? tool.provider_title ?? tool.title, MAX_DISPLAY_TITLE_LENGTH);
     const providerDescription = cleanDisplayText(tool.providerDescription ?? tool.provider_description ?? tool.description, MAX_DISPLAY_DESCRIPTION_LENGTH);
     const displayTitle = custom.displayName
@@ -135,6 +156,8 @@ function getMcpToolPresentation(tool = {}) {
         displayDescription,
         providerTitle,
         providerDescription,
+        customDisplayName: custom.displayName,
+        customDisplayDescription: custom.displayDescription,
         hasCustomPresentation: Boolean(custom.displayName || custom.displayDescription),
         requiresCustomPresentation: !known && !custom.displayName && !hasChinese(providerTitle),
         searchAliases
@@ -149,10 +172,7 @@ function presentMcpTool(tool = {}) {
 }
 
 module.exports = {
-    MCP_TOOL_PRESENTATIONS,
     getMcpToolPresentation,
-    hasChinese,
     normalizeCustomPresentation,
-    normalizeMcpToolShortName,
     presentMcpTool
 };

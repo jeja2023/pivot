@@ -13,11 +13,13 @@ function parseVector(value) {
 
 function toolSignature(tool = {}) {
     const name = String(tool.name || tool.fullName || '').trim();
+    const displayName = String(tool.displayTitle || tool.title || '').trim();
     const server = String(tool.serverName || '').trim();
     const type = String(tool.serverType || '').trim();
-    const description = String(tool.description || '').trim();
+    const description = String(tool.displayDescription || tool.description || '').trim();
     return [
-        `工具：${name}`,
+        displayName ? `工具：${displayName}` : '',
+        `内部标识：${name}`,
         server ? `服务：${server}` : '',
         type ? `类型：${type}` : '',
         description
@@ -28,6 +30,8 @@ function toolFingerprint(tool = {}) {
     return crypto.createHash('sha256').update(JSON.stringify({
         fullName: String(tool.fullName || ''),
         name: String(tool.name || ''),
+        displayTitle: String(tool.displayTitle || tool.title || ''),
+        displayDescription: String(tool.displayDescription || ''),
         serverName: String(tool.serverName || ''),
         serverType: String(tool.serverType || ''),
         description: String(tool.description || ''),

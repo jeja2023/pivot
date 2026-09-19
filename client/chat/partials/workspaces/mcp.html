@@ -281,6 +281,30 @@
     </div>
 </div>
 
+<div id="mcp-tool-presentation-modal" class="modal-overlay mcp-tool-presentation-overlay hidden" aria-hidden="true">
+    <div class="modal mcp-edit-modal mcp-tool-presentation-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-tool-presentation-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-tool-presentation-title">维护工具中文展示</h3>
+                <p>只修改界面显示与搜索别名，不会修改工具内部标识、参数或执行行为。</p>
+            </div>
+            <button id="mcp-tool-presentation-close-btn" class="btn-secondary workspace-modal-close" type="button">关闭</button>
+        </div>
+        <div class="mcp-edit-form">
+            <input id="mcp-tool-presentation-server-id" type="hidden">
+            <input id="mcp-tool-presentation-name" type="hidden">
+            <input id="mcp-tool-presentation-display-name" class="form-input" maxlength="80" placeholder="中文工具名称，例如：查询业务订单" aria-label="中文工具名称">
+            <textarea id="mcp-tool-presentation-display-description" class="form-input" rows="3" maxlength="360"
+                placeholder="中文说明，可选；留空时使用系统默认说明" aria-label="中文工具说明"></textarea>
+            <div class="mcp-form-tip">清空名称和说明后保存，可恢复系统默认中文显示。英文原名仍可用于搜索，但不会替代中文展示。</div>
+            <div class="mcp-edit-actions">
+                <button id="mcp-tool-presentation-save-btn" class="btn-primary" type="button">保存中文展示</button>
+                <button id="mcp-tool-presentation-cancel-btn" class="btn-secondary" type="button">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="mcp-local-auth-modal" class="modal-overlay hidden mcp-local-auth-overlay" aria-hidden="true">
     <div class="modal mcp-local-auth-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-local-auth-title">
         <div class="mcp-edit-header">

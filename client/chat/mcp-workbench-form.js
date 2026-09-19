@@ -33,7 +33,7 @@ function bindMcpModalAccessibility() {
     document.documentElement.dataset.mcpModalA11yBound = '1';
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        const openOverlays = [...document.querySelectorAll('.mcp-workspace-view, #mcp-edit-modal, #mcp-share-modal, #mcp-tools-modal, #mcp-local-auth-modal, #mcp-tool-test-modal')]
+        const openOverlays = [...document.querySelectorAll('.mcp-workspace-view, #mcp-edit-modal, #mcp-share-modal, #mcp-tools-modal, #mcp-tool-presentation-modal, #mcp-local-auth-modal, #mcp-tool-test-modal')]
             .filter(el => !el.classList.contains('hidden'));
         const current = openOverlays[openOverlays.length - 1];
         if (!current || current.id === 'mcp-workbench-modal') return;
@@ -446,6 +446,8 @@ function fillMcpForm(server, mode = 'create') {
     if (server.server_type === 'database') {
         mcpFormEl('db-type', mode).value = database.database_type || 'postgres';
         mcpFormEl('db-host', mode).value = database.host || '';
+        mcpFormEl('db-type', mode).value = database.database_type || 'postgres';
+        mcpFormEl('db-host', mode).value = database.host || '';
         mcpFormEl('db-port', mode).value = database.port || mcpDbDefaultPorts[database.database_type] || '';
         mcpFormEl('db-name', mode).value = database.database_name || '';
         mcpFormEl('db-user', mode).value = database.username || '';
@@ -505,3 +507,103 @@ window.Pivot.legacy.openMcpEditModal = function(serverId) {
     setMcpModalVisibility(modal, true, { focusSelector: '#mcp-edit-name' });
 };
 
+window.Pivot.legacy.openMcpSystemConfig = function (type) {
+    const service = mcpBuiltinServices.find(item => item.type === type);
+    if (!service?.requiresConfig) return showToast('该系统工具不需要额外配置', 'error');
+    const existing = mcpServersCache.find(server => server.server_type === type);
+    if (existing) return window.Pivot.legacy.openMcpEditModal(existing.id);
+
+    const modal = document.getElementById('mcp-edit-modal');
+    if (!modal) return;
+    bindMcpFormControls('edit');
+    setMcpEditTitle(`配置${service.title}`);
+    [
+        'mcp-edit-id', 'mcp-edit-url', 'mcp-edit-key', 'mcp-edit-desc',
+        'mcp-edit-im-endpoint-url', 'mcp-edit-im-auth-header', 'mcp-edit-im-token',
+        'mcp-edit-im-allowed-targets', 'mcp-edit-im-default-target',
+        'mcp-edit-im-max-message-length'
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    setMcpSourceType(type, 'edit');
+    mcpFormEl('name', 'edit').value = service.defaultName || service.title;
+    mcpFormEl('desc', 'edit').value = service.defaultDescription || service.description || '';
+    mcpFormEl('im-auth-header', 'edit').value = 'Authorization';
+    const imAllowAtAll = mcpFormEl('im-allow-at-all', 'edit');
+    if (imAllowAtAll) imAllowAtAll.checked = false;
+    const shared = mcpFormEl('shared', 'edit');
+    if (shared) shared.checked = false;
+    document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
+        el.classList.toggle('hidden', !isAdminUser());
+    });
+    document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
+        el.classList.toggle('hidden', !isSuperAdminUser());
+    });
+    setMcpModalVisibility(modal, true, { focusSelector: '#mcp-edit-name' });
+};
+
+function canManageMcpToolPresentation(server = {}) {
+    const external = String(server.server_type || '') === 'external';
+    const belongs = window.Pivot?.legacy?.mcpServerBelongsToCurrentUser?.(server);
+    const owner = (belongs !== undefined ? belongs : true)
+        || (server.user_id === null && typeof isSuperAdminUser === 'function' && isSuperAdminUser());
+    return external && owner && server.read_only !== true;
+}
+
+function bindMcpToolPresentationModal() {
+    const modal = document.getElementById('mcp-tool-presentation-modal');
+    if (!modal || modal.dataset.boundMcpToolPresentation === '1') return;
+    modal.dataset.boundMcpToolPresentation = '1';
+    const close = () => setMcpModalVisibility(modal, false);
+    document.getElementById('mcp-tool-presentation-close-btn')?.addEventListener('click', close);
+    document.getElementById('mcp-tool-presentation-cancel-btn')?.addEventListener('click', close);
+    document.getElementById('mcp-tool-presentation-save-btn')?.addEventListener('click', async event => {
+        const serverId = document.getElementById('mcp-tool-presentation-server-id')?.value || '';
+        const toolName = document.getElementById('mcp-tool-presentation-name')?.value || '';
+        const displayName = document.getElementById('mcp-tool-presentation-display-name')?.value || '';
+        const displayDescription = document.getElementById('mcp-tool-presentation-display-description')?.value || '';
+        if (!serverId || !toolName) return;
+        const button = event.currentTarget;
+        const previous = button.textContent;
+        button.disabled = true;
+        button.textContent = '正在保存...';
+        try {
+            const url = API_BASE + '/mcp/servers/' + encodeURIComponent(serverId)
+                + '/tools/' + encodeURIComponent(toolName) + '/presentation';
+            const response = await apiFetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ displayName, displayDescription })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '保存中文展示失败。');
+            close();
+            showToast('工具中文展示已保存。', 'success');
+            await window.Pivot.legacy.openMcpToolsModal?.(serverId);
+        } catch (error) {
+            showToast(error.message || '保存中文展示失败。', 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = previous;
+        }
+    });
+    modal.addEventListener('click', event => { if (event.target === modal) close(); });
+}
+
+function openMcpToolPresentationModal(server, tool) {
+    const modal = document.getElementById('mcp-tool-presentation-modal');
+    if (!modal || !server || !tool) return;
+    bindMcpToolPresentationModal();
+    document.getElementById('mcp-tool-presentation-server-id').value = String(server.id || '');
+    document.getElementById('mcp-tool-presentation-name').value = String(tool.name || '');
+    document.getElementById('mcp-tool-presentation-display-name').value = String(tool.customDisplayName || '');
+    document.getElementById('mcp-tool-presentation-display-description').value = String(tool.customDisplayDescription || '');
+    const title = document.getElementById('mcp-tool-presentation-title');
+    if (title) title.textContent = '维护工具中文展示';
+    setMcpModalVisibility(modal, true, { focusSelector: '#mcp-tool-presentation-display-name' });
+}
+
+window.Pivot.legacy.canManageMcpToolPresentation = canManageMcpToolPresentation;
+window.Pivot.legacy.bindMcpToolPresentationModal = bindMcpToolPresentationModal;
+window.Pivot.legacy.openMcpToolPresentationModal = openMcpToolPresentationModal;

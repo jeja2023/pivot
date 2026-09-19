@@ -159,7 +159,7 @@ function mountMcpManagementRoutes(deps = {}) {
                 }
                 const gov = getCapabilityToolGovernanceFromPackage(item, tool.name, user);
                 const shortName = String(tool.name || '').replace(/^mcp\.\d+\./, '');
-                const title = tool.title && tool.title !== tool.name ? tool.title : (MCP_CHAT_TOOL_TITLES[shortName] || tool.title || tool.name);
+                const title = tool.displayTitle || (tool.title && tool.title !== tool.name ? tool.title : (MCP_CHAT_TOOL_TITLES[shortName] || tool.title || tool.name));
                 tools.push({
                     name: tool.name,
                     fullName: tool.fullName,

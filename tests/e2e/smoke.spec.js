@@ -596,7 +596,7 @@ test.describe('Pivot browser smoke', () => {
             contentType: 'application/json',
             body: JSON.stringify({
                 tools: [
-                    { fullName: 'mcp.17.report.read_report', name: 'report.read_report', title: '读取报表', serverName: '报表工具' },
+                    { fullName: 'mcp.17.report.read_report', name: 'report.read_report', title: 'read report', displayTitle: '读取报表', description: 'Read a report.', displayDescription: '读取指定报表的数据与摘要。', searchAliases: ['读取报表', 'read report'], serverName: '报表工具' },
                     { fullName: 'mcp.17.report.list_reports', name: 'report.list_reports', title: '列出报表', serverName: '报表工具' },
                     { fullName: 'mcp.17.report.export_report', name: 'report.export_report', title: '导出报表', serverName: '报表工具' },
                     { fullName: 'mcp.17.report.share_report', name: 'report.share_report', title: '共享报表', serverName: '报表工具' },
@@ -644,10 +644,11 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('.chat-route-mention-item', { hasText: '@第七报表工具' })).toBeVisible();
         await page.locator('.chat-route-mention-pager button', { hasText: '上一页' }).click();
         await expect(page.locator('.chat-route-mention-result-summary')).toHaveText('已显示 1–6 / 7');
-        await mentionSearch.fill('读取');
+        await mentionSearch.fill('read report');
         const allowedTool = page.locator('.chat-route-mention-item', { hasText: '@读取报表' });
         await expect(allowedTool).toBeVisible();
-        await expect(page.locator('#chat-route-mention-menu')).toContainText('工具 · 报表工具');
+        await expect(page.locator('#chat-route-mention-menu')).toContainText('@读取报表');
+        await expect(page.locator('#chat-route-mention-menu')).not.toContainText('@read report');
         await expect(page.locator('.chat-route-mention-item', { hasText: '@删除报表' })).toHaveCount(0);
         await allowedTool.click();
         await expect(page.locator('#user-input')).toHaveValue('@读取报表 ');

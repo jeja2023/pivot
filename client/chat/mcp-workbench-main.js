@@ -82,6 +82,7 @@ async function loadMcpDatasetSummary() {
         return { count: 0, rowCount: 0, available: false };
     }
 }
+
 function mcpServerOwnerId(server = {}) {
     const owner = server.owner || {};
     if (owner.scope === 'global' || owner.id === null || server.user_id === null) return null;
@@ -93,6 +94,8 @@ function mcpServerBelongsToCurrentUser(server = {}) {
     const ownerId = mcpServerOwnerId(server);
     return Boolean(ownerId && user?.id && String(ownerId) === String(user.id));
 }
+
+window.Pivot.legacy.mcpServerBelongsToCurrentUser = mcpServerBelongsToCurrentUser;
 
 function mcpShouldShowAsWorkbenchServer(server = {}) {
     if (server.read_only === true || String(server.scope || '').toLowerCase() === 'shared') return true;
@@ -350,41 +353,6 @@ function renderMcpSystemServices() {
         ${renderMcpSection('处理与交付', '文档、数据、格式转换、图表和报告只处理上传文件、数据集或上游结果。', systemCards)}
     `);
 }
-window.Pivot.legacy.openMcpSystemConfig = function (type) {
-    const service = mcpBuiltinServices.find(item => item.type === type);
-    if (!service?.requiresConfig) return showToast('该系统工具不需要额外配置', 'error');
-    const existing = mcpServersCache.find(server => server.server_type === type);
-    if (existing) return window.Pivot.legacy.openMcpEditModal(existing.id);
-
-    const modal = document.getElementById('mcp-edit-modal');
-    if (!modal) return;
-    bindMcpFormControls('edit');
-    setMcpEditTitle(`配置${service.title}`);
-    [
-        'mcp-edit-id', 'mcp-edit-url', 'mcp-edit-key', 'mcp-edit-desc',
-        'mcp-edit-im-endpoint-url', 'mcp-edit-im-auth-header', 'mcp-edit-im-token',
-        'mcp-edit-im-allowed-targets', 'mcp-edit-im-default-target',
-        'mcp-edit-im-max-message-length'
-    ].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    setMcpSourceType(type, 'edit');
-    mcpFormEl('name', 'edit').value = service.defaultName || service.title;
-    mcpFormEl('desc', 'edit').value = service.defaultDescription || service.description || '';
-    mcpFormEl('im-auth-header', 'edit').value = 'Authorization';
-    const imAllowAtAll = mcpFormEl('im-allow-at-all', 'edit');
-    if (imAllowAtAll) imAllowAtAll.checked = false;
-    const shared = mcpFormEl('shared', 'edit');
-    if (shared) shared.checked = false;
-    document.querySelectorAll('#mcp-edit-modal .admin-only').forEach(el => {
-        el.classList.toggle('hidden', !isAdminUser());
-    });
-    document.querySelectorAll('#mcp-edit-modal .super-admin-only').forEach(el => {
-        el.classList.toggle('hidden', !isSuperAdminUser());
-    });
-    mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-edit-name' });
-};
 
 window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
     const server = mcpIsLocalDeviceServerId(serverId)
@@ -396,6 +364,7 @@ window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
     const list = document.getElementById('mcp-tools-list');
     if (!modal || !title || !list) return;
     mcpModalApi().bindMcpModalAccessibility?.();
+    window.Pivot?.legacy?.bindMcpToolPresentationModal?.();
     const fallbackTools = mcpFallbackToolsForServer(server);
     let tools = mcpToolsForServer(server.id, fallbackTools);
     PivotSafeHtml.setHtml(list, '<div class="mcp-empty-panel compact"><strong>正在读取工具列表...</strong><span>正在同步服务能力，请稍候。</span></div>');
@@ -421,6 +390,7 @@ window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
         const riskLevel = governance.riskLevel || 'medium';
         const approvalRequired = Boolean(governance.approvalRequired);
         const toolFullName = tool.fullName || tool.name || '';
+        const canCustomizePresentation = window.Pivot?.legacy?.canManageMcpToolPresentation?.(server);
         const ownerLabel = mcpOwnerLabel(tool) || mcpOwnerLabel(server);
         const showOwner = mcpShouldShowOwner(tool) || mcpShouldShowOwner(server);
         return `
@@ -431,12 +401,13 @@ window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
                     </div>
                     <p>${mcpEscape(mcpToolDescription(tool) || '暂无说明')}</p>
                     <div class="mcp-tool-meta">
-                        ${toolFullName ? `<span>${mcpEscape(toolFullName)}</span>` : ''}
+                        ${toolFullName ? `<details class="mcp-tool-technical-id"><summary>技术标识</summary><code>${mcpEscape(toolFullName)}</code></details>` : ''}
                         ${showOwner && ownerLabel ? `<span class="mcp-tool-owner" title="${mcpEscape(ownerLabel)}">所属：${mcpEscape(ownerLabel)}</span>` : ''}
                         <span>${mcpEscape(mcpToolRiskLabel(riskLevel))}</span>
                         ${approvalRequired ? '<span>需审批</span>' : ''}
                     </div>
                     <div class="mcp-tool-actions">
+                        ${canCustomizePresentation ? `<button class="btn-secondary mcp-tool-presentation-btn" type="button" data-mcp-tool-presentation="${mcpEscape(toolFullName)}">中文名称</button>` : ''}
                         <button class="btn-secondary mcp-tool-test-btn" type="button" data-mcp-test-tool="${mcpEscape(toolFullName)}" data-mcp-tool-title="${mcpEscape(mcpToolTitle(tool))}">单步测试</button>
                     </div>
                 </div>
@@ -451,6 +422,12 @@ window.Pivot.legacy.openMcpToolsModal = async function (serverId) {
             const toolObj = tools.find(t => (t.fullName || t.name) === toolName);
             const openFn = (window.Pivot?.moduleApi?.('mcp.workbench', {}) || {}).openMcpToolTestModal || openMcpToolTestModal;
             openFn(toolName, toolTitle, toolObj);
+        });
+    });
+    list.querySelectorAll('[data-mcp-tool-presentation]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tool = tools.find(item => (item.fullName || item.name) === btn.dataset.mcpToolPresentation);
+            if (tool) window.Pivot?.legacy?.openMcpToolPresentationModal?.(server, tool);
         });
     });
     mcpModalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '#mcp-tools-refresh-btn' });

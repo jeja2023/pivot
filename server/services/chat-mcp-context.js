@@ -74,7 +74,11 @@ function normalizeMcpToolShortName(tool) {
 function getMcpActionName(tool) {
     const shortName = normalizeMcpToolShortName(tool);
     const readableName = shortName.split('.').pop().replace(/[_-]+/g, ' ').trim();
-    return MCP_CHAT_TOOL_TITLES[shortName] || cleanCapabilityDisplayName(tool?.title || '') || readableName || '工具';
+    return String(tool?.displayTitle || '').trim()
+        || MCP_CHAT_TOOL_TITLES[shortName]
+        || cleanCapabilityDisplayName(tool?.title || '')
+        || readableName
+        || '工具';
 }
 
 function isLocalBrowserMcpTool(tool = {}) {

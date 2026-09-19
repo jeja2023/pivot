@@ -792,7 +792,7 @@ async function listCachedMcpTools(serverId = null, user = null) {
     }
     if (serverId) {
         const rows = await query(`
-            SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+            SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url, s.config AS server_config,
                    s.scope, s.allowed_units,
                    COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                    u.unit AS owner_unit, u.role AS owner_role, c.database_type
@@ -809,7 +809,7 @@ async function listCachedMcpTools(serverId = null, user = null) {
         return await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
     }
     const rows = await query(`
-        SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url,
+        SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url, s.config AS server_config,
                s.scope, s.allowed_units,
                COALESCE(NULLIF(u.deleted_username, ''), u.username) AS owner_username, u.nickname AS owner_nickname,
                u.unit AS owner_unit, u.role AS owner_role, c.database_type
@@ -848,6 +848,7 @@ async function formatMcpTool(row, user = null) {
         serverId: row.server_id,
         serverName: row.server_name,
         serverType,
+        serverConfig: row.server_config,
         databaseType: row.database_type || '',
         owner: formatMcpOwner(row),
         name: row.name,
