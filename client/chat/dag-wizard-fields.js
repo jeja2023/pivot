@@ -6,7 +6,7 @@ const resolveToolShortName = tool => {
         try {
             return toolShortName(tool);
         } catch {
-            // fallback below
+            // 回退到工具全名或别名解析
         }
     }
     const raw = String(tool?.fullName || tool?.full_name || tool?.toolName || tool?.name || '').trim();
