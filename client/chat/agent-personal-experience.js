@@ -1,9 +1,9 @@
 /* 个人 Agent 的目标草案、能力目录和双向渠道交互。 */
-/* global API_BASE, apiJson */
+/* global API_BASE, apiFetch */
 (function () {
     function create(deps = {}) {
         const { state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane, apiJson: injectedApiJson } = deps;
-        const apiJson = injectedApiJson || (typeof window !== 'undefined' && typeof window.apiJson === 'function' ? window.apiJson : async (path, options = {}) => {
+        const apiJson = injectedApiJson || (async (path, options = {}) => {
             const fetchFn = typeof apiFetch === 'function' ? apiFetch : fetch;
             const response = await fetchFn(path, options);
             const data = await response.json().catch(() => ({}));
