@@ -420,6 +420,28 @@ test('知识图谱顶部入口与文档列表行操作入口具备范围隔离�
     assert.match(kgServiceJs, /buildGraphMentionScopeSql/);
 });
 
+test('知识库首页以资料列表为主，使用与治理按需在独立工作台打开', () => {
+    const knowledge = read('client/chat/partials/workspaces/knowledge.html');
+    const product = read('client/chat/knowledge-product.js');
+    const panels = read('client/chat/rag-documents-panels.js');
+    const css = read('client/chat/styles/workspaces/knowledge.css');
+
+    assert.match(knowledge, /id="knowledge-product-open"[^>]*data-knowledge-product-open[^>]*>知识使用与治理<\/button>/);
+    assert.match(knowledge, /<\/section>\s*<div id="knowledge-product-modal"[^>]*data-knowledge-modal="1"/);
+    assert.match(knowledge, /role="tablist"[^>]*知识使用与治理功能/);
+    assert.match(knowledge, /role="tabpanel"[^>]*data-knowledge-product-panel="search"/);
+    assert.doesNotMatch(knowledge, /knowledge-product-shell/);
+    assert.match(product, /function openKnowledgeProduct\(tab = 'search'\)/);
+    assert.match(product, /function closeKnowledgeProduct\(\)/);
+    assert.match(product, /data-knowledge-product-open/);
+    assert.match(product, /event\.target === getProductModal\(\)/);
+    assert.match(product, /\['ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
+    assert.match(panels, /data-knowledge-product-open data-knowledge-product-tab="content"/);
+    assert.match(css, /\.modal\.knowledge-product-modal\s*\{[\s\S]*?height:\s*min\(780px/);
+    assert.match(css, /\.knowledge-product-modal-body\s*\{[\s\S]*?overflow:\s*auto;/);
+    assert.match(css, /@media \(max-width: 640px\)/);
+});
+
 test('数据分析数据查询页面可视化筛选紧凑布局、固定高度表格与分页契约', () => {
     const viewJs = read('client/chat/data-analysis/view.js');
     const queryJs = read('client/chat/data-analysis/query.js');

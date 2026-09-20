@@ -221,7 +221,16 @@
         if (activeTab === 'evaluation') return loadEvaluation();
     }
 
-    function switchTab(name) {
+    function getProductModal() {
+        return document.getElementById('knowledge-product-modal');
+    }
+
+    function isProductModalOpen() {
+        const modal = getProductModal();
+        return Boolean(modal && !modal.classList.contains('hidden'));
+    }
+
+    function switchTab(name, { focusPanel = false } = {}) {
         if (!tabs.includes(name)) return;
         activeTab = name;
         document.querySelectorAll('[data-knowledge-product-tab]').forEach(button => {
@@ -232,7 +241,21 @@
         document.querySelectorAll('[data-knowledge-product-panel]').forEach(panel => {
             panel.classList.toggle('hidden', panel.dataset.knowledgeProductPanel !== name);
         });
+        if (focusPanel) document.querySelector(`[data-knowledge-product-panel="${name}"]`)?.focus?.();
         refreshActiveTab().catch(error => showToast(error.message || '加载知识库数据失败', 'error'));
+    }
+
+    function openKnowledgeProduct(tab = 'search') {
+        const modal = getProductModal();
+        if (!modal) return;
+        switchTab(tabs.includes(tab) ? tab : 'search');
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, {
+            focusSelector: activeTab === 'search' ? '#knowledge-product-query' : `[data-knowledge-product-tab="${activeTab}"]`
+        });
+    }
+
+    function closeKnowledgeProduct() {
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(getProductModal(), false);
     }
 
     async function showCitation(key) {
@@ -497,6 +520,10 @@
     }
 
     document.addEventListener('click', event => {
+        if (event.target === getProductModal()) return closeKnowledgeProduct();
+        const open = event.target.closest('[data-knowledge-product-open]');
+        if (open) return openKnowledgeProduct(open.dataset.knowledgeProductTab || 'search');
+        if (event.target.closest('[data-knowledge-product-close]')) return closeKnowledgeProduct();
         const tab = event.target.closest('[data-knowledge-product-tab]');
         if (tab) return switchTab(tab.dataset.knowledgeProductTab);
         if (event.target.closest('#knowledge-product-search')) return void runKnowledgeSearch({ ask: false });
@@ -543,10 +570,35 @@
         if (versionAction) return void performVersionAction(versionAction).catch(error => showToast(error.message || '更新版本状态失败', 'error'));
     });
 
-    document.addEventListener('pivot:workspace-mounted', event => {
-        if (event.detail?.name === 'knowledge') switchTab(activeTab);
+    document.addEventListener('keydown', event => {
+        if (!isProductModalOpen() || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const current = event.target.closest('[data-knowledge-product-tab]');
+        if (!current) return;
+        const index = tabs.indexOf(current.dataset.knowledgeProductTab);
+        if (index < 0) return;
+        event.preventDefault();
+        const nextIndex = event.key === 'Home' ? 0
+            : event.key === 'End' ? tabs.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        const next = tabs[nextIndex];
+        switchTab(next);
+        document.querySelector(`[data-knowledge-product-tab="${next}"]`)?.focus?.();
     });
-    document.addEventListener('pivot:knowledge-opened', () => switchTab(activeTab));
 
-    window.Pivot?.exposeModule?.('knowledge.product', { loadDocuments, loadEvaluation, loadJobs, loadSources, switchTab });
+    document.addEventListener('pivot:workspace-mounted', event => {
+        if (event.detail?.name === 'knowledge' && isProductModalOpen()) switchTab(activeTab);
+    });
+    document.addEventListener('pivot:knowledge-opened', () => {
+        if (isProductModalOpen()) switchTab(activeTab);
+    });
+
+    window.Pivot?.exposeModule?.('knowledge.product', {
+        closeKnowledgeProduct,
+        loadDocuments,
+        loadEvaluation,
+        loadJobs,
+        loadSources,
+        openKnowledgeProduct,
+        switchTab
+    });
 })();

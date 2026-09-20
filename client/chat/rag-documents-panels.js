@@ -261,34 +261,16 @@ const renderRagQualityReport = (report) => {
         return;
     }
     PivotSafeHtml.setHtml(el, `
-        <div class="governance-head">
+        <button type="button" class="governance-head" data-knowledge-product-open data-knowledge-product-tab="content" aria-label="查看知识质量治理详情">
             <strong>质量诊断</strong>
-            <span>${duplicateGroups.length ? `发现 ${duplicateGroups.length} 组重复文档` : visibleProblems.length ? `发现 ${visibleProblems.length} 个需处理文档` : '存在需关注指标'}</span>
-        </div>
+            <span>${duplicateGroups.length ? `${duplicateGroups.length} 组重复` : visibleProblems.length ? `${visibleProblems.length} 个待处理` : '存在需关注指标'} · 查看治理</span>
+        </button>
         ${issueItems.length ? `
             <div class="governance-metrics">
                 ${issueItems.map(([label, value]) => `<span><b>${Number(value || 0)}</b>${window.Pivot.legacy.escapeRagHtml(label)}</span>`).join('')}
             </div>
         ` : ''}
-        ${visibleProblems.length ? `
-            <div class="governance-list">
-                ${visibleProblems.map(doc => `
-                <span class="${doc.status === 'error' ? 'is-error' : ''}">
-                    ${window.Pivot.legacy.escapeRagHtml(doc.name || '文档')} · ${window.Pivot.legacy.escapeRagHtml(getRagStatusLabel(doc.status))} · 分块 ${Number(doc.chunk_count || 0)}
-                </span>
-                `).join('')}
-            </div>
-        ` : ''}
-        ${duplicateGroups.length ? `
-            <div class="governance-list is-duplicate">
-                ${duplicateGroups.map(group => `
-                <span>
-                    ${window.Pivot.legacy.escapeRagHtml(group.documents?.map(document => document.name || '文档').join('、') || '重复文档')} · 完全相同
-                </span>
-                `).join('')}
-            </div>
-        ` : ''}
-        ${unhashedReady > 0 ? `<div class="governance-note">${unhashedReady} 个历史文档尚未生成重复检测指纹，批量重建后可纳入检测。</div>` : ''}
+        ${unhashedReady > 0 ? `<span class="governance-note">${unhashedReady} 个历史文档待补齐指纹</span>` : ''}
     `);
 };
 
@@ -692,4 +674,3 @@ async function openKnowledgeCollectionShareModal() {
 window.Pivot?.exposeModule?.('rag.panels', {
     openKnowledgeCollectionShareModal
 });
-
