@@ -5,6 +5,9 @@ const { getModelContextBudget } = require('./context-budget');
 const { defaultToolOrchestrator } = require('./agent-tool-orchestrator');
 const { buildToolExecutionPlan } = require('./agent-tool-execution-plan');
 const { executeWorkflowApiOperation } = require('./workflow-api-operations');
+const { evaluateToolInvocation, validateToolOutput } = require('./tool-policy-engine');
+const { recordToolInvocationEvent } = require('./tool-invocation-events');
+const { acquire: acquireToolExecutionGuard } = require('./tool-execution-guard');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -119,14 +122,69 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         ...(context.run || { tool_policy: 'all', approval_policy: 'approve_all_mcp' })
     };
     if (context.modelCfg?.id) policyRun.chosen_model_id = context.modelCfg.id;
-    const executionPlan = await buildToolExecutionPlan({ run: policyRun, tool, input, user, context });
+    // Agent、工作流和桌面运行时也要经过工具库统一 PEP。既有
+    // ToolOrchestrator 仍负责预算、检查点、恢复与实际审批暂停；此处
+    // 提供跨入口一致的契约/目录/连接/治理检查和调用事件关联。
+    const policyEvaluation = await evaluateToolInvocation({
+        actor: user,
+        run: policyRun,
+        tool,
+        toolName: safeName,
+        input,
+        source: context.source || (context.entrypoint === 'workflow' ? 'workflow' : 'agent'),
+        traceContext: context.traceContext || {},
+        options: {
+            ...context,
+            toolList,
+            allowApproval: context.allowApproval === true || context.approvalGranted === true
+        }
+    });
+    const executionPlan = policyEvaluation.executionPlan || await buildToolExecutionPlan({ run: policyRun, tool, input, user, context });
+    const guardLease = acquireToolExecutionGuard({
+        toolName: safeName,
+        connectionAccountId: policyEvaluation.connection?.id || null,
+        serverId: policyEvaluation.serverId,
+        env: context.env || process.env
+    });
     return defaultToolOrchestrator.execute({
         run: policyRun,
         tool,
-        input,
+        input: policyEvaluation.input,
         user,
         context,
         executionPlan,
+        onComplete: async ({ output, effectiveInput }) => {
+            guardLease.release();
+            await recordToolInvocationEvent({
+                actorId: user?.id,
+                runId: policyRun.id || null,
+                stepId: context.stepId || context.node?.id || '',
+                serverId: policyEvaluation.serverId,
+                releaseId: policyEvaluation.release?.id,
+                toolItemId: policyEvaluation.toolItem?.id,
+                connectionAccountId: policyEvaluation.connection?.id,
+                toolName: safeName,
+                definitionDigest: policyEvaluation.toolItem?.definitionDigest || policyEvaluation.toolItem?.definition_digest || '',
+                policyDecision: 'allow', source: policyEvaluation.source, input: effectiveInput, output,
+                status: 'success', ...policyEvaluation.trace
+            });
+        },
+        onFailure: async ({ error, effectiveInput }) => {
+            guardLease.release({ error });
+            await recordToolInvocationEvent({
+                actorId: user?.id,
+                runId: policyRun.id || null,
+                stepId: context.stepId || context.node?.id || '',
+                serverId: policyEvaluation.serverId,
+                releaseId: policyEvaluation.release?.id,
+                toolItemId: policyEvaluation.toolItem?.id,
+                connectionAccountId: policyEvaluation.connection?.id,
+                toolName: safeName,
+                definitionDigest: policyEvaluation.toolItem?.definitionDigest || policyEvaluation.toolItem?.definition_digest || '',
+                policyDecision: 'allow', source: policyEvaluation.source, input: effectiveInput, error,
+                status: 'error', retryable: Boolean(executionPlan.retry?.retryable), ...policyEvaluation.trace
+            });
+        },
         execute: async ({ input: effectiveInput }) => {
             if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName)) {
                 const error = new Error('自主 Agent 禁止在服务端进程内执行动态代码；请使用桌面 Worker 沙箱。');
@@ -134,15 +192,14 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 error.category = 'policy';
                 throw error;
             }
+            let output;
             if (safeName.startsWith('mcp.')) {
-                return await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null });
-            }
-            if (safeName.startsWith('api.operation.')) {
+                output = await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null });
+            } else if (safeName.startsWith('api.operation.')) {
                 const { executeAgentHttp } = require('./agent-http-tool');
                 const operationId = String(tool.apiOperationId || safeName.slice('api.operation.'.length));
-                return await executeWorkflowApiOperation(operationId, effectiveInput, user, context, executeAgentHttp);
-            }
-            if (tool.databaseTool && safeName.startsWith('db.')) {
+                output = await executeWorkflowApiOperation(operationId, effectiveInput, user, context, executeAgentHttp);
+            } else if (tool.databaseTool && safeName.startsWith('db.')) {
                 const rawConnectionId = effectiveInput?.connectionId ?? effectiveInput?.connection_id ?? effectiveInput?.databaseConnectionId ?? effectiveInput?.database_connection_id ?? effectiveInput?.mcpServerId ?? effectiveInput?.mcp_server_id;
                 const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
                 const selectedConnectionId = String(rawConnectionId ?? '').trim()
@@ -163,9 +220,19 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 delete toolInput.database_connection_id;
                 delete toolInput.mcpServerId;
                 delete toolInput.mcp_server_id;
-                return await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null });
+                output = await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null });
+            } else {
+                output = await executeBuiltInTool(safeName, effectiveInput, user, context);
             }
-            return await executeBuiltInTool(safeName, effectiveInput, user, context);
+            const outputIssues = validateToolOutput(tool, policyEvaluation.toolItem, output);
+            if (outputIssues.length) {
+                const error = new Error(`工具输出契约校验失败：${outputIssues[0]}`);
+                error.code = 'TOOL_OUTPUT_INVALID';
+                error.status = 502;
+                error.category = 'validation';
+                throw error;
+            }
+            return output;
         }
     });
 }

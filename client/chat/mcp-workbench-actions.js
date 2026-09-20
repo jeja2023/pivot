@@ -9,6 +9,12 @@
         const root = document.getElementById('mcp-workbench-modal');
         if (!root || root.dataset.boundMcpWorkbenchActions === '1') return;
         root.dataset.boundMcpWorkbenchActions = '1';
+        root.addEventListener('keydown', async event => {
+            if (event.key !== 'Enter' || event.target?.id !== 'mcp-product-tool-search') return;
+            event.preventDefault();
+            try { await workbenchApi().loadMcpProductCatalog?.(event.target.value || ''); }
+            catch (error) { showToast(error.message || '工具搜索失败', 'error'); }
+        });
         root.addEventListener('click', async event => {
             const button = event.target.closest('button, [role="button"]');
             if (!button || !root.contains(button) || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
@@ -35,6 +41,31 @@
             if (button.hasAttribute('data-mcp-retry-governance')) {
                 event.preventDefault();
                 return await workbenchApi().loadMcpGovernance?.();
+            }
+            if (button.id === 'mcp-product-tool-search-btn') {
+                event.preventDefault();
+                const query = document.getElementById('mcp-product-tool-search')?.value || '';
+                try { return await workbenchApi().loadMcpProductCatalog?.(query); }
+                catch (error) { return showToast(error.message || '工具搜索失败', 'error'); }
+            }
+            if (button.hasAttribute('data-mcp-product-detail-close')) {
+                event.preventDefault();
+                return window.Pivot?.moduleApi?.('mcp.modal', {})?.setMcpModalVisibility?.(document.getElementById('mcp-product-detail-modal'), false);
+            }
+            if (button.id === 'mcp-product-operations-refresh') {
+                event.preventDefault();
+                try { return await workbenchApi().loadMcpToolOperations?.(); }
+                catch (error) { return showToast(error.message || '运行记录加载失败', 'error'); }
+            }
+            if (button.dataset.mcpProductDescribe !== undefined) {
+                event.preventDefault();
+                try { return await workbenchApi().describeMcpProductTool?.(button); }
+                catch (error) { return showToast(error.message || '工具契约读取失败', 'error'); }
+            }
+            if (button.dataset.mcpConnectionAction !== undefined) {
+                event.preventDefault();
+                try { return await workbenchApi().changeMcpConnectionAccount?.(button); }
+                catch (error) { return showToast(error.message || '连接账户操作失败', 'error'); }
             }
             if (button.hasAttribute('data-mcp-open-data-analysis')) {
                 event.preventDefault();

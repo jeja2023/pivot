@@ -655,7 +655,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     runId, stepId: `${runId}:${step}:${call.id || call.name}`,
                     operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
                     input: args, output: { error: toolErr.message },
-                    policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+                    policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(toolErr.code) ? 'denied' : 'allow',
                     status: 'error', errorCategory: toolErr.category || 'unknown', errorMessage: toolErr.message,
                     durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                     ,stepContext, entrypoint: 'agent'

@@ -74,6 +74,7 @@ const { createAppsRouter } = require('./routes/apps');
 const { createAgentsRouter } = require('./routes/agents');
 const { createTriggersRouter } = require('./routes/triggers');
 const { createMcpRouter } = require('./routes/mcp');
+const { createToolLibraryRouter } = require('./routes/tool-library');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
 const { createMemoriesRouter } = require('./routes/memories');
@@ -625,6 +626,11 @@ app.use('/api', createMcpRouter({
 app.use('/api/rag', ragRouter);
 
 app.use('/api', createKnowledgeRouter({
+    authMiddleware,
+    logAction
+}));
+
+app.use('/api', createToolLibraryRouter({
     authMiddleware,
     logAction
 }));

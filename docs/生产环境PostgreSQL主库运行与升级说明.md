@@ -1,7 +1,7 @@
 # Pivot 生产环境 PostgreSQL 主库运行与升级说明
 
 适用版本：v0.1.155 及后续 PostgreSQL-only 主库版本  
-更新日期：2026-09-20
+更新日期：2026-09-20（v0.1.157 工具库控制面增量）
 
 ## 1. 适用范围与不可变边界
 
@@ -45,11 +45,11 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
   → 写入 Schema 注释与默认系统配置
 ```
 
-`server/db/schema/pg-schema.snapshot.json` 是主库的原生 DDL 来源。当前基线包含 104 张表、184 个外键和 172 个索引；迁移注册表中的 68 条迁移均为 PostgreSQL `upPg` 迁移。
+`server/db/schema/pg-schema.snapshot.json` 是主库的原生 DDL 来源。当前基线包含 104 张表、184 个外键和 172 个索引；迁移注册表中的 69 条迁移均为 PostgreSQL `upPg` 迁移。
 
 历史建表和补列已由 schema 快照接管。不要手工把历史 SQLite DDL、FTS5 虚表或 SQLite `PRAGMA` 迁回生产库。
 
-## 4. v0.1.155 升级步骤
+## 4. 升级步骤（v0.1.155 及后续版本）
 
 1. 在维护窗口前备份 PostgreSQL 数据库及 `uploads/` 文件目录；两者应使用同一恢复点标识。
 2. 检查 `.env`：
@@ -80,6 +80,19 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 | 访问控制 | 无权限用户不能读取集合、引用、原件或将其作为 Agent 资料包。 |
 | 局域网来源 | 目录仅访问白名单路径；HTTP/API 不发生越权重定向；数据库来源只使用已审核只读模板。 |
 | 质量评测 | 黄金问题集、评测运行和指标结果可读取，且不将空答案误计为成功。 |
+
+### v0.1.157 工具库控制面增量检查
+
+`v0.1.157` 会自动应用 `202609200004_tool_library_product_control_plane`，新增工具 Catalog Release、目录项/别名/向量索引、连接器与连接账户、授权请求、工具任务、调用事件、评测与工具包供应链表。迁移保留既有 `mcp_servers` 和 `mcp_tool_cache`；后者继续作为 active Catalog Release 的兼容读模型，因此无需在停机窗口手工迁移已有服务配置。
+
+| 检查项 | 预期结果 |
+| --- | --- |
+| `schema_migrations` | 已登记 `202609200004_tool_library_product_control_plane`。 |
+| 首次目录刷新 | 每个已配置外部 MCP 服务至少生成一个 `tool_catalog_releases` 记录；刷新失败时既有 active release 和缓存仍可用。 |
+| OAuth 安全 | 生产连接器的授权端点、令牌端点和回调地址均使用 HTTPS；`PIVOT_ALLOW_INSECURE_OAUTH_HTTP` 保持 `false`。 |
+| 连接账户 | `connection_accounts` 只保存加密凭据引用；管理/API 响应、工具 Schema、调用日志和模型上下文不出现令牌原文。 |
+| 工作流兼容 | 若新 Release 标记为破坏性变更，相关已发布工作流显示 stale，重新确认后才可再次发布。 |
+| 运行治理 | 工具调用事件可关联 actor、release、策略决定、Trace 和安全摘要；任务取消、限流和熔断不绕过统一策略入口。 |
 
 ## 6. 禁止执行的旧流程
 
@@ -125,6 +138,9 @@ PostgreSQL 版本迁移不提供自动 down migration。若升级后必须回退
 ## 9. 关联文档
 
 - [v0.1.155 发布记录](releases/v0.1.155-知识库产品化与PostgreSQL主库收敛.md)
+- [v0.1.157 工具库产品化控制面与受控连接发布记录](releases/v0.1.157-工具库产品化控制面与受控连接.md)
+- [工具库产品级差距分析与升级方案](../工具库产品级差距分析与升级方案.md)
+- [工具包发布与签名规范](工具包发布与签名规范.md)
 - [知识库产品化改造方案](../Pivot知识库产品化改造方案.md)
 - [生产环境离线部署](生产环境离线部署.md)
 - [历史 SQLite→PostgreSQL 一次性迁移方案（归档）](../Pivot生产环境迁移PostgreSQL实施方案.md)

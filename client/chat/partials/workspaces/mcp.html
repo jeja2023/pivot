@@ -13,7 +13,7 @@
         <div class="mcp-primary-tabs" role="tablist" aria-label="工具库功能分类">
             <button class="mcp-primary-tab active" type="button" data-mcp-section="tools" role="tab"
                 aria-selected="true" tabindex="0">
-                <span>工具服务</span>
+                <span>工具目录</span>
             </button>
             <button class="mcp-primary-tab" type="button" data-mcp-section="data" role="tab" aria-selected="false"
                 tabindex="-1">
@@ -23,6 +23,10 @@
                 aria-selected="false" tabindex="-1">
                 <span>连接与凭据</span>
             </button>
+            <button class="mcp-primary-tab" type="button" data-mcp-section="operations" role="tab"
+                aria-selected="false" tabindex="-1">
+                <span>运行与治理</span>
+            </button>
         </div>
         <div class="workspace-modal-body">
             <div id="mcp-workbench-state" class="mcp-workbench-state" role="status" aria-live="polite" hidden></div>
@@ -31,6 +35,20 @@
                 <div class="mcp-tab-pane" data-mcp-pane="tools">
                     <div class="mcp-list-wrap">
                         <div id="mcp-governance-panel" class="workspace-governance-panel"></div>
+                        <section class="mcp-product-section" aria-labelledby="mcp-product-catalog-title">
+                            <div class="mcp-product-section-head">
+                                <div>
+                                    <strong id="mcp-product-catalog-title">可用工具</strong>
+                                    <span>按任务搜索已授权工具；只有选择后才加载完整参数契约。</span>
+                                </div>
+                                <div class="mcp-product-search">
+                                    <input id="mcp-product-tool-search" class="form-input" type="search"
+                                        placeholder="例如：查询订单、生成图表、读取报表" aria-label="搜索可用工具">
+                                    <button id="mcp-product-tool-search-btn" class="btn-secondary" type="button">搜索</button>
+                                </div>
+                            </div>
+                            <div id="mcp-product-catalog" class="mcp-product-grid" aria-live="polite"></div>
+                        </section>
                         <div id="mcp-system-services" class="mcp-system-services"></div>
                         <div id="mcp-tool-cache" class="agent-tool-list"></div>
                     </div>
@@ -44,15 +62,52 @@
                 <!-- Tab 3: 连接与凭据 -->
                 <div class="mcp-tab-pane hidden" data-mcp-pane="credentials">
                     <div class="mcp-list-wrap">
+                        <section class="mcp-product-section" aria-labelledby="mcp-connection-accounts-title">
+                            <div class="mcp-product-section-head">
+                                <div>
+                                    <strong id="mcp-connection-accounts-title">连接账户</strong>
+                                    <span>查看授权范围、过期状态与最近错误；凭据本身不会在此显示。</span>
+                                </div>
+                            </div>
+                            <div id="mcp-connection-accounts" class="mcp-product-grid" aria-live="polite"></div>
+                        </section>
                         <div id="mcp-security-credentials" class="mcp-server-list"></div>
                         <div id="mcp-api-operations" class="mcp-server-list"></div>
                         <div id="mcp-notifications-extensions" class="mcp-server-list"></div>
+                    </div>
+                </div>
+                <div class="mcp-tab-pane hidden" data-mcp-pane="operations">
+                    <div class="mcp-list-wrap">
+                        <section class="mcp-product-section" aria-labelledby="mcp-tool-operations-title">
+                            <div class="mcp-product-section-head">
+                                <div>
+                                    <strong id="mcp-tool-operations-title">工具运行与治理</strong>
+                                    <span>查看策略决定、调用成功率、延迟、失败原因和等待审批的调用。</span>
+                                </div>
+                                <button id="mcp-product-operations-refresh" class="btn-secondary" type="button">刷新运行记录</button>
+                            </div>
+                            <div id="mcp-tool-operations-summary" class="mcp-operation-summary" aria-live="polite"></div>
+                            <div id="mcp-tool-operations" class="mcp-operation-list" aria-live="polite"></div>
+                        </section>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 </section>
+
+<div id="mcp-product-detail-modal" class="modal-overlay hidden mcp-product-detail-overlay" aria-hidden="true">
+    <div class="modal mcp-product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-product-detail-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-product-detail-title">工具契约</h3>
+                <p id="mcp-product-detail-subtitle">工具输入、输出和治理信息。</p>
+            </div>
+            <button class="btn-secondary workspace-modal-close" type="button" data-mcp-product-detail-close aria-label="关闭工具契约">关闭</button>
+        </div>
+        <pre id="mcp-product-detail-content" class="mcp-product-detail-content"></pre>
+    </div>
+</div>
 
 <!-- 管理与配置面板 (符合第39条复用规范) -->
 <div id="mcp-edit-modal" class="modal-overlay hidden" style="z-index: 1900;" aria-hidden="true">

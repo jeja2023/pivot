@@ -23,7 +23,13 @@ function registerAgentToolTestRoute({ router, authMiddleware, logAction }) {
             resolvedInput = resolveDagNodeInput({ tool: toolName, input }, { goal: String(rawContext.goal || req.body?.dagInputs?.goal || '').trim(), inputs: dagInputs, states, nodeMap });
         }
         const startedAt = Date.now(); let output;
-        try { output = await executeToolByName(toolName, resolvedInput, req.user, tools, { dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {} }); }
+        try {
+            output = await executeToolByName(toolName, resolvedInput, req.user, tools, {
+                dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {},
+                source: 'manual_test',
+                entrypoint: 'manual_test'
+            });
+        }
         catch (error) {
             if (error instanceof PolicyError || [400, 403, 404].includes(error?.status)) return res.status(error.status || 400).json({ error: error.message });
             throw error;

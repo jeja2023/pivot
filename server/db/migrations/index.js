@@ -47,6 +47,7 @@ const migrationModules = [
     require('./agent-workflow-iteration-items'),
     require('./agent-workflow-trigger-events'),
     require('./agent-workflow-release-review'),
+    require('./tool-library-product-control-plane'),
     require('./chat-adaptive-routing'),
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),

@@ -1,7 +1,6 @@
 // 聊天工具库工作台数据加载与操作 Chat MCP workbench data loading and actions
 let mcpWorkbenchLoadPromise = null;
 const mcpModalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
-
 function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
     const badge = count ? `${count} 个` : service.badge;
     const cardMeta = metaText || (count ? '可继续添加连接' : '配置后可查看工具');
@@ -20,7 +19,6 @@ function renderMcpCatalogCard(service, { count = 0, metaText = '' } = {}) {
         </div>
     `;
 }
-
 function renderMcpInstanceCard(server) {
     const database = server.database_connection || {};
     const typeLabel = server.server_type === 'database'
@@ -60,13 +58,11 @@ function renderMcpInstanceCard(server) {
         </div>
     `;
 }
-
 function mcpFormatCount(value) {
     if (window.Pivot?.formatNumber) return window.Pivot.formatNumber(value);
     const num = Number(value) || 0;
     return String(num);
 }
-
 async function loadMcpDatasetSummary() {
     try {
         const res = await apiFetch(`${API_BASE}/apps/data-analysis/datasets/summary`);
@@ -82,40 +78,33 @@ async function loadMcpDatasetSummary() {
         return { count: 0, rowCount: 0, available: false };
     }
 }
-
 function mcpServerOwnerId(server = {}) {
     const owner = server.owner || {};
     if (owner.scope === 'global' || owner.id === null || server.user_id === null) return null;
     return owner.id || server.user_id || null;
 }
-
 function mcpServerBelongsToCurrentUser(server = {}) {
     const user = typeof currentUser !== 'undefined' ? currentUser : null;
     const ownerId = mcpServerOwnerId(server);
     return Boolean(ownerId && user?.id && String(ownerId) === String(user.id));
 }
-
 window.Pivot.legacy.mcpServerBelongsToCurrentUser = mcpServerBelongsToCurrentUser;
-
 function mcpShouldShowAsWorkbenchServer(server = {}) {
     if (server.read_only === true || String(server.scope || '').toLowerCase() === 'shared') return true;
     if (mcpServerOwnerId(server) === null) return true;
     if (mcpServerBelongsToCurrentUser(server)) return true;
     return false;
 }
-
 function mcpIsOtherUserServer(server = {}) {
     if (!(typeof isAdminUser === 'function' && isAdminUser())) return false;
     if (mcpServerOwnerId(server) === null) return false;
     return !mcpServerBelongsToCurrentUser(server);
 }
-
 function mcpServerTypeLabel(server = {}) {
     const database = server.database_connection || {};
     if (server.server_type === 'database') return mcpDbToolLabels[database.database_type] || '数据库';
     return mcpBuiltinToolLabels[server.server_type] || '外部服务';
 }
-
 function renderMcpOtherUserToolsPanel(servers = []) {
     if (!servers.length) return '';
     const owners = new Set();
@@ -157,7 +146,6 @@ function renderMcpOtherUserToolsPanel(servers = []) {
         </details>
     `;
 }
-
 function renderMcpDataManagementPanel(summary = {}) {
     const count = Number(summary.count) || 0;
     const rowCount = Number(summary.rowCount) || 0;
@@ -1312,8 +1300,13 @@ async function refreshMcpWorkbench(button = null) {
 }
 
 window.Pivot?.exposeModule?.('mcp.workbench', {
+    changeMcpConnectionAccount: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.changeConnectionAccount?.(...args),
+    describeMcpProductTool: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.describeTool?.(...args),
     fillMcpToolSampleInput,
+    loadMcpConnectionAccounts: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.loadConnectionAccounts?.(...args),
     loadMcpGovernance,
+    loadMcpProductCatalog: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.loadCatalog?.(...args),
+    loadMcpToolOperations: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.loadOperations?.(...args),
     openMcpDataAnalysisImport,
     openMcpApiImportModal: (...args) => window.Pivot?.moduleApi?.('mcp.apiOperations')?.openModal?.(...args),
     openMcpShareModal,
@@ -1330,13 +1323,17 @@ window.Pivot.legacy.loadMcpWorkbench = async function () {
         try {
             window.Pivot.moduleApi?.('mcp.actions')?.bindMcpWorkbenchActions?.();
             window.Pivot?.moduleApi?.('mcp.tabs')?.bindTabs?.();
+            const product = window.Pivot?.moduleApi?.('mcp.product', {}) || {};
             const results = await Promise.allSettled([
                 loadMcpGovernance(),
                 window.Pivot.legacy.syncMcpLocalExecutionBridge
                     ? window.Pivot.legacy.syncMcpLocalExecutionBridge()
                     : Promise.resolve(null),
                 loadMcpTools(),
-                loadMcpServers()
+                loadMcpServers(),
+                product.loadCatalog?.(),
+                product.loadConnectionAccounts?.(),
+                product.loadOperations?.()
             ]);
             const failures = results.filter(result => result.status === 'rejected');
             if (failures.length === results.length) {

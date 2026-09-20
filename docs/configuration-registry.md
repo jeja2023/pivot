@@ -61,6 +61,16 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 工具库执行治理
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_TOOL_MAX_CONCURRENT_PER_TOOL` | integer | `4` | 1–100 | 单进程内同一工具/连接的最大并发执行数；超过后快速拒绝，避免下游雪崩。 |
+| `PIVOT_TOOL_MAX_CALLS_PER_MINUTE` | integer | `120` | 1–100000 | 单进程内同一工具/连接每分钟最大调用数；用于保护下游服务和账号配额。 |
+| `PIVOT_TOOL_CIRCUIT_FAILURE_THRESHOLD` | integer | `5` | 1–100 | 同一工具/连接连续临时失败达到该阈值后开启熔断保护。 |
+| `PIVOT_TOOL_CIRCUIT_COOLDOWN_MS` | integer | `30000` | 1000–1800000 | 工具熔断后的冷却时间；冷却结束只允许一次半开恢复探测。 |
+| `PIVOT_ALLOW_INSECURE_OAUTH_HTTP` | boolean | `false` | true / false | 是否仅为本地开发允许 OAuth 授权端点和回调使用 HTTP；生产环境必须保持 false。 |
+
 ## 知识库局域网来源
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

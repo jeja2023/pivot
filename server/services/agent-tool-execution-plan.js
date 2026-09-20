@@ -50,6 +50,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
         policy: {
             decision: policy.decision,
             reasons: policy.reasons || [],
+            reasonCodes: policy.reasonCodes || [],
             riskLevel: Number(tool.risk_level || 0) || 0
         },
         approval: {

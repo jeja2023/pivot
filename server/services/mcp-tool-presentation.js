@@ -168,6 +168,13 @@ function getMcpToolPresentation(tool = {}) {
 function presentMcpTool(tool = {}) {
     return {
         ...tool,
+        // Contract/release fields are deliberately retained in the read model:
+        // the display formatter must never strip the immutable execution
+        // identity that agents, workflows and diagnostics need to surface.
+        ...(tool.output_schema || tool.outputSchema ? { output_schema: tool.output_schema || tool.outputSchema } : {}),
+        ...(tool.catalogReleaseId ? { catalogReleaseId: tool.catalogReleaseId, catalogReleaseVersion: tool.catalogReleaseVersion || '' } : {}),
+        ...(tool.catalogItemId ? { catalogItemId: tool.catalogItemId } : {}),
+        ...(tool.definitionDigest ? { definitionDigest: tool.definitionDigest } : {}),
         ...getMcpToolPresentation(tool)
     };
 }

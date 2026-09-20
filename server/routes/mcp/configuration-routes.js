@@ -447,8 +447,16 @@ function mountMcpConfigurationRoutes(deps = {}) {
             const server = await getAccessibleMcpServer(req.params.id, req.user);
             if (!server) return res.status(404).json({ error: '工具服务不存在。' });
             const tools = await refreshMcpTools(server, req.user);
-            logAction(req, '刷新工具库工具', `${server.name}: ${tools.length}`);
-            res.json({ success: true, tools });
+            const catalogRelease = tools.catalogRelease || null;
+            const catalogComparison = tools.catalogComparison || {};
+            logAction(req, '刷新工具库工具', `${server.name}: ${tools.length}，目录版本: ${catalogRelease?.release_version || '-'}`);
+            res.json({
+                success: true,
+                tools,
+                catalogRelease,
+                catalogComparison,
+                pendingReview: tools.catalogActivated === false && catalogRelease?.status === 'pending_review'
+            });
         }));
 
         router.post('/mcp/servers/:id/diagnose', authMiddleware, asyncHandler(async (req, res) => {

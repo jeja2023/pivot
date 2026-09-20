@@ -11,6 +11,7 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
     // 延迟引入，避免与 mcp-client 之间形成模块加载环。
     const { getAccessibleMcpServer } = require('../mcp-client');
     const { executeMcpTool } = require('../mcp-client');
+    const { defaultToolPolicyEngine } = require('../tool-policy-engine');
 
     const serverId = Number(mcpServerId);
     if (!serverId) {
@@ -26,15 +27,22 @@ async function importFromDatabase({ user, mcpServerId, sql, table, schema, limit
     }
     const safeLimit = Math.min(Math.max(Number(limit) || MAX_DB_IMPORT_ROWS, 1), MAX_DB_IMPORT_ROWS);
     let result;
+    const invoke = async toolInput => await defaultToolPolicyEngine.invoke({
+        actor: user,
+        toolName: `mcp.${server.id}.db.run_readonly_query`,
+        input: toolInput,
+        source: 'data_analysis',
+        options: { entrypoint: 'data_analysis_import' }
+    }, async evaluation => await executeMcpTool(`mcp.${server.id}.db.run_readonly_query`, evaluation.input, user, { source: 'data-analysis', connectionAccountId: evaluation.connection?.id || null }));
     const trimmedSql = String(sql || '').trim();
     const trimmedTable = String(table || '').trim();
     if (trimmedSql) {
-        result = await executeMcpTool(`mcp.${server.id}.db.run_readonly_query`, { sql: trimmedSql, limit: safeLimit }, user, { source: 'data-analysis' });
+        result = await invoke({ sql: trimmedSql, limit: safeLimit });
     } else if (trimmedTable) {
         // 无显式 SQL 时，对指定表做一次受限的全列 SELECT（由 db.run_readonly_query 内部治理与限行）。
         const safeIdent = `"${trimmedTable.replace(/"/g, '""')}"`;
         const qualified = schema ? `"${String(schema).replace(/"/g, '""')}".${safeIdent}` : safeIdent;
-        result = await executeMcpTool(`mcp.${server.id}.db.run_readonly_query`, { sql: `SELECT * FROM ${qualified}`, limit: safeLimit }, user, { source: 'data-analysis' });
+        result = await invoke({ sql: `SELECT * FROM ${qualified}`, limit: safeLimit });
     } else {
         const err = new Error('请提供要导入的 SQL 查询或数据表名。');
         err.status = 400;

@@ -17,6 +17,24 @@
 }
 
 @media (max-width: 680px) {
+    .mcp-product-section-head,
+    .mcp-product-search {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .mcp-product-search {
+        min-width: 0;
+    }
+
+    .mcp-product-search .btn-secondary {
+        width: 100%;
+    }
+
+    .mcp-product-grid {
+        grid-template-columns: 1fr;
+    }
+
     .mcp-workbench-state {
         align-items: flex-start;
         flex-direction: column;

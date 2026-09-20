@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const { generateEmbeddingsAdaptive } = require('./rag-index/embedding-client');
 const { getEmbeddingConfig } = require('./rag-config');
 const { logger } = require('../logger');
+const { query, execute } = require('../db/client');
+const { getBeijingTimestamp } = require('../time');
 
 const MAX_TOOL_VECTOR_DIMENSIONS = 8192;
 const MAX_TOOL_CATALOG_CACHE_ENTRIES = 2048;
@@ -17,11 +19,15 @@ function toolSignature(tool = {}) {
     const server = String(tool.serverName || '').trim();
     const type = String(tool.serverType || '').trim();
     const description = String(tool.displayDescription || tool.description || '').trim();
+    const tags = Array.isArray(tool.tags) ? tool.tags.map(item => String(item || '').trim()).filter(Boolean).join('、') : '';
+    const examples = Array.isArray(tool.examples) ? tool.examples.slice(0, 3).map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n') : '';
     return [
         displayName ? `工具：${displayName}` : '',
         `内部标识：${name}`,
         server ? `服务：${server}` : '',
         type ? `类型：${type}` : '',
+        tags ? `标签：${tags}` : '',
+        examples ? `示例：${examples}` : '',
         description
     ].filter(Boolean).join('\n').slice(0, 1800);
 }
@@ -35,7 +41,11 @@ function toolFingerprint(tool = {}) {
         serverName: String(tool.serverName || ''),
         serverType: String(tool.serverType || ''),
         description: String(tool.description || ''),
-        schema: tool.input_schema || tool.inputSchema || null
+        inputSchema: tool.input_schema || tool.inputSchema || null,
+        outputSchema: tool.output_schema || tool.outputSchema || null,
+        tags: Array.isArray(tool.tags) ? tool.tags : [],
+        examples: Array.isArray(tool.examples) ? tool.examples : [],
+        definitionDigest: String(tool.definitionDigest || tool.definition_digest || '')
     })).digest('hex');
 }
 
@@ -51,8 +61,68 @@ function embeddingKey(config = {}) {
 function createMcpToolCatalogIndex(deps = {}) {
     const generateEmbeddings = deps.generateEmbeddingsAdaptive || generateEmbeddingsAdaptive;
     const getConfig = deps.getEmbeddingConfig || getEmbeddingConfig;
+    const read = deps.query || query;
+    const write = deps.execute || execute;
+    const now = deps.getBeijingTimestamp || getBeijingTimestamp;
     const cache = new Map();
     const inFlight = new Map();
+
+    function ownerKey(user = null) {
+        return user?.id ? `user:${user.id}` : 'system';
+    }
+
+    function cacheVector(entry, vector) {
+        while (cache.size >= MAX_TOOL_CATALOG_CACHE_ENTRIES) {
+            const oldest = cache.keys().next().value;
+            if (oldest === undefined) break;
+            cache.delete(oldest);
+        }
+        cache.set(`${entry.embeddingKey}:${entry.fingerprint}`, { vector, updatedAt: Date.now() });
+    }
+
+    async function hydratePersistedEntries(entries = [], user = null) {
+        const candidates = entries.filter(entry => entry?.tool?.catalogItemId && !parseVector(entry.vector).length);
+        if (!candidates.length) return entries;
+        const fingerprints = candidates.map(entry => entry.fingerprint);
+        try {
+            const rows = await read(`
+                SELECT source_fingerprint, embedding_vector
+                FROM tool_catalog_embeddings
+                WHERE embedding_key = ? AND owner_key = ? AND source_fingerprint = ANY(?)
+            `, [candidates[0].embeddingKey, ownerKey(user), fingerprints]);
+            const vectors = new Map(rows.map(row => [String(row.source_fingerprint), parseVector(row.embedding_vector)]));
+            return entries.map(entry => {
+                const vector = vectors.get(entry.fingerprint);
+                if (!vector?.length) return entry;
+                cacheVector(entry, vector);
+                return { ...entry, vector };
+            });
+        } catch (_) {
+            // First deployment may not yet have run the control-plane migration.
+            return entries;
+        }
+    }
+
+    async function persistVectors(entries = [], user = null) {
+        const owner = ownerKey(user);
+        await Promise.all(entries.filter(entry => entry?.tool?.catalogItemId && parseVector(entry.vector).length).map(async entry => {
+            try {
+                await write(`
+                    INSERT INTO tool_catalog_embeddings (
+                        tool_item_id, source_fingerprint, embedding_key, owner_key, embedding_vector,
+                        embedding_dimensions, source_digest, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
+                    ON CONFLICT(source_fingerprint, embedding_key, owner_key) DO UPDATE SET
+                        tool_item_id = excluded.tool_item_id, embedding_vector = excluded.embedding_vector,
+                        embedding_dimensions = excluded.embedding_dimensions, source_digest = excluded.source_digest,
+                        updated_at = excluded.updated_at
+                `, [
+                    entry.tool.catalogItemId, entry.fingerprint, entry.embeddingKey, owner, JSON.stringify(entry.vector),
+                    entry.vector.length, String(entry.tool.definitionDigest || entry.tool.definition_digest || '').slice(0, 128), now(), now()
+                ]);
+            } catch (_) {}
+        }));
+    }
 
     function getEntries(tools = [], { embeddingConfig = null, userId = null } = {}) {
         const config = embeddingConfig || getConfig(userId);
@@ -73,8 +143,9 @@ function createMcpToolCatalogIndex(deps = {}) {
     async function refreshEntries(entries = [], { user = null, embeddingConfig = null, signal = null } = {}) {
         const config = embeddingConfig || getConfig(user?.id || null);
         if (!config?.http?.url) return entries;
-        const missing = entries.filter(entry => entry && !parseVector(entry.vector).length);
-        if (!missing.length) return entries;
+        const hydratedEntries = await hydratePersistedEntries(entries, user);
+        const missing = hydratedEntries.filter(entry => entry && !parseVector(entry.vector).length);
+        if (!missing.length) return hydratedEntries;
         const key = `${embeddingKey(config)}:${missing.map(entry => entry.fingerprint).join('|')}`;
         if (inFlight.has(key)) return await inFlight.get(key);
         const work = (async () => {
@@ -97,9 +168,11 @@ function createMcpToolCatalogIndex(deps = {}) {
                 cache.set(`${entry.embeddingKey}:${entry.fingerprint}`, { vector, updatedAt: Date.now() });
                 refreshed.set(entry.fingerprint, vector);
             });
-            return entries.map(entry => refreshed.has(entry.fingerprint)
+            const next = hydratedEntries.map(entry => refreshed.has(entry.fingerprint)
                 ? { ...entry, vector: refreshed.get(entry.fingerprint) }
                 : entry);
+            await persistVectors(next.filter(entry => refreshed.has(entry.fingerprint)), user);
+            return next;
         })().finally(() => inFlight.delete(key));
         inFlight.set(key, work);
         return await work;

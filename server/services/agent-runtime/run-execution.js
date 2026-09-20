@@ -1,5 +1,6 @@
 const { sanitizeUserVisibleText } = require('../../llm');
 const { requeueAgentRunAfterLeaseLoss } = require('./lease-loss');
+const { buildToolTraceContext } = require('../tool-trace-context');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -644,6 +645,7 @@ const {
                     stepIndex: step,
                     stepContext,
                     contextHash: stepContext.contextHash,
+                    traceContext: buildToolTraceContext({ runId, spanId: `${runId}:${step}`, requestId: stepContext?.requestId || '' }),
                     budget: taskBudget,
                     approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
                     allowApproval: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
@@ -744,7 +746,7 @@ const {
                         toolName: plan.tool,
                         input: effectivePlanInput,
                         output: { error: toolErr.message, diagnosis },
-                        policyDecision: toolErr.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+                        policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(toolErr.code) ? 'denied' : 'allow',
                         status: 'error',
                         errorCategory: diagnosis.category,
                         errorMessage: toolErr.message,

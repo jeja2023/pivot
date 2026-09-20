@@ -26,13 +26,13 @@ const {
     updateMcpServerSharing
 } = require('../../services/mcp-client');
 const { getBuiltInToolDefinitions, executeBuiltInTool } = require('../../services/agent-tools');
+const { defaultToolPolicyEngine } = require('../../services/tool-policy-engine');
+const { normalizeToolContract } = require('../../services/agent-contracts');
 const {
     filterBuiltInToolsByCapability,
     filterMcpToolsByCapability,
     getCapabilityToolGovernanceFromPackage,
     getGlobalCapabilityPackage,
-    isToolCapabilityEnabled,
-    isCapabilityEnabled,
     listGlobalCapabilityPackages,
     setGlobalCapabilityPackageStatus,
     setGlobalCapabilityToolGovernance
@@ -66,6 +66,17 @@ const {
 const { mountLocalConnectorRoutes } = require('./local-connector');
 const { mountMcpManagementRoutes } = require('./management-routes');
 const { mountMcpConfigurationRoutes } = require('./configuration-routes');
+
+const SUPPORTED_MCP_PROTOCOL_VERSIONS = Object.freeze(['2024-11-05', '2025-11-25', '2026-07-28']);
+
+function negotiateMcpProtocolVersion(value) {
+    const requested = String(value || '').trim();
+    if (!requested) return '2025-11-25';
+    if (SUPPORTED_MCP_PROTOCOL_VERSIONS.includes(requested)) return requested;
+    const error = new Error(`不支持的 MCP 协议版本：${requested}`);
+    error.code = -32602;
+    throw error;
+}
 
 async function createSystemBuiltinService(serviceType, user) {
     const definition = SYSTEM_MCP_SERVICES[serviceType];
@@ -231,32 +242,18 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.post('/mcp/tools/call', authMiddleware, asyncHandler(async (req, res) => {
         const name = String(req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: '工具名称为必填项。' });
-        if (name.startsWith('mcp.')) {
-            const cachedList = await listCachedMcpTools(null, req.user);
-            const cached = cachedList.find(tool => tool.fullName === name);
-            const sourceRef = cached
-                ? String(cached.serverId ?? cached.server_id ?? cached.serverName ?? '')
-                : '';
-            const type = cached?.serverType === 'database'
-                ? 'database_connection'
-                : 'mcp_server';
-            if (sourceRef && !(await isCapabilityEnabled(type, sourceRef, req.user))) {
-                return res.status(403).json({ error: '该工具包已停用。' });
-            }
-            if (sourceRef && !(await isToolCapabilityEnabled(type, sourceRef, cached?.name || '', req.user))) {
-                return res.status(403).json({ error: '该工具已在工具治理中停用。' });
-            }
-        } else if (!(await isCapabilityEnabled('builtin_tool', name, req.user))) {
-            return res.status(403).json({ error: '该系统工具包已停用。' });
-        } else if (!(await isToolCapabilityEnabled('builtin_tool', name, name, req.user))) {
-            return res.status(403).json({ error: '该系统工具已在工具治理中停用。' });
-        }
         const startedAt = Date.now();
         let result;
         try {
-            result = name.startsWith('mcp.')
-                ? await executeMcpTool(name, req.body?.input || {}, req.user)
-                : await executeBuiltInTool(name, req.body?.input || {}, req.user);
+            result = await defaultToolPolicyEngine.invoke({
+                actor: req.user,
+                toolName: name,
+                input: req.body?.input || {},
+                source: 'mcp_manual',
+                options: { entrypoint: 'mcp_manual' }
+            }, async evaluation => (name.startsWith('mcp.')
+                ? await executeMcpTool(name, evaluation.input, req.user, { source: 'mcp_manual', connectionAccountId: evaluation.connection?.id || null })
+                : await executeBuiltInTool(name, evaluation.input, req.user, { entrypoint: 'mcp_manual' })));
             if (!name.startsWith('mcp.')) {
                 recordMcpCallLog({ user: req.user, serverId: null, toolName: name, source: 'manual', durationMs: Date.now() - startedAt, input: req.body?.input, output: result });
             }
@@ -274,41 +271,55 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
         const { id, method, params } = req.body || {};
         try {
             if (method === 'initialize') {
+                const protocolVersion = negotiateMcpProtocolVersion(params?.protocolVersion);
                 return sendJsonRpc(res, id, {
-                    protocolVersion: '2024-11-05',
+                    protocolVersion,
                     serverInfo: { name: 'Pivot MCP', version: '1.0.0' },
-                    capabilities: { tools: {}, resources: {} }
+                    capabilities: { tools: { listChanged: true }, resources: { listChanged: true } }
                 });
             }
             if (method === 'tools/list') {
                 const builtIns = await filterBuiltInToolsByCapability(getBuiltInToolDefinitions(req.user), req.user);
                 return sendJsonRpc(res, id, {
-                    tools: builtIns.map(tool => ({
-                        name: tool.name,
-                        description: tool.description,
-                        inputSchema: tool.input_schema
-                    }))
+                    tools: builtIns.map(rawTool => {
+                        const tool = normalizeToolContract(rawTool);
+                        return {
+                            name: tool.name,
+                            title: tool.title,
+                            description: tool.description,
+                            inputSchema: tool.input_schema,
+                            ...(rawTool.output_schema || rawTool.outputSchema ? { outputSchema: tool.output_schema } : {}),
+                            annotations: {
+                                title: tool.title,
+                                readOnlyHint: !tool.side_effect,
+                                destructiveHint: tool.side_effect,
+                                idempotentHint: tool.idempotent,
+                                openWorldHint: tool.network
+                            }
+                        };
+                    })
                 });
             }
             if (method === 'tools/call') {
-                if (!(await isCapabilityEnabled('builtin_tool', params?.name, req.user))) {
-                    throw new Error('该系统工具包已停用。');
-                }
-                if (!(await isToolCapabilityEnabled('builtin_tool', params?.name, params?.name, req.user))) {
-                    throw new Error('该系统工具已在工具治理中停用。');
-                }
                 const startedAt = Date.now();
                 let result;
                 try {
-                    result = await executeBuiltInTool(params?.name, params?.arguments || {}, req.user);
+                    result = await defaultToolPolicyEngine.invoke({
+                        actor: req.user,
+                        toolName: params?.name,
+                        input: params?.arguments || {},
+                        source: 'mcp_rpc',
+                        options: { entrypoint: 'mcp_rpc' }
+                    }, async evaluation => await executeBuiltInTool(params?.name, evaluation.input, req.user, { entrypoint: 'mcp_rpc' }));
                     recordMcpCallLog({ user: req.user, serverId: null, toolName: params?.name, source: 'rpc', durationMs: Date.now() - startedAt, input: params?.arguments, output: result });
                 } catch (error) {
                     recordMcpCallLog({ user: req.user, serverId: null, toolName: params?.name, source: 'rpc', status: 'error', durationMs: Date.now() - startedAt, input: params?.arguments, error });
                     throw error;
                 }
-                return sendJsonRpc(res, id, {
-                    content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]
-                });
+                    return sendJsonRpc(res, id, {
+                        content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }],
+                        ...(result && typeof result === 'object' ? { structuredContent: result } : {})
+                    });
             }
             if (method === 'resources/list') {
                 const cursor = normalizeMcpListCursor(params?.cursor);
@@ -407,4 +418,4 @@ function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     return router;
 }
 
-module.exports = { createMcpRouter, normalizeMcpListCursor };
+module.exports = { createMcpRouter, normalizeMcpListCursor, SUPPORTED_MCP_PROTOCOL_VERSIONS };

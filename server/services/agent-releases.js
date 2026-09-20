@@ -28,6 +28,7 @@ const {
 const { runDeclarativeSkillChecks, sandboxValidateSkill, scanInstalledPackage } = require('./agent-skill-validation');
 const { recordSkillReleaseResolveMiss } = require('./agent-governance-metrics');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
+const { persistWorkflowToolReleaseBindings } = require('./workflow-tool-releases');
 
 
 function invalid(message, status = 400, code = 'AGENT_RELEASE_INVALID') {
@@ -601,7 +602,18 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
             WHERE id = ? AND deleted_at IS NULL
         `, [resolved.version_id, now, now, resolved.workflow.id]);
         if (updated !== 1) throw invalid('工作流发布状态写入失败。', 409, 'WORKFLOW_RELEASE_WRITE_CONFLICT');
-        return next;
+        const toolReleaseBindings = await persistWorkflowToolReleaseBindings(next.id, resolved.dagSpec, {
+            execute: trx.execute,
+            activeRelease: async serverId => {
+                const { activeRelease } = require('./tool-catalog-releases');
+                return await activeRelease(serverId, { queryOne: trx.queryOne });
+            },
+            releaseItems: async releaseId => {
+                const { releaseItems } = require('./tool-catalog-releases');
+                return await releaseItems(releaseId, { query: trx.query });
+            }
+        });
+        return { ...next, toolReleaseBindings };
     });
     try { await createAgentInboxEvent(user, { eventKey: `workflow.release:${release.id}`, eventType: 'release.published', sourceId: String(release.id), title: '工作流版本已发布', body: `工作流 ${resolved.workflow.name} 已进入 ${rollout.rolloutScope} 灰度。`, risk: 'medium', payload: { releaseId: release.id, workflowId: resolved.workflow.id, version: resolved.version } }); } catch (_) {}
     return { ...release, impact };
@@ -743,6 +755,9 @@ function formatWorkflowReleaseForRead(row, { includeTargets = false } = {}) {
             reviewed_by: row.reviewed_by || null,
             reviewed_at: row.reviewed_at || null
         } : {}),
+        tool_dependency_stale: Boolean(row.tool_dependency_stale),
+        tool_dependency_stale_at: row.tool_dependency_stale_at || null,
+        tool_dependency_stale_reason: row.tool_dependency_stale_reason || '',
         status: row.status,
         published_by: row.published_by,
         published_at: row.published_at,

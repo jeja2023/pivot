@@ -703,7 +703,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
     mcp: [
         '/chat/tool-policy.js', '/chat/mcp-workbench-common.js', '/chat/mcp-workbench-local-auth.js',
         '/chat/mcp-workbench-credentials.js', '/chat/agent-automation-resources.js',
-        '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-actions.js', '/chat/mcp-workbench-api-operations.js', '/chat/mcp-workbench-main.js'
+        '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-product.js', '/chat/mcp-workbench-actions.js', '/chat/mcp-workbench-api-operations.js', '/chat/mcp-workbench-main.js'
     ]
 };
 

@@ -34,6 +34,7 @@ const { createApiAccessGuard } = require('../../services/api-access-settings');
 const { getEmbeddingConfig } = require('../../services/rag-config');
 const { requestEmbeddings, getEmbeddingRuntimeGuardUser } = require('../../services/rag-index');
 const { executeBuiltInTool, getBuiltInToolDefinitions } = require('../../services/agent-tools');
+const { defaultToolPolicyEngine } = require('../../services/tool-policy-engine');
 const {
     estimateEmbeddingTokens,
     normalizeTokenUsage
@@ -192,7 +193,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
         }
         try {
             const args = req.body?.arguments || req.body?.input || {};
-            const result = await executeBuiltInTool(name, args, req.user);
+            const result = await defaultToolPolicyEngine.invoke({
+                actor: req.user,
+                toolName: name,
+                input: args,
+                source: 'openai',
+                options: { entrypoint: 'openai_tools_call' }
+            }, async evaluation => await executeBuiltInTool(name, evaluation.input, req.user, { entrypoint: 'openai_tools_call' }));
             const inputTokens = estimateTokens(JSON.stringify(args));
             const outputTokens = estimateTokens(JSON.stringify(result));
             updateApiKeyUsage(req, { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
@@ -468,7 +475,13 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     args = JSON.parse(args);
                 } catch (e) {}
             }
-            const result = await executeBuiltInTool(toolName, args, req.user);
+            const result = await defaultToolPolicyEngine.invoke({
+                actor: req.user,
+                toolName,
+                input: args,
+                source: 'openai',
+                options: { entrypoint: 'openai_chat_completion' }
+            }, async evaluation => await executeBuiltInTool(toolName, evaluation.input, req.user, { entrypoint: 'openai_chat_completion' }));
             const content = JSON.stringify(result, null, 2);
             const promptTokens = estimateTokens(JSON.stringify(args));
             const completionTokens = estimateTokens(content);

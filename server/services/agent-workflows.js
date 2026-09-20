@@ -20,6 +20,7 @@ const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-depen
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { isTenantAdmin } = require('./agent-skill-access');
 const { isSuperAdmin } = require('../permissions');
+const { persistWorkflowToolReleaseBindings } = require('./workflow-tool-releases');
 
 /**
  * 工作流访问判定：所有者可读写，共享工作流按部门范围只读可运行。
@@ -272,7 +273,7 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
             throw err;
         }
         const tenantId = user.tenant_id || await getPrimaryTenantId(user.id);
-        const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status, published_by, previous_release_id FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
+        const releaseRows = await query(`SELECT id, workflow_version_id, rollout_percent, target_user_ids, target_units, status, published_by, previous_release_id, tool_dependency_stale, tool_dependency_stale_reason FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' AND ((rollout_scope = 'personal' AND published_by = ?) OR (rollout_scope IN ('team', 'organization') AND tenant_id = ?)) ORDER BY published_at DESC`, [workflow.id, user.id, tenantId]);
         // 灰度分桶复用 agent-skill-rollout 的实现（每候选独立分桶 + 租户级 HMAC），
         // 避免同一套灰度语义在技能与工作流两处各写一份（落地方案 v1.2 §6.3）。
         const { computeRolloutBucket } = require('./agent-skill-rollout');
@@ -293,6 +294,13 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
             const error = new Error('当前账号尚未进入该工作流灰度范围，且没有可用的稳定版本。');
             error.status = 409;
             error.code = 'WORKFLOW_ROLLOUT_NOT_ASSIGNED';
+            throw error;
+        }
+        const effectiveRelease = selectedRelease || fallbackRelease || null;
+        if (effectiveRelease?.tool_dependency_stale === true && options.allowStaleToolRelease !== true) {
+            const error = new Error(effectiveRelease.tool_dependency_stale_reason || '工作流依赖的工具目录版本已变化，请所有者重新确认并发布工作流。');
+            error.status = 409;
+            error.code = 'WORKFLOW_TOOL_RELEASE_STALE';
             throw error;
         }
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, fallbackVersionId);
@@ -511,7 +519,8 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [resolved.version_id, now, now, resolved.workflow.id, resolved.workflow.user_id]);
     if (options.skipRelease !== true) try {
-        await execute(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, published_by, published_at) VALUES (?, ?, 'personal', 100, '[]'::jsonb, '[]'::jsonb, 'published', ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET status = 'published', rollout_percent = 100, published_by = excluded.published_by, published_at = excluded.published_at`, [resolved.workflow.id, resolved.version_id, user.id, now]);
+        const release = await queryOne(`INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, published_by, published_at) VALUES (?, ?, 'personal', 100, '[]'::jsonb, '[]'::jsonb, 'published', ?, ?) ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET status = 'published', rollout_percent = 100, published_by = excluded.published_by, published_at = excluded.published_at RETURNING id`, [resolved.workflow.id, resolved.version_id, user.id, now]);
+        if (release?.id) await persistWorkflowToolReleaseBindings(release.id, resolved.dagSpec);
     } catch (releaseError) {
         releaseError.code = releaseError.code || 'WORKFLOW_RELEASE_RECORD_FAILED';
         throw releaseError;

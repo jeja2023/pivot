@@ -298,6 +298,179 @@
     color: #92400e;
 }
 
+/* 产品级工具目录、连接账户和调用运营面。 */
+.mcp-product-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfefd 100%);
+}
+
+.mcp-product-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mcp-product-section-head > div:first-child {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.mcp-product-section-head strong {
+    color: var(--text-main, #1e293b);
+    font-size: 0.84rem;
+}
+
+.mcp-product-section-head span {
+    color: var(--text-muted, #64748b);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.mcp-product-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: min(100%, 360px);
+}
+
+.mcp-product-search .form-input {
+    min-width: 0;
+    height: 30px;
+    padding: 4px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 7px;
+    font-size: 0.72rem;
+}
+
+.mcp-product-search .btn-secondary,
+.mcp-product-card-actions .btn-secondary {
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 0.7rem;
+}
+
+.mcp-product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 8px;
+}
+
+.mcp-product-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 9px;
+    background: #fff;
+}
+
+.mcp-product-card-head,
+.mcp-product-card-actions,
+.mcp-product-badges,
+.mcp-operation-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.mcp-product-card-head {
+    justify-content: space-between;
+}
+
+.mcp-product-card-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-main, #1e293b);
+    font-size: 0.76rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-product-card-head em,
+.mcp-operation-row em {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-style: normal;
+    font-weight: 700;
+}
+
+.mcp-product-card-head .risk-low { background: #ecfdf5; color: #047857; }
+.mcp-product-card-head .risk-medium { background: #fffbeb; color: #b45309; }
+.mcp-product-card-head .risk-high,
+.mcp-product-card-head .risk-critical { background: #fef2f2; color: #b91c1c; }
+.mcp-product-card-head .connection-active { background: #ecfdf5; color: #047857; }
+.mcp-product-card-head .connection-expiring,
+.mcp-product-card-head .connection-refresh_failed { background: #fffbeb; color: #b45309; }
+.mcp-product-card-head .connection-revoked,
+.mcp-product-card-head .connection-disabled { background: #fef2f2; color: #b91c1c; }
+.mcp-product-card-head .connection-unconnected,
+.mcp-product-card-head .connection-authorizing { background: #eff6ff; color: #1d4ed8; }
+
+.mcp-product-card p {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-muted, #64748b);
+    font-size: 0.68rem;
+    line-height: 1.45;
+    line-clamp: 3;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.mcp-product-badges span,
+.mcp-operation-summary span {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 2px 6px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 5px;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.62rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mcp-operation-summary {
+    padding: 8px;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.mcp-operation-summary b { color: var(--text-main, #1e293b); }
+.mcp-product-error { color: #b91c1c; font-size: 0.66rem; line-height: 1.4; }
+.mcp-product-empty { padding: 14px; color: var(--text-muted, #64748b); font-size: 0.72rem; text-align: center; }
+
+.mcp-operation-list { display: flex; flex-direction: column; gap: 5px; }
+.mcp-operation-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 8px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 8px; }
+.mcp-operation-row > div { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.mcp-operation-row strong { overflow: hidden; color: var(--text-main, #1e293b); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-operation-row span,
+.mcp-operation-row small { color: var(--text-muted, #64748b); font-size: 0.64rem; }
+.mcp-operation-row small { grid-column: 1 / -1; color: #b91c1c; }
+.mcp-operation-row .status-success,
+.mcp-operation-row .status-completed { background: #ecfdf5; color: #047857; }
+.mcp-operation-row .status-error,
+.mcp-operation-row .status-failed,
+.mcp-operation-row .status-denied { background: #fef2f2; color: #b91c1c; }
+.mcp-operation-row .status-pending_approval { background: #fffbeb; color: #b45309; }
+
 .mcp-workbench-state .btn-secondary {
     flex: 0 0 auto;
     height: 26px;

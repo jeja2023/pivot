@@ -368,7 +368,6 @@ module.exports = {
     getGlobalCapabilityPackage,
     getCapabilityToolGovernance,
     getCapabilityToolGovernanceFromPackage,
-    isCapabilityEnabled,
     isToolCapabilityEnabled,
     listCapabilityPackages,
     listGlobalCapabilityPackages,

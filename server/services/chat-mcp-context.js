@@ -17,7 +17,7 @@ const {
 } = require('./chat-route-helpers');
 const { forwardChatCompletion } = require('./model-forwarder');
 const { buildThinkingControlPayload } = require('./models');
-const { buildToolExecutionPlan, summarizeToolExecutionPlan } = require('./agent-tool-execution-plan');
+const { defaultToolPolicyEngine } = require('./tool-policy-engine');
 const { createMcpIntentHelpers } = require('./chat-mcp-intent');
 
 const MCP_CHAT_TOOL_TITLES = {
@@ -143,46 +143,46 @@ function buildMcpTraceMessage(actionName, serverName, fallback = '工具服务',
 async function executeChatMcpTool(tool, input, user, options = {}) {
     const executableTool = isLocalBrowserMcpTool(tool) ? { ...tool, source: 'mcp' } : tool;
     const allowLocalBrowser = options.allowLocalBrowser === true && isLocalBrowserMcpTool(executableTool);
-    const plan = await buildToolExecutionPlan({
-        run: {
+    const run = {
             id: `chat:${user?.id || 'anonymous'}`,
             user_id: user?.id || null,
             goal: '聊天工具调用',
             tool_policy: 'all',
             approval_policy: 'safe_mcp_auto',
             network_policy: options.networkPolicy || {}
-        },
-        tool: executableTool,
-        input,
-        user,
+        };
+    let detailed;
+    try {
+        detailed = await defaultToolPolicyEngine.invokeDetailed({
+            actor: user,
+            run,
+            tool: executableTool,
+            toolName: executableTool.fullName || executableTool.name,
+            input,
+            source: options.source || 'chat',
+            options: {
+                ...options,
+                entrypoint: 'chat',
         // 用户明确请求访问允许站点后，桌面端仍对打开/点击/截图执行本机确认；
         // 这里仅免除普通会话没有交互容器的服务端审批死锁。
-        context: { autonomous: false, sandboxAvailable: options.sandboxAvailable !== false, allowApproval: allowLocalBrowser }
-    });
-    if (plan.policy.decision === 'denied') {
-        const error = new Error(plan.policy.reasons.join('；') || '聊天工具调用被策略拒绝。');
-        error.code = 'AGENT_POLICY_DENIED';
-        error.plan = summarizeToolExecutionPlan(plan);
+                autonomous: false,
+                sandboxAvailable: options.sandboxAvailable !== false,
+                allowApproval: allowLocalBrowser
+            }
+        }, async evaluation => await executeMcpTool(executableTool.fullName || executableTool.name, evaluation.input, user, {
+            ...(options || {}),
+            executionPlan: evaluation.executionPlan,
+            traceContext: options.traceContext || {},
+            connectionAccountId: evaluation.connection?.id || null,
+            source: options.source || 'chat'
+        }));
+    } catch (error) {
+        if (error?.policy || error?.details) {
+            error.plan = error?.details?.executionPlan || error.plan || null;
+        }
         throw error;
     }
-    if (plan.approval.required) {
-        const error = new Error('聊天工具调用需要人工审批。');
-        error.code = 'AGENT_APPROVAL_REQUIRED';
-        error.plan = summarizeToolExecutionPlan(plan);
-        throw error;
-    }
-    if (plan.network.preflight === 'denied') {
-        const error = new Error(plan.network.error?.message || '聊天工具网络预检被拒绝。');
-        error.code = plan.network.error?.code || 'AGENT_NETWORK_POLICY_DENIED';
-        error.plan = summarizeToolExecutionPlan(plan);
-        throw error;
-    }
-    const result = await executeMcpTool(executableTool.fullName || executableTool.name, plan.input, user, {
-        ...(options || {}),
-        executionPlan: plan,
-        source: options.source || 'chat'
-    });
-    return { result, plan };
+    return { result: detailed.output, plan: detailed.evaluation.executionPlan };
 }
 
 const intentHelpers = createMcpIntentHelpers({

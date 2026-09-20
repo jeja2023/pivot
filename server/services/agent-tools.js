@@ -55,6 +55,7 @@ const {
 } = require('./agent-tools-workflow-nodes');
 const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } = require('./agent-tools-artifacts');
 const { createAgentDelegateExecutor } = require('./agent-tools-delegation');
+const { executeToolDiscoveryMeta, getToolDiscoveryDefinitions } = require('./agent-tools-discovery');
 
 const MAX_TEXT = 12000;
 // 动态代码只能在独立的桌面 Worker / 受控执行平面中运行。
@@ -292,6 +293,7 @@ function getBuiltInToolDefinitions(user) {
                 }
             }
         },
+        ...getToolDiscoveryDefinitions(asJsonSchema),
         {
             name: 'workflow.input',
             title: '工作流输入',
@@ -1041,6 +1043,9 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.merge') {
         return executeAgentMerge(input);
     }
+
+    const discovery = await executeToolDiscoveryMeta(name, input, user, context);
+    if (discovery.handled) return discovery.value;
 
     if (name === 'system.health') {
         assertAdmin(user);

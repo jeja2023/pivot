@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pivot.local/schemas/pivot.toolkit.schema.json",
+  "title": "Pivot Toolkit Manifest",
+  "description": "受控发布到 Pivot 工具库的工具包清单。签名覆盖除 signature/keyId 外的规范化 Manifest。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "slug",
+    "version",
+    "displayName",
+    "publisher",
+    "protocol",
+    "tools",
+    "requiredCapabilities",
+    "dataClassification"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,126}$" },
+    "version": { "type": "string", "pattern": "^(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*)){2}(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "publisher": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "versions"],
+      "properties": {
+        "type": { "enum": ["mcp", "builtin", "api_operation"] },
+        "versions": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      }
+    },
+    "tools": { "type": "array", "minItems": 1, "maxItems": 2000, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$" } },
+    "requiredCapabilities": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "requiredScopes": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+    "dataClassification": { "enum": ["public", "internal", "confidential", "restricted"] },
+    "privacyUrl": { "type": "string", "format": "uri" },
+    "docsUrl": { "type": "string", "format": "uri" },
+    "healthcheck": { "type": "boolean" },
+    "keyId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "signature": { "type": "string", "minLength": 1 }
+  }
+}

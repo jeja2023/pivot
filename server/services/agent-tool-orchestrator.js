@@ -52,7 +52,8 @@ function createToolOrchestrator(overrides = {}) {
 
     async function execute(request = {}) {
         const {
-            run = {}, tool = {}, input = {}, user = null, context = {}, execute, executionPlan = null
+            run = {}, tool = {}, input = {}, user = null, context = {}, execute, executionPlan = null,
+            onComplete = null, onFailure = null
         } = request;
         if (typeof execute !== 'function') throw new Error('ToolOrchestrator 缺少实际工具执行器。');
         let policy;
@@ -110,6 +111,7 @@ function createToolOrchestrator(overrides = {}) {
                 });
             }
         } catch (error) {
+            try { await onFailure?.({ error, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event('tool.failed', requestWithKey, {
                 errorCode: String(error?.code || 'AGENT_CHECKPOINT_FAILED'),
                 errorCategory: String(error?.category || 'recovery'),
@@ -118,6 +120,7 @@ function createToolOrchestrator(overrides = {}) {
             throw error;
         }
         if (checkpoint?.replay) {
+            try { await onComplete?.({ output: checkpoint.output, policy, operationKey, effectiveInput, executionPlan, replayed: true }); } catch (_) {}
             await event('tool.replayed', requestWithKey, { checkpointId: checkpoint.checkpointId || '' });
             return checkpoint.output;
         }
@@ -130,6 +133,7 @@ function createToolOrchestrator(overrides = {}) {
                 policy
             });
             if (operationKey) await completeCheckpoint(operationKey, output);
+            try { await onComplete?.({ output, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event('tool.completed', requestWithKey, { output: output && typeof output === 'object' ? { completed: true } : undefined });
             return output;
         } catch (error) {
@@ -139,6 +143,7 @@ function createToolOrchestrator(overrides = {}) {
             const eventType = ['AGENT_SANDBOX_REQUIRED', 'AGENT_SANDBOX_DENIED', 'AGENT_WORKSPACE_DENIED'].includes(error?.code)
                 ? 'sandbox.denied'
                 : 'tool.failed';
+            try { await onFailure?.({ error, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event(eventType, requestWithKey, {
                 errorCode: String(error?.code || ''),
                 errorCategory: String(error?.category || ''),

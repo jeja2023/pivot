@@ -9,6 +9,7 @@ const { listDagNodes, listSteps } = require('./agent-runs');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
 const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { buildToolTraceContext } = require('./tool-trace-context');
 const { normalizeToolInput } = require('./agent-policy');
 const { createSubworkflowRuntime } = require('./agent-dag-subworkflow-runtime');
 const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
@@ -24,7 +25,6 @@ const {
     validateJsonSchemaDefinition,
     validateValueAgainstSchema
 } = require('./agent-dag-contracts');
-
 const {
     persistDagOutput,
     persistedDagOutput,
@@ -37,7 +37,6 @@ const {
     setCachedNodeOutput,
     isCacheableDagTool
 } = require('./agent-dag-cache');
-
 function buildDagFallbackFinalAnswer(dagSpec, states) {
     const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
     const completedNodes = nodes.filter(node => ['completed', 'continued_error'].includes(states.get(node.id)?.status));
@@ -316,7 +315,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
             toolName: node.tool,
             input: resolvedInput,
             output: { error: lastError?.message || '执行失败' },
-            policyDecision: lastError?.code === 'AGENT_POLICY_DENIED' ? 'denied' : 'allow',
+            policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(lastError?.code) ? 'denied' : 'allow',
             status: 'error',
             errorCategory: diagnoseError(lastError || new Error('DAG 节点执行失败')).category,
             errorMessage: lastError?.message || '执行失败',
@@ -679,6 +678,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     allowApproval: true,
                     stepContext,
                     contextHash: stepContext?.contextHash || '',
+                    traceContext: buildToolTraceContext({ runId: run.id, spanId: nodeSpanId || `${run.id}:${node.id}`, requestId: stepContext?.requestId || '' }),
                     workflowApprovalResult,
                     workflowDelayResult,
                     timeoutMs: policy.timeoutMs,
