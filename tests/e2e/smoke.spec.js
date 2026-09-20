@@ -1,4 +1,4 @@
-/* global document, Event, window -- Playwright 浏览器端执行上下文全局变量 */
+/* global document, Event, sessionStorage, window -- Playwright 浏览器端执行上下文全局变量 */
 const { expect, test } = require('@playwright/test');
 
 if (process.env.PIVOT_E2E_DEBUG === 'true') {
