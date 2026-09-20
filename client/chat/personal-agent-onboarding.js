@@ -22,7 +22,10 @@
     function render() {
         const root = modal(); if (!root) return;
         root.querySelectorAll('[data-onboarding-step]').forEach(item => item.classList.toggle('hidden', Number(item.dataset.onboardingStep) !== state.step));
-        root.querySelectorAll('[data-onboarding-progress]').forEach(item => item.classList.toggle('active', Number(item.dataset.onboardingProgress) <= state.step));
+        root.querySelectorAll('[data-onboarding-progress]').forEach((item) => {
+            const stepNum = Number(item.dataset.onboardingProgress);
+            item.classList.toggle('active', stepNum <= state.step);
+        });
         root.querySelector('[data-onboarding-action="back"]').disabled = state.step === 1;
         root.querySelector('[data-onboarding-action="next"]').textContent = state.step === 4 ? '完成设置' : '下一步';
     }

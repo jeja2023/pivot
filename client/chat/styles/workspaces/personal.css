@@ -357,8 +357,8 @@
 .personal-hero-start input { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,255,255,.48); border-radius: 8px; padding: 9px 10px; color: var(--text-main); background: var(--surface); }
 .personal-hero-actions, .personal-hero-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .personal-hero-actions .btn-primary { background: var(--surface); color: var(--primary); border-color: var(--surface); }
-.personal-hero-start small { display: block; margin-top: 7px; font-size: .68rem; opacity: .9; line-height: 1.25; }
-.personal-hero-examples button { border: 0; border-radius: 999px; padding: 3px 8px; color: inherit; background: rgba(255,255,255,.16); cursor: pointer; font-size: .68rem; }
+.personal-hero-examples button { border: 0; border-radius: 999px; padding: 3px 8px; color: inherit; background: var(--hero-chip-bg, rgba(255, 255, 255, 0.16)); cursor: pointer; font-size: .68rem; }
+.personal-onboarding-modal { z-index: 2150; }
 .personal-onboarding-dialog { width: min(560px, calc(100vw - 28px)); }
 .personal-onboarding-head { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
 .personal-onboarding-head h3 { margin: 0; }.personal-onboarding-head p { margin: 6px 0 0; color: var(--text-muted); font-size: .85rem; }

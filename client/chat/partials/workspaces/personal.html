@@ -73,16 +73,16 @@
                     </div>
                     <div class="personal-hero-start" aria-label="直接开始任务">
                         <label class="sr-only" for="personal-quick-task">输入要处理的事情</label>
-                        <input id="personal-quick-task" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
+                        <input id="personal-quick-task" class="form-input" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
                         <div class="personal-hero-actions">
                             <button class="btn-secondary" type="button" data-personal-action="quick-chat">快速问答</button>
                             <button class="btn-primary" type="button" data-personal-action="quick-agent">交给后台 Agent</button>
                         </div>
                         <small>快速问答会立即在当前对话中回答；后台 Agent 适合需要检索、整理或持续执行的任务。</small>
                         <div class="personal-hero-examples" aria-label="示例任务">
-                            <button type="button" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
-                            <button type="button" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
-                            <button type="button" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
+                            <button type="button" class="btn-secondary" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
+                            <button type="button" class="btn-secondary" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
+                            <button type="button" class="btn-secondary" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
                         </div>
                     </div>
                 </section>
@@ -195,7 +195,7 @@
             </div>
         </div>
     </div>
-    <div id="personal-agent-onboarding" class="modal-overlay personal-onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-onboarding-title" aria-hidden="true" style="z-index: 2150;">
+    <div id="personal-agent-onboarding" class="modal-overlay personal-onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-onboarding-title" aria-hidden="true">
         <div class="modal personal-onboarding-dialog">
             <header class="personal-onboarding-head">
                 <div><h3 id="personal-onboarding-title">用 3 分钟设置你的 Agent</h3><p id="personal-onboarding-copy">先从称呼和表达偏好开始；所有选项都可以之后修改。</p></div>

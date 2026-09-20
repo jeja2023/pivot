@@ -96,7 +96,8 @@ async function reviewAgentWorkflowRelease(releaseId, status) {
         showToast(data.error || '工作流发布审阅失败', 'error');
         return false;
     }
-    showToast(status === 'approved' ? '已通过工作流发布审阅' : '已通知所有者修改工作流发布', 'success');
+    const toastMessage = status === 'approved' ? '已通过工作流发布审阅' : '已通知所有者修改工作流发布';
+    showToast(toastMessage, 'success');
     return true;
 }
 
