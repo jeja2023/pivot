@@ -2,7 +2,14 @@
 /* global API_BASE, apiJson */
 (function () {
     function create(deps = {}) {
-        const { state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane } = deps;
+        const { state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane, apiJson: injectedApiJson } = deps;
+        const apiJson = injectedApiJson || (typeof window !== 'undefined' && typeof window.apiJson === 'function' ? window.apiJson : async (path, options = {}) => {
+            const fetchFn = typeof apiFetch === 'function' ? apiFetch : fetch;
+            const response = await fetchFn(path, options);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || data.message || `请求失败（${response.status}）`);
+            return data;
+        });
         state.capabilities = Array.isArray(state.capabilities) ? state.capabilities : [];
         state.capabilityQuery = String(state.capabilityQuery || '');
         state.channelGatewayDetails = state.channelGatewayDetails instanceof Map ? state.channelGatewayDetails : new Map();
@@ -93,7 +100,7 @@
                     if (tokenNotice && response.token) { tokenNotice.textContent = `Webhook 令牌（仅展示一次，请妥善保存）：${response.token}`; tokenNotice.classList.remove('hidden'); } else handlers.close?.();
                     setNotice(draftToken ? '已确认并创建持续目标。' : '持续目标已创建。', 'success');
                 }
-                handlers.reload?.();
+                await handlers.reload?.();
             } catch (error) { setNotice(error.message || `持续目标${editId ? '修改' : '创建'}失败。`, 'error'); }
         }
 

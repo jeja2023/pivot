@@ -447,7 +447,7 @@
     }
 
     const personalExperience = window.Pivot.moduleApi('agent.personalExperience').create({
-        state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane
+        state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane, apiJson
     });
 
     function renderSkills() {

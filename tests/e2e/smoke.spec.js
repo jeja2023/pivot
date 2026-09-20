@@ -498,8 +498,16 @@ test.describe('Pivot browser smoke', () => {
     test('个人工作台入口可打开并关闭所有按需工作区', async ({ page }) => {
         test.setTimeout(90_000);
         await ensureBrowserSession(page);
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('personal'));
+        await page.evaluate(() => {
+            sessionStorage.setItem('pivot.agent.onboarding.dismissed', '1');
+            window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('personal');
+        });
         await expect(page.locator('#personal-workbench-modal')).toBeVisible();
+        const onboardingSkip = page.locator('#personal-agent-onboarding [data-onboarding-action="skip"]');
+        if (await onboardingSkip.isVisible()) {
+            await onboardingSkip.click();
+            await expect(page.locator('#personal-agent-onboarding')).toBeHidden();
+        }
 
         const cases = [
             ['open-apps', '#apps-workbench-modal', '#apps-modal-close'],

@@ -4,7 +4,8 @@
     const state = { step: 1, profile: null, checked: false };
 
     async function request(path, options = {}) {
-        const response = await fetch(`${API_ROOT}${path}`, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+        const fetchFn = typeof apiFetch === 'function' ? apiFetch : fetch;
+        const response = await fetchFn(`${API_ROOT}${path}`, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || '设置暂时无法保存。');
         return data;
