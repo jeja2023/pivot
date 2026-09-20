@@ -1,0 +1,23 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const read = file => fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
+
+test('personal capability catalog is backed only by authorized releases and governed capability packages', () => {
+    const route = read('server/routes/agent-control-plane.js');
+    const client = read('client/chat/agent-personal-experience.js');
+    const partial = read('client/chat/partials/workspaces/agent.html');
+    const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
+
+    assert.match(route, /\/agents\/capabilities\/catalog/);
+    assert.match(route, /listCapabilityPackages\(req\.user\)/);
+    assert.match(route, /listSkillCatalogForUser\(req\.user/);
+    assert.match(client, /\/agents\/capabilities\/catalog\?limit=300/);
+    assert.match(client, /capabilityKindLabel/);
+    assert.match(partial, /id="agent-capability-catalog-search"/);
+    assert.match(partial, /id="agent-capability-catalog-list"/);
+    assert.match(css, /\.agent-capability-catalog-list/);
+    assert.match(css, /\.agent-capability-catalog-item/);
+});

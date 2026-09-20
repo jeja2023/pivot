@@ -35,13 +35,24 @@ function normalizeBindingInput(input = {}) {
     if (!channelKey) throw invalid('渠道绑定标识不能为空。');
     const config = input.config && typeof input.config === 'object' ? input.config : {};
     const platform = String(config.platform || '').trim().toLowerCase();
+    const gateway = config.gateway && typeof config.gateway === 'object' ? config.gateway : {};
+    const gatewayEnabled = gateway.enabled === true || gateway.gatewayEnabled === true;
     if (platform && !['wecom', 'feishu', 'dingtalk'].includes(platform)) throw invalid('受控 IM 平台只能是企业微信、飞书或钉钉。');
     if (channelType === 'im' && platform && !String(config.url || config.endpoint || '').trim()) throw invalid('受控 IM 渠道必须配置 Webhook Endpoint。');
+    const credentialRef = String(input.credentialRef || input.credential_ref || '').trim().slice(0, 255);
+    if (gatewayEnabled) {
+        if (!['webhook', 'im'].includes(channelType)) throw invalid('双向消息 Gateway 仅支持 Webhook 或企业 IM 渠道。');
+        if (!credentialRef) throw invalid('双向消息 Gateway 必须填写签名凭据引用。');
+        if (!String(config.url || config.endpoint || '').trim()) throw invalid('双向消息 Gateway 必须配置受控回投 Endpoint。');
+        // 外部会话目标只以 AES-GCM 密文保存；没有独立数据密钥时拒绝启用，
+        // 避免首条入站消息才暴露“无法建立安全回复通道”的运行时故障。
+        if (!String(process.env.DATA_ENCRYPTION_KEY || '').trim()) throw invalid('双向消息 Gateway 需要配置 DATA_ENCRYPTION_KEY，才能保护外部回复目标。', 503);
+    }
     const notificationPolicy = input.notificationPolicy || input.notification_policy;
     return {
         channelType,
         channelKey,
-        credentialRef: String(input.credentialRef || input.credential_ref || '').trim().slice(0, 255),
+        credentialRef,
         config: Object.fromEntries(Object.entries({ ...config, ...(platform ? { platform } : {}) }).slice(0, 32)),
         notificationPolicy: notificationPolicy && typeof notificationPolicy === 'object' ? notificationPolicy : {},
         status: input.status === 'paused' ? 'paused' : 'active'

@@ -305,6 +305,17 @@
 .chat-tools-menu-trigger:hover, .chat-tools-menu-trigger[aria-expanded="true"] {
     color: var(--primary); background: rgba(16, 185, 129, .10); transform: translateY(-1px);
 }
+
+#chat-voice-input.is-recording {
+    color: #dc2626;
+    border-color: rgba(220, 38, 38, 0.42);
+    background: rgba(254, 226, 226, 0.85);
+    animation: chat-voice-recording-pulse 1.25s ease-in-out infinite;
+}
+
+@keyframes chat-voice-recording-pulse {
+    50% { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12); }
+}
 .chat-tools-menu-trigger[aria-expanded="true"] svg { transform: rotate(45deg); }
 .chat-tools-menu-trigger svg { transition: transform .18s ease; }
 .chat-tools-menu-panel {
@@ -314,6 +325,18 @@
     background: var(--surface, rgba(255,255,255,.98)); box-shadow: 0 16px 34px var(--shadow-md, rgba(15,23,42,.16));
 }
 .chat-attachment-menu-panel { width: 180px; padding: 5px; }
+.chat-memory-intent-dialog { width: min(560px, calc(100vw - 28px)); padding: 0; overflow: hidden; }
+.chat-memory-intent-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px; border-bottom:1px solid var(--border); }
+.chat-memory-intent-head h3 { margin:0; color:var(--text-main); font-size:1rem; }
+.chat-memory-intent-head p { margin:6px 0 0; color:var(--text-muted); font-size:.74rem; line-height:1.5; }
+.chat-memory-intent-field { display:flex; flex-direction:column; gap:6px; padding:16px 18px 0; }
+.chat-memory-intent-field > span { color:var(--text-muted); font-size:.73rem; font-weight:700; }
+.chat-memory-intent-field textarea { min-height:82px; resize:vertical; }
+.chat-memory-intent-preview { display:grid; gap:8px; margin:14px 18px 0; padding:12px; border:1px solid rgba(16,185,129,.25); border-radius:9px; background:rgba(236,253,245,.52); }
+.chat-memory-intent-preview strong { color:var(--text-main); font-size:.8rem; }
+.chat-memory-intent-preview p { margin:0; color:var(--text-muted); font-size:.73rem; line-height:1.45; }
+.chat-memory-intent-preview select { width:100%; height:34px; }
+.chat-memory-intent-actions { display:flex; justify-content:flex-end; gap:8px; padding:16px 18px 18px; }
 .chat-tools-menu-panel[hidden] { display: none; }
 .chat-mode-selector { position: relative; display: inline-flex; align-items: center; }
 .chat-mode-trigger {

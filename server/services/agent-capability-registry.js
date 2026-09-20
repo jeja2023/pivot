@@ -54,7 +54,10 @@ const AGENT_CAPABILITY_DEFINITIONS = Object.freeze([
     // ── 网络域 ──
     { id: 'network.request', title: '网络访问', parent: null, risk: 'high' },
     { id: 'network.http_request', title: 'HTTP 请求', parent: 'network.request', risk: 'high' },
+    { id: 'network.web_search', title: '网页检索', parent: 'network.request', risk: 'medium' },
     { id: 'network.browser_visit', title: '浏览器访问', parent: 'network.request', risk: 'high' },
+    { id: 'media.image_generate', title: '图片生成', parent: null, risk: 'high' },
+    { id: 'media.text_to_speech', title: '语音合成', parent: null, risk: 'medium' },
 
     // ── 知识与检索域 ──
     { id: 'knowledge.read', title: '知识库读取', parent: null, risk: 'low' },

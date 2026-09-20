@@ -91,6 +91,7 @@ window.Pivot.legacy.loadAgentWorkbench = async function(options = {}) {
         await Promise.all([
             loadAgentModelRouters(),
             loadAgentTools(),
+            loadAgentContextCollections(),
             loadAgentRuns(undefined, { skipAutoOpen: options.skipAutoOpen === true }),
             loadAgentRuntimeStatus(),
             loadAgentMetrics(),

@@ -71,6 +71,20 @@
                         <h2 id="personal-hero-title">今天想先处理什么？</h2>
                         <span id="personal-workbench-greeting">把分散的对话、任务、资料和自动化，收拢成一条清晰的工作流。</span>
                     </div>
+                    <div class="personal-hero-start" aria-label="直接开始任务">
+                        <label class="sr-only" for="personal-quick-task">输入要处理的事情</label>
+                        <input id="personal-quick-task" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
+                        <div class="personal-hero-actions">
+                            <button class="btn-secondary" type="button" data-personal-action="quick-chat">快速问答</button>
+                            <button class="btn-primary" type="button" data-personal-action="quick-agent">交给后台 Agent</button>
+                        </div>
+                        <small>快速问答会立即在当前对话中回答；后台 Agent 适合需要检索、整理或持续执行的任务。</small>
+                        <div class="personal-hero-examples" aria-label="示例任务">
+                            <button type="button" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
+                            <button type="button" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
+                            <button type="button" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
+                        </div>
+                    </div>
                 </section>
                 <section id="personal-workbench-stats" class="personal-stats" aria-label="工作概览"></section>
                 <div class="personal-workbench-grid">
@@ -93,6 +107,16 @@
                             <button class="btn-secondary personal-card-link" type="button" data-personal-action="open-goals">管理 <span class="link-arrow">→</span></button>
                         </header>
                         <div id="personal-goals-list" class="personal-list"></div>
+                    </section>
+                    <section class="personal-card personal-card-assistant" aria-labelledby="personal-assistant-title">
+                        <header class="personal-card-header">
+                            <div>
+                                <h3 id="personal-assistant-title">我的智能助手</h3>
+                                <p>档案、记忆和个人经验会在受控范围内持续生效</p>
+                            </div>
+                            <button class="btn-secondary personal-card-link" type="button" data-personal-action="open-assistant-profile">管理 <span class="link-arrow">→</span></button>
+                        </header>
+                        <div id="personal-assistant-list" class="personal-list"></div>
                     </section>
                     <section class="personal-card personal-card-recent" aria-labelledby="personal-recent-title">
                         <header class="personal-card-header">
@@ -169,6 +193,26 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+    <div id="personal-agent-onboarding" class="modal-overlay personal-onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-onboarding-title" aria-hidden="true" style="z-index: 2150;">
+        <div class="modal personal-onboarding-dialog">
+            <header class="personal-onboarding-head">
+                <div><h3 id="personal-onboarding-title">用 3 分钟设置你的 Agent</h3><p id="personal-onboarding-copy">先从称呼和表达偏好开始；所有选项都可以之后修改。</p></div>
+                <button class="btn-secondary" type="button" data-onboarding-action="skip" aria-label="跳过设置">稍后设置</button>
+            </header>
+            <div class="personal-onboarding-progress" aria-label="设置进度"><span data-onboarding-progress="1">1</span><span data-onboarding-progress="2">2</span><span data-onboarding-progress="3">3</span><span data-onboarding-progress="4">4</span></div>
+            <section data-onboarding-step="1" class="personal-onboarding-step">
+                <h4>怎么称呼你？</h4><label>称呼<input id="onboarding-display-name" class="form-input" maxlength="120" placeholder="例如：小王"></label><label>你主要负责什么？<input id="onboarding-role" class="form-input" maxlength="240" placeholder="例如：项目协调与报告整理"></label>
+            </section>
+            <section data-onboarding-step="2" class="personal-onboarding-step hidden">
+                <h4>希望我怎样表达？</h4><label>语气<select id="onboarding-tone" class="form-input"><option value="professional">专业直接</option><option value="friendly">友好协作</option><option value="concise">简洁</option></select></label><label>详略<select id="onboarding-verbosity" class="form-input"><option value="balanced">适中</option><option value="concise">简明</option><option value="detailed">详细</option></select></label>
+            </section>
+            <section data-onboarding-step="3" class="personal-onboarding-step hidden">
+                <h4>通常想让我协助什么？</h4><label>常见任务（用逗号分隔）<input id="onboarding-common-tasks" class="form-input" maxlength="480" placeholder="例如：项目汇报，待办整理，资料检索"></label><p>只保存你主动填写的任务类型，不会保存此处之外的聊天内容。</p></section>
+            <section data-onboarding-step="4" class="personal-onboarding-step hidden">
+                <h4>数据与通知范围</h4><p>Agent 默认只使用你在任务中明确选择、且自己已有权限的资料和工具。通知渠道完全可选，绑定后可随时撤销。</p><label class="personal-onboarding-check"><input id="onboarding-channel" type="checkbox">完成后前往设置通知渠道</label></section>
+            <footer class="personal-onboarding-actions"><button class="btn-secondary" type="button" data-onboarding-action="back">上一步</button><button class="btn-primary" type="button" data-onboarding-action="next">下一步</button></footer>
         </div>
     </div>
 </section>

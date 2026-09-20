@@ -176,6 +176,19 @@
                             <button type="button" id="upload-folder-choice" class="btn-secondary chat-tool-subpanel-item" role="menuitem">选择文件夹</button>
                         </div>
                         </div>
+                        <div id="chat-memory-menu" class="chat-tools-menu">
+                            <button type="button" id="chat-memory-menu-btn" class="btn-secondary chat-tools-menu-trigger" aria-label="记忆操作" aria-expanded="false" aria-controls="chat-memory-menu-panel" title="记忆操作">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5A5.5 5.5 0 0 0 4 9v1a3 3 0 0 0 0 6v1a3 3 0 0 0 3 3h2"></path><path d="M14.5 3.5A5.5 5.5 0 0 1 20 9v1a3 3 0 0 1 0 6v1a3 3 0 0 1-3 3h-2"></path><path d="M9 12h6M12 9v6"></path></svg>
+                            </button>
+                            <div id="chat-memory-menu-panel" class="chat-tools-menu-panel chat-memory-menu-panel" role="menu" aria-label="记忆操作" hidden>
+                                <button type="button" id="chat-remember-input" class="btn-secondary chat-tool-subpanel-item" role="menuitem">记住当前输入</button>
+                                <button type="button" id="chat-memory-intent" class="btn-secondary chat-tool-subpanel-item" role="menuitem">用自然语言更正或忘记</button>
+                                <button type="button" id="chat-open-memories" class="btn-secondary chat-tool-subpanel-item" role="menuitem">查看和管理记忆</button>
+                            </div>
+                        </div>
+                        <button type="button" id="chat-voice-input" class="btn-secondary chat-tools-menu-trigger" aria-label="语音输入" aria-pressed="false" title="语音输入（浏览器本地转写，不会上传录音）">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"></path></svg>
+                        </button>
                         <div id="chat-route-override-state" hidden aria-hidden="true">
                             <select id="chat-rag-collection-scope" class="form-input" disabled tabindex="-1"><option value="">全部知识库</option></select>
                             <select id="chat-rag-tag-scope" class="form-input" disabled tabindex="-1"><option value="">全部标签</option></select>
@@ -224,4 +237,12 @@
             </div>
             </section>
         </main>
+    </div>
+    <div id="chat-memory-intent-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="chat-memory-intent-title">
+        <div class="modal chat-memory-intent-dialog">
+            <div class="chat-memory-intent-head"><div><h3 id="chat-memory-intent-title">管理个人记忆</h3><p>例如“记住我偏好简洁摘要”“忘记项目代号”“更正旧偏好为新偏好”。系统会先预览，确认后才修改。</p></div><button type="button" id="chat-memory-intent-close" class="btn-secondary">关闭</button></div>
+            <label class="chat-memory-intent-field"><span>自然语言操作</span><textarea id="chat-memory-intent-text" class="form-input" rows="3" maxlength="2400" placeholder="输入记住、忘记或更正指令"></textarea></label>
+            <div id="chat-memory-intent-preview" class="chat-memory-intent-preview hidden" aria-live="polite"></div>
+            <div class="chat-memory-intent-actions"><button type="button" id="chat-memory-intent-preview-btn" class="btn-secondary">预览操作</button><button type="button" id="chat-memory-intent-apply" class="btn-primary" disabled>确认修改</button></div>
+        </div>
     </div>

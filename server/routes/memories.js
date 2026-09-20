@@ -18,9 +18,11 @@ const {
     softDeleteMemory,
     updateMemory,
     updateMemoryStatus,
-    updateMemoryStatuses
+    updateMemoryStatuses,
+    upsertMemory
 } = require('../services/long-term-memory');
 const { getMemoryPolicy, listMemoryPolicyVersions, updateMemoryPolicy } = require('../services/memory-governance');
+const { applyMemoryIntent, previewMemoryIntent } = require('../services/agent-memory-intents');
 
 function normalizeMemoryId(raw) {
     const id = Number.parseInt(raw, 10);
@@ -35,6 +37,37 @@ function sendServiceError(res, err) {
         });
     }
     throw err;
+}
+
+async function normalizeExplicitMemorySource(user, body = {}) {
+    const sourceSessionId = String(body.sourceSessionId || body.source_session_id || '').trim().slice(0, 128);
+    if (sourceSessionId) {
+        const session = await require('../repositories/sessions').getSessionById(sourceSessionId, user.id);
+        if (!session) {
+            const error = new Error('记忆来源会话不存在或无权引用。');
+            error.statusCode = 404;
+            error.code = 'MEMORY_SOURCE_SESSION_NOT_FOUND';
+            throw error;
+        }
+    }
+    const requestedIds = Array.isArray(body.sourceMessageIds || body.source_message_ids)
+        ? (body.sourceMessageIds || body.source_message_ids)
+        : [];
+    const ids = [...new Set(requestedIds.map(value => Number.parseInt(value, 10)).filter(value => Number.isSafeInteger(value) && value > 0))].slice(0, 20);
+    if (!ids.length) return { sourceSessionId: sourceSessionId || null, sourceMessageIds: [] };
+    const { query } = require('../db/client');
+    const rows = await query(`
+        SELECT id
+        FROM messages
+        WHERE user_id = ? AND deleted_at IS NULL AND id IN (${ids.map(() => '?').join(',')})
+    `, [user.id, ...ids]);
+    if (rows.length !== ids.length) {
+        const error = new Error('记忆来源消息不存在或无权引用。');
+        error.statusCode = 404;
+        error.code = 'MEMORY_SOURCE_MESSAGE_NOT_FOUND';
+        throw error;
+    }
+    return { sourceSessionId: sourceSessionId || null, sourceMessageIds: ids };
 }
 
 function createMemoriesRouter({ authMiddleware, logAction }) {
@@ -127,6 +160,46 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
     router.get('/memories/summary', authMiddleware, asyncHandler(async (req, res) => {
         const summary = await getMemorySummary(req.user.id);
         res.json({ success: true, summary });
+    }));
+
+    // 显式记忆始终视为用户确认，仍受敏感信息和类别策略拦截；不能借此把任意
+    // 其他用户的会话/消息作为来源挂入自己的长期记忆。
+    router.post('/memories/remember', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const source = await normalizeExplicitMemorySource(req.user, req.body || {});
+            const result = await upsertMemory(req.user.id, {
+                content: req.body?.content,
+                type: req.body?.type || 'preference',
+                scope: req.body?.scope || 'user',
+                salience: req.body?.salience ?? 0.8,
+                confidence: req.body?.confidence ?? 0.9,
+                expiresAt: req.body?.expiresAt || req.body?.expires_at || null,
+                ...source
+            }, { user: req.user, confirmed: true });
+            if (result?.skipped) {
+                return res.status(422).json({ error: result.reason === 'invalid_or_sensitive' ? '该内容疑似包含敏感信息或过短，不能保存为长期记忆。' : '当前记忆策略不允许保存该内容。', code: `MEMORY_REMEMBER_${String(result.reason || 'REJECTED').toUpperCase()}` });
+            }
+            if (typeof logAction === 'function') logAction(req, '显式保存长期记忆', `结果: ${result.merged ? '合并已有记忆' : '新增记忆'}，来源会话: ${source.sourceSessionId || '无'}`);
+            const summary = await getMemorySummary(req.user.id);
+            return res.status(result.merged ? 200 : 201).json({ success: true, ...result, summary });
+        } catch (err) {
+            return sendServiceError(res, err);
+        }
+    }));
+
+    router.post('/memories/intents/preview', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await previewMemoryIntent(req.user, req.body?.text || req.body?.intent || '');
+        res.json({ success: true, preview });
+    }));
+
+    router.post('/memories/intents/apply', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await applyMemoryIntent(req.user, req.body || {});
+            if (typeof logAction === 'function') logAction(req, '执行自然语言记忆操作', `动作: ${result.action}，记忆ID: ${result.memoryId || result.result?.memory?.id || 'new'}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
     }));
 
     router.put('/memories/settings', authMiddleware, asyncHandler(async (req, res) => {

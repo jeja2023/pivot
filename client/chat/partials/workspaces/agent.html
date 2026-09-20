@@ -31,6 +31,19 @@
                 <form id="agent-goal-editor" class="agent-task-editor-body agent-goal-modal-form">
                     <!-- 编辑模式隐藏字段 -->
                     <input type="hidden" id="agent-goal-edit-id" value="">
+                    <input type="hidden" id="agent-goal-draft-token" value="">
+                    <section id="agent-goal-natural-panel" class="agent-goal-natural-panel" aria-labelledby="agent-goal-natural-title">
+                        <div class="agent-goal-natural-head">
+                            <strong id="agent-goal-natural-title">用一句话生成草案</strong>
+                            <span>先预览时间、权限和触发范围，确认后才会创建。</span>
+                        </div>
+                        <div class="agent-goal-natural-row">
+                            <textarea id="agent-goal-natural-input" class="form-input" rows="2" maxlength="2000"
+                                placeholder="例如：每个工作日 09:00 检查项目风险并通知我"></textarea>
+                            <button id="agent-goal-draft-parse" class="btn-secondary" type="button">生成草案</button>
+                        </div>
+                        <div id="agent-goal-draft-preview" class="agent-goal-draft-preview hidden" role="status" aria-live="polite"></div>
+                    </section>
                     <label class="modal-form-field">
                         <span>目标名称</span>
                         <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160"
@@ -57,6 +70,14 @@
                             <input id="agent-goal-time" class="form-input" type="time" value="09:00">
                         </label>
                     </div>
+                    <div class="modal-form-grid modal-form-grid--2">
+                        <label class="modal-form-field"><span>时区</span><input id="agent-goal-timezone" class="form-input" value="Asia/Shanghai" maxlength="80"></label>
+                        <label class="modal-form-field"><span>结果投递渠道（可选）</span><select id="agent-goal-delivery-channel" class="form-input"><option value="">仅在 Pivot 待办中心查看</option></select></label>
+                    </div>
+                    <div class="modal-form-grid modal-form-grid--2">
+                        <label class="modal-form-field"><span>模型策略</span><select id="agent-goal-model-router" class="form-input"><option value="fixed">固定（默认）</option><option value="auto-context">上下文匹配</option><option value="auto-cost">成本优先</option><option value="auto-load">负载均衡</option></select></label>
+                        <label class="modal-form-field"><span>结果保留天数</span><input id="agent-goal-retention-days" class="form-input" type="number" min="1" max="3650" value="30"></label>
+                    </div>
                     <label id="agent-goal-directory-field" class="modal-form-field hidden">
                         <span>监听目录路径</span>
                         <input id="agent-goal-directory" class="form-input" placeholder="请输入受控目录根内的相对路径">
@@ -71,6 +92,7 @@
                         <span class="agent-goal-hint">后台自动监听并生成独立审计记录</span>
                         <div>
                             <button type="button" id="agent-goal-cancel" class="btn-secondary">取消</button>
+                            <button type="button" id="agent-goal-preview" class="btn-secondary">测试运行</button>
                             <button type="submit" id="agent-goal-submit" class="btn-primary">保存持续目标</button>
                         </div>
                     </div>
@@ -221,6 +243,19 @@
                                     <span>补充说明</span>
                                     <textarea id="agent-context-notes" class="form-input" rows="2"
                                         placeholder="可选，限定范围、部门或资料来源"></textarea>
+                                </label>
+                                <label class="agent-context-collections-field">
+                                    <span>项目资料包（可选）</span>
+                                    <select id="agent-context-collections" class="form-input" multiple size="3"
+                                        aria-describedby="agent-context-collections-help"></select>
+                                    <small id="agent-context-collections-help">只检索所选、且当前账号仍有权限访问的知识库集合；权限变化会在运行时再次校验。</small>
+                                    <button id="agent-context-collections-refresh" class="btn-secondary btn-xs" type="button">刷新资料包</button>
+                                </label>
+                                <label class="agent-network-origins-field">
+                                    <span>外部能力允许来源（可选）</span>
+                                    <textarea id="agent-network-origins" class="form-input" rows="2"
+                                        placeholder="每行一个 Origin，例如：https://search.example.com"></textarea>
+                                    <small>仅用于已配置的网页检索、图片生成或语音合成 Provider。每次外部调用仍需审批，不接受完整路径、密钥或内网地址。</small>
                                 </label>
                             </div>
                         </div>
@@ -929,6 +964,13 @@
                                 title="刷新技能列表">刷新</button>
                         </div>
                     </div>
+                    <section class="agent-capability-catalog" aria-labelledby="agent-capability-catalog-title">
+                        <div class="agent-harness-subhead">
+                            <div><strong id="agent-capability-catalog-title">可用能力目录</strong><span>只展示当前账号已授权的 Skill、内置工具与受控连接。</span></div>
+                            <div class="agent-capability-catalog-actions"><input id="agent-capability-catalog-search" class="form-input" type="search" placeholder="搜索能力名称、来源或用途"><button id="agent-capability-catalog-refresh" class="btn-secondary btn-xs" type="button">刷新目录</button></div>
+                        </div>
+                        <div id="agent-capability-catalog-list" class="agent-capability-catalog-list" aria-live="polite"></div>
+                    </section>
                     <div class="agent-harness-skill-layout">
                         <div class="agent-harness-skill-list-wrap">
                             <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>

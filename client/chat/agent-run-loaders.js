@@ -3,6 +3,30 @@
 // Agent 模型、工具加载器和运行列表渲染。
 /* eslint-disable no-undef */
 let agentRunsLoadSequence = 0;
+let agentContextCollectionsCache = [];
+
+async function loadAgentContextCollections() {
+    const select = document.getElementById('agent-context-collections');
+    if (!select) return [];
+    const refresh = document.getElementById('agent-context-collections-refresh');
+    if (refresh && refresh.dataset.agentContextPackBound !== '1') {
+        refresh.dataset.agentContextPackBound = '1';
+        refresh.addEventListener('click', () => loadAgentContextCollections().catch(error => showToast(error.message || '项目资料包加载失败', 'error')));
+    }
+    const selected = new Set([...select.selectedOptions].map(option => String(option.value)));
+    const response = await apiFetch(`${API_BASE}/agents/context-packs/collections`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '项目资料包加载失败');
+    agentContextCollectionsCache = Array.isArray(data.data) ? data.data : [];
+    PivotSafeHtml.setHtml(select, agentContextCollectionsCache.length
+        ? agentContextCollectionsCache.map(collection => {
+            const meta = `${Number(collection.readyCount || 0)}/${Number(collection.documentCount || 0)} 篇可用资料${collection.readOnly ? ' · 只读共享' : ''}`;
+            return `<option value="${agentEscape(collection.id)}" title="${agentEscape(collection.description || meta)}">${agentEscape(collection.name)} · ${agentEscape(meta)}</option>`;
+        }).join('')
+        : '<option value="" disabled>暂无可访问的知识库集合</option>');
+    [...select.options].forEach(option => { option.selected = selected.has(String(option.value)); });
+    return agentContextCollectionsCache;
+}
 
 async function loadAgentModels() {
     const loaded = typeof window.Pivot.legacy.loadSelectableModels === 'function'

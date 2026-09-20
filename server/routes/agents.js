@@ -13,6 +13,7 @@ const {
     listDeletedRunsForAdmin,
     listRuns,
     listSteps,
+    listWorkflowIterationItemsForUser,
     listWorkflowInvocationsForUser,
     updateAgentRunTitleAndGoalForUser
 } = require('../services/agent-runs');
@@ -53,11 +54,12 @@ const {
 } = require('../services/agent-evaluations');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { registerAgentApiOperationRoutes } = require('./agent-api-operations');
-const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
+const { registerAgentToolTestRoute } = require('./agent-tool-test');
 const { recordAgentFeedback } = require('../services/agent-feedback');
 const { createSkillVersion } = require('../services/agent-releases');
 const { publishWorkflowRelease } = require('../services/agent-releases');
 const { buildDelegationContext, listCollaboratorRuns, normalizeDelegationInput } = require('../services/agent-collaboration');
+const { registerAgentDelegationBatchRoute } = require('./agent-delegation-batch');
 const {
     createWorkflowCredential,
     deleteWorkflowCredential,
@@ -103,7 +105,9 @@ const {
     triggers: {
         createWorkflowTrigger,
         deleteWorkflowTrigger,
+        listWorkflowTriggerEvents,
         listWorkflowTriggers,
+        replayWorkflowTriggerEvent,
         rotateWorkflowTriggerToken,
         updateWorkflowTrigger
     },
@@ -139,6 +143,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
     }));
 
     registerAgentApiOperationRoutes(router, { authMiddleware, automationGuard, logAction });
+    registerAgentToolTestRoute({ router, authMiddleware, logAction });
 
     router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: await listAgentSkillsForUser(req.user, { includeDisabled: req.query.includeDisabled === 'true' }) });
@@ -213,65 +218,6 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         logAction(req, '停用 Agent Skill', `Skill: ${req.params.name}`);
         res.json({ success: true });
     }));
-
-    router.post('/agents/tools/test', authMiddleware, asyncHandler(async (req, res) => {
-        const { PolicyError } = require('../services/agent-policy');
-        const { resolveDagNodeInput } = require('../services/agent-dag-utils');
-        const toolName = String(req.body?.tool || '').trim();
-        const input = req.body?.input && typeof req.body.input === 'object' && !Array.isArray(req.body.input) ? req.body.input : {};
-        const tools = await formatToolList(req.user);
-        const tool = findAgentToolByName(toolName, tools);
-        if (!tool) return res.status(403).json({ error: '工具不可用或无权访问。' });
-        if (['workflow.approval', 'workflow.delay', 'workflow.subworkflow'].includes(toolName)) {
-            return res.status(400).json({ error: '人工审批、延时和子工作流节点需要在完整工作流中测试。' });
-        }
-        const isImTargetDiscovery = /(?:^|\.)im\.list_allowed_targets$/.test(toolName);
-        if (!isImTargetDiscovery && (tool.side_effect === true || tool.sideEffect === true || tool.requiresApproval === true || tool.alwaysRequiresApproval === true)) {
-            return res.status(400).json({ error: '为避免产生真实副作用，此节点不能单独测试；请使用完整工作流并按审批策略运行。' });
-        }
-
-        let resolvedInput = input;
-        const rawContext = req.body?.upstreamContext;
-        if (rawContext && typeof rawContext === 'object') {
-            const states = new Map(
-                Array.isArray(rawContext.states)
-                    ? rawContext.states
-                    : (rawContext.states && typeof rawContext.states === 'object' ? Object.entries(rawContext.states) : [])
-            );
-            const nodeMap = new Map(
-                Array.isArray(rawContext.nodes)
-                    ? rawContext.nodes.map(n => [n.id, n])
-                    : (rawContext.nodes && typeof rawContext.nodes === 'object' ? Object.entries(rawContext.nodes) : [])
-            );
-            const dagInputs = req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : (rawContext.inputs || {});
-            const context = {
-                goal: String(rawContext.goal || req.body?.dagInputs?.goal || '').trim(),
-                inputs: dagInputs,
-                states,
-                nodeMap
-            };
-            resolvedInput = resolveDagNodeInput({ tool: toolName, input }, context);
-        }
-
-        const startedAt = Date.now();
-        let output;
-        try {
-            output = await executeToolByName(toolName, resolvedInput, req.user, tools, {
-                dagInputs: req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : {}
-            });
-        } catch (error) {
-            if (error instanceof PolicyError) {
-                return res.status(400).json({ error: error.message });
-            }
-            if (error?.status === 400 || error?.status === 403 || error?.status === 404) {
-                return res.status(error.status).json({ error: error.message });
-            }
-            throw error;
-        }
-        logAction(req, '测试智能体工具节点', `工具: ${toolName}`);
-        res.json({ success: true, output, resolvedInput, durationMs: Date.now() - startedAt });
-    }));
-
 
     // 公开支持的模型路由策略，供前端下拉填充
     router.get('/agents/model-routers', authMiddleware, asyncHandler(async (req, res) => {
@@ -488,6 +434,19 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
     // 工作流触发器：入站 Webhook、文件落地和数据变更三类触发方式的管理入口
     router.get('/agents/triggers', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: await listWorkflowTriggers(req.user) });
+    }));
+
+    router.get('/agents/triggers/:id/events', authMiddleware, asyncHandler(async (req, res) => {
+        const events = await listWorkflowTriggerEvents(req.params.id, req.user, { limit: req.query.limit });
+        if (events === null) return res.status(404).json({ error: '触发器不存在或无权查看事件。' });
+        res.json({ success: true, data: events });
+    }));
+
+    router.post('/agents/triggers/events/:eventId/replay', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = await replayWorkflowTriggerEvent(req.params.eventId, req.user);
+        if (!result) return res.status(404).json({ error: '触发事件不存在或无权重放。' });
+        logAction(req, '重放工作流触发事件', `事件ID: ${req.params.eventId}，任务ID: ${result.run.id}`);
+        res.status(202).json({ success: true, ...result });
     }));
 
     router.post('/agents/triggers', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
@@ -759,6 +718,12 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         res.json({ success: true, data: invocations });
     }));
 
+    router.get('/agents/runs/:id/iteration-items', authMiddleware, asyncHandler(async (req, res) => {
+        const items = await listWorkflowIterationItemsForUser(req.params.id, req.user);
+        if (items === null) return res.status(404).json({ error: '工作流任务不存在或无权访问。' });
+        res.json({ success: true, data: items });
+    }));
+
     router.get('/agents/runs/:id/trace', authMiddleware, asyncHandler(async (req, res) => {
         const trace = await getAgentTraceForUser(req.params.id, req.user);
         if (!trace) return res.status(404).json({ error: '智能体任务不存在。' });
@@ -781,6 +746,11 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         const context = await buildDelegationContext(req.params.id, req.user);
         if (!context) return res.status(404).json({ error: '父任务不存在或无权委派。' });
         const delegation = normalizeDelegationInput(req.body || {});
+        const toolAllowlist = context.parentToolAllowlist.length
+            ? (delegation.toolAllowlist.length
+                ? context.parentToolAllowlist.filter(tool => delegation.toolAllowlist.includes(tool))
+                : context.parentToolAllowlist)
+            : delegation.toolAllowlist;
         const child = await createAgentRun({
             user: req.user,
             parentRunId: context.parentRunId,
@@ -788,8 +758,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             title: delegation.title,
             maxSteps: delegation.maxSteps,
             maxTokenBudget: delegation.maxTokenBudget,
-            approvalPolicy: delegation.approvalPolicy,
-            toolPolicy: delegation.toolPolicy,
+            // 委派不能扩张主管任务的策略或工具集合。
+            approvalPolicy: context.parentApprovalPolicy || 'safe_mcp_auto',
+            toolPolicy: context.parentToolPolicy === 'builtin_only' ? 'builtin_only' : delegation.toolPolicy,
+            toolAllowlist,
             forkHistory: delegation.forkHistory,
             dedupeKey: req.get('Idempotency-Key') ? `delegate:${context.parentRunId}:${String(req.get('Idempotency-Key')).slice(0, 180)}` : null,
             metadata: { source: 'delegation', parentRunId: context.parentRunId, collaboration: { parentTitle: context.parentTitle } }
@@ -797,6 +769,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         logAction(req, '委派 Agent 协作子任务', `父任务ID: ${context.parentRunId}，子任务ID: ${child.id}`);
         res.status(202).json({ success: true, run: child, parent: context });
     }));
+
+    registerAgentDelegationBatchRoute({ router, authMiddleware, automationGuard, buildDelegationContext, createAgentRun, cancelAgentRun, logAction });
 
     router.get('/agents/runs/:id/events', authMiddleware, asyncHandler(async (req, res) => {
         const detail = await getRunDetailForUser(req.params.id, req.user);

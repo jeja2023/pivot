@@ -328,6 +328,12 @@ async function listWorkflowInvocationsForUser(runId, user) {
     return await runRepository.listWorkflowInvocations(run.id);
 }
 
+async function listWorkflowIterationItemsForUser(runId, user) {
+    const run = await getRunForUser(runId, user);
+    if (!run || String(run.run_mode || '') !== 'dag') return null;
+    return await runRepository.listWorkflowIterationItems(run.id);
+}
+
 async function getDagNodeCompleteOutputForUser(runId, nodeId, user) {
     const run = await getRunForUser(runId, user);
     if (!run || String(run.run_mode || '') !== 'dag') return null;
@@ -372,10 +378,11 @@ function getRunProgress(run, steps = []) {
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const [steps, dagNodes, invocations, trace, checkpoints] = await Promise.all([
+    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints] = await Promise.all([
         listSteps(run.id),
         listDagNodes(run.id),
         listWorkflowInvocationsForUser(run.id, user),
+        listWorkflowIterationItemsForUser(run.id, user),
         getAgentTraceForUser(run.id, user),
         summarizeAgentCheckpoints(run.id)
     ]);
@@ -406,6 +413,7 @@ async function getRunDetailForUser(runId, user) {
         steps: steps || [],
         dagNodes: effectiveDagNodes,
         invocations: invocations || [],
+        iterationItems: iterationItems || [],
         progress: getRunProgress(run, steps || []),
         trace,
         checkpoints
@@ -426,6 +434,7 @@ module.exports = {
     getRunProgress,
     listDagNodes,
     listWorkflowInvocationsForUser,
+    listWorkflowIterationItemsForUser,
     listDeletedRunsForAdmin,
     listRuns,
     sortDagNodesByDependencies,

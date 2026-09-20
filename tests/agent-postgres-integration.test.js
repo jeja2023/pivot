@@ -17,6 +17,14 @@ const { archiveStalePersonalExperiences, learnAgentRun, getAgentLearningOverview
 const { findBestPersonalSkill } = require('../server/services/agent-skills');
 const { createEvolutionShareRequest, decideEvolutionProposal, publishEvolutionProposal, restoreEvolutionProposal, revokePersonalEvolutionProposal, validateEvolutionProposal } = require('../server/services/agent-evolution');
 const { generateManagedOrganizationSigningKey, disableManagedOrganizationSigning } = require('../server/services/agent-skill-signing-configuration');
+const { createWorkflowCredential } = require('../server/services/workflow-credentials');
+const {
+    configureAgentChannelGateway,
+    createChannelPairing,
+    deliverChannelGatewayRunResult,
+    receiveChannelMessage,
+    revokeChannelPairing
+} = require('../server/services/agent-channel-gateway');
 
 test('production control-plane migration is PostgreSQL-only and declares release/delivery/inbox tables', () => {
     const text = String(productionMigrations[0].upPg);
@@ -117,6 +125,91 @@ test('Webhook Channel Adapter performs bounded chunked delivery over a real loca
         assert.equal(received[0].chunkTotal, 4);
         assert.equal(received[3].idempotencyKey, 'integration-delivery:3');
     } finally { process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previousSensitiveOutbound; await new Promise(resolve => server.close(resolve)); }
+});
+
+test('paired channel gateway rejects untrusted identities, deduplicates inbound messages, and maps one external conversation to one Agent session', { skip: !process.env.DATABASE_URL }, async () => {
+    const { getPgPool } = require('../server/db/pg-connection');
+    const pool = getPgPool();
+    const suffix = `${process.pid}-${Date.now()}`;
+    const user = await ensureTestUser(pool, `integration_channel_${suffix}`);
+    const credentialSlug = `CHANNEL_GATEWAY_${String(Date.now()).slice(-10)}`;
+    const secret = `gateway-secret-${suffix}`;
+    const bindingId = `channel-gateway-${suffix}`;
+    const modelName = `gateway-model-${suffix}`;
+    const runId = `channel-gateway-run-${suffix}`;
+    let modelId = null;
+    let sessionId = null;
+    let pairingId = null;
+    try {
+        await createWorkflowCredential(user, { name: 'Gateway signing key', slug: credentialSlug, secretValue: secret });
+        const model = await pool.query(`INSERT INTO models (user_id, name, url, api_key, model_name, status, created_at) VALUES ($1, $2, 'http://127.0.0.1:1/v1', '', $3, 'active', NOW()) RETURNING id`, [user.id, modelName, modelName]);
+        modelId = Number(model.rows[0].id);
+        await pool.query(`
+            INSERT INTO agent_channel_bindings (id, user_id, channel_type, channel_key, credential_ref, config, notification_policy, status, created_at, updated_at)
+            VALUES ($1, $2, 'webhook', 'gateway-target', $3, $4, '{}', 'active', NOW(), NOW())
+        `, [bindingId, user.id, credentialSlug, JSON.stringify({ url: 'https://gateway.example.test/outbound', gateway: { enabled: true, modelId } })]);
+        configureAgentChannelGateway({
+            createAgentRun: async input => {
+                sessionId = input.sessionId;
+                await pool.query(`INSERT INTO agent_runs (id, user_id, session_id, model_id, title, goal, status, metadata, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, NOW(), NOW())`, [runId, input.user.id, input.sessionId, modelId, input.title, input.goal, JSON.stringify(input.metadata)]);
+                return { id: runId };
+            }
+        });
+        const pairing = await createChannelPairing(bindingId, user);
+        pairingId = pairing.pairing.id;
+        assert.ok(pairing.code);
+        const timestamp = String(Date.now());
+        const payload = { senderId: 'external-user-1', conversationId: 'external-chat-1', text: '请汇总今天的项目风险', eventId: `gateway-event-${suffix}`, pairingCode: pairing.code };
+        const signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${canonicalJson(payload)}`).digest('hex');
+        const accepted = await receiveChannelMessage(bindingId, payload, { 'x-agent-event-timestamp': timestamp, 'x-agent-signature': signature });
+        assert.equal(accepted.accepted, true);
+        assert.equal(accepted.paired, true);
+        assert.equal(accepted.runId, runId);
+        assert.ok(accepted.sessionId);
+        assert.equal(sessionId, accepted.sessionId);
+        const duplicate = await receiveChannelMessage(bindingId, payload, { 'x-agent-event-timestamp': timestamp, 'x-agent-signature': signature });
+        assert.equal(duplicate.deduped, true);
+        assert.equal(duplicate.runId, runId);
+        const events = await pool.query('SELECT status, run_id FROM agent_channel_inbound_events WHERE binding_id = $1', [bindingId]);
+        assert.equal(events.rows.length, 1);
+        assert.equal(events.rows[0].status, 'accepted');
+        assert.equal(events.rows[0].run_id, runId);
+        const mappedSessions = await pool.query('SELECT session_id FROM agent_channel_sessions WHERE binding_id = $1', [bindingId]);
+        assert.equal(mappedSessions.rows.length, 1);
+        assert.equal(mappedSessions.rows[0].session_id, sessionId);
+        const protectedSession = await pool.query('SELECT outbound_target_encrypted FROM agent_channel_sessions WHERE binding_id = $1', [bindingId]);
+        assert.equal(protectedSession.rows.length, 1);
+        assert.doesNotMatch(String(protectedSession.rows[0].outbound_target_encrypted || ''), /external-chat-1/);
+        const delivery = await deliverChannelGatewayRunResult(runId, 'completed');
+        assert.ok(delivery?.id);
+        const queuedDelivery = await pool.query('SELECT interaction FROM agent_channel_deliveries WHERE id = $1', [delivery.id]);
+        assert.equal(queuedDelivery.rows.length, 1);
+        const deliveryInteraction = typeof queuedDelivery.rows[0].interaction === 'string'
+            ? queuedDelivery.rows[0].interaction
+            : JSON.stringify(queuedDelivery.rows[0].interaction || {});
+        assert.match(deliveryInteraction, /outboundTargetEncrypted/);
+        assert.doesNotMatch(deliveryInteraction, /external-chat-1/);
+
+        await revokeChannelPairing(bindingId, pairingId, user);
+        const revokedPayload = { ...payload, eventId: `gateway-event-revoked-${suffix}` };
+        const revokedTimestamp = String(Date.now());
+        const revokedSignature = crypto.createHmac('sha256', secret).update(`${revokedTimestamp}.${canonicalJson(revokedPayload)}`).digest('hex');
+        await assert.rejects(
+            () => receiveChannelMessage(bindingId, revokedPayload, { 'x-agent-event-timestamp': revokedTimestamp, 'x-agent-signature': revokedSignature }),
+            error => ['AGENT_CHANNEL_GATEWAY_PAIRING_INVALID', 'AGENT_CHANNEL_GATEWAY_PAIRING_REQUIRED'].includes(error.code)
+        );
+    } finally {
+        await pool.query('DELETE FROM agent_channel_deliveries WHERE binding_id = $1', [bindingId]);
+        await pool.query('DELETE FROM agent_channel_inbound_events WHERE binding_id = $1', [bindingId]);
+        await pool.query('DELETE FROM agent_channel_sessions WHERE binding_id = $1', [bindingId]);
+        await pool.query('DELETE FROM agent_channel_pairings WHERE binding_id = $1', [bindingId]);
+        await pool.query('DELETE FROM messages WHERE session_id = $1', [sessionId || '']);
+        await pool.query('DELETE FROM agent_runs WHERE id = $1', [runId]);
+        await pool.query('DELETE FROM sessions WHERE id = $1', [sessionId || '']);
+        await pool.query('DELETE FROM agent_channel_bindings WHERE id = $1', [bindingId]);
+        await pool.query('DELETE FROM workflow_credentials WHERE user_id = $1 AND slug = $2', [user.id, credentialSlug]);
+        if (modelId) await pool.query('DELETE FROM models WHERE id = $1', [modelId]);
+    }
 });
 
 test('PostgreSQL profile field versions reject stale concurrent updates', { skip: !process.env.DATABASE_URL }, async () => {

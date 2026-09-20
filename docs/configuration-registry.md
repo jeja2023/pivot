@@ -61,3 +61,28 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## Agent 网页检索
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `AGENT_WEB_SEARCH_ENDPOINT` | string | `` | 逗号分隔的语言标记 | 受控网页检索 Provider 的 HTTPS JSON Endpoint；运行任务仍须在网络策略中显式允许该 Origin。 |
+| `AGENT_WEB_SEARCH_CREDENTIAL` | string | `` | 逗号分隔的语言标记 | 可选的工作流凭据引用名；设置后优先用其作为网页检索 Provider 凭据。 |
+| `AGENT_WEB_SEARCH_API_KEY` | string | `` | 逗号分隔的语言标记 | 可选网页检索 Provider 密钥；仅在未配置凭据引用时使用，生产环境建议改用凭据引用。 |
+| `AGENT_WEB_SEARCH_HEADER` | string | `Authorization` | 逗号分隔的语言标记 | 网页检索 Provider 凭据请求头名称。 |
+| `AGENT_WEB_SEARCH_PREFIX` | string | `Bearer` | 逗号分隔的语言标记 | 网页检索 Provider 凭据请求头前缀；运行时会自动补一个空格。 |
+
+## Agent 多模态 Provider
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `AGENT_IMAGE_GENERATION_ENDPOINT` | string | `` | 逗号分隔的语言标记 | 受控图片生成 Provider 的 HTTPS JSON Endpoint；运行任务仍须显式允许该 Origin。 |
+| `AGENT_IMAGE_GENERATION_CREDENTIAL` | string | `` | 逗号分隔的语言标记 | 可选图片生成 Provider 凭据引用名；生产环境优先使用凭据引用。 |
+| `AGENT_IMAGE_GENERATION_API_KEY` | string | `` | 逗号分隔的语言标记 | 可选图片生成 Provider 密钥；仅在未设置凭据引用时使用。 |
+| `AGENT_IMAGE_GENERATION_HEADER` | string | `Authorization` | 逗号分隔的语言标记 | 图片生成 Provider 凭据请求头名称。 |
+| `AGENT_IMAGE_GENERATION_PREFIX` | string | `Bearer` | 逗号分隔的语言标记 | 图片生成 Provider 凭据请求头前缀；运行时自动补一个空格。 |
+| `AGENT_TTS_ENDPOINT` | string | `` | 逗号分隔的语言标记 | 受控语音合成 Provider 的 HTTPS JSON Endpoint；运行任务仍须显式允许该 Origin。 |
+| `AGENT_TTS_CREDENTIAL` | string | `` | 逗号分隔的语言标记 | 可选语音合成 Provider 凭据引用名；生产环境优先使用凭据引用。 |
+| `AGENT_TTS_API_KEY` | string | `` | 逗号分隔的语言标记 | 可选语音合成 Provider 密钥；仅在未设置凭据引用时使用。 |
+| `AGENT_TTS_HEADER` | string | `Authorization` | 逗号分隔的语言标记 | 语音合成 Provider 凭据请求头名称。 |
+| `AGENT_TTS_PREFIX` | string | `Bearer` | 逗号分隔的语言标记 | 语音合成 Provider 凭据请求头前缀；运行时自动补一个空格。 |
+

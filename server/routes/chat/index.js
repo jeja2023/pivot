@@ -411,7 +411,8 @@ function createChatRouter({
                         type: 'memory',
                         status: 'hit',
                         message: `已检索到 ${agentContext.memoryCount} 条相关长期记忆`,
-                        memoryCount: agentContext.memoryCount
+                        memoryCount: agentContext.memoryCount,
+                        usageReasons: agentContext.memoryUsageReasons || []
                     }));
                 }
                 if (ragEnabled) {
@@ -463,6 +464,7 @@ function createChatRouter({
                         ragScope,
                         currentContent: modelContent,
                         memoryContext: agentContext.memoryContext,
+                        memoryUsageReasons: agentContext.memoryUsageReasons,
                         ragContext: agentContext.ragContext
                     })
                 });

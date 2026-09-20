@@ -7,6 +7,7 @@ const {
     getNodeTestOutputSnapshots,
     resetDagNodeTestOverride,
     serialize,
+    setDagNodeTestContext,
     setDagNodeTestOutput,
     setDagNodeTestOverride
 } = require('../client/chat/dag-core');
@@ -86,6 +87,11 @@ test('节点测试变量覆盖只保留在当前编辑会话并可恢复', () =>
 
     setDagNodeTestOutput('mock_source', { output: { status: 'simulated' }, source: 'mock' });
     assert.equal(getNodeTestOutputSnapshots().get('mock_source').source, 'mock');
+
+    setDagNodeTestContext({ nodes: [{ id: 'source', tool: 'workflow.template', input: { template: 'A' } }] });
+    setDagNodeTestOutput('source', { output: { text: 'A' } });
+    setDagNodeTestContext({ nodes: [{ id: 'source', tool: 'workflow.template', input: { template: 'B' } }] });
+    assert.equal(getNodeTestOutputSnapshots().has('source'), false);
 });
 
 test('AI 节点库提供可编辑契约的参数抽取与内容分类预设', () => {

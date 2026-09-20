@@ -14,6 +14,7 @@ const { buildSkillSourceMarkdown, parseSkillSourceMarkdown } = require('./agent-
 const { createSkillVersion, getSkillVersion } = require('./agent-releases');
 const { capabilitiesCoverTool, normalizeCapabilityList } = require('./agent-capability-registry');
 const { isRegisteredToolName, resolveRegisteredToolCapabilities } = require('./agent-tool-capabilities');
+const crypto = require('crypto');
 
 function authoringError(message, code = 'AGENT_SKILL_SOURCE_INVALID', status = 422) {
     const error = new Error(message);
@@ -91,6 +92,60 @@ async function createSkillVersionFromMarkdown(user, input = {}) {
         sourceRunId: input.sourceRunId
     });
     return { version, preview };
+}
+
+// 从用户明确选中的 Run 提炼声明式 Skill 草稿。只使用成功工具的名称与能力登记，
+// 不把提示词、工具输入/输出或 Trace 原文塞进 Skill 指令，避免把秘密和偶发数据固化。
+async function createSkillDraftFromRun(user, runId) {
+    const run = await queryOne(`
+        SELECT id, title, goal, status FROM agent_runs
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `, [String(runId || ''), user.id]);
+    if (!run) return null;
+    if (!['completed', 'completed_with_errors'].includes(String(run.status))) {
+        throw authoringError('只能从已完成的任务创建 Skill 草稿。', 'AGENT_SKILL_DRAFT_RUN_NOT_COMPLETED', 409);
+    }
+    const steps = await query(`
+        SELECT tool_name FROM agent_steps
+        WHERE run_id = ? AND type = 'tool' AND status != 'error' AND tool_name IS NOT NULL
+        ORDER BY step_index ASC, id ASC
+        LIMIT 32
+    `, [run.id]);
+    const tools = [...new Set(steps.map(step => String(step.tool_name || '').trim()).filter(isRegisteredToolName))].slice(0, 16);
+    if (!tools.length) throw authoringError('该任务没有可复用的已登记成功工具，无法安全创建 Skill 草稿。', 'AGENT_SKILL_DRAFT_NO_REUSABLE_TOOLS', 422);
+    const capabilities = normalizeCapabilityList(tools.flatMap(tool => resolveRegisteredToolCapabilities(tool)));
+    const slug = crypto.createHash('sha256').update(`${user.id}:${run.id}`).digest('hex').slice(0, 16);
+    const title = String(run.title || '个人任务').replace(/\s+/g, ' ').trim().slice(0, 80) || '个人任务';
+    const manifest = {
+        schemaVersion: 1,
+        id: `personal-run-${slug}`,
+        name: `personal-run-${slug}`,
+        version: '0.1.0',
+        title: `${title}配方`.slice(0, 120),
+        description: '从用户明确选中的已完成任务生成的个人 Skill 草稿；发布前须完成校验。',
+        publisher: 'personal',
+        capabilities,
+        tools,
+        inputs: { goal: { type: 'string', description: '当前任务的明确目标。' } },
+        outputs: { answer: { type: 'string', description: '可交付的结果与必要的依据。' } },
+        qualityGates: ['保持在当前用户已有权限内', '工具失败时说明限制，不扩大权限或重试副作用'],
+        tags: ['personal', 'run-derived']
+    };
+    const instructions = [
+        '这是从一次已完成任务提炼的个人执行配方。',
+        '先确认当前目标与可用资料；只调用清单中声明、且当前任务已授权的工具。',
+        '不要复用原任务中的私密输入、外部标识、文件路径、令牌或工具输出。',
+        '结果应区分事实、推断和待确认事项；遇到权限、审批或资料不足时停止并说明原因。'
+    ].join('\n');
+    const markdown = buildSkillSourceMarkdown(manifest, instructions);
+    return {
+        sourceRunId: run.id,
+        run: { id: run.id, title, status: run.status },
+        manifest,
+        markdown,
+        preview: previewSkillSource(markdown),
+        provenance: { toolCount: tools.length, tools, capabilities }
+    };
 }
 
 /** 把已存版本导出回 SKILL.md，保证「导入 → 编辑 → 再导入」可往返。 */
@@ -190,6 +245,7 @@ async function getPublishedVersionForName(user, name) {
 }
 
 module.exports = {
+    createSkillDraftFromRun,
     createSkillVersionFromMarkdown,
     diffSkillVersions,
     exportSkillVersionMarkdown,

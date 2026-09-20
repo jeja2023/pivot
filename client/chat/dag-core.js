@@ -24,6 +24,7 @@ const MIN_CONTENT_WIDTH = 960;
 
 const MIN_CONTENT_HEIGHT = 360;
 const dagNodeTestOutputs = new Map();
+let dagNodeTestContextKey = '';
 
 // 工作流是无限画布：允许节点越过默认原点向左、向上布局，同时保留足够大的
 // 安全边界，避免异常数据把 SVG / 小地图扩展到不可渲染的尺寸。
@@ -410,6 +411,24 @@ function getNodeTestOutputSnapshots() {
     return new Map(dagNodeTestOutputs);
 }
 
+function stableDagTestValue(value) {
+    if (value === null || value === undefined) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableDagTestValue).join(',')}]`;
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableDagTestValue(value[key])}`).join(',')}}`;
+}
+
+/**
+ * 节点测试数据只对同一份草稿有效。定义变化时清除旧快照，避免把过期字段
+ * 误带到后续测试；正式定义、运行历史和发布版本均不受影响。
+ */
+function setDagNodeTestContext(spec = {}) {
+    const nextKey = stableDagTestValue(serialize(ensureDefaults(spec)));
+    if (dagNodeTestContextKey && dagNodeTestContextKey !== nextKey) dagNodeTestOutputs.clear();
+    dagNodeTestContextKey = nextKey;
+    return dagNodeTestContextKey;
+}
+
 function setDagNodeTestOutput(nodeId, snapshot = {}) {
     const key = String(nodeId || '').trim();
     if (!key || !snapshot || typeof snapshot !== 'object') return false;
@@ -420,6 +439,7 @@ function setDagNodeTestOutput(nodeId, snapshot = {}) {
         output,
         originalOutput: snapshot.originalOutput ?? output,
         originalSource: snapshot.originalSource ?? source,
+        contextKey: dagNodeTestContextKey,
         source,
         overridden: false
     });
@@ -655,6 +675,7 @@ if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
         getUpstreamNodes,
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
+        setDagNodeTestContext,
         setDagNodeTestOutput,
         setDagNodeTestOverride,
         resetDagNodeTestOverride,
@@ -685,6 +706,7 @@ if (typeof module !== 'undefined' && module.exports) {
         getUpstreamNodes,
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
+        setDagNodeTestContext,
         setDagNodeTestOutput,
         setDagNodeTestOverride,
         resetDagNodeTestOverride,

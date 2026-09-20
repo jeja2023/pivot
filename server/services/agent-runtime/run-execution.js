@@ -316,8 +316,8 @@ const {
         }
         const chatBridge = runtimeMetadata.chatBridge;
         const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '' }
-            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '' };
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null }
+            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null };
         if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
             const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
             toolList = toolList.map(tool => {

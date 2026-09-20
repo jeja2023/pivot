@@ -1,10 +1,9 @@
-const fs = require('fs');
-const path = require('path');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { validateSkillManifest, parseSkillManifest, projectSkillReadModel } = require('./agent-skills');
-const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
-const { publishAgentWorkflowVersion, resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { buildWorkflowVersionDiff, publishAgentWorkflowVersion, resolveAgentWorkflowVersion } = require('./agent-workflows');
+const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
+const { formatToolList } = require('./agent-tool-catalog');
 const { getAgentEvalRun } = require('./agent-evaluations');
 const { createAgentInboxEvent } = require('./agent-inbox');
 const { getPrimaryTenantId, getUserEnterpriseContext } = require('./enterprise-access');
@@ -26,14 +25,10 @@ const {
     signOrganizationEnvelope,
     verifyEnvelopeForVersion
 } = require('./agent-skill-signing');
-const { scanSkillPackageEntries } = require('./agent-skill-supply-chain');
-const { capabilitiesCoverTool } = require('./agent-capability-registry');
-const { isRegisteredToolName, resolveRegisteredToolCapabilities } = require('./agent-tool-capabilities');
+const { runDeclarativeSkillChecks, sandboxValidateSkill, scanInstalledPackage } = require('./agent-skill-validation');
 const { recordSkillReleaseResolveMiss } = require('./agent-governance-metrics');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
 
-const MAX_SCANNED_PACKAGE_FILES = 256;
-const MAX_SCANNED_FILE_BYTES = 2 * 1024 * 1024;
 
 function invalid(message, status = 400, code = 'AGENT_RELEASE_INVALID') {
     const error = new Error(message);
@@ -82,6 +77,12 @@ function normalizeScope(value) {
     }
 }
 
+function normalizeWorkflowReleaseNote(value, label = '发布说明') {
+    const note = String(value || '').trim();
+    if (note.length > 2000) throw invalid(`${label}最多 2000 个字符。`);
+    return note;
+}
+
 function normalizeIdList(value, limit) {
     return [...new Set((Array.isArray(value) ? value : [])
         .map(item => Number.parseInt(item, 10))
@@ -101,114 +102,6 @@ function normalizeRollout(input = {}) {
         targetUnits: normalizeIdList(input.targetTeamIds || input.target_team_ids || input.targetUnits || input.target_units, 100),
         teamId: Number.parseInt(input.teamId ?? input.team_id, 10) || null,
         breakerThresholds: normalizeBreakerThresholds(input.breakerThresholds || input.breaker_thresholds)
-    };
-}
-
-/**
- * 读取已安装包目录的实际条目并执行供应链扫描。
- * 落地方案 v1.2 B7：扫描对象必须是实际文件，而不是 manifest.files 自报清单。
- */
-function scanInstalledPackage(packageRoot, manifest) {
-    const root = String(packageRoot || '').trim();
-    if (!root || !fs.existsSync(root)) {
-        return scanSkillPackageEntries([], manifest);
-    }
-    const entries = [];
-    const walk = (directory, prefix = '') => {
-        if (entries.length >= MAX_SCANNED_PACKAGE_FILES) return;
-        for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
-            if (entries.length >= MAX_SCANNED_PACKAGE_FILES) return;
-            const absolute = path.join(directory, item.name);
-            const relative = prefix ? `${prefix}/${item.name}` : item.name;
-            if (item.isSymbolicLink()) {
-                entries.push({ name: relative, data: Buffer.alloc(0), externalFileAttributes: 0xA1FF0000 });
-                continue;
-            }
-            if (item.isDirectory()) { walk(absolute, relative); continue; }
-            if (!item.isFile()) continue;
-            const stat = fs.statSync(absolute);
-            const data = stat.size <= MAX_SCANNED_FILE_BYTES ? fs.readFileSync(absolute) : Buffer.alloc(0);
-            entries.push({
-                name: relative,
-                data,
-                compressedSize: stat.size,
-                uncompressedSize: stat.size,
-                externalFileAttributes: 0
-            });
-        }
-    };
-    walk(root);
-    return scanSkillPackageEntries(entries, manifest);
-}
-
-/**
- * 平台声明式验证（替换 manifest.tests[].script 执行）。
- * 落地方案 v1.2 B2、阶段 0.9：隔离 Worker 落地前不执行包内任何脚本，
- * 改为对声明本身做可验证的断言 —— 工具必须已登记，且技能声明的能力必须覆盖工具所需能力。
- */
-function runDeclarativeSkillChecks(checked) {
-    const errors = [];
-    const toolAssertions = [];
-    checked.tools.forEach(name => {
-        if (!isRegisteredToolName(name)) {
-            errors.push(`技能声明的工具未在平台登记：${name}`);
-            toolAssertions.push({ tool: name, registered: false, covered: false });
-            return;
-        }
-        const required = resolveRegisteredToolCapabilities(name);
-        const covered = capabilitiesCoverTool(checked.capabilities, required);
-        if (!covered) errors.push(`技能声明的能力未覆盖工具 ${name} 所需能力（${required.join('、')}）。`);
-        toolAssertions.push({ tool: name, registered: true, covered, requiredCapabilities: required });
-    });
-    const manifest = checked.manifest || {};
-    ['inputs', 'outputs'].forEach(field => {
-        if (manifest[field] === undefined) return;
-        if (!manifest[field] || typeof manifest[field] !== 'object' || Array.isArray(manifest[field])) {
-            errors.push(`manifest.${field} 必须是对象。`);
-        }
-    });
-    if (Array.isArray(manifest.tests) || Array.isArray(manifest.regressionTests)) {
-        errors.push('manifest.tests 中的可执行脚本已被禁止，请改用平台声明式验证。');
-    }
-    return {
-        passed: errors.length === 0,
-        mode: 'platform-declarative',
-        scriptsExecuted: false,
-        skipReason: '隔离执行环境未启用，包内脚本一律不执行（落地方案 v1.2 阶段 0.9）。',
-        toolAssertions,
-        errors
-    };
-}
-
-async function sandboxValidateSkill({ version, packageRoot = '', user, options = {} }) {
-    const root = packageRoot && fs.existsSync(packageRoot) ? packageRoot : path.dirname(__filename);
-    const jail = createWorkspaceJail(options.workspaceRoot || path.join(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'agent-release-sandbox'), `skill-${version.id}`);
-    const staged = jail.resolve('package');
-    fs.mkdirSync(staged, { recursive: true, mode: 0o700 });
-    fs.cpSync(root, staged, { recursive: true, force: false, errorOnExist: false });
-    // 固定的平台静态脚本，内容不来自 manifest；仅确认制品目录可读，不执行包内代码。
-    const staticScript = [
-        'const fs=require("fs");',
-        'const p=process.argv[1];',
-        'if(!fs.existsSync(p)) process.exit(2);',
-        'const s=fs.statSync(p);',
-        'if(!s.isDirectory()) process.exit(3);',
-        'process.stdout.write(JSON.stringify({ok:true,files:fs.readdirSync(p).length}));'
-    ].join('');
-    const result = await runSandboxedProcess(process.execPath, ['-e', staticScript, staged], {
-        jail,
-        strictIsolation: options.strictIsolation ?? (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'),
-        networkDisabled: true,
-        timeoutMs: Math.min(Math.max(Number(options.timeoutMs) || 30000, 1000), 120000),
-        inheritEnv: false,
-        user
-    });
-    return {
-        passed: result.code === 0,
-        mode: 'isolated-static-sandbox',
-        sideEffects: false,
-        packageScriptsExecuted: false,
-        result: { code: result.code, stdout: result.stdout.slice(0, 4000), stderr: result.stderr.slice(0, 4000), isolation: result.isolation }
     };
 }
 
@@ -636,6 +529,7 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         : null;
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current', { allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     if (!resolved) return null;
+    const impact = await getWorkflowReleaseImpact(workflowId, user, { version: input.version || 'current', resolved });
     let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
     if (evaluation && Number(evaluation.run?.target_snapshot?.workflowVersionId || 0) !== Number(resolved.version_id)) evaluation = null;
     if (!evaluation) {
@@ -650,6 +544,7 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
     }
     if (input.fixedEvaluationRequired !== false && (!evaluation?.run || Number(evaluation.run.summary?.passRate || 0) < Number(input.minPassRate || 80))) throw invalid('工作流固定评测集未通过发布门禁。', 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
     const rollout = normalizeRollout(input);
+    const releaseNote = normalizeWorkflowReleaseNote(input.releaseNote ?? input.release_note);
     if (rollout.rolloutScope !== 'personal' && !isTenantAdmin(user)) throw invalid('团队或组织工作流发布需要管理员权限。', 403, 'WORKFLOW_ROLLOUT_SCOPE_FORBIDDEN');
     const tenant = await assertTenantContext(user);
     if (rollout.rolloutScope !== 'personal') {
@@ -684,8 +579,8 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         }
         const previous = await trx.queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1 FOR UPDATE", [resolved.workflow.id]);
         const next = await trx.queryOne(`
-            INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)
+            INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at, release_note, review_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)
             ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET
                 tenant_id = excluded.tenant_id,
                 rollout_scope = excluded.rollout_scope,
@@ -694,9 +589,12 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
                 target_units = excluded.target_units,
                 status = 'published',
                 published_by = excluded.published_by,
-                published_at = excluded.published_at
+                published_at = excluded.published_at,
+                release_note = excluded.release_note,
+                review_status = excluded.review_status,
+                review_note = '', reviewed_by = NULL, reviewed_at = NULL
             RETURNING *
-        `, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now]);
+        `, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now, releaseNote, rollout.rolloutScope === 'personal' ? 'not_required' : 'pending']);
         const updated = await trx.execute(`
             UPDATE agent_workflows
             SET published_version_id = ?, published_at = ?, updated_at = ?
@@ -706,7 +604,98 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         return next;
     });
     try { await createAgentInboxEvent(user, { eventKey: `workflow.release:${release.id}`, eventType: 'release.published', sourceId: String(release.id), title: '工作流版本已发布', body: `工作流 ${resolved.workflow.name} 已进入 ${rollout.rolloutScope} 灰度。`, risk: 'medium', payload: { releaseId: release.id, workflowId: resolved.workflow.id, version: resolved.version } }); } catch (_) {}
-    return release;
+    return { ...release, impact };
+}
+
+async function reviewWorkflowRelease(id, user, input = {}) {
+    const release = await queryOne(`
+        SELECT r.*, w.user_id AS workflow_owner_id
+        FROM agent_workflow_releases r
+        JOIN agent_workflows w ON w.id = r.workflow_id
+        WHERE r.id = ? AND r.status = 'published' AND w.deleted_at IS NULL
+    `, [id]);
+    if (!release) return null;
+    const tenantId = Number(release.tenant_id || 0) || await getPrimaryTenantId(release.workflow_owner_id);
+    const reviewerTenant = await assertTenantContext(user);
+    if (!isTenantAdmin(user) || Number(reviewerTenant.tenantId) !== Number(tenantId)) {
+        throw invalid('只有同一组织的管理员可以审阅工作流发布。', 403, 'WORKFLOW_RELEASE_REVIEW_FORBIDDEN');
+    }
+    const reviewStatus = ['approved', 'changes_requested'].includes(String(input.status || input.reviewStatus || input.review_status || ''))
+        ? String(input.status || input.reviewStatus || input.review_status)
+        : null;
+    if (!reviewStatus) throw invalid('审阅状态只能是 approved 或 changes_requested。');
+    const reviewNote = normalizeWorkflowReleaseNote(input.note ?? input.reviewNote ?? input.review_note, '审阅说明');
+    if (!reviewNote) throw invalid('审阅说明不能为空。');
+    const now = getBeijingTimestamp();
+    const reviewed = await queryOne(`
+        UPDATE agent_workflow_releases
+        SET review_status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?
+        WHERE id = ? AND status = 'published'
+        RETURNING *
+    `, [reviewStatus, reviewNote, user.id, now, id]);
+    if (reviewed) {
+        try { await createAgentInboxEvent({ id: release.workflow_owner_id }, { eventKey: `workflow.release.review:${id}:${reviewStatus}:${reviewed.reviewed_at}`, eventType: 'release.reviewed', sourceId: String(id), title: '工作流发布已审阅', body: reviewNote, risk: reviewStatus === 'changes_requested' ? 'medium' : 'low', payload: { releaseId: id, status: reviewStatus } }); } catch (_) {}
+    }
+    return reviewed;
+}
+
+async function getWorkflowReleaseImpact(workflowId, user, options = {}) {
+    const resolved = options.resolved || await resolveAgentWorkflowVersion(workflowId, user, options.version || 'current', {
+        allowTenantAdmin: options.allowTenantAdmin === true && isTenantAdmin(user), tenantId: options.tenantId || null
+    });
+    if (!resolved) return null;
+    const dagSpec = resolved.dagSpec && typeof resolved.dagSpec === 'object' ? resolved.dagSpec : { nodes: [] };
+    const nodes = Array.isArray(dagSpec.nodes) ? dagSpec.nodes : [];
+    const manifest = buildAgentWorkflowDependencyManifest(dagSpec);
+    const toolList = await formatToolList(user, { toolPolicy: 'all' });
+    const toolsByName = new Map(toolList.map(tool => [String(tool.name || ''), tool]));
+    const sideEffects = [];
+    const approvals = [];
+    const networks = [];
+    const unavailableTools = [];
+    const subworkflows = [];
+    nodes.forEach(node => {
+        const toolName = String(node.tool || '');
+        const tool = toolsByName.get(toolName);
+        const item = { nodeId: node.id, title: node.title || node.id, tool: toolName };
+        if (!tool) unavailableTools.push(item);
+        if (tool?.side_effect || tool?.sideEffect) sideEffects.push(item);
+        if (tool?.approval_required || tool?.requiresApproval || tool?.alwaysRequiresApproval || ['workflow.approval', 'workflow.notify'].includes(toolName)) approvals.push(item);
+        if (tool?.network || /^agent\.http$|^api\.operation\./.test(toolName)) networks.push(item);
+        if (['workflow.subworkflow', 'workflow.iteration'].includes(toolName)) {
+            const input = node.input && typeof node.input === 'object' ? node.input : {};
+            subworkflows.push({ ...item, workflowId: input.workflowId ?? input.workflow_id ?? null, version: input.version || input.workflowVersion || 'published' });
+        }
+    });
+    let diff = null;
+    const previousVersionId = Number(resolved.workflow?.published_version_id || 0);
+    if (previousVersionId && previousVersionId !== Number(resolved.version_id)) {
+        const previous = await queryOne('SELECT version, dag_spec FROM agent_workflow_versions WHERE id = ?', [previousVersionId]);
+        if (previous) diff = { fromVersion: Number(previous.version), ...buildWorkflowVersionDiff(parseJson(previous.dag_spec, {}), dagSpec) };
+    }
+    return {
+        workflowId: resolved.workflow.id,
+        workflowName: resolved.workflow.name,
+        versionId: resolved.version_id,
+        version: resolved.version,
+        previousPublishedVersionId: previousVersionId || null,
+        diff,
+        dependencies: manifest,
+        sideEffects,
+        approvals,
+        networks,
+        unavailableTools,
+        subworkflows,
+        summary: {
+            nodeCount: nodes.length,
+            sideEffectCount: sideEffects.length,
+            approvalCount: approvals.length,
+            networkCount: networks.length,
+            unavailableToolCount: unavailableTools.length,
+            subworkflowCount: subworkflows.length,
+            changedCount: Number(diff?.summary?.added || 0) + Number(diff?.summary?.removed || 0) + Number(diff?.summary?.changed || 0)
+        }
+    };
 }
 
 async function rollbackWorkflowRelease(id, user) {
@@ -747,7 +736,12 @@ function formatWorkflowReleaseForRead(row, { includeTargets = false } = {}) {
         rollout_percent: Number(row.rollout_percent || 0),
         ...(includeTargets ? {
             target_user_ids: parseJson(row.target_user_ids, []),
-            target_units: parseJson(row.target_units, [])
+            target_units: parseJson(row.target_units, []),
+            release_note: row.release_note || '',
+            review_status: row.review_status || 'not_required',
+            review_note: row.review_note || '',
+            reviewed_by: row.reviewed_by || null,
+            reviewed_at: row.reviewed_at || null
         } : {}),
         status: row.status,
         published_by: row.published_by,
@@ -926,6 +920,7 @@ module.exports = {
     approveSkillVersionForSharing,
     getSkillReleaseForUser,
     getSkillVersion,
+    getWorkflowReleaseImpact,
     listSkillCatalogForUser,
     listSkillReleasesForUser,
     listSkillVersionsForUser,
@@ -935,6 +930,7 @@ module.exports = {
     pauseSkillReleaseBySystem,
     publishSkillVersion,
     publishWorkflowRelease,
+    reviewWorkflowRelease,
     resolvePublishedSkill,
     resumeSkillRelease,
     rollbackSkillRelease,

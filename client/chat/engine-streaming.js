@@ -117,6 +117,22 @@ function getAssistantTraceEventCopy(event = {}) {
         };
     }
 
+    if (type === 'memory') {
+        const reasons = Array.isArray(event?.usageReasons) ? event.usageReasons.slice(0, 3) : [];
+        const reasonText = reasons.map(item => String(item?.reason || '').trim()).filter(Boolean).join('；');
+        if (status === 'hit') {
+            return {
+                tool: 'memory',
+                label: '个人记忆',
+                tone: 'ready',
+                text: `${message || `已检索到 ${Number(event?.memoryCount || reasons.length || 0)} 条相关长期记忆。`}${reasonText ? ` 使用原因：${reasonText}` : ''}`,
+                action: 'memory',
+                actionLabel: '查看记忆'
+            };
+        }
+        return { tool: 'memory', label: '个人记忆', tone: status === 'error' ? 'error' : 'info', text: message || '正在检索个人记忆。' };
+    }
+
     if (type === 'mcp') {
         if (status === 'planning') {
             return {
@@ -262,6 +278,7 @@ function handleAssistantTraceAction(event) {
     if (target === 'rag') window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
     if (target === 'mcp') window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
     if (target === 'mcp-consent') window.Pivot.moduleApi('chat.inputMenu').enableMcpFromRouteTrace?.();
+    if (target === 'memory') window.Pivot.moduleApi('chat.memoryActions').openChatMemoryManagement?.();
 }
 
 document.addEventListener('click', handleAssistantTraceAction);

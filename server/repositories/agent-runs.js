@@ -276,6 +276,21 @@ async function listWorkflowInvocations(runId) {
     }));
 }
 
+async function listWorkflowIterationItems(runId) {
+    const rows = await query(`
+        SELECT id, run_id, iteration_key, input_index, item_id, input_digest, workflow_id, workflow_version_id,
+               invocation_id, status, input_json, result_json, error_message, created_at, updated_at, completed_at
+        FROM agent_workflow_iteration_items
+        WHERE run_id = ?
+        ORDER BY iteration_key ASC, input_index ASC
+    `, [runId]);
+    return rows.map(row => ({
+        ...row,
+        input_json: parseJsonObject(row.input_json) || {},
+        result_json: parseJsonObject(row.result_json) || row.result_json || null
+    }));
+}
+
 async function updateAgentRunTitleAndGoal(runId, userId, { title, goal } = {}) {
     const run = await getRunForUser(runId, userId);
     if (!run) return null;
@@ -298,5 +313,6 @@ module.exports = {
     listDeletedRunsForAdmin,
     listSteps,
     listDagNodes,
-    listWorkflowInvocations
+    listWorkflowInvocations,
+    listWorkflowIterationItems
 };

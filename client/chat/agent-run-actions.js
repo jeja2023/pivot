@@ -14,7 +14,7 @@ function setAgentRunActionBusy(runId, selectors, busy) {
     document.querySelectorAll(selectors).forEach(button => {
         const buttonRunId = String(button.dataset.agentCancel || button.dataset.agentApprove || button.dataset.agentReject
             || button.dataset.agentRerun || button.dataset.agentResume || button.dataset.agentSteer || button.dataset.agentDagRerunNode
-            || button.dataset.agentCreateWorkflowDraft || button.dataset.agentRunDelete || '');
+            || button.dataset.agentCreateWorkflowDraft || button.dataset.agentRunDelete || button.dataset.agentDelegateBatch || '');
         const matchesCurrentDag = button.dataset.agentDagRerunNode && String(activeAgentRunId || '') === id;
         if (buttonRunId !== id && !matchesCurrentDag) return;
         button.disabled = busy;
@@ -48,7 +48,35 @@ function getSelectedAgentToolAllowlist() {
 function getAgentContextConfig() {
     return {
         mode: document.getElementById('agent-context-mode')?.value || 'auto',
-        notes: document.getElementById('agent-context-notes')?.value || ''
+        notes: document.getElementById('agent-context-notes')?.value || '',
+        collectionIds: [...(document.getElementById('agent-context-collections')?.selectedOptions || [])]
+            .map(option => option.value)
+            .filter(Boolean)
+    };
+}
+
+function getAgentNetworkPolicy() {
+    const raw = String(document.getElementById('agent-network-origins')?.value || '');
+    const origins = [...new Set(raw.split(/[\n,]/).map(value => String(value || '').trim()).filter(Boolean).map(value => {
+        try {
+            const url = new URL(value);
+            if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || (url.pathname !== '/' && url.pathname !== '')) return '';
+            return url.origin;
+        } catch (_) { return ''; }
+    }).filter(Boolean))].slice(0, 12);
+    if (!origins.length) return {};
+    const ports = [...new Set(origins.map(origin => {
+        const url = new URL(origin);
+        return Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+    }))];
+    return {
+        allowed_origins: origins,
+        allowed_ports: ports,
+        allow_redirect: false,
+        allowed_redirect_origins: [],
+        block_private_ranges: true,
+        block_loopback: true,
+        block_link_local: true
     };
 }
 
@@ -71,6 +99,7 @@ function getAgentRunPayload(goalOverride = '') {
         retryLimit: document.getElementById('agent-retry-limit')?.value || 1,
         toolAllowlist: getSelectedAgentToolAllowlist(),
         contextConfig: getAgentContextConfig(),
+        networkPolicy: getAgentNetworkPolicy(),
         skillId: window.Pivot.legacy.getAgentHarnessSkillId?.() || '',
         sessionId: window.Pivot.legacy.currentSessionId || null
     };
@@ -256,7 +285,44 @@ async function learnFromAgentRun(runId) {
     }
 }
 
-window.Pivot?.exposeModule?.('agent.runActions', { learnFromAgentRun }, ['learnFromAgentRun']);
+function parseDelegationBatchTasks(value = '') {
+    const tasks = String(value || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 10).map((line, index) => {
+        const separator = line.search(/[：:]/);
+        const title = separator > 0 ? line.slice(0, separator).trim() : `子任务 ${index + 1}`;
+        const goal = (separator > 0 ? line.slice(separator + 1) : line).trim();
+        return { title: title.slice(0, 160), goal };
+    }).filter(item => item.goal.length >= 4);
+    if (!tasks.length) throw new Error('请至少填写一个明确子任务；每行可写“标题：任务描述”。');
+    return tasks;
+}
+
+async function delegateBatchFromAgentRun(runId) {
+    const promptFn = window.Pivot?.legacy?.showInputPrompt;
+    if (typeof promptFn !== 'function') throw new Error('输入窗口尚未加载，请刷新页面后重试。');
+    const value = await promptFn({
+        title: '并行委派子任务',
+        message: '每行一个任务，可写“标题：任务描述”。子任务继承当前任务的权限和预算，不能扩大工具范围；若需要结构化输出，请在工作流中使用委派节点配置输出契约。',
+        placeholder: '资料核对：检索资料并列出事实依据\n风险审阅：找出风险、遗漏和待确认项',
+        requiredMessage: '请至少填写一个子任务。',
+        width: 620
+    });
+    if (value === null) return null;
+    const tasks = parseDelegationBatchTasks(value);
+    return await runAgentActionOnce(`delegate-batch:${runId}`, runId, '[data-agent-delegate-batch]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/delegate/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createAgentIdempotencyKey() },
+            body: JSON.stringify({ title: '并行协作任务组', tasks })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '批量委派失败');
+        showToast(`已创建 ${Array.isArray(data.runs) ? data.runs.length : 0} 个协作子任务，结果会自动回传。`, 'success');
+        await window.Pivot.legacy.openAgentRun(runId, { silent: true });
+        return data;
+    }, '批量委派失败');
+}
+
+window.Pivot?.exposeModule?.('agent.runActions', { delegateBatchFromAgentRun, learnFromAgentRun }, ['delegateBatchFromAgentRun', 'learnFromAgentRun']);
 
 window.Pivot.legacy.rerunAgentDagNode = async function(runId, nodeId = '') {
     await runAgentActionOnce(`dag-rerun:${runId}:${nodeId}`, runId, '[data-agent-dag-rerun-node]', async () => {

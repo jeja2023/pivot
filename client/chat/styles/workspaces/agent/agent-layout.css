@@ -413,8 +413,39 @@
     border-radius: 8px;
 }
 
-.agent-inline-settings-grid .agent-context-notes-field {
+.agent-inline-settings-grid .agent-context-notes-field,
+.agent-inline-settings-grid .agent-context-collections-field,
+.agent-inline-settings-grid .agent-network-origins-field {
     grid-column: 1 / -1;
+}
+
+.agent-inline-settings-grid .agent-context-collections-field .form-input {
+    height: auto;
+    min-height: 76px;
+    padding: 5px 8px;
+}
+
+.agent-inline-settings-grid .agent-context-collections-field small,
+.agent-inline-settings-grid .agent-network-origins-field small {
+    color: var(--text-muted);
+    font-size: 0.67rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.agent-inline-settings-grid .agent-context-collections-field .btn-secondary {
+    align-self: flex-start;
+    height: 28px;
+    margin-top: 1px;
+    padding: 0 9px;
+    font-size: 0.7rem;
+}
+
+.agent-inline-settings-grid .agent-network-origins-field textarea.form-input {
+    height: auto;
+    min-height: 52px;
+    line-height: 1.4;
+    resize: vertical;
 }
 
 .agent-config-modal {
@@ -861,7 +892,9 @@ body.pivot-desktop-runtime:not(.auth-active) #agent-config-modal[data-agent-conf
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .agent-task-editor-modal .agent-context-notes-field {
+    .agent-task-editor-modal .agent-context-notes-field,
+    .agent-task-editor-modal .agent-context-collections-field,
+    .agent-task-editor-modal .agent-network-origins-field {
         grid-column: auto;
     }
 }

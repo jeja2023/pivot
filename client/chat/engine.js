@@ -177,6 +177,7 @@ function hasSendableChatPayload() {
     return Boolean(text) || window.Pivot.legacy.pendingAttachments.length > 0;
 }
 
+
 async function postChatAgentControl(runId, path, body = {}) {
     const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}${path}`, {
         method: 'POST',
@@ -783,6 +784,11 @@ async function runSendMessage(shouldRegenerate) {
                     updateAssistantStatus(data.message || '正在检索知识库');
                     if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
                     if (data.status === 'empty') showToast(data.message || '知识库未命中', 'warning');
+                    return;
+                }
+                if (data.type === 'memory') {
+                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
+                    updateAssistantStatus(data.message || '正在检索个人记忆');
                     return;
                 }
                 if (data.type === 'context_budget') {

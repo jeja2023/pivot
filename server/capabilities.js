@@ -42,6 +42,18 @@ const supportIntentPatterns = [
     /(?:生图|视频|音频|联网|搜索)[^。！？\n]{0,30}(?:提示词|prompt|方案|代码|接口|配置|怎么做|如何做)/i
 ];
 
+function hasConfiguredRealtimeWebSearch() {
+    return Boolean(String(process.env.AGENT_WEB_SEARCH_ENDPOINT || '').trim());
+}
+
+function hasConfiguredImageGeneration() {
+    return Boolean(String(process.env.AGENT_IMAGE_GENERATION_ENDPOINT || '').trim());
+}
+
+function hasConfiguredTextToSpeech() {
+    return Boolean(String(process.env.AGENT_TTS_ENDPOINT || '').trim());
+}
+
 function detectUnsupportedCapability(content) {
     const text = String(content || '').trim();
     if (!text) return null;
@@ -49,9 +61,12 @@ function detectUnsupportedCapability(content) {
     const asksForSupportArtifact = supportIntentPatterns.some(pattern => pattern.test(text));
     if (asksForSupportArtifact) return null;
 
-    return unsupportedCapabilities.find(capability => (
-        capability.patterns.some(pattern => pattern.test(text))
-    )) || null;
+    return unsupportedCapabilities.find(capability => {
+        const supported = (capability.code === 'realtime_web' && hasConfiguredRealtimeWebSearch())
+            || (capability.code === 'image_generation' && hasConfiguredImageGeneration())
+            || (capability.code === 'audio_generation' && hasConfiguredTextToSpeech());
+        return !supported && capability.patterns.some(pattern => pattern.test(text));
+    }) || null;
 }
 
 function buildCapabilityFallbackMessage(capability) {

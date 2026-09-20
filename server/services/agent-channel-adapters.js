@@ -39,6 +39,86 @@ function deliveryIdempotencyKey(input = {}) {
     return String(input.idempotencyKey || input.idempotency_key || `delivery:${input.eventType || 'event'}:${input.sourceId || input.runId || crypto.randomUUID()}`).slice(0, 255);
 }
 
+function serializeChannelDelivery(row = {}) {
+    const interaction = parseJson(row.interaction, {});
+    // 不把 Gateway 加密目标、回调 nonce 或其它内部投递字段交给浏览器。
+    delete interaction.outboundTargetEncrypted;
+    return {
+        id: Number(row.id),
+        bindingId: row.binding_id,
+        runId: row.run_id || interaction.runId || null,
+        eventType: row.event_type || '',
+        subject: row.subject || '',
+        status: row.status || '',
+        attempts: Number(row.attempts || 0),
+        lastError: String(row.last_error || '').slice(0, 600),
+        nextAttemptAt: row.next_attempt_at || null,
+        deliveredAt: row.delivered_at || null,
+        deadLetteredAt: row.dead_lettered_at || null,
+        createdAt: row.created_at || null,
+        updatedAt: row.updated_at || null,
+        interaction
+    };
+}
+
+async function listChannelDeliveriesForUser(user, options = {}) {
+    const status = String(options.status || 'all').trim();
+    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 50, 200));
+    const params = [user.id];
+    const where = ['d.user_id = ?'];
+    if (['queued', 'delivering', 'delivered', 'dead_letter'].includes(status)) {
+        where.push('d.status = ?');
+        params.push(status);
+    }
+    if (options.runId) {
+        where.push("COALESCE(d.interaction->>'runId', '') = ?");
+        params.push(String(options.runId));
+    }
+    const rows = await query(`
+        SELECT d.*
+        FROM agent_channel_deliveries d
+        WHERE ${where.join(' AND ')}
+        ORDER BY d.created_at DESC, d.id DESC
+        LIMIT ?
+    `, [...params, limit]);
+    return rows.map(serializeChannelDelivery);
+}
+
+async function retryChannelDeliveryForUser(deliveryId, user) {
+    const id = Number.parseInt(deliveryId, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    const row = await queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ? AND user_id = ?', [id, user.id]);
+    if (!row) return null;
+    if (!['dead_letter', 'queued'].includes(String(row.status || ''))) {
+        const error = new Error('仅失败或等待中的投递可手动重试。');
+        error.status = 409;
+        error.code = 'CHANNEL_DELIVERY_RETRY_STATE_INVALID';
+        throw error;
+    }
+    const now = getBeijingTimestamp();
+    await execute(`
+        UPDATE agent_channel_deliveries
+        SET status = 'queued', attempts = CASE WHEN status = 'dead_letter' THEN 0 ELSE attempts END,
+            next_attempt_at = ?, last_error = '', dead_lettered_at = NULL,
+            claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND user_id = ?
+    `, [now, now, id, user.id]);
+    const retry = await deliverChannelDelivery(id);
+    return serializeChannelDelivery(retry || await queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ? AND user_id = ?', [id, user.id]));
+}
+
+function gatewayOutboundTarget(binding, interaction = {}) {
+    const encrypted = String(interaction.outboundTargetEncrypted || '').trim();
+    if (!encrypted) return '';
+    return require('./agent-channel-gateway').decryptOutboundTarget(binding.id, encrypted);
+}
+
+function outboundInteractionForProvider(interaction = {}) {
+    const safe = { ...(interaction && typeof interaction === 'object' ? interaction : {}) };
+    delete safe.outboundTargetEncrypted;
+    return safe;
+}
+
 async function enqueueChannelDelivery(user, input = {}) {
     const binding = await queryOne("SELECT * FROM agent_channel_bindings WHERE id = ? AND user_id = ? AND status = 'active'", [String(input.bindingId || ''), user.id]);
     if (!binding) return null;
@@ -61,7 +141,11 @@ async function enqueueChannelDelivery(user, input = {}) {
     if (attachments.some(item => item.bytes > MAX_ATTACHMENT_BYTES)) throw Object.assign(new Error('附件超过渠道允许的大小。'), { status: 413, code: 'CHANNEL_ATTACHMENT_TOO_LARGE' });
     const key = deliveryIdempotencyKey(input);
     const now = getBeijingTimestamp();
-    const interaction = { ...(input.interaction && typeof input.interaction === 'object' ? input.interaction : {}), ...(boundPlatform ? { platform: boundPlatform } : {}) };
+    const interaction = {
+        ...(input.interaction && typeof input.interaction === 'object' ? input.interaction : {}),
+        ...(input.runId ? { runId: String(input.runId).slice(0, 128) } : {}),
+        ...(boundPlatform ? { platform: boundPlatform } : {})
+    };
     const row = await queryOne(`INSERT INTO agent_channel_deliveries (binding_id, user_id, tenant_id, idempotency_key, event_type, subject, body, attachments, interaction, status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?) ON CONFLICT(binding_id, idempotency_key) DO UPDATE SET updated_at = agent_channel_deliveries.updated_at RETURNING id`, [binding.id, user.id, binding.tenant_id || user.tenant_id || input.tenantId || null, key, String(input.eventType || 'agent.event').slice(0, 80), String(input.subject || '').slice(0, 255), String(input.body || '').slice(0, MAX_BODY_CHARS), JSON.stringify(attachments), JSON.stringify(interaction), now, now, now]);
     const delivery = await queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [row?.id]);
     if (delivery) delivery.bindingPlatform = boundPlatform;
@@ -80,9 +164,13 @@ async function deliverWebhook(binding, delivery, user) {
     const url = String(config.url || '').trim();
     if (!url) throw Object.assign(new Error('Webhook 渠道缺少 URL。'), { code: 'CHANNEL_URL_MISSING' });
     await assertSafeMcpOutboundUrl(url, user);
+    const interaction = parseJson(delivery.interaction, {});
+    const outboundTarget = gatewayOutboundTarget(binding, interaction);
+    if (interaction.source === 'channel_gateway' && !outboundTarget) throw Object.assign(new Error('Webhook 渠道缺少受保护的回复目标。'), { code: 'CHANNEL_GATEWAY_TARGET_MISSING' });
+    const providerInteraction = outboundInteractionForProvider(interaction);
     const chunks = chunkText(delivery.body, Number(config.chunkSize || 3500));
     for (let index = 0; index < chunks.length; index += 1) {
-        await safeJsonRequest({ method: 'post', url, data: { eventType: delivery.event_type, subject: delivery.subject, body: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, attachments: parseJson(delivery.attachments, []), interaction: parseJson(delivery.interaction, {}) }, user, assertUrl: assertSafeMcpOutboundUrl, headers: config.headers || {}, timeout: Math.min(Number(config.timeoutMs || 15000), 30000), createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), validateStatus: status => status >= 200 && status < 300 });
+        await safeJsonRequest({ method: 'post', url, data: { eventType: delivery.event_type, subject: delivery.subject, body: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, attachments: parseJson(delivery.attachments, []), ...(outboundTarget ? { target: outboundTarget } : {}), interaction: providerInteraction }, user, assertUrl: assertSafeMcpOutboundUrl, headers: config.headers || {}, timeout: Math.min(Number(config.timeoutMs || 15000), 30000), createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), validateStatus: status => status >= 200 && status < 300 });
     }
 }
 
@@ -162,8 +250,13 @@ async function deliverIm(binding, delivery, user) {
     const endpoint = String(config.endpoint || '').trim();
     if (!endpoint) throw Object.assign(new Error('IM 渠道缺少受控发送端点。'), { code: 'CHANNEL_IM_ENDPOINT_MISSING' });
     await assertSafeMcpOutboundUrl(endpoint, user);
+    const interaction = parseJson(delivery.interaction, {});
+    const outboundTarget = gatewayOutboundTarget(binding, interaction);
+    const target = String(outboundTarget || binding.channel_key || '').trim();
+    if (interaction.source === 'channel_gateway' && !outboundTarget) throw Object.assign(new Error('IM 渠道缺少受保护的回复目标。'), { code: 'CHANNEL_IM_TARGET_MISSING' });
     const chunks = chunkText(delivery.body, Number(config.chunkSize || 3000));
-    for (let index = 0; index < chunks.length; index += 1) await safeJsonRequest({ method: 'post', url: endpoint, data: { target: binding.channel_key, title: delivery.subject, message: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, interaction: parseJson(delivery.interaction, {}) }, user, assertUrl: assertSafeMcpOutboundUrl, createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), headers: config.headers || {}, timeout: 30000, validateStatus: status => status >= 200 && status < 300 });
+    const providerInteraction = outboundInteractionForProvider(interaction);
+    for (let index = 0; index < chunks.length; index += 1) await safeJsonRequest({ method: 'post', url: endpoint, data: { target, title: delivery.subject, message: chunks[index], chunkIndex: index, chunkTotal: chunks.length, idempotencyKey: `${delivery.idempotency_key}:${index}`, interaction: providerInteraction }, user, assertUrl: assertSafeMcpOutboundUrl, createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }), headers: config.headers || {}, timeout: 30000, validateStatus: status => status >= 200 && status < 300 });
 }
 
 function appendQuery(url, values = {}) {
@@ -259,6 +352,14 @@ async function deliverChannelDelivery(deliveryId, options = {}) {
             WHERE id = ? AND status = 'delivering' AND claim_token = ?
             RETURNING *
         `, [getBeijingTimestamp(), getBeijingTimestamp(), delivery.id, claimToken]);
+        const gatewaySessionId = parseJson(delivery.interaction, {})?.gatewaySessionId;
+        if (delivered && gatewaySessionId) {
+            try {
+                await require('./agent-channel-gateway').recordChannelGatewayDelivery(gatewaySessionId, delivered.delivered_at);
+            } catch (_) {
+                // 会话活跃时间仅用于界面；不能影响已确认的外部投递结果。
+            }
+        }
         return delivered || null;
     } catch (error) {
         const attempts = Number(delivery.attempts || 0) + 1;
@@ -283,4 +384,4 @@ async function dispatchChannelDeliveries(limit = 50, options = {}) {
     return { processed: rows.length };
 }
 
-module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, buildPlatformImPayload, chunkText, claimChannelDelivery, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, normalizeAttachments, reclaimExpiredChannelDeliveryClaims };
+module.exports = { MAX_ATTEMPTS, MAX_ATTACHMENT_BYTES, backoff, buildPlatformImPayload, chunkText, claimChannelDelivery, deliverEmail, deliverIm, deliverWebhook, dispatchChannelDeliveries, deliverChannelDelivery, deliveryIdempotencyKey, enqueueChannelDelivery, listChannelDeliveriesForUser, normalizeAttachments, retryChannelDeliveryForUser, serializeChannelDelivery };

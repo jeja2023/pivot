@@ -9,19 +9,21 @@ const {
     restoreEvolutionProposal, revokePersonalEvolutionProposal, createEvolutionShareRequest
 } = require('../services/agent-evolution');
 const { getAgentFeedbackSummary, listAgentFeedback } = require('../services/agent-feedback');
-const { createAgentGoal, listAgentGoals, runAgentGoalNow, setAgentGoalStatus, updateAgentGoal } = require('../services/agent-goals');
+const { createAgentGoal, listAgentGoals, previewAgentGoal, runAgentGoalNow, setAgentGoalStatus, updateAgentGoal } = require('../services/agent-goals');
+const { confirmedGoalDraftInput, createGoalDraft, mergeConfirmedGoalDraftOverrides } = require('../services/agent-goal-drafts');
 const { createAgentChannel, deleteAgentChannel, listAgentChannels, updateAgentChannel } = require('../services/agent-channels');
+const { createChannelPairing, linkChannelGatewaySession, listChannelGatewaySessions, listChannelPairings, revokeChannelPairing } = require('../services/agent-channel-gateway');
 const { listAgentInbox, markInboxItem } = require('../services/agent-inbox');
 const { getPersonalWorkbench, updatePersonalWorkbenchShortcuts } = require('../services/personal-workbench');
 const { listToolReliability } = require('../services/agent-tool-reliability');
 const { deleteAgentPersonalData, exportAgentPersonalData } = require('../services/agent-data');
 const {
     approveSkillVersionForSharing, createSkillVersion, listSkillCatalogForUser, listSkillReleasesForUser, listSkillVersionsForUser,
-    pauseSkillRelease, publishSkillVersion, publishWorkflowRelease, resumeSkillRelease,
-    rollbackSkillRelease, rollbackWorkflowRelease, listWorkflowReleasesForUser, validateSkillVersion
+    getWorkflowReleaseImpact, pauseSkillRelease, publishSkillVersion, publishWorkflowRelease, resumeSkillRelease,
+    rollbackSkillRelease, rollbackWorkflowRelease, listWorkflowReleasesForUser, reviewWorkflowRelease, validateSkillVersion
 } = require('../services/agent-releases');
 const {
-    createSkillVersionFromMarkdown, diffSkillVersions, exportSkillVersionMarkdown,
+    createSkillDraftFromRun, createSkillVersionFromMarkdown, diffSkillVersions, exportSkillVersionMarkdown,
     listSkillVersionHistory, previewSkillSource
 } = require('../services/agent-skill-authoring');
 const {
@@ -32,10 +34,14 @@ const {
 const { getAgentQualityDashboard } = require('../services/agent-quality');
 const { getAgentImprovementSuggestions } = require('../services/agent-improvement-suggestions');
 const { getAgentGovernanceStatus } = require('../services/agent-governance-status');
+const { listCapabilityPackages } = require('../services/capability-market');
+const { parseSkillManifest } = require('../services/agent-skills');
 const {
     getAgentLearningOverview, getAgentLearningSettings, learnAgentRun,
     listAgentLearningJobs, updateAgentLearningSettings
 } = require('../services/agent-learning');
+const { listKnowledgeCollections } = require('../services/rag-documents');
+const { getAgentExperienceSummary, recordAgentExperienceEvent } = require('../services/agent-experience-events');
 
 function allowedSkillPermissions() {
     const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -61,6 +67,18 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, profile });
     }));
 
+    router.get('/agents/experience/summary', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, summary: await getAgentExperienceSummary(req.user, { days: req.query.days }) });
+    }));
+    router.post('/agents/experience/events', authMiddleware, asyncHandler(async (req, res) => {
+        const event = await recordAgentExperienceEvent(req.user, req.body?.type, {
+            sessionId: req.body?.sessionId || req.body?.session_id,
+            runId: req.body?.runId || req.body?.run_id,
+            metadata: req.body?.metadata
+        });
+        res.status(201).json({ success: true, event });
+    }));
+
     router.get('/agents/data/export', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, export: await exportAgentPersonalData(req.user) })));
     router.delete('/agents/data', authMiddleware, asyncHandler(async (req, res) => {
         const result = await deleteAgentPersonalData(req.user, { reason: req.body?.reason || 'user_request' });
@@ -83,9 +101,41 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, settings });
     }));
 
+    router.get('/agents/context-packs/collections', authMiddleware, asyncHandler(async (req, res) => {
+        const collections = await listKnowledgeCollections(req.user);
+        res.json({
+            success: true,
+            data: collections.map(collection => ({
+                id: Number(collection.id),
+                name: collection.name,
+                description: collection.description || '',
+                documentCount: Number(collection.doc_count || 0),
+                readyCount: Number(collection.ready_count || 0),
+                updatedAt: collection.updated_at || null,
+                readOnly: collection.read_only === true
+            }))
+        });
+    }));
+
     router.get('/agents/goals', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentGoals(req.user, { status: req.query.status, limit: req.query.limit }) })));
+    router.post('/agents/goals/parse', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const result = createGoalDraft(req.user, req.body?.prompt ?? req.body?.text ?? req.body?.goal);
+        await recordAgentExperienceEvent(req.user, 'goal_draft_previewed', { metadata: { triggerType: result.draft.triggerSpec.type } });
+        writeLog(req, '生成 Agent 持续目标草案', `可确认: ${result.draft.canConfirm ? '是' : '否'}，触发方式: ${result.draft.triggerSpec.type}`);
+        res.json({ success: true, ...result });
+    }));
+    router.post('/agents/goals/preview', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const run = await previewAgentGoal(req.user, req.body || {});
+        writeLog(req, '预览 Agent 持续目标', `任务ID: ${run.id}`);
+        res.status(202).json({ success: true, run, notice: '这是一次性预览，不会创建或启用持续目标。' });
+    }));
     router.post('/agents/goals', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
-        const result = await createAgentGoal(req.user, req.body || {});
+        const confirmationToken = String(req.body?.confirmationToken || req.body?.confirmation_token || '').trim();
+        const input = confirmationToken
+            ? mergeConfirmedGoalDraftOverrides(confirmedGoalDraftInput(req.user, confirmationToken), req.body?.goalOverrides || req.body?.goal_overrides)
+            : (req.body || {});
+        const result = await createAgentGoal(req.user, input);
+        if (confirmationToken) await recordAgentExperienceEvent(req.user, 'goal_created_confirmed', { metadata: { triggerType: result.goal.triggerSpec?.type || '' } });
         writeLog(req, '创建 Agent 持续目标', `目标ID: ${result.goal.id}，标题: ${result.goal.title}`);
         res.status(201).json({ success: true, ...result });
     }));
@@ -147,6 +197,17 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
     }));
 
     router.get('/agents/channels', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, data: await listAgentChannels(req.user, { status: req.query.status }) })));
+    router.get('/agents/channels/deliveries', authMiddleware, asyncHandler(async (req, res) => {
+        const { listChannelDeliveriesForUser } = require('../services/agent-channel-adapters');
+        res.json({ success: true, data: await listChannelDeliveriesForUser(req.user, { status: req.query.status, runId: req.query.runId, limit: req.query.limit }) });
+    }));
+    router.post('/agents/channels/deliveries/:id/retry', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const { retryChannelDeliveryForUser } = require('../services/agent-channel-adapters');
+        const delivery = await retryChannelDeliveryForUser(req.params.id, req.user);
+        if (!delivery) return res.status(404).json({ error: '渠道投递不存在或无权操作。' });
+        writeLog(req, '手动重试 Agent 渠道投递', `投递ID: ${delivery.id}，状态: ${delivery.status}`);
+        res.json({ success: true, delivery });
+    }));
     router.post('/agents/channels', authMiddleware, asyncHandler(async (req, res) => {
         const channel = await createAgentChannel(req.user, req.body || {});
         writeLog(req, '创建 Agent 渠道绑定', `渠道ID: ${channel.id}，类型: ${channel.channelType}`);
@@ -158,6 +219,34 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (!queued) return res.status(404).json({ error: '渠道不存在或已停用。' });
         const delivery = await deliverChannelDelivery(queued.id);
         res.status(202).json({ success: true, delivery });
+    }));
+    router.post('/agents/channels/:id/pairings', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await createChannelPairing(req.params.id, req.user, { ttlMs: req.body?.ttlMs ?? req.body?.ttl_ms });
+        if (!result) return res.status(404).json({ error: '渠道不存在、未启用或无权操作。' });
+        writeLog(req, '创建 Agent 渠道配对码', `渠道ID: ${req.params.id}，过期时间: ${result.pairing.expiresAt}`);
+        res.status(201).json({ success: true, ...result });
+    }));
+    router.get('/agents/channels/:id/pairings', authMiddleware, asyncHandler(async (req, res) => {
+        const data = await listChannelPairings(req.params.id, req.user, { limit: req.query.limit });
+        if (!data) return res.status(404).json({ error: '渠道不存在或无权访问。' });
+        res.json({ success: true, data });
+    }));
+    router.post('/agents/channels/:id/pairings/:pairingId/revoke', authMiddleware, asyncHandler(async (req, res) => {
+        const pairing = await revokeChannelPairing(req.params.id, req.params.pairingId, req.user);
+        if (!pairing) return res.status(404).json({ error: '渠道配对不存在或无权撤销。' });
+        writeLog(req, '撤销 Agent 渠道配对', `渠道ID: ${req.params.id}，配对ID: ${pairing.id}`);
+        res.json({ success: true, pairing });
+    }));
+    router.get('/agents/channels/:id/sessions', authMiddleware, asyncHandler(async (req, res) => {
+        const data = await listChannelGatewaySessions(req.params.id, req.user, { limit: req.query.limit });
+        if (!data) return res.status(404).json({ error: '渠道不存在或无权访问。' });
+        res.json({ success: true, data });
+    }));
+    router.post('/agents/channels/:id/sessions/:sessionId/link', authMiddleware, asyncHandler(async (req, res) => {
+        const session = await linkChannelGatewaySession(req.params.id, req.params.sessionId, req.user, req.body?.pivotSessionId || req.body?.pivot_session_id);
+        if (!session) return res.status(404).json({ error: '渠道会话不存在、已撤销或无权操作。' });
+        writeLog(req, '接续多渠道 Agent 会话', `渠道ID: ${req.params.id}，渠道会话: ${session.id}，Pivot会话: ${session.sessionId}`);
+        res.json({ success: true, session });
     }));
     router.patch('/agents/channels/:id', authMiddleware, asyncHandler(async (req, res) => {
         const channel = await updateAgentChannel(req.params.id, req.user, req.body || {});
@@ -281,9 +370,50 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         const rows = await listSkillCatalogForUser(req.user, { limit: req.query.limit });
         res.json({ success: true, data: rows.map(row => ({ id: row.id, name: row.name, rollout_scope: row.rollout_scope, rollout_percent: row.rollout_percent, status: row.status, published_at: row.published_at, version: row.version, digest: row.digest, content_digest: row.content_digest })) });
     }));
+    router.get('/agents/capabilities/catalog', authMiddleware, asyncHandler(async (req, res) => {
+        const limit = Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 200, 500));
+        const [packages, releases] = await Promise.all([
+            listCapabilityPackages(req.user),
+            listSkillCatalogForUser(req.user, { limit })
+        ]);
+        const skills = (releases || []).map(release => {
+            let manifest = {};
+            try { manifest = parseSkillManifest(release.manifest_json || release.manifest_yaml || {}); } catch (_) {}
+            return {
+                id: `skill:${release.id}`,
+                kind: 'skill',
+                title: String(manifest.title || release.name || '已发布 Skill').slice(0, 160),
+                description: String(manifest.description || '').slice(0, 600),
+                source: release.rollout_scope === 'personal' ? '个人已验证经验' : '组织已发布 Skill',
+                scope: release.rollout_scope || 'personal',
+                status: release.status,
+                version: release.version || '',
+                capabilities: Array.isArray(manifest.capabilities) ? manifest.capabilities.slice(0, 20) : [],
+                tools: Array.isArray(manifest.tools) ? manifest.tools.slice(0, 20) : []
+            };
+        });
+        const capabilities = (packages || []).map(item => ({
+            id: String(item.package_key || item.id),
+            kind: item.type || 'capability',
+            title: String(item.name || '未命名能力').slice(0, 160),
+            description: String(item.description || '').slice(0, 600),
+            source: item.type === 'builtin_tool' ? '系统内置工具' : item.type === 'database_connection' ? '受控数据库连接' : '受控 MCP 服务',
+            scope: item.scope || 'user',
+            status: item.enabled === false ? 'disabled' : 'enabled',
+            version: '',
+            capabilities: [],
+            tools: []
+        }));
+        res.json({ success: true, data: [...skills, ...capabilities].slice(0, limit) });
+    }));
     router.post('/agents/skills/source/preview', authMiddleware, asyncHandler(async (req, res) => {
         // 预览只做解析与严格校验，不落库；错误清单直接回传给编辑器。
         res.json({ success: true, preview: previewSkillSource(String(req.body?.markdown || '')) });
+    }));
+    router.post('/agents/runs/:id/skill-draft', authMiddleware, asyncHandler(async (req, res) => {
+        const draft = await createSkillDraftFromRun(req.user, req.params.id);
+        if (!draft) return res.status(404).json({ error: '任务不存在或无权访问。' });
+        res.json({ success: true, draft });
     }));
     router.post('/agents/skills/source', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const result = await createSkillVersionFromMarkdown(req.user, req.body || {});
@@ -354,9 +484,24 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         if (!release) return res.status(404).json({ error: '工作流不存在或无权发布。' });
         res.json({ success: true, release });
     }));
+    router.get('/agents/workflows/:id/release-impact', authMiddleware, asyncHandler(async (req, res) => {
+        const impact = await getWorkflowReleaseImpact(req.params.id, req.user, {
+            version: req.query.version || 'current',
+            allowTenantAdmin: req.query.tenantAdmin === 'true' && ['admin', 'root'].includes(String(req.user?.role || '').toLowerCase()),
+            tenantId: req.query.tenantId
+        });
+        if (!impact) return res.status(404).json({ error: '工作流不存在或无权查看发布影响。' });
+        res.json({ success: true, impact });
+    }));
     router.post('/agents/workflows/releases/:id/rollback', authMiddleware, asyncHandler(async (req, res) => {
         const release = await rollbackWorkflowRelease(req.params.id, req.user);
         if (!release) return res.status(404).json({ error: '工作流发布不存在或无权回滚。' });
+        res.json({ success: true, release });
+    }));
+    router.post('/agents/workflows/releases/:id/review', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const release = await reviewWorkflowRelease(req.params.id, req.user, req.body || {});
+        if (!release) return res.status(404).json({ error: '工作流发布不存在、已回滚或无权审阅。' });
+        writeLog(req, '审阅工作流发布', `发布ID: ${release.id}，结论: ${release.review_status}`);
         res.json({ success: true, release });
     }));
     router.get('/agents/workflows/:id/releases', authMiddleware, asyncHandler(async (req, res) => {

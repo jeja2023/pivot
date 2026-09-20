@@ -272,6 +272,20 @@ test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认�
     assert.match(toolbarJs, /紧急跳过门禁发布/);
 });
 
+test('工作流版本页提供发布影响清单和管理员审阅闭环', () => {
+    const versionsJs = read('client/chat/agent-workflow-versions.js');
+    const releaseService = read('server/services/agent-releases.js');
+    const controlPlane = read('server/routes/agent-control-plane.js');
+
+    assert.match(versionsJs, /发布影响清单/);
+    assert.match(versionsJs, /data-agent-workflow-release-review/);
+    assert.match(versionsJs, /workflows\/releases\/\$\{encodeURIComponent\(releaseId\)\}\/review/);
+    assert.match(releaseService, /async function getWorkflowReleaseImpact/);
+    assert.match(releaseService, /async function reviewWorkflowRelease/);
+    assert.match(controlPlane, /\/agents\/workflows\/:id\/release-impact/);
+    assert.match(controlPlane, /\/agents\/workflows\/releases\/:id\/review/);
+});
+
 test('Agent控制台各模块具备分页控件且收件箱点击详情自动标记已读', () => {
     const html = read('client/chat/partials/workspaces/agent.html');
     const js = read('client/chat/agent-harness.js');

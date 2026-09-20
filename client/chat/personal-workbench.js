@@ -283,6 +283,65 @@
         });
     }
 
+    function openAssistantSection(section = 'profile') {
+        const open = window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'workbench', subview: 'governance' });
+        return Promise.resolve(open).then(() => {
+            document.querySelector(`[data-agent-harness-nav="${CSS.escape(section)}"]`)?.click();
+            if (section === 'profile' && state.dashboard?.assistant?.profileReady !== true) {
+                document.getElementById('agent-profile-wizard')?.click();
+            }
+        });
+    }
+
+    function renderAssistant(assistant = {}) {
+        const container = document.getElementById('personal-assistant-list');
+        if (!container) return;
+        clear(container);
+        const items = [
+            {
+                action: 'open-assistant-profile',
+                title: assistant.profileReady ? (assistant.displayName ? `助手档案：${assistant.displayName}` : '助手档案已配置') : '完成 3 分钟助手设置',
+                meta: assistant.profileReady ? `档案版本 ${Number(assistant.profileVersion || 1)} · 可随时修改表达偏好和常见任务` : '设置称呼、表达偏好和常见工作，让助手更贴合你',
+                icon: ICONS.sparkle,
+                status: assistant.profileReady ? '已配置' : '待设置',
+                statusClass: assistant.profileReady ? 'status-active' : 'status-warning'
+            },
+            {
+                action: 'open-assistant-memory',
+                title: assistant.memoryEnabled === false ? '我的记忆已暂停' : `我的记忆：${Number(assistant.activeMemories || 0)} 条活跃`,
+                meta: assistant.memoryEnabled === false ? '不会自动提取、检索或注入新的长期记忆，可随时恢复' : (Number(assistant.disabledMemories || 0) ? `${Number(assistant.disabledMemories)} 条已暂停；可查看来源、暂停或删除` : '只在相关且符合你的策略时注入任务上下文'),
+                icon: ICONS.knowledge,
+                status: assistant.memoryEnabled === false ? '已暂停' : '管理记忆',
+                statusClass: assistant.memoryEnabled === false ? 'status-warning' : 'status-active'
+            },
+            {
+                action: 'open-assistant-learning',
+                title: `我的经验：${Number(assistant.experiences || 0)} 项已验证`,
+                meta: Number(assistant.pendingExperiences || 0) ? `${Number(assistant.pendingExperiences)} 项待确认改进` : (assistant.autoLearning ? '完成重复任务后会在低风险范围内沉淀经验' : '自动学习已暂停，可随时恢复'),
+                icon: ICONS.automation,
+                status: Number(assistant.pendingExperiences || 0) ? '待确认' : '查看经验',
+                statusClass: Number(assistant.pendingExperiences || 0) ? 'status-warning' : 'status-active'
+            }
+        ];
+        items.forEach(item => {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'personal-row personal-assistant-row';
+            row.dataset.personalAction = item.action;
+            const icon = document.createElement('span');
+            icon.className = 'personal-row-icon-box icon-box-green';
+            PivotSafeHtml.setHtml(icon, item.icon);
+            icon.setAttribute('aria-hidden', 'true');
+            const copy = document.createElement('span');
+            copy.className = 'personal-row-copy';
+            appendText(copy, 'strong', 'personal-row-title', item.title);
+            appendText(copy, 'span', 'personal-row-meta', item.meta);
+            appendText(row, 'span', `personal-status-text ${item.statusClass}`, item.status);
+            row.prepend(icon, copy);
+            container.appendChild(row);
+        });
+    }
+
     function renderRecentWork(items = []) {
         const container = document.getElementById('personal-recent-list');
         if (!container) return;
@@ -411,8 +470,10 @@
         renderStats(dashboard.stats);
         renderAttention(dashboard.inbox);
         renderGoals(dashboard.goals);
+        renderAssistant(dashboard.assistant);
         renderRecentWork(dashboard.recentWork);
         renderShortcuts(dashboard.shortcuts);
+        window.Pivot?.moduleApi?.('personal.agentOnboarding')?.maybeShow?.(dashboard.assistant).catch?.(() => {});
     }
 
     async function loadPersonalWorkbench({ silent = false } = {}) {
@@ -455,6 +516,24 @@
         await window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.();
         const appId = key === 'official-writing' ? 'official-writing' : key;
         document.querySelector(`[data-app-id="${appId}"]`)?.click();
+    }
+
+    async function openQuickTask(mode) {
+        const input = document.getElementById('personal-quick-task');
+        const goal = String(input?.value || '').trim();
+        if (!goal) {
+            window.Pivot.legacy.showToast?.('先输入想处理的事情。', 'warning');
+            return;
+        }
+        if (mode === 'agent') {
+            await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', create: true });
+            const target = document.getElementById('agent-goal-input');
+            if (target) { target.value = goal; target.dispatchEvent(new Event('input', { bubbles: true })); }
+            return;
+        }
+        await openShortcut('chat');
+        const target = document.getElementById('message-input') || document.getElementById('chat-input');
+        if (target) { target.value = goal; target.focus(); target.dispatchEvent(new Event('input', { bubbles: true })); }
     }
 
     function openShortcutEditor() {
@@ -641,6 +720,9 @@
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
                 return openShortcut('chat');
             }
+            if (action === 'quick-chat') return openQuickTask('chat');
+            if (action === 'quick-agent') return openQuickTask('agent');
+            if (action === 'resume-onboarding') return window.Pivot.moduleApi?.('personal.agentOnboarding')?.open?.();
             if (action === 'open-knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');
@@ -658,6 +740,9 @@
             if (action === 'open-goals') {
                 return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'goals', subview: 'goals' });
             }
+            if (action === 'open-assistant-profile') return openAssistantSection('profile');
+            if (action === 'open-assistant-memory') return openAssistantSection('memory');
+            if (action === 'open-assistant-learning') return openAssistantSection('learning');
             if (action === 'open-completed-tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
             if (action === 'open-tools') return window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
             if (action === 'open-manual') return (window.Pivot?.moduleApi?.('workspaces.navigation')?.openManualWorkbench || window.Pivot?.legacy?.openManualWorkbench)?.();
@@ -685,6 +770,11 @@
         }
         const shortcut = event.target.closest('[data-personal-shortcut]')?.dataset.personalShortcut;
         if (shortcut) await openShortcut(shortcut);
+        const example = event.target.closest('[data-personal-example]')?.dataset.personalExample;
+        if (example) {
+            const input = document.getElementById('personal-quick-task');
+            if (input) { input.value = example; input.focus(); }
+        }
         const recent = event.target.closest('[data-personal-recent-id]');
         if (recent) await handleRecentWork(recent);
         const attention = event.target.closest('[data-personal-item-type]');

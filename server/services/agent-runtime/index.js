@@ -27,7 +27,9 @@ const {
     configureAgentTriggers,
     createWorkflowTrigger,
     deleteWorkflowTrigger,
+    listWorkflowTriggerEvents,
     listWorkflowTriggers,
+    replayWorkflowTriggerEvent,
     rotateWorkflowTriggerToken,
     runDuePollingTriggers,
     updateWorkflowTrigger
@@ -117,8 +119,11 @@ const { TaskBudget, normalizeTaskBudget } = require('../agent-budget');
 const { diagnoseError } = require('../agent-diagnosis');
 const { recordAgentToolCall } = require('../agent-tool-audit');
 const { recordAgentRunOutcome } = require('../agent-feedback');
+const { recordFirstTaskCreated, recordFirstTaskTerminal } = require('../agent-experience-events');
 const { listToolReliability, selectToolOrder } = require('../agent-tool-reliability');
 const { enqueueChannelDelivery, dispatchChannelDeliveries } = require('../agent-channel-adapters');
+const { configureAgentChannelGateway, deliverChannelGatewayRunResult } = require('../agent-channel-gateway');
+const { recordCollaboratorCompletion } = require('../agent-collaboration');
 const { createAgentInboxEvent } = require('../agent-inbox');
 const { createPersistedAgentStepContext } = require('../agent-world-state-store');
 const { buildAgentAuditFields } = require('../agent-step-context');
@@ -141,6 +146,7 @@ const {
 const {
     configureAgentGoals,
     createAgentGoal,
+    deliverGoalRunResult,
     dispatchAgentGoalWebhook,
     getAgentGoal,
     listAgentGoals,
@@ -177,8 +183,16 @@ const createAgentNotification = createAgentNotificationFactory({
     publishUserEvent,
     createInboxEvent: createAgentInboxEvent,
     deliverNotification: async (userId, notification) => {
+        const channelRun = notification.run_id
+            ? await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [notification.run_id])
+            : null;
+        const gatewayBindingId = parseJsonObject(channelRun?.metadata || '{}')?.channelGateway?.bindingId || '';
         const bindings = await query('SELECT id FROM agent_channel_bindings WHERE user_id = ? AND status = \'active\'', [userId]);
-        for (const binding of bindings) await enqueueChannelDelivery({ id: userId }, { bindingId: binding.id, eventType: `agent.notification.${notification.type || 'info'}`, sourceId: notification.id, runId: notification.run_id, idempotencyKey: `notification:${notification.id}`, subject: notification.title, body: notification.body || '' });
+        for (const binding of bindings) {
+            // 双向会话的最终正文由 channel.agent_result 单独投递；同一绑定不再叠加一条泛通知。
+            if (gatewayBindingId && String(binding.id) === String(gatewayBindingId)) continue;
+            await enqueueChannelDelivery({ id: userId }, { bindingId: binding.id, eventType: `agent.notification.${notification.type || 'info'}`, sourceId: notification.id, runId: notification.run_id, idempotencyKey: `notification:${notification.id}`, subject: notification.title, body: notification.body || '' });
+        }
     }
 });
 const runState = createRunState({
@@ -193,7 +207,11 @@ const runState = createRunState({
     TERMINAL_STATUSES,
     releaseChildRunReservation,
     persistAgentRunChatResult,
+    deliverChannelGatewayRunResult,
+    deliverGoalRunResult,
+    recordCollaboratorCompletion: (runId, status) => recordCollaboratorCompletion(runId, status, { createAgentRun }),
     recordAgentRunOutcome,
+    recordFirstTaskTerminal,
     recordAgentEvent,
     crypto,
     publishUserEvent,
@@ -668,8 +686,11 @@ const { createAgentRunFactory } = require('./run-creation');
 const createAgentRun = createAgentRunFactory({
     assertRunUserActive,
     enqueueAgentRun,
-    publishAgentRunEvent
+    publishAgentRunEvent,
+    recordFirstTaskCreated
 });
+
+configureAgentChannelGateway({ createAgentRun });
 
 const lifecycle = createRunLifecycle({
     activeRunControllers,
@@ -794,7 +815,7 @@ const workflows = {
     updateAgentWorkflow, updateAgentWorkflowMetadata, updateAgentWorkflowSharing
 };
 const triggers = {
-    createWorkflowTrigger, deleteWorkflowTrigger, listWorkflowTriggers, rotateWorkflowTriggerToken,
+    createWorkflowTrigger, deleteWorkflowTrigger, listWorkflowTriggerEvents, listWorkflowTriggers, replayWorkflowTriggerEvent, rotateWorkflowTriggerToken,
     runDuePollingTriggers, updateWorkflowTrigger
 };
 const artifacts = {

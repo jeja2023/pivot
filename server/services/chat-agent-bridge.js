@@ -84,6 +84,7 @@ function buildChatAgentMetadata({
     ragScope = {},
     currentContent = '',
     memoryContext = '',
+    memoryUsageReasons = [],
     ragContext = ''
 } = {}) {
     const normalizedMcpToolAllowlist = Array.isArray(mcpToolAllowlist)
@@ -106,6 +107,7 @@ function buildChatAgentMetadata({
                 content: normalizeChatContent(currentContent, MAX_CHAT_AGENT_GOAL_LENGTH)
             },
             memoryContext: clampText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
+            memoryUsageReasons: Array.isArray(memoryUsageReasons) ? memoryUsageReasons.slice(0, 20) : [],
             ragContext: clampText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
             createdAt: getBeijingTimestamp()
         },
@@ -125,6 +127,7 @@ async function prepareChatAgentContext({
 } = {}) {
     let memoryContext = '';
     let memoryCount = 0;
+    let memoryUsageReasons = [];
     let ragContext = '';
     let ragSummary = null;
     const queryText = String(modelContent || '').trim();
@@ -133,9 +136,11 @@ async function prepareChatAgentContext({
         try {
             const matches = await retrieveLongTermMemories(userId, queryText, { user });
             memoryCount = Array.isArray(matches) ? matches.length : 0;
-            memoryContext = buildLongTermMemoryContextMessage(matches, {
+            const memoryMessage = buildLongTermMemoryContextMessage(matches, {
                 inputBudget: modelCfg ? getModelContextBudget(modelCfg).inputBudget : 4000
-            }) || '';
+            });
+            memoryContext = memoryMessage || '';
+            memoryUsageReasons = memoryMessage?.metadata?.usageReasons || [];
         } catch (error) {
             logger.warn({ userId, err: error.message }, '普通聊天 Agent 长期记忆检索失败');
         }
@@ -154,6 +159,7 @@ async function prepareChatAgentContext({
     return {
         memoryContext: clampText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
         memoryCount,
+        memoryUsageReasons,
         ragContext: clampText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
         ragSummary
     };

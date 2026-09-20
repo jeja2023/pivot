@@ -61,6 +61,61 @@ function normalizeIterationInput(input = {}) {
     };
 }
 
+function stableIterationJson(value) {
+    if (value === null || value === undefined) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableIterationJson).join(',')}]`;
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableIterationJson(value[key])}`).join(',')}}`;
+}
+
+function iterationItemIdentity({ item, childInputs, childGoal, workflowId, version }) {
+    const inputDigest = crypto.createHash('sha256').update(stableIterationJson({ item, childInputs, childGoal, workflowId, version })).digest('hex');
+    return { inputDigest, itemId: inputDigest.slice(0, 24) };
+}
+
+function compactIterationValue(value, maxChars = 120000) {
+    let serialized = '';
+    try { serialized = JSON.stringify(value); } catch (_) { serialized = JSON.stringify({ text: clampText(value, maxChars) }); }
+    if (serialized.length <= maxChars) return value;
+    return { __partial: true, originalChars: serialized.length, text: serialized.slice(0, maxChars), warning: '迭代项完整结果已由调用实例与节点输出持久化，本记录仅保存受限预览。' };
+}
+
+async function listIterationItems(deps, runId, iterationKey) {
+    if (typeof deps?.listWorkflowIterationItems === 'function') return await deps.listWorkflowIterationItems(runId, iterationKey);
+    const rows = await queryOne(`
+        SELECT COALESCE(json_agg(item ORDER BY input_index), '[]'::json) AS items
+        FROM (
+            SELECT input_index, item_id, input_digest, workflow_id, workflow_version_id, invocation_id, status,
+                   input_json, result_json, error_message, created_at, updated_at, completed_at
+            FROM agent_workflow_iteration_items
+            WHERE run_id = ? AND iteration_key = ?
+        ) item
+    `, [runId, iterationKey]);
+    return Array.isArray(rows?.items) ? rows.items : [];
+}
+
+async function writeIterationItem(deps, payload) {
+    if (typeof deps?.upsertWorkflowIterationItem === 'function') return await deps.upsertWorkflowIterationItem(payload);
+    const now = getBeijingTimestamp();
+    return await execute(`
+        INSERT INTO agent_workflow_iteration_items (
+            run_id, iteration_key, input_index, item_id, input_digest, workflow_id, workflow_version_id,
+            invocation_id, status, input_json, result_json, error_message, created_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, iteration_key, input_index) DO UPDATE SET
+            item_id = excluded.item_id, input_digest = excluded.input_digest, workflow_id = excluded.workflow_id,
+            workflow_version_id = excluded.workflow_version_id, invocation_id = excluded.invocation_id,
+            status = excluded.status, input_json = excluded.input_json, result_json = excluded.result_json,
+            error_message = excluded.error_message, updated_at = excluded.updated_at, completed_at = excluded.completed_at
+    `, [
+        payload.runId, payload.iterationKey, payload.inputIndex, payload.itemId, payload.inputDigest,
+        payload.workflowId, payload.workflowVersionId || null, payload.invocationId || null, payload.status,
+        JSON.stringify(compactIterationValue(payload.input || {})),
+        payload.result === undefined ? null : JSON.stringify(compactIterationValue(payload.result)),
+        String(payload.error || '').slice(0, 4000), now, now, payload.completedAt ? now : null
+    ]);
+}
+
 function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo, prepareDagFallbackOutput, buildDagFallbackFinalAnswer, extractReadableDagOutput, upsertDagNode }) {
     async function executeWorkflowIteration({ input, run, user, modelCfg, toolList, deadline, deps, parentContext = {}, invocation = {} }) {
         const config = normalizeIterationInput(input);
@@ -69,22 +124,46 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
         const baseExecutionPath = String(invocation.executionPath || parentContext.executionPath || '').trim();
         const parentInvocationId = String(invocation.parentInvocationId || parentContext.invocationId || '').trim();
         const callerNodeId = String(invocation.callerNodeId || parentContext.callerNodeId || 'iteration').trim() || 'iteration';
+        const iterationKey = [...baseExecutionPath.split('/').filter(Boolean), `iteration:${callerNodeId}:${config.workflowId}`].join('/');
+        const persistedItems = new Map((await listIterationItems(deps, run.id, iterationKey))
+            .map(row => [Number(row.input_index ?? row.inputIndex), row]));
         const workerCount = config.onItemError === 'stop' ? 1 : Math.min(config.concurrency, config.items.length || 1);
         const executeItem = async index => {
             const item = config.items[index];
             const variableContext = { goal: run.goal, inputs: parentContext.dagInputs || {}, states: parentContext.states || new Map(), nodeMap: parentContext.nodeMap || new Map(), item, itemIndex: index };
             const childInputs = resolveDagNodeInput({ input: config.inputs }, variableContext);
             const childGoal = typeof config.goal === 'string' ? resolveDagInputValue(config.goal, variableContext) : (run.goal || '');
+            const identity = iterationItemIdentity({ item, childInputs, childGoal, workflowId: config.workflowId, version: config.version });
+            const persisted = persistedItems.get(index);
+            if (persisted?.status === 'completed' && persisted.input_digest === identity.inputDigest && persisted.result_json) {
+                const reused = typeof persisted.result_json === 'string' ? JSON.parse(persisted.result_json) : persisted.result_json;
+                results[index] = { ...reused, itemId: reused.itemId || identity.itemId, inputIndex: index, status: 'completed', reused: true };
+                recordWorkflowIterationItemResult({ status: 'reused' });
+                return;
+            }
+            await writeIterationItem(deps, {
+                runId: run.id, iterationKey, inputIndex: index, itemId: identity.itemId, inputDigest: identity.inputDigest,
+                workflowId: config.workflowId, status: 'running', input: { item, childInputs, childGoal }
+            });
             try {
                 const child = await executeSubworkflowDag({
                     input: { workflowId: config.workflowId, version: config.version, goal: childGoal, inputs: childInputs }, run, user, modelCfg, toolList, deadline, deps,
-                    stack: parentContext.stack || [], invocation: { parentInvocationId, callerNodeId: `${callerNodeId}:item:${index}`, executionPath: baseExecutionPath, iterationMode: true }
+                    stack: parentContext.stack || [], invocation: { parentInvocationId, callerNodeId: `${callerNodeId}:item:${index}`, executionPath: baseExecutionPath, iterationMode: true, itemId: identity.itemId }
                 });
-                results[index] = { inputIndex: index, status: 'completed', value: child.output, outputs: child.outputs, invocationId: child.invocationId, workflowId: child.workflowId, version: child.version, versionId: child.versionId };
+                results[index] = { itemId: identity.itemId, inputIndex: index, status: 'completed', value: child.output, outputs: child.outputs, invocationId: child.invocationId, workflowId: child.workflowId, version: child.version, versionId: child.versionId };
+                await writeIterationItem(deps, {
+                    runId: run.id, iterationKey, inputIndex: index, itemId: identity.itemId, inputDigest: identity.inputDigest,
+                    workflowId: child.workflowId, workflowVersionId: child.versionId, invocationId: child.invocationId,
+                    status: 'completed', input: { item, childInputs, childGoal }, result: results[index], completedAt: true
+                });
                 recordWorkflowIterationItemResult({ status: 'completed' });
             } catch (error) {
-                const entry = { inputIndex: index, status: 'error', error: String(error?.message || error || '逐项子工作流执行失败').slice(0, 4000) };
+                const entry = { itemId: identity.itemId, inputIndex: index, status: 'error', error: String(error?.message || error || '逐项子工作流执行失败').slice(0, 4000) };
                 results[index] = entry; errors.push(entry); recordWorkflowIterationItemResult({ status: 'error' });
+                await writeIterationItem(deps, {
+                    runId: run.id, iterationKey, inputIndex: index, itemId: identity.itemId, inputDigest: identity.inputDigest,
+                    workflowId: config.workflowId, status: 'error', input: { item, childInputs, childGoal }, error: entry.error, completedAt: true
+                }).catch(() => {});
                 if (config.onItemError === 'stop') stoppedOnError = true;
             }
         };
@@ -182,8 +261,8 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                     const outputSchema = schemaHasRules(explicitOutputSchema) ? explicitOutputSchema : normalizeJsonSchema(selectedTool?.output_schema || selectedTool?.outputSchema || {});
                     const executionContext = {
                         dagInputs, workflowApprovalResult, workflowDelayResult, budget: deps.taskBudget, approvalKey,
-                        approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: true, invocationId, executionPath,
-                        executeSubworkflow: childInput => executeSubworkflowDag({ input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack, invocation: { parentInvocationId: invocationId, callerNodeId: node.id, executionPath, iterationMode: invocation.iterationMode === true } }),
+                        approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: true, invocationId, executionPath, itemId: invocation.itemId || null,
+                        executeSubworkflow: childInput => executeSubworkflowDag({ input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack, invocation: { parentInvocationId: invocationId, callerNodeId: node.id, executionPath, iterationMode: invocation.iterationMode === true, itemId: invocation.itemId || null } }),
                         executeIteration: iterationInput => executeWorkflowIteration({ input: iterationInput, run, user, modelCfg, toolList, deadline, deps, parentContext: { dagInputs, states, nodeMap, stack: childStack, executionPath, invocationId, callerNodeId: node.id } })
                     };
                     const result = await executeDagNodeWithPolicy({ run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: 0, executionContext }, deps);

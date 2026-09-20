@@ -202,9 +202,19 @@ function normalizeContextConfig(value) {
     const mode = ['none', 'auto', 'recent', 'knowledge', 'custom'].includes(String(parsed.mode || 'auto'))
         ? String(parsed.mode || 'auto')
         : 'auto';
+    let rawCollectionIds = parsed.collectionIds ?? parsed.collection_ids ?? parsed.knowledgeCollectionIds ?? parsed.knowledge_collection_ids ?? [];
+    if (typeof rawCollectionIds === 'string') {
+        try { rawCollectionIds = JSON.parse(rawCollectionIds); } catch (_) { rawCollectionIds = rawCollectionIds.split(','); }
+    }
+    if (!Array.isArray(rawCollectionIds)) rawCollectionIds = [rawCollectionIds];
+    const collectionIds = [...new Set(rawCollectionIds
+        .map(item => Number.parseInt(item, 10))
+        .filter(item => Number.isSafeInteger(item) && item > 0)
+        .slice(0, 12))];
     return {
         mode,
-        notes: String(parsed.notes || '').trim().slice(0, 1000)
+        notes: String(parsed.notes || '').trim().slice(0, 1000),
+        collectionIds
     };
 }
 

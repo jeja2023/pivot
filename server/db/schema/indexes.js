@@ -47,6 +47,8 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_workflow ON agent_workflow_triggers(workflow_id, deleted_at);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workflow_triggers_token ON agent_workflow_triggers(token_hash) WHERE token_hash IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_triggers_poll ON agent_workflow_triggers(trigger_type, status, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_trigger_events_trigger ON agent_workflow_trigger_events(trigger_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_trigger_events_run ON agent_workflow_trigger_events(run_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_workflow_credentials_user ON workflow_credentials(user_id, deleted_at, updated_at);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_credentials_slug ON workflow_credentials(user_id, slug) WHERE deleted_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_workflow_credentials_scope ON workflow_credentials(scope, deleted_at);
@@ -55,6 +57,7 @@ function baseIndexesSql() {
         CREATE INDEX IF NOT EXISTS idx_official_writing_documents_user_updated ON official_writing_documents(user_id, deleted_at, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_dag_nodes_run ON agent_dag_nodes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_agent_workflow_invocations_run ON agent_workflow_invocations(run_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_workflow_iteration_items_run ON agent_workflow_iteration_items(run_id, iteration_key, status, input_index);
         CREATE INDEX IF NOT EXISTS idx_agent_run_concurrency_leases_user_expiry ON agent_run_concurrency_leases(user_id, lease_expires_at);
         CREATE INDEX IF NOT EXISTS idx_workflow_api_operations_user ON workflow_api_operations(user_id, status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_run ON agent_approval_requests(run_id, request_type, status);

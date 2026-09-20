@@ -5,6 +5,8 @@ const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { computeNextScheduleRun } = require('./agent-schedules');
+const { normalizeStrategy: normalizeModelRouterStrategy } = require('./model-router');
+const { enqueueChannelDelivery } = require('./agent-channel-adapters');
 const {
     normalizeApprovalPolicy,
     normalizePositiveInt,
@@ -140,12 +142,19 @@ function normalizeGoalInput(body = {}, current = null) {
 
 function normalizeAuthorization(raw = {}, source = {}) {
     const input = raw && typeof raw === 'object' ? raw : {};
+    const timezone = String(input.timezone || input.time_zone || source.timezone || source.time_zone || 'Asia/Shanghai').trim().slice(0, 80);
+    try { Intl.DateTimeFormat('en-US', { timeZone: timezone }); } catch (_) { throw invalid('持续目标时区无效。'); }
     return {
         toolPolicy: normalizeToolPolicy(input.toolPolicy || input.tool_policy || source.toolPolicy || source.tool_policy),
         toolAllowlist: normalizeToolAllowlist(input.toolAllowlist || input.tool_allowlist || source.toolAllowlist || source.tool_allowlist),
         approvalPolicy: normalizeApprovalPolicy(input.approvalPolicy || input.approval_policy || source.approvalPolicy || source.approval_policy),
         networkPolicy: input.networkPolicy && typeof input.networkPolicy === 'object' ? input.networkPolicy : {},
-        expiresAt: input.expiresAt || input.expires_at || null
+        expiresAt: input.expiresAt || input.expires_at || null,
+        modelId: Number.parseInt(input.modelId ?? input.model_id ?? source.modelId ?? source.model_id, 10) || null,
+        modelRouter: normalizeModelRouterStrategy(input.modelRouter || input.model_router || source.modelRouter || source.model_router || 'fixed'),
+        timezone,
+        deliveryBindingIds: normalizeStringList(input.deliveryBindingIds || input.delivery_binding_ids || source.deliveryBindingIds || source.delivery_binding_ids, 10, 128),
+        resultRetentionDays: normalizePositiveInt(input.resultRetentionDays ?? input.result_retention_days ?? source.resultRetentionDays ?? source.result_retention_days, 30, 1, 3650)
     };
 }
 
@@ -239,6 +248,7 @@ async function createAgentGoal(user, body = {}, options = {}) {
     const bodyTrigger = body.triggerSpec || body.trigger_spec || {};
     const token = bodyTrigger.type === 'webhook' && !bodyTrigger.token && !bodyTrigger.tokenHash && !bodyTrigger.token_hash ? generateGoalToken() : null;
     const data = normalizeGoalInput(token ? { ...body, triggerSpec: { ...bodyTrigger, token } } : body);
+    await assertGoalDeliveryBindings(user, data.authorizationSpec.deliveryBindingIds);
     const tenantId = options.tenantId || user.tenant_id || await getPrimaryTenantId(user.id);
     const now = getBeijingTimestamp();
     const id = `goal_${crypto.randomUUID()}`;
@@ -260,10 +270,19 @@ async function updateAgentGoal(id, user, body = {}) {
         authorizationSpec: body.authorizationSpec || body.authorization_spec || parseJson(current.authorization_spec, {}),
         budgetSpec: body.budgetSpec || body.budget_spec || parseJson(current.budget_spec, {})
     });
+    await assertGoalDeliveryBindings(user, data.authorizationSpec.deliveryBindingIds);
     const now = getBeijingTimestamp();
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
     await execute(`UPDATE agent_goals SET title = ?, goal = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?::timestamptz, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ?::timestamptz ELSE NULL END, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
     return parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [current.id]));
+}
+
+async function assertGoalDeliveryBindings(user, bindingIds = []) {
+    const ids = normalizeStringList(bindingIds, 10, 128);
+    if (!ids.length) return;
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = await query(`SELECT id FROM agent_channel_bindings WHERE user_id = ? AND status = 'active' AND id IN (${placeholders})`, [user.id, ...ids]);
+    if (rows.length !== ids.length) throw invalid('结果渠道包含不存在、已停用或无权使用的绑定。', 403);
 }
 
 async function setAgentGoalStatus(id, user, status) {
@@ -343,6 +362,8 @@ async function runAgentGoalNow(goal, user, options = {}) {
         user,
         goal: goal.goal,
         title: goal.title,
+        modelId: auth.modelId || null,
+        modelRouter: auth.modelRouter || 'fixed',
         runMode: options.runMode || 'standard',
         toolPolicy: auth.toolPolicy,
         toolAllowlist: auth.toolAllowlist,
@@ -355,6 +376,20 @@ async function runAgentGoalNow(goal, user, options = {}) {
             source: 'goal',
             goalId: goal.id,
             goalVersion: goal.version,
+            goalSnapshot: {
+                modelId: auth.modelId || null,
+                modelRouter: auth.modelRouter || 'fixed',
+                toolPolicy: auth.toolPolicy,
+                toolAllowlist: auth.toolAllowlist || [],
+                timezone: auth.timezone || 'Asia/Shanghai',
+                resultRetentionDays: auth.resultRetentionDays || 30,
+                expiresAt: auth.expiresAt || null
+            },
+            goalDelivery: {
+                bindingIds: auth.deliveryBindingIds || [],
+                timezone: auth.timezone || 'Asia/Shanghai',
+                resultRetentionDays: auth.resultRetentionDays || 30
+            },
             triggerType: options.triggerType || triggerSpec.type || 'manual',
             triggerKey,
             triggerInputs: options.metadata || {}
@@ -367,6 +402,67 @@ async function runAgentGoalNow(goal, user, options = {}) {
     await execute(`UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?${claimClause}`, [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id, ...(claimToken ? [claimToken] : [])]);
     try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
     return created;
+}
+
+async function deliverGoalRunResult(runId, status = '') {
+    const run = await queryOne('SELECT id, user_id, tenant_id, title, final_answer, error_message, metadata FROM agent_runs WHERE id = ?', [String(runId || '')]);
+    const metadata = parseJson(run?.metadata, {});
+    if (!run || metadata.source !== 'goal') return [];
+    const bindingIds = normalizeStringList(metadata.goalDelivery?.bindingIds, 10, 128);
+    if (!bindingIds.length) return [];
+    const body = String(run.final_answer || '').trim() || (String(status) === 'cancelled'
+        ? '持续目标本次运行已停止。'
+        : `持续目标运行失败：${String(run.error_message || '未生成可用结果。').slice(0, 1600)}`);
+    const user = { id: run.user_id, tenant_id: run.tenant_id || null };
+    return await Promise.all(bindingIds.map(bindingId => enqueueChannelDelivery(user, {
+        bindingId,
+        eventType: 'goal.result',
+        runId: run.id,
+        sourceId: run.id,
+        idempotencyKey: `goal-run:${run.id}:${bindingId}`,
+        subject: String(run.title || '持续目标结果').slice(0, 255),
+        body,
+        interaction: { source: 'agent_goal', runStatus: String(status || '') }
+    })));
+}
+
+/**
+ * 预览只创建一次受治理的普通 Run，不写入 agent_goals，也不领取/推进触发器水位线。
+ * 用户可先审阅真实工具、审批和结果，再决定是否保存为持续目标。
+ */
+async function previewAgentGoal(user, body = {}) {
+    const data = normalizeGoalInput({ ...(body || {}), status: 'paused' });
+    const run = ensureCreateRun();
+    const auth = data.authorizationSpec;
+    const budget = data.budgetSpec;
+    const previewId = `goal_preview_${crypto.randomUUID()}`;
+    return await run({
+        user,
+        goal: data.goal,
+        title: `预览：${data.title}`.slice(0, 160),
+        modelId: auth.modelId || body.modelId || body.model_id || null,
+        modelRouter: auth.modelRouter || 'fixed',
+        runMode: 'standard',
+        toolPolicy: auth.toolPolicy,
+        toolAllowlist: auth.toolAllowlist,
+        approvalPolicy: auth.approvalPolicy,
+        networkPolicy: auth.networkPolicy,
+        maxSteps: budget.maxSteps,
+        maxTokenBudget: budget.maxTokenBudget,
+        dedupeKey: `goal-preview:${user.id}:${previewId}`,
+        metadata: {
+            source: 'goal_preview',
+            goalPreview: {
+                id: previewId,
+                triggerSpec: data.triggerSpec,
+                authorizationSpec: auth,
+                budgetSpec: budget,
+                cooldownSeconds: data.cooldownSeconds,
+                maxFailures: data.maxFailures
+            }
+        },
+        contextConfig: { mode: 'none', notes: '这是持续目标的单次预览；不会创建、启用或修改任何调度。' }
+    });
 }
 
 function isGoalPathAllowed(directory) {
@@ -510,6 +606,7 @@ module.exports = {
     claimAgentGoal,
     configureAgentGoals,
     createAgentGoal,
+    deliverGoalRunResult,
     dispatchAgentGoalWebhook,
     generateGoalToken,
     getAgentGoal,
@@ -517,6 +614,7 @@ module.exports = {
     listAgentGoals,
     normalizeGoalInput,
     normalizeTriggerSpec,
+    previewAgentGoal,
     recordAgentGoalRunOutcome,
     runAgentGoalNow,
     runDueAgentGoals,

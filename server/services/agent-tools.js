@@ -1,4 +1,5 @@
 const { query } = require('../db/client');
+const { searchUserSessions } = require('./agent-session-search');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
 const { debugRetrieveContext } = require('./rag-index');
@@ -11,7 +12,15 @@ const { isSuperAdmin } = require('../permissions');
 const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
 const { normalizeNetworkPolicy } = require('./agent-network-policy');
+const { normalizeContextConfig } = require('./agent-validators');
 const { executeAgentHttp } = require('./agent-http-tool');
+const { executeAgentWebSearch, isAgentWebSearchAvailable } = require('./agent-web-search');
+const {
+    executeAgentImageGeneration,
+    executeAgentTextToSpeech,
+    isAgentImageGenerationAvailable,
+    isAgentTextToSpeechAvailable
+} = require('./agent-media-generation');
 const {
     clickBrowserTarget,
     closeAgentBrowserContext,
@@ -45,6 +54,7 @@ const {
     renderWorkflowValue
 } = require('./agent-tools-workflow-nodes');
 const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } = require('./agent-tools-artifacts');
+const { createAgentDelegateExecutor } = require('./agent-tools-delegation');
 
 const MAX_TEXT = 12000;
 // 动态代码只能在独立的桌面 Worker / 受控执行平面中运行。
@@ -149,7 +159,8 @@ function getBuiltInToolDefinitions(user) {
                 model: { type: 'string', description: '模型 ID 或 model_name。' },
                 temperature: { type: 'number', minimum: 0, maximum: 2, default: 0.2 },
                 maxTokens: { type: 'integer', minimum: 1, maximum: 32768, default: 1200 },
-                responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' }
+                responseFormat: { type: 'string', enum: ['markdown', 'text', 'json'], default: 'markdown' },
+                outputSchema: { type: 'object', description: '可选 JSON Schema。设置后会强制 JSON 输出，失败时最多自动修正一次。' }
             }, ['task', 'agentName', 'role', 'model'])
         },
         {
@@ -199,6 +210,57 @@ function getBuiltInToolDefinitions(user) {
                     headers: { type: 'object' }, data: {}, text: { type: 'string' }
                 }
             }
+        },
+        {
+            name: 'agent.web_search',
+            title: '受控网页检索',
+            description: '通过管理员配置的检索 Provider 搜索公开网页。每次调用必须命中任务网络白名单，返回结果仅作为只读证据。',
+            network: true,
+            alwaysRequiresApproval: true,
+            input_schema: asJsonSchema({
+                query: { type: 'string', minLength: 1, maxLength: 500, description: '要检索的关键词或问题。' },
+                limit: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
+                locale: { type: 'string', maxLength: 24, default: 'zh-CN' },
+                safeSearch: { type: 'boolean', default: true },
+                timeoutMs: { type: 'integer', minimum: 1000, maximum: 30000, default: 15000 }
+            }, ['query']),
+            output_schema: {
+                type: 'object',
+                required: ['query', 'provider', 'results', 'resultCount', 'text'],
+                properties: {
+                    query: { type: 'string' }, provider: { type: 'string' }, resultCount: { type: 'integer' }, text: { type: 'string' },
+                    results: { type: 'array', items: { type: 'object', properties: { rank: { type: 'integer' }, title: { type: 'string' }, url: { type: 'string' }, snippet: { type: 'string' }, publishedAt: { type: 'string' }, source: { type: 'string' } } } }
+                }
+            }
+        },
+        {
+            name: 'agent.image_generate',
+            title: '受控图片生成',
+            description: '通过管理员配置的图片 Provider 生成一张图片。生成与媒体展示 URL 都必须在任务网络白名单内，并且每次均需审批。',
+            network: true,
+            alwaysRequiresApproval: true,
+            input_schema: asJsonSchema({
+                prompt: { type: 'string', minLength: 1, maxLength: 2400, description: '图片生成提示词。' },
+                size: { type: 'string', maxLength: 32, default: '1024x1024' },
+                style: { type: 'string', maxLength: 120 },
+                alt: { type: 'string', maxLength: 160, description: '图片无障碍说明。' },
+                timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 30000 }
+            }, ['prompt'])
+        },
+        {
+            name: 'agent.text_to_speech',
+            title: '受控语音合成',
+            description: '通过管理员配置的语音 Provider 合成可播放音频。每次调用均需审批，返回媒体地址必须位于任务网络白名单。',
+            network: true,
+            alwaysRequiresApproval: true,
+            input_schema: asJsonSchema({
+                text: { type: 'string', minLength: 1, maxLength: 12000, description: '要朗读的文字。' },
+                voice: { type: 'string', maxLength: 120 },
+                format: { type: 'string', enum: ['mp3', 'wav', 'ogg'], default: 'mp3' },
+                speed: { type: 'number', minimum: 0.5, maximum: 2, default: 1 },
+                title: { type: 'string', maxLength: 120 },
+                timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, default: 30000 }
+            }, ['text'])
         },
         {
             name: 'agent.browser',
@@ -467,9 +529,12 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'sessions.search',
             title: '会话检索',
-            description: '按关键词检索当前用户的历史会话内容。',
+            description: '按关键词检索当前用户的历史会话内容，可限定会话与时间范围；结果含可打开的来源引用。',
             input_schema: asJsonSchema({
                 query: { type: 'string' },
+                sessionId: { type: 'string', description: '可选，仅检索当前用户拥有的指定会话。' },
+                from: { type: 'string', description: '可选，ISO 8601 起始时间。' },
+                to: { type: 'string', description: '可选，ISO 8601 结束时间。' },
                 limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 }
             }, ['query'])
         },
@@ -553,7 +618,13 @@ function getBuiltInToolDefinitions(user) {
     ].filter(tool => !tool.admin || adminOnly);
     // Docker 服务镜像只携带 Playwright 包，不携带 Chromium；在工具目录层
     // 隐藏不可用能力，避免模型规划后才触发审批再失败。
-    return definitions.filter(tool => tool.name !== 'agent.browser' || isAgentBrowserRuntimeAvailable());
+    return definitions.filter(tool => {
+        if (tool.name === 'agent.browser') return isAgentBrowserRuntimeAvailable();
+        if (tool.name === 'agent.web_search') return isAgentWebSearchAvailable();
+        if (tool.name === 'agent.image_generate') return isAgentImageGenerationAvailable();
+        if (tool.name === 'agent.text_to_speech') return isAgentTextToSpeechAvailable();
+        return true;
+    });
 }
 
 async function getUserAccessibleModels(user) {
@@ -742,73 +813,12 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
     };
 }
 
-const DELEGATE_ROLE_LABELS = {
-    researcher: '研究员',
-    analyst: '分析员',
-    reviewer: '审阅员',
-    writer: '撰写员',
-    custom: '领域专家'
-};
-
-async function executeAgentDelegate(input = {}, user, context = {}) {
-    const task = String(input.task || '').trim();
-    const agentName = String(input.agentName || input.agent_name || '').trim().slice(0, 80);
-    const role = Object.hasOwn(DELEGATE_ROLE_LABELS, input.role) ? input.role : 'custom';
-    if (!task) throw new Error('委派智能体需要填写明确任务。');
-    if (!agentName) throw new Error('委派智能体需要填写名称。');
-    const modelCfg = await chooseAgentLlmModel(input, user, context);
-    if (!modelCfg) throw new Error('没有可用于委派智能体的模型，或当前用户无权访问指定模型。');
-    const responseFormat = ['markdown', 'text', 'json'].includes(String(input.responseFormat || input.response_format || 'markdown'))
-        ? String(input.responseFormat || input.response_format || 'markdown')
-        : 'markdown';
-    const roleLabel = DELEGATE_ROLE_LABELS[role];
-    const instructions = String(input.instructions || '').trim();
-    const contextText = clampText(input.context || '', 20000);
-    const formatGuide = responseFormat === 'json'
-        ? '只输出合法 JSON，不要使用 Markdown 代码块。'
-        : responseFormat === 'text'
-            ? '输出简洁纯文本。'
-            : '输出结构清晰的 Markdown。';
-    const messages = [
-        {
-            role: 'system',
-            content: [
-                `你是 Pivot 多智能体团队中的“${agentName}”，职责是${roleLabel}。`,
-                '你只处理当前委派任务，不擅自扩展目标；明确区分事实、推断和未知信息。',
-                instructions,
-                formatGuide
-            ].filter(Boolean).join('\n')
-        },
-        {
-            role: 'user',
-            content: [
-                `委派任务：\n${task}`,
-                contextText ? `可用上下文：\n${contextText}` : '',
-                '请给出可直接交给 Supervisor 审核的结果，并指出关键依据、风险和仍待确认的问题。'
-            ].filter(Boolean).join('\n\n')
-        }
-    ];
-    const temperature = Math.max(0, Math.min(Number(input.temperature ?? 0.2), 2));
-    const maxTokens = resolveWorkflowMaxTokens(input, modelCfg);
-    const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
-    const usageRef = {};
-    const content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
-    await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '', { usageRef });
-    return {
-        content,
-        text: content,
-        agent: { name: agentName, role, roleLabel, modelId: modelCfg.id, modelName: modelCfg.name },
-        handoff: {
-            fromAgent: agentName,
-            toAgent: 'Supervisor',
-            summary: content,
-            status: 'ready',
-            createdAt: new Date().toISOString()
-        },
-        responseFormat,
-        contextBudget: fitted.metadata
-    };
-}
+const executeAgentDelegate = createAgentDelegateExecutor({
+    callModelText, recordAgentModelUsage, chooseAgentLlmModel, clampText,
+    fitMessagesToContextBudget, isNativeStructuredOutputUnsupported,
+    normalizeJsonSchema, requestStructuredOutput, resolveWorkflowMaxTokens,
+    schemaHasRules, validateJsonSchemaDefinition, validateStructuredOutput
+});
 
 function normalizeHandoffList(value, limit = 30) {
     const source = Array.isArray(value) ? value : (value ? [value] : []);
@@ -938,10 +948,15 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         if (typeof chatBridge === 'string') {
             try { chatBridge = JSON.parse(chatBridge); } catch (_) { chatBridge = null; }
         }
+        const runContextConfig = normalizeContextConfig(context?.run?.context_config || context?.run?.contextConfig || {});
+        // 显式选择的项目资料包优先且只能收窄范围；RAG 内部仍会再次执行当前 ACL。
+        const scope = runContextConfig.collectionIds.length
+            ? { collectionIds: runContextConfig.collectionIds }
+            : (chatBridge?.ragScope && typeof chatBridge.ragScope === 'object' ? chatBridge.ragScope : {});
         const result = await debugRetrieveContext(user.id, query, {
             topK: parsePositiveInt(input.topK, 5, 10),
             candidateLimit: parsePositiveInt(input.candidateLimit, 80, 200),
-            scope: chatBridge?.ragScope && typeof chatBridge.ragScope === 'object' ? chatBridge.ragScope : {},
+            scope,
             user
         });
         return {
@@ -957,19 +972,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     }
 
     if (name === 'sessions.search') {
-        const searchQuery = String(input.query || '').trim();
-        if (!searchQuery) throw new Error('请填写检索关键词。');
-        const like = `%${searchQuery}%`;
-        const limit = parsePositiveInt(input.limit, 8, 20);
-        return await query(`
-            SELECT m.id, m.session_id, s.title, m.role, substring(m.content from 1 for 1200) AS content, m.created_at
-            FROM messages m
-            JOIN sessions s ON s.id = m.session_id
-            WHERE m.user_id = ? AND m.deleted_at IS NULL AND s.deleted_at IS NULL
-              AND m.content LIKE ?
-            ORDER BY m.created_at DESC
-            LIMIT ?
-        `, [user.id, like, limit]);
+        return await searchUserSessions(user, input);
     }
 
     if (name === 'sessions.recent') {
@@ -1020,6 +1023,15 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
 
     if (name === 'agent.http') {
         return executeAgentHttp(input, user, context);
+    }
+    if (name === 'agent.web_search') {
+        return executeAgentWebSearch(input, user, context);
+    }
+    if (name === 'agent.image_generate') {
+        return executeAgentImageGeneration(input, user, context);
+    }
+    if (name === 'agent.text_to_speech') {
+        return executeAgentTextToSpeech(input, user, context);
     }
 
     if (name === 'agent.browser') {

@@ -6,6 +6,9 @@ const { listAgentArtifacts } = require('./agent-artifacts');
 const { listRuns } = require('./agent-runs');
 const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
 const { formatAgentStatus } = require('./agent-validators');
+const { getAgentProfile } = require('./agent-profile');
+const { getMemorySummary, isLongTermMemoryEnabled } = require('./long-term-memory');
+const { getAgentLearningOverview } = require('./agent-learning');
 
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
 const DEFAULT_SHORTCUTS = ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
@@ -55,7 +58,7 @@ function toRecentWork(kind, record) {
 }
 
 async function getPersonalWorkbench(user) {
-    const [inbox, goals, artifacts, sessions, runs, completedArtifactCount, shortcutSetting] = await Promise.all([
+    const [inbox, goals, artifacts, sessions, runs, completedArtifactCount, shortcutSetting, profile, memorySummary, learning] = await Promise.all([
         safe(() => listAgentInbox(user, { limit: 4 }), { data: [], unread: 0, total: 0 }),
         safe(() => listAgentGoals(user, { status: 'active', limit: 3 }), []),
         safe(() => listAgentArtifacts(user, 4), []),
@@ -83,7 +86,10 @@ async function getPersonalWorkbench(user) {
             const r = Number(runResult?.total || 0);
             return Math.max(a, r);
         }, 0),
-        safe(() => getUserSettingValueAsync(user.id, SHORTCUT_SETTING_KEY), '')
+        safe(() => getUserSettingValueAsync(user.id, SHORTCUT_SETTING_KEY), ''),
+        safe(() => getAgentProfile(user.id), null),
+        safe(() => getMemorySummary(user.id, isLongTermMemoryEnabled), {}),
+        safe(() => getAgentLearningOverview(user), { experiences: [], proposals: [], settings: {} })
     ]);
     const actionableInbox = (inbox.data || []).filter(item => {
         if (!item) return false;
@@ -114,7 +120,20 @@ async function getPersonalWorkbench(user) {
         inbox: actionableInbox.slice(0, 3),
         goals: goals.slice(0, 3),
         recentWork,
-        shortcuts: normalizeShortcuts(shortcutSetting)
+        shortcuts: normalizeShortcuts(shortcutSetting),
+        assistant: {
+            displayName: profile?.displayName || '',
+            profileVersion: Number(profile?.version || 0),
+            profileReady: Boolean(profile?.displayName || profile?.role || (profile?.workHabits || []).length || (profile?.commonTasks || []).length),
+            activeMemories: Number(memorySummary?.active || 0),
+            disabledMemories: Number(memorySummary?.disabled || 0),
+            memoryEnabled: memorySummary?.enabled !== false,
+            experiences: Array.isArray(learning?.experiences) ? learning.experiences.length : 0,
+            pendingExperiences: Array.isArray(learning?.proposals)
+                ? learning.proposals.filter(item => ['candidate_created', 'waiting_user_review', 'validation_failed'].includes(String(item?.status || ''))).length
+                : 0,
+            autoLearning: learning?.settings?.autoLearning !== false
+        }
     };
 }
 

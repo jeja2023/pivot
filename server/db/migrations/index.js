@@ -1,20 +1,13 @@
 const crypto = require('crypto');
 const { buildRagSearchContent } = require('../../services/rag-tokenizer'); const regulationsMigrations = require('./regulations');
 const { enterpriseSchemaSql } = require('../schema/enterprise');
-const personalAgentMigrations = require('./personal-agent');
-const personalAgentControlPlaneMigrations = require('./personal-agent-control-plane');
-const agentProductionControlPlaneMigrations = require('./agent-production-control-plane');
-const agentSkillGovernanceMigrations = require('./agent-skill-governance');
-const agentArtifactDeliveryMigrations = require('./agent-artifact-delivery');
-const agentStandaloneArtifactMigrations = require('./agent-standalone-artifacts');
-const agentArtifactCasRefcountMigrations = require('./agent-artifact-cas-refcounts');
-const agentLocalConnectorMigrations = require('./agent-local-connector');
-const agentLearningMigrations = require('./agent-learning');
-const officialWritingDocumentsMigrations = require('./official-writing-documents');
-const agentGoalDispatchLeaseMigrations = require('./agent-goal-dispatch-lease');
-const agentContextAuditContractMigrations = require('./agent-context-audit-contract');
-const modelToolCallCapabilityMigrations = require('./model-tool-call-capabilities');
-const ragOperationsObservabilityMigrations = require('./rag-operations-observability');
+const personalAgentMigrations = require('./personal-agent'); const personalAgentControlPlaneMigrations = require('./personal-agent-control-plane');
+const agentProductionControlPlaneMigrations = require('./agent-production-control-plane'); const agentSkillGovernanceMigrations = require('./agent-skill-governance');
+const agentArtifactDeliveryMigrations = require('./agent-artifact-delivery'); const agentStandaloneArtifactMigrations = require('./agent-standalone-artifacts');
+const agentArtifactCasRefcountMigrations = require('./agent-artifact-cas-refcounts'); const agentLocalConnectorMigrations = require('./agent-local-connector');
+const agentLearningMigrations = require('./agent-learning'); const officialWritingDocumentsMigrations = require('./official-writing-documents');
+const agentGoalDispatchLeaseMigrations = require('./agent-goal-dispatch-lease'); const agentContextAuditContractMigrations = require('./agent-context-audit-contract');
+const modelToolCallCapabilityMigrations = require('./model-tool-call-capabilities'); const ragOperationsObservabilityMigrations = require('./rag-operations-observability');
 const ragPrecisionSignalMigrations = require('./rag-precision-signals');
 const apiKeyScopeExpiryMigrations = require('./api-key-scope-expiry');
 const agentStepUniqueIndexMigrations = require('./agent-step-unique-index');
@@ -33,6 +26,10 @@ const agentRunMetadataJsonbCompatibilityMigrations = require('./agent-run-metada
 const agentDagReuseProvenanceMigrations = require('./agent-dag-reuse-provenance'); const agentDagOutputRefcountMigrations = require('./agent-dag-output-refcounts');
 const agentEvaluationCaseSnapshotMigrations = require('./agent-evaluation-case-snapshots'); const agentWorkflowInvocationMigrations = require('./agent-workflow-invocations');
 const workflowApiOperationMigrations = require('./workflow-api-operations'); const agentRunConcurrencyLeaseMigrations = require('./agent-run-concurrency-leases'); const agentDagErrorInfoMigrations = require('./agent-dag-error-info');
+const agentChannelGatewayMigrations = require('./agent-channel-gateway-migrations');
+const agentWorkflowIterationItemMigrations = require('./agent-workflow-iteration-items');
+const agentWorkflowTriggerEventMigrations = require('./agent-workflow-trigger-events');
+const agentWorkflowReleaseReviewMigrations = require('./agent-workflow-release-review');
 const chatAdaptiveRoutingMigrations = require('./chat-adaptive-routing');
 function archiveDeletedUsernameInSqlite(database, userId) {
     const normalizedUserId = Number.parseInt(userId, 10);
@@ -991,6 +988,10 @@ const migrations = [
     ...agentRunMetadataJsonbCompatibilityMigrations,
     ...agentDagReuseProvenanceMigrations, ...agentDagOutputRefcountMigrations, ...agentEvaluationCaseSnapshotMigrations,
     ...agentWorkflowInvocationMigrations, ...workflowApiOperationMigrations, ...agentRunConcurrencyLeaseMigrations, ...agentDagErrorInfoMigrations,
+    ...agentChannelGatewayMigrations,
+    ...agentWorkflowIterationItemMigrations,
+    ...agentWorkflowTriggerEventMigrations,
+    ...agentWorkflowReleaseReviewMigrations,
     ...chatAdaptiveRoutingMigrations
 ];
 

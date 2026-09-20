@@ -319,6 +319,28 @@ function agentTablesSql() {
             FOREIGN KEY (workflow_id) REFERENCES agent_workflows(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS agent_workflow_trigger_events (
+            id TEXT PRIMARY KEY,
+            trigger_id INTEGER NOT NULL,
+            run_id TEXT,
+            replay_of_event_id TEXT,
+            event_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'received',
+            dedupe_key TEXT DEFAULT '',
+            watermark_before TEXT DEFAULT '',
+            watermark_after TEXT DEFAULT '',
+            input_json TEXT NOT NULL DEFAULT '{}',
+            source_meta_json TEXT NOT NULL DEFAULT '{}',
+            goal TEXT DEFAULT '',
+            error_message TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            FOREIGN KEY (trigger_id) REFERENCES agent_workflow_triggers(id) ON DELETE CASCADE,
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL,
+            FOREIGN KEY (replay_of_event_id) REFERENCES agent_workflow_trigger_events(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS workflow_credentials (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -427,6 +449,27 @@ function agentTablesSql() {
             updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
             completed_at DATETIME,
             UNIQUE(run_id, invocation_path),
+            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_workflow_iteration_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            iteration_key TEXT NOT NULL,
+            input_index INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            input_digest TEXT NOT NULL,
+            workflow_id INTEGER NOT NULL,
+            workflow_version_id INTEGER,
+            invocation_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            input_json TEXT NOT NULL DEFAULT '{}',
+            result_json TEXT,
+            error_message TEXT DEFAULT '',
+            created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+            completed_at DATETIME,
+            UNIQUE(run_id, iteration_key, input_index),
             FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
         );
 

@@ -22,7 +22,7 @@
         inbox: [], inboxPage: 1, inboxLimit: 20,
         goals: [], goalsPage: 1, goalsLimit: 8,
         reliability: [], reliabilityPage: 1, reliabilityLimit: 15,
-        quality: null, channels: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
+        quality: null, channels: [], deliveries: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
     };
     // 控制面会在打开工作台、切换子页和保存操作后重复刷新。只允许最新一轮
     // 请求提交状态，避免旧请求在创建目标后返回并把新列表覆盖掉。
@@ -65,8 +65,6 @@
         return INBOX_TITLE_MAP[raw.toLowerCase()] || INBOX_TITLE_MAP[raw] || raw || '未命名通知';
     };
     const formatInboxBody = text => String(text || '-').replace(/任务状态：\s*([a-zA-Z_]+)/g, (_, s) => `任务状态：${window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s) || s}`);
-
-
     const formatGoalTrigger = (spec = {}) => {
         const type = spec?.type || spec?.trigger_type || 'timer';
         if (type === 'timer') return `定时 ${spec?.timeOfDay || spec?.time || '09:00'}`;
@@ -75,7 +73,6 @@
         if (type === 'database') return '数据变更增量监控';
         return '手动触发';
     };
-
     function openGoalModal(goal = null, defaults = null) {
         const modal = document.getElementById('agent-goal-modal');
         if (!modal) return;
@@ -88,6 +85,13 @@
         const descEl = document.getElementById('agent-goal-modal-desc');
         const editIdInput = document.getElementById('agent-goal-edit-id');
         const submitBtn = document.getElementById('agent-goal-submit');
+        personalExperience.setGoalModalMode(goal);
+        const deliverySelect = document.getElementById('agent-goal-delivery-channel');
+        if (deliverySelect) {
+            const current = goal?.authorizationSpec?.deliveryBindingIds?.[0] || '';
+            setMarkup(deliverySelect, `<option value="">仅在 Pivot 待办中心查看</option>${state.channels.map(channel => `<option value="${escapeAttr(channel.id)}">${escape(channel.channelType)} · ${escape(channel.channelKey)}</option>`).join('')}`);
+            deliverySelect.value = current;
+        }
 
         if (goal) {
             if (titleEl) titleEl.textContent = '编辑持续目标';
@@ -105,6 +109,10 @@
             if (type === 'timer') { const el = document.getElementById('agent-goal-time'); if (el) el.value = spec.timeOfDay || spec.time || '09:00'; }
             else if (type === 'file') { const el = document.getElementById('agent-goal-directory'); if (el) el.value = spec.directory || ''; }
             else if (type === 'database') { const el = document.getElementById('agent-goal-query'); if (el) el.value = spec.query || ''; }
+            const auth = goal.authorizationSpec || {};
+            if (document.getElementById('agent-goal-timezone')) document.getElementById('agent-goal-timezone').value = auth.timezone || 'Asia/Shanghai';
+            if (document.getElementById('agent-goal-model-router')) document.getElementById('agent-goal-model-router').value = auth.modelRouter || 'fixed';
+            if (document.getElementById('agent-goal-retention-days')) document.getElementById('agent-goal-retention-days').value = auth.resultRetentionDays || 30;
         } else {
             if (titleEl) titleEl.textContent = '新建持续目标';
             if (descEl) descEl.textContent = '配置由定时调度或外部事件源自动触发的自主 Agent 持续目标';
@@ -131,15 +139,14 @@
 
         setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
     }
-
     function closeGoalModal() {
         const modal = document.getElementById('agent-goal-modal');
         if (modal) { modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
         const editIdInput = document.getElementById('agent-goal-edit-id');
         if (editIdInput) editIdInput.value = '';
+        personalExperience.clearGoalDraft();
         document.getElementById('agent-goal-editor')?.reset();
     }
-
     function renderAgentControlPlane() {
         const inboxPanel = document.getElementById('agent-inbox-panel');
         const goalsPanel = document.getElementById('agent-goals-panel');
@@ -283,10 +290,14 @@
         }
         if (channelsPanel) {
             const chStatusBadge = (s) => s === 'active' ? `<span class="agent-inbox-type-badge badge-run">● 活跃</span>` : s === 'error' ? `<span class="agent-inbox-type-badge badge-approval">✕ 异常</span>` : `<span class="agent-inbox-type-badge badge-event">○ 停用</span>`;
+            const deliveryRows = Array.isArray(state.deliveries) ? state.deliveries : [];
+            const deliveryMarkup = deliveryRows.length
+                ? `<section class="agent-channel-deliveries"><div class="agent-harness-subhead"><strong>投递状态</strong><span>任务完成与外部送达分开记录；失败可单独重投。</span></div><div class="aht-wrap"><table class="aht"><thead><tr><th>主题</th><th style="width:90px" class="tc">状态</th><th style="width:70px" class="tc">尝试</th><th>最近错误</th><th style="width:120px" class="tc">操作</th></tr></thead><tbody>${deliveryRows.slice(0, 20).map(item => `<tr><td title="${escapeAttr(item.subject || item.eventType)}">${escape(shortText(item.subject || item.eventType || '渠道投递', 36))}</td><td class="tc">${item.status === 'delivered' ? '<span class="agent-inbox-type-badge badge-run">已送达</span>' : item.status === 'dead_letter' ? '<span class="agent-inbox-type-badge badge-approval">投递失败</span>' : '<span class="agent-inbox-type-badge badge-event">等待投递</span>'}</td><td class="tc">${Number(item.attempts || 0)}</td><td title="${escapeAttr(item.lastError || '')}">${escape(shortText(item.lastError || '—', 60))}</td><td class="tc">${['dead_letter', 'queued'].includes(item.status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-channel-delivery-retry="${escapeAttr(item.id)}">重投</button>` : '—'}</td></tr>`).join('')}</tbody></table></div></section>`
+                : '<div class="agent-channel-delivery-empty">尚无渠道投递记录。</div>';
             const chListHtml = state.channels.length
-                ? `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:100px">渠道类型</th><th>目标地址 / 用户标识</th><th style="width:130px">凭据引用</th><th style="width:80px" class="tc">状态</th><th style="width:60px" class="tc">操作</th></tr></thead><tbody>${state.channels.map((ch, i) => `<tr><td class="tc font-mono">${i + 1}</td><td>${escape(ch.channelType)}</td><td title="${escapeAttr(ch.channelKey)}">${escape(ch.channelKey)}</td><td class="mono">${escape(ch.credentialRef || '—')}</td><td class="tc">${chStatusBadge(ch.status)}</td><td class="tc"><div class="aht-actions"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(ch.id)}">测试</button></div></td></tr>`).join('')}</tbody></table></div>`
+                ? `<div class="aht-wrap"><table class="aht"><thead><tr><th style="width:56px" class="tc">序号</th><th style="width:100px">渠道类型</th><th>目标地址 / 用户标识</th><th style="width:130px">凭据引用</th><th style="width:80px" class="tc">状态</th><th style="width:190px" class="tc">操作</th></tr></thead><tbody>${state.channels.map((ch, i) => `<tr><td class="tc font-mono">${i + 1}</td><td>${escape(ch.channelType)}</td><td title="${escapeAttr(ch.channelKey)}">${escape(ch.channelKey)}</td><td class="mono">${escape(ch.credentialRef || '—')}</td><td class="tc">${chStatusBadge(ch.status)}</td><td class="tc"><div class="aht-actions"><button type="button" class="btn-secondary btn-xs" data-agent-channel-test="${escapeAttr(ch.id)}">测试</button><button type="button" class="btn-secondary btn-xs" data-agent-channel-pair="${escapeAttr(ch.id)}">配对码</button><button type="button" class="btn-secondary btn-xs" data-agent-channel-sessions="${escapeAttr(ch.id)}">会话</button></div></td></tr>`).join('')}</tbody></table></div><div class="agent-channel-gateway-details">${personalExperience.renderGatewayDetails(state.channels)}</div>`
                 : '<div class="agent-harness-empty-card">暂无活跃外部通知渠道</div>';
-            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">外部推送</option><option value="im">企业 IM（企微/钉钉/飞书）</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>平台</span><select id="agent-channel-platform" class="form-input"><option value="wecom">企业微信</option><option value="feishu">飞书</option><option value="dingtalk">钉钉</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="受控 Endpoint 或接收人标识"></label><label class="modal-form-field"><span>凭据引用（可选）</span><input id="agent-channel-credential" class="form-input" placeholder="凭据别名"></label><label class="modal-form-field"><span>网关 Endpoint（可选）</span><input id="agent-channel-endpoint" class="form-input" placeholder="受控 HTTPS Endpoint"></label></div><div class="agent-channel-form-actions"><span class="agent-channel-form-hint">IM 渠道的平台、Endpoint 和凭据由受控绑定保存；工作流节点只引用绑定 ID。</span><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${chListHtml}`);
+            setMarkup(channelsPanel, `<div class="agent-channel-editor-form"><div class="agent-channel-form-row"><label class="modal-form-field"><span>渠道类型</span><select id="agent-channel-type" class="form-input"><option value="webhook">外部推送</option><option value="im">企业 IM（企微/钉钉/飞书）</option><option value="email">邮件通知</option><option value="web">Web 弹窗</option></select></label><label class="modal-form-field"><span>平台</span><select id="agent-channel-platform" class="form-input"><option value="wecom">企业微信</option><option value="feishu">飞书</option><option value="dingtalk">钉钉</option></select></label><label class="modal-form-field"><span>目标地址 / 用户标识</span><input id="agent-channel-key" class="form-input" placeholder="受控 Endpoint 或接收人标识"></label><label class="modal-form-field"><span>签名凭据引用</span><input id="agent-channel-credential" class="form-input" placeholder="双向 Gateway 必填"></label><label class="modal-form-field"><span>网关 Endpoint（可选）</span><input id="agent-channel-endpoint" class="form-input" placeholder="受控 HTTPS Endpoint"></label><label class="agent-channel-gateway-switch"><input id="agent-channel-gateway-enabled" type="checkbox"><span><strong>启用双向会话 Gateway</strong><small>外部消息需签名并完成一次性配对。</small></span></label></div><div class="agent-channel-form-actions"><span class="agent-channel-form-hint">双向模式只接受已配对身份；运行结果按持久队列回投，失败不会重复执行任务。</span><button type="button" class="btn-primary btn-xs" data-agent-channel-create>+ 添加渠道</button></div></div>${chListHtml}${deliveryMarkup}`);
         }
         if (reliabilityPanel) {
             const page = Math.max(1, Number(state.reliabilityPage || 1));
@@ -332,12 +343,13 @@
         controlPlaneLoadController = controller;
         const requestOptions = { cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) };
         try {
-            const [inbox, goals, reliability, quality, channels] = await Promise.all([
+            const [inbox, goals, reliability, quality, channels, deliveries] = await Promise.all([
                 apiJson(`${API_BASE}/agents/inbox?limit=100`, requestOptions),
                 apiJson(`${API_BASE}/agents/goals?limit=50`, requestOptions),
                 apiJson(`${API_BASE}/agents/tools/reliability?days=30`, requestOptions),
                 apiJson(`${API_BASE}/agents/quality?days=30`, requestOptions).catch(() => ({ dashboard: null })),
-                apiJson(`${API_BASE}/agents/channels?status=active`, requestOptions).catch(() => ({ data: [] }))
+                apiJson(`${API_BASE}/agents/channels?status=active`, requestOptions).catch(() => ({ data: [] })),
+                apiJson(`${API_BASE}/agents/channels/deliveries?limit=20`, requestOptions).catch(() => ({ data: [] }))
             ]);
             if (sequence !== controlPlaneLoadSequence) return false;
             state.inbox = Array.isArray(inbox.data) ? inbox.data : [];
@@ -345,6 +357,7 @@
             state.reliability = Array.isArray(reliability.signals) ? reliability.signals : [];
             state.quality = quality.dashboard || null;
             state.channels = Array.isArray(channels.data) ? channels.data : [];
+            state.deliveries = Array.isArray(deliveries.data) ? deliveries.data : [];
             window.Pivot.modules = window.Pivot.modules || {};
             window.Pivot.modules.agentChannelBindings = () => state.channels.slice();
             renderAgentControlPlane();
@@ -361,51 +374,6 @@
             throw error;
         } finally {
             if (controlPlaneLoadController === controller) controlPlaneLoadController = null;
-        }
-    }
-
-    async function saveAgentGoal(event) {
-        event.preventDefault();
-        const editId = document.getElementById('agent-goal-edit-id')?.value;
-        const triggerType = document.getElementById('agent-goal-trigger')?.value || 'timer';
-        const triggerSpec = triggerType === 'timer' ? { type: 'timer', frequency: 'daily', timeOfDay: document.getElementById('agent-goal-time')?.value || '09:00' } : triggerType === 'file' ? { type: 'file', directory: document.getElementById('agent-goal-directory')?.value || '' } : triggerType === 'database' ? { type: 'database', query: document.getElementById('agent-goal-query')?.value || '' } : { type: triggerType };
-        const payload = {
-            title: document.getElementById('agent-goal-title')?.value,
-            goal: document.getElementById('agent-goal-goal')?.value,
-            triggerSpec
-        };
-
-        try {
-            if (editId) {
-                await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(editId)}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                closeGoalModal();
-                if (typeof showToast === 'function') showToast('持续目标已成功修改', 'success');
-                setNotice('持续目标已修改。', 'success');
-            } else {
-                const response = await apiJson(`${API_BASE}/agents/goals`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const tokenNotice = document.getElementById('agent-goal-token-notice');
-                if (tokenNotice && response.token) {
-                    tokenNotice.textContent = `Webhook 令牌（仅展示一次，请妥善保存）：${response.token}`;
-                    tokenNotice.classList.remove('hidden');
-                } else {
-                    closeGoalModal();
-                }
-                if (typeof showToast === 'function') showToast('持续目标已成功创建', 'success');
-                setNotice('持续目标已创建。', 'success');
-            }
-            await loadControlPlane();
-        } catch (error) {
-            const actionName = editId ? '修改' : '创建';
-            if (typeof showToast === 'function') showToast(error.message || `持续目标${actionName}失败`, 'error');
-            setNotice(error.message || `持续目标${actionName}失败。`, 'error');
         }
     }
 
@@ -459,6 +427,10 @@
         if (!response.ok) throw new Error(data.error || data.message || `请求失败（${response.status}）`);
         return data;
     }
+
+    const personalExperience = window.Pivot.moduleApi('agent.personalExperience').create({
+        state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane
+    });
 
     function renderSkills() {
         const list = document.getElementById('agent-harness-skill-list');
@@ -518,6 +490,7 @@
         });
         renderSkills();
         populateSkillSelect();
+        personalExperience.loadCapabilityCatalog().catch(error => setNotice(error.message || '能力目录加载失败。', 'error'));
         return state.skills;
     }
 
@@ -1076,6 +1049,7 @@
         });
 
         document.getElementById('agent-harness-skills-refresh')?.addEventListener('click', () => loadSkills().catch(error => setNotice(error.message, 'error')));
+        personalExperience.bindControls();
         document.getElementById('agent-harness-residency-refresh')?.addEventListener('click', () => loadResidents().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-scope')?.addEventListener('change', () => loadResidents().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-sweep')?.addEventListener('click', () => sweepResidents());
@@ -1128,13 +1102,8 @@
         document.getElementById('agent-goal-cancel')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal-close')?.addEventListener('click', closeGoalModal);
         document.getElementById('agent-goal-modal')?.addEventListener('click', event => { if (event.target.id === 'agent-goal-modal') closeGoalModal(); });
-        document.getElementById('agent-goal-editor')?.addEventListener('submit', saveAgentGoal);
-        document.getElementById('agent-goal-trigger')?.addEventListener('change', event => {
-            const type = event.target.value;
-            document.getElementById('agent-goal-time-field')?.classList.toggle('hidden', type !== 'timer');
-            document.getElementById('agent-goal-directory-field')?.classList.toggle('hidden', type !== 'file');
-            document.getElementById('agent-goal-query-field')?.classList.toggle('hidden', type !== 'database');
-        });
+        document.getElementById('agent-goal-editor')?.addEventListener('submit', event => personalExperience.saveGoal(event, { close: closeGoalModal, reload: loadControlPlane }));
+        document.getElementById('agent-goal-preview')?.addEventListener('click', () => personalExperience.previewGoal({ close: closeGoalModal }));
         document.getElementById('agent-inbox-read-all')?.addEventListener('click', async () => {
             const unreadItems = state.inbox.filter(item => item.unread);
             if (!unreadItems.length) {
@@ -1227,15 +1196,19 @@
             }
         });
         document.getElementById('agent-channels-panel')?.addEventListener('click', event => {
+            if (personalExperience.handleGatewayAction(event)) return;
             const create = event.target.closest('[data-agent-channel-create]');
             if (create) {
                 const channelType = document.getElementById('agent-channel-type')?.value;
                 const endpoint = document.getElementById('agent-channel-endpoint')?.value;
                 const platform = document.getElementById('agent-channel-platform')?.value;
-                apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint, url: endpoint, ...(channelType === 'im' ? { platform } : {}) } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
+                const gatewayEnabled = document.getElementById('agent-channel-gateway-enabled')?.checked === true;
+                apiJson(`${API_BASE}/agents/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelType, channelKey: document.getElementById('agent-channel-key')?.value, credentialRef: document.getElementById('agent-channel-credential')?.value, config: { endpoint, url: endpoint, ...(channelType === 'im' ? { platform } : {}), ...(gatewayEnabled ? { gateway: { enabled: true } } : {}) } }) }).then(() => loadControlPlane()).catch(error => setNotice(error.message, 'error'));
             }
             const test = event.target.closest('[data-agent-channel-test]');
             if (test) apiJson(`${API_BASE}/agents/channels/${encodeURIComponent(test.dataset.agentChannelTest)}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Pivot 渠道连通性测试' }) }).then(() => setNotice('渠道测试已提交。', 'success')).catch(error => setNotice(error.message, 'error'));
+            const retry = event.target.closest('[data-agent-channel-delivery-retry]');
+            if (retry) apiJson(`${API_BASE}/agents/channels/deliveries/${encodeURIComponent(retry.dataset.agentChannelDeliveryRetry)}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(() => { setNotice('渠道投递已重新入队。', 'success'); return loadControlPlane(); }).catch(error => setNotice(error.message, 'error'));
         });
         loadControlPlane().catch(() => { });
     }

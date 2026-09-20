@@ -12,7 +12,11 @@ const {
     TERMINAL_STATUSES,
     releaseChildRunReservation,
     persistAgentRunChatResult,
+    deliverChannelGatewayRunResult,
+    deliverGoalRunResult,
+    recordCollaboratorCompletion,
     recordAgentRunOutcome,
+    recordFirstTaskTerminal,
     recordAgentEvent,
     publishUserEvent,
     parseJsonObject,
@@ -27,9 +31,28 @@ async function finalizeTerminalRun(runId, targetStatus) {
     try { await persistAgentRunChatResult(runId); } catch (chatBridgeError) {
         logger.error({ runId, err: chatBridgeError.message }, 'Agent 聊天结果回写失败');
     }
+    if (targetStatus !== 'deleted' && typeof deliverChannelGatewayRunResult === 'function') {
+        try { await deliverChannelGatewayRunResult(runId, targetStatus); } catch (gatewayError) {
+            // 运行结果已经持久化；渠道投递故障交给持久 outbox 重试，不能回滚终态。
+            logger.error({ runId, err: gatewayError.message }, 'Agent 渠道结果投递入队失败');
+        }
+    }
+    if (targetStatus !== 'deleted' && typeof deliverGoalRunResult === 'function') {
+        try { await deliverGoalRunResult(runId, targetStatus); } catch (goalDeliveryError) {
+            logger.error({ runId, err: goalDeliveryError.message }, '持续目标结果投递入队失败');
+        }
+    }
+    if (targetStatus !== 'deleted' && typeof recordCollaboratorCompletion === 'function') {
+        try { await recordCollaboratorCompletion(runId, targetStatus); } catch (collaborationError) {
+            logger.error({ runId, err: collaborationError.message }, 'Agent 协作完成消息投递失败');
+        }
+    }
     if (targetStatus !== 'deleted') {
         try { await recordAgentRunOutcome(runId, targetStatus); } catch (feedbackError) {
             logger.warn({ runId, err: feedbackError.message }, 'Agent 结果反馈基线写入失败');
+        }
+        try { await recordFirstTaskTerminal?.(runId, targetStatus); } catch (experienceError) {
+            logger.warn({ runId, err: experienceError.message }, 'Agent 首任务体验事件写入失败');
         }
     }
 }

@@ -360,7 +360,9 @@ async function updateAgentWorkflow(workflowId, user, body = {}) {
             FROM agent_workflows w
             LEFT JOIN agent_workflow_versions v ON v.id = w.current_version_id
             WHERE w.id = ? AND w.user_id = ? AND w.deleted_at IS NULL
-            FOR UPDATE
+            -- v 可能为空（例如迁移或异常修复期间）；PostgreSQL 不允许锁定
+            -- LEFT JOIN 的可空侧。只锁定工作流主记录即可保护版本 CAS。
+            FOR UPDATE OF w
         `, [current.id, user.id]);
         if (!locked) return null;
         if (Number.isInteger(expectedVersion) && expectedVersion > 0 && Number(locked.current_version || 0) !== expectedVersion) {

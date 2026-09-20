@@ -95,6 +95,11 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     if (String(contextConfig?.skillInstructions || '').trim()) {
         contextLines.push(`个人经验（已验证 Skill）：${String(contextConfig.skillTitle || '个人经验')}\n${String(contextConfig.skillInstructions).slice(0, 12000)}`);
     }
+    const projectCollections = Array.isArray(contextConfig?.projectContextPack?.collections)
+        ? contextConfig.projectContextPack.collections : [];
+    if (projectCollections.length) {
+        contextLines.push(`本任务仅可把以下项目资料包作为知识库检索范围：${projectCollections.map(collection => String(collection.name || collection.id)).join('、')}。需要资料时使用 rag.search；不要声称可访问包外资料。`);
+    }
     const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
     const messages = [
         {

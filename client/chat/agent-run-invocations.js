@@ -20,5 +20,22 @@ function appendAgentWorkflowInvocationList(container, invocations = []) {
     PivotSafeHtml.setHtml(host, markup);
     while (host.firstChild) container.appendChild(host.firstChild);
 }
-window.Pivot.registerModule('agent.runInvocations', { appendAgentWorkflowInvocationList, renderAgentWorkflowInvocationList });
+
+function renderAgentWorkflowIterationItems(items = []) {
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) return '';
+    const statusText = status => ({ completed: '完成', running: '执行中', error: '失败', pending: '等待中' }[String(status || '').toLowerCase()] || String(status || '未知'));
+    return `<section class="agent-run-invocations agent-run-iteration-items"><div class="agent-tool-section-head compact"><strong>逐项子工作流</strong><span>${rows.length} 项</span></div><div class="agent-step-list">${rows.map(item => `<details class="agent-step-item"><summary><span><strong>第 ${Number(item.input_index ?? item.inputIndex) + 1} 项${item.item_id ? ` · ${agentEscape(String(item.item_id).slice(0, 10))}` : ''}</strong><small>工作流 ${agentEscape(item.workflow_id || '-')} · 版本 ${agentEscape(item.workflow_version_id || '-')}</small></span><em class="agent-step-status ${agentEscape(String(item.status || ''))}">${agentEscape(statusText(item.status))}</em></summary><div class="agent-step-detail">${item.error_message ? `<div class="error-detail">${agentEscape(item.error_message)}</div>` : ''}${item.result_json ? `<pre>${agentEscape(JSON.stringify(item.result_json, null, 2))}</pre>` : ''}</div></details>`).join('')}</div></section>`;
+}
+
+function appendAgentWorkflowRunRelations(container, { invocations = [], iterationItems = [] } = {}) {
+    appendAgentWorkflowInvocationList(container, invocations);
+    const markup = renderAgentWorkflowIterationItems(iterationItems);
+    if (!container || !markup) return;
+    const host = document.createElement('div');
+    PivotSafeHtml.setHtml(host, markup);
+    while (host.firstChild) container.appendChild(host.firstChild);
+}
+
+window.Pivot.registerModule('agent.runInvocations', { appendAgentWorkflowInvocationList, appendAgentWorkflowRunRelations, renderAgentWorkflowInvocationList, renderAgentWorkflowIterationItems });
 })();

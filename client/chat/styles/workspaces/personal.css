@@ -352,6 +352,21 @@
     line-height: 1.3;
 }
 
+.personal-hero { gap: 18px; }
+.personal-hero-start { position: relative; z-index: 1; width: min(430px, 52%); }
+.personal-hero-start input { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,255,255,.48); border-radius: 8px; padding: 9px 10px; color: var(--text-main); background: var(--surface); }
+.personal-hero-actions, .personal-hero-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.personal-hero-actions .btn-primary { background: var(--surface); color: var(--primary); border-color: var(--surface); }
+.personal-hero-start small { display: block; margin-top: 7px; font-size: .68rem; opacity: .9; line-height: 1.25; }
+.personal-hero-examples button { border: 0; border-radius: 999px; padding: 3px 8px; color: inherit; background: rgba(255,255,255,.16); cursor: pointer; font-size: .68rem; }
+.personal-onboarding-dialog { width: min(560px, calc(100vw - 28px)); }
+.personal-onboarding-head { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
+.personal-onboarding-head h3 { margin: 0; }.personal-onboarding-head p { margin: 6px 0 0; color: var(--text-muted); font-size: .85rem; }
+.personal-onboarding-progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 20px 0; }
+.personal-onboarding-progress span { display:grid; place-items:center; height:24px; border-radius:999px; background:var(--bg-hover); color:var(--text-muted); font-size:.75rem; }.personal-onboarding-progress span.active { background:var(--primary); color:#fff; }
+.personal-onboarding-step { min-height: 160px; }.personal-onboarding-step h4 { margin: 0 0 14px; }.personal-onboarding-step label { display:block; margin: 12px 0; color:var(--text-muted); font-size:.82rem; }.personal-onboarding-step .form-input { display:block; width:100%; box-sizing:border-box; margin-top:5px; }.personal-onboarding-step p { color:var(--text-muted); font-size:.8rem; }.personal-onboarding-check { color:var(--text-main)!important; }.personal-onboarding-check input { margin-right:8px; }
+.personal-onboarding-actions { display:flex; justify-content:space-between; gap:8px; margin-top:16px; }
+
 /* 3 栏 KPI 概览指标卡片 */
 .personal-stats {
     display: grid;
@@ -449,7 +464,7 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: repeat(3, minmax(150px, 1fr));
     gap: 10px;
     margin-bottom: 0;
 }
@@ -1250,4 +1265,3 @@ body.dark-mode .personal-shortcut-add:hover,
         overflow-y: hidden;
     }
 }
-

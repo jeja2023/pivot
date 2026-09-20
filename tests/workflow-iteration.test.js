@@ -6,9 +6,11 @@ const { executeWorkflowIteration } = require('../server/services/agent-dag-runti
 function makeDeps() {
     const invocations = new Map();
     const nodes = new Map();
+    const iterationItems = new Map();
     return {
         invocations,
         nodes,
+        iterationItems,
         async assertRunNotCancelled() {},
         async listDagNodes() { return [...nodes.values()]; },
         async upsertDagNode(_runId, node, patch) {
@@ -19,6 +21,12 @@ function makeDeps() {
         async upsertSubworkflowInvocation(payload) { invocations.set(payload.invocationId, { ...payload }); },
         async getSubworkflowInvocation(_runId, executionPath) {
             return [...invocations.values()].find(item => item.executionPath === executionPath) || null;
+        },
+        async listWorkflowIterationItems(runId, iterationKey) {
+            return [...iterationItems.values()].filter(item => item.runId === runId && item.iterationKey === iterationKey);
+        },
+        async upsertWorkflowIterationItem(payload) {
+            iterationItems.set(`${payload.runId}:${payload.iterationKey}:${payload.inputIndex}`, { ...payload, input_index: payload.inputIndex, input_digest: payload.inputDigest, result_json: payload.result });
         },
         async resolveAgentWorkflowVersion(workflowId, _user, version) {
             return {
@@ -75,6 +83,7 @@ test('逐项调用子工作流保留顺序、调用身份和固定版本', async
     assert.equal([...deps.invocations.values()].every(item => item.workflowVersion === 7 && item.workflowVersionId === 70), true);
     assert.equal([...deps.nodes.values()].some(item => String(item.node_key).includes('item:0')), true);
     assert.equal([...deps.nodes.values()].some(item => String(item.node_key).includes('item:1')), true);
+    assert.equal([...deps.iterationItems.values()].every(item => item.inputDigest && item.itemId), true);
 });
 
 test('逐项调用子工作流按 continue 和 drop 处理失败项', async () => {
@@ -106,4 +115,25 @@ test('逐项调用子工作流按 continue 和 drop 处理失败项', async () =
     const dropped = await executeWorkflowIteration({ input: { ...base, onItemError: 'drop' }, ...common });
     assert.equal(dropped.count, 2);
     assert.deepEqual(dropped.items.map(item => item.inputIndex), [0, 2]);
+});
+
+test('逐项恢复仅复用输入摘要未变化的已完成项', async () => {
+    const deps = makeDeps();
+    const base = {
+        items: [{ name: '甲' }, { name: '乙' }], workflowId: 10, version: '7',
+        inputs: { item: '{{item}}' }, concurrency: 1, onItemError: 'continue'
+    };
+    const common = {
+        run: { id: 'iteration-resume', goal: '逐项恢复', tool_timeout_ms: 30000 }, user: { id: 1 }, modelCfg: null,
+        toolList: [{ name: 'workflow.output', input_schema: { type: 'object' } }], deadline: Date.now() + 30000,
+        deps, parentContext: { dagInputs: {}, states: new Map(), nodeMap: new Map(), callerNodeId: 'iterate' }
+    };
+    await executeWorkflowIteration({ input: base, ...common });
+    const firstInvocationCount = deps.invocations.size;
+    const resumed = await executeWorkflowIteration({ input: base, ...common });
+    assert.equal(resumed.items.every(item => item.reused === true), true);
+    assert.equal(deps.invocations.size, firstInvocationCount);
+    const changed = await executeWorkflowIteration({ input: { ...base, items: [{ name: '甲' }, { name: '新乙' }] }, ...common });
+    assert.equal(changed.items[0].reused, true);
+    assert.equal(changed.items[1].reused, undefined);
 });

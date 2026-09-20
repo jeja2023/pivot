@@ -329,6 +329,8 @@ body.dark-mode .agent-workflow-dependency-summary span,
 .agent-workflow-version-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 6px;
 }
 
@@ -364,6 +366,23 @@ body.dark-mode .agent-workflow-dependency-summary span,
     margin: 4px 0 0;
     color: #475569;
     font-size: 0.72rem;
+}
+
+.agent-workflow-release-impact section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-workflow-release-impact ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.agent-workflow-release-impact li + li {
+    margin-top: 2px;
 }
 
 .agent-workflow-diff-row {

@@ -98,7 +98,7 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
     try {
         const { enqueueAgentLearningJob } = require('./agent-learning');
         const shouldLearn = feedback.source === 'runtime'
-            ? ['success', 'partial'].includes(feedback.outcome)
+            ? ['success', 'partial'].includes(feedback.outcome) && feedback.metadata?.learningEligible === true
             : Boolean(feedback.correction || feedback.modifiedAnswer);
         const trigger = feedback.source === 'runtime'
             ? (Number(run.retry_count || 0) > 0 ? 'recovery' : 'success')
@@ -111,17 +111,27 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
 }
 
 async function recordAgentRunOutcome(runId, status, options = {}) {
-    const run = await queryOne('SELECT id, user_id, status, final_answer, error_message FROM agent_runs WHERE id = ?', [String(runId || '')]);
+    const run = await queryOne('SELECT id, user_id, status, retry_count, final_answer, error_message FROM agent_runs WHERE id = ?', [String(runId || '')]);
     if (!run?.user_id) return null;
     let failures = [];
+    let successfulToolCalls = 0;
     try {
         const rows = await query(`SELECT tool_name AS tool, COUNT(*) AS count FROM agent_tool_calls WHERE run_id = ? AND status IN ('error', 'failed', 'denied') GROUP BY tool_name ORDER BY count DESC LIMIT 20`, [String(run.id)]);
         failures = rows.map(row => ({ tool: row.tool, count: Number(row.count || 0) }));
+        const successful = await queryOne("SELECT COUNT(*) AS count FROM agent_tool_calls WHERE run_id = ? AND status IN ('success', 'completed')", [String(run.id)]);
+        successfulToolCalls = Number(successful?.count || 0);
     } catch (_) {}
     const result = await recordAgentFeedback({ id: run.user_id }, run.id, {
         outcome: ['completed'].includes(String(status)) ? 'success' : ['completed_with_errors'].includes(String(status)) ? 'partial' : 'failure',
         toolFailures: failures,
-        metadata: { status, finalAnswerPresent: Boolean(run.final_answer), error: String(run.error_message || '').slice(0, 500) }
+        metadata: {
+            status,
+            finalAnswerPresent: Boolean(run.final_answer),
+            error: String(run.error_message || '').slice(0, 500),
+            successfulToolCalls,
+            // 自动学习仅来自多步骤成功或失败恢复成功；显式用户反馈另走 correction。
+            learningEligible: successfulToolCalls >= 2 || Number(run.retry_count || 0) > 0
+        }
     }, { source: options.source || 'runtime' });
     try {
         const { recordAgentGoalRunOutcome } = require('./agent-goals');

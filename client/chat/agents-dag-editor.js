@@ -33,7 +33,6 @@ const raf = typeof globalThis.requestAnimationFrame === 'function'
 const caf = typeof globalThis.cancelAnimationFrame === 'function'
     ? handle => globalThis.cancelAnimationFrame(handle)
     : handle => clearTimeout(handle);
-
 function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpenJson, onNodeSelectionChange, readOnly = false }) {
         if (!canvas) return null;
 
@@ -826,6 +825,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const render = () => {
+            dagCoreApi.setDagNodeTestContext?.(spec);
             updateViewBox();
             renderEdges();
             renderNodes();

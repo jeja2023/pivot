@@ -100,6 +100,25 @@ function createTriggersRouter({ triggerLimiter, logAction } = {}) {
         }
     }));
 
+    router.post('/channel/:bindingId/message', limiterGuard, asyncHandler(async (req, res) => {
+        const payload = req.body && typeof req.body === 'object' ? req.body : {};
+        if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > MAX_WEBHOOK_PAYLOAD_BYTES) {
+            return res.status(413).json({ error: '渠道消息内容过大，请精简后重试。' });
+        }
+        try {
+            const { receiveChannelMessage } = require('../services/agent-channel-gateway');
+            const headers = Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key.toLowerCase(), value]));
+            const result = await receiveChannelMessage(req.params.bindingId, payload, headers);
+            if (!result) return res.status(404).json({ error: '渠道不存在或已停用。' });
+            if (typeof logAction === 'function') logAction(req, '渠道双向消息接入', `渠道绑定: ${req.params.bindingId}，任务ID: ${result.runId || '-'}，幂等: ${result.deduped ? '是' : '否'}`);
+            res.status(result.deduped ? 200 : 202).json({ success: true, ...result });
+        } catch (error) {
+            const status = Number(error.status || error.statusCode || 500);
+            logger.warn({ err: error.message, sourceIp: req.ip, bindingId: req.params.bindingId }, '渠道双向消息接入失败');
+            res.status(status).json({ error: status >= 500 ? '渠道消息处理失败，请稍后重试。' : error.message, code: error.code || 'CHANNEL_GATEWAY_ERROR' });
+        }
+    }));
+
     return router;
 }
 

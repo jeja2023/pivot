@@ -23,6 +23,7 @@ const {
     normalizeToolPolicy,
     normalizeApprovalPolicy,
     normalizePositiveInt,
+    normalizeContextConfig,
     serializeContextConfig,
     normalizeDagSpec,
     serializeToolAllowlist,
@@ -46,7 +47,8 @@ const { getAgentLearningSettings } = require('../agent-learning');
 const SKILL_METADATA_KEYS = Object.freeze([
     'skillConstraints', 'skillPermissions', 'skillCapabilities', 'skillTools',
     'skillContextPresent', 'skillLegacyUnrestricted', 'skillLegacyUnrestrictedUntil',
-    'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto'
+    'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto',
+    'skillMatchReason', 'skillMatchScore', 'skillMatchTerms'
 ]);
 const { normalizeTaskBudget } = require('../agent-budget');
 const {
@@ -59,6 +61,7 @@ const {
 const { inferDagRunGoal } = require('./dag-run-config');
 const { buildAgentProfileContext, getAgentProfile } = require('../agent-profile');
 const { getAgentFeedbackSignals } = require('../agent-feedback');
+const { resolveAgentContextPack } = require('../agent-context-packs');
 
 function createAgentRunFactory(deps = {}) {
     const {
@@ -139,6 +142,10 @@ function createAgentRunFactory(deps = {}) {
         const normalizedRunMode = normalizeRunMode(runMode);
         const normalizedRouter = normalizeRouterStrategy(modelRouter);
         const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+        // 项目资料包必须由服务端按当前 ACL 解析；请求体不能伪造包名或快照。
+        delete runMetadata.projectContextPack;
+        const resolvedContext = await resolveAgentContextPack(user, normalizeContextConfig(contextConfig));
+        if (resolvedContext.pack) runMetadata.projectContextPack = resolvedContext.pack;
         // 档案与反馈只作为可审计的运行上下文快照保存；它们不会修改工具权限或审批策略。
         try {
             const profile = await getAgentProfile(user.id);
@@ -162,6 +169,9 @@ function createAgentRunFactory(deps = {}) {
             if (learned?.name) {
                 skillReference = learned.name;
                 runMetadata.learnedSkillAuto = true;
+                runMetadata.skillMatchReason = learned.matchReason || { type: 'personal_skill_match', summary: '与当前任务的标题、说明或标签匹配。' };
+                runMetadata.skillMatchScore = Number(learned.matchReason?.score || 0);
+                runMetadata.skillMatchTerms = Array.isArray(learned.matchReason?.matchedTerms) ? learned.matchReason.matchedTerms.slice(0, 20) : [];
             }
         }
         if (skillReference) {
@@ -177,6 +187,9 @@ function createAgentRunFactory(deps = {}) {
             runMetadata.skillConstraints = skillContext.skillConstraints;
             runMetadata.skillTitle = skillContext.skillTitle || skillContext.skillName;
             runMetadata.skillInstructions = skillContext.skillInstructions || '';
+            if (!runMetadata.skillMatchReason) {
+                runMetadata.skillMatchReason = { type: 'explicit_skill_selection', summary: '用户或流程明确选择了此已发布 Skill。' };
+            }
         }
         const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
@@ -278,7 +291,7 @@ function createAgentRunFactory(deps = {}) {
                 normalizedTemplateId,
                 normalizedScheduleId,
                 normalizedDedupeKey,
-                serializeContextConfig(contextConfig),
+                serializeContextConfig(resolvedContext.contextConfig),
                 normalizePositiveInt(resumeFromStep, 0, 0, 999),
                 JSON.stringify(runMetadata),
                 normalizedRouter,
@@ -316,6 +329,8 @@ function createAgentRunFactory(deps = {}) {
             enqueueAgentRun(runId, user);
         }
         const run = await getRunForUser(runId, user);
+        // 体验漏斗只记录受限的运行元数据；统计写入不能影响任务创建。
+        try { await deps.recordFirstTaskCreated?.(user, run, runMetadata); } catch (_) { }
         if (typeof publishAgentRunEvent === 'function') {
             await publishAgentRunEvent(runId, 'created');
         }

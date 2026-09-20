@@ -66,8 +66,12 @@ async function enqueueAgentLearningJob(user, sourceRunId, triggerType = 'success
     const runId = String(sourceRunId || '').trim();
     const trigger = normalizeTrigger(triggerType);
     if (!Number.isSafeInteger(userId) || userId <= 0 || !runId) return { scheduled: false, reason: 'invalid_input' };
-    const run = await queryOne('SELECT id, user_id, tenant_id, status, model_id, chosen_model_id, metadata, goal, title, final_answer, error_message FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, userId]);
+    const run = await queryOne('SELECT id, user_id, tenant_id, session_id, status, model_id, chosen_model_id, metadata, goal, title, final_answer, error_message FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, userId]);
     if (!run) return { scheduled: false, reason: 'run_not_found' };
+    const sourceSessionId = String(run.session_id || '').trim();
+    if (sourceSessionId && !(await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sourceSessionId, userId]))) {
+        return { scheduled: false, reason: 'source_session_deleted' };
+    }
     if (hasSensitiveContent(`${run.goal || ''}\n${run.final_answer || ''}\n${run.error_message || ''}`)) return { scheduled: false, reason: 'sensitive_source' };
     const metadata = parseJson(run.metadata, {});
     if (metadata.evaluation || metadata.evaluationRunId) return { scheduled: false, reason: 'evaluation_run' };
@@ -246,6 +250,9 @@ async function setJobResult(jobIdValue, fields = {}) {
 async function processAgentLearningJob(row, options = {}) {
     const run = await queryOne('SELECT * FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [row.source_run_id, row.user_id]);
     if (!run) return setJobResult(row.id, { status: 'failed', errorCode: 'SOURCE_RUN_MISSING', errorMessage: '来源任务不存在。' });
+    if (run.session_id && !(await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [run.session_id, row.user_id]))) {
+        return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'source_session_deleted' } });
+    }
     const calls = await listAgentToolCalls(run.id, { limit: 500 });
     if (calls.some(call => hasSensitiveContent(JSON.stringify({ input: call.input_payload || {}, error: call.error_message || '' })))) {
         return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'sensitive_trace' } });

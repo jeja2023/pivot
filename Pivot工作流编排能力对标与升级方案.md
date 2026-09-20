@@ -1,24 +1,24 @@
 # Pivot 工作流编排能力对标与升级方案
 
-> 文档版本：2.1（实施记录与验证状态更新）  
-> 审查基线：Pivot `0.1.151`，Git 提交 `760f347`  
-> 复核日期：2026-09-19  
-> 状态：核心实施已完成；本文保留改造前复核结论作为决策留痕，具体实施状态以“零、实施完成记录”为准  
+> 文档版本：2.2（现阶段开发收口与真实 PostgreSQL 验证更新）
+> 审查基线：Pivot `0.1.153` 当前工作区
+> 复核日期：2026-09-20
+> 状态：现阶段可在项目内闭环的开发任务已完成；本文保留改造前复核结论作为决策留痕，具体实施状态以“零、实施完成记录”为准
 > 适用范围：现有自动化工作区、DAG 运行链路及其依赖；未来版本需重新核对  
 > 决策原则：优先修复正确性与权限边界，复用现有底座，以业务场景和测量结果决定扩展
 
-## 零、实施完成记录（2026-09-19）
+## 零、实施完成记录（2026-09-20）
 
-本轮已按本文的增量架构实施 A～F 中可在当前项目内闭环的工作项；未将“满足特定负载证据后再立项”的外部 Worker、消息代理、S3 和全新执行器提前落地。以下状态覆盖文中“拟新增”“尚未实施”等历史审查表述。
+本轮已按本文的增量架构完成 A～F 中可在当前项目内闭环的开发项，包括此前尚未持久化的逐项恢复、触发器诊断/重放、发布影响与审阅、调试失效和跨层关联。未将“满足特定负载证据后再立项”的外部 Worker、消息代理、S3 和全新执行器提前落地。以下状态覆盖文中“拟新增”“尚未实施”等历史审查表述。
 
 | 阶段 | 已交付内容 | 关键落点 |
 |---|---|---|
 | A：正确性基线 | 缓存改为显式 `cacheable` 契约准入，并把用户、租户、版本、工具、模型、绑定摘要纳入缓存键；工作流定义的缓存、路由、Schema、失败策略、兜底输出完整往返；发布列表与回滚统一走资源访问控制；保存、发布采用事务/并发校验。 | `agent-dag-cache.js`、`agent-contracts.js`、`agent-workflows.js`、`agent-releases.js` |
-| B：路由与恢复 | 增加 `joinMode=any_active`，跳过未命中路由分支；局部重跑保留完整原图与复用来源；大输出以 CAS 引用保存并经生命周期清理；子工作流记录 invocation ID、路径、固定版本和节点隔离。 | `agent-dag-utils.js`、`run-lifecycle.js`、`agent-dag-output.js`、`agent-dag-subworkflow-runtime.js` |
-| C：调试与发布 | 节点测试输出可在当前编辑会话覆盖、重置或作为 Mock 使用，Mock 按输出契约校验且不进入生产；评测批次冻结用例及断言快照；发布前检查与版本固定在服务端完成。 | `dag-core.js`、`dag-inspector-testing.js`、`agent-evaluations.js` |
-| D：业务组合 | 新增“逐项调用子工作流”，保留输入顺序、调用身份、单项错误与失败策略；增加结构化 `errorInfo`、契约化兜底输出，以及参数抽取、内容分类预设。 | `workflow.iteration`、`agent-dag-error-info.js`、`dag-node-presets.js` |
+| B：路由与恢复 | 增加 `joinMode=any_active`，跳过未命中路由分支；局部重跑保留完整原图与复用来源；大输出以 CAS 引用保存并经生命周期清理；子工作流记录 invocation ID、路径、固定版本和节点隔离；逐项调用的输入摘要、版本、调用身份和终态结果已持久化，可在同一运行恢复时仅复用未变化的成功项。 | `agent-dag-utils.js`、`run-lifecycle.js`、`agent-dag-output.js`、`agent-dag-subworkflow-runtime.js`、`agent_workflow_iteration_items` |
+| C：调试与发布 | 节点测试输出可在当前编辑会话覆盖、重置或作为 Mock 使用，Mock 按输出契约校验且不进入生产；草稿定义变化会使测试快照失效；评测批次冻结用例及断言快照；发布前检查与版本固定在服务端完成。 | `dag-core.js`、`dag-inspector-testing.js`、`agent-evaluations.js` |
+| D：业务组合 | 新增“逐项调用子工作流”，保留输入顺序、调用身份、单项错误与失败策略及可恢复状态；增加结构化 `errorInfo`、契约化兜底输出，以及参数抽取、内容分类预设。 | `workflow.iteration`、`agent-dag-error-info.js`、`dag-node-presets.js`、`agent_workflow_iteration_items` |
 | E：接入与迁移 | 支持受限 OpenAPI 3 JSON 导入为受治理 API 操作，统一复用凭据、网络、审批与工具目录；工作流包导入/导出含依赖清单与敏感值脱敏预检。 | `workflow-api-operations.js`、`mcp-workbench-api-operations.js`、`dag-governance.js` |
-| F：运行与观测 | 每用户并发由 PostgreSQL 租约原子控制，运行锁/租约丢失或跨实例取消会停止旧执行器；新增 DAG、缓存、调用、逐项处理 Prometheus 指标和运行详情。 | `agent-run-concurrency-leases.js`、`agent-queue.js`、`agent-governance-metrics.js` |
+| F：运行与观测 | 每用户并发由 PostgreSQL 租约原子控制，运行锁/租约丢失或跨实例取消会停止旧执行器；新增 DAG、缓存、调用、逐项处理 Prometheus 指标和运行详情；触发事件持久化记录接收、派发、失败、水位和重放关系，可由所有者诊断并将成功事件重放为新运行；Trace 关联工作流版本、调用路径和逐项身份；发布前可查看影响清单，组织发布可由同租户管理员审阅。 | `agent-run-concurrency-leases.js`、`agent-queue.js`、`agent-governance-metrics.js`、`agent-triggers.js`、`agent-releases.js` |
 
 ### 0.1 数据迁移
 
@@ -29,14 +29,17 @@
 - `202609190005_workflow_api_operations`：受控 API 操作。
 - `202609190006_agent_run_concurrency_leases`：跨实例用户并发租约。
 - `202609190007_agent_dag_error_info`：DAG 结构化错误诊断。
+- `202609200001_agent_workflow_iteration_items`：逐项子工作流恢复记录。
+- `202609200002_agent_workflow_trigger_events`：触发接收、派发、失败与重放诊断。
+- `202609200003_agent_workflow_release_review`：发布说明和同租户管理员审阅记录。
 
 所有迁移均提供 PostgreSQL `upPg`；基础 Schema、索引和中文数据字典已同步。部署前仍须在目标 PostgreSQL 执行正常迁移流程，不得向生产库直接执行开发测试脚本。
 
 ### 0.2 验证状态与未替代事项
 
-- 已通过纯函数/注入式回归：缓存隔离、路由汇聚、重跑计划、CAS 输出、版本差异、OpenAPI、逐项子工作流、结构化兜底、并发租约、指标及工作流包导入导出，共 42 项测试断言。
-- 已通过静态门禁：迁移覆盖/索引、架构边界、大文件治理、开发规范、死导出、安全 HTML、密钥、配置注册表、文本与回归矩阵。
-- 当前工作区未配置 `TEST_DATABASE_URL` 或 `DATABASE_URL`，因此 HTTP 授权矩阵、事务竞争和真实迁移未在本机运行；必须在隔离 PostgreSQL 测试库或 CI 补跑 `node scripts/run_node_tests.js`。
+- 已通过纯函数/注入式回归：缓存隔离、路由汇聚、重跑计划、CAS 输出、版本差异、OpenAPI、逐项子工作流与失效、结构化兜底、并发租约、指标、触发器和工作流包导入导出。
+- 已通过本机隔离 PostgreSQL 回归：迁移执行、迭代项持久化恢复、触发诊断访问边界、发布影响清单、同租户管理员审阅、凭据/触发器授权矩阵；执行方式为 `node scripts/run_node_tests.js`，未对业务库写入。
+- 当前并行工作区的全量静态门禁仍有与本方案无关的个人 Agent 改造项待其所属改动收口；本方案新增文件已完成语法检查、目标前后端回归和 PostgreSQL 回归。不得以并行改动的门禁失败否定上述运行结果，也不得把它们写入本方案的基线。
 - 外部 Worker、Redis/RabbitMQ/Kafka、S3、通用 Saga 补偿、实时协同和任意循环仍遵循原文的负载/场景门槛，**未实施且不应因本文完成而自动启用**。
 
 ## 一、复核结论与方案取舍
@@ -100,12 +103,12 @@
 | 版本治理 | 有版本、发布、回滚、Diff、可选 `expectedVersion` 冲突检查 | Diff 覆盖与事务边界需补强 | [agent-workflows.js](E:/pivot/server/services/agent-workflows.js) |
 | 发布与评测 | 有评测批次、版本标识、通过率门禁、灰度发布和发布回滚 | 精确锁版、发布原子性、访问边界需要验证 | [agent-evaluations.js](E:/pivot/server/services/agent-evaluations.js)、[agent-releases.js](E:/pivot/server/services/agent-releases.js) |
 | 失败处理 | 有 `success/failure/always`、`when`、重试及 `onError` | 已能表达失败处理；错误对象、兜底和可视化仍可增强 | [agent-dag-utils.js](E:/pivot/server/services/agent-dag-utils.js)、[agent-dag-runtime.js](E:/pivot/server/services/agent-dag-runtime.js) |
-| 数组处理 | 有筛选、汇总、分组、字段规范化和内容校对 | 缺少通用“每项调用多节点流程”与逐项持久化 | [builtin-mcp-data.js](E:/pivot/server/services/builtin-mcp-data.js)、[agent-content-review.js](E:/pivot/server/services/agent-content-review.js) |
+| 数组处理 | 有筛选、汇总、分组、字段规范化、内容校对和“逐项调用已发布子工作流” | 逐项记录持久化输入摘要、固定版本、调用身份和终态结果；恢复时仅复用同摘要的已完成项 | [builtin-mcp-data.js](E:/pivot/server/services/builtin-mcp-data.js)、[agent-content-review.js](E:/pivot/server/services/agent-content-review.js)、[agent-dag-subworkflow-runtime.js](E:/pivot/server/services/agent-dag-subworkflow-runtime.js) |
 | 循环和子流程 | foreach 在独立受控进程执行数组代码；子工作流可调用发布版本，限制递归与三层嵌套 | foreach 并非嵌套图执行器；子流程另有简化执行循环 | [agent-tools-workflow-nodes.js](E:/pivot/server/services/agent-tools-workflow-nodes.js)、[agent-dag-runtime.js](E:/pivot/server/services/agent-dag-runtime.js) |
 | 工具与模型契约 | 有归一化工具契约、能力目录、统一执行器、LLM JSON Schema 请求及修复 | 应复用既有字段和入口，补齐输出契约而非重建 | [agent-contracts.js](E:/pivot/server/services/agent-contracts.js)、[agent-tool-orchestrator.js](E:/pivot/server/services/agent-tool-orchestrator.js)、[agent-tools.js](E:/pivot/server/services/agent-tools.js) |
 | 审批和等待 | 有审批人、串签、超时、回调、持久化延时 | 人工填写业务字段与编辑结果属于进一步扩展 | [agent-approval-requests.js](E:/pivot/server/services/agent-approval-requests.js) |
-| 自动触发 | Webhook、文件、数据库及独立计划任务 | 补测重放、水位、时区、漏触发，不另建定时器 | [agent-triggers.js](E:/pivot/server/services/agent-triggers.js)、[agent-schedules.js](E:/pivot/server/services/agent-schedules.js) |
-| 事件与观测 | 事件序号、持久化事件、Outbox、Trace、瀑布图、指标入口 | 日志重放不等于重新执行；补业务关联和跨层 Trace | [agent-event-log.js](E:/pivot/server/services/agent-event-log.js)、[agent-event-outbox.js](E:/pivot/server/services/agent-event-outbox.js)、[metrics.js](E:/pivot/server/metrics.js) |
+| 自动触发 | Webhook、文件、数据库及独立计划任务 | 触发事件已记录接收、派发、失败、水位和重放关系；所有者可诊断并将成功事件重放为新运行，真实业务源的时区与漏触发演练留在生产接入验收 | [agent-triggers.js](E:/pivot/server/services/agent-triggers.js)、[agent-schedules.js](E:/pivot/server/services/agent-schedules.js) |
+| 事件与观测 | 事件序号、持久化事件、Outbox、Trace、瀑布图、指标入口 | Trace 已关联工作流版本、调用路径和逐项身份；日志重放仍只会通过受控触发器新建运行，不伪装为原运行续跑 | [agent-event-log.js](E:/pivot/server/services/agent-event-log.js)、[agent-event-outbox.js](E:/pivot/server/services/agent-event-outbox.js)、[metrics.js](E:/pivot/server/metrics.js) |
 | 任务队列 | PostgreSQL 持久化运行记录、条件认领、锁续期、优先级和每用户并发限制 | 部分计数与取消控制器驻留进程内，不能据此承诺全局配额 | [agent-queue.js](E:/pivot/server/services/agent-queue.js) |
 | 部署与存储 | 已声明 PostgreSQL 队列/锁和 shared_fs 多节点路径；有 Blob、CAS、授权下载与引用生命周期 | 配置预检不替代故障演练；S3 和外部队列仍为待接线适配器 | [deployment-providers.js](E:/pivot/server/services/deployment-providers.js)、[部署预检](E:/pivot/docs/多节点部署预检.md)、[agent-artifact-cas.js](E:/pivot/server/services/agent-artifact-cas.js) |
 | 预算与子任务 | 有 Token/资源预算、子任务预留和释放 | 新迭代必须接入，避免并发倍增消耗 | [agent-run-resources.js](E:/pivot/server/services/agent-run-resources.js)、[agent-budget.js](E:/pivot/server/services/agent-budget.js) |
@@ -625,14 +628,14 @@ flowchart TD
 
 不沿用原方案的固定“4～16 周”估计。人员投入、可用测试环境与业务流量尚未确认，当前采用带依赖的交付包；每包完成设计和基线测量后再估算工期。
 
-| 阶段 | 主要交付 | 前置条件 | 完成标准 |
+| 阶段 | 主要交付 | 当前状态 | 完成/后续边界 |
 |---|---|---|---|
-| A：正确性基线（P0/P1） | 缓存隔离与准入、发布资源授权、定义字段往返、服务端 Diff | 本文代码基线复核 | 跨用户/跨租户隔离及执行字段等价测试通过 |
-| B：路由与恢复（P1） | 分支汇聚语义、局部重跑完整图、输出完整性标记、子流程调用身份 | A 的定义与契约一致性 | 分支、重跑、同名子节点、截断输出等故障样例通过 |
-| C：调试与发布闭环（P1） | 变量覆盖/重置、Mock、快照引用、精确评测、保存发布事务 | A；调试依赖 B | 三个首批场景可完成调试、发布和回滚验证 |
-| D：业务组合扩展（P2） | 数组调用子流程、失败项处理、结构化错误、分类/抽取预设 | B/C；完成预算、身份和权限设计 | 逐项恢复不重做成功副作用，结果顺序与来源可解释 |
-| E：接入与迁移（P2） | MCP 接入模板、有限 OpenAPI、依赖清单、模板迁移 | A/C；选定真实接入系统 | 新接入可配置、测试、停用、排错；导入不泄露凭据 |
-| F：按负载扩容（P2/P3） | 全局配额、跨实例取消/租约强化；必要时独立 Worker/S3 | 目标负载与故障演练结果 | 达到书面 SLO，部署画像与实际适配能力一致 |
+| A：正确性基线（P0/P1） | 缓存隔离与准入、发布资源授权、定义字段往返、服务端 Diff | 已完成 | 已有跨用户/跨租户隔离及执行字段等价测试 |
+| B：路由与恢复（P1） | 分支汇聚语义、局部重跑完整图、输出完整性标记、子流程调用身份 | 已完成 | 已覆盖分支、重跑、同名子节点、截断输出和逐项持久化恢复 |
+| C：调试与发布闭环（P1） | 变量覆盖/重置、Mock、快照引用、精确评测、保存发布事务 | 已完成 | 草稿变更会使测试快照失效；发布增加影响清单、说明与管理员审阅 |
+| D：业务组合扩展（P2） | 数组调用子流程、失败项处理、结构化错误、分类/抽取预设 | 已完成 | 逐项恢复不重做同摘要的成功项，结果顺序与来源可解释 |
+| E：接入与迁移（P2） | MCP 接入模板、有限 OpenAPI、依赖清单、模板迁移 | 开发能力已完成 | 真实内部系统接入、停用和排错演练由生产接入验收执行，不是待开发项 |
+| F：按负载扩容（P2/P3） | 全局配额、跨实例取消/租约强化；必要时独立 Worker/S3 | 当前风险项已完成 | 外部 Worker/S3 仅在目标负载和故障演练证明需要时另行立项 |
 
 阶段并非全串行：A 中权限与字段修复可并行；精确评测可与 B 并行；D 不必等待完整 Connector SDK；F 中已暴露的运行风险优先修复，不因“扩容后置”而延后。
 

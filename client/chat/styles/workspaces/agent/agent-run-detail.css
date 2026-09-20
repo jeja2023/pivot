@@ -1219,6 +1219,11 @@
     font-weight: 650;
 }
 
+.agent-collaborator-group { margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.agent-collaborator-list { display: grid; gap: 7px; margin-top: 9px; }
+.agent-collaborator-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-main); background: var(--bg-side); cursor: pointer; text-align: left; }
+.agent-collaborator-row span { color: var(--text-muted); font-size: .78rem; }.agent-collaborator-row.is-error, .agent-collaborator-row.is-failed { border-color: rgba(220, 38, 38, .35); }.agent-collaborator-row.is-completed { border-color: rgba(16, 185, 129, .35); }
+
 /* 运行详情中的产物、审批与异常操作区：统一交由 Agent 工作区样式维护。 */
 .agent-artifacts-empty-actions {
     display: flex;
@@ -1266,7 +1271,11 @@
     margin-top: 10px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
+    .agent-run-approval-card {
+        padding: 12px;
+    }
+
     .agent-run-approval-actions,
     .agent-run-error-actions {
         align-items: stretch;
@@ -1277,5 +1286,13 @@
     .agent-run-approval-actions .btn-danger-outline,
     .agent-run-error-actions .btn-secondary {
         width: 100%;
+        min-height: 42px;
+        touch-action: manipulation;
+    }
+
+    .agent-run-approval-actions .btn-primary,
+    .agent-run-approval-actions .btn-danger-outline {
+        min-height: 42px;
+        touch-action: manipulation;
     }
 }

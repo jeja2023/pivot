@@ -895,6 +895,7 @@ async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
     if (!workflow) return showToast('请选择要发布的工作流', 'warning');
     const skipEvaluationGate = options?.skipEvaluationGate === true || options?.fixedEvaluationRequired === false;
     const reqBody = { version };
+    if (options.releaseNote !== undefined) reqBody.releaseNote = String(options.releaseNote || '').trim().slice(0, 2000);
     if (skipEvaluationGate) {
         const reason = await window.Pivot.legacy.showInputPrompt?.({
             title: '紧急跳过评测门禁',

@@ -29,6 +29,9 @@ function applyAgentTemplate(template) {
     if (contextMode) contextMode.value = context.mode || 'auto';
     const contextNotes = document.getElementById('agent-context-notes');
     if (contextNotes) contextNotes.value = context.notes || '';
+    const contextCollections = document.getElementById('agent-context-collections');
+    const selectedCollections = new Set((Array.isArray(context.collectionIds) ? context.collectionIds : []).map(String));
+    if (contextCollections) [...contextCollections.options].forEach(option => { option.selected = selectedCollections.has(String(option.value)); });
     const allowlist = agentParsePayload(template.tool_allowlist || '[]');
     const selectedTools = Array.isArray(allowlist) ? allowlist.map(item => String(item || '').trim()).filter(Boolean) : [];
     document.querySelectorAll('[data-agent-tool-allow]').forEach(input => {

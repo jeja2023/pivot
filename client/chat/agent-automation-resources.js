@@ -169,6 +169,7 @@ function renderAgentAutomationResourceList() {
                 ${hasError ? `<p class="agent-automation-resource-error">最近错误：${agentEscape(trigger.lastError)}</p>` : ''}
                 <div class="agent-automation-resource-actions">
                     <button type="button" class="btn-secondary" data-agent-automation-resource-action="trigger-edit" data-agent-automation-resource-id="${agentEscapeAttr(trigger.id)}">编辑</button>
+                    <button type="button" class="btn-secondary" data-agent-automation-resource-action="trigger-events" data-agent-automation-resource-id="${agentEscapeAttr(trigger.id)}">运行诊断</button>
                     <button type="button" class="btn-secondary" data-agent-automation-resource-action="trigger-toggle" data-agent-automation-resource-id="${agentEscapeAttr(trigger.id)}">${paused ? '启用' : '暂停'}</button>
                     ${trigger.triggerType === 'webhook' ? `<button type="button" class="btn-secondary" data-agent-automation-resource-action="trigger-rotate" data-agent-automation-resource-id="${agentEscapeAttr(trigger.id)}">轮换令牌</button>` : ''}
                     <button type="button" class="btn-danger-outline" data-agent-automation-resource-action="trigger-delete" data-agent-automation-resource-id="${agentEscapeAttr(trigger.id)}">删除</button>
@@ -204,6 +205,30 @@ function renderAgentAutomationResourceList() {
             </div>
         </article>`;
     }).join('')}</div>`);
+}
+
+async function renderAgentAutomationTriggerEvents(trigger) {
+    const editor = document.getElementById('agent-automation-resources-editor');
+    if (!editor || !trigger) return;
+    agentAutomationResourceEditorState = { kind: 'trigger-events', id: String(trigger.id) };
+    setAgentAutomationResourceEditorVisible(true);
+    PivotSafeHtml.setHtml(editor, '<div class="agent-automation-resources-loading">正在加载触发记录...</div>');
+    try {
+        const response = await apiFetch(`${API_BASE}/agents/triggers/${encodeURIComponent(trigger.id)}/events?limit=50`);
+        const data = await readAgentAutomationResourceResponse(response, '触发记录加载失败');
+        const events = data.data || [];
+        PivotSafeHtml.setHtml(editor, `<section class="agent-automation-resources-editor"><div class="agent-automation-resources-editor-head"><strong>${agentEscape(trigger.name || '触发器')} · 运行诊断</strong><button type="button" class="btn-secondary" data-agent-automation-resource-back>返回列表</button></div><p class="agent-automation-resources-notice">重放会创建新的任务，不会修改原事件或覆盖已完成运行。</p>${events.length ? `<div class="agent-automation-resource-rows">${events.map(item => `<article class="agent-automation-resource-row"><div class="agent-automation-resource-main"><div><strong>${agentEscape(agentAutomationResourceTypeLabel(item.eventType))} · ${agentEscape(item.status || '-')}</strong><span>${agentEscape(agentAutomationResourceDateText(item.createdAt))}${item.runId ? ` · 任务 ${agentEscape(item.runId)}` : ''}</span></div><span class="automation-status ${item.status === 'error' ? 'paused' : 'published'}">${agentEscape(item.status || '-')}</span></div><div class="agent-automation-resource-meta"><span>输入 ${Number(item.inputSummary?.keyCount || 0)} 项</span>${item.watermarkBefore || item.watermarkAfter ? `<span>水位 ${agentEscape(item.watermarkBefore || '-')} → ${agentEscape(item.watermarkAfter || '-')}</span>` : ''}</div>${item.errorMessage ? `<p class="agent-automation-resource-error">${agentEscape(item.errorMessage)}</p>` : ''}<div class="agent-automation-resource-actions">${['dispatched', 'deduplicated'].includes(item.status) ? `<button type="button" class="btn-secondary" data-agent-trigger-event-replay="${agentEscapeAttr(item.id)}">重放为新任务</button>` : ''}</div></article>`).join('')}</div>` : '<div class="agent-automation-resources-empty"><strong>暂无触发记录</strong><span>事件接收、派发、失败和重放会在此保留诊断摘要。</span></div>'}</section>`);
+    } catch (error) {
+        PivotSafeHtml.setHtml(editor, `<div class="agent-automation-resource-error">${agentEscape(error.message || '触发记录加载失败')}</div>`);
+    }
+}
+
+async function replayAgentAutomationTriggerEvent(eventId) {
+    const response = await apiFetch(`${API_BASE}/agents/triggers/events/${encodeURIComponent(eventId)}/replay`, { method: 'POST' });
+    const data = await readAgentAutomationResourceResponse(response, '触发事件重放失败');
+    showToast(`已创建重放任务：${data.run?.id || '-'}`, 'success');
+    const trigger = agentWorkflowTriggersCache.find(item => String(item.id) === String(agentAutomationResourceEditorState?.id));
+    if (trigger) await renderAgentAutomationTriggerEvents(trigger);
 }
 
 function clearAgentAutomationResourceNotice() {
@@ -626,6 +651,7 @@ async function handleAgentAutomationResourceAction(button) {
     const trigger = agentWorkflowTriggersCache.find(item => String(item.id) === String(id));
     const credential = agentWorkflowCredentialsCache.find(item => String(item.id) === String(id));
     if (action === 'trigger-edit' && trigger) return renderAgentAutomationResourceEditor('trigger', trigger);
+    if (action === 'trigger-events' && trigger) return renderAgentAutomationTriggerEvents(trigger);
     if (action === 'credential-edit' && credential) {
         try {
             await loadAgentAutomationShareOptions();
@@ -750,7 +776,9 @@ function bindAgentAutomationResources() {
     });
     document.getElementById('agent-automation-resources-editor')?.addEventListener('submit', saveAgentAutomationResource);
     document.getElementById('agent-automation-resources-editor')?.addEventListener('click', event => {
-        if (event.target.closest('[data-agent-automation-resource-back]')) resetAgentAutomationResourceEditor();
+        if (event.target.closest('[data-agent-automation-resource-back]')) return resetAgentAutomationResourceEditor();
+        const replay = event.target.closest('[data-agent-trigger-event-replay]');
+        if (replay) replayAgentAutomationTriggerEvent(replay.dataset.agentTriggerEventReplay).catch(error => showToast(error.message || '触发事件重放失败', 'error'));
     });
     document.getElementById('agent-automation-resources-editor')?.addEventListener('input', () => setAgentAutomationResourceEditorError(''));
     document.getElementById('agent-automation-resources-editor')?.addEventListener('change', event => {

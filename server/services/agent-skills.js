@@ -248,9 +248,22 @@ async function findBestPersonalSkill(user, goal, options = {}) {
         const matched = terms.filter(term => haystack.includes(term));
         const bigramHits = [...new Set(chineseBigrams.filter(term => haystack.includes(term)))];
         const score = matched.length * 2 + Math.min(bigramHits.length, 6) + (manifest.tags || []).filter(tag => text.includes(String(tag).toLowerCase())).length;
-        return { release, manifest, matched, score };
+        return { release, manifest, matched, bigramHits, score };
     }).filter(item => item.score >= Number(options.minScore || 2)).sort((a, b) => b.score - a.score || String(b.release.published_at || '').localeCompare(String(a.release.published_at || '')));
-    return candidates[0]?.release || null;
+    const selected = candidates[0];
+    if (!selected) return null;
+    return {
+        ...selected.release,
+        matchReason: {
+            type: 'keyword_and_tag_overlap',
+            score: selected.score,
+            matchedTerms: selected.matched.slice(0, 20),
+            matchedBigrams: selected.bigramHits.slice(0, 12),
+            summary: selected.matched.length || selected.bigramHits.length
+                ? '任务关键词与个人 Skill 的名称、说明或标签存在重叠。'
+                : '个人 Skill 与当前任务类型匹配。'
+        }
+    };
 }
 
 async function disableAgentSkill(name, user) {

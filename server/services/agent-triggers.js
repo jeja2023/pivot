@@ -9,6 +9,7 @@ const { getBeijingTimestamp } = require('../time');
 const { resolveAgentWorkflowVersion, normalizeDagInputsPayload } = require('./agent-workflows');
 const { resolveAgentWorkflowDependencyBindings } = require('./agent-workflow-dependencies');
 const { getBuiltinConfigForServerAsync, isPathInside } = require('./builtin-mcp-common');
+const { redactTraceValue } = require('./agent-traces');
 
 const TRIGGER_TYPES = new Set(['webhook', 'file', 'database']);
 const TRIGGER_STATUSES = new Set(['active', 'paused']);
@@ -288,41 +289,117 @@ async function getTriggerUser(userId) {
     `, [userId]);
 }
 
+function compactTriggerEventValue(value, maxChars = 4000) {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') return value.slice(0, maxChars);
+    try {
+        const serialized = JSON.stringify(value);
+        if (serialized.length <= maxChars) return value;
+        return { __partial: true, originalChars: serialized.length, preview: serialized.slice(0, maxChars) };
+    } catch (_) {
+        return String(value).slice(0, maxChars);
+    }
+}
+
+function formatTriggerEvent(row = {}, { includeInput = false } = {}) {
+    const input = parseJson(row.input_json, {});
+    const sourceMeta = parseJson(row.source_meta_json, {});
+    return {
+        id: row.id,
+        triggerId: row.trigger_id,
+        runId: row.run_id || null,
+        replayOfEventId: row.replay_of_event_id || null,
+        eventType: row.event_type,
+        status: row.status,
+        dedupeKey: row.dedupe_key || '',
+        watermarkBefore: row.watermark_before || '',
+        watermarkAfter: row.watermark_after || '',
+        inputSummary: { keyCount: Object.keys(input || {}).length, bytes: Buffer.byteLength(JSON.stringify(input || {}), 'utf8') },
+        ...(includeInput ? { inputs: input } : {}),
+        sourceMeta,
+        goal: String(row.goal || '').slice(0, 2000),
+        errorMessage: row.error_message || '',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        completedAt: row.completed_at || null
+    };
+}
+
+async function beginTriggerEvent(trigger, { eventType, inputs, goal, dedupeKey = '', watermarkBefore = '', watermarkAfter = '', sourceMeta = {}, replayOfEventId = '' } = {}) {
+    const id = `te_${crypto.randomUUID().replace(/-/g, '')}`;
+    const now = getBeijingTimestamp();
+    await execute(`
+        INSERT INTO agent_workflow_trigger_events (
+            id, trigger_id, replay_of_event_id, event_type, status, dedupe_key, watermark_before, watermark_after,
+            input_json, source_meta_json, goal, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        id, trigger.id, replayOfEventId || null, String(eventType || trigger.trigger_type || 'unknown').slice(0, 32),
+        String(dedupeKey || '').slice(0, 256), String(watermarkBefore || '').slice(0, 4000), String(watermarkAfter || '').slice(0, 4000),
+        JSON.stringify(compactTriggerEventValue(redactTraceValue(inputs || {}))), JSON.stringify(compactTriggerEventValue(redactTraceValue(sourceMeta || {}))),
+        String(goal || '').slice(0, 12000), now, now
+    ]);
+    return id;
+}
+
+async function finishTriggerEvent(eventId, { status = 'dispatched', runId = null, error = '' } = {}) {
+    if (!eventId) return;
+    const now = getBeijingTimestamp();
+    await execute(`
+        UPDATE agent_workflow_trigger_events
+        SET status = ?,
+            run_id = CASE WHEN COALESCE(?::text, '') <> '' AND EXISTS (SELECT 1 FROM agent_runs WHERE id = ?) THEN ? ELSE NULL END,
+            error_message = ?, updated_at = ?, completed_at = ?
+        WHERE id = ?
+    `, [String(status).slice(0, 32), runId || null, runId || null, runId || null, String(error || '').slice(0, 4000), now, now, eventId]);
+}
+
+async function listWorkflowTriggerEvents(triggerId, user, options = {}) {
+    const trigger = await queryOne('SELECT id FROM agent_workflow_triggers WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [triggerId, user.id]);
+    if (!trigger) return null;
+    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 50, 200));
+    const rows = await query(`
+        SELECT * FROM agent_workflow_trigger_events
+        WHERE trigger_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+    `, [trigger.id, limit]);
+    return rows.map(row => formatTriggerEvent(row));
+}
+
 // 触发器共用的任务创建逻辑，统一带上来源标记和幂等键
-async function createTriggerRun(trigger, user, { inputs, goal, dedupeKey }) {
+async function createTriggerRun(trigger, user, { inputs, goal, dedupeKey, event = {} }) {
     const createRun = ensureCreateAgentRun();
     // 先确认工作流仍可访问且处于已发布状态，运行时会按同一版本再解析一次
     await assertTriggerWorkflowAccess(trigger.workflow_id, user);
-    const run = await createRun({
-        user,
-        goal: goal || `由触发器「${trigger.name}」启动`,
-        title: trigger.name,
-        runMode: 'dag',
-        workflowId: trigger.workflow_id,
-        workflowVersion: 'published',
-        dagInputs: normalizeDagInputsPayload(inputs || {}),
-        dedupeKey,
-        metadata: {
-            source: 'trigger',
-            triggerId: trigger.id,
-            triggerName: trigger.name,
-            triggerType: trigger.trigger_type
-        }
-    });
-    const now = getBeijingTimestamp();
-    await execute(`
-        UPDATE agent_workflow_triggers
-        SET last_triggered_at = ?, last_run_id = ?, trigger_count = trigger_count + 1,
-            last_error = NULL, updated_at = ?
-        WHERE id = ?
-    `, [now, run.id, now, trigger.id]);
-    // 与计划任务保持一致：触发入队后写一条用户通知，便于在通知中心追溯来源
+    const effectiveGoal = goal || `由触发器「${trigger.name}」启动`;
+    const eventId = await beginTriggerEvent(trigger, { ...event, inputs, goal: effectiveGoal, dedupeKey });
     try {
-        await createAgentNotificationCallback(user.id, run.id, 'trigger', '触发器已启动工作流', trigger.name);
-    } catch (notificationError) {
-        logger.warn({ err: notificationError.message, triggerId: trigger.id }, '触发器通知写入失败');
+        const run = await createRun({
+            user, goal: effectiveGoal, title: trigger.name, runMode: 'dag', workflowId: trigger.workflow_id,
+            workflowVersion: 'published', dagInputs: normalizeDagInputsPayload(inputs || {}), dedupeKey,
+            metadata: { source: 'trigger', triggerId: trigger.id, triggerName: trigger.name, triggerType: trigger.trigger_type, triggerEventId: eventId }
+        });
+        const now = getBeijingTimestamp();
+        await execute(`
+            UPDATE agent_workflow_triggers
+            SET last_triggered_at = ?, last_run_id = ?, trigger_count = trigger_count + 1,
+                last_error = NULL, updated_at = ?
+            WHERE id = ?
+        `, [now, run.id, now, trigger.id]);
+        await finishTriggerEvent(eventId, { status: run.deduplicated ? 'deduplicated' : 'dispatched', runId: run.id })
+            .catch(error => logger.warn({ err: error.message, triggerId: trigger.id, eventId }, '触发事件终态审计写入失败，不影响已创建任务'));
+        // 与计划任务保持一致：触发入队后写一条用户通知，便于在通知中心追溯来源
+        try {
+            await createAgentNotificationCallback(user.id, run.id, 'trigger', '触发器已启动工作流', trigger.name);
+        } catch (notificationError) {
+            logger.warn({ err: notificationError.message, triggerId: trigger.id }, '触发器通知写入失败');
+        }
+        return run;
+    } catch (error) {
+        await finishTriggerEvent(eventId, { status: 'error', error: error.message }).catch(() => {});
+        throw error;
     }
-    return run;
 }
 
 async function recordTriggerError(triggerId, message) {
@@ -370,7 +447,11 @@ async function dispatchWebhookTrigger(token, payload = {}, meta = {}) {
         const run = await createTriggerRun(trigger, user, {
             inputs,
             goal: config.goalTemplate || `由入站 Webhook「${trigger.name}」启动`,
-            dedupeKey
+            dedupeKey,
+            event: {
+                eventType: 'webhook',
+                sourceMeta: { sourceIp: String(meta.sourceIp || '').slice(0, 120), timestamp: String(meta.timestamp || '').slice(0, 32), hasIdempotencyKey: Boolean(headerIdempotencyKey) }
+            }
         });
         logger.info({ triggerId: trigger.id, runId: run.id, sourceIp: meta.sourceIp || '' }, '入站 Webhook 已触发工作流');
         return { runId: run.id, triggerName: trigger.name };
@@ -463,7 +544,8 @@ async function pollFileTrigger(trigger) {
                     modifiedAt: getBeijingTimestamp(stat.mtime)
                 },
                 goal: config.goalTemplate || `处理新到文件：${entry.name}`,
-                dedupeKey
+                dedupeKey,
+                event: { eventType: 'file', sourceMeta: { fileName: entry.name, fileSize: stat.size, modifiedAt: getBeijingTimestamp(stat.mtime) } }
             });
             created.push(run);
         } catch (err) {
@@ -521,7 +603,8 @@ async function pollDatabaseTrigger(trigger, executeTool) {
         const run = await createTriggerRun(trigger, user, {
             inputs: { [config.inputName || 'rows']: rows, rowCount: rows.length, watermark: nextWatermark },
             goal: config.goalTemplate || `处理 ${rows.length} 条数据变更`,
-            dedupeKey
+            dedupeKey,
+            event: { eventType: 'database', watermarkBefore: watermark, watermarkAfter: nextWatermark, sourceMeta: { rowCount: rows.length, watermarkField } }
         });
         // 水位线推进放在任务创建之后，任务创建失败时下轮会重新读取同一批数据
         await execute(`
@@ -535,6 +618,34 @@ async function pollDatabaseTrigger(trigger, executeTool) {
         logger.error({ err: err.message, triggerId: trigger.id }, '数据变更触发工作流失败');
         return [];
     }
+}
+
+async function replayWorkflowTriggerEvent(eventId, user) {
+    const event = await queryOne(`
+        SELECT e.*, t.user_id, t.workflow_id, t.name, t.trigger_type, t.status AS trigger_status, t.config_json, t.deleted_at
+        FROM agent_workflow_trigger_events e
+        JOIN agent_workflow_triggers t ON t.id = e.trigger_id
+        WHERE e.id = ? AND t.user_id = ? AND t.deleted_at IS NULL
+    `, [eventId, user.id]);
+    if (!event) return null;
+    if (event.status !== 'dispatched' && event.status !== 'deduplicated') {
+        throw invalid('只有已成功派发的触发事件可以重放。', 409);
+    }
+    const replayKey = `trigger:${event.trigger_id}:replay:${event.id}:${crypto.randomUUID().slice(0, 12)}`;
+    const trigger = { ...event, id: event.trigger_id, workflow_id: event.workflow_id, trigger_type: event.trigger_type };
+    const run = await createTriggerRun(trigger, user, {
+        inputs: parseJson(event.input_json, {}),
+        goal: event.goal || `重放触发器「${event.name}」`,
+        dedupeKey: replayKey,
+        event: {
+            eventType: event.event_type,
+            watermarkBefore: event.watermark_before,
+            watermarkAfter: event.watermark_after,
+            sourceMeta: { ...parseJson(event.source_meta_json, {}), replay: true },
+            replayOfEventId: event.id
+        }
+    });
+    return { event: formatTriggerEvent(event, { includeInput: false }), run };
 }
 
 // 轮询入口，由自动化调度 tick 统一驱动
@@ -592,9 +703,11 @@ module.exports = {
     assertWebhookSignature,
     hashTriggerToken,
     listWorkflowTriggers,
+    listWorkflowTriggerEvents,
     pollDatabaseTrigger,
     pollFileTrigger,
     rotateWorkflowTriggerToken,
+    replayWorkflowTriggerEvent,
     runDuePollingTriggers,
     updateWorkflowTrigger
 };

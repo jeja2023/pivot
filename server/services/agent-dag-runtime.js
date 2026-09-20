@@ -192,7 +192,6 @@ function cloneDagFallbackValue(value) {
     if (value === undefined || value === null || typeof value !== 'object') return value;
     try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
 }
-
 /** 兜底值必须被显式配置，且通过当前节点的输出契约校验。 */
 function prepareDagFallbackOutput(node = {}, outputSchema = {}, errorInfo = {}) {
     const hasFallback = Object.prototype.hasOwnProperty.call(node, 'fallbackOutput')
@@ -210,7 +209,6 @@ function prepareDagFallbackOutput(node = {}, outputSchema = {}, errorInfo = {}) 
         errorInfo: { ...errorInfo, fallbackApplied: true }
     };
 }
-
 async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex = 0, executionContext = {} }, deps) {
     const executeDagTool = deps.executeToolByName || executeToolByName, recordToolCall = deps.recordAgentToolCall || recordAgentToolCall;
     const listRunSteps = deps.listSteps || listSteps, waitForRetry = deps.waitForDagRetry || waitForDagRetry;
@@ -627,6 +625,12 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     nodeId: node.id,
                     toolName: node.tool,
                     retryLimit: policy.retryLimit,
+                    workflowVersionId: runMetadata.workflowVersionId || runMetadata.workflow_version_id || null,
+                    // 顶层 DAG 节点没有子工作流/迭代执行上下文；这些字段仅由
+                    // executeDagNodeWithPolicy 的子调用记录，不能引用未定义变量。
+                    invocationId: null,
+                    executionPath: null,
+                    itemId: null,
                     agentName: delegatedAgent ? resolvedInput.agentName : undefined,
                     role: delegatedAgent ? resolvedInput.role : undefined,
                     handoffTo: delegatedAgent ? 'Supervisor' : (handoffNode ? resolvedInput.toAgent : undefined)
