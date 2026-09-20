@@ -150,3 +150,12 @@ test('显式 toolRef release 必须属于对应工具服务，不能静默回退
     assert.equal(resolved.release.id, 99);
     assert.equal(resolved.item.definition_digest, 'abc');
 });
+
+test('tool-library 路由安全初始化且不出现 path-to-regexp 异常', () => {
+    const { createToolLibraryRouter } = require('../server/routes/tool-library');
+    const router = createToolLibraryRouter({
+        authMiddleware: (req, res, next) => next(),
+        logAction: () => {}
+    });
+    assert.ok(router);
+});

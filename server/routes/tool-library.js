@@ -202,8 +202,11 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
         res.json({ success: true, data: account });
     }));
 
-    router.post('/connection-accounts/:id/:action(refresh|revoke|disable)', authMiddleware, asyncHandler(async (req, res) => {
+    router.post('/connection-accounts/:id/:action', authMiddleware, asyncHandler(async (req, res) => {
         const action = req.params.action;
+        if (!['refresh', 'revoke', 'disable'].includes(action)) {
+            return res.status(404).json({ error: '不支持的操作。' });
+        }
         let account;
         if (action === 'refresh') {
             const existing = await getForUser(req.params.id, req.user);
