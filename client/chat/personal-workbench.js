@@ -454,7 +454,7 @@
             return;
         }
         await openShortcut('chat');
-        const target = document.getElementById('message-input') || document.getElementById('chat-input');
+        const target = document.getElementById('user-input') || document.getElementById('message-input') || document.getElementById('chat-input');
         if (target) { target.value = goal; target.focus(); target.dispatchEvent(new Event('input', { bubbles: true })); }
     }
 
@@ -629,7 +629,6 @@
                 return openShortcut('chat');
             }
             if (action === 'quick-chat') return openQuickTask('chat');
-            if (action === 'quick-agent') return openQuickTask('agent');
             if (action === 'resume-onboarding') return window.Pivot.moduleApi?.('personal.agentOnboarding')?.open?.();
             if (action === 'open-knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
             if (action === 'new-document') {
@@ -708,6 +707,12 @@
         }
     });
 
+    document.addEventListener('submit', event => {
+        if (event.target?.id !== 'personal-quick-task-form') return;
+        event.preventDefault();
+        openQuickTask('agent').catch(error => window.Pivot.legacy.showToast?.(error.message || '创建 Agent 任务失败', 'error'));
+    });
+
     document.getElementById('personal-shortcuts-modal')?.addEventListener('click', event => {
         if (event.target.id === 'personal-shortcuts-modal') closeShortcutEditor();
     });
@@ -734,6 +739,10 @@
     document.getElementById('personal-shortcuts-cancel')?.addEventListener('click', closeShortcutEditor);
     document.getElementById('personal-shortcuts-save')?.addEventListener('click', () => {
         saveShortcuts().catch(error => window.Pivot.legacy.showToast?.(error.message || '常用入口保存失败', 'error'));
+    });
+    document.getElementById('personal-quick-task-form')?.addEventListener('submit', event => {
+        event.preventDefault();
+        openQuickTask('agent');
     });
 
     window.Pivot?.exposeModule?.('workspaces.personal', { loadPersonalWorkbench });

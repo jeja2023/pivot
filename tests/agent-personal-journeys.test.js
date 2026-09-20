@@ -12,7 +12,8 @@ test('personal Agent first-use journey is backed by an editable profile and priv
     const routes = read('server/routes/agent-control-plane.js');
     const service = read('server/services/agent-experience-events.js');
     assert.match(partial, /id="personal-agent-onboarding"/);
-    assert.match(partial, /data-personal-action="quick-agent"/);
+    assert.match(partial, /id="personal-quick-task-form"/);
+    assert.match(partial, /type="submit">交给 Agent/);
     assert.match(client, /\/agents\/profile/);
     assert.match(client, /onboarding_completed/);
     assert.match(routes, /\/agents\/experience\/events/);

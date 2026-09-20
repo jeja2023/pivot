@@ -66,29 +66,29 @@
             </header>
             <div id="personal-workbench-state" class="personal-workbench-state" role="status" aria-live="polite"></div>
             <div class="personal-workbench-scroll">
-                <section class="personal-hero" aria-label="快捷开始">
+                <section class="personal-hero" aria-label="今日工作入口">
                     <div class="personal-hero-copy">
                         <h2 id="personal-hero-title">今天想先处理什么？</h2>
                         <span id="personal-workbench-greeting">把分散的对话、任务、资料和自动化，收拢成一条清晰的工作流。</span>
                     </div>
-                    <div class="personal-hero-start" aria-label="直接开始任务">
+                    <form id="personal-quick-task-form" class="personal-command-form" aria-label="创建 Agent 任务">
                         <label class="sr-only" for="personal-quick-task">输入要处理的事情</label>
-                        <div class="personal-quick-start-head"><strong>快速开始</strong></div>
-                        <div class="personal-quick-task-field">
+                        <div class="personal-command-row">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
-                            <input id="personal-quick-task" class="form-input" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
+                            <input id="personal-quick-task" class="form-input" type="text" maxlength="2000" placeholder="输入想处理的事情，例如：整理今天的待办并给出优先级">
+                            <button class="btn-primary personal-command-submit" type="submit">交给 Agent <span aria-hidden="true">→</span></button>
                         </div>
-                        <div class="personal-hero-actions">
-                            <button class="btn-secondary" type="button" data-personal-action="quick-chat"><span>快速问答</span><small>在当前对话中完成</small></button>
-                            <button class="btn-primary" type="button" data-personal-action="quick-agent"><span>交给后台 Agent</span><small>适合检索、整理与持续工作</small></button>
+                        <div class="personal-command-footer">
+                            <button class="btn-secondary personal-command-chat" type="button" data-personal-action="quick-chat">在对话中继续</button>
+                            <span>简单问题直接继续对话；需要检索、整理或持续执行时按 Enter 或交给 Agent。</span>
+                            <div class="personal-hero-examples" aria-label="示例任务">
+                                <em>试试</em>
+                                <button type="button" class="btn-secondary" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
+                                <button type="button" class="btn-secondary" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
+                                <button type="button" class="btn-secondary" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
+                            </div>
                         </div>
-                        <div class="personal-hero-examples" aria-label="示例任务">
-                            <span>试试：</span>
-                            <button type="button" class="btn-secondary" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
-                            <button type="button" class="btn-secondary" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
-                            <button type="button" class="btn-secondary" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
-                        </div>
-                    </div>
+                    </form>
                 </section>
                 <div class="personal-workbench-grid">
                     <section class="personal-card personal-card-attention" aria-labelledby="personal-attention-title">

@@ -53,14 +53,19 @@ test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡�
     const client = read('client/chat/personal-workbench.js');
     const styles = read('client/chat/styles/workspaces/personal.css');
 
-    assert.match(template, /class="personal-quick-task-field"/);
+    assert.match(template, /id="personal-quick-task-form"/);
+    assert.match(template, /class="personal-command-row"/);
+    assert.match(template, /personal-command-submit/);
     assert.doesNotMatch(template, /personal-hero-pulse|personal-workbench-stats/);
     assert.doesNotMatch(client, /function renderStats|function renderHeroPulse|personal-stat-attention/);
     assert.match(styles, /grid-template-areas:\s*'attention goals'/);
     assert.match(styles, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/);
-    assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*150px;/);
+    assert.match(styles, /\.personal-workbench-grid\s*\{[\s\S]*?flex:\s*0 0 auto;/);
+    assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*146px;/);
     assert.match(styles, /\.personal-workbench-scroll\s*\{[\s\S]*?overflow-y:\s*auto;/);
     assert.doesNotMatch(styles, /@media \(min-height: 650px\)[\s\S]*?overflow-y:\s*hidden/);
+    assert.match(client, /personal-quick-task-form/);
+    assert.match(client, /document\.getElementById\('user-input'\)/);
 });
 
 test('工作台作为系统主入口，关闭二级页面时回到来源工作区', () => {
