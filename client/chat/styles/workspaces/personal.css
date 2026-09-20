@@ -1375,18 +1375,17 @@ body.dark-mode .personal-shortcut-add:hover,
 }
 
 .personal-workbench-grid {
-    /* Hero 收紧后不再用 flex 撑满剩余视口；卡片高度交给真实内容决定。 */
+    /* 方案 1：第 1 行 3 列平齐，第 2 行 2+1 组合，信息饱满，消除大屏死角空白 */
     flex: 0 0 auto;
     display: grid;
     grid-template-areas:
-        'attention goals'
-        'assistant recent'
-        'shortcuts shortcuts';
-    grid-template-columns: minmax(0, 1.14fr) minmax(360px, 0.86fr);
-    grid-template-rows: auto auto auto;
+        'attention goals assistant'
+        'recent recent shortcuts';
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto;
     align-items: stretch;
     align-content: start;
-    gap: 12px;
+    gap: 14px;
     margin: 0;
 }
 
@@ -1408,11 +1407,11 @@ body.dark-mode .personal-shortcut-add:hover,
     content: '';
 }
 
-.personal-card-attention { grid-area: attention; min-height: 162px; }
-.personal-card-goals { grid-area: goals; min-height: 162px; }
-.personal-card-assistant { grid-area: assistant; min-height: 214px; }
-.personal-card-recent { grid-area: recent; min-height: 214px; }
-.personal-card-shortcuts { grid-area: shortcuts; min-height: 146px; }
+.personal-card-attention { grid-area: attention; min-height: 220px; }
+.personal-card-goals { grid-area: goals; min-height: 220px; }
+.personal-card-assistant { grid-area: assistant; min-height: 220px; }
+.personal-card-recent { grid-area: recent; min-height: 236px; }
+.personal-card-shortcuts { grid-area: shortcuts; min-height: 236px; }
 .personal-card-attention::before { background: var(--warning, #f59e0b); }
 .personal-card-goals::before { background: var(--purple-accent, #8b5cf6); }
 .personal-card-assistant::before { background: var(--primary); }
@@ -1506,36 +1505,43 @@ body.dark-mode .personal-shortcut-add:hover,
 }
 
 .personal-shortcuts {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 10px;
-    padding: 10px 16px 12px;
-    align-content: start;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 14px 12px;
+    align-content: stretch;
 }
 
 .personal-shortcut {
-    min-height: 76px;
-    padding: 8px 10px;
+    min-height: 60px;
+    padding: 7px 10px;
     border-radius: 10px;
     box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .personal-shortcut:hover { box-shadow: var(--shortcut-hover-shadow, 0 8px 16px rgba(15, 23, 42, 0.07)); }
-.personal-shortcut-icon { width: 28px; height: 28px; border-radius: 8px; }
-.personal-shortcut-icon svg { width: 16px; height: 16px; }
-.personal-shortcut-info { gap: 1px; margin-top: 5px; }
-.personal-shortcut-title { font-size: 0.78rem; }
+.personal-shortcut-icon { width: 26px; height: 26px; border-radius: 8px; }
+.personal-shortcut-icon svg { width: 15px; height: 15px; }
+.personal-shortcut-info { gap: 1px; margin-top: 4px; }
+.personal-shortcut-title { font-size: 0.76rem; }
 .personal-shortcut-hint { font-size: 0.62rem; line-height: 1.25; }
 
 @media (max-width: 1180px) {
     .personal-hero { grid-template-columns: minmax(230px, .7fr) minmax(450px, 1.3fr); gap: 22px; }
     .personal-workbench-grid {
-        grid-template-areas: 'attention' 'goals' 'assistant' 'recent' 'shortcuts';
-        grid-template-columns: 1fr;
+        grid-template-areas:
+            'attention goals'
+            'recent assistant'
+            'shortcuts shortcuts';
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .personal-card-attention, .personal-card-goals { min-height: 162px; }
+    .personal-card-attention, .personal-card-goals { min-height: 200px; }
     .personal-card-assistant, .personal-card-recent { min-height: 214px; }
-    .personal-card-shortcuts { min-height: 236px; }
-    .personal-shortcuts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .personal-card-shortcuts { min-height: auto; }
+    .personal-shortcuts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 }
 
 @media (max-width: 860px) {
@@ -1555,7 +1561,16 @@ body.dark-mode .personal-shortcut-add:hover,
     .personal-hero-examples { overflow-x: auto; padding-bottom: 1px; }
     .personal-card-header { padding: 11px 13px 9px; }
     .personal-row { padding: 9px 13px; }
-    .personal-card-shortcuts { min-height: 324px; }
+    .personal-workbench-grid {
+        grid-template-areas:
+            'attention'
+            'goals'
+            'assistant'
+            'recent'
+            'shortcuts';
+        grid-template-columns: 1fr;
+    }
+    .personal-card-shortcuts { min-height: auto; }
     .personal-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
-    .personal-shortcut { min-height: 76px; }
+    .personal-shortcut { min-height: 72px; }
 }
