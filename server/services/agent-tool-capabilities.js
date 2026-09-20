@@ -27,6 +27,7 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'agent.image_generate': ['media.image_generate'],
     'agent.text_to_speech': ['media.text_to_speech'],
     'agent.browser': ['network.browser_visit'],
+    'terminal.runtime': ['code.execute'],
     'agent.merge': ['agent.execute'],
     'tools.search': ['system.observe'],
     'tools.describe': ['system.observe'],

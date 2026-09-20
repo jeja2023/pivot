@@ -1302,6 +1302,7 @@ async function refreshMcpWorkbench(button = null) {
 window.Pivot?.exposeModule?.('mcp.workbench', {
     changeMcpConnectionAccount: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.changeConnectionAccount?.(...args),
     describeMcpProductTool: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.describeTool?.(...args),
+    executeMcpProductTool: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.executeDescribedTool?.(...args),
     fillMcpToolSampleInput,
     loadMcpConnectionAccounts: (...args) => window.Pivot?.moduleApi?.('mcp.product')?.loadConnectionAccounts?.(...args),
     loadMcpGovernance,

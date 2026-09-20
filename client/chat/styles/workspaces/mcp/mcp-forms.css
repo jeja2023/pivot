@@ -71,6 +71,10 @@
 .mcp-product-detail-overlay { z-index: 1910; }
 .mcp-product-detail-modal { width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: hidden; }
 .mcp-product-detail-content { max-height: calc(100vh - 170px); margin: 0; padding: 16px; overflow: auto; background: #0f172a; color: #e2e8f0; font-size: 0.72rem; line-height: 1.5; text-align: left; white-space: pre-wrap; word-break: break-word; }
+.mcp-product-execute-panel { display: grid; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--border); background: #fff; }
+.mcp-product-execute-panel label { font-weight: 700; font-size: 0.78rem; color: var(--text-main); }
+.mcp-product-execute-panel p { margin: 0; color: var(--text-muted); font-size: 0.72rem; line-height: 1.45; }
+.mcp-product-execute-panel .btn-primary { justify-self: end; }
 
 .mcp-edit-header {
     display: flex;

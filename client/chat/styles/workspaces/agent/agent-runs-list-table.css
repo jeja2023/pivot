@@ -906,6 +906,12 @@
     font-weight: 600;
 }
 
+.agent-context-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 8px;
+}
+
 /* 响应式断点 */
 @media (max-width: 1200px) {
     .agent-tasks-context-pane {

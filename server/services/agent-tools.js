@@ -56,18 +56,20 @@ const {
 const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } = require('./agent-tools-artifacts');
 const { createAgentDelegateExecutor } = require('./agent-tools-delegation');
 const { executeToolDiscoveryMeta, getToolDiscoveryDefinitions } = require('./agent-tools-discovery');
+const { executeTerminalRuntime, isTerminalRuntimeAvailable, terminalToolDefinition } = require('./agent-tools-terminal');
 
 const MAX_TEXT = 12000;
 // 动态代码只能在独立的桌面 Worker / 受控执行平面中运行。
 // Node 的 vm.runInNewContext 不是安全沙箱：恶意代码可以通过构造器链重新取得宿主
 // 对象。因此所有直接调用 executeBuiltInTool 的入口（MCP、OpenAI、工具测试 API）
 // 都必须在这里统一拒绝，不能依赖调用方自行传入 autonomous 标志。
-const IN_PROCESS_DYNAMIC_CODE_TOOLS = new Set(['agent.code', 'workflow.foreach']);
+const IN_PROCESS_DYNAMIC_CODE_TOOLS = new Set(['agent.code', 'workflow.foreach', 'terminal.runtime']);
 
 function assertDynamicCodeExecutionIsSandboxed(toolName, context = {}) {
     const name = String(toolName || '').trim();
     if (!IN_PROCESS_DYNAMIC_CODE_TOOLS.has(name)) return;
     if (name === 'workflow.foreach' && context.sandboxExecution === true && context.approvalGranted === true) return;
+    if (name === 'terminal.runtime' && context.approvalGranted === true) return;
     const error = new Error('动态代码只能在独立 Worker 沙箱中执行，当前服务端执行入口已拒绝。');
     error.code = 'AGENT_SANDBOX_REQUIRED';
     error.category = 'policy';
@@ -189,6 +191,7 @@ function getBuiltInToolDefinitions(user) {
                 vars: { type: 'object', description: '注入到代码作用域的变量，支持 {{nodes.*.output}} 等模板引用。' }
             }, ['code'])
         },
+        terminalToolDefinition(asJsonSchema),
         {
             name: 'agent.http',
             title: 'HTTP 请求',
@@ -625,6 +628,7 @@ function getBuiltInToolDefinitions(user) {
         if (tool.name === 'agent.web_search') return isAgentWebSearchAvailable();
         if (tool.name === 'agent.image_generate') return isAgentImageGenerationAvailable();
         if (tool.name === 'agent.text_to_speech') return isAgentTextToSpeechAvailable();
+        if (tool.name === 'terminal.runtime') return isTerminalRuntimeAvailable();
         return true;
     });
 }
@@ -1038,6 +1042,10 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
 
     if (name === 'agent.browser') {
         return executeAgentBrowser(input, context);
+    }
+
+    if (name === 'terminal.runtime') {
+        return executeTerminalRuntime(input, user, context);
     }
 
     if (name === 'agent.merge') {

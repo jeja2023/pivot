@@ -113,6 +113,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
                 'Schema: {"thought":"简短推理（中文）","action":"tool|final","tool":"tool.name","input":{},"answer":"最终答案（中文）"}',
                 `运行模式：${runModeLabel}。`,
                 '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
+                '工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。',
                 '以观察结果为依据，不要编造工具返回结果。',
                 contextLines.length ? `上下文指导：${contextLines.join(' ')}` : '无额外上下文指导。',
                 worldState ? buildWorldStatePrompt(worldState, { injection: worldStateInjection }) : '',

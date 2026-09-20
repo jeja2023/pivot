@@ -160,7 +160,6 @@ function renderAgentTrace(traceData = {}, runStatus = '', runId = '') {
         </details>
     `;
 }
-
 function agentRunDurationLabel(value) {
     const ms = Math.max(Number(value) || 0, 0);
     if (!ms) return '—';
@@ -168,7 +167,6 @@ function agentRunDurationLabel(value) {
     if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} 秒`;
     return `${Math.round(ms)} 毫秒`;
 }
-
 function agentRunFriendlySummary(run = {}, progress = {}) {
     const status = String(run.status || '').toLowerCase();
     const continuation = agentRunMetadata(run).autoContinuation || {};
@@ -614,6 +612,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.Pivot.legacy.createWorkflowDraftFromAgentRun(run.id));
     container.querySelector('[data-agent-create-skill-draft]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runPersonalContext')?.createSkillDraftFromRun?.(run.id).catch(error => window.Pivot?.legacy?.showToast?.(error.message || '生成 Skill 草稿失败', 'error')));
     container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
+    window.Pivot?.moduleApi?.('agent.runPersonalContext')?.bindSkillMatchPause?.(container, run);
     container.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
         btn.addEventListener('click', () => window.Pivot.legacy.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });
@@ -643,7 +642,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
             const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, rating: section?.querySelector('[data-agent-feedback-rating]')?.value || null, correction, modifiedAnswer: correction }) });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '反馈提交失败');
-            if (status) { status.textContent = '已记录，谢谢反馈。'; status.className = 'agent-run-feedback-status is-success'; }
+            if (status) { status.textContent = window.Pivot?.moduleApi?.('agent.runPersonalContext')?.feedbackStatusText?.(data) || '已记录，谢谢反馈。'; status.className = 'agent-run-feedback-status is-success'; }
             event.currentTarget.disabled = true;
         } catch (error) {
             if (status) { status.textContent = error.message || '反馈提交失败'; status.className = 'agent-run-feedback-status is-error'; }
@@ -744,7 +743,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         ? tokenUsage.replace(/^模型用量\s*/u, '总计 ')
         : '';
     const projectContextMarkup = personalContext.projectContextMarkup(run, agentEscape);
-    const memoryContextMarkup = personalContext.memoryContextMarkup?.(run, agentEscape) || '';
+    const memoryContextMarkup = personalContext.personalContextMarkup?.(run, agentEscape) || '';
     const actionMarkup = agentRunActionMarkup(run, {
         isPreview,
         canCancel,

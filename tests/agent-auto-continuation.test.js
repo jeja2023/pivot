@@ -73,7 +73,12 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
         listSteps: async () => [],
         getRunMetadata: () => metadata,
         getAgentRunTitle: item => item.title,
-        formatToolList: async () => [{ name: 'rag.search', source: 'builtin', idempotent: true }],
+        formatToolList: async () => [
+            { name: 'tools.search', source: 'builtin', idempotent: true },
+            { name: 'tools.describe', source: 'builtin', idempotent: true },
+            { name: 'tools.execute', source: 'builtin', idempotent: false },
+            { name: 'rag.search', source: 'builtin', idempotent: true }
+        ],
         listToolReliability: async () => [],
         selectToolOrder: list => list,
         normalizeMaxSteps: value => Number(value),

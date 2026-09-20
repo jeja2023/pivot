@@ -112,6 +112,15 @@ function findAgentToolByName(name, toolList = []) {
 
 async function executeToolByName(name, input, user, toolList = [], context = {}) {
     const safeName = String(name || '').trim();
+    if (context.autonomous === true && context.discoveredExecution !== true) {
+        const plannerTools = context.plannerToolNames instanceof Set ? context.plannerToolNames : new Set(context.plannerToolNames || []);
+        if (plannerTools.size && !plannerTools.has(safeName)) {
+            const error = new Error('此工具尚未通过 search → describe → execute 的渐进式发现流程。');
+            error.code = 'TOOL_DISCOVERY_REQUIRED';
+            error.status = 409;
+            throw error;
+        }
+    }
     const tool = findAgentToolByName(safeName, toolList);
     if (!tool) {
         const err = new Error(`工具不可用或无权访问：${safeName || '-'}`);

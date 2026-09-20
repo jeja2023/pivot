@@ -14,6 +14,40 @@
         return `已使用个人经验“${String(value.skillTitle).slice(0, 120)}”：${String(reason.summary || '与当前任务匹配。').slice(0, 180)}${terms.length ? ` 匹配词：${terms.join('、')}。` : ''}`;
     }
 
+    function skillContextMarkup(run = {}, escape = value => String(value || '')) {
+        const value = metadata(run);
+        if (!value.learnedSkillAuto || !value.skillReleaseId || !value.skillTitle) return '';
+        const reason = value.skillMatchReason && typeof value.skillMatchReason === 'object' ? value.skillMatchReason : {};
+        const terms = Array.isArray(reason.matchedTerms) ? reason.matchedTerms.filter(Boolean).slice(0, 6) : [];
+        return `<div class="agent-context-card"><h5>已使用的个人经验</h5><div class="agent-context-row"><span>${escape(String(value.skillTitle).slice(0, 120))}</span><strong>${escape(String(reason.summary || '与当前任务匹配。').slice(0, 180))}</strong></div>${terms.length ? `<div class="agent-context-row"><span>匹配词</span><strong>${escape(terms.join('、'))}</strong></div>` : ''}<div class="agent-context-actions"><button type="button" class="btn-secondary btn-xs" data-agent-skill-match-pause="${escape(String(run.id || ''))}">这条经验不相关，暂停使用</button></div></div>`;
+    }
+
+    function personalContextMarkup(run = {}, escape = value => String(value || '')) {
+        return `${memoryContextMarkup(run, escape)}${skillContextMarkup(run, escape)}`;
+    }
+
+    function feedbackStatusText(response = {}) {
+        return response?.feedback?.learning?.scheduled
+            ? '已记录，将基于这次修正生成一条待确认的个人经验。'
+            : '已记录，谢谢反馈。';
+    }
+
+    function bindSkillMatchPause(container, run = {}) {
+        container?.querySelector('[data-agent-skill-match-pause]')?.addEventListener('click', async event => {
+            const button = event.currentTarget;
+            if (!window.confirm('暂停后，后续任务将不再自动使用这条个人经验；历史记录会保留，且可在“经验沉淀”中恢复。是否继续？')) return;
+            button.disabled = true;
+            try {
+                const response = await fetch(`${API_BASE}/agents/runs/${encodeURIComponent(run.id)}/skill-match/pause`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || '暂停个人经验失败');
+                window.Pivot?.legacy?.showToast?.(data.message || '已暂停个人经验。', 'success');
+                await window.Pivot?.legacy?.openAgentRun?.(run.id, { silent: true });
+            } catch (error) { window.Pivot?.legacy?.showToast?.(error.message || '暂停个人经验失败', 'error'); }
+            finally { button.disabled = false; }
+        });
+    }
+
     function projectContextMarkup(run = {}, escape = value => String(value || '')) {
         const collections = Array.isArray(metadata(run).projectContextPack?.collections) ? metadata(run).projectContextPack.collections : [];
         const names = collections.map(item => String(item?.name || item?.id || '').trim()).filter(Boolean).slice(0, 8);
@@ -70,5 +104,5 @@
         return createdData.version || null;
     }
 
-    window.Pivot?.exposeModule?.('agent.runPersonalContext', { appendCollaboratorGroup, createSkillDraftFromRun, memoryContextMarkup, projectContextMarkup, skillMatchText });
+    window.Pivot?.exposeModule?.('agent.runPersonalContext', { appendCollaboratorGroup, bindSkillMatchPause, createSkillDraftFromRun, feedbackStatusText, memoryContextMarkup, personalContextMarkup, projectContextPack: projectContextMarkup, projectContextMarkup, skillContextMarkup, skillMatchText });
 })();

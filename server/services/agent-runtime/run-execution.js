@@ -84,18 +84,15 @@ const {
     instanceId = '',
     logger,
     getBeijingTimestamp,
-} = deps;
-
+    } = deps;
     function runStartedAtMs(run = {}) {
         const parsed = Date.parse(String(run.started_at || run.created_at || '').replace(' ', 'T'));
         return Number.isFinite(parsed) ? parsed : Date.now();
     }
-
     function autoContinuationState(run = {}) {
         const value = getRunMetadata(run).autoContinuation;
         return value && typeof value === 'object' ? value : {};
     }
-
     async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'timeout' }) {
         const enabled = reason === 'step_limit' ? AGENT_AUTO_CONTINUE_ON_STEP_LIMIT : AGENT_AUTO_CONTINUE_ON_TIMEOUT;
         if (!enabled || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
@@ -103,7 +100,6 @@ const {
         const count = Math.max(Number.parseInt(prior.count, 10) || 0, 0);
         const elapsedMs = Math.max(Date.now() - runStartedAtMs(run), 0);
         if (count >= AGENT_MAX_AUTO_CONTINUATIONS || elapsedMs >= AGENT_MAX_TOTAL_RUNTIME_MS) return false;
-
         const currentStatus = await getRunStatus(runId);
         if (TERMINAL_STATUSES.has(currentStatus)) return false;
         // 工具尚未提交时不能立刻续跑：底层进程可能仍在收尾，直接再次执行会制造
@@ -339,9 +335,8 @@ const {
                 && !tool?.requiresApproval
                 && !tool?.alwaysRequiresApproval);
         }
-        if (toolList.length === 0) {
-            throw new Error('没有可用工具符合当前任务配置。');
-        }
+        const { prepareProgressiveToolDiscovery } = require('./progressive-tool-discovery');
+        const { plannerToolList, toolDiscoveryState, plannerToolNames: progressivePlannerToolNames } = prepareProgressiveToolDiscovery(toolList);
         await assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
         await updateRun(runId, {
@@ -381,6 +376,9 @@ const {
                 user,
                 modelCfg,
                 toolList,
+                plannerToolList,
+                toolDiscoveryState,
+                plannerToolNames: progressivePlannerToolNames,
                 runId,
                 deadline,
                 assertRunWithinBudget,
@@ -470,7 +468,7 @@ const {
                     ? { ...runtimeMetadata.chatBridge, currentMessage: plannerCurrentMessage }
                     : null
             };
-            const plannerMessages = buildPlannerMessages(run.goal, toolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
+            const plannerMessages = buildPlannerMessages(run.goal, plannerToolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',
@@ -611,7 +609,14 @@ const {
                 model_id: run.model_id ?? modelCfg?.id,
                 chosen_model_id: run.chosen_model_id ?? modelCfg?.id
             });
-            const operationSignature = `${plan.tool}:${approvalInputHash(effectivePlanInput)}`;
+            let progressiveExecution; try {
+                progressiveExecution = await require('../agent-progressive-execution').resolveProgressiveExecution({ toolName: plan.tool, input: effectivePlanInput, user, toolList, state: toolDiscoveryState, run });
+            } catch (toolResolutionError) {
+                observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: toolResolutionError.message });
+                await insertStep(runId, step, { type: 'tool', title: `工具发现未完成：${plan.tool}`, toolName: plan.tool, input: effectivePlanInput, errorMessage: toolResolutionError.message, status: 'error', contextHash: stepContext.contextHash });
+                continue;
+            }
+            const operationSignature = `${progressiveExecution.approvalToolName}:${approvalInputHash(progressiveExecution.approvalInput)}`;
             stagnantRounds = operationSignature === lastOperationSignature ? stagnantRounds + 1 : 1;
             lastOperationSignature = operationSignature;
             if (stagnantRounds >= 3) {
@@ -634,9 +639,9 @@ const {
                 await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-                const selectedTool = findAgentToolByName(plan.tool, toolList);
-                const approvalKey = `${runId}:${step}:${plan.tool}`;
-                if (await maybePauseForApproval(run, selectedTool, effectivePlanInput, approvalKey)) return;
+                const selectedTool = progressiveExecution.approvalTool;
+                const approvalKey = `${runId}:${step}:${progressiveExecution.approvalToolName}`;
+                if (await maybePauseForApproval(run, selectedTool, progressiveExecution.approvalInput, approvalKey)) return;
                 const toolContext = {
                     run,
                     modelCfg,
@@ -647,8 +652,10 @@ const {
                     contextHash: stepContext.contextHash,
                     traceContext: buildToolTraceContext({ runId, spanId: `${runId}:${step}`, requestId: stepContext?.requestId || '' }),
                     budget: taskBudget,
-                    approvalGranted: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
-                    allowApproval: isApprovalGranted(run, plan.tool, approvalKey, effectivePlanInput),
+                    approvalGranted: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
+                    allowApproval: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
+                    toolDiscoveryState,
+                    plannerToolNames: progressivePlannerToolNames,
                     waitForWorkflowDelay,
                     delayKey: plan.tool === 'workflow.delay'
                         ? stableWorkflowDelayKey(plan.tool, step, effectivePlanInput)

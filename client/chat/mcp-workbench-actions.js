@@ -52,6 +52,11 @@
                 event.preventDefault();
                 return window.Pivot?.moduleApi?.('mcp.modal', {})?.setMcpModalVisibility?.(document.getElementById('mcp-product-detail-modal'), false);
             }
+            if (button.id === 'mcp-product-execute-btn') {
+                event.preventDefault();
+                try { return await window.Pivot?.moduleApi?.('mcp.product')?.executeDescribedTool?.(button); }
+                catch (error) { return showToast(error.message || '工具执行失败', 'error'); }
+            }
             if (button.id === 'mcp-product-operations-refresh') {
                 event.preventDefault();
                 try { return await workbenchApi().loadMcpToolOperations?.(); }

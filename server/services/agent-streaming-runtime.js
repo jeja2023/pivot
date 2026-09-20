@@ -98,7 +98,7 @@ function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, chatContext = {} }, deps) {
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, chatContext = {} }, deps) {
     let roundsUsed = 0;
     try {
         const callStreamingModel = deps.callModelStreamingWithTools || callModelStreamingWithTools;
@@ -108,10 +108,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
         const recordUsage = deps.recordAgentModelUsage || recordAgentModelUsage;
         const recordToolCallCapability = deps.recordNativeToolCallCapability || recordNativeToolCallCapability;
         const taskBudget = deps.taskBudget || null;
-        const tools = buildAgentToolSchemas(toolList);
+        const tools = buildAgentToolSchemas(plannerToolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
 
 需要时使用 tool_calls 调用工具；否则提供最终答案。返回结构化的工具输入 JSON。
+
+工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。
 
 【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。
 不得声称已经把文件写入用户电脑；只有用户明确点击保存并收到交付结果后，才能说明文件已保存。生成代码时请输出代码，并提示用户使用代码块中的“保存到本机”。`;
@@ -517,7 +519,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
             for (const call of result.toolCalls) {
                 assertRunWithinBudget();
                 await assertRunNotCancelled(runId);
-                const selectedTool = findAgentToolByName(call.name, toolList);
+                const selectedTool = findAgentToolByName(call.name, plannerToolList);
                 if (!selectedTool) {
                     const message = `工具不可用或无权访问：${call.name || '-'}`;
                     preparedCalls.push({ call, tool: null, input: call.arguments || {}, unavailable: message });
@@ -528,11 +530,22 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     model_id: run.model_id ?? modelCfg?.id,
                     chosen_model_id: run.chosen_model_id ?? modelCfg?.id
                 });
-                if (await deps.maybePauseForApproval(run, selectedTool, args)) {
+                let progressive;
+                try {
+                    const { resolveProgressiveExecution } = require('./agent-progressive-execution');
+                    progressive = await resolveProgressiveExecution({
+                        toolName: call.name, input: args, user, toolList,
+                        state: toolDiscoveryState, run
+                    });
+                } catch (error) {
+                    preparedCalls.push({ call, tool: selectedTool, input: args, unavailable: error.message, error });
+                    continue;
+                }
+                if (await deps.maybePauseForApproval(run, progressive.approvalTool, progressive.approvalInput)) {
                     // 保持运行处于待审批状态；审批通过后由恢复流程继续。
                     return { completed: true, roundsUsed };
                 }
-                preparedCalls.push({ call, tool: selectedTool, input: args });
+                preparedCalls.push({ ...progressive, call, tool: progressive.approvalTool, input: args });
             }
 
             const executedCalls = await executeToolCallsInOrder(preparedCalls, async prepared => {
@@ -541,7 +554,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     return { ...prepared, status: 'unavailable', durationMs: 0 };
                 }
                 const { call, input: args } = prepared;
-                if (taskBudget) taskBudget.consumeTool(prepared.tool || { name: call?.name || '' });
+                if (taskBudget) taskBudget.consumeTool(prepared.approvalTool || prepared.tool || { name: call?.name || '' });
                 const callStart = Date.now();
                 await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
@@ -549,7 +562,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                     type: 'tool',
                     name: `工具调用：${call.name}`,
                     input: args,
-                    details: { step, toolName: call.name, source: 'streaming_tool_call', concurrency: prepared.tool.concurrency || '' },
+                    details: { step, toolName: prepared.approvalToolName || call.name, source: 'streaming_tool_call', concurrency: (prepared.approvalTool || prepared.tool).concurrency || '' },
                     contextHash: stepContext?.contextHash || ''
                 });
                 try {
@@ -564,8 +577,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, runId, dead
                             contextHash: stepContext?.contextHash || '',
                             budget: deps.taskBudget || null,
                             budgetAlreadyConsumed: true,
-                            approvalGranted: Boolean(deps.getRunMetadata?.(run)?.approvedTools?.includes(call.name)),
-                            allowApproval: Boolean(deps.getRunMetadata?.(run)?.approvedTools?.includes(call.name)),
+                            approvalGranted: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),
+                            allowApproval: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),
+                            toolDiscoveryState,
+                            plannerToolNames,
                             signal,
                             waitForWorkflowDelay: deps.waitForWorkflowDelay,
                             delayKey: call.name === 'workflow.delay' ? `${call.name}:stream:${step}:${call.id || 'call'}` : ''

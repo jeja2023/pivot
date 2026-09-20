@@ -97,7 +97,7 @@
 </section>
 
 <div id="mcp-product-detail-modal" class="modal-overlay hidden mcp-product-detail-overlay" aria-hidden="true">
-    <div class="modal mcp-product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-product-detail-title">
+            <div class="modal mcp-product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-product-detail-title">
         <div class="mcp-edit-header">
             <div>
                 <h3 id="mcp-product-detail-title">工具契约</h3>
@@ -106,6 +106,12 @@
             <button class="btn-secondary workspace-modal-close" type="button" data-mcp-product-detail-close aria-label="关闭工具契约">关闭</button>
         </div>
         <pre id="mcp-product-detail-content" class="mcp-product-detail-content"></pre>
+        <div class="mcp-product-execute-panel">
+            <label for="mcp-product-execute-input">执行输入（JSON）</label>
+            <textarea id="mcp-product-execute-input" class="form-input form-input-mono" rows="4" spellcheck="false">{}</textarea>
+            <p>已阅读契约后才可执行。高风险、写入或联网工具仍会进入审批；不会因目录操作扩大权限。</p>
+            <button id="mcp-product-execute-btn" class="btn-primary" type="button" disabled>执行已确认工具</button>
+        </div>
     </div>
 </div>
 

@@ -14,7 +14,8 @@ function extractNetworkUrl(input = {}) {
 function sandboxChoice(tool, context = {}) {
     const name = String(tool?.name || '').trim();
     const explicit = String(context.sandboxMode || context.sandbox_mode || '').trim().toLowerCase();
-    const required = context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(name);
+    const required = ['agent.code', 'workflow.foreach', 'terminal.runtime'].includes(name)
+        && (context.autonomous === true || name === 'terminal.runtime');
     if (required) return { mode: explicit || 'workspace-worker', required: true, escalationAllowed: false };
     if (explicit) return { mode: explicit, required: false, escalationAllowed: false };
     return { mode: 'none', required: false, escalationAllowed: false };

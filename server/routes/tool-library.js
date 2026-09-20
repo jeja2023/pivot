@@ -7,6 +7,7 @@ const { executeBuiltInTool } = require('../services/agent-tools');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { invalidate: invalidateMcpToolCatalog } = require('../services/mcp-tool-catalog-index');
 const { defaultToolPolicyEngine } = require('../services/tool-policy-engine');
+const { describeToolForUser, searchToolsForUser, toolRef } = require('../services/tool-discovery');
 const { list: listReleases, activate, releaseItems, compareCatalogReleases } = require('../services/tool-catalog-releases');
 const { assertUsable, listForUser, getForUser, transition, createAccount, bindToolConnection } = require('../services/connection-accounts');
 const { publicConnectorDefinition, startAuthorization, completeAuthorization, refreshAccount, revokeAccount, saveConnectorDefinition } = require('../services/connection-oauth');
@@ -63,7 +64,7 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
             if (!queryText) return true;
             return [tool.name, tool.title, tool.description, ...(tool.capabilities || [])].join(' ').toLowerCase().includes(queryText);
         }).slice(0, safeLimit(req.query.limit, 100, 500)).map(tool => ({
-            toolRef: { toolName: tool.name, definitionDigest: tool.definition_digest || '' },
+            toolRef: toolRef(tool),
             name: tool.name, title: tool.title, description: tool.description,
             riskLevel: tool.risk_level || tool.risk || 'low', capabilities: tool.capabilities || [],
             source: tool.source || 'builtin', requiresConnection: false,
@@ -229,66 +230,29 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
     }));
 
     router.post('/tools/search', authMiddleware, asyncHandler(async (req, res) => {
-        const queryText = String(req.body?.query || '').trim().toLowerCase();
-        if (!queryText) return res.status(400).json({ error: '请提供工具搜索关键词。' });
-        const tools = await formatToolList(req.user);
-        const tokens = queryText.split(/\s+/).filter(Boolean);
-        const scored = tools.map(tool => {
-            const text = [tool.name, tool.title, tool.description, ...(tool.capabilities || [])].join(' ').toLowerCase();
-            const score = tokens.reduce((total, token) => total + (text.includes(token) ? 1 : 0), 0);
-            return { tool, score };
-        }).filter(item => item.score > 0).sort((a, b) => b.score - a.score || String(a.tool.name).localeCompare(String(b.tool.name))).slice(0, safeLimit(req.body?.limit, 5, 20));
-        res.json({ data: scored.map(item => ({
-            ...compactCatalogItem({ ...item.tool, tool_name: item.tool.name, full_name: item.tool.name, risk_level: item.tool.risk_level || item.tool.risk, authScopes: [] }),
-            score: item.score,
-            reason: '名称、描述或能力标签与查询匹配。'
-        })) });
+        const result = await searchToolsForUser(req.user, req.body || {});
+        res.json({ data: result.candidates, meta: { query: result.query, totalAuthorizedTools: result.totalAuthorizedTools } });
     }));
 
     router.post('/tools/describe', authMiddleware, asyncHandler(async (req, res) => {
         const name = String(req.body?.toolRef?.toolName || req.body?.tool || req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: '请指定工具。' });
-        const requestedReleaseId = Number(req.body?.toolRef?.releaseId || 0);
-        if (requestedReleaseId) {
-            const frozenItems = await releaseItems(requestedReleaseId);
-            const bareName = String(name).replace(/^mcp\.\d+\./, '');
-            const item = frozenItems.find(candidate => String(candidate.tool_name || candidate.toolName) === bareName);
-            if (!item) return res.status(404).json({ error: '工具不在指定的目录版本中。' });
-            const server = await getAccessibleMcpServer(item.server_id, req.user);
-            if (!server) return res.status(404).json({ error: '工具服务不存在或无权访问。' });
-            const requestedDigest = String(req.body?.toolRef?.definitionDigest || '').trim();
-            const digest = item.definitionDigest || item.definition_digest || '';
-            if (requestedDigest && requestedDigest !== digest) return res.status(409).json({ error: '工具定义摘要不匹配，请重新选择当前目录版本。', code: 'TOOL_REFERENCE_STALE' });
-            return res.json({ data: {
-                toolRef: { toolName: `mcp.${item.server_id}.${item.tool_name || item.toolName}`, releaseId: requestedReleaseId, definitionDigest: digest },
-                name: `mcp.${item.server_id}.${item.tool_name || item.toolName}`, title: item.title, description: item.description,
-                inputSchema: item.inputSchema || item.input_schema || {}, outputSchema: item.outputSchema || item.output_schema || {},
-                capabilities: item.capabilities || [], riskLevel: item.risk_level || 'medium', idempotent: Boolean(item.idempotent),
-                sideEffect: Boolean(item.side_effect), cacheable: Boolean(item.cacheable), cancellable: Boolean(item.cancellable),
-                concurrency: item.concurrency || 'read', timeout: item.timeout || {}, requiresApproval: item.risk_level === 'high' || item.risk_level === 'critical' || Boolean(item.side_effect),
-                serverName: server.name || '', connectionRequirements: item.authScopes || item.auth_scopes || []
-            } });
-        }
-        const tools = await formatToolList(req.user, { toolPolicy: 'all' });
-        const tool = tools.find(item => item.name === name || item.fullName === name);
-        if (!tool) return res.status(404).json({ error: '工具不存在或无权访问。' });
-        res.json({ data: {
-            toolRef: { toolName: tool.name, releaseId: req.body?.toolRef?.releaseId || null, definitionDigest: req.body?.toolRef?.definitionDigest || '' },
-            name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.input_schema || {}, outputSchema: tool.output_schema || {},
-            capabilities: tool.capabilities || [], riskLevel: tool.risk_level || tool.risk || 'low', approvalRequired: Boolean(tool.approval_required || tool.requiresApproval),
-            idempotent: Boolean(tool.idempotent), sideEffect: Boolean(tool.side_effect), network: Boolean(tool.network), timeout: tool.timeout || {}, serverName: tool.serverName || ''
-        } });
+        const description = await describeToolForUser(req.user, { ...(req.body?.toolRef || {}), toolName: name });
+        res.json({ data: description });
     }));
 
     router.post('/tools/invoke', authMiddleware, asyncHandler(async (req, res) => {
-        const name = String(req.body?.toolRef?.toolName || req.body?.tool || req.body?.name || '').trim();
+        const requestedName = String(req.body?.toolRef?.toolName || req.body?.tool || req.body?.name || '').trim();
+        if (!requestedName) return res.status(400).json({ error: '请指定工具。' });
+        const described = await describeToolForUser(req.user, { ...(req.body?.toolRef || {}), toolName: requestedName });
+        const name = described.name;
         if (!name) return res.status(400).json({ error: '请指定工具。' });
         const policyRequest = {
             actor: req.user,
             toolName: name,
             input: req.body?.input || {},
             source: 'mcp_manual',
-            options: { releaseId: req.body?.toolRef?.releaseId, connectionAccountId: req.body?.connectionAccountId, entrypoint: 'tool_library' }
+            options: { releaseId: described.toolRef?.releaseId, connectionAccountId: req.body?.connectionAccountId, entrypoint: 'tool_library' }
         };
         if (req.body?.background === true) {
             // 后台任务只自动执行明确声明为只读且幂等的工具。写工具和未声明

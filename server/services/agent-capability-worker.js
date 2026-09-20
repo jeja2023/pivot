@@ -55,18 +55,27 @@ async function runCapabilityWorker(definition, input, options = {}) {
     if (Buffer.byteLength(payload) > 1024 * 1024) throw workerError('Capability Worker 输入超过 1MB 上限。', 'CAPABILITY_WORKER_INPUT_TOO_LARGE', 413);
     const command = dockerCommand(options.env || process.env);
     const containerName = `pivot-capability-${crypto.randomUUID().replace(/-/g, '')}`;
-    const args = ['run', '--rm', '--name', containerName, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', `${spec.limits.memoryMb}m`, '--cpus', String(spec.limits.cpu), '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--user', '65532:65532', '--env', 'NVIDIA_VISIBLE_DEVICES=void', '--env', 'CUDA_VISIBLE_DEVICES=', spec.image, ...spec.command];
+    const workspaceMount = options.workspaceMount && typeof options.workspaceMount === 'object' ? options.workspaceMount : null;
+    const mountSource = workspaceMount?.source ? String(workspaceMount.source) : '';
+    const mountTarget = workspaceMount?.target ? String(workspaceMount.target) : '/workspace';
+    if (mountSource && (!require('path').isAbsolute(mountSource) || !/^\/[A-Za-z0-9._/-]{1,240}$/.test(mountTarget) || mountTarget.includes('..'))) {
+        throw workerError('Capability Worker 工作区挂载配置无效。', 'CAPABILITY_WORKER_MOUNT_INVALID');
+    }
+    const args = ['run', '--rm', '--name', containerName, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', `${spec.limits.memoryMb}m`, '--cpus', String(spec.limits.cpu), '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--user', '65532:65532', '--env', 'NVIDIA_VISIBLE_DEVICES=void', '--env', 'CUDA_VISIBLE_DEVICES='];
+    if (mountSource) args.push('--mount', `type=bind,src=${mountSource},dst=${mountTarget}${workspaceMount.readOnly === true ? ',readonly' : ''}`, '--workdir', mountTarget);
+    args.push(spec.image, ...spec.command);
     const spawnProcess = options.spawn || spawn;
     return await new Promise((resolve, reject) => {
         const child = spawnProcess(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { PATH: process.env.PATH || '' } });
         const worker = { child, command, containerName };
         activeCapabilityWorkers.add(worker);
-        let output = '', error = '', settled = false;
+        let output = '', error = '', settled = false, abortHandler = null;
         const finish = (fn, value) => {
             if (!settled) {
                 settled = true;
                 activeCapabilityWorkers.delete(worker);
                 clearTimeout(timer);
+                if (abortHandler && options.signal) options.signal.removeEventListener?.('abort', abortHandler);
                 fn(value);
             }
         };
@@ -74,6 +83,16 @@ async function runCapabilityWorker(definition, input, options = {}) {
             stopCapabilityWorker(worker);
             finish(reject, workerError('Capability Worker 执行超时。', 'CAPABILITY_WORKER_TIMEOUT', 504));
         }, spec.limits.timeoutMs);
+        if (options.signal) {
+            abortHandler = () => {
+                stopCapabilityWorker(worker);
+                const reason = options.signal.reason instanceof Error ? options.signal.reason : workerError('Capability Worker 已取消。', 'CAPABILITY_WORKER_CANCELLED', 499);
+                if (!reason.code) reason.code = 'CAPABILITY_WORKER_CANCELLED';
+                finish(reject, reason);
+            };
+            if (options.signal.aborted) return abortHandler();
+            options.signal.addEventListener?.('abort', abortHandler, { once: true });
+        }
         child.stdout.on('data', chunk => {
             output += chunk;
             if (Buffer.byteLength(output) > spec.limits.maxOutputBytes) {

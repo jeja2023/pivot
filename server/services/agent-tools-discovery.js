@@ -44,16 +44,33 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
 }
 
 async function executeToolDiscoveryMeta(name, input, user, context) {
+    const state = context?.toolDiscoveryState;
+    const {
+        assertDescribed, assertSearched, rememberDescription, rememberSearch
+    } = require('./agent-tool-progressive-discovery');
     if (name === 'tools.search') {
         const { searchToolsForUser } = require('./tool-discovery');
-        return { handled: true, value: await searchToolsForUser(user, input) };
+        const value = await searchToolsForUser(user, input, {}, {
+            toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
+            toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
+        });
+        rememberSearch(state, value);
+        return { handled: true, value };
     }
     if (name === 'tools.describe') {
         const { describeToolForUser } = require('./tool-discovery');
-        return { handled: true, value: await describeToolForUser(user, input.toolRef || input.tool_ref || {}) };
+        const reference = input.toolRef || input.tool_ref || {};
+        assertSearched(state, reference);
+        const value = await describeToolForUser(user, reference, {}, {
+            toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
+            toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
+        });
+        rememberDescription(state, value.toolRef);
+        return { handled: true, value };
     }
     if (name === 'tools.execute') {
         const { executeDiscoveredTool } = require('./tool-discovery');
+        assertDescribed(state, input.toolRef || input.tool_ref || {});
         return { handled: true, value: await executeDiscoveredTool(user, input, context) };
     }
     return { handled: false, value: undefined };

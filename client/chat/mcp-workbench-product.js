@@ -3,6 +3,7 @@
 (function installMcpProductWorkbench() {
     const escape = value => escapeHtml(value === undefined || value === null ? '' : String(value));
     const modalApi = () => window.Pivot?.moduleApi?.('mcp.modal', {}) || {};
+    let describedTool = null;
 
     function empty(message) {
         return `<div class="mcp-product-empty">${escape(message)}</div>`;
@@ -126,6 +127,7 @@
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || '工具契约读取失败');
         const detail = data.data || {};
+        describedTool = detail.toolRef && detail.name ? detail : null;
         const message = `${detail.title || detail.name}\n\n${detail.description || ''}\n\n输入契约：\n${JSON.stringify(detail.inputSchema || {}, null, 2)}\n\n输出契约：\n${JSON.stringify(detail.outputSchema || {}, null, 2)}`;
         const modal = document.getElementById('mcp-product-detail-modal');
         const title = document.getElementById('mcp-product-detail-title');
@@ -135,7 +137,31 @@
         if (title) title.textContent = detail.title || detail.name || '工具契约';
         if (subtitle) subtitle.textContent = `${detail.name || ''} · 风险：${riskLabel(detail.riskLevel)}${detail.requiresApproval ? ' · 调用前需审批' : ''}`;
         content.textContent = message;
+        const input = document.getElementById('mcp-product-execute-input');
+        const execute = document.getElementById('mcp-product-execute-btn');
+        if (input) input.value = '{}';
+        if (execute) execute.disabled = !describedTool;
         modalApi().setMcpModalVisibility?.(modal, true, { focusSelector: '[data-mcp-product-detail-close]' });
+    }
+
+    async function executeDescribedTool(button) {
+        if (!describedTool?.toolRef || !describedTool?.name) throw new Error('请先从搜索结果中查看工具契约。');
+        const rawInput = String(document.getElementById('mcp-product-execute-input')?.value || '{}').trim() || '{}';
+        let input;
+        try { input = JSON.parse(rawInput); } catch (_) { throw new Error('执行输入必须是合法 JSON 对象。'); }
+        if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('执行输入必须是 JSON 对象。');
+        button.disabled = true;
+        try {
+            const response = await apiFetch(`${API_BASE}/tools/invoke`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ toolRef: describedTool.toolRef, input })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '工具执行失败');
+            showToast('工具已执行；可在“运行与治理”查看策略与调用记录。', 'success');
+            await loadOperations();
+            return data.result;
+        } finally { button.disabled = false; }
     }
 
     async function changeConnectionAccount(button) {
@@ -169,5 +195,5 @@
         }
     }
 
-    window.Pivot?.exposeModule?.('mcp.product', { changeConnectionAccount, describeTool, loadCatalog, loadConnectionAccounts, loadOperations });
+    window.Pivot?.exposeModule?.('mcp.product', { changeConnectionAccount, describeTool, executeDescribedTool, loadCatalog, loadConnectionAccounts, loadOperations });
 }());

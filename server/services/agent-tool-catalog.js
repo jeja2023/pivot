@@ -29,6 +29,11 @@ async function formatToolList(user, options = {}) {
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
     const allowed = allowlist.length ? new Set(allowlist) : null;
     const isAllowed = (name, source, aliases = []) => {
+        // Progressive-discovery meta tools are a non-business, read-only control
+        // surface. They must stay available even when a run pins a narrow
+        // business-tool allowlist; otherwise the model cannot discover the one
+        // allowed tool or inspect its contract before executing it.
+        if (String(name || '').startsWith('tools.')) return true;
         if (policy === 'builtin_only' && source === 'mcp') return false;
         if (allowed && !allowed.has(name) && !aliases.some(alias => allowed.has(alias))) return false;
         return true;
@@ -90,6 +95,11 @@ async function formatToolList(user, options = {}) {
                 governance: tool.governance || {},
                 serverName: tool.serverName,
                 owner: tool.owner || null,
+                ...(tool.catalogReleaseId ? { catalogReleaseId: tool.catalogReleaseId, catalogReleaseVersion: tool.catalogReleaseVersion || '' } : {}),
+                ...(tool.catalogItemId ? { catalogItemId: tool.catalogItemId } : {}),
+                ...(tool.definitionDigest ? { definitionDigest: tool.definitionDigest } : {}),
+                ...(tool.authScopes ? { authScopes: tool.authScopes } : {}),
+                ...(tool.examples ? { examples: tool.examples } : {}),
                 localDevice: tool.localDevice || null,
                 localBrowserConnector: tool.localBrowserConnector === true,
                 ...(tool.localBrowserConnector === true ? { network: false } : {})

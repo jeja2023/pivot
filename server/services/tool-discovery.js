@@ -1,6 +1,7 @@
 'use strict';
 
 /** Progressive tool discovery for model contexts. */
+const crypto = require('crypto');
 const { formatToolList } = require('./agent-tool-catalog');
 
 function normalizeTerms(value) {
@@ -41,7 +42,11 @@ function toolRef(tool = {}) {
     return {
         toolName: tool.name || tool.fullName || '',
         releaseId: tool.catalogReleaseId || null,
-        definitionDigest: tool.definitionDigest || tool.definition_digest || ''
+        definitionDigest: tool.definitionDigest || tool.definition_digest || crypto.createHash('sha256').update(JSON.stringify({
+            name: tool.name || tool.fullName || '', version: tool.version || '',
+            inputSchema: tool.input_schema || tool.inputSchema || {}, outputSchema: tool.output_schema || tool.outputSchema || {},
+            capabilities: tool.capabilities || [], risk: tool.risk_level || tool.risk || '', source: tool.source || ''
+        })).digest('hex')
     };
 }
 
@@ -62,38 +67,46 @@ function toSummary(entry = {}) {
     };
 }
 
-async function searchToolsForUser(user, input = {}, deps = {}) {
+function catalogOptions(input = {}, options = {}) {
+    return {
+        toolPolicy: options.toolPolicy || options.tool_policy || input.toolPolicy || input.tool_policy,
+        toolAllowlist: options.toolAllowlist || options.tool_allowlist || input.toolAllowlist || input.tool_allowlist
+    };
+}
+
+async function searchToolsForUser(user, input = {}, deps = {}, options = {}) {
     const listTools = deps.formatToolList || formatToolList;
     const query = String(input.query || '').trim();
     if (!query) {
         const error = new Error('请提供工具搜索关键词。'); error.status = 400; throw error;
     }
     const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 20);
-    const tools = await listTools(user, { toolPolicy: input.toolPolicy || input.tool_policy, toolAllowlist: input.toolAllowlist || input.tool_allowlist });
+    const tools = await listTools(user, catalogOptions(input, options));
     return {
         query,
-        candidates: rankTools(query, tools, input.filters || input).slice(0, limit).map(toSummary),
-        totalAuthorizedTools: tools.length
+        candidates: rankTools(query, tools.filter(tool => !String(tool?.name || '').startsWith('tools.')), input.filters || input).slice(0, limit).map(toSummary),
+        totalAuthorizedTools: tools.filter(tool => !String(tool?.name || '').startsWith('tools.')).length
     };
 }
 
-async function describeToolForUser(user, reference = {}, deps = {}) {
+async function describeToolForUser(user, reference = {}, deps = {}, options = {}) {
     const listTools = deps.formatToolList || formatToolList;
     const toolName = String(reference.toolName || reference.tool_name || reference.name || '').trim();
     if (!toolName) {
         const error = new Error('请提供 toolRef.toolName。'); error.status = 400; throw error;
     }
-    const tools = await listTools(user, { toolPolicy: 'all' });
+    const tools = await listTools(user, catalogOptions({}, options));
     const tool = tools.find(item => item.name === toolName || item.fullName === toolName);
     if (!tool) {
         const error = new Error('工具不存在或无权访问。'); error.status = 404; throw error;
     }
+    const resolvedRef = toolRef(tool);
     const expectedDigest = String(reference.definitionDigest || reference.definition_digest || '').trim();
-    if (expectedDigest && tool.definitionDigest && expectedDigest !== tool.definitionDigest) {
+    if (expectedDigest && expectedDigest !== resolvedRef.definitionDigest) {
         const error = new Error('工具定义已更新，请重新搜索并确认最新版本。'); error.status = 409; error.code = 'TOOL_REFERENCE_STALE'; throw error;
     }
     return {
-        toolRef: toolRef(tool), name: tool.name, title: tool.title || tool.name, description: tool.description || '',
+        toolRef: resolvedRef, name: tool.name, title: tool.title || tool.name, description: tool.description || '',
         inputSchema: tool.input_schema || tool.inputSchema || {}, outputSchema: tool.output_schema || tool.outputSchema || {},
         capabilities: tool.capabilities || [], riskLevel: tool.risk_level || tool.risk || 'low',
         idempotent: Boolean(tool.idempotent), sideEffect: Boolean(tool.side_effect), cacheable: Boolean(tool.cacheable),
@@ -105,19 +118,24 @@ async function describeToolForUser(user, reference = {}, deps = {}) {
 
 async function executeDiscoveredTool(user, input = {}, context = {}, deps = {}) {
     const reference = input.toolRef || input.tool_ref || {};
-    const description = await describeToolForUser(user, reference, deps);
+    const runOptions = {
+        toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
+        toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
+    };
+    const description = await describeToolForUser(user, reference, deps, runOptions);
     if (String(description.name).startsWith('tools.')) {
         const error = new Error('工具发现元工具不能递归执行。'); error.status = 400; error.code = 'TOOL_META_RECURSION_FORBIDDEN'; throw error;
     }
     const { executeToolByName } = require('./agent-tool-runtime');
-    const tools = await (deps.formatToolList || formatToolList)(user, { toolPolicy: context.run?.tool_policy || 'all' });
+    const tools = await (deps.formatToolList || formatToolList)(user, runOptions);
     return await executeToolByName(description.name, input.input && typeof input.input === 'object' ? input.input : {}, user, tools, {
         ...context,
         source: context.source || 'agent',
         entrypoint: 'tool_meta_execute',
+        discoveredExecution: true,
         releaseId: description.toolRef.releaseId,
         definitionDigest: description.toolRef.definitionDigest
     });
 }
 
-module.exports = { describeToolForUser, executeDiscoveredTool, searchToolsForUser };
+module.exports = { describeToolForUser, executeDiscoveredTool, searchToolsForUser, toolRef };

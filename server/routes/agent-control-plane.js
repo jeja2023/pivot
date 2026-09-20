@@ -1,6 +1,7 @@
 const express = require('express');
 const { asyncHandler } = require('../http');
 const { queryOne } = require('../db/client');
+const { getRunForUser } = require('../services/agent-runs');
 const { getAgentProfile, listAgentProfileVersions, restoreAgentProfileVersion, updateAgentProfile } = require('../services/agent-profile');
 const {
     activatePersonalEvolutionProposal, applyEvolutionProposal, createEvolutionProposal, decideEvolutionProposal,
@@ -48,6 +49,11 @@ function allowedSkillPermissions() {
     return values.length ? values : undefined;
 }
 
+function parseRunMetadata(value) {
+    if (value && typeof value === 'object') return value;
+    try { return JSON.parse(String(value || '{}')) || {}; } catch (_) { return {}; }
+}
+
 function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter } = {}) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (_req, _res, next) => next();
@@ -88,6 +94,20 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
 
     router.get('/agents/learning/overview', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, ...(await getAgentLearningOverview(req.user)) });
+    }));
+    router.post('/agents/runs/:id/skill-match/pause', authMiddleware, asyncHandler(async (req, res) => {
+        const run = await getRunForUser(req.params.id, req.user);
+        if (!run) return res.status(404).json({ error: '任务不存在或无权操作。' });
+        const metadata = parseRunMetadata(run.metadata);
+        const releaseId = Number.parseInt(metadata.skillReleaseId, 10);
+        if (!Number.isSafeInteger(releaseId) || releaseId <= 0 || metadata.learnedSkillAuto !== true) {
+            return res.status(409).json({ error: '该任务没有自动匹配的个人经验可暂停。', code: 'SKILL_MATCH_NOT_PAUSABLE' });
+        }
+        const reason = String(req.body?.reason || '用户在运行详情中标记为不相关。').slice(0, 200);
+        const paused = await pauseSkillRelease(releaseId, req.user, reason);
+        if (!paused) return res.status(409).json({ error: '个人经验状态已变化，请刷新后重试。' });
+        writeLog(req, '暂停自动匹配的个人经验', `任务ID: ${run.id}，发布ID: ${releaseId}`);
+        res.json({ success: true, release: paused, message: '已暂停这条个人经验；后续任务不会再自动匹配它。' });
     }));
     router.get('/agents/learning/jobs', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, data: await listAgentLearningJobs(req.user, { limit: req.query.limit }) });

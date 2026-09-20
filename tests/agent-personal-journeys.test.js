@@ -36,6 +36,20 @@ test('memory, goal and delivery journeys retain a controlled confirmation and so
     assert.match(harness, /channels\/deliveries\/.*\/retry/);
 });
 
+test('correction feedback can create a governed learning job and an auto-matched experience can be paused', () => {
+    const feedback = read('server/services/agent-feedback.js');
+    const routes = read('server/routes/agent-control-plane.js');
+    const context = read('client/chat/agent-run-personal-context.js');
+    const detail = read('client/chat/agent-run-detail.js');
+    assert.match(feedback, /learning = await enqueueAgentLearningJob/);
+    assert.match(routes, /\/agents\/runs\/:id\/skill-match\/pause/);
+    assert.match(routes, /metadata\.learnedSkillAuto !== true/);
+    assert.match(context, /skillContextMarkup/);
+    assert.match(context, /data-agent-skill-match-pause/);
+    assert.match(detail, /bindSkillMatchPause/);
+    assert.match(context, /基于这次修正生成一条待确认的个人经验/);
+});
+
 test('historical session search is user-scoped, time-bounded, and carries a source reference', () => {
     const tools = read('server/services/agent-session-search.js');
     assert.match(tools, /input\.sessionId/);

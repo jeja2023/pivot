@@ -95,6 +95,7 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
         RETURNING *
     `, [userId, tenantId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
     const serialized = serializeFeedback(row);
+    let learning = { scheduled: false, reason: 'not_requested' };
     try {
         const { enqueueAgentLearningJob } = require('./agent-learning');
         const shouldLearn = feedback.source === 'runtime'
@@ -103,11 +104,18 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
         const trigger = feedback.source === 'runtime'
             ? (Number(run.retry_count || 0) > 0 ? 'recovery' : 'success')
             : 'correction';
-        if (shouldLearn) await enqueueAgentLearningJob(user, normalizedRunId, trigger, { kind: feedback.source === 'runtime' ? '' : 'skill' });
+        if (shouldLearn) {
+            learning = await enqueueAgentLearningJob(user, normalizedRunId, trigger, {
+                kind: feedback.source === 'runtime' ? '' : 'skill'
+            });
+        } else {
+            learning = { scheduled: false, reason: feedback.source === 'runtime' ? 'runtime_not_eligible' : 'no_correction' };
+        }
     } catch (_) {
         // 学习是后台增强能力，不能阻断任务结果或用户反馈写入。
+        learning = { scheduled: false, reason: 'learning_unavailable' };
     }
-    return serialized;
+    return { ...serialized, learning };
 }
 
 async function recordAgentRunOutcome(runId, status, options = {}) {
