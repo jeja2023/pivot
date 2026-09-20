@@ -29,10 +29,8 @@ async function formatToolList(user, options = {}) {
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
     const allowed = allowlist.length ? new Set(allowlist) : null;
     const isAllowed = (name, source, aliases = []) => {
-        // Progressive-discovery meta tools are a non-business, read-only control
-        // surface. They must stay available even when a run pins a narrow
-        // business-tool allowlist; otherwise the model cannot discover the one
-        // allowed tool or inspect its contract before executing it.
+        // 渐进式发现元工具属于非业务属性的只读控制面。即使用户或任务指定了窄范围业务工具白名单，
+        // 元工具也必须保持可见；否则模型无法发现已授权工具，也无法在执行前检视契约。
         if (String(name || '').startsWith('tools.')) return true;
         if (policy === 'builtin_only' && source === 'mcp') return false;
         if (allowed && !allowed.has(name) && !aliases.some(alias => allowed.has(alias))) return false;

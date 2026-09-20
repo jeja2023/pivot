@@ -1,8 +1,7 @@
 'use strict';
 
-/* The planner only receives the three discovery meta-tools. The complete,
- * authorization-filtered catalog remains available to the execution runtime
- * after tools.execute has resolved a previously described toolRef. */
+/* 规划器仅接收三个渐进式发现元工具。经过权限过滤的完整工具目录在 tools.execute
+ * 成功解析此前已检视契约的 toolRef 后，继续向底层执行运行时开放。 */
 const META_TOOL_NAMES = Object.freeze(new Set(['tools.search', 'tools.describe', 'tools.execute']));
 
 function buildProgressivePlannerToolList(toolList = []) {

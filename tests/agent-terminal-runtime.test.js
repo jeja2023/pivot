@@ -19,8 +19,8 @@ function fixture() {
         context: {
             run: { id: 'terminal-test' },
             terminalWorkspaceRoot: root,
-            // The local runner is never a production fallback. It is enabled
-            // here solely to unit-test input normalization without Docker.
+            // 本地 runner 绝非生产环境后备方案。此处仅用于在无 Docker 环境下
+            // 单独对输入规范化逻辑进行单元测试。
             env: { PIVOT_AGENT_TERMINAL_ALLOW_UNSAFE_LOCAL: 'true' }
         }
     };

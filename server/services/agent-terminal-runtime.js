@@ -1,11 +1,9 @@
 'use strict';
 
 /*
- * A deliberately small terminal surface for Agent runs.  This is not a host
- * shell: every command is executed without a shell in a per-user/per-run
- * jailed workspace, networking is disabled, and the executable set is fixed.
- * Keeping this boundary here lets desktop, Agent and manual-tool entrypoints
- * share identical execution semantics.
+ * 面向 Agent 运行的受限终端执行面。本模块绝非宿主机 Shell：所有命令均在按用户和按运行隔离的
+ * 隔离工作区中无 Shell 启动，默认切断网络，且可执行程序集合完全受控。
+ * 保持该边界可确保桌面端、Agent 自动化及手动测试统一具备完全一致的执行语义。
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -40,9 +38,8 @@ function terminalTaskId(user = {}, context = {}) {
     const userId = Number.parseInt(user?.id, 10);
     if (!Number.isSafeInteger(userId) || userId <= 0) throw terminalError('终端执行必须关联有效用户。', 'AGENT_TERMINAL_USER_REQUIRED', 401);
     const runId = String(context.run?.id || context.runId || context.taskId || 'manual').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 96) || 'manual';
-    // Never accept a task id from tool input.  A user can only ever reach a
-    // workspace named for their own account, and normal Agent calls get an
-    // additionally run-scoped workspace.
+    // 严禁从工具入参接收自定义任务 ID。用户只能访问归属于本人账户的工作区，
+    // 常规 Agent 调用还会额外按 Run 隔离到独立子空间。
     return `user-${userId}-${runId}`;
 }
 
@@ -163,8 +160,7 @@ async function writeTerminalFile(input = {}, user, context = {}) {
     const jail = prepareJail(user, context);
     const target = jail.resolve(relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-    // Resolve once more after creating the parent to catch a concurrent
-    // symlink substitution between validation and write.
+    // 创建父目录后再次校验解析路径，防御校验与写入之间的并发符号链接替换。
     const safeTarget = jail.resolve(relativePath);
     fs.writeFileSync(safeTarget, content, { encoding: 'utf8', mode: 0o600 });
     return { action: 'write', path: relativePath, bytes: Buffer.byteLength(content, 'utf8'), workspace: publicWorkspace(jail) };
