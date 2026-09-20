@@ -73,20 +73,23 @@
                     </div>
                     <div class="personal-hero-start" aria-label="直接开始任务">
                         <label class="sr-only" for="personal-quick-task">输入要处理的事情</label>
-                        <input id="personal-quick-task" class="form-input" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
-                        <div class="personal-hero-actions">
-                            <button class="btn-secondary" type="button" data-personal-action="quick-chat">快速问答</button>
-                            <button class="btn-primary" type="button" data-personal-action="quick-agent">交给后台 Agent</button>
+                        <div class="personal-quick-start-head"><strong>快速开始</strong></div>
+                        <div class="personal-quick-task-field">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                            <input id="personal-quick-task" class="form-input" type="text" maxlength="2000" placeholder="例如：整理今天的待办并给出优先级">
                         </div>
-                        <small>快速问答会立即在当前对话中回答；后台 Agent 适合需要检索、整理或持续执行的任务。</small>
+                        <div class="personal-hero-actions">
+                            <button class="btn-secondary" type="button" data-personal-action="quick-chat"><span>快速问答</span><small>在当前对话中完成</small></button>
+                            <button class="btn-primary" type="button" data-personal-action="quick-agent"><span>交给后台 Agent</span><small>适合检索、整理与持续工作</small></button>
+                        </div>
                         <div class="personal-hero-examples" aria-label="示例任务">
+                            <span>试试：</span>
                             <button type="button" class="btn-secondary" data-personal-example="整理最近会话中的待办，并按优先级给出下一步。">整理待办</button>
                             <button type="button" class="btn-secondary" data-personal-example="总结我今天需要关注的项目风险。">项目风险</button>
                             <button type="button" class="btn-secondary" data-personal-example="帮我规划一项每周重复执行的检查工作。">安排自动化</button>
                         </div>
                     </div>
                 </section>
-                <section id="personal-workbench-stats" class="personal-stats" aria-label="工作概览"></section>
                 <div class="personal-workbench-grid">
                     <section class="personal-card personal-card-attention" aria-labelledby="personal-attention-title">
                         <header class="personal-card-header">
@@ -153,7 +156,7 @@
             </div>
         </div>
     </div>
-    <div id="personal-user-modal" class="modal-overlay personal-user-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-user-dialog-title" style="z-index: 2100;">
+    <div id="personal-user-modal" class="modal-overlay personal-user-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-user-dialog-title">
         <div class="modal personal-user-dialog">
             <header class="personal-user-dialog-head">
                 <div class="personal-user-head-content">
@@ -193,6 +196,11 @@
                     </div>
                 </div>
             </div>
+            <footer class="personal-user-dialog-footer">
+                <button class="btn-secondary" type="button" data-personal-action="user-to-manual">使用帮助</button>
+                <button class="btn-secondary" type="button" data-personal-action="user-to-settings">系统设置</button>
+                <button class="btn-secondary personal-user-logout-btn" type="button" data-personal-action="logout">退出登录</button>
+            </footer>
         </div>
     </div>
     <div id="personal-agent-onboarding" class="modal-overlay personal-onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="personal-onboarding-title" aria-hidden="true">

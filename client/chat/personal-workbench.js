@@ -95,87 +95,6 @@
         return node;
     }
 
-    function renderStats(stats = {}) {
-        const container = document.getElementById('personal-workbench-stats');
-        if (!container) return;
-        clear(container);
-
-        const attentionCount = Number.isFinite(Number(stats.attention)) ? Math.max(0, Number(stats.attention)) : 0;
-        const automationCount = Number.isFinite(Number(stats.automations)) ? Math.max(0, Number(stats.automations)) : 0;
-        const artifactCount = Number.isFinite(Number(stats.completedArtifacts))
-            ? Math.max(0, Number(stats.completedArtifacts))
-            : (Number.isFinite(Number(stats.artifactsThisWeek)) ? Math.max(0, Number(stats.artifactsThisWeek)) : 0);
-
-        const statConfigs = [
-            {
-                type: 'attention',
-                label: '需要我处理',
-                value: String(attentionCount),
-                subtext: attentionCount === 0 ? '全部已处理' : '项待处理',
-                subtextClass: attentionCount === 0 ? 'personal-stat-trend-good' : 'personal-stat-subtext-info',
-                iconSvg: ICONS.check
-            },
-            {
-                type: 'automation',
-                label: '自动化运行中',
-                value: String(automationCount),
-                subtext: automationCount === 0 ? '暂无运行中任务' : '持续目标运行中',
-                subtextClass: automationCount === 0 ? '' : 'personal-stat-trend-good',
-                iconSvg: ICONS.automation
-            },
-            {
-                type: 'artifact',
-                label: '已完成成果',
-                value: String(artifactCount),
-                subtext: '累计完成',
-                subtextClass: 'personal-stat-trend-good',
-                iconSvg: ICONS.sparkle
-            }
-        ];
-
-        statConfigs.forEach(cfg => {
-            const card = document.createElement('div');
-            card.className = `personal-stat personal-stat-${cfg.type}`;
-            if (cfg.type === 'automation') {
-                card.dataset.personalAction = 'open-goals';
-                card.setAttribute('role', 'button');
-                card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '管理自动化目标');
-            } else if (cfg.type === 'attention') {
-                card.dataset.personalAction = 'open-inbox';
-                card.setAttribute('role', 'button');
-                card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '查看待处理事项');
-            } else if (cfg.type === 'artifact') {
-                card.dataset.personalAction = 'open-completed-tasks';
-                card.setAttribute('role', 'button');
-                card.setAttribute('tabindex', '0');
-                card.setAttribute('title', '查看已完成成果');
-            }
-
-            const copy = document.createElement('div');
-            copy.className = 'personal-stat-copy';
-
-            appendText(copy, 'span', 'personal-stat-label', cfg.label);
-
-            const valueGroup = document.createElement('div');
-            valueGroup.className = 'personal-stat-value-group';
-            appendText(valueGroup, 'strong', 'personal-stat-value', cfg.value);
-
-            if (cfg.subtext) {
-                appendText(valueGroup, 'span', `personal-stat-subtext ${cfg.subtextClass || ''}`, cfg.subtext);
-            }
-            copy.appendChild(valueGroup);
-
-            const iconWrap = document.createElement('div');
-            iconWrap.className = 'personal-stat-icon-wrap';
-            PivotSafeHtml.setHtml(iconWrap, cfg.iconSvg);
-
-            card.append(copy, iconWrap);
-            container.appendChild(card);
-        });
-    }
-
     function renderAttention(items = []) {
         const container = document.getElementById('personal-attention-list');
         if (!container) return;
@@ -467,7 +386,6 @@
         const railUserInitial = document.getElementById('personal-rail-user-initial');
         if (railUserInitial) railUserInitial.textContent = initial;
 
-        renderStats(dashboard.stats);
         renderAttention(dashboard.inbox);
         renderGoals(dashboard.goals);
         renderAssistant(dashboard.assistant);
@@ -527,8 +445,12 @@
         }
         if (mode === 'agent') {
             await window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', create: true });
-            const target = document.getElementById('agent-goal-input');
-            if (target) { target.value = goal; target.dispatchEvent(new Event('input', { bubbles: true })); }
+            const target = document.getElementById('agent-goal-input') || document.getElementById('agent-task-goal');
+            if (target) {
+                target.value = goal;
+                target.focus?.();
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+            }
             return;
         }
         await openShortcut('chat');
@@ -681,20 +603,6 @@
             : `${API_BASE}/agents/inbox/${encodeURIComponent(sourceType)}/${encodeURIComponent(sourceId)}/read`;
         apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
 
-        const statCard = document.querySelector('.personal-stat-attention');
-        if (statCard) {
-            const valEl = statCard.querySelector('.personal-stat-value');
-            const subtextEl = statCard.querySelector('.personal-stat-subtext');
-            if (valEl) {
-                const cur = Math.max(0, (parseInt(valEl.textContent, 10) || 1) - 1);
-                valEl.textContent = String(cur);
-                if (subtextEl) {
-                    subtextEl.textContent = cur === 0 ? '全部已处理' : '项待处理';
-                    subtextEl.className = `personal-stat-subtext ${cur === 0 ? 'personal-stat-trend-good' : 'personal-stat-subtext-info'}`;
-                }
-            }
-        }
-
         if (rowEl && rowEl.parentElement) {
             const parent = rowEl.parentElement;
             rowEl.remove();
@@ -800,6 +708,10 @@
         }
     });
 
+    document.getElementById('personal-shortcuts-modal')?.addEventListener('click', event => {
+        if (event.target.id === 'personal-shortcuts-modal') closeShortcutEditor();
+    });
+
     document.getElementById('personal-user-modal')?.addEventListener('click', event => {
         if (event.target.id === 'personal-user-modal') closeUserProfileModal();
     });
@@ -809,6 +721,12 @@
             const userModal = document.getElementById('personal-user-modal');
             if (userModal && !userModal.classList.contains('hidden')) {
                 closeUserProfileModal();
+                return;
+            }
+            const shortcutsModal = document.getElementById('personal-shortcuts-modal');
+            if (shortcutsModal && !shortcutsModal.classList.contains('hidden')) {
+                closeShortcutEditor();
+                return;
             }
         }
     });

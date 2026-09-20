@@ -48,6 +48,21 @@ test('个人工作台接入主模板、当前用户聚合接口与持久化快�
     assert.match(routes, /router\.put\('\/agents\/workbench\/shortcuts'/);
 });
 
+test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡片布局，桌面端不隐藏溢出内容', () => {
+    const template = read('client/chat/partials/workspaces/personal.html');
+    const client = read('client/chat/personal-workbench.js');
+    const styles = read('client/chat/styles/workspaces/personal.css');
+
+    assert.match(template, /class="personal-quick-task-field"/);
+    assert.doesNotMatch(template, /personal-hero-pulse|personal-workbench-stats/);
+    assert.doesNotMatch(client, /function renderStats|function renderHeroPulse|personal-stat-attention/);
+    assert.match(styles, /grid-template-areas:\s*'attention goals'/);
+    assert.match(styles, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/);
+    assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*150px;/);
+    assert.match(styles, /\.personal-workbench-scroll\s*\{[\s\S]*?overflow-y:\s*auto;/);
+    assert.doesNotMatch(styles, /@media \(min-height: 650px\)[\s\S]*?overflow-y:\s*hidden/);
+});
+
 test('工作台作为系统主入口，关闭二级页面时回到来源工作区', () => {
     const workspace = read('client/chat/app-workspaces.js');
     const apps = read('client/chat/apps-workbench-rag.js');
@@ -135,4 +150,3 @@ test('用户个人信息弹窗支持展示真实注册时间，并在缺少时�
     assert.match(personalClient, /personal-user-created-at/);
     assert.match(personalClient, /系统初始用户/);
 });
-
