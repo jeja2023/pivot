@@ -59,23 +59,23 @@ function toRecentWork(kind, record) {
 
 async function getPersonalWorkbench(user) {
     const [inbox, goals, artifacts, sessions, runs, completedArtifactCount, shortcutSetting, profile, memorySummary, learning] = await Promise.all([
-        safe(() => listAgentInbox(user, { limit: 4 }), { data: [], unread: 0, total: 0 }),
-        safe(() => listAgentGoals(user, { status: 'active', limit: 3 }), []),
-        safe(() => listAgentArtifacts(user, 3), []),
+        safe(() => listAgentInbox(user, { limit: 5 }), { data: [], unread: 0, total: 0 }),
+        safe(() => listAgentGoals(user, { status: 'active', limit: 5 }), []),
+        safe(() => listAgentArtifacts(user, 5), []),
         safe(() => query(`
             SELECT s.id, s.title, s.is_pinned, s.created_at, s.updated_at,
                    (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.deleted_at IS NULL) AS msg_count
             FROM sessions s
             WHERE s.user_id = ? AND s.deleted_at IS NULL AND COALESCE(s.is_archived, 0) = 0
             ORDER BY COALESCE(s.is_pinned, 0) DESC, COALESCE(s.updated_at, s.created_at) DESC, s.id DESC
-            LIMIT 3
+            LIMIT 5
         `, [user.id]), []),
         safe(() => query(`
             SELECT id, title, goal, status, created_at, updated_at
             FROM agent_runs
             WHERE user_id = ? AND deleted_at IS NULL
             ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
-            LIMIT 3
+            LIMIT 5
         `, [user.id]), []),
         safe(async () => {
             const [artifactRow, runResult] = await Promise.all([
@@ -108,7 +108,7 @@ async function getPersonalWorkbench(user) {
         ...runs.map(record => toRecentWork('run', record))
     ]
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
-        .slice(0, 3);
+        .slice(0, 5);
     return {
         generatedAt: getBeijingTimestamp(),
         stats: {
@@ -117,8 +117,8 @@ async function getPersonalWorkbench(user) {
             artifactsThisWeek: completedArtifactCount,
             completedArtifacts: completedArtifactCount
         },
-        inbox: actionableInbox.slice(0, 3),
-        goals: goals.slice(0, 3),
+        inbox: actionableInbox.slice(0, 5),
+        goals: goals.slice(0, 5),
         recentWork,
         shortcuts: normalizeShortcuts(shortcutSetting),
         assistant: {
