@@ -1,32 +1,38 @@
 /**
- * server/db/schema/pg.js
- * PostgreSQL Schema 初始化 —— 基于 SQLite 权威 DDL 的方言转换器
+ * PostgreSQL 主数据库 schema 初始化。
  *
- * 设计原则：不手写第二份建表脚本。schema/base.js 的 baseTablesSql() 是唯一
- * 数据源，本模块读取该文本并做机械转换，因此新增表/列只改 base.js 一处，
- * 两种方言永不漂移，从根本上杜绝「PG 漏列」类事故。
- *
- * 转换规则：
- *   INTEGER PRIMARY KEY AUTOINCREMENT → BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
- *   INTEGER                           → BIGINT（布尔语义列仍是 0/1 整型，与 SQLite 完全一致）
- *   REAL                              → DOUBLE PRECISION
- *   DATETIME                          → TIMESTAMPTZ
- *   datetime('now', '+8 hours')       → (NOW() AT TIME ZONE 'Asia/Shanghai')
- *   FOREIGN KEY 子句                  → 建表时剥离，全部表建完后统一 ALTER 补回
- *                                       （规避 SQLite 允许、PG 不允许的前向引用）
- *   FTS5 虚拟表 + 触发器              → 不建，改用 pg_trgm GIN 索引
- *
- * 向量列（embedding）转换为 pgvector 的 vector 类型。应用层仍在 JS 端计算
- * 余弦相似度，但 pg 驱动会将 vector 读取为 `[1,2,...]` 文本，可继续 JSON 解析。
+ * 主库已正式收敛到 PostgreSQL。`pg-schema.snapshot.json` 是经审查的原生
+ * PostgreSQL DDL 快照是主数据库唯一 schema 来源。
  */
 const { getPgPool } = require('../pg-connection');
-const { baseTablesSql, baseIndexesSql } = require('./base');
+const snapshot = require('./pg-schema.snapshot.json');
 const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
-const PG_SCHEMA_VERSION = '20260908.4';
+const PG_SCHEMA_VERSION = '20260920.3';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
+
+const PG_HELPER_FUNCTIONS = [
+    `
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON p.pronamespace = n.oid
+            WHERE p.proname = 'pivot_json_extract' AND n.nspname = current_schema()
+        ) THEN
+            CREATE FUNCTION pivot_json_extract(payload text, path text[])
+            RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $fn$
+            BEGIN
+                IF payload IS NULL OR payload = '' THEN RETURN NULL; END IF;
+                RETURN payload::jsonb #>> path;
+            EXCEPTION WHEN others THEN RETURN NULL;
+            END
+            $fn$;
+        END IF;
+    END $$;`
+];
 
 function getPgSchemaName() {
     const testSchema = String(process.env.PG_TEST_SCHEMA || '').trim();
@@ -44,9 +50,6 @@ function qualifiedPgTable(tableName) {
 async function isPgSchemaCurrent(pool) {
     if (String(process.env[PG_SCHEMA_RECONCILE_ENV] || '').toLowerCase() === 'true') return false;
     try {
-        // search_path 会在隔离 schema 缺表时回退到 public。版本标记若从 public
-        // 读取，会让新 schema 错误跳过全部 DDL 与 seed。直接限定表名；表不存在
-        // 时查询会进入 catch 并执行初始化，不需要额外探测 information_schema。
         const result = await pool.query(`SELECT value FROM ${qualifiedPgTable('app_meta')} WHERE key = $1`, ['pg_schema_version']);
         return result.rows[0]?.value === PG_SCHEMA_VERSION;
     } catch (_) {
@@ -57,278 +60,44 @@ async function isPgSchemaCurrent(pool) {
 async function markPgSchemaCurrent(client) {
     await client.query(`
         INSERT INTO ${qualifiedPgTable('app_meta')} (key, value, updated_at)
-        VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+        VALUES ($1, $2, ${PG_NOW})
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
     `, ['pg_schema_version', PG_SCHEMA_VERSION]);
 }
 
-// SQLite 将向量序列化为 TEXT；迁移后的 PostgreSQL 物理表使用 pgvector。
-// 保持显式白名单，避免把其他业务 TEXT 列误转换为 vector。
-const PG_VECTOR_COLUMNS = {
-    knowledge_chunks: ['embedding'],
-    memories: ['embedding'],
-    regulation_articles: ['embedding'],
-};
-
-// 迁移后的 PostgreSQL 库以原生 JSONB 保存这些结构化字段。新建库也必须
-// 使用同一物理类型，避免 node-postgres 的返回值在测试与生产间发生漂移。
-const PG_JSONB_COLUMNS = {
-    agent_runs: ['context_config', 'metadata', 'budget_config', 'usage_stats', 'network_policy'],
-    agent_events: ['payload'],
-    knowledge_entities: ['aliases'],
-    memories: ['source_message_ids'],
-    memory_extraction_jobs: ['message_ids', 'result'],
-    rag_debug_queries: ['scope_json', 'selected_chunk_ids', 'scores_json', 'queue_json'],
-};
-
-/**
- * 生产 SQLite 库中物理存在、但当前代码已不再引用的历史遗留列。
- * 全量数据迁移使用 `SELECT *` 抽取，PG 侧缺列会直接导致 INSERT 失败，
- * 故必须显式保留。清理需等历史数据归档后另行决策。
- */
-const LEGACY_RESIDUAL_COLUMNS = [
-    ['models', 'disable_chat_thinking', 'BIGINT DEFAULT 0'],
-    ['analysis_datasets', 'active_version', 'BIGINT DEFAULT 1'],
-    ['users', 'token_version', 'BIGINT DEFAULT 0'],
-];
-
-// ──────────────────────────────────────────────────────────────────────────
-// DDL 文本转换
-// ──────────────────────────────────────────────────────────────────────────
-
-/**
- * 把 SQLite 列定义片段转换为 PG 方言
- */
-function convertColumnTypes(text) {
-    return text
-        // 自增主键（必须先于通用 INTEGER 替换）
-        .replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi,
-                 'BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY')
-        // 时间函数默认值：DEFAULT (datetime('now', '+8 hours')) → DEFAULT (NOW() AT TIME ZONE ...)
-        .replace(/datetime\(\s*'now'\s*,\s*'\+8 hours'\s*\)/gi, `NOW() AT TIME ZONE 'Asia/Shanghai'`)
-        // 标量类型
-        .replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
-        .replace(/\bINTEGER\b/gi, 'BIGINT')
-        .replace(/\bREAL\b/gi, 'DOUBLE PRECISION');
-}
-
-/**
- * 对已迁移为 pgvector 的表覆写 SQLite 源 DDL 中的向量列类型。
- */
-function convertVectorColumnTypes(text) {
-    const tableMatch = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(text);
-    const columns = PG_VECTOR_COLUMNS[tableMatch?.[1]];
-    if (!columns) return text;
-
-    return columns.reduce((ddl, column) => ddl.replace(
-        new RegExp(`^(\\s*${column}\\s+)TEXT(?:\\s+DEFAULT\\s+'')?`, 'gim'),
-        '$1vector'
-    ), text);
-}
-
-function convertJsonbColumnTypes(text) {
-    const tableMatch = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(text);
-    const columns = PG_JSONB_COLUMNS[tableMatch?.[1]];
-    if (!columns) return text;
-
-    return columns.reduce((ddl, column) => ddl.replace(
-        new RegExp(`^(\\s*${column}\\s+)TEXT\\b`, 'gim'),
-        '$1JSONB'
-    ), text);
-}
-
-/**
- * 将 baseTablesSql() 文本切分为独立 CREATE TABLE 语句。
- * 表定义内部不含分号（无触发器），可安全按 `);` 边界切分。
- */
-function splitCreateTableStatements(sql) {
-    return sql
-        .split(/;\s*(?=\n|$)/)
-        .map(part => part.trim())
-        .filter(part => /^CREATE\s+TABLE/i.test(part));
+function tableNameFromDdl(ddl) {
+    const match = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(String(ddl || '').trim());
+    if (!match) throw new Error(`[PG Schema] 无法解析表名: ${String(ddl || '').slice(0, 80)}`);
+    return match[1];
 }
 
 function getPgSchemaTableNames() {
-    return splitCreateTableStatements(baseTablesSql()).map(statement => {
-        const match = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([\w]+)["`]?/i.exec(statement);
-        if (!match) throw new Error(`[PG Schema] 无法解析表名: ${statement.slice(0, 80)}`);
-        return match[1];
-    });
+    return snapshot.tables.map(tableNameFromDdl);
 }
 
-/**
- * 从建表语句中剥离 FOREIGN KEY 子句。
- * @returns {{ ddl: string, foreignKeys: Array<{table, column, refTable, refColumn, onDelete}> }}
- */
-function stripForeignKeys(statement) {
-    const tableMatch = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?/i.exec(statement);
-    if (!tableMatch) throw new Error(`[PG Schema] 无法解析表名: ${statement.slice(0, 80)}`);
-    const table = tableMatch[1];
-
-    const foreignKeys = [];
-    const keptLines = [];
-
-    for (const rawLine of statement.split('\n')) {
-        const line = rawLine.trim();
-        const fk = /^FOREIGN\s+KEY\s*\(\s*(\w+)\s*\)\s*REFERENCES\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(ON\s+DELETE\s+[A-Z ]+?)?\s*,?$/i.exec(line);
-        if (fk) {
-            foreignKeys.push({
-                table,
-                column: fk[1],
-                refTable: fk[2],
-                refColumn: fk[3],
-                onDelete: (fk[4] || '').trim(),
-            });
-            continue;
-        }
-        keptLines.push(rawLine);
-    }
-
-    // 剥离后可能留下悬空逗号（原最后一个列定义带逗号，因其后是 FK 行）
-    let ddl = keptLines.join('\n');
-    ddl = ddl.replace(/,(\s*)\)\s*$/, '$1)');
-
-    return { ddl, foreignKeys };
-}
-
-/**
- * 生成幂等的外键补建语句（约束名与 PG 默认命名一致，避免重复添加）
- */
-function buildAddForeignKeySql(fk) {
-    const constraintName = `${fk.table}_${fk.column}_fkey`;
-    const onDelete = fk.onDelete ? ` ${fk.onDelete.toUpperCase()}` : '';
-    return `
-        DO $$ BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}'
-            ) THEN
-                BEGIN
-                    ALTER TABLE "${fk.table}"
-                        ADD CONSTRAINT "${constraintName}"
-                        FOREIGN KEY ("${fk.column}") REFERENCES "${fk.refTable}"("${fk.refColumn}")${onDelete};
-                EXCEPTION WHEN foreign_key_violation OR others THEN
-                    -- 若历史存量数据存在孤儿关联，使用 NOT VALID 挂载约束，保障后续新增数据受控
-                    ALTER TABLE "${fk.table}"
-                        ADD CONSTRAINT "${constraintName}"
-                        FOREIGN KEY ("${fk.column}") REFERENCES "${fk.refTable}"("${fk.refColumn}")${onDelete}
-                        NOT VALID;
-                END;
-            END IF;
-        END $$`;
-}
-
-/**
- * 索引 DDL 的 PG 方言修正：
- *  - SQLite 允许对不存在的表建索引前不校验，PG 无差异，直接复用
- *  - 逐条切分以便单条失败可精确报错
- */
-function splitIndexStatements(sql) {
-    return sql
-        .split(/;\s*(?=\n|$)/)
-        .map(part => part.replace(/^\s*--.*$/gm, '').trim())
-        .filter(part => /^CREATE\s+(UNIQUE\s+)?INDEX/i.test(part));
-}
-
-/**
- * PostgreSQL 专属：替代 SQLite FTS5 的全文检索索引（pg_trgm GIN）
- */
-const PG_FULLTEXT_INDEXES = [
-    `CREATE INDEX IF NOT EXISTS idx_messages_content_trgm ON messages USING gin (content gin_trgm_ops)`,
-    `CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_content_trgm ON knowledge_chunks USING gin (content gin_trgm_ops)`,
-    `CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_search_trgm ON knowledge_chunks USING gin (search_content gin_trgm_ops)`,
-    `CREATE INDEX IF NOT EXISTS idx_regulation_articles_content_trgm ON regulation_articles USING gin (content gin_trgm_ops)`,
-    `CREATE INDEX IF NOT EXISTS idx_regulation_articles_search_trgm ON regulation_articles USING gin (search_content gin_trgm_ops)`,
-];
-
-/**
- * PostgreSQL 专属：容错 JSON 提取函数。
- *
- * 业务表中 metadata / config 等字段是 TEXT 列，历史数据可能含非法 JSON。
- * SQLite 侧靠 json_valid() 前置守卫规避，PG 侧 `::jsonb` 转换失败会直接
- * 中断整条查询，故封装为带异常捕获的 IMMUTABLE 函数，非法输入返回 NULL。
- * 标记 IMMUTABLE 使其可用于表达式索引。
- */
-const PG_HELPER_FUNCTIONS = [
-    `
-    DO $$
-    BEGIN
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_proc p
-            JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE p.proname = 'pivot_json_extract'
-              AND n.nspname = current_schema()
-        ) THEN
-            CREATE FUNCTION pivot_json_extract(payload text, path text[])
-            RETURNS text
-            LANGUAGE plpgsql
-            IMMUTABLE
-            PARALLEL SAFE
-            AS $fn$
-            BEGIN
-                IF payload IS NULL OR payload = '' THEN
-                    RETURN NULL;
-                END IF;
-                RETURN payload::jsonb #>> path;
-            EXCEPTION WHEN others THEN
-                RETURN NULL;
-            END
-            $fn$;
-        END IF;
-    END $$;`,
-];
-
-// ──────────────────────────────────────────────────────────────────────────
-// 初始化入口
-// ──────────────────────────────────────────────────────────────────────────
-
-/**
- * 生成完整的 PG 初始化语句列表（可单独调用用于对账/演练，不触库）
- */
 function buildPgSchemaStatements() {
-    const tableStatements = splitCreateTableStatements(baseTablesSql());
-    const tables = [];
-    const foreignKeys = [];
-
-    for (const statement of tableStatements) {
-        const { ddl, foreignKeys: fks } = stripForeignKeys(statement);
-        tables.push(convertJsonbColumnTypes(convertVectorColumnTypes(convertColumnTypes(ddl))));
-        foreignKeys.push(...fks);
-    }
-
-    const residualColumns = LEGACY_RESIDUAL_COLUMNS.map(
-        ([table, column, def]) => `ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "${column}" ${def}`
-    );
-
     return {
         extensions: [
             `DO $$
             BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_extension e
-                    JOIN pg_namespace n ON e.extnamespace = n.oid
-                    WHERE e.extname = 'vector' AND n.nspname <> 'public'
-                ) THEN
+                IF EXISTS (SELECT 1 FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid WHERE e.extname = 'vector' AND n.nspname <> 'public') THEN
                     ALTER EXTENSION vector SET SCHEMA public;
                 END IF;
-                IF EXISTS (
-                    SELECT 1 FROM pg_extension e
-                    JOIN pg_namespace n ON e.extnamespace = n.oid
-                    WHERE e.extname = 'pg_trgm' AND n.nspname <> 'public'
-                ) THEN
+                IF EXISTS (SELECT 1 FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid WHERE e.extname = 'pg_trgm' AND n.nspname <> 'public') THEN
                     ALTER EXTENSION pg_trgm SET SCHEMA public;
                 END IF;
             END $$;`,
-            `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`,
-            `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`,
+            'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public',
+            'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public'
         ],
         helperFunctions: PG_HELPER_FUNCTIONS,
-        tables,
-        residualColumns,
-        foreignKeys: foreignKeys.map(buildAddForeignKeySql),
-        indexes: splitIndexStatements(baseIndexesSql()),
-        fulltextIndexes: PG_FULLTEXT_INDEXES,
+        tables: snapshot.tables,
+        residualColumns: snapshot.residualColumns,
+        foreignKeys: snapshot.foreignKeys,
+        indexes: snapshot.indexes,
+        fulltextIndexes: snapshot.fulltextIndexes,
         comments: buildPgCommentStatements(),
-        foreignKeyMeta: foreignKeys,
+        foreignKeyMeta: snapshot.foreignKeyMeta
     };
 }
 
@@ -337,56 +106,41 @@ async function syncIdentitySequences(client) {
         const seqs = await client.query(`
             SELECT table_name, column_name, pg_get_serial_sequence('"' || table_name || '"', column_name) AS seq_name
             FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND column_name = 'id'
+            WHERE table_schema = current_schema() AND column_name = 'id'
               AND pg_get_serial_sequence('"' || table_name || '"', column_name) IS NOT NULL
         `);
         for (const row of seqs.rows) {
             if (!row.seq_name) continue;
             try {
-                await client.query(`
-                    SELECT setval($1, COALESCE((SELECT MAX("id") FROM "${row.table_name}"), 1), true)
-                `, [row.seq_name]);
+                await client.query(`SELECT setval($1, COALESCE((SELECT MAX("id") FROM "${row.table_name}"), 1), true)`, [row.seq_name]);
             } catch (_) {}
         }
-    } catch (err) {
-        logger.warn({ err: err.message }, '[PG] 自增序列自愈校准跳过');
+    } catch (error) {
+        logger.warn({ err: error.message }, '[PG] 自增序列自愈校准跳过');
     }
 }
 
 async function normalizeLegacyResidualColumnTypes(client) {
-    // 早期 PG 测试库曾把该 SQLite INTEGER 遗留列创建为 TEXT；仅使用
-    // ADD COLUMN IF NOT EXISTS 无法收敛已经存在的错误物理类型。
     try {
         await client.query(`
             DO $$
             BEGIN
                 IF EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'analysis_datasets'
-                      AND column_name = 'active_version'
-                      AND data_type <> 'bigint'
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'analysis_datasets'
+                      AND column_name = 'active_version' AND data_type <> 'bigint'
                 ) THEN
                     ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" DROP DEFAULT;
-                    ALTER TABLE "analysis_datasets"
-                        ALTER COLUMN "active_version" TYPE BIGINT
-                        USING CASE
-                            WHEN trim("active_version"::text) ~ '^[+-]?[0-9]+$'
-                            THEN trim("active_version"::text)::bigint
-                            ELSE NULL
-                        END;
+                    ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" TYPE BIGINT
+                    USING CASE WHEN trim("active_version"::text) ~ '^[+-]?[0-9]+$'
+                        THEN trim("active_version"::text)::bigint ELSE NULL END;
                     ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" SET DEFAULT 1;
                 END IF;
             END $$;
         `);
-    } catch (err) {
-        if (err.code === '42501') {
-            logger.warn({ err: err.message }, '[PG] 遗留列类型校准权限不足，保留现有列类型');
-        } else {
-            throw err;
-        }
+    } catch (error) {
+        if (error.code === '42501') logger.warn({ err: error.message }, '[PG] 遗留列类型校准权限不足，保留现有列类型');
+        else throw error;
     }
 }
 
@@ -396,23 +150,16 @@ async function applyPgSchemaComments() {
     if (await isPgSchemaCurrent(pool)) return;
     const client = await pool.connect();
     let applied = 0;
-
     try {
         for (const sql of statements) {
-            try {
-                await client.query(sql);
-                applied += 1;
-            } catch (err) {
-                logger.warn({ sql, err: err.message }, '[PG] 添加表或字段注释失败');
-            }
+            try { await client.query(sql); applied += 1; }
+            catch (error) { logger.warn({ sql, err: error.message }, '[PG] 添加表或字段注释失败'); }
         }
     } finally {
         client.release();
     }
-
     const markerClient = await pool.connect();
     try { await markPgSchemaCurrent(markerClient); } finally { markerClient.release(); }
-
     logger.info({ applied, total: statements.length }, '[PG] 数据字典注释已应用');
 }
 
@@ -424,119 +171,69 @@ async function initSchemaPg() {
     }
     const plan = buildPgSchemaStatements();
     const client = await pool.connect();
-
     try {
-        // pgvector 是 embedding 列的必需类型；pg_trgm 则允许降级为顺序扫描。
-        // 数据库级扩展必须位于 public schema，否则隔离测试 schema 在并发创建与 CASCADE 清理时会击穿类型解析。
         for (const sql of plan.extensions) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (sql.includes('CREATE EXTENSION IF NOT EXISTS vector')) {
-                    throw new Error(`[PG Schema] pgvector 扩展安装失败，无法创建 embedding 列: ${err.message}`);
-                }
-                logger.warn({ sql, err: err.message }, '[PG] 扩展安装失败，相关能力将不可用');
+            try { await client.query(sql); }
+            catch (error) {
+                if (sql.includes('CREATE EXTENSION IF NOT EXISTS vector')) throw new Error(`[PG Schema] pgvector 扩展安装失败，无法创建 embedding 列: ${error.message}`);
+                logger.warn({ sql, err: error.message }, '[PG] 扩展安装失败，相关能力将不可用');
             }
         }
-
         for (const sql of plan.helperFunctions) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (err.code === '42501' || String(err.message).includes('pivot_json_extract')) {
-                    logger.warn({ err: err.message }, '[PG] 函数已存在且非属主，跳过函数更新');
-                } else {
-                    throw err;
-                }
+            try { await client.query(sql); }
+            catch (error) {
+                if (error.code === '42501' || String(error.message).includes('pivot_json_extract')) logger.warn({ err: error.message }, '[PG] 函数已存在且非属主，跳过函数更新');
+                else throw error;
             }
         }
-
         for (const sql of plan.tables) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (err.code === '42501' || err.code === '42P07' || String(err.message).includes('already exists')) {
-                    logger.warn({ err: err.message }, '[PG] 表已存在或权限受限，跳过建表');
-                } else {
-                    throw new Error(`[PG Schema] 建表失败: ${err.message}\nDDL: ${sql.slice(0, 400)}`);
-                }
+            try { await client.query(sql); }
+            catch (error) {
+                if (error.code === '42501' || error.code === '42P07' || String(error.message).includes('already exists')) logger.warn({ err: error.message }, '[PG] 表已存在或权限受限，跳过建表');
+                else throw new Error(`[PG Schema] 建表失败: ${error.message}\nDDL: ${sql.slice(0, 400)}`);
             }
         }
-
         for (const sql of plan.residualColumns) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (err.code === '42501' || err.code === '42701') {
-                    logger.warn({ sql, err: err.message }, '[PG] 当前用户非表属主或列已存在，跳过遗留列补齐');
-                } else {
-                    throw err;
-                }
+            try { await client.query(sql); }
+            catch (error) {
+                if (error.code === '42501' || error.code === '42701') logger.warn({ sql, err: error.message }, '[PG] 当前用户非表属主或列已存在，跳过遗留列补齐');
+                else throw error;
             }
         }
-
         await normalizeLegacyResidualColumnTypes(client);
-
         for (const sql of plan.foreignKeys) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (err.code === '42501' || err.code === '42710') {
-                    logger.warn({ sql: sql.trim().slice(0, 200), err: err.message }, '[PG] 当前用户非表属主或外键已存在，跳过外键补建');
-                } else {
-                    throw new Error(`[PG Schema] 外键补建失败: ${err.message}\nSQL: ${sql.trim().slice(0, 300)}`);
-                }
+            try { await client.query(sql); }
+            catch (error) {
+                if (error.code === '42501' || error.code === '42710') logger.warn({ sql: sql.trim().slice(0, 200), err: error.message }, '[PG] 当前用户非表属主或外键已存在，跳过外键补建');
+                else throw new Error(`[PG Schema] 外键补建失败: ${error.message}\nSQL: ${sql.trim().slice(0, 300)}`);
             }
         }
-
         for (const sql of plan.indexes) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                if (err.code === '42501' || err.code === '42P07') {
-                    logger.warn({ sql: sql.slice(0, 200), err: err.message }, '[PG] 当前用户非属主或索引已存在，跳过索引补建');
-                } else {
-                    throw new Error(`[PG Schema] 建索引失败: ${err.message}\nSQL: ${sql.slice(0, 300)}`);
-                }
+            try { await client.query(sql); }
+            catch (error) {
+                if (error.code === '42501' || error.code === '42P07') logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 当前用户非属主或索引已存在，跳过索引补建');
+                else throw new Error(`[PG Schema] 建索引失败: ${error.message}\nSQL: ${sql.slice(0, 300)}`);
             }
         }
-
-        // 全文索引依赖 pg_trgm，扩展缺失或非属主时降级跳过而非中断启动
         for (const sql of plan.fulltextIndexes) {
-            try {
-                await client.query(sql);
-            } catch (err) {
-                logger.warn({ err: err.message }, '[PG] pg_trgm 全文索引创建失败，全文检索将退化为顺序扫描');
-            }
+            try { await client.query(sql); }
+            catch (error) { logger.warn({ err: error.message }, '[PG] pg_trgm 全文索引创建失败，全文检索将退化为顺序扫描'); }
         }
-
-        // 自动自愈校准全量主键自增序列，彻底杜绝数据迁移或备份还原后主键冲突
         await syncIdentitySequences(client);
     } finally {
         client.release();
     }
-
-    logger.info({
-        tables: plan.tables.length,
-        foreignKeys: plan.foreignKeys.length,
-        indexes: plan.indexes.length,
-    }, '[PG] Schema 初始化完成');
+    logger.info({ tables: plan.tables.length, foreignKeys: plan.foreignKeys.length, indexes: plan.indexes.length }, '[PG] Schema 初始化完成');
 }
 
 module.exports = {
-    initSchemaPg,
-    applyPgSchemaComments,
-    buildPgSchemaStatements,
-    getPgSchemaTableNames,
-    getPgSchemaName,
-    isPgSchemaCurrent,
-    normalizeLegacyResidualColumnTypes,
-    convertColumnTypes,
-    convertVectorColumnTypes,
-    convertJsonbColumnTypes,
-    stripForeignKeys,
-    PG_VECTOR_COLUMNS,
-    PG_JSONB_COLUMNS,
     PG_NOW,
     PG_SCHEMA_VERSION,
+    applyPgSchemaComments,
+    buildPgSchemaStatements,
+    getPgSchemaName,
+    getPgSchemaTableNames,
+    initSchemaPg,
+    isPgSchemaCurrent,
+    normalizeLegacyResidualColumnTypes
 };

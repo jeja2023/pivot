@@ -3,35 +3,6 @@
 const migration = {
     id: '202609200002_agent_workflow_trigger_events',
     description: 'Persist workflow trigger receipt, dispatch, failure and replay diagnostics without exposing trigger secrets.',
-    up(db) {
-        db.exec(`
-            CREATE TABLE IF NOT EXISTS agent_workflow_trigger_events (
-                id TEXT PRIMARY KEY,
-                trigger_id INTEGER NOT NULL,
-                run_id TEXT,
-                replay_of_event_id TEXT,
-                event_type TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'received',
-                dedupe_key TEXT DEFAULT '',
-                watermark_before TEXT DEFAULT '',
-                watermark_after TEXT DEFAULT '',
-                input_json TEXT NOT NULL DEFAULT '{}',
-                source_meta_json TEXT NOT NULL DEFAULT '{}',
-                goal TEXT DEFAULT '',
-                error_message TEXT DEFAULT '',
-                created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                completed_at DATETIME,
-                FOREIGN KEY (trigger_id) REFERENCES agent_workflow_triggers(id) ON DELETE CASCADE,
-                FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL,
-                FOREIGN KEY (replay_of_event_id) REFERENCES agent_workflow_trigger_events(id) ON DELETE SET NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_agent_workflow_trigger_events_trigger
-                ON agent_workflow_trigger_events(trigger_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_agent_workflow_trigger_events_run
-                ON agent_workflow_trigger_events(run_id, created_at DESC);
-        `);
-    },
     async upPg(client) {
         await client.query(`
             CREATE TABLE IF NOT EXISTS agent_workflow_trigger_events (

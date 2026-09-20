@@ -30,7 +30,7 @@ function getDeploymentProfile(env = process.env) {
     const databaseProvider = String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() || 'postgres';
     const providers = getDeploymentProviders(env);
     const sharedStorage = getSharedStorageLayout(env, providers.objectStorage);
-    const databaseReady = providers.database?.ready === true && databaseProvider !== 'sqlite';
+    const databaseReady = providers.database?.ready === true && databaseProvider === 'postgres';
     const objectStorageOperational = providers.objectStorage?.ready === true
         && (providers.objectStorage?.key !== 'shared_fs' || sharedStorage.ready);
     const objectStorageReady = objectStorageOperational && providers.objectStorage?.multiNodeReady === true;
@@ -81,7 +81,7 @@ function getDeploymentProfile(env = process.env) {
             adapterRequiredForMultiNode: providers.queue?.ready !== true
         },
         locks: {
-            provider: providers.lock?.key || 'in_process_or_sqlite',
+            provider: providers.lock?.key || 'in_process',
             configured: providers.lock?.configured === true,
             adapterWired: providers.lock?.adapterWired === true,
             ready: providers.lock?.ready === true,

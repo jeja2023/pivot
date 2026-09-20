@@ -58,7 +58,7 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     const dag = read('client/chat/partials/workspaces/agent-dag.html');
     const resources = read('client/chat/agent-automation-resources.js');
     const credentials = read('server/services/workflow-credentials.js');
-    const migrations = read('server/db/migrations/index.js');
+    const credentialVisibilityMigration = read('server/db/migrations/workflow-credential-user-visibility.js');
 
     const extraModals = read('client/chat/partials/admin-extra-modals.html');
     assert.match(dag, /id="agent-workflow-dependency-manage-creds-btn"/);
@@ -82,7 +82,8 @@ test('自动化资源将触发器和凭据能力接入页面，并避免回显�
     assert.match(read('client/chat/chat.workspace.mcp.entry.css'), /shared-automation-resources\.css/);
     assert.match(credentials, /allowed_user_ids: parseAllowedUserIds\(row\.allowed_user_ids\)/);
     assert.match(credentials, /allowed_units = \?, allowed_user_ids = \?, updated_at/);
-    assert.match(migrations, /202608220008_workflow_credential_user_visibility/);
+    assert.match(credentialVisibilityMigration, /202608220008_workflow_credential_user_visibility/);
+    assert.match(credentialVisibilityMigration, /async upPg\(client\)/);
 });
 
 test('工作流资产列表仅对已发布工作流展示计划按钮，未发布工作流不可见', () => {

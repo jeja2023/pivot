@@ -18,13 +18,16 @@ const {
     safeIndexKnowledgeGraphForChunks
 } = require('../knowledge-graph');
 const knowledgeRepository = require('../../repositories/knowledge');
-const { buildDocumentAccessFilter } = require('../knowledge-access');
+const { createRetrievalScopeBuilder } = require('./retrieval-scope-builder');
+const { attachCitationKeys: attachCitationKeysBase } = require('./citation-keys');
 const {
     getEmbeddingConfig,
+    getEmbeddingProfile,
     getRagConfig,
     getHybridRetrievalConfig,
     getChunkSizeForDocType
 } = require('../rag-config');
+const { ensureKnowledgeVectorIndex } = require('../knowledge-vector-index');
 const { chunkText, chunkDocument, detectDocType } = require('../rag-chunker');
 const { recordSlowRagRetrieval } = require('../observability');
 const {
@@ -144,6 +147,18 @@ function buildFtsOrQuery(keywords) {
         .join(' OR ');
 }
 
+// PostgreSQL `simple` 分词器对中文不会自动分词。search_content 已在入库时
+// 展开 CJK n-gram，因此查询端也用相同词元构造 to_tsquery 的 OR 表达式。
+// 仅保留字母、数字和下划线，防止用户输入进入 tsquery 操作符语法。
+function buildPostgresTsQuery(keywords = []) {
+    return (Array.isArray(keywords) ? keywords : [])
+        .map(term => String(term || '').replace(/[^\p{L}\p{N}_]/gu, '').trim())
+        .filter(Boolean)
+        .slice(0, 32)
+        .map(term => `'${term.replace(/'/g, "''")}'`)
+        .join(' | ');
+}
+
 function normalizeScopeIdList(value, max = 50) {
     const values = Array.isArray(value) ? value : [value];
     return [...new Set(values
@@ -161,48 +176,53 @@ function normalizeScopeTagList(value, max = 20) {
         .slice(0, max);
 }
 
+function normalizeScopeEnumList(value, allowed, max = 20) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values
+        .flatMap(item => String(item || '').split(/[,，;；\s\n]+/))
+        .map(item => item.trim().toLowerCase())
+        .filter(item => allowed.has(item)))]
+        .slice(0, max);
+}
+
+function normalizeScopeDate(value) {
+    const text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.test(text)) return '';
+    const date = new Date(text.replace(' ', 'T'));
+    return Number.isNaN(date.getTime()) ? '' : text;
+}
+
 function normalizeRetrievalScope(scope = {}) {
     const raw = scope && typeof scope === 'object' ? scope : {};
+    const filters = raw.filters && typeof raw.filters === 'object' ? raw.filters : raw;
     const collectionIds = normalizeScopeIdList(raw.collectionIds ?? raw.collectionId);
     const tagNames = normalizeScopeTagList(raw.tagNames ?? raw.tagName ?? raw.tag);
+    const verifiedStatuses = normalizeScopeEnumList(filters.verifiedStatus ?? filters.verifiedStatuses ?? (filters.verified === true ? 'verified' : ''), new Set(['verified', 'unverified', 'expired']), 3);
+    const lifecycleStatuses = normalizeScopeEnumList(filters.lifecycleStatus ?? filters.lifecycleStatuses, new Set(['draft', 'review', 'published', 'expired', 'archived']), 5);
+    const sourceKinds = normalizeScopeEnumList(filters.sourceKind ?? filters.sourceKinds, new Set(['upload', 'local_dir', 'lan_http', 'database', 'internal_api', 'manual']), 6);
+    const ownerUnits = normalizeScopeTagList(filters.ownerUnit ?? filters.ownerUnits, 20);
+    const updatedAfter = normalizeScopeDate(filters.updatedAfter);
     const parts = [];
     if (collectionIds.length) parts.push(`collections:${collectionIds.join(',')}`);
     if (tagNames.length) parts.push(`tags:${tagNames.join(',')}`);
+    if (verifiedStatuses.length) parts.push(`verified:${verifiedStatuses.join(',')}`);
+    if (lifecycleStatuses.length) parts.push(`lifecycle:${lifecycleStatuses.join(',')}`);
+    if (sourceKinds.length) parts.push(`sources:${sourceKinds.join(',')}`);
+    if (ownerUnits.length) parts.push(`owners:${ownerUnits.join(',')}`);
+    if (updatedAfter) parts.push(`updated:${updatedAfter}`);
     return {
         collectionIds,
         tagNames,
+        verifiedStatuses,
+        lifecycleStatuses,
+        sourceKinds,
+        ownerUnits,
+        updatedAfter,
         cacheKey: parts.length ? parts.join(';') : 'all'
     };
 }
 
-function buildRetrievalScopeSql(scope, docAlias = 'd', user = null) {
-    const normalized = normalizeRetrievalScope(scope);
-    const clauses = [];
-    const params = [];
-    if (normalized.collectionIds.length) {
-        clauses.push(`${docAlias}.collection_id IN (${normalized.collectionIds.map(() => '?').join(',')})`);
-        params.push(...normalized.collectionIds);
-    }
-    if (normalized.tagNames.length) {
-        clauses.push(`EXISTS (
-            SELECT 1
-            FROM knowledge_doc_tags tag_scope
-            WHERE tag_scope.doc_id = ${docAlias}.id
-              AND tag_scope.user_id = ${docAlias}.user_id
-              AND tag_scope.tag IN (${normalized.tagNames.map(() => '?').join(',')})
-        )`);
-        params.push(...normalized.tagNames);
-    }
-    const access = user ? buildDocumentAccessFilter(user, docAlias, 'c_access') : null;
-    return {
-        sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '',
-        params,
-        normalized,
-        accessSql: access ? ` AND ${access.sql}` : '',
-        accessParams: access ? access.params : [],
-        accessJoin: user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = d.collection_id AND c_access.deleted_at IS NULL' : ''
-    };
-}
+const buildRetrievalScopeSql = createRetrievalScopeBuilder(normalizeRetrievalScope);
 
 function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
     return buildRagCacheScopeBase(userId, config, scope, user, buildRetrievalScopeSql);
@@ -212,41 +232,44 @@ function loadRagFeedbackSignals(userId, queryText) {
     return loadRagFeedbackSignalsBase(userId, queryText, logger);
 }
 
+async function attachCitationKeys(chunks = []) {
+    return await attachCitationKeysBase(chunks, { knowledgeRepository, logger });
+}
+
 async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = null) {
     if (keywords.length === 0) return [];
+    const tsQuery = buildPostgresTsQuery(keywords);
     const keywordWhere = keywords.map(() => '(c.search_content ILIKE ? OR c.content ILIKE ?)').join(' OR ');
-    const lexicalScore = `GREATEST(${keywords.map(() => 'GREATEST(similarity(COALESCE(c.search_content, \'\'), ?), similarity(COALESCE(c.content, \'\'), ?))').join(', ')})`;
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const ownerFilter = user ? '' : 'AND d.user_id = ?';
     const searchParams = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
     const scopeParams = user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params];
 
     try {
+        if (!tsQuery) return [];
         return await query(`
             SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
-                   ${lexicalScore} AS lexical_score
+                   ts_rank_cd(
+                       to_tsvector('simple', COALESCE(c.search_content, c.content)),
+                       to_tsquery('simple', ?)
+                   ) AS lexical_score
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
-            WHERE (${keywordWhere})
+            WHERE to_tsvector('simple', COALESCE(c.search_content, c.content)) @@ to_tsquery('simple', ?)
               ${ownerFilter}
-              AND d.status = 'ready'
+              AND d.status IN ('ready', 'lexical_ready')
               AND d.deleted_at IS NULL
               AND COALESCE(d.is_enabled, 1) = 1
               ${scopeFilter.sql}
               ${scopeFilter.accessSql}
             ORDER BY lexical_score DESC, c.id DESC
             LIMIT ?
-        `, [
-            ...keywords.flatMap(k => [k, k]),
-            ...searchParams,
-            ...scopeParams,
-            limit
-        ]);
+        `, [tsQuery, tsQuery, ...scopeParams, limit]);
     } catch (e) {
-        // pg_trgm 可能未安装或历史库权限不足。保留原 ILIKE 路径作为兼容回退，
-        // 但在可用时始终按数据库计算的 lexical_score 排序，而不是按 chunk id。
-        logger.warn({ err: e.message }, 'RAG 词法相关度排序下推失败，回退基础文本检索');
+        // pg FTS 可能因旧库未建表达式索引、权限不足或异常词元降级。仍保留
+        // pg_trgm + ILIKE 路径，保证升级窗口及历史库中的资料可检索。
+        logger.warn({ err: e.message }, 'RAG FTS 词法检索失败，回退 trigram 文本检索');
         try {
             return await query(`
                 SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
@@ -255,7 +278,7 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
                 ${scopeFilter.accessJoin}
                 WHERE (${keywordWhere})
                   ${ownerFilter}
-                  AND d.status = 'ready'
+                  AND d.status IN ('ready', 'lexical_ready')
                   AND d.deleted_at IS NULL
                   AND COALESCE(d.is_enabled, 1) = 1
                   ${scopeFilter.sql}
@@ -284,7 +307,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
-            WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
+            WHERE 1 = 1 ${ownerFilter} AND d.status IN ('ready', 'lexical_ready') AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
             ORDER BY lexical_score DESC, c.id DESC
             LIMIT ?
         `, [
@@ -300,7 +323,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
-            WHERE 1 = 1 ${ownerFilter} AND d.status = 'ready' AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
+            WHERE 1 = 1 ${ownerFilter} AND d.status IN ('ready', 'lexical_ready') AND d.deleted_at IS NULL AND COALESCE(d.is_enabled, 1) = 1${scopeFilter.sql}${scopeFilter.accessSql} AND (${keywordWhere})
             ORDER BY c.id DESC
             LIMIT ?
         `, [...scopeParams, ...keywords.map(k => `%${k}%`), limit]);
@@ -330,7 +353,7 @@ async function hasAccessibleChunks(userId, scope = {}, user = null) {
         JOIN knowledge_docs d ON c.doc_id = d.id
         ${scopeFilter.accessJoin}
         WHERE 1 = 1 ${ownerFilter}
-          AND d.status = 'ready'
+          AND d.status IN ('ready', 'lexical_ready')
           AND d.deleted_at IS NULL
           AND COALESCE(d.is_enabled, 1) = 1
           ${scopeFilter.sql}
@@ -356,6 +379,7 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
     if (!Array.isArray(queryVector) || !queryVector.length || limit <= 0) return [];
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const queryNorm = computeVectorNorm(queryVector);
+    const embeddingProfile = getEmbeddingProfile(getEmbeddingConfig(userId));
     const top = [];
     let chunks = [];
     try {
@@ -366,6 +390,7 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
             scopeFilter,
             user,
             queryVector,
+            embeddingProfile,
             limit
         })) || [];
     } catch (error) {
@@ -376,6 +401,7 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
             userId,
             scopeFilter,
             user,
+            embeddingProfile,
             limit: Math.min(Math.max(Number(limit) * 4, 100), 1000)
         })) || [];
     }
@@ -426,7 +452,7 @@ async function selectChunksByIds(userId, chunkIds, limit, scope = {}, user = nul
         ${scopeFilter.accessJoin}
         WHERE c.id IN (${placeholders})
           ${ownerFilter}
-          AND d.status = 'ready'
+          AND d.status IN ('ready', 'lexical_ready')
           AND d.deleted_at IS NULL
           AND COALESCE(d.is_enabled, 1) = 1
           ${scopeFilter.sql}
@@ -644,12 +670,14 @@ async function debugRetrieveContext(userId, query, {
         gated = scored.filter(item => item.denseScore > config.scoreThreshold);
     }
     // matches 展示全部候选评分（便于调参）；注入上下文只取门控+MMR 结果。
-    const selected = attachCitationConfidence(applyMMR(gated, safeTopK, hybrid.mmrLambda), config.scoreThreshold);
+    const selected = await attachCitationKeys(attachCitationConfidence(applyMMR(gated, safeTopK, hybrid.mmrLambda), config.scoreThreshold));
     const selectedIds = new Set(selected.map(match => match.chunkId));
+    const selectedCitationKeys = new Map(selected.map(match => [Number(match.chunkId), match.citationKey || '']));
     const maxRankScore = scored.reduce((max, match) => Math.max(max, Number(match.rankScore ?? match.fused ?? match.score) || 0), 0);
     const matches = scored.map((match, index) => normalizeRetrievalDebugMatch({
         ...match,
-        source: match.headingPath || match.source
+        source: match.headingPath || match.source,
+        citationKey: selectedCitationKeys.get(Number(match.chunkId)) || ''
     }, config.scoreThreshold, index, selectedIds, maxRankScore));
 
     return {
@@ -776,6 +804,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             return '';
         }
 
+        topChunks = await attachCitationKeys(topChunks);
         const injectedContext = formatInjectedContext(topChunks, config.scoreThreshold) + (graphContext.context || '');
         setToCache(userId, normalizedQuery, config.topK, injectedContext, cacheScope);
         recordRetrieval({
@@ -804,6 +833,8 @@ function buildEnrichedChunkText(content, headingPath) {
 async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
+    const embeddingConfig = getEmbeddingConfig(userId);
+    const embeddingProfile = getEmbeddingProfile(embeddingConfig);
     const docRow = await knowledgeRepository.getDocumentName(docId);
     const docName = docRow.name || '';
     const docType = detectDocType(docName, text);
@@ -826,6 +857,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
         clearChunkEmbeddingCache();
         const enrichedChunks = chunks.map(item => buildEnrichedChunkText(item.content, item.headingPath));
         const inputBatches = buildEmbeddingInputBatches(enrichedChunks);
+        const indexedVectorDimensions = new Set();
         let indexed = 0;
         for (const enrichedBatch of inputBatches) {
             const batch = chunks.slice(indexed, indexed + enrichedBatch.length);
@@ -847,14 +879,15 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
                 charStart: Number.isInteger(chunk.charStart) ? chunk.charStart : null,
                 charEnd: Number.isInteger(chunk.charEnd) ? chunk.charEnd : null,
                 enriched: enrichedBatch[index],
-                vector: Array.isArray(vectors) ? vectors[index] : null
+                vector: Array.isArray(vectors) ? vectors[index] : null,
+                embeddingProfile
             }));
 
             // 一个 embedding 批次只提交一次数据库写入，避免几百个 chunk
             // 逐条往返造成事务放大与图谱索引滞后。
             const insertedRows = await query(`
-                INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, chunk_index, char_start, char_end, embedding)
-                VALUES ${results.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+                INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, chunk_index, char_start, char_end, embedding, embedding_profile, embedding_dimensions)
+                VALUES ${results.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
                 RETURNING id, content
             `, results.flatMap(item => [
                 docId,
@@ -864,11 +897,16 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
                 item.chunkIndex,
                 item.charStart,
                 item.charEnd,
-                Array.isArray(item.vector) ? JSON.stringify(item.vector) : null
+                Array.isArray(item.vector) ? JSON.stringify(item.vector) : null,
+                Array.isArray(item.vector) ? item.embeddingProfile : '',
+                Array.isArray(item.vector) ? item.vector.length : 0
             ]));
             const insertedChunks = insertedRows
                 .filter(item => item?.id)
                 .map(item => ({ chunkId: item.id, content: item.content }));
+            results.forEach(item => {
+                if (Array.isArray(item.vector) && item.vector.length > 0) indexedVectorDimensions.add(item.vector.length);
+            });
             await safeIndexKnowledgeGraphForChunks({ userId, docId, chunks: insertedChunks });
             indexed += batch.length;
             if (typeof onProgress === 'function') {
@@ -879,6 +917,11 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             }
         }
         recordRagIngest({ status: 'ready', chunks: chunks.length, durationMs: Date.now() - startedAt });
+        for (const dimensions of indexedVectorDimensions) {
+            await ensureKnowledgeVectorIndex(dimensions, embeddingProfile).catch(error => {
+                logger.warn({ err: error.message, dimensions, embeddingProfile }, '知识库向量索引检查失败，继续完成文档索引');
+            });
+        }
         return chunks.length;
     } catch (e) {
         recordRagIngest({ status: 'error', chunks: 0, durationMs: Date.now() - startedAt });
@@ -940,6 +983,8 @@ module.exports = {
     calculateCitationConfidence,
     buildKeywordCandidates,
     buildFtsOrQuery,
+    attachCitationKeys,
+    buildPostgresTsQuery,
     normalizeRetrievalScope,
     buildRagCacheScope,
     buildRagSearchContent,

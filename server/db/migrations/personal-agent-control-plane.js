@@ -1,7 +1,7 @@
 /**
  * PostgreSQL-only control-plane additions for the personal Agent experience.
  * The runtime has already moved to PostgreSQL; this migration intentionally
- * exposes no SQLite implementation.
+ * exposes only the PostgreSQL implementation.
  */
 const migration = {
     id: '202608240002_personal_agent_control_plane_v2',

@@ -426,7 +426,8 @@ function createChatRouter({
                             : '知识库未检索到足够相关内容，将按普通上下文继续',
                         sourceCount,
                         citationCount,
-                        sources: agentContext.ragSummary?.sources || []
+                        sources: agentContext.ragSummary?.sources || [],
+                        citationKeys: agentContext.ragSummary?.citationKeys || []
                     }));
                 }
                 const run = await agentRunFactory({

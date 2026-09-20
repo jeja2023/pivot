@@ -20,9 +20,9 @@ try {
     // 忽略只读或虚拟文件系统路径下的创建失败
 }
 
-// PostgreSQL runtime 不暴露同步 db。测试启动器可显式开启同步兼容 facade，
-// 让遗留测试夹具逐步迁移到 PG，而不把 better-sqlite3 带回生产路径。
-const db = process.env.PIVOT_TEST_DB_SYNC === 'postgres'
+// PostgreSQL runtime 不暴露同步 db。测试启动器可显式开启 PostgreSQL 同步
+// facade；它通过 PG Worker 执行，不对应任何 SQLite 主数据库模式。
+const db = process.env.PIVOT_TEST_PG_SYNC === 'true'
     ? require('./test-sync-db').createTestDb()
     : null;
 const dbPath = null;

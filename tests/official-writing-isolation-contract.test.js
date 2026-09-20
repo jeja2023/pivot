@@ -2,7 +2,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const Sqlite = require('better-sqlite3');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
@@ -23,24 +22,16 @@ async function withOfficialWritingDbClient(fakeClient, callback) {
     }
 }
 
-test('公文写作文档迁移建立按用户归属的服务端表', () => {
-    const migrations = require('../server/db/migrations/official-writing-documents');
-    const db = new Sqlite(':memory:');
-    try {
-        db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
-        migrations[0].up(db);
-        const columns = db.pragma('table_info(official_writing_documents)');
-        assert.ok(columns.some(column => column.name === 'user_id' && column.notnull === 1));
-        assert.ok(columns.some(column => column.name === 'client_id' && column.notnull === 1));
-        assert.ok(columns.some(column => column.name === 'state' && column.notnull === 1));
-        assert.ok(columns.some(column => column.name === 'deleted_at'));
-        assert.deepEqual(db.pragma('index_list(official_writing_documents)').map(index => index.name), [
-            'idx_official_writing_documents_user_updated',
-            'sqlite_autoindex_official_writing_documents_1'
-        ]);
-    } finally {
-        db.close();
-    }
+test('公文写作文档迁移建立按用户归属的 PostgreSQL 服务端表', () => {
+    const [migration] = require('../server/db/migrations/official-writing-documents');
+    const source = migration.upPg.toString();
+    assert.equal(typeof migration.upPg, 'function');
+    assert.match(source, /CREATE TABLE IF NOT EXISTS official_writing_documents/);
+    assert.match(source, /user_id BIGINT NOT NULL REFERENCES users\(id\) ON DELETE CASCADE/);
+    assert.match(source, /client_id VARCHAR\(96\) NOT NULL/);
+    assert.match(source, /state TEXT NOT NULL DEFAULT '\{\}'/);
+    assert.match(source, /deleted_at TIMESTAMPTZ/);
+    assert.match(source, /idx_official_writing_documents_user_updated/);
 });
 
 test('公文写作前端不再读取或写入跨账号 localStorage，并清除旧缓存', () => {
@@ -101,22 +92,32 @@ test('公文写作文档服务不会接受或查询其他用户的文档归属',
 });
 
 test('公文写作草稿保存具备幂等性且内容未修改时不刷重复审计日志', async () => {
-    const migrations = require('../server/db/migrations/official-writing-documents');
-    const db = new Sqlite(':memory:');
-    try {
-        db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
-        db.exec('INSERT INTO users (id) VALUES (1);');
-        migrations[0].up(db);
+    const documents = new Map();
+    const fakeClient = {
+        queryOne: async (_sql, [userId, clientId, title, manualTitle, state]) => {
+            const key = `${userId}:${clientId}`;
+            const existing = documents.get(key);
+            if (existing?.deleted_at) return null;
+            const isUnchanged = existing
+                && existing.title === title
+                && existing.manual_title === manualTitle
+                && existing.state === state;
+            const row = {
+                user_id: userId,
+                client_id: clientId,
+                title,
+                manual_title: manualTitle,
+                state,
+                version: existing ? existing.version + (isUnchanged ? 0 : 1) : 1,
+                created_at: existing?.created_at || '2026-09-05T00:00:00.000Z',
+                updated_at: isUnchanged ? existing.updated_at : '2026-09-05T00:00:01.000Z'
+            };
+            documents.set(key, row);
+            return row;
+        }
+    };
 
-        const fakeClient = {
-            queryOne: async (sql, params) => {
-                const sqliteSql = sql.replace(/NOW\(\)/g, "datetime('now')");
-                const stmt = db.prepare(sqliteSql);
-                return stmt.get(...params);
-            }
-        };
-
-        await withOfficialWritingDbClient(fakeClient, async service => {
+    await withOfficialWritingDbClient(fakeClient, async service => {
             const user = { id: 1 };
             const first = await service.saveOfficialWritingDocument(user, 'doc-idem', {
                 title: '初次标题',
@@ -140,9 +141,5 @@ test('公文写作草稿保存具备幂等性且内容未修改时不刷重复�
             });
             assert.equal(third.version, 2);
             assert.equal(third.isModified, true);
-        });
-    } finally {
-        db.close();
-    }
+    });
 });
-

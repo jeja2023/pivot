@@ -1,9 +1,4 @@
 // 从 security-rag.test.js 拆出；仍由父级入口统一加载。
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const Module = require('node:module');
-const Sqlite = require('better-sqlite3');
 const { sql } = require('../../server/db/statements');
 const { execute: dbExecute, queryOne: dbQueryOne } = require('../../server/db/client');
 
@@ -65,35 +60,6 @@ const {
     updateEntity
 } = require('../security-helpers');
 
-function withDbModuleConnection(relativePath, database, callback) {
-    const filename = path.resolve(__dirname, '../..', relativePath);
-    const connectionPath = path.resolve(__dirname, '../..', 'server', 'db', 'connection.js');
-    const savedConnection = require.cache[connectionPath];
-    const removed = [];
-    Object.keys(require.cache).forEach(key => {
-        const normalized = key.replace(/\\/g, '/');
-        if (normalized.includes('/server/db/')) {
-            removed.push([key, require.cache[key]]);
-            delete require.cache[key];
-        }
-    });
-
-    const dbModule = new Module(connectionPath);
-    dbModule.filename = connectionPath;
-    dbModule.loaded = true;
-    dbModule.exports = { db: database };
-    require.cache[connectionPath] = dbModule;
-    try {
-        return callback(require(filename));
-    } finally {
-        delete require.cache[connectionPath];
-        if (savedConnection) require.cache[connectionPath] = savedConnection;
-        removed.forEach(([key, entry]) => {
-            require.cache[key] = entry;
-        });
-    }
-}
-
 test('RAG 辅助函数生成安全 FTS 查询和确定性分块', () => {
     assert.equal(buildFtsOrQuery(['hello', 'a"b']), '"hello" OR "a""b"');
     assert.ok(buildKeywordCandidates('权限配置流程').includes('权限'));
@@ -110,45 +76,6 @@ test('RAG 切片会保留段落换行并优先贴近自然边界', () => {
     assert.ok(chunks.length > 1);
     assert.ok(chunks[0].includes('\n\n'));
     assert.ok(chunks[0].endsWith('。\n\n'));
-});
-
-test('旧版知识库文档表缺少 collection_id 时数据库初始化可完成迁移', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-legacy-rag-db-'));
-    const dbPath = path.join(dir, 'chat.db');
-    const legacyDb = new Sqlite(dbPath);
-    legacyDb.exec(`
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password_hash TEXT,
-            role TEXT,
-            status TEXT,
-            created_at DATETIME
-        );
-        CREATE TABLE app_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        CREATE TABLE knowledge_docs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT NOT NULL,
-            status TEXT,
-            created_at DATETIME
-        );
-    `);
-    try {
-        withDbModuleConnection('server/db/schema.js', legacyDb, ({ initSchema }) => {
-            assert.doesNotThrow(() => initSchema());
-        });
-        withDbModuleConnection('server/db/migrate.js', legacyDb, ({ runMigrations }) => {
-            assert.doesNotThrow(() => runMigrations());
-        });
-        const cols = legacyDb.prepare('PRAGMA table_info(knowledge_docs)').all().map(col => col.name);
-        assert.equal(cols.includes('collection_id'), true);
-    } finally {
-        legacyDb.close();
-    }
 });
 
 test('知识图谱会从 RAG 分块提取实体和类型化关系', () => {

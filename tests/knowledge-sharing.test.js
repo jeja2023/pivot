@@ -69,7 +69,8 @@ test('知识库资源判定与 SQL 过滤器绑定用户和单位范围', () => 
     const documentFilter = buildDocumentAccessFilter(sameUnit, 'd', 'c');
     assert.match(documentFilter.sql, /d\.collection_id IS NOT NULL/);
     assert.match(documentFilter.sql, /c\.scope = 'shared'/);
-    assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id]);
+    assert.match(documentFilter.sql, /knowledge_permissions/);
+    assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id, sameUnit.id, sameUnit.unit, sameUnit.role, sameUnit.id, sameUnit.id]);
 });
 
 test('单位白名单 SQL 使用精确 token 匹配，不把 % 和 _ 当作通配符', () => {

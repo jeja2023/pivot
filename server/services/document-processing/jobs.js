@@ -789,7 +789,7 @@ async function shareJobResult({ user, jobId, target, options = {} }) {
             collectionId: options.collectionId,
             tags: tags.filter(Boolean)
         });
-        const scheduled = scheduleKnowledgeDocumentIndexing({ docId: created.docId, userId, user });
+        const scheduled = await scheduleKnowledgeDocumentIndexing({ docId: created.docId, userId, user });
         return {
             target: 'knowledge',
             documentId: created.docId,

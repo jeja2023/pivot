@@ -77,6 +77,7 @@ const { createMcpRouter } = require('./routes/mcp');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
 const { createMemoriesRouter } = require('./routes/memories');
+const { createKnowledgeRouter } = require('./routes/knowledge');
 const { createAppServerRouter } = require('./routes/app-server');
 const { createAppServerProtocol } = require('./services/app-server-protocol');
 const { createAgentResidencyStore } = require('./services/agent-residency');
@@ -622,6 +623,11 @@ app.use('/api', createMcpRouter({
 }));
 
 app.use('/api/rag', ragRouter);
+
+app.use('/api', createKnowledgeRouter({
+    authMiddleware,
+    logAction
+}));
 
 // --- 对话接口 ---
 app.use('/api', createSessionsRouter({

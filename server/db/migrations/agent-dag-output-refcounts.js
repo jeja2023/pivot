@@ -3,9 +3,6 @@
 const migration = {
     id: '202609190002_agent_dag_output_refcounts',
     description: 'Release complete DAG output CAS references when DAG node rows are physically deleted.',
-    up() {
-        // 完整 CAS 产物和引用计数控制面仅运行于 PostgreSQL 部署；SQLite 保持 JSON 节点输出兼容。
-    },
     async upPg(client) {
         await client.query(`
             CREATE OR REPLACE FUNCTION agent_dag_node_release_output_ref() RETURNS trigger AS $$

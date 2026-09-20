@@ -407,7 +407,7 @@ ragRouter.post('/upload', authMiddleware, upload.single('file'), uploadSecurityM
         collectionName: req.body?.collectionName,
         tags: req.body?.tags
     });
-    scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id, user: req.user });
+    await scheduleKnowledgeDocumentIndexing({ docId, userId: req.user.id, user: req.user });
     auditRagAction(req, '知识库文档上传', { docId, collectionId, name: req.file.originalname });
     req.log?.info({ docId, collectionId, name: req.file.originalname }, 'RAG 文档上传');
     res.json({ success: true, docId, message: '后台处理中' });
@@ -420,7 +420,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
         return res.status(409).json({ error: '原始文件不存在，无法重新索引，请重新上传文档' });
     }
 
-    const result = scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user });
+    const result = await scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user });
     if (!result.started && result.reason === 'already_processing') {
         return res.status(409).json({ error: '文档正在处理中，请稍后再试' });
     }

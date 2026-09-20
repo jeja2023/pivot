@@ -3,36 +3,6 @@
 const migration = {
     id: '202609190005_workflow_api_operations',
     description: 'Store governed OpenAPI-derived workflow API operations without storing secret values.',
-    up(db) {
-        db.exec(`
-            CREATE TABLE IF NOT EXISTS workflow_api_operations (
-                id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                operation_id TEXT NOT NULL DEFAULT '',
-                method TEXT NOT NULL,
-                base_url TEXT NOT NULL,
-                path_template TEXT NOT NULL,
-                parameter_schema TEXT NOT NULL DEFAULT '{}',
-                body_schema TEXT NOT NULL DEFAULT '{}',
-                response_schema TEXT NOT NULL DEFAULT '{}',
-                credential_slug TEXT DEFAULT '',
-                credential_header TEXT DEFAULT 'Authorization',
-                credential_prefix TEXT DEFAULT 'Bearer ',
-                side_effect INTEGER NOT NULL DEFAULT 0,
-                idempotent INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'active',
-                source_digest TEXT NOT NULL DEFAULT '',
-                created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                updated_at DATETIME DEFAULT (datetime('now', '+8 hours')),
-                deleted_at DATETIME,
-                UNIQUE(user_id, name),
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_workflow_api_operations_user ON workflow_api_operations(user_id, status, updated_at);
-        `);
-    },
     async upPg(client) {
         await client.query(`
             CREATE TABLE IF NOT EXISTS workflow_api_operations (

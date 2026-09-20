@@ -84,7 +84,7 @@ async function main() {
         DATABASE_URL: databaseUrl,
         PG_TEST_SCHEMA: testSchema,
         PG_IDLE_TIMEOUT_MS: '100',
-        PIVOT_TEST_DB_SYNC: 'postgres',
+        PIVOT_TEST_PG_SYNC: 'true',
         PIVOT_DB_WRITE_QUEUE_DISABLED: 'false',
         PIVOT_LOGIN_RATE_LIMIT_MAX: '100',
         DEFAULT_ADMIN_PASSWORD: 'E2eAdmin123',

@@ -38,6 +38,6 @@
 
 阶段专项合计 `39/39` 通过，ESLint 对新增和修改模块无错误。该阶段验收基线版本为 `0.1.21`；后续 Harness 治理、协议基线和恢复矩阵增量已发布为 `v0.1.22`，变更记录见 `CHANGELOG.md`。
 
-服务端运行与数据表按 PostgreSQL-only 口径验收；数据库生命周期/Trace 集成夹具（`tests/agent-runtime-lifecycle.test.js`、`tests/agent-trace-contracts.test.js`）需要 `DATABASE_URL` 或显式 `PIVOT_TEST_DB_SYNC=postgres`。当前工作区未配置该连接，因此未将这部分计入专项通过数。桌面 Runtime 的 SQLite State DB 是客户端本地任务状态存储，不属于服务端业务数据库迁移。
+服务端运行与数据表按 PostgreSQL-only 口径验收；数据库生命周期/Trace 集成夹具（`tests/agent-runtime-lifecycle.test.js`、`tests/agent-trace-contracts.test.js`）需要 `DATABASE_URL`，测试同步 facade 使用 `PIVOT_TEST_PG_SYNC=true`。桌面 Runtime 的 SQLite State DB 是客户端本地任务状态存储，不属于服务端业务数据库迁移。
 
 本轮补强验收新增：桌面 Runtime 工具看门狗与预算持久化、Workspace Jail 符号链接越权拒绝、白名单企业内网地址放行、Skill ZIP 上传魔数校验、完整 YAML 解析、Skill 最小权限 PEP 拦截。

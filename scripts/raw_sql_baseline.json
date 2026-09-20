@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1541,
+  "total": 1701,
   "entries": [
     {
       "file": "server/auth.js",
@@ -132,7 +132,15 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/autonomous-runtime-foundations.js",
+      "count": 10
+    },
+    {
       "file": "server/db/migrations/chat-adaptive-routing.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/chat-agent-run-message-link.js",
       "count": 1
     },
     {
@@ -140,8 +148,16 @@
       "count": 1
     },
     {
-      "file": "server/db/migrations/index.js",
-      "count": 15
+      "file": "server/db/migrations/knowledge-database-query-templates.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-product-foundation.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-product-governance.js",
+      "count": 1
     },
     {
       "file": "server/db/migrations/message-context-token-count.js",
@@ -189,10 +205,14 @@
     },
     {
       "file": "server/db/migrations/runner.js",
-      "count": 6
+      "count": 3
     },
     {
       "file": "server/db/migrations/workflow-api-operations.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/workflow-credential-user-visibility.js",
       "count": 1
     },
     {
@@ -205,11 +225,11 @@
     },
     {
       "file": "server/db/seed.js",
-      "count": 7
+      "count": 10
     },
     {
       "file": "server/db/test-sync-worker-thread.js",
-      "count": 3
+      "count": 2
     },
     {
       "file": "server/llm.js",
@@ -266,6 +286,10 @@
     {
       "file": "server/routes/events.js",
       "count": 1
+    },
+    {
+      "file": "server/routes/knowledge.js",
+      "count": 8
     },
     {
       "file": "server/routes/mcp/configuration-routes.js",
@@ -656,8 +680,36 @@
       "count": 4
     },
     {
+      "file": "server/services/knowledge-content.js",
+      "count": 98
+    },
+    {
+      "file": "server/services/knowledge-database-templates.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/knowledge-embedding-recovery.js",
+      "count": 2
+    },
+    {
+      "file": "server/services/knowledge-evaluations.js",
+      "count": 23
+    },
+    {
       "file": "server/services/knowledge-graph.js",
       "count": 45
+    },
+    {
+      "file": "server/services/knowledge-ingestion-jobs.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/knowledge-manual-embeddings.js",
+      "count": 7
+    },
+    {
+      "file": "server/services/knowledge-sources.js",
+      "count": 15
     },
     {
       "file": "server/services/long-term-memory/index.js",

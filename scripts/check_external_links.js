@@ -1,8 +1,6 @@
 /* External dependency readiness check: config-only by default, live probes with --live. */
-const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const Database = require('better-sqlite3');
 const { Pool } = require('pg');
 const dotenv = require('dotenv');
 const { toPostgresParams } = require('../server/db/client');
@@ -20,8 +18,6 @@ dotenv.config({ path: path.join(rootDir, '.env') });
 const live = process.argv.includes('--live');
 const timeoutMs = Math.max(1000, Math.min(Number(process.env.PIVOT_EXTERNAL_CHECK_TIMEOUT_MS || 15000) || 15000, 120000));
 const adminGuardUser = { id: 1, username: 'admin', role: 'admin' };
-const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(rootDir, 'data');
-const dbPath = process.env.PIVOT_DB_PATH ? path.resolve(process.env.PIVOT_DB_PATH) : path.join(dataDir, 'chat.db');
 
 const builtinPrefixes = {
     reports: 'pivot-reports://',
@@ -107,25 +103,8 @@ async function openReadOnlyConfigStore() {
             add('配置库', 'PostgreSQL', 'warn', `无法连接 ${urlPreview(connectionString)}: ${err.message}`);
         }
     }
-    if (!fs.existsSync(dbPath)) {
-        add('配置库', '配置数据库', 'warn', `未找到 PostgreSQL 连接或 SQLite 配置库 ${dbPath}，只能检查 .env 中的配置。`);
-        return null;
-    }
-    try {
-        const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
-        return {
-            kind: 'SQLite',
-            location: dbPath,
-            async tableExists(name) {
-                return Boolean(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
-            },
-            async all(sql, params = []) { return sqlite.prepare(sql).all(...params); },
-            async close() { sqlite.close(); }
-        };
-    } catch (err) {
-        add('配置库', 'SQLite', 'warn', `无法只读打开 ${dbPath}: ${err.message}`);
-        return null;
-    }
+    add('配置库', 'PostgreSQL', 'warn', '未配置 DATABASE_URL 或 TEST_DATABASE_URL，只能检查 .env 中的配置。');
+    return null;
 }
 
 async function tableExists(store, name) {
@@ -395,7 +374,7 @@ async function main() {
         : [];
     add('数据库 MCP', '连接配置', databaseRows.length > 0 ? 'ok' : 'warn', databaseRows.length > 0 ? `${databaseRows.length} 个 active 数据库连接` : '未配置 active 数据库连接。');
     databaseRows.forEach(row => {
-        add('数据库 MCP', row.server_name, row.database_name ? 'ok' : 'warn', `${row.database_type} @ ${row.host || 'sqlite'} / ${row.database_name || '未填数据库名'}`);
+        add('数据库 MCP', row.server_name, row.database_name ? 'ok' : 'warn', `${row.database_type} @ ${row.host || '本机授权'} / ${row.database_name || '未填数据库名'}`);
     });
 
     const builtinRows = await tableExists(configDb, 'mcp_builtin_configs')
@@ -440,7 +419,7 @@ async function main() {
         return acc;
     }, {});
     console.log(`Pivot 外部链路体检 ${live ? '(live)' : '(config-only)'}`);
-    console.log(`配置库: ${configDb?.kind || '未连接'} ${configDb?.location || dbPath}`);
+    console.log(`配置库: ${configDb?.kind || '未连接'} ${configDb?.location || '未配置 PostgreSQL 连接'}`);
     checks.forEach(item => {
         const prefix = item.status.toUpperCase().padEnd(7);
         const url = item.url ? ` [${item.url}]` : '';

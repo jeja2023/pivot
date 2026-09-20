@@ -2,7 +2,7 @@
  * server/db/seed.js
  * 数据库初始数据填充（PostgreSQL）
  *
- * SQLite 同步 seed 仅服务于历史测试夹具，不再属于应用运行模式。
+ * 主数据库仅支持 PostgreSQL。
  */
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -29,8 +29,10 @@ function buildInitialAdminCredential() {
 }
 
 function writeInitialAdminCredentialFile(password) {
+    const credentialDir = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'));
+    fs.mkdirSync(credentialDir, { recursive: true, mode: 0o700 });
     const credentialPath = path.resolve(
-        process.env.DATA_DIR || path.join(__dirname, '../../data'),
+        credentialDir,
         'initial-admin-password.txt'
     );
     fs.writeFileSync(
@@ -50,64 +52,7 @@ function logInitialAdminCredential(credential) {
     logger.warn({ username: 'admin', credentialPath }, '系统初始化：已创建随机管理员密码，请读取该一次性文件后尽快修改密码并删除文件');
 }
 
-function requireLegacySqliteDb() {
-    const { db } = require('./connection');
-    if (!db || typeof db.prepare !== 'function') {
-        throw new Error('[DB] 当前版本已切换为 PostgreSQL-only；SQLite seed 入口仅允许历史测试夹具显式注入 SQLite 连接后调用。');
-    }
-    return db;
-}
-
-// ── Legacy SQLite seed helpers ───────────────────────────────────────────
-
-function createInitialAdminAccount() {
-    const db = requireLegacySqliteDb();
-    const { recordMigration } = require('./migrate');
-    const credential = buildInitialAdminCredential();
-    db.prepare('INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run('admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp());
-    logInitialAdminCredential(credential);
-    recordMigration('initial_admin_created_v1', 'done');
-}
-
-function ensureBuiltInAdminAccount() {
-    const db = requireLegacySqliteDb();
-    const { recordMigration } = require('./migrate');
-    const admin = db.prepare('SELECT id, role, status, deleted_at FROM users WHERE username = ?').get('admin');
-    if (!admin) { createInitialAdminAccount(); return; }
-    const needsRepair = admin.role !== 'admin' || admin.status === 'disabled' || admin.deleted_at;
-    if (!needsRepair) return;
-    db.prepare(`
-        UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
-            nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
-            unit = COALESCE(NULLIF(unit, ''), '智枢科技')
-        WHERE id = ?
-    `).run(admin.id);
-    recordMigration('initial_admin_repaired_v1', 'done');
-    logger.warn({ username: 'admin', userId: admin.id }, '系统初始化：已修复内置 admin 账号角色或状态');
-}
-
-function runSeeds() {
-    const db = requireLegacySqliteDb();
-
-    const promptCount = db.prepare('SELECT COUNT(*) as count FROM prompts').get().count;
-    if (promptCount === 0) {
-        const defaultPrompts = [
-            ['中英文翻译官', '你是一个精通中英文翻译的助手，能够地道、准确地在两种语言间切换，并保持原有的语气。', '翻译', 'role', 'chat,agent,workflow', '适合需要固定翻译角色的对话、任务和工作流节点。'],
-            ['代码助手', '你是一个资深的软件工程师，擅长编写简洁、高效、安全的代码，并能给出详尽的注释和优化建议。', '编程', 'role', 'chat,agent,workflow', '用于代码审阅、实现建议和工程说明。'],
-            ['周报专家', '你擅长总结工作成果，能将零散的任务描述转化为结构清晰、重点突出的专业周报。', '办公', 'output', 'chat,agent,workflow', '规定输出为清晰、可复用的周报结构。'],
-            ['文案润色', '你是一个文字编辑专家，能对给出的文本进行修辞优化、逻辑理顺，使其更具感染力和专业性。', '创作', 'method', 'chat,agent,workflow', '适合把写作风格和润色标准沉淀为规范。']
-        ];
-        const stmt = db.prepare('INSERT INTO prompts (name, content, category, type, target_surfaces, description) VALUES (?, ?, ?, ?, ?, ?)');
-        defaultPrompts.forEach(p => stmt.run(...p));
-    }
-
-    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-    if (userCount === 0) { createInitialAdminAccount(); }
-    else { ensureBuiltInAdminAccount(); }
-}
-
-// ── PostgreSQL 异步 seed ──────────────────────────────────────────────────
+// PostgreSQL seed ──────────────────────────────────────────────────────────
 
 async function runSeedsPg() {
     const { transaction } = require('./client');
@@ -161,10 +106,32 @@ async function runSeedsPg() {
     });
 }
 
+async function ensureBuiltInAdminAccount() {
+    const { transaction } = require('./client');
+    await transaction(async trx => {
+        const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = ?', ['admin']);
+        if (!admin) {
+            const credential = buildInitialAdminCredential();
+            await trx.execute(
+                'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                ['admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp()]
+            );
+            logInitialAdminCredential(credential);
+            return;
+        }
+        if (admin.role === 'admin' && admin.status !== 'disabled' && !admin.deleted_at) return;
+        await trx.execute(`
+            UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
+                nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
+                unit = COALESCE(NULLIF(unit, ''), '智枢科技')
+            WHERE id = ?
+        `, [admin.id]);
+        logger.warn({ username: 'admin', userId: admin.id }, '[PG] 已修复内置 admin 账号角色或状态');
+    });
+}
+
 module.exports = {
-    runSeeds,
     runSeedsPg,
-    createInitialAdminAccount,
     ensureBuiltInAdminAccount,
     validateInitialPassword
 };

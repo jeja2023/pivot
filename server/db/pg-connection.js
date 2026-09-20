@@ -3,13 +3,12 @@
  * PostgreSQL 连接池管理（懒加载单例）
  * 通过 PIVOT_DB_DIALECT=postgres + DATABASE_URL 激活
  *
- * ── 类型解析对齐（关键）────────────────────────────────────────────────────
- * node-postgres 的默认行为与 better-sqlite3 不一致，若不校正会击穿应用层：
+ * ── 类型解析规范（关键）────────────────────────────────────────────────────
+ * node-postgres 的默认类型转换会破坏应用层的数值和时间契约，因此统一：
  *   1. BIGINT (int8, OID 20) 默认返回「字符串」→ row.id === 1 恒为 false、
  *      COUNT(*) 得到 "5" 而非 5。故统一解析为 Number。
  *   2. NUMERIC (OID 1700) 默认返回「字符串」→ 统一解析为 Number。
- *   3. TIMESTAMPTZ/TIMESTAMP 默认返回 JS Date 对象，而 SQLite 返回
- *      'YYYY-MM-DD HH:mm:ss' 字符串。应用层大量代码直接做字符串比较、
+ *   3. TIMESTAMPTZ/TIMESTAMP 默认返回 JS Date 对象；应用层大量代码直接做字符串比较、
  *      startsWith(datePrefix)、字面拼接，故统一归一化为北京时间字符串。
  *
  * 配套要求：每个连接建立时 SET timezone = 'Asia/Shanghai'，使 PG 的
@@ -28,7 +27,7 @@ const OID_TIMESTAMPTZ = 1184; // timestamp with time zone
 const OID_DATE = 1082;
 
 /**
- * 将 PG 的 timestamp 文本输出归一化为 SQLite 同构的 'YYYY-MM-DD HH:mm:ss'。
+ * 将 PG 的 timestamp 文本输出归一化为 'YYYY-MM-DD HH:mm:ss'。
  * PG 在 timezone=Asia/Shanghai 下输出形如：
  *   '2026-08-17 10:00:00+08'  /  '2026-08-17 10:00:00.123456+08'
  * 裁掉小数秒与时区后缀即为北京时间字符串。
@@ -54,7 +53,7 @@ function applyPgTypeParsers() {
     pgTypes.setTypeParser(OID_INT8, val => (val === null ? null : Number(val)));
     pgTypes.setTypeParser(OID_NUMERIC, val => (val === null ? null : Number(val)));
 
-    // 时间列 → 北京时间字符串（与 SQLite 存储格式一致）
+    // 时间列 → 北京时间字符串
     pgTypes.setTypeParser(OID_TIMESTAMPTZ, normalizePgTimestamp);
     pgTypes.setTypeParser(OID_TIMESTAMP, normalizePgTimestamp);
     pgTypes.setTypeParser(OID_DATE, normalizePgTimestamp);

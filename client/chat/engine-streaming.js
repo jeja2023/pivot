@@ -57,6 +57,9 @@ function getAssistantTraceEventCopy(event = {}) {
         : [];
     const sourceCount = Number(event?.sourceCount || sources.length || 0);
     const citationCount = Number(event?.citationCount || 0);
+    const citationKeys = Array.isArray(event?.citationKeys)
+        ? event.citationKeys.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
+        : [];
 
     if (type === 'route') {
         const rag = event?.rag && typeof event.rag === 'object' ? event.rag : {};
@@ -94,7 +97,8 @@ function getAssistantTraceEventCopy(event = {}) {
                 tone: 'ready',
                 text: sourceCount > 0
                     ? `${hitPrefix} ${sourceCount} 份可引用文档${sourceText}${citationText}，会优先依据知识库回答。`
-                    : `${hitPrefix}相关文档，会优先依据知识库回答。`
+                    : `${hitPrefix}相关文档，会优先依据知识库回答。`,
+                citationKeys
             };
         }
         if (status === 'empty') {
@@ -245,6 +249,20 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
     text.textContent = copy.text;
     item.append(label, text);
 
+    if (Array.isArray(copy.citationKeys) && copy.citationKeys.length) {
+        const citations = document.createElement('span');
+        citations.className = 'chat-answer-trace-citations';
+        copy.citationKeys.forEach((key, index) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'chat-answer-trace-citation';
+            button.dataset.chatTraceCitation = key;
+            button.textContent = `来源 ${index + 1}`;
+            citations.appendChild(button);
+        });
+        item.appendChild(citations);
+    }
+
     if (copy.action && copy.actionLabel) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -271,6 +289,22 @@ function renderAssistantRouteMetadata(messageContent, routeMetadata = null) {
 }
 
 function handleAssistantTraceAction(event) {
+    const citation = event.target.closest?.('[data-chat-trace-citation]');
+    if (citation) {
+        event.preventDefault();
+        const citationKey = citation.dataset.chatTraceCitation;
+        apiFetch(`${API_BASE}/knowledge/citations/${encodeURIComponent(citationKey)}`, { headers: authHeaders() })
+            .then(response => response.json().then(data => ({ response, data })))
+            .then(({ response, data }) => {
+                if (!response.ok || data.error) throw new Error(data.error || '来源预览失败');
+                const detail = data.citation || {};
+                const copy = `${detail.document?.title || '知识来源'}\n${detail.locator?.headingPath || ''}\n\n${detail.quotedText || ''}`;
+                if (window.Pivot?.legacy?.showAlert) return window.Pivot.legacy.showAlert('知识来源', copy);
+                showToast(copy.slice(0, 300), 'info');
+            })
+            .catch(error => showToast(error.message || '来源预览失败', 'error'));
+        return;
+    }
     const action = event.target.closest?.('[data-chat-trace-action]');
     if (!action) return;
     event.preventDefault();

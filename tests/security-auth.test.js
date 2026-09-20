@@ -40,13 +40,13 @@ const {
 } = require('./security-helpers');
 const { refreshAppSettingsCache } = require('../server/services/app-settings');
 
-test('seed repair restores built-in admin role and login status', () => {
+test('seed repair restores built-in admin role and login status', async () => {
     const admin = db.prepare('SELECT id, role, status, deleted_at, nickname, unit FROM users WHERE username = ?').get('admin');
     assert.ok(admin);
     try {
         db.prepare("UPDATE users SET role = 'user', status = 'disabled', deleted_at = ?, nickname = '', unit = '' WHERE username = ?")
             .run('2026-01-01 00:00:00', 'admin');
-        ensureBuiltInAdminAccount();
+        await ensureBuiltInAdminAccount();
         const repaired = db.prepare('SELECT role, status, deleted_at, nickname, unit FROM users WHERE username = ?').get('admin');
         assert.equal(repaired.role, 'admin');
         assert.equal(repaired.status, 'active');

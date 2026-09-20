@@ -8,7 +8,7 @@
  * 而不是把数据库错误直接抛给调用方。
  */
 
-/** PostgreSQL undefined_table。SQLite 侧表现为 no such table 文案。 */
+/** PostgreSQL undefined_table。 */
 const UNDEFINED_TABLE_CODE = '42P01';
 
 const CONTROL_PLANE_DISABLED_CODE = 'AGENT_SKILL_CONTROL_PLANE_DISABLED';

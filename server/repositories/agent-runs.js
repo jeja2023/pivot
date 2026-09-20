@@ -1,8 +1,6 @@
 /**
  * server/repositories/agent-runs.js
- * 智能体运行记录数据访问层（SQLite / PostgreSQL 双方言）
- *
- * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
+ * 智能体运行记录 PostgreSQL 数据访问层。
  */
 const { query, queryOne, execute } = require('../db/client');
 const { likeOperator } = require('../db/dialect');
@@ -241,7 +239,7 @@ async function listSteps(runId) {
 }
 
 async function listDagNodes(runId) {
-    // condition 在 PG 中是关键字，需加引号；SQLite 同样接受双引号标识符
+    // condition 在 PostgreSQL 中是关键字，必须加引号。
     const nodes = await query(`
         SELECT id, run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, "condition", status,
                output, reused_from_run_id, error_message, error_info, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at

@@ -1,8 +1,6 @@
 /**
  * server/repositories/agent-workflows.js
- * 智能体工作流数据访问层（SQLite / PostgreSQL 双方言）
- *
- * 全部接口返回 Promise，方言差异统一由 db/dialect.js 抽象。
+ * 智能体工作流 PostgreSQL 数据访问层。
  */
 const { query, queryOne } = require('../db/client');
 const { nowOffsetExpr } = require('../db/dialect');

@@ -91,7 +91,7 @@ test('JSONB readers accept native node-postgres arrays and objects', () => {
     assert.deepEqual(debugRow.queue, { pending: 1 });
 });
 
-test('dynamic PostgreSQL schema generator produces complete table DDL matching SQLite base schema', () => {
+test('PostgreSQL schema snapshot produces complete native table DDL', () => {
     const plan = pgSchema.buildPgSchemaStatements();
     assert.ok(plan);
     assert.ok(plan.tables.length >= 82, 'Generated PG schema must contain the shared rate-limit table and all application tables');

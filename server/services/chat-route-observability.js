@@ -133,7 +133,7 @@ function recordChatRouteMetric(metric = {}, deps = {}) {
     const state = mergeMetric(live.get(key) || emptyMetric(), metric);
     live.set(key, state);
 
-    // SQLite 与 PostgreSQL 都需要保留路由审计聚合。异步写入避免将
+    // 路由审计聚合需要持续保留。异步写入避免将
     // 可观测性持久化放到聊天关键路径；测试可显式传入 persist:false。
     if (deps.persist === false) return;
     const queued = mergeMetric(pending.get(key) || emptyMetric(), metric);

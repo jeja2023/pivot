@@ -160,7 +160,7 @@ const fetchActiveAnnouncementRows = async (userId) => {
 
 const fetchPublicAnnouncementRows = async () => {
     const now = getBeijingTimestamp();
-    // show_on_login 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    // show_on_login 以 BIGINT 0/1 存储，统一使用整数比较。
     const showOnLoginCondition = 'a.show_on_login = 1';
     return query(`
         SELECT a.*

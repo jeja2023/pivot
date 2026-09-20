@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.154-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.1.155-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,11 +11,13 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.1.154
+## 最新版本：0.1.155
 
-个人 Agent 开发闭环已完成：首次引导、可解释记忆、历史会话回忆、学习与 Skill 草稿、目标预览/投递、签名配对的双向渠道 Gateway 和受控附件、授权能力目录、受限并行协作、项目资料包、浏览器语音输入及审批/白名单约束下的网页检索、图片和 TTS Provider。普通会话与自动化始终复用同一 Runtime、ACL、审批、审计和网络策略。
+知识库已升级为可维护、可验证、可运营的局域网知识产品：支持文档版本与发布生命周期、责任/验证/有效期治理、稳定引用、持久化索引任务、局域网来源同步、统一 ACL，以及黄金问题集与检索质量评测。检索统一使用 PostgreSQL 的词法、向量与融合排序路径。
 
-（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.1.154 发布记录](docs/releases/v0.1.154-个人Agent开发闭环与生产验收就绪.md)。）
+主业务数据库现已正式收敛为 PostgreSQL；桌面授权、本机只读 SQLite 数据源、桌面 Agent 状态库和 SQLite 文件分析能力保持独立可用，不再构成主业务库兼容路径。
+
+（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.1.155 发布记录](docs/releases/v0.1.155-知识库产品化与PostgreSQL主库收敛.md)。）
 
 国产化桌面客户端当前正式支持 Linux AMD64 和 ARM64 的 UOS/Debian 构建；构建命令、离线依赖、原生模块验收和 LoongArch64 限制见 [统信 UOS 与龙芯客户端打包指南](docs/统信UOS与龙芯3A6000客户端打包指南.md)。龙芯 LoongArch64 当前不会生成正式安装包。
 
@@ -514,23 +516,25 @@ npm run check:external:live
 
 ## 数据库与迁移
 
-生产环境已全面升级至 **纯 PostgreSQL 14+ / 16+ / 17+** 架构（支持 `pgvector` 向量检索与 `pg_trgm` GIN 索引），并保留 DuckDB 作为独立的高性能列式内存数据分析引擎。
+生产环境主业务数据库已收敛为 **PostgreSQL-only** 架构（支持 `pgvector` 向量检索与 `pg_trgm` GIN 索引），并保留 DuckDB 作为独立的高性能列式内存数据分析引擎。SQLite 仅用于桌面本机授权、桌面局部状态、受控本机 SQLite 只读工具和 SQLite 文件数据分析导入，不再作为服务端业务数据库。
 
-针对生产环境数据库部署与平滑迁移，请查阅以下实施手册：
-- **无网络/离线隔离区迁移指南**：[《Pivot 生产环境无网络离线迁移 PostgreSQL 实施指南》](docs/Pivot生产环境无网络离线迁移PostgreSQL实施指南.md)（含离线镜像打包、无外网插件安装、四级深度核验与 5 分钟快速回滚预案）。
-- **架构演进与全量方案**：[《Pivot 生产环境迁移 PostgreSQL 实施方案》](Pivot生产环境迁移PostgreSQL实施方案.md)（含 79 张表方言转换规则、1,018 条原生中文注释字典与主键游标无锁流式抽取引擎）。
+针对生产环境数据库部署、升级、备份、恢复和知识库验收，请查阅：
 
-系统启动时会自动执行 PostgreSQL schema 校验与元数据注释注入，所有历史业务表与字段均幂等兼容。
+- **当前运行与升级手册**：[《Pivot 生产环境 PostgreSQL 主库运行与升级说明》](docs/生产环境PostgreSQL主库运行与升级说明.md)。
+- **离线部署手册**：[《生产环境离线部署》](docs/生产环境离线部署.md)。
+- **历史一次性迁移资料（归档，不可直接执行）**：[《Pivot 历史 SQLite→PostgreSQL 一次性迁移实施方案》](Pivot生产环境迁移PostgreSQL实施方案.md)。
 
-### v0.1.8 PostgreSQL 迁移与运行兼容说明
+系统启动时会从原生 PostgreSQL schema 快照补齐结构、执行未应用的 `upPg` 迁移并注入元数据注释。升级前必须备份 PostgreSQL 和同一恢复点的上传文件；部署后执行 `npm run verify:knowledge-migration -- --strict` 完成知识资产、引用、权限与向量投影的只读对账。
 
-`knowledge_chunks`、`memories` 与 `regulation_articles` 的 `embedding` 列在 PostgreSQL 中使用 `pgvector` 的 `vector` 类型；智能体配置、长期记忆来源、RAG 调试记录和知识图谱别名等结构化字段使用 `JSONB`。应用层已经兼容 node-postgres 返回的原生 JSON 对象和数组。
+### v0.1.155 PostgreSQL 主库与桌面 SQLite 边界
 
-常规迁移保持逐字段无损；如需治理允许为空的历史外键孤儿引用，可在已批准的数据治理窗口执行 `REPAIR_ORPHAN_FOREIGN_KEYS=true node -r dotenv/config scripts/migrate_sqlite_to_pg.js`。该模式仅清空失效引用，不删除业务记录，随后使用 `node -r dotenv/config scripts/verify_pg_migration.js` 与 `node -r dotenv/config scripts/diff_schema_sqlite_pg.js` 校验数据和 schema。
+`knowledge_chunks`、`memories` 与 `regulation_articles` 的 `embedding` 列在 PostgreSQL 中使用 pgvector 的 `vector` 类型；智能体配置、长期记忆来源、RAG 调试记录和知识图谱别名等结构化字段使用 `JSONB`。应用层使用 node-postgres 的原生 JSON 对象和数组。
+
+主库不再提供 SQLite 迁移/核验脚本、SQLite FTS5 结构或运行时回退。已经完成历史 PostgreSQL 切换的环境可直接升级；仍在使用 SQLite 主业务库的旧环境须先在隔离环境完成一次性迁移、核验和切换演练，不能直接部署 v0.1.155。桌面端 SQLite 授权和本机数据文件不需要、也不应迁入 PostgreSQL。
 
 ## 目录结构
 
-- `server/`：后端核心程序，包含 Express 路由、SQLite schema、服务层、模型适配、RAG、MCP、智能体运行时和安全中间件。
+- `server/`：后端核心程序，包含 Express 路由、PostgreSQL schema、服务层、模型适配、RAG、MCP、智能体运行时和安全中间件。
   - `server/cache.js`：通用 `LruCache` / `TtlCache`（v0.0.43）。
   - `server/security.js`：URL 防 SSRF、文件路径校验、`redactSecrets` 脱敏（v0.0.43）。
   - `server/services/concurrency.js`：信号量、`withTimeout`、`KeyedConcurrencyGuard`（v0.0.43）。
@@ -543,7 +547,7 @@ npm run check:external:live
   - `client/chat/agents-dag-editor.js`：智能体 DAG 可视化编辑器（v0.0.47 / v0.0.51 缩放与小地图）。
   - `client/chat/apps-workbench-regulations.js`：法规查询工作台，承载法规检索、详情、AI 问答和管理员维护入口（v0.0.168）。
   - `client/chat/safe-html.js`：HTML 转义与 DOMPurify 适配。
-- `data/`：SQLite 数据库及默认备份目录。
+- `data/`：应用运行时状态、一次性初始化凭据和默认 PostgreSQL 备份目录；不承载主业务数据库。
 - `uploads/`：用户附件隔离存储目录。
 - `scripts/`：语法检查、数据库备份、模型下载等辅助脚本。
 - `tests/`：安全、迁移、RAG、MCP、智能体、模型路由、流式工具累加器和系统边界测试。
@@ -552,4 +556,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.1.154
+**当前版本**：v0.1.155

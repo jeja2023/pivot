@@ -49,21 +49,6 @@ async function setup() {
     } finally {
         await closePgPool();
     }
-    // SQLite's FTS virtual tables are represented as read-only views in the
-    // isolated PG schema so legacy fixture assertions can inspect row counts.
-    await withClient(async client => {
-        await client.query(`SET search_path TO "${schema}", public`);
-        await client.query(`
-            CREATE OR REPLACE VIEW knowledge_chunks_fts AS
-            SELECT id AS rowid, id, COALESCE(search_content, content, '') AS content
-            FROM knowledge_chunks
-        `);
-        await client.query(`
-            CREATE OR REPLACE VIEW messages_fts AS
-            SELECT id AS rowid, id, COALESCE(content, '') AS content
-            FROM messages
-        `);
-    });
 }
 
 async function cleanup() {

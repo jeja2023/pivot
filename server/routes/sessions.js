@@ -278,7 +278,7 @@ function createSessionsRouter({
         const ftsQuery = buildFtsQuery(keyword);
         if (!ftsQuery) return res.json({ data: [] });
 
-        // FTS 内容搜索在 PostgreSQL 模式下暂不支持 SQLite 特有的 snippet/messages_fts 语法
+        // 内容搜索使用 PostgreSQL 文本检索，不依赖 snippet 或虚拟 FTS 表语法。
         const sessions = await query(`
             SELECT DISTINCT s.*,
             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.deleted_at IS NULL) as msg_count,

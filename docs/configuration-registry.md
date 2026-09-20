@@ -61,6 +61,15 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 知识库局域网来源
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `KNOWLEDGE_LOCAL_SOURCE_ROOTS` | csv | `` | 逗号分隔的语言标记 | 允许被本地目录知识源扫描的绝对路径白名单，多个路径用英文逗号分隔；留空时禁用目录同步。 |
+| `KNOWLEDGE_SOURCE_MAX_FILES` | integer | `5000` | 1–100000 | 单次局域网目录同步最多扫描的文件数，超出后需拆分数据源。 |
+| `KNOWLEDGE_SOURCE_SCHEDULE_INTERVAL_MS` | integer | `300000` | 10000–86400000 | 后台轮询 scheduled/watch 知识来源的最短间隔；目录 watch 也以安全轮询方式实现。 |
+| `KNOWLEDGE_EMBEDDING_RECOVERY_INTERVAL_MS` | integer | `300000` | 60000–86400000 | Embedding 服务恢复后扫描 lexical_ready 文档并补齐向量索引的间隔。 |
+
 ## Agent 网页检索
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

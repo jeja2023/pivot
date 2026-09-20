@@ -11,16 +11,6 @@ const PROVIDER_REGISTRY = {
             adapterWired: true,
             status: 'active',
             capabilities: ['multi_node', 'transactional']
-        },
-        sqlite: {
-            key: 'sqlite',
-            label: 'SQLite (Legacy)',
-            interface: 'DatabaseProvider',
-            local: true,
-            multiNodeReady: false,
-            adapterWired: true,
-            status: 'deprecated',
-            capabilities: ['single_node']
         }
     },
     objectStorage: {
@@ -90,9 +80,9 @@ const PROVIDER_REGISTRY = {
         }
     },
     lock: {
-        in_process_or_sqlite: {
-            key: 'in_process_or_sqlite',
-            label: 'In-process or SQLite lock',
+        in_process: {
+            key: 'in_process',
+            label: 'In-process lock',
             interface: 'LockProvider',
             local: true,
             multiNodeReady: false,
@@ -168,7 +158,7 @@ function resolveProviderKey(type, env = process.env) {
         if (hasEnv(env, ['PIVOT_LOCK_URL', 'REDIS_URL', 'ETCD_ENDPOINTS'])) return 'distributed';
         return String(env.PIVOT_DB_PROVIDER || env.DB_PROVIDER || 'postgres').trim().toLowerCase() === 'postgres'
             ? 'postgres'
-            : 'in_process_or_sqlite';
+            : 'in_process';
     }
     return '';
 }
@@ -178,7 +168,7 @@ function getDeploymentProviders(env = process.env) {
     return Array.from(PROVIDER_TYPES).reduce((acc, type) => {
         const requestedKey = resolveProviderKey(type, env);
         const provider = providerFor(type, requestedKey);
-        const defaultKeys = { database: 'postgres', objectStorage: 'local_fs', queue: 'in_process', lock: 'in_process_or_sqlite' };
+        const defaultKeys = { database: 'postgres', objectStorage: 'local_fs', queue: 'in_process', lock: 'in_process' };
         // 默认 Provider 代表当前单节点运行时已经存在的本地/数据库实现；外部
         // Provider 则由环境变量显式选择。这里的 configured 只表示“选中了”，
         // ready 还必须经过 adapterWired + active 检查。

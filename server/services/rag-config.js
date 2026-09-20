@@ -80,6 +80,13 @@ function getEmbeddingConfig(userId = null) {
     };
 }
 
+function getEmbeddingProfile(config = {}) {
+    const http = config?.http || config?.cloud || {};
+    const mode = normalizeEmbeddingMode(config?.mode || EMBEDDING_MODES.http);
+    const model = String(http.model || 'embedding').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').slice(0, 120) || 'embedding';
+    return `${mode}:${model}`;
+}
+
 function getPublicEmbeddingConfig(userId = null) {
     const config = getEmbeddingConfig(userId);
     return {
@@ -216,6 +223,7 @@ module.exports = {
     EMBEDDING_MODES,
     RAG_CONFIG_KEYS,
     getEmbeddingConfig,
+    getEmbeddingProfile,
     getPublicEmbeddingConfig,
     getRagConfig,
     getHybridRetrievalConfig,

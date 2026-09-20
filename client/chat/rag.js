@@ -70,6 +70,7 @@ const {
 
 const getRagStatusLabel = (status) => {
     if (status === 'ready') return '就绪';
+    if (status === 'lexical_ready') return '关键词就绪';
     if (status === 'processing') return '处理中';
     if (status === 'error') return '失败';
     return status || '-';

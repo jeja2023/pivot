@@ -3,8 +3,7 @@
  * 技能治理控制面增量迁移（PostgreSQL-only）
  *
  * 落地方案 v1.2 §6.2、§4.2（部署矩阵决策 A）：
- * 控制面表只存在于 PostgreSQL 部署，因此本文件只提供 upPg / downPg；
- * SQLite 侧不创建控制面，由 agent-control-plane-state.js 给出确定性降级。
+ * 控制面表只存在于 PostgreSQL 部署，因此本文件只提供 upPg / downPg。
  *
  * 迁移在既有 agent_skill_* 表上做增量演进，不新建平行表族：
  * 1. 补齐签名信封、内容摘要、规范化 manifest、租户、团队、灰度密钥版本与熔断阈值列；

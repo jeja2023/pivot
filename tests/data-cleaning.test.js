@@ -236,7 +236,7 @@ test('数据清洗客户端可渲染质量报告、规则编辑器、预览和�
     assert.match(elements.get('data-cleaning-rules').innerHTML, /查找/);
 });
 
-test('数据清洗会保留原数据集、生成派生数据集并保存可回放记录', { skip: process.env.PIVOT_TEST_DB_SYNC !== 'postgres' }, async () => {
+test('数据清洗会保留原数据集、生成派生数据集并保存可回放记录', { skip: process.env.PIVOT_TEST_PG_SYNC !== 'true' }, async () => {
     const suffix = Date.now().toString(36);
     const username = `cleaning_user_${suffix}`;
     const createdUser = await queryOne(`

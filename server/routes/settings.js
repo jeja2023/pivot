@@ -321,7 +321,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             syncConfiguredRuntimes();
             modelEndpointRuntime = getModelEndpointRuntimeStatus();
             agentQueue = await syncAgentRuntimeConcurrency();
-            knowledgeIndexQueue = syncKnowledgeDocumentIndexConcurrency();
+            knowledgeIndexQueue = await syncKnowledgeDocumentIndexConcurrency();
             memoryCompressionConcurrency = syncMemoryCompressionConcurrency();
         } catch (e) {
             req.log?.warn({ err: e.message }, '运行时配置保存后的同步刷新失败');

@@ -1,4 +1,8 @@
-# Pivot 生产环境从 SQLite 迁移至 PostgreSQL 实施方案 (v2.2 修订版)
+# （归档）Pivot 历史 SQLite→PostgreSQL 一次性迁移实施方案 (v2.2 修订版)
+
+> **归档状态（v0.1.155 起）**：Pivot 主业务数据库已正式收敛为 PostgreSQL。本文保留为历史一次性数据迁移的设计与演练资料，不再描述当前服务的启动或升级路径。
+>
+> 本文引用的 `scripts/migrate_sqlite_to_pg.js`、`scripts/verify_pg_migration.js` 和 `scripts/diff_schema_sqlite_pg.js` 已从产品代码移除，禁止在 v0.1.155 及后续版本的生产主库中执行。当前运行、部署、升级与回滚请遵循 [生产环境 PostgreSQL 主库运行与升级说明](docs/生产环境PostgreSQL主库运行与升级说明.md)。
 
 > **文档版本**：v2.2.0（修复 IDENTITY 序列重置、布尔映射错误、时区基准验证、重跑机制、离线索引策略、work_mem 公式、HNSW 参数）  
 > **更新日期**：2026-08-17  

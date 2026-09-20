@@ -278,7 +278,7 @@ test('软删除存储清理会清除过期文件和 RAG 分块', async () => {
     try {
         assert.equal(fs.existsSync(attachmentPath), true);
         assert.equal(fs.existsSync(knowledgePath), true);
-        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts WHERE rowid = ?').get(chunkInfo.lastInsertRowid).count, 1);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE id = ?').get(chunkInfo.lastInsertRowid).count, 1);
 
         const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
         assert.equal(result.attachmentRows, 1);
@@ -301,7 +301,6 @@ test('软删除存储清理会清除过期文件和 RAG 分块', async () => {
         assert.equal(doc.chunk_count, 0);
         assert.equal(doc.indexed_chunks, 0);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE doc_id = ?').get(docInfo.lastInsertRowid).count, 0);
-        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts WHERE rowid = ?').get(chunkInfo.lastInsertRowid).count, 0);
     } finally {
         db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docInfo.lastInsertRowid);
@@ -312,7 +311,7 @@ test('软删除存储清理会清除过期文件和 RAG 分块', async () => {
     }
 });
 
-test('软删除存储清理会清除过期消息和消息 FTS 行', async () => {
+test('软删除存储清理会清除过期消息', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -329,11 +328,9 @@ test('软删除存储清理会清除过期消息和消息 FTS 行', async () => 
     `).run(sessionId, userInfo.lastInsertRowid, 'user', `expired message gc ${suffix}`);
 
     try {
-        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 1);
         const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
         assert.equal(result.messageRows, 1);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages WHERE id = ?').get(messageInfo.lastInsertRowid).count, 0);
-        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE rowid = ?').get(messageInfo.lastInsertRowid).count, 0);
     } finally {
         db.prepare('DELETE FROM messages WHERE id = ?').run(messageInfo.lastInsertRowid);
         db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);

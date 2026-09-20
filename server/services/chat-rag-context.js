@@ -31,10 +31,13 @@ function summarizeRagContextSources(ragContext, limit = 3) {
     const text = String(ragContext || '');
     const seen = new Set();
     const sources = [];
-    const citationPattern = /\[引用\s+(\d+)\s*\|\s*来源:\s*([^\]\n]+)\]/g;
+    const citationPattern = /\[引用\s+(\d+)(?:\s*\|\s*citation:\s*([^|\]\s]+))?\s*\|\s*来源:\s*([^\]\n]+)\]/g;
+    const citationKeys = [];
     let match = null;
     while ((match = citationPattern.exec(text)) !== null) {
-        const source = String(match[2] || '').trim();
+        const citationKey = String(match[2] || '').trim();
+        const source = String(match[3] || '').trim();
+        if (citationKey && !citationKeys.includes(citationKey)) citationKeys.push(citationKey);
         if (!source || seen.has(source)) continue;
         seen.add(source);
         sources.push(source);
@@ -43,7 +46,8 @@ function summarizeRagContextSources(ragContext, limit = 3) {
     return {
         citationCount: (text.match(/\[引用\s+\d+/g) || []).length,
         sourceCount: seen.size,
-        sources: sources.slice(0, Math.max(1, Number(limit) || 3))
+        sources: sources.slice(0, Math.max(1, Number(limit) || 3)),
+        citationKeys: citationKeys.slice(0, Math.max(1, Number(limit) || 3))
     };
 }
 

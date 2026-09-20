@@ -60,11 +60,6 @@ function translate(input) {
 async function execute(client, request) {
     try {
         const rawSql = String(request.sql || '').trim();
-        const pragma = rawSql.match(/^PRAGMA\s+table_info\s*\(\s*(["`]?)([a-z_][a-z0-9_]*)\1\s*\)\s*;?$/i);
-        if (pragma) {
-            const result = await client.query(`SELECT (ordinal_position - 1)::int AS cid, column_name AS name, data_type AS type, CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull, NULL::text AS dflt_value, CASE WHEN column_name IN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema WHERE tc.table_schema = current_schema() AND tc.table_name = $1 AND tc.constraint_type = 'PRIMARY KEY') THEN 1 ELSE 0 END AS pk FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position`, [pragma[2].toLowerCase()]);
-            return { ok: true, rows: result.rows, rowCount: result.rowCount, lastInsertRowid: 0 };
-        }
         let sql = translate(rawSql);
         if (request.mode === 'run' && /^INSERT\s+/i.test(sql) && !/\bRETURNING\b/i.test(sql)) sql += ' RETURNING *';
         const result = await client.query(sql, Array.isArray(request.params) ? request.params : []);

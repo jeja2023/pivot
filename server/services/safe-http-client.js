@@ -54,6 +54,11 @@ async function buildSafeAxiosOptions(url, options = {}) {
         maxBodyLength: Number.isFinite(Number(options.maxBodyLength))
             ? Math.max(1024, Number(options.maxBodyLength))
             : 4 * 1024 * 1024,
+        // 重定向后的目标若不重新执行 SSRF / DNS pin 校验，会成为绕过出站
+        // 安全策略的通道。调用方需要跳转时应先单独校验并显式请求下一跳。
+        maxRedirects: Number.isInteger(Number(options.maxRedirects))
+            ? Math.max(0, Math.min(Number(options.maxRedirects), 1))
+            : 0,
         validateStatus: options.validateStatus,
         signal: options.signal,
         ...agents

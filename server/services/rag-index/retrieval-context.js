@@ -55,7 +55,9 @@ function formatInjectedContext(topChunks, scoreThreshold = 0) {
         const confidence = Number.isFinite(Number(chunk.citationConfidence))
             ? Number(chunk.citationConfidence)
             : calculateCitationConfidence(chunk, scoreThreshold, maxRankScore);
-        injectedContext += `[引用 ${index + 1} | 来源: ${location} | 检索可信度: ${Math.round(confidence * 100)}%]: ${chunk.text}\n`;
+        const citationKey = String(chunk.citationKey || '').trim();
+        const keySegment = citationKey ? ` | citation: ${citationKey}` : '';
+        injectedContext += `[引用 ${index + 1}${keySegment} | 来源: ${location} | 检索可信度: ${Math.round(confidence * 100)}%]: ${chunk.text}\n`;
     });
     injectedContext += '请基于上述参考信息回答我的问题。如果参考信息中没有答案，请告知无法在知识库中查阅到该信息。\n';
     return injectedContext;
@@ -67,7 +69,7 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
     const scopeFilter = buildScopeSql(scope, 'knowledge_docs', user);
     const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
     const accessFilter = user ? scopeFilter.accessSql : '';
-    const accessJoin = user ? ' LEFT JOIN knowledge_collections c_access ON c_access.id = knowledge_docs.collection_id AND c_access.deleted_at IS NULL' : '';
+    const accessJoin = scopeFilter.accessJoin || '';
     const [docsResult, entityVersionRow, relationVersionRow, feedbackVersionRow] = await Promise.all([
         queryOne(`
             SELECT
@@ -78,7 +80,7 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
             ${accessJoin}
             WHERE 1 = 1 ${ownerFilter}
               AND knowledge_docs.deleted_at IS NULL
-              AND knowledge_docs.status = 'ready'
+              AND knowledge_docs.status IN ('ready', 'lexical_ready')
               AND COALESCE(knowledge_docs.is_enabled, 1) = 1
               ${scopeFilter.sql}
               ${accessFilter}
@@ -118,6 +120,7 @@ function normalizeRetrievalDebugMatch(match, scoreThreshold, rank = 0, selectedI
     const citationConfidence = match.citationConfidence ?? calculateCitationConfidence(match, scoreThreshold, maxRankScore);
     return {
         chunkId: match.chunkId,
+        citationKey: String(match.citationKey || ''),
         source: match.source,
         documentName: match.documentName || match.source,
         chunkIndex: Number(match.chunkIndex || 0),

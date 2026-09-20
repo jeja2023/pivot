@@ -1,16 +1,13 @@
 'use strict';
 
 /**
- * 早期 PostgreSQL 部署从 SQLite 表结构迁移时，agent_runs.metadata 可能保留为
- * TEXT；而后续运行时的并发比较交换（CAS）以 JSONB 为契约。类型不一致会让
+ * 早期 PostgreSQL 部署中 agent_runs.metadata 可能保留为 TEXT；而后续运行时
+ * 的并发比较交换（CAS）以 JSONB 为契约。类型不一致会让
  * COALESCE(metadata, '{}'::jsonb) 在聊天 Agent 结果恢复中持续报错。
  */
 const migration = {
     id: '202609100003_agent_run_metadata_jsonb_compatibility',
     description: 'Convert legacy agent_runs.metadata TEXT values to JSONB for concurrent Agent result recovery.',
-    up(_db) {
-        // SQLite 持续以 TEXT 保存 JSON，当前 SQLite 适配层会处理其序列化。
-    },
     async upPg(client) {
         const typeResult = await client.query(`
             SELECT a.atttypid::regtype::text AS data_type

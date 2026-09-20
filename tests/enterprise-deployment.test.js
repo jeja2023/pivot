@@ -1,9 +1,5 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const Sqlite = require('better-sqlite3');
-
-const migrations = require('../server/db/migrations');
-const { runVersionedMigrations } = require('../server/db/migrations/runner');
 const { assertDeploymentReady, getDeploymentProfile } = require('../server/services/deployment-profile');
 const {
     createProviderPlaceholder,
@@ -16,33 +12,11 @@ const {
     normalizeSubjectType
 } = require('../server/services/enterprise-access');
 
-test('enterprise deployment migration creates provider and policy tables', () => {
-    const db = new Sqlite(':memory:');
-    try {
-        db.exec(`
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT,
-                password_hash TEXT
-            );
-        `);
-        const applied = runVersionedMigrations(db, migrations);
-        assert.ok(applied.includes('202607030001_rag_debug_enterprise_contracts'));
-        [
-            'rag_debug_queries',
-            'organizations',
-            'teams',
-            'team_members',
-            'resource_permissions',
-            'policy_objects',
-            'deployment_provider_configs'
-        ].forEach(table => {
-            assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
-        });
-        assert.deepEqual(runVersionedMigrations(db, migrations), []);
-    } finally {
-        db.close();
-    }
+test('enterprise deployment tables are part of the PostgreSQL schema snapshot', () => {
+    const { buildPgSchemaStatements } = require('../server/db/schema/pg');
+    const schema = buildPgSchemaStatements().tables.join('\n');
+    ['rag_debug_queries', 'organizations', 'teams', 'team_members', 'resource_permissions', 'policy_objects', 'deployment_provider_configs']
+        .forEach(table => assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`)));
 });
 
 test('deployment providers do not claim multi-node readiness before adapters are wired', () => {
@@ -105,7 +79,7 @@ test('enterprise provider and access helpers normalize extension inputs', () => 
     assert.equal(normalizeProviderType('queue'), 'queue');
     assert.throws(() => normalizeProviderType('unknown'), /Unsupported|不支持/);
     assert.equal(providerFor('database', 'mysql').status, 'planned');
-    assert.equal(createProviderPlaceholder('database', 'sqlite').createClient().status, 'local-placeholder');
+    assert.equal(createProviderPlaceholder('database', 'postgres').key, 'postgres');
     assert.throws(() => createProviderPlaceholder('queue', 'distributed').createClient(), /placeholder|预留服务商占位符|占位符/);
     assert.equal(normalizeResourceType('mcp-tool'), 'mcp_tool');
     assert.equal(normalizeSubjectType('team'), 'team');

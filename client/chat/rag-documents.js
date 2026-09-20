@@ -493,7 +493,7 @@ function getRagDocDisplayName(name = '') {
 function updateRagDebugSamples(docs = []) {
     const buttons = Array.from(document.querySelectorAll('[data-rag-debug-sample]'));
     if (!buttons.length) return;
-    const readyDoc = docs.find(doc => doc.status === 'ready') || docs[0] || null;
+    const readyDoc = docs.find(doc => ['ready', 'lexical_ready'].includes(doc.status)) || docs[0] || null;
     const docName = getRagDocDisplayName(readyDoc?.name);
     const samples = docName ? [
         { label: `总结《${docName}》`, query: `请总结《${docName}》的主要内容。` },
@@ -558,7 +558,7 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
                     <input type="checkbox" class="rag-enable-toggle" data-rag-id="${d.id}" ${Number(d.is_enabled ?? 1) === 1 ? 'checked' : ''}>
                 </td>
                 <td class="text-center">${Number(d.chunk_count || 0)}</td>
-                <td class="text-center">${Number(d.progress || (d.status === 'ready' ? 100 : 0))}%</td>
+                <td class="text-center">${Number(d.progress || (['ready', 'lexical_ready'].includes(d.status) ? 100 : 0))}%</td>
                 <td>${window.Pivot.legacy.escapeRagHtml(window.Pivot.legacy.formatRagDateToCN(d.created_at))}</td>
                 <td>${window.Pivot.legacy.escapeRagHtml(window.Pivot.legacy.formatRagDateToCN(d.updated_at || d.processed_at))}</td>
                 <td class="text-center">
@@ -611,6 +611,7 @@ async function openKnowledgeWorkbench() {
     const panel = document.getElementById('knowledge-workbench-modal');
     if (!panel) return;
     panel.setAttribute('aria-hidden', 'false');
+    document.dispatchEvent(new CustomEvent('pivot:knowledge-opened'));
     const toolbar = panel.querySelector('.knowledge-toolbar');
     if (toolbar && !toolbar.querySelector('#rag-share-collection-btn')) {
         const button = document.createElement('button');

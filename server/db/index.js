@@ -7,9 +7,9 @@ const { refreshUserSettingsCache } = require('../services/user-settings');
 
 const stmts = {};
 
-// Keep the small synchronous statement surface available to legacy tests while
-// production PostgreSQL callers use the async client/repositories directly.
-if (db?.prepare && process.env.PIVOT_TEST_DB_SYNC === 'postgres') {
+// 同步 facade 仅供 PostgreSQL 集成测试夹具使用；生产调用方一律使用 async
+// client/repositories，不存在 SQLite 主库回退。
+if (db?.prepare && process.env.PIVOT_TEST_PG_SYNC === 'true') {
     stmts.getMessages = db.prepare(`
         SELECT m.*, COALESCE(md.name, md.model_name, '') AS model_name, md.model_name AS model_api_name
         FROM messages m
@@ -21,9 +21,9 @@ if (db?.prepare && process.env.PIVOT_TEST_DB_SYNC === 'postgres') {
 }
 
 async function initializePostgresStructure({
-    initSchemaPg = require('./schema').initSchemaPg,
+    initSchemaPg = require('./schema/pg').initSchemaPg,
     runMigrationsPg = require('./migrate').runMigrationsPg,
-    applyPgSchemaComments = require('./schema').applyPgSchemaComments
+    applyPgSchemaComments = require('./schema/pg').applyPgSchemaComments
 } = {}) {
     await initSchemaPg();
     await runMigrationsPg();

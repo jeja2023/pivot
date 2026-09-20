@@ -1,10 +1,8 @@
 /**
  * server/repositories/sessions.js
- * 会话与消息数据访问层（SQLite / PostgreSQL 双方言）
+ * 会话与消息 PostgreSQL 数据访问层。
  *
- * 全部接口返回 Promise：PG 驱动本质异步，无法在 Node 中同步等待。
- * SQLite 模式下 client.js 会把同步结果包装为已 resolve 的 Promise，
- * 因此调用方统一 await 即可，无需感知方言。
+ * 全部接口返回 Promise，调用方统一使用 async/await。
  */
 const { query, queryOne, execute } = require('../db/client');
 

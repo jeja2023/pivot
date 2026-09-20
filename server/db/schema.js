@@ -1,11 +1,8 @@
 /**
  * server/db/schema.js
- * Schema 初始化出口（PostgreSQL runtime）
- *
- * base.js 中的 SQLite 方言 DDL 仍作为 PG 转换器的源文本，也用于历史旧库测试。
+ * Schema 初始化出口（PostgreSQL runtime）。
+ * 主数据库只加载原生 PostgreSQL schema 快照。
  */
-const { initSchema, baseTablesSql, baseIndexesSql, sqliteFtsSql } = require('./schema/base');
-
 function initSchemaPg() {
     return require('./schema/pg').initSchemaPg();
 }
@@ -19,12 +16,6 @@ function applyPgSchemaComments() {
 }
 
 module.exports = {
-    // Legacy SQLite schema source/helpers
-    initSchema,
-    baseTablesSql,
-    baseIndexesSql,
-    sqliteFtsSql,
-    // PostgreSQL
     initSchemaPg,
     applyPgSchemaComments,
     buildPgSchemaStatements,

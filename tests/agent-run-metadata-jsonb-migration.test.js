@@ -33,7 +33,7 @@ test('Agent 运行元数据 JSONB 兼容迁移无损转换历史 TEXT 列', asyn
 });
 
 test('Agent 运行元数据 JSONB 兼容迁移可在 PostgreSQL 中转换真实历史记录', {
-    skip: process.env.PIVOT_TEST_DB_SYNC !== 'postgres'
+    skip: process.env.PIVOT_TEST_PG_SYNC !== 'true'
 }, async () => {
     const { getPgPool } = require('../server/db/pg-connection');
     const pool = getPgPool();

@@ -159,7 +159,8 @@ test('RAG PostgreSQL retrieval pushes vector distance and lexical ranking into t
     const rag = fs.readFileSync(path.join(root, 'server/services/rag-index/index.js'), 'utf8');
     const regulations = fs.readFileSync(path.join(root, 'server/services/regulations/search.js'), 'utf8');
     assert.match(repository, /vector_dims\(c\.embedding\)\s*=\s*\?/);
-    assert.match(repository, /c\.embedding\s*<=>\s*\?::vector/);
+    assert.match(repository, /c\.embedding::vector\(\$\{vector\.length\}\)\)\s*<=>\s*\?::vector/);
+    assert.match(repository, /c\.embedding_profile\s*=\s*\?/);
     assert.match(rag, /ORDER BY lexical_score DESC/);
     assert.match(regulations, /a\.embedding\s*<=>\s*\?::vector/);
     assert.match(regulations, /ORDER BY score DESC/);

@@ -1,8 +1,7 @@
 /**
  * server/db/statements.js
- * SQLite 预编译语句缓存层（仅在 SQLite 模式下有效）
- *
- * PG 模式请使用 server/db/client.js 的异步 query/queryOne/execute/transaction。
+ * PostgreSQL 测试夹具的同步 statement facade。
+ * 生产代码请使用 server/db/client.js 的异步 query/queryOne/execute/transaction。
  */
 const { isPostgres } = require('./dialect');
 
@@ -25,7 +24,7 @@ function normalizeSqlText(text) {
 function prepareCached(cache, database, text) {
     const sqlText = normalizeSqlText(text);
     if (!database || typeof database.prepare !== 'function') {
-        const err = new Error('需要提供兼容 better-sqlite3 的数据库实例。');
+        const err = new Error('需要 PostgreSQL 测试同步 facade。');
         err.status = 500;
         throw err;
     }
@@ -43,11 +42,11 @@ function createStatementCache(database) {
 }
 
 /**
- * 返回 SQLite 预编译语句（.get/.all/.run）。
- * 在 PG 模式下调用会抛出错误，提示使用 client.js。
+ * 返回测试用同步预编译语句（.get/.all/.run）。生产环境调用会拒绝，提示
+ * 使用 client.js 的异步接口。
  */
 function sql(text) {
-    if (isPostgres() && process.env.PIVOT_TEST_DB_SYNC !== 'postgres') {
+    if (isPostgres() && process.env.PIVOT_TEST_PG_SYNC !== 'true') {
         throw new Error(
             `[DB] sql() 在 PostgreSQL 模式下不可用。请将调用方改为使用 server/db/client.js 的异步 API：\n` +
             `  query()、queryOne()、execute()、transaction()\n` +

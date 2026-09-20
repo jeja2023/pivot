@@ -184,6 +184,7 @@ async function assembleChatContext({
                 citationCount: ragSourceSummary.citationCount,
                 sourceCount: ragSourceSummary.sourceCount,
                 sources: ragSourceSummary.sources,
+                citationKeys: ragSourceSummary.citationKeys || [],
                 scoped: ragScoped
             }));
         } else {

@@ -78,6 +78,76 @@
                     </table>
                 </div>
                 <div id="pagination-ragDocs" class="pagination workspace-pagination"></div>
+                <section class="knowledge-product-shell" aria-labelledby="knowledge-product-title">
+                    <div class="knowledge-product-heading">
+                        <div>
+                            <h4 id="knowledge-product-title">知识使用与治理</h4>
+                            <p>直接提问、核验来源、维护文章版本，并管理局域网数据来源。</p>
+                        </div>
+                        <div class="knowledge-product-tabs" role="tablist" aria-label="知识库产品功能">
+                            <button type="button" class="btn-secondary is-active" role="tab" aria-selected="true" data-knowledge-product-tab="search">搜索问答</button>
+                            <button type="button" class="btn-secondary" role="tab" aria-selected="false" data-knowledge-product-tab="content">知识内容</button>
+                            <button type="button" class="btn-secondary" role="tab" aria-selected="false" data-knowledge-product-tab="sources">局域网来源</button>
+                            <button type="button" class="btn-secondary" role="tab" aria-selected="false" data-knowledge-product-tab="jobs">索引任务</button>
+                            <button type="button" class="btn-secondary" role="tab" aria-selected="false" data-knowledge-product-tab="evaluation">质量评测</button>
+                        </div>
+                    </div>
+                    <div class="knowledge-product-panel" data-knowledge-product-panel="search">
+                        <div class="knowledge-ask-form">
+                            <label for="knowledge-product-query">向知识库提问</label>
+                            <textarea id="knowledge-product-query" class="form-input" rows="3" maxlength="4000" placeholder="例如：采购审批需要哪些材料？"></textarea>
+                            <div class="knowledge-search-filters" aria-label="知识检索筛选">
+                                <select id="knowledge-filter-verified" class="form-input"><option value="">全部验证状态</option><option value="verified">仅已验证</option><option value="unverified">待验证</option><option value="expired">已过期</option></select>
+                                <select id="knowledge-filter-source-kind" class="form-input"><option value="">全部来源</option><option value="upload">上传文件</option><option value="local_dir">局域网目录</option><option value="lan_http">内网 HTTP</option><option value="database">只读数据库</option><option value="manual">知识文章</option></select>
+                                <input id="knowledge-filter-updated-after" class="form-input" type="date" aria-label="更新时间下限">
+                            </div>
+                            <div class="knowledge-ask-actions">
+                                <button type="button" id="knowledge-product-search" class="btn-secondary">检索证据</button>
+                                <button type="button" id="knowledge-product-ask" class="btn-primary">生成有据回答</button>
+                            </div>
+                        </div>
+                        <div id="knowledge-product-answer" class="knowledge-product-answer" aria-live="polite"></div>
+                        <div id="knowledge-product-results" class="knowledge-product-results"></div>
+                    </div>
+                    <div class="knowledge-product-panel hidden" data-knowledge-product-panel="content">
+                        <div class="knowledge-product-toolbar">
+                            <span>文章草稿默认不参与问答，发布后才成为正式知识。</span>
+                            <div class="knowledge-product-row-actions">
+                                <button type="button" id="knowledge-product-draft-from-chat" class="btn-secondary">从会话沉淀</button>
+                                <button type="button" id="knowledge-product-draft-from-agent" class="btn-secondary">从 Agent 沉淀</button>
+                                <button type="button" id="knowledge-product-new-article" class="btn-primary">新建知识文章</button>
+                            </div>
+                        </div>
+                        <div id="knowledge-product-documents" class="knowledge-product-list"></div>
+                    </div>
+                    <div class="knowledge-product-panel hidden" data-knowledge-product-panel="sources">
+                        <div class="knowledge-product-toolbar">
+                            <span>目录、内网 HTTP/API 和只读数据库均受权限与安全策略约束。</span>
+                            <button type="button" id="knowledge-product-new-source" class="btn-secondary">新建数据源</button>
+                        </div>
+                        <div id="knowledge-product-sources" class="knowledge-product-list"></div>
+                    </div>
+                    <div class="knowledge-product-panel hidden" data-knowledge-product-panel="jobs">
+                        <div class="knowledge-product-toolbar">
+                            <span>索引任务具备持久化、重试和进程重启恢复能力。</span>
+                            <button type="button" id="knowledge-product-refresh-jobs" class="btn-secondary">刷新任务</button>
+                        </div>
+                        <div id="knowledge-product-jobs" class="knowledge-product-list"></div>
+                    </div>
+                    <div class="knowledge-product-panel hidden" data-knowledge-product-panel="evaluation">
+                        <div class="knowledge-product-toolbar">
+                            <span>用黄金问题集持续验证召回、引用和拒答质量。</span>
+                            <div class="knowledge-product-row-actions">
+                                <button type="button" id="knowledge-product-new-eval-case" class="btn-secondary">新建问题集</button>
+                                <button type="button" id="knowledge-product-eval-gaps" class="btn-secondary">查看缺口</button>
+                                <button type="button" id="knowledge-product-run-evaluation" class="btn-primary">运行评测</button>
+                            </div>
+                        </div>
+                        <div id="knowledge-product-evaluation-summary" class="knowledge-product-answer"></div>
+                        <div id="knowledge-product-evaluation-cases" class="knowledge-product-list"></div>
+                        <div id="knowledge-product-evaluation-runs" class="knowledge-product-list"></div>
+                    </div>
+                </section>
             </div>
         </div>
     </div>

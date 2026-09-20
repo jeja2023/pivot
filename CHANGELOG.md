@@ -1,3 +1,25 @@
+## [v0.1.155] - 2026-09-20
+
+### 知识库产品化与 PostgreSQL 主库收敛
+
+- 知识库由“上传文件 + RAG 分块”升级为可运营的知识产品：新增稳定文档/版本/内容块、草稿—审核—发布—归档生命周期、责任人与验证人、有效期、版本差异、评论纠错、稳定引用键、原文片段预览和受控下载。
+- 新增持久化索引任务与恢复机制：任务支持租约抢占、心跳续租、退避重试、重启恢复和多实例 `SKIP LOCKED` 调度；Embedding 不可用时保留可检索的词法索引，并由向量恢复巡检补齐。
+- 检索主路径统一为 PostgreSQL：`tsvector + GIN`、`pg_trgm` 回退、向量检索、RRF/MMR 融合、按 embedding profile/dimensions 隔离以及 HNSW partial index；引用、下载、聊天和 Agent 检索均复用同一 ACL 范围。
+- 知识库新增局域网来源治理：支持受控上传、目录/NAS/SMB 映射路径、内网 HTTP/API manifest 和数据库内容投影；目录/API 支持 hash/ETag 增量与删除归档，数据库来源只能引用管理员批准的单条只读 SQL 模板。
+- 新增知识质量评测与运营闭环：黄金问题集、Recall@K、MRR、nDCG、引用精确率/召回率/F1、答案关键点覆盖、拒答准确率、运行比较与知识缺口报告均可持久化追溯。
+- 主业务数据库完成 PostgreSQL-only 收敛：移除主库 SQLite schema、迁移、SQLite→PostgreSQL 转换脚本及运行时回退；原生 PostgreSQL schema 快照成为唯一主结构来源，68 条版本化迁移全部只提供 `upPg`。
+- 明确保留桌面端 SQLite 边界：桌面授权、本机只读 SQLite 数据源、桌面 Agent 状态库和数据分析导入 SQLite 文件仍可用；`better-sqlite3` 继续随桌面运行时交付，不再承担 Pivot 主业务库职责。
+- 测试同步 facade 改为 PostgreSQL Worker，历史 SQLite 主库测试契约同步移除；恢复工作流凭据个人可见性与聊天 Agent 终态消息幂等的 PostgreSQL 迁移，避免升级后凭据范围和消息唯一关联遗漏。
+- 新增知识库迁移只读对账命令 `npm run verify:knowledge-migration -- --strict`，并更新 PostgreSQL 迁移覆盖、原始 SQL、索引与治理基线。
+
+#### 升级注意事项
+
+- 部署前必须备份 PostgreSQL 数据库和 `uploads/`；服务端必须配置可用的 `DATABASE_URL`，并确保数据库账号可使用 `vector`、`pg_trgm` 扩展及建表/索引权限。
+- 启动新版本会自动初始化原生 PostgreSQL schema 并执行未应用的版本化迁移。请勿再运行已移除的 `migrate_sqlite_to_pg.js`、`verify_pg_migration.js` 或任何主库 SQLite 启动脚本。
+- 已经完成 SQLite→PostgreSQL 历史数据迁移的环境可直接升级；尚未迁移的历史 SQLite 主库不在本版本的在线升级支持范围内，应先在隔离环境完成一次性数据迁移与验收。
+
+详细发布记录见 [v0.1.155 发布记录](docs/releases/v0.1.155-知识库产品化与PostgreSQL主库收敛.md)，完整能力与验收边界见 [Pivot 知识库产品化改造方案](Pivot知识库产品化改造方案.md)。
+
 ## [v0.1.154] - 2026-09-20
 
 ### 个人 Agent 开发闭环与生产验收就绪

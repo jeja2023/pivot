@@ -44,7 +44,7 @@ async function main() {
 
         await client.query('BEGIN');
 
-        // 3. 创建 79 张业务表
+        // 3. 创建 PostgreSQL 主 schema 表
         console.log(`\n【3/6】创建业务表 (共 ${plan.tables.length} 张)...`);
         for (const sql of plan.tables) {
             await client.query(sql);

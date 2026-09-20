@@ -3,9 +3,6 @@
 const migration = {
     id: '202609200003_agent_workflow_release_review',
     description: 'Store workflow release notes and tenant-admin review decisions without changing release resolution semantics.',
-    up() {
-        // agent_workflow_releases 是 PostgreSQL 控制面表；SQLite 不承载该发布投影。
-    },
     async upPg(client) {
         await client.query(`
             ALTER TABLE agent_workflow_releases ADD COLUMN IF NOT EXISTS release_note TEXT NOT NULL DEFAULT '';

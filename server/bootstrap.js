@@ -1,4 +1,13 @@
-const { recoverStaleKnowledgeDocumentIndexes } = require('./services/rag-documents');
+const {
+    recoverStaleKnowledgeDocumentIndexes,
+    startKnowledgeIngestionWorker,
+    createKnowledgeEmbeddingRecoveryRunner,
+    scheduleEmbeddingProfileMismatchedDocuments
+} = require('./services/rag-documents');
+const { recoverKnowledgeEvaluationRuns } = require('./services/knowledge-evaluations');
+const { createKnowledgeSourceSyncScheduler } = require('./services/knowledge-sources');
+const { backfillKnowledgeProductProjections, refreshKnowledgeFreshness } = require('./services/knowledge-content');
+const { recoverManualKnowledgeArticleEmbeddings } = require('./services/knowledge-manual-embeddings');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const {
@@ -55,6 +64,7 @@ function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, se
 }
 
 function runBackgroundTask(task, logger, failureMessage) {
+    if (typeof task !== 'function') return;
     return Promise.resolve()
         .then(() => task())
         .catch(err => {
@@ -69,6 +79,22 @@ function startBackgroundServices({
         startGpuMonitor,
         startModelEndpointMonitor,
         recoverStaleKnowledgeDocumentIndexes,
+        startKnowledgeIngestionWorker,
+        recoverKnowledgeEvaluationRuns,
+        refreshKnowledgeFreshness,
+        backfillKnowledgeProductProjections,
+        recoverManualKnowledgeArticleEmbeddings,
+        startKnowledgeEmbeddingRecoveryRunner: () => createKnowledgeEmbeddingRecoveryRunner({
+            recover: async () => {
+                const [lexical, mismatched, manual] = await Promise.all([
+                    require('./services/rag-documents').scheduleLexicalReadyKnowledgeDocuments(),
+                    scheduleEmbeddingProfileMismatchedDocuments(),
+                    recoverManualKnowledgeArticleEmbeddings()
+                ]);
+                return { scheduled: Number(lexical.scheduled || 0) + Number(mismatched.scheduled || 0) + Number(manual.ready || 0), lexical, mismatched, manual };
+            }
+        }).start(),
+        startKnowledgeSourceSyncScheduler: () => createKnowledgeSourceSyncScheduler().start(),
         recoverAgentRuns,
         startAgentRecoveryRunner,
         startAgentScheduleRunner,
@@ -86,7 +112,14 @@ function startBackgroundServices({
     runBackgroundTask(dependencies.startGpuMonitor, logger, 'GPU 监控服务启动失败');
     runBackgroundTask(dependencies.startModelEndpointMonitor, logger, '模型端点监控服务启动失败');
     setImmediateFn(() => {
+        runBackgroundTask(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');
         runBackgroundTask(dependencies.recoverStaleKnowledgeDocumentIndexes, logger, '知识库索引恢复执行失败');
+        runBackgroundTask(dependencies.recoverKnowledgeEvaluationRuns, logger, '知识库评测运行恢复失败');
+        runBackgroundTask(dependencies.refreshKnowledgeFreshness, logger, '知识库文档新鲜度巡检失败');
+        runBackgroundTask(dependencies.backfillKnowledgeProductProjections, logger, '知识库历史产品投影回填失败');
+        runBackgroundTask(dependencies.recoverManualKnowledgeArticleEmbeddings, logger, '人工知识文章向量补齐失败');
+        runBackgroundTask(dependencies.startKnowledgeEmbeddingRecoveryRunner, logger, '知识库向量补齐巡检器启动失败');
+        runBackgroundTask(dependencies.startKnowledgeSourceSyncScheduler, logger, '知识库局域网来源同步调度器启动失败');
         runBackgroundTask(dependencies.recoverAgentRuns, logger, '智能体任务恢复执行失败');
         if (typeof dependencies.startAgentRecoveryRunner === 'function') {
             runBackgroundTask(dependencies.startAgentRecoveryRunner, logger, '智能体周期性恢复服务启动失败');

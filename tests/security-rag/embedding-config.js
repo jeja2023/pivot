@@ -7,7 +7,6 @@ const {
     buildEmbeddingModelListUrls,
     buildEmbeddingPayload,
     buildEmbeddingResponse,
-    buildFtsOrQuery,
     buildRagSearchContent,
     createSettingsRouter,
     db,
@@ -474,7 +473,7 @@ test('RAG 嵌入模型发现支持 OpenAI 和 Ollama 风格端点', () => {
     );
 });
 
-test('RAG FTS 会索引生成的中文 ngram 词元', () => {
+test('RAG PostgreSQL FTS 会检索生成的中文 ngram 词元', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -492,11 +491,10 @@ test('RAG FTS 会索引生成的中文 ngram 词元', () => {
 
     try {
         const row = db.prepare(`
-            SELECT c.id
-            FROM knowledge_chunks_fts
-            JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.rowid
-            WHERE knowledge_chunks_fts MATCH ? AND c.id = ?
-        `).get(buildFtsOrQuery(['权限']), chunkInfo.lastInsertRowid);
+            SELECT c.id FROM knowledge_chunks c
+            WHERE to_tsvector('simple', COALESCE(c.search_content, c.content)) @@ to_tsquery('simple', ?)
+              AND c.id = ?
+        `).get("'权限'", chunkInfo.lastInsertRowid);
         assert.equal(row.id, chunkInfo.lastInsertRowid);
     } finally {
         db.prepare('DELETE FROM knowledge_chunks WHERE id = ?').run(chunkInfo.lastInsertRowid);

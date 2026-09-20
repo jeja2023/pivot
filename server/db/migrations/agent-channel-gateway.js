@@ -4,8 +4,7 @@
  * 双向消息 Gateway 的持久边界。
  *
  * 渠道身份配对、外部会话映射和入站事件去重均独立于 Agent Run，避免平台重试
- * 或进程重启把同一条外部消息转成重复任务。生产运行时是 PostgreSQL-only；
- * SQLite 兼容测试不会把未支持的控制面表误当成可用能力。
+ * 或进程重启把同一条外部消息转成重复任务。生产运行时是 PostgreSQL-only。
  */
 const migration = {
     id: '202609200001_agent_channel_gateway',

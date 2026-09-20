@@ -9,7 +9,7 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
-const { getRagConfig } = require('./rag-config');
+const { getRagConfig, getEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
 const { getGraphSummary } = require('./knowledge-graph');
 const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeIndexStage } = require('./rag-index-staging');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
@@ -27,6 +27,19 @@ const { isAdmin } = require('../permissions');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { invalidateCollection: invalidateKnowledgeCatalogCollection } = require('./knowledge-catalog-index');
 const { getRagFeedbackSummary, recordRagFeedback } = require('./rag-feedback');
+const {
+    getOrCreateProductDocumentForLegacy,
+    publishLegacyDocumentProjection
+} = require('./knowledge-content');
+const {
+    createKnowledgeIngestionQueue,
+    createKnowledgeIngestionWorker
+} = require('./knowledge-ingestion-jobs');
+const {
+    createKnowledgeEmbeddingRecoveryRunner: createEmbeddingRecoveryRunner,
+    createEmbeddingProfileMismatchScheduler,
+    createLexicalReadyScheduler
+} = require('./knowledge-embedding-recovery');
 const projectRoot = path.resolve(__dirname, '../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
@@ -39,9 +52,8 @@ const allowedExtensions = new Set([
     '.csv', '.json',
     '.html', '.htm'
 ]);
-const activeIndexes = new Set();
-const pendingIndexes = new Map();
-let runningIndexCount = 0;
+const knowledgeIngestionQueue = createKnowledgeIngestionQueue();
+let knowledgeIngestionWorker = null;
 function invalidateKnowledgeCatalog(collectionId) {
     try { invalidateKnowledgeCatalogCollection(collectionId); } catch (_) {}
 }
@@ -362,6 +374,7 @@ async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = 
             SET source_path = ?, source_size = ?, source_hash = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
         `, [savedFile.sourcePath, savedFile.sourceSize, savedFile.sourceHash || '', getBeijingTimestamp(), docId, userId]);
+        await getOrCreateProductDocumentForLegacy({ legacyDocId: docId, userId });
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(resolvedCollectionId);
         return { docId, collectionId: resolvedCollectionId, tags: assignedTags, ...savedFile };
@@ -440,7 +453,8 @@ async function markKnowledgeDocumentRebuildError({ docId, userId, error }) {
     const now = getBeijingTimestamp();
     const result = await execute(`
         UPDATE knowledge_docs
-        SET status = 'ready', error_message = ?, processed_at = COALESCE(processed_at, ?), updated_at = ?
+        SET status = CASE WHEN status = 'lexical_ready' THEN 'lexical_ready' ELSE 'ready' END,
+            error_message = ?, processed_at = COALESCE(processed_at, ?), updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [`重建失败，继续使用旧索引：${String(error?.message || error || '知识库索引失败').slice(0, 900)}`, now, now, docId, userId]);
     return Number(result || 0) > 0;
@@ -491,18 +505,28 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
             }
         });
         const coverage = await queryOne(`
-            SELECT COUNT(*) AS total, SUM(CASE WHEN embedding IS NULL OR TRIM(embedding) = '' THEN 1 ELSE 0 END) AS missing
+            SELECT COUNT(*) AS total, SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END) AS missing
             FROM knowledge_chunks WHERE doc_id = ?
         `, [stageId]);
-        if (Number(coverage?.missing || 0) > 0) {
-            const error = new Error(`Embedding 未完成：${Number(coverage.missing)} / ${Number(coverage.total)} 个分块缺少向量`);
-            error.code = 'RAG_EMBEDDING_INCOMPLETE';
-            throw error;
-        }
-        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash });
+        const missingEmbeddings = Number(coverage?.missing || 0);
+        const indexStatus = missingEmbeddings > 0 ? 'lexical_ready' : 'ready';
+        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus });
+        const projection = await publishLegacyDocumentProjection({
+            legacyDocId: normalizedDocId,
+            userId,
+            indexStatus,
+            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId))
+        });
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(doc.collection_id);
-        return { docId: normalizedDocId, chunkCount };
+        return {
+            docId: normalizedDocId,
+            chunkCount,
+            indexStatus,
+            missingEmbeddings,
+            degraded: indexStatus === 'lexical_ready',
+            projection
+        };
     } catch (e) {
         await discardKnowledgeIndexStage(stageId);
         if (keepOldIndex) await markKnowledgeDocumentRebuildError({ docId: normalizedDocId, userId, error: e });
@@ -569,7 +593,7 @@ async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
             items.push({ docId: id, status: 'skipped', reason: 'source_missing' });
             continue;
         }
-        const result = scheduleKnowledgeDocumentIndexing({ docId: id, userId, user });
+        const result = await scheduleKnowledgeDocumentIndexing({ docId: id, userId, user });
         if (result.started) {
             scheduled += 1;
             items.push({ docId: id, status: 'queued' });
@@ -693,74 +717,61 @@ async function getKnowledgeQualityReport(userId) {
         duplicates,
         problemDocs,
         recommendations,
-        queue: {
-            running: runningIndexCount,
-            pending: pendingIndexes.size,
-            maxConcurrent: getMaxConcurrentIndexes()
-        }
+        queue: await getKnowledgeIndexQueueStatus(normalized.id)
     };
 }
 
-function drainKnowledgeDocumentIndexQueue() {
-    const maxConcurrentIndexes = getMaxConcurrentIndexes();
-    while (runningIndexCount < maxConcurrentIndexes && pendingIndexes.size > 0) {
-        const [key, job] = pendingIndexes.entries().next().value;
-        pendingIndexes.delete(key);
-        runningIndexCount += 1;
-
-        setImmediate(async () => {
-            try {
-                await processKnowledgeDocument(job);
-            } catch (e) {
-                if (e.statusCode !== 404) {
-                    logger.error({ err: e.message, docId: job.docId }, 'RAG 文档索引失败');
-                }
-            } finally {
-                activeIndexes.delete(key);
-                runningIndexCount = Math.max(runningIndexCount - 1, 0);
-                drainKnowledgeDocumentIndexQueue();
-            }
-        });
-    }
+function getKnowledgeIngestionWorker() {
+    if (knowledgeIngestionWorker) return knowledgeIngestionWorker;
+    knowledgeIngestionWorker = createKnowledgeIngestionWorker({
+        queue: knowledgeIngestionQueue,
+        getConcurrency: getMaxConcurrentIndexes,
+        logger,
+        processJob: async job => {
+            const result = await processKnowledgeDocument({ docId: job.docId, userId: job.userId });
+            return { ...result, stage: result?.indexStatus === 'lexical_ready' ? 'lexical_indexed' : 'published' };
+        }
+    });
+    return knowledgeIngestionWorker;
 }
 
-function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null }) {
+async function startKnowledgeIngestionWorker() {
+    return await getKnowledgeIngestionWorker().start();
+}
+
+async function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null, priority = 0 }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return { started: false, reason: 'invalid_doc_id' };
-    const key = `${userId}:${normalizedDocId}`;
-    if (activeIndexes.has(key)) return { started: false, reason: 'already_processing' };
-
-    activeIndexes.add(key);
-    pendingIndexes.set(key, { docId: normalizedDocId, userId, user });
-    drainKnowledgeDocumentIndexQueue();
-    return { started: true };
+    const result = await knowledgeIngestionQueue.enqueue({
+        docId: normalizedDocId,
+        userId,
+        priority,
+        payload: {
+            // 不持久化完整用户对象；任务执行时按 user_id 读取当前 Embedding 配置。
+            requestedBy: normalizeKnowledgeUser(user || userId).id || Number(userId) || null
+        }
+    });
+    if (result.started) {
+        await startKnowledgeIngestionWorker();
+        await getKnowledgeIngestionWorker().kick();
+    }
+    return result;
 }
 
-function syncKnowledgeDocumentIndexConcurrency() {
-    drainKnowledgeDocumentIndexQueue();
-    return getKnowledgeIndexQueueStatus();
+async function syncKnowledgeDocumentIndexConcurrency() {
+    await getKnowledgeIngestionWorker().kick();
+    return await getKnowledgeIndexQueueStatus();
 }
 
-function getKnowledgeIndexQueueStatus(userId = null) {
-    const normalizedUserId = Number.parseInt(userId, 10);
-    const hasUserFilter = Number.isSafeInteger(normalizedUserId) && normalizedUserId > 0;
-    const pendingJobs = Array.from(pendingIndexes.values());
-    const activeKeys = Array.from(activeIndexes.values());
-    const userPendingDocs = hasUserFilter
-        ? pendingJobs.filter(job => Number(job.userId) === normalizedUserId).map(job => job.docId).slice(0, 20)
-        : [];
-    const userActive = hasUserFilter
-        ? activeKeys.filter(key => String(key).startsWith(String(normalizedUserId) + ':')).length
-        : 0;
+async function getKnowledgeIndexQueueStatus(userId = null) {
+    const status = await knowledgeIngestionQueue.getStatus(userId);
     return {
-        running: runningIndexCount,
-        pending: pendingIndexes.size,
-        active: activeIndexes.size,
+        ...status,
         maxConcurrent: getMaxConcurrentIndexes(),
-        saturated: runningIndexCount >= getMaxConcurrentIndexes(),
-        userPending: userPendingDocs.length,
-        userActive,
-        userPendingDocIds: userPendingDocs
+        saturated: status.running >= getMaxConcurrentIndexes(),
+        userPending: Number(status.pending || 0),
+        userActive: Number(status.running || 0),
+        userPendingDocIds: []
     };
 }
 
@@ -770,7 +781,7 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
     const access = buildDocumentAccessFilter(normalized, 'd', 'c');
     const fromSql = 'FROM knowledge_docs d LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL';
     const wherePrefix = `${access.sql} AND d.deleted_at IS NULL`;
-    // is_enabled 在 SQLite 和 PostgreSQL 中均为 BIGINT 0/1 整型，统一使用整数比较
+    // is_enabled 以 BIGINT 0/1 存储，统一使用整数比较。
     const isEnabledCond = 'COALESCE(d.is_enabled, 1) != 0';
 
     const rows = await query(`
@@ -800,7 +811,7 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         SELECT COUNT(*) AS count
         ${fromSql}
         WHERE ${wherePrefix}
-          AND d.status = 'ready'
+          AND d.status IN ('ready', 'lexical_ready')
           AND ${isEnabledCond}
           ${scopeFilter.sql}
     `, [...access.params, ...scopeFilter.params]);
@@ -829,17 +840,13 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         retryableErrors,
         lastError,
         config: getRagConfig({}, normalized.id),
-        queue: {
-            running: runningIndexCount,
-            pending: pendingIndexes.size,
-            maxConcurrent: getMaxConcurrentIndexes()
-        }
+        queue: await getKnowledgeIndexQueueStatus(normalized.id)
     };
 
     for (const row of rows) {
         const count = Number(row.count || 0);
         summary.total += count;
-        if (row.status === 'ready') summary.ready = count;
+        if (row.status === 'ready' || row.status === 'lexical_ready') summary.ready += count;
         if (row.status === 'processing') summary.processing = count;
         if (row.status === 'error') summary.error = count;
         summary.chunks += Number(row.chunks || 0);
@@ -864,7 +871,7 @@ async function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, use
     let scheduled = 0;
     let alreadyProcessing = 0;
     for (const row of rows) {
-        const result = scheduleKnowledgeDocumentIndexing({ docId: row.id, userId, user });
+        const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId, user });
         if (result.started) scheduled += 1;
         if (result.reason === 'already_processing') alreadyProcessing += 1;
     }
@@ -877,6 +884,7 @@ async function scheduleFailedKnowledgeDocumentsForUser({ userId, limit = 20, use
 }
 
 async function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
+    const leaseRecovery = await knowledgeIngestionQueue.recoverExpiredLeases({ limit });
     const rows = await query(`
         SELECT id, user_id, source_path
         FROM knowledge_docs
@@ -898,14 +906,33 @@ async function recoverStaleKnowledgeDocumentIndexes({ limit = 50 } = {}) {
             failed += 1;
             continue;
         }
-        const result = scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id });
+        const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id });
         if (result.started) scheduled += 1;
     }
 
     if (rows.length > 0) {
         logger.info({ total: rows.length, scheduled, failed }, 'RAG 索引恢复扫描完成');
     }
-    return { total: rows.length, scheduled, failed };
+    return { total: rows.length, scheduled, failed, leaseRecovery };
+}
+
+const scheduleLexicalReadyKnowledgeDocuments = createLexicalReadyScheduler({
+    query,
+    scheduleKnowledgeDocumentIndexing
+});
+const scheduleEmbeddingProfileMismatchedDocuments = createEmbeddingProfileMismatchScheduler({
+    query,
+    scheduleKnowledgeDocumentIndexing,
+    getEmbeddingConfig,
+    getEmbeddingProfile
+});
+
+function createKnowledgeEmbeddingRecoveryRunner(options = {}) {
+    return createEmbeddingRecoveryRunner({
+        ...options,
+        recover: options.recover || scheduleLexicalReadyKnowledgeDocuments,
+        logger: options.logger || logger
+    });
 }
 
 async function deleteKnowledgeDocument({ docId, userId }) {
@@ -914,8 +941,7 @@ async function deleteKnowledgeDocument({ docId, userId }) {
     const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
     if (!doc) return false;
 
-    const queueKey = `${userId}:${normalizedDocId}`;
-    if (pendingIndexes.delete(queueKey)) activeIndexes.delete(queueKey);
+    await knowledgeIngestionQueue.cancelQueuedForDocument(normalizedDocId, userId);
     const now = getBeijingTimestamp();
     const result = await execute(`
         UPDATE knowledge_docs
@@ -956,6 +982,9 @@ module.exports = {
     processKnowledgeDocument,
     readKnowledgeDocumentFromPath,
     recoverStaleKnowledgeDocumentIndexes,
+    scheduleEmbeddingProfileMismatchedDocuments,
+    scheduleLexicalReadyKnowledgeDocuments,
+    createKnowledgeEmbeddingRecoveryRunner,
     batchDeleteKnowledgeDocuments,
     batchReindexKnowledgeDocuments,
     recordRagFeedback,
@@ -964,5 +993,6 @@ module.exports = {
     setKnowledgeDocumentTags,
     setKnowledgeDocumentEnabled,
     scheduleKnowledgeDocumentIndexing,
+    startKnowledgeIngestionWorker,
     syncKnowledgeDocumentIndexConcurrency
 };
