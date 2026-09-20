@@ -266,7 +266,7 @@
         if (!container) return;
         clear(container);
 
-        const list = Array.isArray(items) ? items : [];
+        const list = (Array.isArray(items) ? items : []).slice(0, 3);
         if (!list.length) {
             return container.appendChild(createEmpty('还没有可继续的工作。发起一次对话或运行任务即可在这里看到它。', {
                 iconSvg: ICONS.chat,
