@@ -112,7 +112,8 @@ async function syncIdentitySequences(client) {
         for (const row of seqs.rows) {
             if (!row.seq_name) continue;
             try {
-                await client.query(`SELECT setval($1, COALESCE((SELECT MAX("id") FROM "${row.table_name}"), 1), true)`, [row.seq_name]);
+                // 表为空时 setval 需指定 is_called=false，保证首次插入获取 id=1；存在记录时对齐 MAX(id) 且 is_called=true。
+                await client.query(`SELECT CASE WHEN MAX("id") IS NOT NULL THEN setval($1, MAX("id"), true) ELSE setval($1, 1, false) END FROM "${row.table_name}"`, [row.seq_name]);
             } catch (_) {}
         }
     } catch (error) {

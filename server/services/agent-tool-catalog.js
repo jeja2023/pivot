@@ -28,10 +28,11 @@ async function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
     const allowed = allowlist.length ? new Set(allowlist) : null;
+    const preserveDiscoveryTools = options.preserveDiscoveryTools === true;
     const isAllowed = (name, source, aliases = []) => {
-        // 渐进式发现元工具属于非业务属性的只读控制面。即使用户或任务指定了窄范围业务工具白名单，
-        // 元工具也必须保持可见；否则模型无法发现已授权工具，也无法在执行前检视契约。
-        if (String(name || '').startsWith('tools.')) return true;
+        // 仅在显式声明保留发现元工具（例如 Agent 自主规划执行模式）时，tools.* 忽略白名单限制；
+        // 否则严格受 toolAllowlist 约束，以保证精确工作流工具暴露与测试断言一致。
+        if (preserveDiscoveryTools && String(name || '').startsWith('tools.')) return true;
         if (policy === 'builtin_only' && source === 'mcp') return false;
         if (allowed && !allowed.has(name) && !aliases.some(alias => allowed.has(alias))) return false;
         return true;

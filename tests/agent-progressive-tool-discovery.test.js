@@ -62,14 +62,17 @@ test('autonomous runtime rejects a direct non-meta tool before policy evaluation
     );
 });
 
-test('narrow tool allowlists retain only the safe discovery control surface plus the named business tool', async () => {
-    const tools = await formatToolList({ id: 1, role: 'user' }, { toolAllowlist: ['rag.search'] });
+test('narrow tool allowlists retain only the safe discovery control surface plus the named business tool when preserveDiscoveryTools is true', async () => {
+    const tools = await formatToolList({ id: 1, role: 'user' }, { toolAllowlist: ['rag.search'], preserveDiscoveryTools: true });
     const names = new Set(tools.map(tool => tool.name));
     assert.equal(names.has('tools.search'), true);
     assert.equal(names.has('tools.describe'), true);
     assert.equal(names.has('tools.execute'), true);
     assert.equal(names.has('rag.search'), true);
     assert.equal(names.has('agent.http'), false);
+
+    const scopedWithoutDiscovery = await formatToolList({ id: 1, role: 'user' }, { toolAllowlist: ['rag.search'] });
+    assert.deepEqual(scopedWithoutDiscovery.map(tool => tool.name), ['rag.search']);
 });
 
 test('both Agent execution paths keep full catalog execution behind the progressive planner surface', () => {
