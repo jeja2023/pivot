@@ -60,8 +60,8 @@ test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡�
     assert.doesNotMatch(client, /function renderStats|function renderHeroPulse|personal-stat-attention/);
     assert.match(styles, /grid-template-areas:\s*'attention goals assistant'/);
     assert.match(styles, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
-    assert.match(styles, /\.personal-workbench-grid\s*\{[\s\S]*?flex:\s*0 0 auto;/);
-    assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*236px;/);
+    assert.match(styles, /\.personal-workbench-grid\s*\{[\s\S]*?flex:\s*1;/);
+    assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*220px;/);
     assert.match(styles, /\.personal-workbench-scroll\s*\{[\s\S]*?overflow-y:\s*auto;/);
     assert.doesNotMatch(styles, /@media \(min-height: 650px\)[\s\S]*?overflow-y:\s*hidden/);
     assert.match(client, /personal-quick-task-form/);
