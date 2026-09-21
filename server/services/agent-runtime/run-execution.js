@@ -300,11 +300,7 @@ const {
                 }
             });
         }
-        let toolList = await formatToolList(user, {
-            toolPolicy: run.tool_policy,
-            toolAllowlist: run.tool_allowlist,
-            preserveDiscoveryTools: true
-        });
+        let toolList = await formatToolList(user, { toolPolicy: run.tool_policy, toolAllowlist: run.tool_allowlist, preserveDiscoveryTools: true });
         try {
             const reliability = await listToolReliability(user, { days: 30, persist: false });
             toolList = selectToolOrder(toolList, reliability.signals);
