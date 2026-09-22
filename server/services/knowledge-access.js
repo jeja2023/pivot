@@ -1,4 +1,4 @@
-const { isAdmin } = require('../permissions');
+const { isSuperAdmin } = require('../permissions');
 
 function normalizeKnowledgeUser(userOrId) {
     if (userOrId && typeof userOrId === 'object') {
@@ -7,7 +7,7 @@ function normalizeKnowledgeUser(userOrId) {
             id: Number.isSafeInteger(id) && id > 0 ? id : null,
             unit: String(userOrId.unit || '').trim(),
             role: String(userOrId.role || 'user').trim() || 'user',
-            isAdmin: isAdmin(userOrId)
+            isSuperAdmin: isSuperAdmin(userOrId)
         };
     }
     const id = Number(userOrId);
@@ -15,13 +15,13 @@ function normalizeKnowledgeUser(userOrId) {
         id: Number.isSafeInteger(id) && id > 0 ? id : null,
         unit: '',
         role: 'user',
-        isAdmin: false
+        isSuperAdmin: false
     };
 }
 
 function buildCollectionAccessFilter(user, alias = 'c') {
     const normalized = normalizeKnowledgeUser(user);
-    if (normalized.isAdmin) return { sql: '1 = 1', params: [] };
+    if (normalized.isSuperAdmin) return { sql: '1 = 1', params: [] };
     return {
         sql: `${alias}.user_id = ?`,
         params: [normalized.id]
@@ -30,7 +30,7 @@ function buildCollectionAccessFilter(user, alias = 'c') {
 
 function buildDocumentAccessFilter(user, docAlias = 'd', _collectionAlias = 'c') {
     const normalized = normalizeKnowledgeUser(user);
-    if (normalized.isAdmin) return { sql: '1 = 1', params: [] };
+    if (normalized.isSuperAdmin) return { sql: '1 = 1', params: [] };
     return {
         sql: `${docAlias}.user_id = ?`,
         params: [normalized.id]
@@ -40,7 +40,7 @@ function buildDocumentAccessFilter(user, docAlias = 'd', _collectionAlias = 'c')
 function canReadKnowledgeResource(resource, user) {
     const normalized = normalizeKnowledgeUser(user);
     if (!resource || resource.deleted_at) return false;
-    return normalized.isAdmin || Number(resource.user_id) === normalized.id;
+    return normalized.isSuperAdmin || Number(resource.user_id) === normalized.id;
 }
 
 module.exports = {

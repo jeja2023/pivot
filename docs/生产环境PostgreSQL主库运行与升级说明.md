@@ -92,6 +92,25 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
   ALTER TABLE knowledge_docs VALIDATE CONSTRAINT knowledge_docs_source_fk;
   ```
 
+### 4.2 v0.1.161 权限边界、HNSW 与 Embedding 容量
+
+本版本将知识库跨用户读取统一限定为超级管理员账户 `admin`：普通管理员即使 `role=admin`，只要用户名不是 `admin`，也只能读取本人上传的常规知识库文档、专题、标签、检索结果、数据源、索引任务和图谱。该限制在服务端 SQL 查询中执行，不能通过页面参数或直接请求其他用户的 `docId` 绕过。
+
+- 产品化文档保留必要的受控协作：文档所有者、被明确指定的内容负责人/审核人，以及存在 `knowledge_permissions` 显式授权的主体可按授权访问指定文档；这不是普通管理员的全库读取权限。
+- 若需要跨用户运维，请使用超级管理员账户 `admin`，不要把普通管理员账号提升为全局数据读取主体或直接修改数据表。
+- 日志出现 `知识库 HNSW 索引创建失败` 且错误为 `syntax error at or near "WITH"` 时，说明运行的是旧镜像中 HNSW DDL 参数与部分索引条件顺序错误的实现。部署本版本后无需删除已有数据；重新索引任一受影响文档或等待补齐队列重试，应用会以正确顺序创建索引。
+- 如果 llama.cpp Embedding 服务返回 `input (...) is too large to process. increase the physical batch size (current batch size: 512)`，修改 **Embedding 服务自己的** Compose 启动参数，而不是 Pivot 主服务的 Compose。为 `llama-server` 同时设置 `--batch-size` 和 `--ubatch-size`，例如均为 `2048`；若显存不足可一起降到 `1024`。`--ubatch-size` 是物理批次上限，必须不小于实际单条输入 token 数，且不应大于模型可用上下文窗口。参数定义见 [llama.cpp server 文档](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)。
+
+部署后可执行以下只读 SQL 确认 profile 对应的 HNSW 索引已创建：
+
+```sql
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname = current_schema()
+  AND tablename = 'knowledge_chunks'
+  AND indexname LIKE 'idx_knowledge_chunks_embedding_hnsw_%';
+```
+
 ## 5. v0.1.155 知识库检查清单
 
 | 检查项 | 预期结果 |

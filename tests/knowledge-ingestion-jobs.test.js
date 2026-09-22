@@ -187,6 +187,7 @@ test('知识库任务退避、HNSW 建索引和 PostgreSQL FTS 词元均有安�
     assert.match(hnswSql, /USING hnsw/i);
     assert.match(hnswSql, /embedding_dimensions = 1024/);
     assert.match(hnswSql, /embedding_profile = 'lan:bge-m3-1024-v1'/);
+    assert.ok(hnswSql.indexOf('WITH (m = 16, ef_construction = 64)') < hnswSql.indexOf('WHERE embedding IS NOT NULL'));
     assert.match(indexNameForProfile(1024, 'lan:bge-m3-1024-v1'), /_\w{12}$/);
     assert.equal(buildPostgresTsQuery(['采购', "x' OR true", 'P-2026/01']), "'采购' | 'xORtrue' | 'P202601'");
 });

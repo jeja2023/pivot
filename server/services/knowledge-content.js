@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { isAdmin } = require('../permissions');
+const { isSuperAdmin } = require('../permissions');
 const { buildRagSearchContent } = require('./rag-tokenizer');
 const { hydrateManualKnowledgeArticleEmbeddings } = require('./knowledge-manual-embeddings');
 
@@ -171,7 +171,7 @@ async function getVersionForUser(versionId, user) {
 }
 
 function canEditDocument(document, user) {
-    return Boolean(document && user && (isAdmin(user)
+    return Boolean(document && user && (isSuperAdmin(user)
         || Number(document.owner_user_id) === Number(user.id)
         || Number(document.content_owner_user_id) === Number(user.id)));
 }
@@ -206,7 +206,7 @@ async function reviewDocumentVersion({ versionId, actor, approved, note = '' }) 
         WHERE version_id = ? AND reviewer_user_id = ? AND status = 'pending'
         ORDER BY id DESC LIMIT 1
     `, [version.id, actor.id]);
-    if (!review && !isAdmin(actor)) return null;
+    if (!review && !isSuperAdmin(actor)) return null;
     const document = await queryOne('SELECT * FROM knowledge_documents WHERE id = ? AND deleted_at IS NULL', [version.document_id]);
     if (!document) return null;
     const timestamp = getBeijingTimestamp();
@@ -577,7 +577,7 @@ async function getProductDocumentForUser(documentId, user) {
         WHERE kd.id = ? AND kd.deleted_at IS NULL
     `, [id]);
     if (!row) return null;
-    if (isAdmin(user) || Number(row.owner_user_id) === Number(user.id)
+    if (isSuperAdmin(user) || Number(row.owner_user_id) === Number(user.id)
         || Number(row.content_owner_user_id) === Number(user.id)
         || Number(row.verifier_user_id) === Number(user.id)) return row;
     const permission = await queryOne(`
@@ -740,7 +740,7 @@ async function verifyKnowledgeDocument({ documentId, actor, status = 'verified' 
     const id = normalizeId(documentId);
     const document = id ? await queryOne('SELECT * FROM knowledge_documents WHERE id = ? AND deleted_at IS NULL', [id]) : null;
     const nextStatus = normalizeStatus(status, VERIFIED_STATUSES, 'verified');
-    if (!document || !actor?.id || (!isAdmin(actor) && Number(document.owner_user_id) !== Number(actor.id) && Number(document.verifier_user_id) !== Number(actor.id))) return null;
+    if (!document || !actor?.id || (!isSuperAdmin(actor) && Number(document.owner_user_id) !== Number(actor.id) && Number(document.verifier_user_id) !== Number(actor.id))) return null;
     const timestamp = getBeijingTimestamp();
     const legacyDocId = normalizeId(document.legacy_doc_id);
     let indexStatus = 'ready';
@@ -899,12 +899,12 @@ async function listProductDocumentsForUser(user, { limit = 100, lifecycleStatus 
         SELECT id
         FROM knowledge_documents
         WHERE deleted_at IS NULL
-          ${isAdmin(user) ? '' : 'AND owner_user_id = ?'}
+          ${isSuperAdmin(user) ? '' : 'AND owner_user_id = ?'}
           ${status ? 'AND lifecycle_status = ?' : ''}
         ORDER BY updated_at DESC, id DESC
         LIMIT ?
     `, [
-        ...(isAdmin(user) ? [] : [user.id]),
+        ...(isSuperAdmin(user) ? [] : [user.id]),
         ...(status ? [status] : []),
         safeLimit
     ]);
@@ -920,7 +920,7 @@ async function listProductDocumentsForUser(user, { limit = 100, lifecycleStatus 
 
 async function setProductDocumentPermission({ documentId, actor, principalType, principalId, permission = 'viewer', expiresAt = null }) {
     const document = await getProductDocumentForUser(documentId, actor);
-    if (!document || (Number(document.owner_user_id) !== Number(actor?.id) && !isAdmin(actor))) return null;
+    if (!document || (Number(document.owner_user_id) !== Number(actor?.id) && !isSuperAdmin(actor))) return null;
     const type = ['user', 'unit', 'role', 'group'].includes(String(principalType || '')) ? String(principalType) : '';
     const subject = normalizeText(principalId, 180);
     const level = normalizeStatus(permission, PERMISSIONS, 'viewer');

@@ -46,6 +46,22 @@ function createDesktopBuildStaging(rootDir, {
         manifest.build.extraResources = (manifest.build.extraResources || [])
             .filter(resource => !isBundledConfigResource(resource));
         manifest.build.extraResources.push({ from: configPath, to: 'config.json' });
+        if (bundledConfig.autoUpdate?.enabled && manifest.build) {
+            let feedUrl = String(bundledConfig.autoUpdate.url || '').trim();
+            if (!feedUrl && bundledConfig.remoteUrl) {
+                try {
+                    feedUrl = new URL(bundledConfig.autoUpdate.path || '/downloads/', bundledConfig.remoteUrl).toString();
+                } catch (_) {}
+            }
+            if (feedUrl) {
+                manifest.build.publish = [
+                    {
+                        provider: 'generic',
+                        url: feedUrl
+                    }
+                ];
+            }
+        }
         // staging 配置不再依赖配置文件所在目录；所有脚本都显式相对工作区解析。
         manifest.build.afterPack = path.join(root, 'scripts', 'after-pack.js');
         writePrivateJson(builderConfigPath, manifest.build);

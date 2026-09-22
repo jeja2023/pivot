@@ -15,7 +15,8 @@ const { getGraphSummary } = require('../server/services/knowledge-graph');
 const owner = { id: 10, role: 'user', unit: '研发部' };
 const sameUnit = { id: 20, role: 'user', unit: '研发部' };
 const otherUnit = { id: 30, role: 'user', unit: '市场部' };
-const admin = { id: 1, role: 'admin', unit: '管理部' };
+const admin = { id: 1, username: 'admin', role: 'admin', unit: '管理部' };
+const regularAdmin = { id: 2, username: 'operations_admin', role: 'admin', unit: '管理部' };
 
 test('普通用户只能把知识资源共享给本单位', () => {
     assert.deepEqual(
@@ -56,7 +57,7 @@ test('全局工具资源允许读取但不允许写入', () => {
     assert.equal(canAccessSharedResource(globalResource, otherUnit, true), false);
 });
 
-test('知识库资源 SQL 过滤器仅允许所有者，管理员可跨用户读取', () => {
+test('知识库资源 SQL 过滤器仅允许所有者，只有超级管理员可跨用户读取', () => {
     const collection = { user_id: owner.id, scope: 'shared', allowed_units: '研发部' };
     assert.equal(canReadKnowledgeResource(collection, sameUnit), false);
     assert.equal(canReadKnowledgeResource(collection, otherUnit), false);
@@ -73,6 +74,10 @@ test('知识库资源 SQL 过滤器仅允许所有者，管理员可跨用户读
     const adminFilter = buildDocumentAccessFilter(admin, 'd', 'c');
     assert.equal(adminFilter.sql, '1 = 1');
     assert.deepEqual(adminFilter.params, []);
+
+    const regularAdminFilter = buildDocumentAccessFilter(regularAdmin, 'd', 'c');
+    assert.equal(regularAdminFilter.sql, 'd.user_id = ?');
+    assert.deepEqual(regularAdminFilter.params, [regularAdmin.id]);
 });
 
 test('知识库集合筛选不受普通用户单位字段影响', () => {

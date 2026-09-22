@@ -23,7 +23,7 @@ const {
 const {
     normalizeShareSettings
 } = require('./unit-visibility');
-const { isAdmin } = require('../permissions');
+const { isSuperAdmin } = require('../permissions');
 const { filterExistingShareUserIds, listShareTargets } = require('./share-targets');
 const { invalidateCollection: invalidateKnowledgeCatalogCollection } = require('./knowledge-catalog-index');
 const { getRagFeedbackSummary, recordRagFeedback } = require('./rag-feedback');
@@ -146,7 +146,7 @@ async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
     const collection = await getKnowledgeCollectionForUser(collectionId, user);
     if (!collection) return null;
     const normalizedUser = normalizeKnowledgeUser(user);
-    if (Number(collection.user_id) !== normalizedUser.id && !isAdmin(user)) return null;
+    if (Number(collection.user_id) !== normalizedUser.id && !isSuperAdmin(user)) return null;
     return {
         collection: {
             id: collection.id,

@@ -6,7 +6,7 @@ const path = require('path');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { isAdmin } = require('../permissions');
+const { isAdmin, isSuperAdmin } = require('../permissions');
 const { getAccessibleModelAsync } = require('../services/models');
 const sessionsRepository = require('../repositories/sessions');
 const { getRunDetailForUser } = require('../services/agent-runs');
@@ -199,7 +199,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
     }));
 
     router.get('/knowledge/citations/summary', authMiddleware, asyncHandler(async (req, res) => {
-        const summary = await getKnowledgeCitationSummary(isAdmin(req.user) && req.query.all === 'true' ? null : req.user.id);
+        const summary = await getKnowledgeCitationSummary(isSuperAdmin(req.user) && req.query.all === 'true' ? null : req.user.id);
         return res.json({ success: true, summary });
     }));
 
@@ -485,11 +485,11 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         const kindCondition = isLan
             ? "AND kind IN ('local_dir', 'lan_http', 'internal_api', 'database')"
             : (req.query.kind ? "AND kind = ?" : "");
-        const params = isAdmin(req.user) ? [] : [req.user.id];
+        const params = isSuperAdmin(req.user) ? [] : [req.user.id];
         if (req.query.kind && !isLan) params.push(req.query.kind);
         const rows = await query(`
             SELECT * FROM knowledge_sources
-            WHERE deleted_at IS NULL AND (${isAdmin(req.user) ? '1 = 1' : 'user_id = ?'})
+            WHERE deleted_at IS NULL AND (${isSuperAdmin(req.user) ? '1 = 1' : 'user_id = ?'})
             ${kindCondition}
             ORDER BY updated_at DESC, id DESC
         `, params);
@@ -554,7 +554,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
 
     router.post('/knowledge/sources/:id/pause', authMiddleware, asyncHandler(async (req, res) => {
         const source = await queryOne('SELECT * FROM knowledge_sources WHERE id = ? AND deleted_at IS NULL', [normalizeId(req.params.id)]);
-        if (!source || (!isAdmin(req.user) && Number(source.user_id) !== Number(req.user.id))) return res.status(404).json({ error: '数据源不存在或无权管理。' });
+        if (!source || (!isSuperAdmin(req.user) && Number(source.user_id) !== Number(req.user.id))) return res.status(404).json({ error: '数据源不存在或无权管理。' });
         await execute(`UPDATE knowledge_sources SET status = 'paused', updated_at = ? WHERE id = ?`, [getBeijingTimestamp(), source.id]);
         logAction?.(req, '知识库数据源暂停', { sourceId: source.id });
         return res.json({ success: true });
@@ -562,7 +562,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
 
     router.post('/knowledge/sources/:id/resume', authMiddleware, asyncHandler(async (req, res) => {
         const source = await queryOne('SELECT * FROM knowledge_sources WHERE id = ? AND deleted_at IS NULL', [normalizeId(req.params.id)]);
-        if (!source || (!isAdmin(req.user) && Number(source.user_id) !== Number(req.user.id))) return res.status(404).json({ error: '数据源不存在或无权管理。' });
+        if (!source || (!isSuperAdmin(req.user) && Number(source.user_id) !== Number(req.user.id))) return res.status(404).json({ error: '数据源不存在或无权管理。' });
         await execute(`UPDATE knowledge_sources SET status = 'active', last_error = '', updated_at = ? WHERE id = ?`, [getBeijingTimestamp(), source.id]);
         logAction?.(req, '知识库数据源恢复', { sourceId: source.id });
         return res.json({ success: true });
@@ -581,9 +581,9 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
                    priority, attempts, max_attempts, next_retry_at, locked_by, locked_at, error_code,
                    error_message, completed_at, created_at, updated_at
             FROM knowledge_ingestion_jobs
-            WHERE ${isAdmin(req.user) ? '1 = 1' : 'user_id = ?'}
+            WHERE ${isSuperAdmin(req.user) ? '1 = 1' : 'user_id = ?'}
             ORDER BY created_at DESC, id DESC LIMIT ?
-        `, isAdmin(req.user) ? [limit] : [req.user.id, limit]);
+        `, isSuperAdmin(req.user) ? [limit] : [req.user.id, limit]);
         return res.json({ success: true, data: rows });
     }));
 

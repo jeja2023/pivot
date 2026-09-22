@@ -66,11 +66,11 @@ function request(server, { method = 'GET', path, token, body } = {}) {
     });
 }
 
-async function createTestUser(label, unit) {
+async function createTestUser(label, unit, role = 'user') {
     const suffix = `${process.pid.toString(36)}${Date.now().toString(36).slice(-7)}${Math.random().toString(36).slice(2, 5)}`;
     const username = `http_${String(label).slice(0, 10)}_${suffix}`;
     const password = 'RecipientPass123';
-    const user = await register(username, password, `${label} HTTP user`, unit, 'user');
+    const user = await register(username, password, `${label} HTTP user`, unit, role);
     const session = await login(username, password);
     return { ...user, accessToken: session.accessToken };
 }
@@ -83,9 +83,9 @@ function cleanupUsers(userIds) {
     sql(`DELETE FROM users WHERE id IN (${placeholders})`).run(...userIds);
 }
 
-test('non-admin RAG users cannot list or mutate another user\'s shared resources', async () => {
+test('regular administrators cannot list or mutate another user\'s knowledge documents', async () => {
     const owner = await createTestUser('rag_owner', 'QA');
-    const receiver = await createTestUser('rag_receiver', 'QA');
+    const receiver = await createTestUser('rag_receiver', 'QA', 'admin');
     const now = getBeijingTimestamp();
     const collectionInfo = sql(`
         INSERT INTO knowledge_collections (

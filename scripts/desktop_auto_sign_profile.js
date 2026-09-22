@@ -37,23 +37,51 @@ function ensureWindowsSelfSignedCertificate(publisher = DEFAULT_LOCAL_PUBLISHER)
     }
 }
 
+function isLocalhostUrl(url) {
+    if (!url) return true;
+    try {
+        const parsed = new URL(url);
+        return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname.toLowerCase());
+    } catch (_) {
+        return true;
+    }
+}
+
 function ensureDefaultDistributionConfig(rootDir) {
     const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
     const tmpDir = path.join(root, '.tmp');
     fs.mkdirSync(tmpDir, { recursive: true });
     const configPath = path.join(tmpDir, 'dist-config.json');
 
-    if (!fs.existsSync(configPath)) {
+    let existingConfig = null;
+    if (fs.existsSync(configPath)) {
+        try {
+            existingConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        } catch (_) {
+            existingConfig = null;
+        }
+    }
+    const shouldRegenerate = !existingConfig || isLocalhostUrl(existingConfig.remoteUrl);
+
+    if (shouldRegenerate) {
         const devConfigPath = path.join(root, 'config.json');
         let baseConfig = {};
         try {
             baseConfig = JSON.parse(fs.readFileSync(devConfigPath, 'utf8'));
         } catch (_) {}
 
+        const targetRemoteUrl = !isLocalhostUrl(baseConfig.remoteUrl)
+            ? baseConfig.remoteUrl
+            : 'http://50.64.150.51:9006/';
+        let targetOrigin = '';
+        try {
+            targetOrigin = new URL(targetRemoteUrl).origin;
+        } catch (_) {}
+
         const distConfig = {
             mode: baseConfig.mode || 'remote',
             environmentName: 'Pivot Production',
-            remoteUrl: baseConfig.remoteUrl || 'http://50.64.150.51:9006/',
+            remoteUrl: targetRemoteUrl,
             partition: 'persist:pivot-client',
             windowTitle: baseConfig.windowTitle || 'Pivot 智枢',
             allowExternalOpen: false,
@@ -68,7 +96,8 @@ function ensureDefaultDistributionConfig(rootDir) {
                 checkIntervalMinutes: 30,
                 autoDownload: true,
                 installOnQuit: false,
-                publisherName: DEFAULT_LOCAL_PUBLISHER
+                publisherName: DEFAULT_LOCAL_PUBLISHER,
+                allowedOrigins: targetOrigin ? [targetOrigin] : []
             }
         };
         fs.writeFileSync(configPath, JSON.stringify(distConfig, null, 2) + '\n', 'utf8');

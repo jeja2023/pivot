@@ -12,7 +12,7 @@ const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getKnowledgeLimits } = require('./resource-limits');
 const { readTypedEnv } = require('../config/env-registry');
-const { isAdmin } = require('../permissions');
+const { isAdmin, isSuperAdmin } = require('../permissions');
 const { assertSafeMcpOutboundUrl, createSafeHttpAgentsForUser } = require('../security');
 const { safeJsonGet } = require('./safe-http-client');
 const { resolveCredentialSecret } = require('./workflow-credentials');
@@ -203,7 +203,7 @@ async function listSourceDocuments(sourceId) {
 async function findSourceForUser(sourceId, user) {
     const source = await queryOne('SELECT * FROM knowledge_sources WHERE id = ? AND deleted_at IS NULL', [normalizeId(sourceId)]);
     if (!source) return null;
-    return isAdmin(user) || Number(source.user_id) === Number(user?.id) ? source : null;
+    return isSuperAdmin(user) || Number(source.user_id) === Number(user?.id) ? source : null;
 }
 
 async function listKnowledgeSourceSyncRuns(sourceId, user, { limit = 50 } = {}) {
@@ -468,7 +468,7 @@ async function syncDatabaseSource(source, actor, deps = {}) {
         throw error;
     }
     const server = await queryOne("SELECT id, user_id FROM mcp_servers WHERE id = ? AND status != 'deleted'", [connectionId]);
-    if (!server || (!isAdmin(actor) && Number(server.user_id) !== Number(actor.id))) {
+    if (!server || (!isSuperAdmin(actor) && Number(server.user_id) !== Number(actor.id))) {
         const error = new Error('数据库连接不存在或无权作为知识来源。');
         error.status = 404;
         throw error;

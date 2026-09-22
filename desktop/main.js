@@ -822,6 +822,17 @@ ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) =>
     }
 
     runtimeConfig = loadDesktopConfig(app);
+    try {
+        updaterController?.destroy?.();
+        updaterController = setupAutoUpdater({
+            app,
+            mainWindow,
+            config: runtimeConfig,
+            authorizeIpc: assertTrustedIpcSender
+        });
+    } catch (updaterErr) {
+        console.warn('重新初始化更新控制器失败:', updaterErr);
+    }
     currentTargetUrl = '';
     lastLoadError = null;
     await loadTarget();

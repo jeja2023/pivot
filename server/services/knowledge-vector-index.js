@@ -47,8 +47,8 @@ function buildHnswIndexSql(dimensions, embeddingProfile = '', { concurrently = t
     return `
         CREATE INDEX ${concurrently ? 'CONCURRENTLY ' : ''}IF NOT EXISTS ${indexName}
         ON knowledge_chunks USING hnsw ((embedding::vector(${safe})) vector_cosine_ops)
-        WHERE embedding IS NOT NULL AND embedding_dimensions = ${safe}${profilePredicate}
         WITH (m = 16, ef_construction = 64)
+        WHERE embedding IS NOT NULL AND embedding_dimensions = ${safe}${profilePredicate}
     `;
 }
 
