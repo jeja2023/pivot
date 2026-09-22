@@ -13,15 +13,20 @@ test('收件箱只展示一次工作流完成通知，兼容隐藏历史镜像�
     `, [`agent_inbox_dedupe_${suffix}`]);
     const userId = Number(user.id);
     try {
+        const runId = `workflow-run-${suffix}`;
+        await execute(`
+            INSERT INTO agent_runs (id, user_id, goal, run_mode, status, created_at, updated_at)
+            VALUES (?, ?, '收件箱测试', 'dag', 'completed', NOW() AT TIME ZONE 'Asia/Shanghai', NOW() AT TIME ZONE 'Asia/Shanghai')
+        `, [runId, userId]);
         const notification = await queryOne(`
             INSERT INTO agent_notifications (user_id, run_id, type, title, body, status, created_at)
             VALUES (?, ?, 'completed', '工作流运行已完成', '月度汇总工作流', 'unread', NOW() AT TIME ZONE 'Asia/Shanghai')
             RETURNING id
-        `, [userId, `workflow-run-${suffix}`]);
+        `, [userId, runId]);
         await execute(`
             INSERT INTO agent_inbox_events (user_id, event_key, event_type, source_run_id, source_id, title, body, status, created_at, updated_at)
             VALUES (?, ?, 'notification.completed', ?, ?, '工作流运行已完成', '月度汇总工作流', 'unread', NOW() AT TIME ZONE 'Asia/Shanghai', NOW() AT TIME ZONE 'Asia/Shanghai')
-        `, [userId, `notification:${notification.id}`, `workflow-run-${suffix}`, String(notification.id)]);
+        `, [userId, `notification:${notification.id}`, runId, String(notification.id)]);
 
         const inbox = await listAgentInbox({ id: userId }, { limit: 20 });
         assert.equal(inbox.data.filter(item => item.sourceType === 'notification').length, 1);
