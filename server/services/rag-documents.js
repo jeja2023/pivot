@@ -15,7 +15,7 @@ const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeInde
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
 const knowledgeRepository = require('../repositories/knowledge');
-const { listDuplicateKnowledgeDocuments } = require('./rag-document-quality');
+const { listDuplicateKnowledgeDocuments, buildKnowledgeQualitySignals } = require('./rag-document-quality');
 const {
     buildDocumentAccessFilter,
     normalizeKnowledgeUser
@@ -629,52 +629,6 @@ async function setKnowledgeDocumentCollection({ docId, userId, collectionId = nu
     return await getKnowledgeDocumentForUser(normalizedDocId, userId);
 }
 
-function clampQualityScore(value) {
-    const score = Math.round(Number(value) || 0);
-    return Math.max(0, Math.min(score, 100));
-}
-
-function buildKnowledgeQualitySignals({ overview, feedback, graph, duplicates = null }) {
-    const total = Number(overview.total || 0);
-    const ready = Number(overview.ready || 0);
-    const readyEnabled = Number(overview.readyEnabled || 0);
-    const error = Number(overview.error || 0);
-    const disabled = Number(overview.disabled || 0);
-    const emptyReady = Number(overview.emptyReady || 0);
-    const chunks = Number(overview.chunks || 0);
-    const staleReady = Number(overview.staleReady || 0);
-    const feedbackTotal = Number(feedback.helpful || 0) + Number(feedback.unhelpful || 0);
-    const helpfulRate = feedbackTotal > 0 ? Math.round((Number(feedback.helpful || 0) / feedbackTotal) * 100) : null;
-    const readinessRate = total > 0 ? Math.round((readyEnabled / total) * 100) : 0;
-    const avgChunksPerReadyDoc = ready > 0 ? Math.round((chunks / ready) * 10) / 10 : 0;
-    const graphEntities = Number(graph.entities || 0);
-    const graphRelations = Number(graph.relations || 0);
-    const duplicateGroups = Number(duplicates?.groups?.length || 0);
-
-    let score = total > 0 ? 55 : 0;
-    score += Math.min(readinessRate * 0.25, 25);
-    score += avgChunksPerReadyDoc > 0 ? Math.min(avgChunksPerReadyDoc, 10) : 0;
-    score += graphEntities > 0 || graphRelations > 0 ? 5 : 0;
-    if (helpfulRate !== null) score += helpfulRate >= 70 ? 5 : helpfulRate >= 50 ? 2 : -5;
-    score -= Math.min(error * 12, 30);
-    score -= Math.min(disabled * 4, 16);
-    score -= Math.min(emptyReady * 10, 20);
-    score -= Math.min(staleReady * 2, 10);
-    const normalizedScore = clampQualityScore(score);
-
-    return {
-        score: normalizedScore,
-        level: normalizedScore >= 85 ? 'excellent' : normalizedScore >= 70 ? 'good' : normalizedScore >= 50 ? 'attention' : 'risk',
-        readinessRate,
-        avgChunksPerReadyDoc,
-        feedbackTotal,
-        helpfulRate,
-        staleReady,
-        graphEntities,
-        graphRelations,
-        duplicateGroups
-    };
-}
 
 async function getKnowledgeQualityReport(userId) {
     const normalized = normalizeKnowledgeUser(userId);

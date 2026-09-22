@@ -590,21 +590,14 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         const graphSummary = graphSummaryResult.status === 'fulfilled' ? graphSummaryResult.value : null;
         renderRagSummary(summary, quality, graphSummary);
         renderRagQualityReport(quality);
-        const unavailablePanels = [
-            summaryResult.status !== 'fulfilled' ? '统计摘要' : '',
-            qualityResult.status !== 'fulfilled' ? '质量诊断' : '',
-            graphSummaryResult.status !== 'fulfilled' ? '图谱摘要' : ''
-        ].filter(Boolean);
-        for (const result of [summaryResult, qualityResult, graphSummaryResult]) {
-            if (result.status === 'rejected') console.warn('知识库辅助统计加载失败：', result.reason);
-        }
-        const secondaryFailures = unavailablePanels.length;
-        const controlFailures = ragControlLoadErrors.size;
-        const partialMessage = [...ragControlLoadErrors, ...unavailablePanels].join('、');
+        const results = [summaryResult, qualityResult, graphSummaryResult];
+        const panels = ['统计摘要', '质量诊断', '图谱摘要'];
+        results.forEach((r, i) => r.status === 'rejected' && console.warn(`知识库${panels[i]}加载失败：`, r.reason));
+        const partialItems = [...ragControlLoadErrors, ...panels.filter((_, i) => results[i].status !== 'fulfilled')];
         setKnowledgeWorkbenchState(
-            secondaryFailures || controlFailures ? 'partial' : '',
-            secondaryFailures || controlFailures ? `文档已加载，但${partialMessage || '部分数据'}暂不可用。` : '',
-            { retry: secondaryFailures > 0 || controlFailures > 0 }
+            partialItems.length ? 'partial' : '',
+            partialItems.length ? `文档已加载，但${partialItems.join('、') || '部分数据'}暂不可用。` : '',
+            { retry: partialItems.length > 0 }
         );
     } catch (e) {
         console.error('加载知识库失败', e);
