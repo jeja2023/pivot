@@ -170,7 +170,7 @@ function copyReleaseArtifactsToDownloads(rawArgs, buildTarget, { publishWindowsU
     }
 
     if (!publishWindowsUpdates) {
-        console.log('> skip Windows update feed publication for development or offline release build');
+        console.log('> 跳过开发或离线构建的 Windows 自动更新源发布');
         return;
     }
 
