@@ -837,7 +837,13 @@ test('模型适配器规范化兼容端点 URL 且不改变本地聊天行为', 
         'https://api.example.com/v1/responses'
     );
     assert.equal(shouldUseResponsesApi('gpt-5.1'), true);
+    assert.equal(shouldUseResponsesApi('o1'), true);
+    assert.equal(shouldUseResponsesApi('o1-mini'), true);
+    assert.equal(shouldUseResponsesApi('openai/o3-mini'), true);
     assert.equal(shouldUseResponsesApi('qwen2.5'), false);
+    assert.equal(shouldUseResponsesApi('failing-chat-1o1'), false);
+    assert.equal(shouldUseResponsesApi('auto1'), false);
+    assert.equal(shouldUseResponsesApi('repo4'), false);
 });
 
 test('模型适配器将聊天消息转换为 Responses API 输入', () => {

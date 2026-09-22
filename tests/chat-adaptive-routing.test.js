@@ -187,6 +187,11 @@ test('Responses Prompt Cache 使用会话隔离 key，并仅对明确缓存参�
     });
     assert.equal(isPromptCacheUnsupported({ response: { status: 400, data: { error: { message: 'unknown prompt_cache_key' } } } }), true);
     assert.equal(isPromptCacheUnsupported({ response: { status: 400, data: { error: { message: 'invalid model' } } } }), false);
+    const circularObj = {};
+    circularObj.self = circularObj;
+    assert.equal(isPromptCacheUnsupported({ response: { status: 500, data: circularObj } }), false);
+    assert.equal(isPromptCacheUnsupported({ response: { status: 400, data: circularObj } }), false);
+    assert.equal(isPromptCacheUnsupported({ response: { status: 400, data: circularObj } }, 'unsupported cache parameter'), true);
 });
 
 test('聊天路由指标按桶聚合后批量持久化，且不携带提问原文', async () => {

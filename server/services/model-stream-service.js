@@ -11,6 +11,7 @@ const {
 const { forwardChatCompletion } = require('./model-forwarder');
 const { isChatThinkingEnabled, buildThinkingControlPayload } = require('./models');
 const { getChatAutoRouteConfig } = require('./chat-route-config');
+const { readStreamErrorDetail } = require('./chat-errors');
 
 function buildChatPromptCache(modelCfg, { sessionId, userId, env = process.env } = {}) {
     const config = getChatAutoRouteConfig(env);
@@ -21,10 +22,24 @@ function buildChatPromptCache(modelCfg, { sessionId, userId, env = process.env }
     };
 }
 
-function isPromptCacheUnsupported(error) {
+function isPromptCacheUnsupported(error, textDetail = '') {
     const status = Number(error?.response?.status || error?.status || 0);
-    const detail = `${error?.message || ''} ${typeof error?.response?.data === 'string' ? error.response.data : JSON.stringify(error?.response?.data || {})}`.toLowerCase();
-    return status === 400 && /prompt_cache|cache[_ ]?(?:key|option|retention)|unknown.*cache|unsupported.*cache/.test(detail);
+    if (status !== 400) return false;
+    let payloadText = typeof textDetail === 'string' ? textDetail : '';
+    if (!payloadText) {
+        const rawData = error?.response?.data;
+        if (typeof rawData === 'string') {
+            payloadText = rawData;
+        } else if (rawData && typeof rawData === 'object' && typeof rawData.on !== 'function') {
+            try {
+                payloadText = JSON.stringify(rawData);
+            } catch (_) {
+                payloadText = '';
+            }
+        }
+    }
+    const detail = `${error?.message || ''} ${payloadText}`.toLowerCase();
+    return /prompt_cache|cache[_ ]?(?:key|option|retention)|unknown.*cache|unsupported.*cache/.test(detail);
 }
 
 function buildChatRequestData(modelCfg, modelName) {
@@ -98,7 +113,13 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             return { response, modelName, targetUrl, mode: 'responses', requestData };
         } catch (err) {
             const status = err.response?.status;
-            if (promptCache && isPromptCacheUnsupported(err)) {
+            let streamDetail = '';
+            if (status === 400 && promptCache && err.response?.data && typeof err.response.data.on === 'function') {
+                try {
+                    streamDetail = await readStreamErrorDetail(err.response.data);
+                } catch (_) {}
+            }
+            if (promptCache && isPromptCacheUnsupported(err, streamDetail)) {
                 log.warn({ status }, '模型端点不支持 Prompt Cache，已在同一 Responses API 安全降级重试');
                 delete requestData.prompt_cache_key;
                 delete requestData.prompt_cache_options;

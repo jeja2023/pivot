@@ -2,14 +2,26 @@ const { estimateTokens } = require('../llm');
 const { saveAssistantMessage, touchSession } = require('./chat-messages');
 
 function compactText(value, maxLength = 12000) {
-    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    let text = '';
+    if (typeof value === 'string') {
+        text = value;
+    } else {
+        try {
+            text = JSON.stringify(value, null, 2);
+        } catch (_) {
+            text = String(value || '');
+        }
+    }
     if (!text) return '';
     return text.length > maxLength ? `${text.slice(0, maxLength)}\n...内容已截断...` : text;
 }
 
 function parseErrorObject(detail) {
     if (!detail) return null;
-    if (typeof detail === 'object') return detail;
+    if (typeof detail === 'object') {
+        if (typeof detail.on === 'function') return null;
+        return detail;
+    }
     if (typeof detail === 'string') {
         const trimmed = detail.trim();
         if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
@@ -30,7 +42,16 @@ function formatTokens(num) {
 
 function normalizeChatError({ error, detail, statusCode, code } = {}) {
     let title = String(error || '模型响应异常').trim();
-    let detailText = typeof detail === 'string' ? detail.trim() : (detail ? JSON.stringify(detail) : '');
+    let detailText = '';
+    if (typeof detail === 'string') {
+        detailText = detail.trim();
+    } else if (detail) {
+        try {
+            detailText = JSON.stringify(detail);
+        } catch (_) {
+            detailText = String(detail);
+        }
+    }
     let finalCode = code || '';
     let finalStatusCode = statusCode;
 

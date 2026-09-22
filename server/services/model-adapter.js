@@ -28,9 +28,11 @@ function buildResponsesUrl(url, options = {}) {
     return `${normalizeModelBaseUrl(url, options).replace(/\/chat\/completions$/, '').replace(/\/+$/, '')}/responses`;
 }
 
+const RESPONSES_API_MODEL_PATTERN = /(?:^|[/:\s_-])(?:gpt-5|o1|o3|o4)(?:[/:\s_.-]|$)/i;
+
 function shouldUseResponsesApi(modelName) {
-    const name = String(modelName || '');
-    return name.includes('gpt-5') || name.includes('o1') || name.includes('o3') || name.includes('o4');
+    const name = String(modelName || '').trim();
+    return RESPONSES_API_MODEL_PATTERN.test(name);
 }
 
 function buildModelHeaders(modelCfg, options = {}) {
