@@ -12,8 +12,8 @@ test('收件箱只展示一次工作流完成通知，兼容隐藏历史镜像�
         RETURNING id
     `, [`agent_inbox_dedupe_${suffix}`]);
     const userId = Number(user.id);
+    const runId = `workflow-run-${suffix}`;
     try {
-        const runId = `workflow-run-${suffix}`;
         await execute(`
             INSERT INTO agent_runs (id, user_id, goal, run_mode, status, created_at, updated_at)
             VALUES (?, ?, '收件箱测试', 'dag', 'completed', NOW() AT TIME ZONE 'Asia/Shanghai', NOW() AT TIME ZONE 'Asia/Shanghai')
@@ -33,6 +33,9 @@ test('收件箱只展示一次工作流完成通知，兼容隐藏历史镜像�
         assert.equal(inbox.data.filter(item => item.sourceType === 'event').length, 0);
         assert.equal(inbox.unread, 1);
     } finally {
+        await execute('DELETE FROM agent_inbox_events WHERE user_id = ?', [userId]);
+        await execute('DELETE FROM agent_notifications WHERE user_id = ?', [userId]);
+        await execute('DELETE FROM agent_runs WHERE id = ?', [runId]);
         await execute('DELETE FROM users WHERE id = ?', [userId]);
     }
 });
