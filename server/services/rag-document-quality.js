@@ -101,4 +101,4 @@ function buildKnowledgeQualitySignals({ overview, feedback, graph, duplicates = 
     };
 }
 
-module.exports = { listDuplicateKnowledgeDocuments, clampQualityScore, buildKnowledgeQualitySignals };
+module.exports = { listDuplicateKnowledgeDocuments, buildKnowledgeQualitySignals };
