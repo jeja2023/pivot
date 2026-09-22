@@ -97,6 +97,7 @@ function ensureDefaultDistributionConfig(rootDir) {
                 autoDownload: true,
                 installOnQuit: false,
                 publisherName: DEFAULT_LOCAL_PUBLISHER,
+                allowUntrustedRoot: true,
                 allowedOrigins: targetOrigin ? [targetOrigin] : []
             }
         };
@@ -113,12 +114,15 @@ function autoProvisionDesktopEnvironment(rootDir, env = process.env, options = {
         const hasSigning = hasWindowsSigningCredential(env);
         const hasPublisher = Boolean(String(env.PIVOT_WINDOWS_UPDATE_PUBLISHER || '').trim());
 
-        if (options.requireTrustedSigning === true && (!hasSigning || !hasPublisher)) {
+        const allowIntranetSelfSigned = options.allowIntranetSelfSigned === true
+            || String(env.PIVOT_ALLOW_INTRANET_SELF_SIGNED || '').trim().toLowerCase() === 'true';
+
+        if (options.requireTrustedSigning === true && (!hasSigning || !hasPublisher) && !allowIntranetSelfSigned) {
             throw new Error('Windows 正式更新包必须显式提供 PIVOT_WINDOWS_UPDATE_PUBLISHER，以及 CSC_LINK、WIN_CSC_LINK、PIVOT_WINDOWS_CERTIFICATE_SHA1 或 PIVOT_WINDOWS_CERTIFICATE_SUBJECT。开发机自签名证书不能用于生产自动更新。');
         }
 
-        // 未发布的本机联调包仍可使用当前用户证书库中的自签名证书；正式包不会走此分支。
-        if (!options.requireTrustedSigning && (!hasSigning || !hasPublisher)) {
+        // 未发布的本机联调包或局域网放行模式仍可使用当前用户证书库中的自签名证书。
+        if ((!options.requireTrustedSigning || allowIntranetSelfSigned) && (!hasSigning || !hasPublisher)) {
             const thumbprint = ensureWindowsSelfSignedCertificate(DEFAULT_LOCAL_PUBLISHER);
             if (thumbprint) {
                 if (!hasPublisher) env.PIVOT_WINDOWS_UPDATE_PUBLISHER = DEFAULT_LOCAL_PUBLISHER;
@@ -126,7 +130,7 @@ function autoProvisionDesktopEnvironment(rootDir, env = process.env, options = {
             }
         }
 
-        if (!String(env.PIVOT_DISTRIBUTION_CONFIG || '').trim() && options.requireDistributionConfig === true) {
+        if (!String(env.PIVOT_DISTRIBUTION_CONFIG || '').trim() && options.requireDistributionConfig === true && !allowIntranetSelfSigned) {
             throw new Error('Windows 正式发布必须显式提供 PIVOT_DISTRIBUTION_CONFIG，禁止使用自动生成的开发分发配置。');
         }
 

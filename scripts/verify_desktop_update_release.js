@@ -41,11 +41,13 @@ function normalizePublisherNames(value) {
         .filter(Boolean);
 }
 
-function verifyDesktopUpdateRelease({ downloadsDir, resourcesDir, version, publisherName } = {}) {
+function verifyDesktopUpdateRelease({ downloadsDir, resourcesDir, version, publisherName, allowIntranetSelfSigned } = {}) {
     const safeVersion = String(version || '').trim();
     const publisher = String(publisherName || '').trim();
+    const allowSelfSigned = allowIntranetSelfSigned === true
+        || String(process.env.PIVOT_ALLOW_INTRANET_SELF_SIGNED || '').trim().toLowerCase() === 'true';
     if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(safeVersion)) throw new Error('更新发布验收缺少有效版本号。');
-    if (!publisher || publisher === 'Pivot Local Dev') throw new Error('更新发布验收要求受信任的 Windows 签名发布者，不能使用 Pivot Local Dev。');
+    if (!publisher || (publisher === 'Pivot Local Dev' && !allowSelfSigned)) throw new Error('更新发布验收要求受信任的 Windows 签名发布者，不能使用 Pivot Local Dev。');
 
     const updateDir = path.resolve(String(downloadsDir || ''));
     const resources = path.resolve(String(resourcesDir || ''));
@@ -59,7 +61,10 @@ function verifyDesktopUpdateRelease({ downloadsDir, resourcesDir, version, publi
     const latest = readYaml(latestPath, 'latest.yml');
     if (String(latest.version || '') !== safeVersion) throw new Error(`latest.yml 版本不匹配：期望 ${safeVersion}，实际 ${latest.version || '<empty>'}。`);
     const releaseFile = Array.isArray(latest.files)
-        ? latest.files.find(file => String(file?.url || '') === installerName)
+        ? latest.files.find(file => {
+            const url = String(file?.url || '');
+            return url === installerName || url === `Pivot-Setup-${safeVersion}.exe`;
+        })
         : null;
     if (!releaseFile) throw new Error(`latest.yml 未声明当前安装器：${installerName}。`);
     if (Number(releaseFile.size) !== installerStat.size) throw new Error('latest.yml 安装器大小与实际文件不一致。');

@@ -18,6 +18,7 @@ const { normalizeWindowsUpdatePublisher } = require('./desktop_update_signing');
 const { autoProvisionDesktopEnvironment } = require('./desktop_auto_sign_profile');
 const {
     isTrustedWindowsRelease,
+    isWindowsIntranetRelease,
     isWindowsUpdateRelease,
     resolveWindowsReleaseChannel,
     stripWindowsReleaseChannelArgs
@@ -29,6 +30,10 @@ const electronBuilderInstallDeps = path.join(root, 'node_modules', 'electron-bui
 const projectVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const packageScriptArgs = process.argv.slice(2);
 const outputArg = packageScriptArgs.find(arg => arg.startsWith('--output-dir='));
+const isIntranetBuild = isWindowsIntranetRelease(packageScriptArgs, process.env);
+if (isIntranetBuild) {
+    process.env.PIVOT_ALLOW_INTRANET_SELF_SIGNED = 'true';
+}
 const windowsReleaseChannel = resolveWindowsReleaseChannel(packageScriptArgs);
 const rawBuilderArgs = stripWindowsReleaseChannelArgs(packageScriptArgs)
     .filter(arg => !arg.startsWith('--output-dir='));
@@ -102,10 +107,14 @@ function prepareBundledDesktopConfig(options = {}) {
     if (options.windowsTarget) {
         if (options.windowsUpdateRelease === true) {
             assertProductionUpdateReleasePolicy(config);
-            if (!options.windowsUpdatePublisher || options.windowsUpdatePublisher === 'Pivot Local Dev') {
+            if (!options.windowsUpdatePublisher || (options.windowsUpdatePublisher === 'Pivot Local Dev' && !options.allowIntranetSelfSigned)) {
                 throw new Error('Windows 自动更新发布必须使用受信任签名发布者，不能使用 Pivot Local Dev。');
             }
-            config.autoUpdate = { ...config.autoUpdate, publisherName: options.windowsUpdatePublisher };
+            config.autoUpdate = {
+                ...config.autoUpdate,
+                publisherName: options.windowsUpdatePublisher,
+                allowUntrustedRoot: options.allowIntranetSelfSigned === true
+            };
         } else {
             // 开发、冒烟和离线安装包绝不携带可用更新链，防止自签名构建覆盖
             // 生产 downloads/latest.yml 后被已安装客户端误下载。
@@ -230,16 +239,18 @@ try {
         platform: buildTarget.platform,
         isDirBuild,
         requireTrustedSigning: windowsRelease,
-        requireDistributionConfig: windowsRelease
+        requireDistributionConfig: windowsRelease,
+        allowIntranetSelfSigned: isIntranetBuild
     });
     // Electron 包内不会保留构建脚本；在组装 asar 之前必须显式产出全部聊天样式包。
     run(process.execPath, [path.join('scripts', 'build_chat_css.js')]);
     const windowsUpdatePublisher = normalizeWindowsUpdatePublisher(process.env.PIVOT_WINDOWS_UPDATE_PUBLISHER);
     const bundledDesktopConfig = prepareBundledDesktopConfig({
-        requireDistributionConfig: windowsRelease,
+        requireDistributionConfig: windowsRelease && !isIntranetBuild,
         windowsTarget: isWindowsTarget,
         windowsUpdateRelease,
-        windowsUpdatePublisher
+        windowsUpdatePublisher,
+        allowIntranetSelfSigned: isIntranetBuild
     });
     desktopBuildStaging = createDesktopBuildStaging(root, {
         bundledConfig: bundledDesktopConfig.config,

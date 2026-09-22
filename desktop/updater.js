@@ -166,7 +166,11 @@ async function verifyWindowsUpdateSignature(publisherNames, artifactPath, option
             ? options.signatureQuery
             : runPowerShellSignatureQuery;
         const result = await signatureQuery(artifactPath, options);
-        if (Number(result?.Status) !== 0) {
+        const statusCode = Number(result?.Status);
+        const allowsUntrustedRoot = options.allowUntrustedRoot === true
+            || normalizePublisherNames(publisherNames).includes('Pivot Local Dev');
+        const isValidStatus = statusCode === 0 || (allowsUntrustedRoot && (statusCode === 1 || statusCode === 6));
+        if (!isValidStatus) {
             return `更新安装包 Authenticode 签名无效（状态 ${result?.Status ?? 'unknown'}）。`;
         }
         if (normalizeWindowsPath(result?.Path) !== normalizeWindowsPath(artifactPath)) {
@@ -213,7 +217,11 @@ function hardenWindowsAutoUpdater(autoUpdater, updateConfig = {}, options = {}) 
     const signatureVerifier = typeof options.verifySignature === 'function'
         ? options.verifySignature
         : verifyWindowsUpdateSignature;
-    autoUpdater.verifyUpdateCodeSignature = (publisherNames, artifactPath) => signatureVerifier(publisherNames, artifactPath, options);
+    autoUpdater.verifyUpdateCodeSignature = (publisherNames, artifactPath) => signatureVerifier(publisherNames, artifactPath, {
+        ...options,
+        allowUntrustedRoot: updateConfig.allowUntrustedRoot === true
+            || normalizePublisherNames(publisherNames).includes('Pivot Local Dev')
+    });
     autoUpdater.disableWebInstaller = true;
     autoUpdater.allowDowngrade = false;
     return true;

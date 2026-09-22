@@ -169,6 +169,40 @@ test('Windows update signature verifier only accepts a valid signature with a ma
             await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, { platform: 'win32', signatureQuery: invalidStatus }),
             /Authenticode 签名无效/
         );
+        assert.equal(
+            await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
+                platform: 'win32',
+                signatureQuery: invalidStatus,
+                allowUntrustedRoot: true
+            }),
+            null
+        );
+        const untrustedRootStatus = async () => ({ Status: 6, Path: artifact, Subject: 'CN=Pivot Production Signing' });
+        assert.equal(
+            await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
+                platform: 'win32',
+                signatureQuery: untrustedRootStatus,
+                allowUntrustedRoot: true
+            }),
+            null
+        );
+        const tamperedStatus = async () => ({ Status: 5, Path: artifact, Subject: 'CN=Pivot Production Signing' });
+        assert.match(
+            await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
+                platform: 'win32',
+                signatureQuery: tamperedStatus,
+                allowUntrustedRoot: true
+            }),
+            /Authenticode 签名无效/
+        );
+        const localDevStatus = async () => ({ Status: 1, Path: artifact, Subject: 'CN=Pivot Local Dev' });
+        assert.equal(
+            await verifyWindowsUpdateSignature(['Pivot Local Dev'], artifact, {
+                platform: 'win32',
+                signatureQuery: localDevStatus
+            }),
+            null
+        );
     } finally {
         require('node:fs').rmSync(path.dirname(artifact), { recursive: true, force: true });
     }

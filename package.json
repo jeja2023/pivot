@@ -57,6 +57,7 @@
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
     "dist:win": "node scripts/package_desktop.js nsis --release",
+    "dist:win:intranet": "node scripts/package_desktop.js nsis --release --intranet",
     "dist:win:offline": "node scripts/package_desktop.js nsis --offline-release",
     "dist:win:dev": "node scripts/package_desktop.js nsis --development",
     "preflight:win-update": "node scripts/preflight_windows_update_release.js",

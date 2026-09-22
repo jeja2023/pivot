@@ -22,8 +22,15 @@ function resolveWindowsReleaseChannel(args = []) {
     return selected[0] || WINDOWS_RELEASE_CHANNELS.development;
 }
 
+const MODIFIER_FLAGS = new Set(['--intranet', '--allow-self-signed']);
+
+function isWindowsIntranetRelease(args = [], env = process.env) {
+    return (Array.isArray(args) && args.some(arg => MODIFIER_FLAGS.has(arg)))
+        || String(env?.PIVOT_ALLOW_INTRANET_SELF_SIGNED || '').trim().toLowerCase() === 'true';
+}
+
 function stripWindowsReleaseChannelArgs(args = []) {
-    return (Array.isArray(args) ? args : []).filter(arg => !Object.hasOwn(CHANNEL_FLAGS, arg));
+    return (Array.isArray(args) ? args : []).filter(arg => !Object.hasOwn(CHANNEL_FLAGS, arg) && !MODIFIER_FLAGS.has(arg));
 }
 
 function isTrustedWindowsRelease(channel) {
@@ -37,6 +44,7 @@ function isWindowsUpdateRelease(channel) {
 module.exports = {
     WINDOWS_RELEASE_CHANNELS,
     isTrustedWindowsRelease,
+    isWindowsIntranetRelease,
     isWindowsUpdateRelease,
     resolveWindowsReleaseChannel,
     stripWindowsReleaseChannelArgs

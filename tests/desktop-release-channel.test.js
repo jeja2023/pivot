@@ -5,6 +5,7 @@ const test = require('node:test');
 const {
     WINDOWS_RELEASE_CHANNELS,
     isTrustedWindowsRelease,
+    isWindowsIntranetRelease,
     isWindowsUpdateRelease,
     resolveWindowsReleaseChannel,
     stripWindowsReleaseChannelArgs
@@ -19,10 +20,13 @@ test('Windows desktop build channels are explicit and never leak release flags t
         () => resolveWindowsReleaseChannel(['nsis', '--release', '--development']),
         /只能选择一种发布通道/
     );
-    assert.deepEqual(stripWindowsReleaseChannelArgs(['nsis', '--release', '--output-dir=dist-electron-test']), ['nsis', '--output-dir=dist-electron-test']);
+    assert.deepEqual(stripWindowsReleaseChannelArgs(['nsis', '--release', '--intranet', '--output-dir=dist-electron-test']), ['nsis', '--output-dir=dist-electron-test']);
     assert.equal(isTrustedWindowsRelease(WINDOWS_RELEASE_CHANNELS.update), true);
     assert.equal(isTrustedWindowsRelease(WINDOWS_RELEASE_CHANNELS.offline), true);
     assert.equal(isTrustedWindowsRelease(WINDOWS_RELEASE_CHANNELS.development), false);
     assert.equal(isWindowsUpdateRelease(WINDOWS_RELEASE_CHANNELS.update), true);
     assert.equal(isWindowsUpdateRelease(WINDOWS_RELEASE_CHANNELS.offline), false);
+    assert.equal(isWindowsIntranetRelease(['nsis', '--release', '--intranet'], {}), true);
+    assert.equal(isWindowsIntranetRelease(['nsis', '--release'], { PIVOT_ALLOW_INTRANET_SELF_SIGNED: 'true' }), true);
+    assert.equal(isWindowsIntranetRelease(['nsis', '--release'], {}), false);
 });

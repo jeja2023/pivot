@@ -11,7 +11,8 @@ const {
     hasWindowsSigningCredential,
     normalizeWindowsUpdatePublisher
 } = require('./desktop_update_signing');
-const { DEFAULT_LOCAL_PUBLISHER } = require('./desktop_auto_sign_profile');
+const { DEFAULT_LOCAL_PUBLISHER, autoProvisionDesktopEnvironment } = require('./desktop_auto_sign_profile');
+const { isWindowsIntranetRelease } = require('./desktop_release_channel');
 
 function resolveStealthSecret(root, env = process.env) {
     const envPath = path.join(root, '.env');
@@ -19,12 +20,25 @@ function resolveStealthSecret(root, env = process.env) {
     return String(env.PIVOT_DISTRIBUTION_STEALTH_SECRET || env.PIVOT_STEALTH_SECRET || fileEnv.PIVOT_STEALTH_SECRET || '').trim();
 }
 
-function preflightWindowsUpdateRelease(rootDir, env = process.env) {
+function preflightWindowsUpdateRelease(rootDir, env = process.env, options = {}) {
     const root = path.resolve(rootDir || path.resolve(__dirname, '..'));
-    const distribution = loadDistributionDesktopConfig(root, env, { required: true });
+    const allowIntranetSelfSigned = options.allowIntranetSelfSigned === true
+        || isWindowsIntranetRelease(options.args || [], env);
+
+    if (allowIntranetSelfSigned) {
+        autoProvisionDesktopEnvironment(root, env, {
+            platform: 'win32',
+            isDirBuild: false,
+            requireTrustedSigning: false,
+            requireDistributionConfig: false,
+            allowIntranetSelfSigned: true
+        });
+    }
+
+    const distribution = loadDistributionDesktopConfig(root, env, { required: !allowIntranetSelfSigned });
     const feedUrl = assertProductionUpdateReleasePolicy(distribution.config);
     const publisherName = normalizeWindowsUpdatePublisher(env.PIVOT_WINDOWS_UPDATE_PUBLISHER);
-    if (!publisherName || publisherName === DEFAULT_LOCAL_PUBLISHER) {
+    if (!publisherName || (publisherName === DEFAULT_LOCAL_PUBLISHER && !allowIntranetSelfSigned)) {
         throw new Error('Windows 自动更新发布必须提供受信任的 PIVOT_WINDOWS_UPDATE_PUBLISHER，不能使用 Pivot Local Dev。');
     }
     if (!hasWindowsSigningCredential(env)) {
@@ -38,7 +52,8 @@ function preflightWindowsUpdateRelease(rootDir, env = process.env) {
 
 if (require.main === module) {
     try {
-        const result = preflightWindowsUpdateRelease();
+        const args = process.argv.slice(2);
+        const result = preflightWindowsUpdateRelease(undefined, process.env, { args });
         console.log(`Windows 自动更新发布预检通过：${result.publisherName} → ${result.feedUrl}`);
     } catch (error) {
         console.error(error?.stack || error?.message || String(error));
