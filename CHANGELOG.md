@@ -7,11 +7,13 @@
 - 修复 `getKnowledgeQualityReport` 将裸 `userId` 传入 `getGraphSummary` 导致图谱摘要逻辑异常的缺陷；改为传入完整规范化用户上下文并加入 `try/catch` 容错——图谱摘要失败只记录 `warn` 日志，不影响文档质量总览整体可用性。
 - 知识库工作台辅助统计失败提示细化：分别标注"统计摘要"、"质量诊断"、"图谱摘要"哪个面板不可用，并对每个 rejected promise 输出 `console.warn` 便于排查。
 - 桌面端（Electron）滚轮侦测区域精确化：新增 `getSessionListScrollRegion` 根据 `#session-list` 与 `.sidebar-session-section-label` 的实际矩形合并计算精确接管区域，替代原来取整个 `.sidebar` 边界框的方式；`isPointerInsideSidebar` 重命名为 `isPointerInsideSessionList`，`target.closest` 检测范围从 `.sidebar` 收窄到 `#session-list, .sidebar-session-section-label`；视口同步和滚轮转发均改用新区域计算，根治右侧聊天消息区滚轮在合成层切换期间被误判并重定向至会话列表的问题。
+- 知识图谱访问权限收紧为超级管理员独占：将图谱实体、关系、提及、文档的跨用户查询权限从 `isAdmin` 升级为 `isSuperAdmin`；为四类图谱资源独立新增专用访问过滤器（`buildGraphEntityAccessFilter`、`buildGraphRelationAccessFilter`、`buildGraphMentionAccessFilter`、`buildGraphDocumentAccessFilter`），消除图谱查询对文档共享过滤器的不当复用；修复 `getGraphSummaryAsync` 中提及计数的参数错误与 `scopedDoc` 缺少所有者校验的安全漏洞；`findQueryEntities` 与 `getGraphContextForQuery` 实体/关系检索统一改用图谱专用过滤器，SQL 更简洁。
 
 #### 升级注意事项
 
 - 无新增数据库迁移，无新增环境变量；升级前按既有流程备份 PostgreSQL 与上传文件。
 - 本版本收紧知识库共享语义：普通用户不再能通过 `scope = 'shared'` 或单位白名单读取他人资源，如有合法跨用户共享需求须由管理员账号统一管理。
+- 本版本收紧知识图谱跨用户权限：普通管理员（`isAdmin`）不再能查看他人图谱数据，仅超级管理员（`isSuperAdmin`）可跨用户。如需普通管理员具备图谱诊断能力，请将相应账号提升为超级管理员。
 
 详细发布记录见 [v0.1.160 发布记录](docs/releases/v0.1.160-知识库严格所有者隔离与桌面滚轮精确命中修复.md)。
 

@@ -683,7 +683,7 @@ async function getKnowledgeQualityReport(userId) {
     const feedback = await getRagFeedbackSummary(normalized.id);
     let graph = { entities: 0, relations: 0 };
     try {
-        graph = await getGraphSummary(normalized);
+        graph = await getGraphSummary(userId);
     } catch (error) {
         // 图谱摘要是质量诊断的补充指标；其历史脏数据或独立查询超时不应让
         // 文档质量总览整体不可用。

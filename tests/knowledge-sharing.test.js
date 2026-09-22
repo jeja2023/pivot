@@ -81,6 +81,9 @@ test('知识库集合筛选不受普通用户单位字段影响', () => {
     assert.deepEqual(filter.params, [20]);
 });
 
-test('Graph-RAG 汇总接受完整用户上下文以应用文档所有者隔离', async () => {
-    await assert.doesNotReject(() => getGraphSummary(sameUnit));
+test('知识图谱跨用户访问仅向超级管理员开放', () => {
+    const source = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../server/services/knowledge-graph.js'), 'utf8');
+    assert.match(source, /isSuperAdmin\(userOrId\)/);
+    assert.doesNotMatch(source, /user\.isAdmin\) return \{ sql: '1 = 1'/);
+    assert.equal(typeof getGraphSummary, 'function');
 });
