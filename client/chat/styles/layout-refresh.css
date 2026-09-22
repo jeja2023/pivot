@@ -263,6 +263,7 @@
     gap: 12px;
     padding: 20px 24px 218px;
     background: var(--ui-page);
+    overscroll-behavior-y: contain;
 }
 
 .message-container > .message {

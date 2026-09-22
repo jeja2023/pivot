@@ -116,16 +116,72 @@
         }
 
         function capabilityKindLabel(kind = '') {
-            return ({ skill: 'Skill', builtin_tool: '内置工具', mcp_server: 'MCP 服务', database_connection: '数据库连接' })[String(kind)] || '能力';
+            return ({ skill: '技能', builtin_tool: '内置工具', mcp_server: 'MCP 服务', database_connection: '数据库连接' })[String(kind)] || '能力';
+        }
+
+        function capabilityTitleLabel(title = '', item = {}) {
+            let text = String(title || '').trim();
+            if (!text) return '未命名能力';
+            text = text
+                .replace(/^Viz\s*MCP\s*/iu, '图表生成 ')
+                .replace(/^Report\s*MCP\s*/iu, '报告编排 ')
+                .replace(/^Documents\s*MCP\s*/iu, '文档解析 ')
+                .replace(/^Data\s*MCP\s*/iu, '数据处理 ')
+                .replace(/^Format\s*MCP\s*/iu, '格式转换 ')
+                .replace(/\bMCP\b/gi, '服务')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const titleMap = {
+                visualization: '图表生成',
+                report: '报告编排',
+                documents: '文档解析',
+                data: '数据处理',
+                format: '格式转换',
+                im: '即时通信通知',
+                reports: '服务器报表目录',
+                database: '数据库连接',
+                database_connection: '数据库连接'
+            };
+            if (titleMap[text.toLowerCase()]) {
+                text = titleMap[text.toLowerCase()];
+            }
+
+            if (item.kind === 'database_connection' && !text.includes('数据库')) {
+                text = `${text} 数据库连接`;
+            }
+
+            return text;
+        }
+
+        function capabilityScopeLabel(scope = '') {
+            const labels = {
+                global: '全局',
+                admin: '管理员',
+                user: '个人',
+                personal: '个人',
+                organization: '组织',
+                team: '团队',
+                system: '系统',
+                shared: '共享',
+                public: '公开',
+                tenant: '租户'
+            };
+            const key = String(scope || '').trim().toLowerCase();
+            return labels[key] || String(scope || '个人');
         }
 
         function renderCapabilityCatalog() {
+            const countBadge = document.getElementById('agent-capability-catalog-count-badge');
+            if (countBadge) countBadge.textContent = `${state.capabilities.length} 个可用能力`;
             const target = document.getElementById('agent-capability-catalog-list');
             if (!target) return;
             const query = String(state.capabilityQuery || '').trim().toLowerCase();
-            const rows = state.capabilities.filter(item => !query || [item.title, item.description, item.source, item.kind, ...(item.capabilities || []), ...(item.tools || [])].join(' ').toLowerCase().includes(query));
+            const rows = state.capabilities.filter(item => !query || [item.title, capabilityTitleLabel(item.title, item), item.description, item.source, item.kind, capabilityKindLabel(item.kind), item.scope, capabilityScopeLabel(item.scope), ...(item.capabilities || []), ...(item.tools || [])].join(' ').toLowerCase().includes(query));
+            const modalCount = document.getElementById('agent-capability-catalog-modal-count');
+            if (modalCount) modalCount.textContent = `共 ${rows.length} 个可用能力`;
             if (!rows.length) return setMarkup(target, '<div class="agent-capability-catalog-empty">当前没有匹配的可用能力。已停用或未发布的能力不会出现在这里。</div>');
-            setMarkup(target, rows.slice(0, 60).map(item => `<article class="agent-capability-catalog-item ${item.status === 'disabled' ? 'is-disabled' : ''}"><div class="agent-capability-catalog-item-head"><strong>${escape(item.title || '未命名能力')}</strong><span class="agent-inbox-type-badge ${item.status === 'disabled' ? 'badge-event' : 'badge-run'}">${escape(capabilityKindLabel(item.kind))}</span></div><p>${escape(String(item.description || '未填写用途说明。').slice(0, 140))}</p><footer><span>${escape(item.source || '受控能力')}</span><span>${escape(item.scope || 'personal')}${item.version ? ` · v${escape(item.version)}` : ''}</span></footer></article>`).join(''));
+            setMarkup(target, rows.slice(0, 60).map(item => `<article class="agent-capability-catalog-item ${item.status === 'disabled' ? 'is-disabled' : ''}"><div class="agent-capability-catalog-item-head"><strong>${escape(capabilityTitleLabel(item.title, item))}</strong><span class="agent-inbox-type-badge ${item.status === 'disabled' ? 'badge-event' : 'badge-run'}">${escape(capabilityKindLabel(item.kind))}</span></div><p>${escape(String(item.description || '未填写用途说明。').slice(0, 140))}</p><footer><span>${escape(item.source || '受控能力')}</span><span>${escape(capabilityScopeLabel(item.scope))}${item.version ? ` · v${escape(item.version)}` : ''}</span></footer></article>`).join(''));
         }
 
         async function loadCapabilityCatalog() {
@@ -133,6 +189,18 @@
             state.capabilities = Array.isArray(data.data) ? data.data : [];
             renderCapabilityCatalog();
             return state.capabilities;
+        }
+
+        function setCapabilityCatalogModalVisibility(visible = true) {
+            const modal = document.getElementById('agent-capability-catalog-modal');
+            if (!modal) return;
+            modal.classList.toggle('hidden', !visible);
+            modal.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            if (visible) {
+                const body = modal.querySelector('.agent-capability-catalog-modal-body');
+                if (body) body.scrollTop = 0;
+                document.getElementById('agent-capability-catalog-search')?.focus();
+            }
         }
 
         function renderGatewayDetails(channels = []) {
@@ -191,6 +259,21 @@
         function bindControls() {
             document.getElementById('agent-capability-catalog-refresh')?.addEventListener('click', () => loadCapabilityCatalog().catch(error => setNotice(error.message, 'error')));
             document.getElementById('agent-capability-catalog-search')?.addEventListener('input', event => { state.capabilityQuery = event.target.value || ''; renderCapabilityCatalog(); });
+            document.getElementById('agent-open-capability-catalog-btn')?.addEventListener('click', () => setCapabilityCatalogModalVisibility(true));
+            document.querySelector('.agent-capability-catalog-entry')?.addEventListener('click', event => {
+                if (event.target.closest('#agent-open-capability-catalog-btn')) return;
+                setCapabilityCatalogModalVisibility(true);
+            });
+            document.getElementById('agent-capability-catalog-modal-close-btn')?.addEventListener('click', () => setCapabilityCatalogModalVisibility(false));
+            const catalogModal = document.getElementById('agent-capability-catalog-modal');
+            catalogModal?.addEventListener('click', event => {
+                if (event.target === catalogModal) setCapabilityCatalogModalVisibility(false);
+            });
+            window.addEventListener('keydown', event => {
+                if (event.key === 'Escape' && catalogModal && !catalogModal.classList.contains('hidden')) {
+                    setCapabilityCatalogModalVisibility(false);
+                }
+            });
             document.getElementById('agent-goal-draft-parse')?.addEventListener('click', parseNaturalGoalDraft);
             document.getElementById('agent-goal-natural-input')?.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); parseNaturalGoalDraft(); } });
             document.getElementById('agent-goal-trigger')?.addEventListener('change', event => {
@@ -203,7 +286,7 @@
             ['agent-goal-title', 'agent-goal-goal', 'agent-goal-time', 'agent-goal-directory', 'agent-goal-query'].forEach(id => document.getElementById(id)?.addEventListener('input', event => { if (event.isTrusted) clearGoalDraft(); }));
         }
 
-        return { bindControls, clearGoalDraft, goalPayload, handleGatewayAction, loadCapabilityCatalog, previewGoal, renderCapabilityCatalog, renderGatewayDetails, saveGoal, setGoalModalMode };
+        return { bindControls, capabilityKindLabel, capabilityScopeLabel, capabilityTitleLabel, clearGoalDraft, goalPayload, handleGatewayAction, loadCapabilityCatalog, previewGoal, renderCapabilityCatalog, renderGatewayDetails, saveGoal, setCapabilityCatalogModalVisibility, setGoalModalMode };
     }
 
     window.Pivot?.exposeModule?.('agent.personalExperience', { create });

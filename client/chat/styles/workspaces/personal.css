@@ -1283,10 +1283,18 @@ body.dark-mode .personal-shortcut-add:hover,
     box-shadow: var(--hero-input-shadow, 0 5px 14px rgba(0, 64, 53, 0.12));
 }
 
+.personal-command-row svg {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
 .personal-command-row input {
     flex: 1;
     min-width: 0;
     height: 36px;
+    margin: 0;
     padding: 0;
     border: 0;
     outline: 0;
@@ -1294,6 +1302,42 @@ body.dark-mode .personal-shortcut-add:hover,
     color: var(--text-main);
     background: transparent;
     font-size: 0.82rem;
+    line-height: normal;
+}
+
+.personal-command-row input:focus {
+    outline: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+.personal-command-row input::placeholder {
+    color: var(--text-muted, #94a3b8);
+    opacity: 1;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.personal-command-row:hover input::placeholder,
+.personal-command-row:focus-within input::placeholder,
+.personal-command-row input:hover::placeholder,
+.personal-command-row input:focus::placeholder {
+    opacity: 0;
+    color: transparent;
+}
+
+.personal-command-row input::-webkit-input-placeholder {
+    color: var(--text-muted, #94a3b8);
+    opacity: 1;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.personal-command-row:hover input::-webkit-input-placeholder,
+.personal-command-row:focus-within input::-webkit-input-placeholder,
+.personal-command-row input:hover::-webkit-input-placeholder,
+.personal-command-row input:focus::-webkit-input-placeholder {
+    opacity: 0;
+    color: transparent;
 }
 
 .personal-command-row:focus-within {

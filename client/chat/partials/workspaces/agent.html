@@ -964,12 +964,24 @@
                                 title="刷新技能列表">刷新</button>
                         </div>
                     </div>
-                    <section class="agent-capability-catalog" aria-labelledby="agent-capability-catalog-title">
-                        <div class="agent-harness-subhead">
-                            <div><strong id="agent-capability-catalog-title">可用能力目录</strong><span>只展示当前账号已授权的 Skill、内置工具与受控连接。</span></div>
-                            <div class="agent-capability-catalog-actions"><input id="agent-capability-catalog-search" class="form-input" type="search" placeholder="搜索能力名称、来源或用途"><button id="agent-capability-catalog-refresh" class="btn-secondary btn-xs" type="button">刷新目录</button></div>
+                    <section class="agent-capability-catalog-entry" aria-labelledby="agent-capability-catalog-entry-title">
+                        <div class="agent-capability-catalog-entry-main">
+                            <div class="agent-capability-catalog-entry-title-row">
+                                <span class="agent-capability-icon">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                </span>
+                                <strong id="agent-capability-catalog-entry-title">可用技能与能力目录</strong>
+                                <span id="agent-capability-catalog-count-badge" class="mcp-count-pill">正在加载...</span>
+                                <span class="mcp-security-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>已授权能力 · 安全受控</span>
+                            </div>
+                            <span>展示当前账号已授权的技能、内置工具与受控连接；涵盖智能体协同、知识检索及各类执行能力。点击即可在弹窗中浏览全量目录。</span>
                         </div>
-                        <div id="agent-capability-catalog-list" class="agent-capability-catalog-list" aria-live="polite"></div>
+                        <div class="agent-capability-catalog-entry-actions">
+                            <button id="agent-open-capability-catalog-btn" class="btn-primary" type="button">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                <span>浏览可用技能目录</span>
+                            </button>
+                        </div>
                     </section>
                     <div class="agent-harness-skill-layout">
                         <div class="agent-harness-skill-list-wrap">
@@ -1106,6 +1118,30 @@ outputs: {}
                 <button id="agent-run-detail-close" class="btn-secondary" type="button">关闭</button>
             </div>
             <div id="agent-run-detail" class="agent-run-detail"></div>
+        </div>
+    </div>
+    <div id="agent-capability-catalog-modal" class="modal-overlay hidden agent-capability-catalog-modal-overlay" role="dialog" aria-modal="true"
+        aria-labelledby="agent-capability-catalog-modal-title" aria-hidden="true">
+        <div class="modal agent-capability-catalog-modal">
+            <div class="mcp-edit-header">
+                <div>
+                    <h3 id="agent-capability-catalog-modal-title">可用技能与能力目录</h3>
+                    <p id="agent-capability-catalog-modal-subtitle">只展示当前账号已授权的技能、内置工具与受控连接，支持按名称、来源或用途快速搜索。</p>
+                </div>
+                <div>
+                    <button id="agent-capability-catalog-modal-close-btn" class="btn-danger-outline workspace-modal-close" type="button" aria-label="关闭可用技能目录">关闭</button>
+                </div>
+            </div>
+            <div class="agent-capability-catalog-modal-search-bar">
+                <div class="agent-capability-search-box">
+                    <input id="agent-capability-catalog-search" class="form-input" type="search" placeholder="搜索能力名称、来源或用途" aria-label="搜索能力名称、来源或用途">
+                    <button id="agent-capability-catalog-refresh" class="btn-secondary" type="button">刷新目录</button>
+                </div>
+                <span id="agent-capability-catalog-modal-count" class="mcp-catalog-modal-count">共 0 个可用能力</span>
+            </div>
+            <div class="agent-capability-catalog-modal-body">
+                <div id="agent-capability-catalog-list" class="agent-capability-catalog-list" aria-live="polite"></div>
+            </div>
         </div>
     </div>
 </section>

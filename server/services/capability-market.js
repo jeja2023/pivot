@@ -20,6 +20,11 @@ function cleanCapabilityName(name) {
     return String(name || '')
         .replace(/^内置\s*/u, '')
         .replace(/^系统内置\s*/u, '')
+        .replace(/^Viz\s*MCP\s*/iu, '图表生成 ')
+        .replace(/^Report\s*MCP\s*/iu, '报告编排 ')
+        .replace(/^Documents\s*MCP\s*/iu, '文档解析 ')
+        .replace(/^Data\s*MCP\s*/iu, '数据处理 ')
+        .replace(/^Format\s*MCP\s*/iu, '格式转换 ')
         .replace(/\s*MCP$/iu, '')
         .trim();
 }
@@ -122,8 +127,10 @@ async function syncCapabilityPackages(user) {
     }
 
     const mcpServers = await listMcpServers(user);
+    const activeServerKeys = new Set();
     for (const server of mcpServers) {
         const isDatabase = server.server_type === 'database';
+        activeServerKeys.add(sourceKey(isDatabase ? 'database_connection' : 'mcp_server', String(server.id)));
         await upsertCapabilityPackage({
             type: isDatabase ? 'database_connection' : 'mcp_server',
             sourceRef: String(server.id),
@@ -138,6 +145,13 @@ async function syncCapabilityPackages(user) {
                 databaseType: server.database_connection?.database_type || ''
             }
         });
+    }
+
+    const existingMcpRows = await query("SELECT package_key FROM capability_packages WHERE type IN ('mcp_server', 'database_connection')");
+    for (const row of existingMcpRows) {
+        if (!activeServerKeys.has(row.package_key)) {
+            await execute('DELETE FROM capability_packages WHERE package_key = ?', [row.package_key]);
+        }
     }
 }
 

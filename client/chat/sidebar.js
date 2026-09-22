@@ -34,11 +34,14 @@ function bindSessionListScrolling(list) {
         }
     }, { passive: true });
 
+    const sidebar = list.closest('.sidebar') || document.querySelector('.sidebar');
+
     // Electron 客户端的无边框窗口会在部分 Windows 精度触控板环境下吞掉
     // overflow 容器的默认滚轮滚动。仅在桌面运行时接管滚轮，确保仍可浏览历史会话。
     const handleWheel = event => {
         if (!window.pivotDesktop && !document.body?.classList.contains('pivot-desktop-runtime')) return;
         if (event.defaultPrevented) return;
+        if (sidebar?.classList.contains('collapsed')) return;
         if (list.scrollHeight <= list.clientHeight) return;
         const rawDeltaY = Number(event.deltaY) || 0;
         if (!rawDeltaY) return;
@@ -56,10 +59,10 @@ function bindSessionListScrolling(list) {
         if (list.scrollTop !== before) event.preventDefault();
     };
     list.addEventListener('wheel', handleWheel, { passive: false });
-    const sidebar = document.querySelector('.sidebar');
     if (sidebar && sidebar.dataset.boundSidebarWheel !== '1') {
         sidebar.dataset.boundSidebarWheel = '1';
         sidebar.addEventListener('wheel', event => {
+            if (sidebar.classList.contains('collapsed')) return;
             const targetList = document.getElementById('session-list');
             if (!targetList || targetList.contains(event.target)) return;
             handleWheel(event);

@@ -33,7 +33,7 @@ function bindMcpModalAccessibility() {
     document.documentElement.dataset.mcpModalA11yBound = '1';
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        const openOverlays = [...document.querySelectorAll('.mcp-workspace-view, #mcp-edit-modal, #mcp-share-modal, #mcp-tools-modal, #mcp-tool-presentation-modal, #mcp-local-auth-modal, #mcp-tool-test-modal')]
+        const openOverlays = [...document.querySelectorAll('.mcp-workspace-view, #mcp-edit-modal, #mcp-share-modal, #mcp-tools-modal, #mcp-tool-presentation-modal, #mcp-local-auth-modal, #mcp-tool-test-modal, #mcp-connection-accounts-modal, #mcp-api-operations-modal, #mcp-catalog-modal, #mcp-product-detail-modal')]
             .filter(el => !el.classList.contains('hidden'));
         const current = openOverlays[openOverlays.length - 1];
         if (!current || current.id === 'mcp-workbench-modal') return;

@@ -8,6 +8,7 @@ const { formatToolList } = require('../services/agent-tool-catalog');
 const { invalidate: invalidateMcpToolCatalog } = require('../services/mcp-tool-catalog-index');
 const { defaultToolPolicyEngine } = require('../services/tool-policy-engine');
 const { describeToolForUser, searchToolsForUser, toolRef } = require('../services/tool-discovery');
+const { getCapabilityDefinition } = require('../services/agent-capability-registry');
 const { list: listReleases, activate, releaseItems, compareCatalogReleases } = require('../services/tool-catalog-releases');
 const { assertUsable, listForUser, getForUser, transition, createAccount, bindToolConnection } = require('../services/connection-accounts');
 const { publicConnectorDefinition, startAuthorization, completeAuthorization, refreshAccount, revokeAccount, saveConnectorDefinition } = require('../services/connection-oauth');
@@ -62,12 +63,14 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
         const tools = await formatToolList(req.user);
         const items = tools.filter(tool => {
             if (!queryText) return true;
-            return [tool.name, tool.title, tool.description, ...(tool.capabilities || [])].join(' ').toLowerCase().includes(queryText);
+            const capTitles = (tool.capabilities || []).map(cap => getCapabilityDefinition(cap)?.title || '').filter(Boolean);
+            return [tool.name, tool.title, tool.description, tool.serverName, ...(tool.capabilities || []), ...capTitles].join(' ').toLowerCase().includes(queryText);
         }).slice(0, safeLimit(req.query.limit, 100, 500)).map(tool => ({
             toolRef: toolRef(tool),
             name: tool.name, title: tool.title, description: tool.description,
             riskLevel: tool.risk_level || tool.risk || 'low', capabilities: tool.capabilities || [],
             source: tool.source || 'builtin', requiresConnection: false,
+            serverName: tool.serverName || '',
             approvalRequired: Boolean(tool.approval_required || tool.requiresApproval)
         }));
         res.json({ data: items });

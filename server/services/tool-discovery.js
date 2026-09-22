@@ -3,6 +3,7 @@
 /** Progressive tool discovery for model contexts. */
 const crypto = require('crypto');
 const { formatToolList } = require('./agent-tool-catalog');
+const { getCapabilityDefinition } = require('./agent-capability-registry');
 
 function normalizeTerms(value) {
     const source = String(value || '').toLowerCase();
@@ -30,7 +31,8 @@ function matchesFilters(tool, filters = {}) {
 function rankTools(query, tools = [], filters = {}) {
     const keywords = normalizeTerms(query);
     return (tools || []).filter(tool => matchesFilters(tool, filters)).map(tool => {
-        const corpus = [tool.name, tool.title, tool.description, tool.serverName, ...(tool.capabilities || [])].join(' ').toLowerCase();
+        const capTitles = (tool.capabilities || []).map(cap => getCapabilityDefinition(cap)?.title || '').filter(Boolean);
+        const corpus = [tool.name, tool.title, tool.description, tool.serverName, ...(tool.capabilities || []), ...capTitles].join(' ').toLowerCase();
         const matchedTerms = keywords.filter(term => corpus.includes(term));
         const title = `${tool.title || ''} ${tool.name || ''}`.toLowerCase();
         const score = matchedTerms.length + matchedTerms.filter(term => title.includes(term)).length * 0.5;
@@ -138,4 +140,4 @@ async function executeDiscoveredTool(user, input = {}, context = {}, deps = {}) 
     });
 }
 
-module.exports = { describeToolForUser, executeDiscoveredTool, searchToolsForUser, toolRef };
+module.exports = { describeToolForUser, executeDiscoveredTool, rankTools, searchToolsForUser, toolRef };

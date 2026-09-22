@@ -35,19 +35,26 @@
                 <div class="mcp-tab-pane" data-mcp-pane="tools">
                     <div class="mcp-list-wrap">
                         <div id="mcp-governance-panel" class="workspace-governance-panel"></div>
-                        <section class="mcp-product-section" aria-labelledby="mcp-product-catalog-title">
+                        <section class="mcp-product-section mcp-catalog-entry-section" aria-labelledby="mcp-product-catalog-title">
                             <div class="mcp-product-section-head">
-                                <div>
-                                    <strong id="mcp-product-catalog-title">可用工具</strong>
-                                    <span>按任务搜索已授权工具；只有选择后才加载完整参数契约。</span>
+                                <div class="mcp-section-title-wrap">
+                                    <div class="mcp-section-title-row">
+                                        <span class="mcp-section-icon mcp-icon-catalog">
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                        </span>
+                                        <strong id="mcp-product-catalog-title">可用工具</strong>
+                                        <span id="mcp-catalog-total-badge" class="mcp-count-pill">正在加载...</span>
+                                        <span class="mcp-security-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>沙箱受控 · 契约保护</span>
+                                    </div>
+                                    <span>常驻业务与系统授权工具；涵盖大模型节点、自动化、智能体协同及格式转换。点击即可弹出全量工具目录进行搜索与契约查看。</span>
                                 </div>
-                                <div class="mcp-product-search">
-                                    <input id="mcp-product-tool-search" class="form-input" type="search"
-                                        placeholder="例如：查询订单、生成图表、读取报表" aria-label="搜索可用工具">
-                                    <button id="mcp-product-tool-search-btn" class="btn-secondary" type="button">搜索</button>
+                                <div class="mcp-section-head-actions">
+                                    <button id="mcp-open-catalog-modal" class="btn-primary" type="button">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                        <span>浏览可用工具清单</span>
+                                    </button>
                                 </div>
                             </div>
-                            <div id="mcp-product-catalog" class="mcp-product-grid" aria-live="polite"></div>
                         </section>
                         <div id="mcp-system-services" class="mcp-system-services"></div>
                         <div id="mcp-tool-cache" class="agent-tool-list"></div>
@@ -62,17 +69,98 @@
                 <!-- Tab 3: 连接与凭据 -->
                 <div class="mcp-tab-pane hidden" data-mcp-pane="credentials">
                     <div class="mcp-list-wrap">
-                        <section class="mcp-product-section" aria-labelledby="mcp-connection-accounts-title">
+                        <section class="mcp-product-section mcp-governance-hub" aria-labelledby="mcp-governance-hub-title">
                             <div class="mcp-product-section-head">
-                                <div>
-                                    <strong id="mcp-connection-accounts-title">连接账户</strong>
-                                    <span>查看授权范围、过期状态与最近错误；凭据本身不会在此显示。</span>
+                                <div class="mcp-section-title-wrap">
+                                    <div class="mcp-section-title-row">
+                                        <span class="mcp-section-icon mcp-icon-governance">
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                        </span>
+                                        <strong id="mcp-governance-hub-title">连接与凭据治理中心</strong>
+                                        <span class="mcp-security-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>安全隔离 · 密标保护</span>
+                                    </div>
+                                    <span>集中管理外部服务 OAuth 2.0 连接、受控安全凭据与 OpenAPI 3 导入操作；访问令牌加密隔离，敏感凭据永不注入提示词。</span>
+                                </div>
+                                <div class="mcp-section-head-actions">
+                                    <button id="mcp-refresh-governance-hub" class="btn-secondary btn-xs" type="button" title="刷新全部连接与凭据数据">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                                        <span>刷新全部</span>
+                                    </button>
                                 </div>
                             </div>
-                            <div id="mcp-connection-accounts" class="mcp-product-grid" aria-live="polite"></div>
+                            <div class="mcp-governance-cards-grid">
+                                <div class="mcp-governance-card" id="mcp-card-connection-accounts">
+                                    <div class="mcp-gov-card-head">
+                                        <div class="mcp-gov-card-title-row">
+                                            <span class="mcp-gov-card-icon mcp-icon-connection">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                            </span>
+                                            <strong>连接账户</strong>
+                                        </div>
+                                        <span class="mcp-gov-badge">OAuth 2.0 隔离</span>
+                                    </div>
+                                    <div class="mcp-gov-card-body">
+                                        <div class="mcp-gov-metric" id="mcp-metric-connections">0 个已授权</div>
+                                        <p class="mcp-gov-desc">管理外部服务 OAuth 2.0 账号，令牌服务端加密，提示词与日志零泄露。</p>
+                                    </div>
+                                    <div class="mcp-gov-card-actions">
+                                        <button class="btn-secondary btn-xs" type="button" id="mcp-open-connection-modal">
+                                            <span>管理账户</span>
+                                        </button>
+                                        <button class="btn-secondary btn-xs" type="button" id="mcp-refresh-connections-btn" title="刷新状态">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mcp-governance-card" id="mcp-card-security-credentials">
+                                    <div class="mcp-gov-card-head">
+                                        <div class="mcp-gov-card-title-row">
+                                            <span class="mcp-gov-card-icon mcp-icon-credentials">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                            </span>
+                                            <strong>受控安全凭据</strong>
+                                        </div>
+                                        <span class="mcp-gov-badge">AES-256 加密</span>
+                                    </div>
+                                    <div class="mcp-gov-card-body">
+                                        <div class="mcp-gov-metric" id="mcp-metric-credentials">0 个可用凭据</div>
+                                        <p class="mcp-gov-desc">可在工作流 HTTP 节点、Agent 工具和渠道中免密安全引用鉴权密钥。</p>
+                                    </div>
+                                    <div class="mcp-gov-card-actions">
+                                        <button class="btn-primary btn-xs" type="button" id="mcp-hub-create-credential">
+                                            <span>新建凭据</span>
+                                        </button>
+                                        <button class="btn-secondary btn-xs" type="button" id="mcp-hub-open-credentials-drawer">
+                                            <span>管理抽屉</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mcp-governance-card" id="mcp-card-api-operations">
+                                    <div class="mcp-gov-card-head">
+                                        <div class="mcp-gov-card-title-row">
+                                            <span class="mcp-gov-card-icon mcp-icon-api">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                            </span>
+                                            <strong>API 操作 (OpenAPI 3)</strong>
+                                        </div>
+                                        <span class="mcp-gov-badge">OpenAPI 3 规范</span>
+                                    </div>
+                                    <div class="mcp-gov-card-body">
+                                        <div class="mcp-gov-metric" id="mcp-metric-operations">0 个导入端点</div>
+                                        <p class="mcp-gov-desc">导入企业内部或第三方 OpenAPI 规范，细粒度接口管控与审批策略。</p>
+                                    </div>
+                                    <div class="mcp-gov-card-actions">
+                                        <button class="btn-primary btn-xs" type="button" id="mcp-hub-import-openapi">
+                                            <span>导入 OpenAPI</span>
+                                        </button>
+                                        <button class="btn-secondary btn-xs" type="button" id="mcp-hub-open-operations-modal">
+                                            <span>查看端点</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </section>
-                        <div id="mcp-security-credentials" class="mcp-server-list"></div>
-                        <div id="mcp-api-operations" class="mcp-server-list"></div>
+                        <div id="mcp-security-credentials" class="hidden"></div>
                         <div id="mcp-notifications-extensions" class="mcp-server-list"></div>
                     </div>
                 </div>
@@ -97,20 +185,47 @@
 </section>
 
 <div id="mcp-product-detail-modal" class="modal-overlay hidden mcp-product-detail-overlay" aria-hidden="true">
-            <div class="modal mcp-product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-product-detail-title">
+    <div class="modal mcp-product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-product-detail-title">
         <div class="mcp-edit-header">
             <div>
                 <h3 id="mcp-product-detail-title">工具契约</h3>
                 <p id="mcp-product-detail-subtitle">工具输入、输出和治理信息。</p>
             </div>
-            <button class="btn-secondary workspace-modal-close" type="button" data-mcp-product-detail-close aria-label="关闭工具契约">关闭</button>
+            <button id="mcp-product-detail-close-btn" class="btn-danger-outline workspace-modal-close" type="button" data-mcp-product-detail-close aria-label="关闭工具契约">关闭</button>
         </div>
-        <pre id="mcp-product-detail-content" class="mcp-product-detail-content"></pre>
-        <div class="mcp-product-execute-panel">
-            <label for="mcp-product-execute-input">执行输入（JSON）</label>
-            <textarea id="mcp-product-execute-input" class="form-input form-input-mono" rows="4" spellcheck="false">{}</textarea>
-            <p>已阅读契约后才可执行。高风险、写入或联网工具仍会进入审批；不会因目录操作扩大权限。</p>
-            <button id="mcp-product-execute-btn" class="btn-primary" type="button" disabled>执行已确认工具</button>
+        <div class="mcp-product-detail-body">
+            <div class="mcp-contract-summary-card">
+                <div class="mcp-contract-desc-title">功能与场景说明</div>
+                <p id="mcp-product-detail-desc" class="mcp-contract-desc-text">暂无说明。</p>
+                <div id="mcp-product-detail-badges" class="mcp-product-badges"></div>
+            </div>
+            <div class="mcp-contract-section">
+                <div class="mcp-contract-section-head">
+                    <strong>输入参数速览</strong>
+                    <span id="mcp-contract-params-count" class="mcp-count-pill">0 个参数</span>
+                </div>
+                <div id="mcp-contract-params-box" class="mcp-contract-params-box"></div>
+            </div>
+            <div class="mcp-product-execute-panel">
+                <div class="mcp-execute-head">
+                    <label for="mcp-product-execute-input"><strong>执行测试入参（JSON）</strong></label>
+                    <div class="mcp-execute-actions">
+                        <button id="mcp-product-fill-sample-btn" class="btn-secondary btn-xs" type="button">填入样例参数</button>
+                        <button id="mcp-product-format-json-btn" class="btn-secondary btn-xs" type="button">格式化 JSON</button>
+                    </div>
+                </div>
+                <textarea id="mcp-product-execute-input" class="form-input form-input-mono" rows="4" spellcheck="false">{}</textarea>
+                <div class="mcp-execute-footer">
+                    <p>已阅读契约后才可执行。高风险、写入或联网工具仍会进入审批；不会因目录操作扩大权限。</p>
+                    <button id="mcp-product-execute-btn" class="btn-primary" type="button" disabled>执行已确认工具</button>
+                </div>
+            </div>
+            <details class="mcp-contract-raw-details">
+                <summary>
+                    <span>查看底层接口原始 JSON Schema（技术人员排查）</span>
+                </summary>
+                <pre id="mcp-product-detail-content" class="mcp-product-detail-content"></pre>
+            </details>
         </div>
     </div>
 </div>
@@ -268,6 +383,67 @@
                 <button id="mcp-edit-save-btn" class="btn-primary" type="button">保存修改</button>
                 <button id="mcp-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<div id="mcp-connection-accounts-modal" class="modal-overlay hidden mcp-connection-modal-overlay" aria-hidden="true">
+    <div class="modal mcp-edit-modal mcp-governance-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-connection-modal-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-connection-modal-title">连接账户管理</h3>
+                <p>集中管理外部服务 OAuth 2.0 授权、个人与服务账号连接；访问凭据加密存储，永不注入提示词与日志。</p>
+            </div>
+            <div class="mcp-section-head-actions">
+                <button id="mcp-modal-refresh-connections" class="btn-secondary btn-xs" type="button">刷新状态</button>
+                <button id="mcp-connection-modal-close-btn" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭">关闭</button>
+            </div>
+        </div>
+        <div class="mcp-modal-scrollable-body">
+            <div id="mcp-connection-accounts" class="mcp-product-grid" aria-live="polite"></div>
+        </div>
+    </div>
+</div>
+
+<div id="mcp-api-operations-modal" class="modal-overlay hidden mcp-api-operations-modal-overlay" aria-hidden="true">
+    <div class="modal mcp-edit-modal mcp-governance-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-operations-modal-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-operations-modal-title">API 操作管理 (OpenAPI 3)</h3>
+                <p>已收录的 OpenAPI 3 HTTP 操作；调用免密鉴权仅引用已有受控安全凭据，支持细粒度审批策略。</p>
+            </div>
+            <div class="mcp-section-head-actions">
+                <button class="btn-primary btn-xs" type="button" data-mcp-open-api-import>导入新规范</button>
+                <button id="mcp-operations-modal-close-btn" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭">关闭</button>
+            </div>
+        </div>
+        <div class="mcp-modal-scrollable-body">
+            <div id="mcp-api-operations" class="mcp-server-list" aria-live="polite"></div>
+        </div>
+    </div>
+</div>
+
+<div id="mcp-catalog-modal" class="modal-overlay hidden mcp-catalog-modal-overlay" aria-hidden="true">
+    <div class="modal mcp-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-catalog-modal-title">
+        <div class="mcp-edit-header">
+            <div>
+                <h3 id="mcp-catalog-modal-title">可用工具目录</h3>
+                <p>按任务搜索已授权工具；只有在任务执行选择后才加载完整参数契约，高危工具受审批策略保护。</p>
+            </div>
+            <div>
+                <button id="mcp-catalog-modal-close-btn" class="btn-danger-outline workspace-modal-close" type="button" aria-label="关闭">关闭</button>
+            </div>
+        </div>
+        <div class="mcp-catalog-modal-search-bar">
+            <div class="mcp-product-search">
+                <input id="mcp-product-tool-search" class="form-input" type="search"
+                    placeholder="按名称或能力搜索，例如：查询订单、生成图表、读取报表" aria-label="搜索可用工具">
+                <button id="mcp-product-tool-search-btn" class="btn-secondary" type="button">搜索</button>
+            </div>
+            <span id="mcp-catalog-modal-count" class="mcp-catalog-modal-count">共 0 个可用工具</span>
+        </div>
+        <div class="mcp-modal-scrollable-body">
+            <div id="mcp-product-catalog" class="mcp-product-grid" aria-live="polite"></div>
         </div>
     </div>
 </div>

@@ -68,13 +68,307 @@
     box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 10px 10px -5px rgba(15, 23, 42, 0.03);
 }
 
-.mcp-product-detail-overlay { z-index: 1910; }
-.mcp-product-detail-modal { width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: hidden; }
-.mcp-product-detail-content { max-height: calc(100vh - 170px); margin: 0; padding: 16px; overflow: auto; background: #0f172a; color: #e2e8f0; font-size: 0.72rem; line-height: 1.5; text-align: left; white-space: pre-wrap; word-break: break-word; }
-.mcp-product-execute-panel { display: grid; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--border); background: #fff; }
-.mcp-product-execute-panel label { font-weight: 700; font-size: 0.78rem; color: var(--text-main); }
-.mcp-product-execute-panel p { margin: 0; color: var(--text-muted); font-size: 0.72rem; line-height: 1.45; }
-.mcp-product-execute-panel .btn-primary { justify-self: end; }
+.mcp-product-detail-overlay {
+    z-index: 1950 !important;
+    padding: clamp(12px, 2vh, 20px) !important;
+    overflow-y: auto;
+}
+.mcp-product-detail-modal {
+    width: min(920px, calc(100vw - 32px));
+    max-height: min(800px, calc(100vh - 96px));
+    height: auto;
+    padding: 0 !important;
+    overflow: hidden;
+    text-align: left !important;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+    margin: auto;
+    flex-shrink: 0;
+}
+.mcp-product-detail-modal .mcp-edit-header {
+    text-align: left !important;
+    flex-shrink: 0;
+    padding: 16px 22px 14px;
+}
+.mcp-product-detail-modal .mcp-edit-header > div:first-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left !important;
+    gap: 4px;
+    min-width: 0;
+}
+.mcp-product-detail-modal .mcp-edit-header h3,
+.mcp-product-detail-modal .mcp-edit-header p {
+    text-align: left !important;
+}
+
+.mcp-product-detail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px 22px 28px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overscroll-behavior: contain;
+}
+
+.mcp-contract-summary-card {
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-side);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mcp-contract-desc-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+}
+
+.mcp-contract-desc-text {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--text-main);
+}
+
+.mcp-contract-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mcp-contract-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.mcp-contract-section-head strong {
+    color: var(--text-main);
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.mcp-contract-params-box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface);
+}
+
+.mcp-params-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.74rem;
+    margin: 0;
+}
+
+.mcp-params-table th {
+    background: var(--bg-side);
+    padding: 8px 12px;
+    font-weight: 600;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
+.mcp-params-table th:nth-child(1) { width: 24%; }
+.mcp-params-table th:nth-child(2) { width: 14%; }
+.mcp-params-table th:nth-child(3) { width: 16%; }
+
+.mcp-params-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text-main);
+}
+
+.mcp-params-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.mcp-param-name {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--bg-side);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.mcp-param-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 0.64rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mcp-param-required {
+    color: var(--danger);
+    background: var(--bg-side);
+    border: 1px solid var(--danger);
+}
+
+.mcp-param-optional {
+    color: var(--text-muted);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+}
+
+.mcp-param-type {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.mcp-param-desc {
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--text-main);
+}
+
+.mcp-param-extra {
+    margin-top: 4px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.mcp-param-extra code {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.68rem;
+    background: var(--bg-side);
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+.mcp-contract-no-params {
+    padding: 20px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    text-align: center;
+}
+
+.mcp-product-execute-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+}
+
+.mcp-execute-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.mcp-execute-head label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--text-main);
+}
+
+.mcp-execute-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mcp-product-execute-panel .form-input-mono {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.76rem;
+    line-height: 1.45;
+    height: auto;
+    min-height: 72px;
+    margin-bottom: 0;
+    resize: vertical;
+    padding: 8px 12px;
+}
+
+.mcp-execute-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.mcp-execute-footer p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.71rem;
+    line-height: 1.45;
+    flex: 1 1 240px;
+}
+
+.mcp-execute-footer .btn-primary {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.mcp-contract-raw-details {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-side);
+    overflow: hidden;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+}
+
+.mcp-contract-raw-details summary {
+    padding: 10px 14px;
+    font-size: 0.73rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.mcp-contract-raw-details summary:hover {
+    background: var(--surface);
+    color: var(--text-main);
+}
+
+.mcp-contract-raw-details .mcp-product-detail-content {
+    max-height: 240px;
+    margin: 0;
+    padding: 12px 14px;
+    overflow: auto;
+    background: var(--bg-side);
+    color: var(--text-main);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-top: 1px solid var(--border);
+}
 
 .mcp-edit-header {
     display: flex;

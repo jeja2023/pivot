@@ -118,6 +118,60 @@ document.getElementById('modal-input-prompt-cancel')?.addEventListener('click', 
     }
 }));
 
+// --- 通用提示与详情弹窗 ---
+let alertResolve = null;
+
+function showAlert(title, message) {
+    const container = document.getElementById('alert-container');
+    const titleEl = document.getElementById('alert-title');
+    const messageEl = document.getElementById('alert-message');
+    if (!container || !titleEl || !messageEl) {
+        return Promise.resolve();
+    }
+    if (alertResolve) {
+        alertResolve();
+        alertResolve = null;
+    }
+    titleEl.innerText = title || '提示';
+    messageEl.innerText = message || '';
+    container.classList.remove('hidden');
+    container.setAttribute('aria-hidden', 'false');
+    const okBtn = document.getElementById('modal-alert-ok');
+    setTimeout(() => okBtn?.focus(), 0);
+    return new Promise(resolve => {
+        alertResolve = resolve;
+    });
+}
+
+function closeAlertModal() {
+    const container = document.getElementById('alert-container');
+    container?.classList.add('hidden');
+    container?.setAttribute('aria-hidden', 'true');
+    const resolve = alertResolve;
+    alertResolve = null;
+    if (resolve) resolve();
+}
+
+Object.assign(window.Pivot.legacy, {
+    showAlert,
+    closeAlertModal
+});
+window.Pivot.registerModule?.('ui.dialogs', {
+    showAlert,
+    closeAlertModal
+});
+
+document.getElementById('modal-alert-ok')?.addEventListener('click', () => closeAlertModal());
+document.getElementById('alert-container')?.addEventListener('click', event => {
+    if (event.target === document.getElementById('alert-container')) closeAlertModal();
+});
+document.getElementById('alert-container')?.addEventListener('keydown', event => {
+    if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault();
+        closeAlertModal();
+    }
+});
+
 async function writeTextToClipboard(text) {
     if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);

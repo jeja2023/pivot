@@ -996,6 +996,94 @@
     background: rgba(15, 23, 42, 0.48);
 }
 
+#knowledge-product-version-modal.modal-overlay,
+.knowledge-product-version-modal-overlay {
+    z-index: 6200 !important;
+}
+
+.modal.knowledge-version-modal {
+    width: min(840px, calc(100vw - 36px));
+    max-height: min(680px, calc(100vh - 36px));
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+}
+
+#knowledge-source-modal.modal-overlay {
+    z-index: 6300 !important;
+}
+
+#knowledge-source-modal .modal.knowledge-source-modal-dialog {
+    width: min(540px, calc(100vw - 32px));
+    text-align: left;
+    padding: 22px;
+}
+
+.knowledge-source-header {
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.knowledge-source-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.knowledge-source-header .model-modal-desc {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.knowledge-source-close-btn {
+    min-width: 60px;
+    height: 32px;
+}
+
+.knowledge-source-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.knowledge-source-label {
+    font-weight: 600;
+    font-size: 0.82rem;
+    margin-bottom: 4px;
+    display: block;
+}
+
+.knowledge-source-config-input {
+    resize: vertical;
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.knowledge-source-config-tip {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-top: 4px;
+    display: block;
+}
+
+.knowledge-source-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.knowledge-source-cancel-btn {
+    min-width: 72px;
+}
+
+.knowledge-source-submit-btn {
+    min-width: 80px;
+}
+
 .modal.knowledge-product-modal {
     display: flex;
     width: min(1240px, calc(100vw - 36px));

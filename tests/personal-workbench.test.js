@@ -64,6 +64,9 @@ test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡�
     assert.match(styles, /\.personal-card-shortcuts\s*\{\s*grid-area:\s*shortcuts;\s*min-height:\s*220px;/);
     assert.match(styles, /\.personal-workbench-scroll\s*\{[\s\S]*?overflow-y:\s*auto;/);
     assert.doesNotMatch(styles, /@media \(min-height: 650px\)[\s\S]*?overflow-y:\s*hidden/);
+    assert.match(styles, /\.personal-command-row svg\s*\{[\s\S]*?display:\s*block;/);
+    assert.match(styles, /\.personal-command-row input\s*\{[\s\S]*?margin:\s*0;/);
+    assert.match(styles, /\.personal-command-row:hover input::placeholder/);
     assert.match(client, /personal-quick-task-form/);
     assert.match(client, /document\.getElementById\('user-input'\)/);
 });

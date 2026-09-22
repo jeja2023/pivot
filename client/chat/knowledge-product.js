@@ -128,8 +128,23 @@
         renderDocuments();
     }
 
+    function sourceKindLabel(kind) {
+        return ({
+            local_dir: '局域网目录',
+            lan_http: '内网 HTTP',
+            database: '只读数据库',
+            internal_api: '内部 API',
+            upload: '本地上传',
+            manual: '知识文章'
+        })[kind] || kind || '-';
+    }
+
     function sourceStatusLabel(source) {
-        const base = `${source.kind || '-'} · ${source.syncMode || 'manual'} · ${source.status || '-'}`;
+        const kind = sourceKindLabel(source.kind);
+        const statusMap = { active: '运行中', paused: '已暂停', error: '异常' };
+        const status = statusMap[source.status] || source.status || '-';
+        const syncMode = source.syncMode === 'scheduled' ? '定时' : '手动';
+        const base = `${kind} · ${syncMode} · ${status}`;
         return source.lastSyncAt ? `${base} · 最近同步 ${window.Pivot.legacy.formatRagDateToCN?.(source.lastSyncAt) || source.lastSyncAt}` : base;
     }
 
@@ -137,7 +152,7 @@
         const target = document.getElementById('knowledge-product-sources');
         if (!target) return;
         if (!productState.sources.length) {
-            PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">暂无局域网数据源。可添加白名单目录、内网 HTTP/API 或只读数据库来源。</div>');
+            PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">暂无局域网数据源。可点击右上角“新建数据源”添加白名单目录、内网 HTTP/API 或只读数据库。</div>');
             return;
         }
         PivotSafeHtml.setHtml(target, productState.sources.map(item => `
@@ -152,8 +167,8 @@
     }
 
     async function loadSources() {
-        const data = await fetchKnowledge('/knowledge/sources');
-        productState.sources = data.data || [];
+        const data = await fetchKnowledge('/knowledge/sources?kind=lan');
+        productState.sources = (data.data || []).filter(s => s.kind !== 'upload' && s.kind !== 'manual');
         renderSources();
     }
 
@@ -351,7 +366,8 @@
         if (modal) return modal;
         modal = document.createElement('div');
         modal.id = 'knowledge-product-version-modal';
-        modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+        modal.className = 'modal-overlay hidden rag-detail-modal-overlay knowledge-product-version-modal-overlay';
+        modal.style.zIndex = '6200';
         modal.dataset.knowledgeModal = '1';
         modal.setAttribute('aria-hidden', 'true');
         PivotSafeHtml.setHtml(modal, `
@@ -366,39 +382,109 @@
         return modal;
     }
 
-    async function createSource() {
-        const name = await window.Pivot.legacy.showInputPrompt?.({ title: '新建局域网数据源', label: '名称', placeholder: '例如：研发共享目录' });
-        if (!name) return;
-        const kind = await window.Pivot.legacy.showInputPrompt?.({ title: '新建局域网数据源', label: '类型', placeholder: 'local_dir / lan_http / internal_api / database' });
-        if (!kind) return;
-        const configText = await window.Pivot.legacy.showInputPrompt?.({ title: '新建局域网数据源', label: '配置 JSON', placeholder: kind === 'database' ? '{"connectionId":"连接 ID","queryTemplateId":1}' : '{"rootPath":"D:/knowledge","recursive":true}', multiline: true });
-        if (!configText) return;
-        let config;
-        try { config = JSON.parse(configText); } catch (_) { return showToast('配置必须是有效 JSON', 'error'); }
-        await fetchKnowledge('/knowledge/sources', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind, config, syncMode: 'manual' })
-        });
-        showToast('数据源已创建。');
-        await loadSources();
+    const SOURCE_CONFIG_TEMPLATES = {
+        local_dir: {
+            template: JSON.stringify({ rootPath: "D:/knowledge", recursive: true }, null, 2),
+            tip: '目录需在环境变量白名单 KNOWLEDGE_LOCAL_SOURCE_ROOTS 内。'
+        },
+        lan_http: {
+            template: JSON.stringify({ indexUrl: "http://192.168.1.100/docs/index.json" }, null, 2),
+            tip: '必须指向内网或局域网 HTTP 端点，不能为公网外部地址。'
+        },
+        database: {
+            template: JSON.stringify({ connectionId: "db-conn-1", queryTemplateId: 1 }, null, 2),
+            tip: '需引用已配置的安全只读数据库连接与查询模板。'
+        },
+        internal_api: {
+            template: JSON.stringify({ endpoint: "http://internal-service/api/docs", method: "GET" }, null, 2),
+            tip: '需为公司内网认证通过的文档接口。'
+        }
+    };
+
+    function openSourceModal() {
+        const modal = document.getElementById('knowledge-source-modal');
+        if (!modal) return;
+        const kindSelect = document.getElementById('knowledge-source-kind');
+        const nameInput = document.getElementById('knowledge-source-name');
+        const configTextarea = document.getElementById('knowledge-source-config');
+        const tipEl = document.getElementById('knowledge-source-config-tip');
+        if (nameInput) nameInput.value = '';
+        if (kindSelect) kindSelect.value = 'local_dir';
+        if (configTextarea) configTextarea.value = SOURCE_CONFIG_TEMPLATES.local_dir.template;
+        if (tipEl) tipEl.textContent = SOURCE_CONFIG_TEMPLATES.local_dir.tip;
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#knowledge-source-name' });
+    }
+
+    function closeSourceModal() {
+        const modal = document.getElementById('knowledge-source-modal');
+        if (modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
+    }
+
+    async function handleSourceSubmit(event) {
+        event?.preventDefault?.();
+        const kind = document.getElementById('knowledge-source-kind')?.value || 'local_dir';
+        const name = document.getElementById('knowledge-source-name')?.value?.trim();
+        if (!name) return showToast('请输入数据源名称', 'error');
+        const configText = document.getElementById('knowledge-source-config')?.value?.trim();
+        let config = {};
+        if (configText) {
+            try {
+                config = JSON.parse(configText);
+            } catch (_) {
+                return showToast('配置参数必须是有效 JSON', 'error');
+            }
+        }
+        try {
+            await fetchKnowledge('/knowledge/sources', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, kind, config, syncMode: 'manual' })
+            });
+            showToast('局域网数据源已创建。');
+            closeSourceModal();
+            await loadSources();
+        } catch (error) {
+            showToast(error.message || '创建数据源失败', 'error');
+        }
     }
 
     async function syncSource(id) {
         showToast('正在同步局域网数据源…', 'info');
-        const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(id)}/sync`, { method: 'POST' });
-        const result = data.result || {};
-        showToast(`同步完成：新增 ${Number(result.created || 0)}，更新 ${Number(result.changed || 0)}，入队 ${Number(result.queued || 0)}。`);
-        await Promise.all([loadSources(), loadJobs()]);
+        try {
+            const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(id)}/sync`, { method: 'POST' });
+            const result = data.result || {};
+            showToast(`同步完成：新增 ${Number(result.created || 0)}，更新 ${Number(result.changed || 0)}，入队 ${Number(result.queued || 0)}。`);
+            await Promise.all([loadSources(), loadJobs()]);
+        } catch (error) {
+            showToast(error.message || '同步失败', 'error');
+        }
     }
 
     async function toggleSource(id, status) {
-        await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(id)}/${status === 'active' ? 'pause' : 'resume'}`, { method: 'POST' });
-        await loadSources();
+        try {
+            const action = status === 'active' ? 'pause' : 'resume';
+            const toastMsg = status === 'active' ? '数据源已暂停同步。' : '数据源已恢复。';
+            await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+            showToast(toastMsg);
+            await loadSources();
+        } catch (error) {
+            showToast(error.message || '更新来源状态失败', 'error');
+        }
     }
 
     async function showSourceRuns(sourceId) {
-        const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(sourceId)}/runs?limit=20`);
-        const copy = (data.data || []).map(item => `${item.status} · ${item.triggerType} · 新增 ${Number(item.summary?.created || 0)} / 更新 ${Number(item.summary?.changed || 0)} / 入队 ${Number(item.summary?.queued || 0)} · ${item.completedAt || item.startedAt || ''}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n') || '暂无同步记录';
-        await window.Pivot.legacy.showAlert?.('数据源同步记录', copy);
+        try {
+            const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(sourceId)}/runs?limit=20`);
+            const runs = data.data || [];
+            if (!runs.length) {
+                await window.Pivot.legacy.showAlert?.('数据源同步记录', '暂无同步记录。可点击“立即同步”发起首次抓取。');
+                return;
+            }
+            const copy = runs.map(item => `${item.status === 'completed' ? '成功' : item.status === 'failed' ? '失败' : item.status} · ${item.triggerType === 'manual' ? '手动触发' : item.triggerType} · 新增 ${Number(item.summary?.created || 0)} / 更新 ${Number(item.summary?.changed || 0)} / 入队 ${Number(item.summary?.queued || 0)} · ${item.completedAt || item.startedAt || ''}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n\n');
+            await window.Pivot.legacy.showAlert?.('数据源同步记录', copy);
+        } catch (error) {
+            showToast(error.message || '加载同步记录失败', 'error');
+        }
     }
 
     async function showVersionDiff(button) {
@@ -541,7 +627,8 @@
         if (versions) return void showDocumentVersions(versions.dataset.knowledgeDocument).catch(error => showToast(error.message || '加载版本失败', 'error'));
         const archive = event.target.closest('[data-knowledge-archive]');
         if (archive) return void fetchKnowledge(`/knowledge/documents/${encodeURIComponent(archive.dataset.knowledgeArchive)}/archive`, { method: 'POST' }).then(loadDocuments).catch(error => showToast(error.message || '归档失败', 'error'));
-        if (event.target.closest('#knowledge-product-new-source')) return void createSource().catch(error => showToast(error.message || '创建数据源失败', 'error'));
+        if (event.target.closest('#knowledge-product-new-source')) return void openSourceModal();
+        if (event.target.closest('#knowledge-source-modal-close') || event.target.closest('#knowledge-source-modal-cancel') || event.target === document.getElementById('knowledge-source-modal')) return void closeSourceModal();
         const sync = event.target.closest('[data-knowledge-sync-source]');
         if (sync) return void syncSource(sync.dataset.knowledgeSyncSource).catch(error => showToast(error.message || '同步失败', 'error'));
         const toggle = event.target.closest('[data-knowledge-toggle-source]');
@@ -568,6 +655,23 @@
         if (event.target.closest('#knowledge-product-eval-gaps')) return void showKnowledgeGaps().catch(error => showToast(error.message || '加载知识缺口失败', 'error'));
         const versionAction = event.target.closest('[data-knowledge-version-action]');
         if (versionAction) return void performVersionAction(versionAction).catch(error => showToast(error.message || '更新版本状态失败', 'error'));
+    });
+
+    document.addEventListener('change', event => {
+        if (event.target?.id === 'knowledge-source-kind') {
+            const kind = event.target.value;
+            const configTextarea = document.getElementById('knowledge-source-config');
+            const tipEl = document.getElementById('knowledge-source-config-tip');
+            const templateInfo = SOURCE_CONFIG_TEMPLATES[kind] || SOURCE_CONFIG_TEMPLATES.local_dir;
+            if (configTextarea) configTextarea.value = templateInfo.template;
+            if (tipEl) tipEl.textContent = templateInfo.tip;
+        }
+    });
+
+    document.addEventListener('submit', event => {
+        if (event.target?.id === 'knowledge-source-form') {
+            return void handleSourceSubmit(event);
+        }
     });
 
     document.addEventListener('keydown', event => {

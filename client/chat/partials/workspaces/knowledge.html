@@ -164,3 +164,40 @@
         </div>
     </section>
 </div>
+
+<div id="knowledge-source-modal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal knowledge-source-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-source-modal-title">
+        <div class="rag-detail-header knowledge-source-header">
+            <div>
+                <h3 id="knowledge-source-modal-title">新建局域网数据源</h3>
+                <p class="model-modal-desc">支持白名单目录、内网 HTTP 清单、只读数据库等受控来源。</p>
+            </div>
+            <button type="button" id="knowledge-source-modal-close" class="btn-danger-outline knowledge-source-close-btn">关闭</button>
+        </div>
+        <form id="knowledge-source-form" class="knowledge-source-form">
+            <div class="form-item">
+                <label for="knowledge-source-kind" class="knowledge-source-label">数据源类型</label>
+                <select id="knowledge-source-kind" class="form-input">
+                    <option value="local_dir">局域网白名单目录 (local_dir)</option>
+                    <option value="lan_http">内网 HTTP 清单 (lan_http)</option>
+                    <option value="database">只读数据库 (database)</option>
+                    <option value="internal_api">内部 API (internal_api)</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label for="knowledge-source-name" class="knowledge-source-label">数据源名称</label>
+                <input type="text" id="knowledge-source-name" class="form-input" placeholder="例如：研发部门共享文档库" required>
+            </div>
+            <div class="form-item">
+                <label for="knowledge-source-config" class="knowledge-source-label">配置参数 (JSON)</label>
+                <textarea id="knowledge-source-config" class="form-input form-input-mono knowledge-source-config-input" rows="6"></textarea>
+                <small id="knowledge-source-config-tip" class="knowledge-source-config-tip">目录需在环境变量白名单 KNOWLEDGE_LOCAL_SOURCE_ROOTS 内。</small>
+            </div>
+            <div class="knowledge-source-actions">
+                <button type="button" id="knowledge-source-modal-cancel" class="btn-secondary knowledge-source-cancel-btn">取消</button>
+                <button type="submit" id="knowledge-source-submit" class="btn-primary knowledge-source-submit-btn">创建数据源</button>
+            </div>
+        </form>
+    </div>
+</div>
+

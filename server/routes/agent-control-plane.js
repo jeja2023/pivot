@@ -402,9 +402,9 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
             return {
                 id: `skill:${release.id}`,
                 kind: 'skill',
-                title: String(manifest.title || release.name || '已发布 Skill').slice(0, 160),
+                title: String(manifest.title || release.name || '已发布技能').slice(0, 160),
                 description: String(manifest.description || '').slice(0, 600),
-                source: release.rollout_scope === 'personal' ? '个人已验证经验' : '组织已发布 Skill',
+                source: release.rollout_scope === 'personal' ? '个人已验证经验' : '组织已发布技能',
                 scope: release.rollout_scope || 'personal',
                 status: release.status,
                 version: release.version || '',

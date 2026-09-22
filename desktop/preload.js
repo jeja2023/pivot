@@ -240,7 +240,7 @@ function installSessionListScrollFallback() {
         const next = inside === true;
         if (pointerInsideSessionList === next) return;
         pointerInsideSessionList = next;
-        scheduleSessionListViewportSync();
+        publishSessionListViewport();
     };
 
     const publishSessionListViewport = () => {
@@ -249,6 +249,7 @@ function installSessionListScrollFallback() {
         const sidebar = list?.closest('.sidebar');
         const app = document.getElementById('app');
         const inactive = !list || !sidebar
+            || sidebar.classList.contains('collapsed')
             || document.body?.classList.contains('auth-active')
             || app?.classList.contains('hidden')
             || hasVisibleModal();
@@ -278,10 +279,44 @@ function installSessionListScrollFallback() {
         window.requestAnimationFrame(publishSessionListViewport);
     };
 
+    const isPointerInsideSidebar = event => {
+        const currentList = document.getElementById('session-list');
+        const currentSidebar = currentList?.closest('.sidebar');
+        if (!currentList || !currentSidebar || currentSidebar.classList.contains('collapsed')) return false;
+        if (document.body?.classList.contains('auth-active')) return false;
+        const currentApp = document.getElementById('app');
+        if (currentApp?.classList.contains('hidden')) return false;
+        if (hasVisibleModal()) return false;
+
+        const target = event?.target;
+        if (isVisibleModalTarget(target)) return false;
+
+        if (target && typeof target.closest === 'function') {
+            if (target.closest('.sidebar')) return true;
+        }
+
+        const rect = currentSidebar.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        const x = Number(event?.clientX);
+        const y = Number(event?.clientY);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        }
+        return false;
+    };
+
     const resolveWheelSessionList = event => {
         const list = document.getElementById('session-list');
         if (!list) return null;
+        const sidebar = list.closest('.sidebar');
+        if (!sidebar || sidebar.classList.contains('collapsed')) return null;
+        const app = document.getElementById('app');
+        if (document.body?.classList.contains('auth-active') || app?.classList.contains('hidden')) return null;
+        if (hasVisibleModal()) return null;
+
         const target = event.target;
+        if (isVisibleModalTarget(target)) return null;
+
         if (target && typeof target.closest === 'function') {
             if (target.closest('#session-list, .sidebar-session-section-label')) return list;
             if (target.closest('.sidebar')) return list;
@@ -290,11 +325,6 @@ function installSessionListScrollFallback() {
         // Chromium/Electron 在无边框窗口、透明层或合成层切换后，偶尔会把
         // wheel.target 报为 BODY/HTML/覆盖层。此时按指针坐标识别侧栏，避免
         // 因错误的命中目标丢掉滚轮；真正可见的弹窗仍保持独立滚动。
-        const app = document.getElementById('app');
-        if (document.body?.classList.contains('auth-active') || app?.classList.contains('hidden')) return null;
-        if (isVisibleModalTarget(target)) return null;
-        const sidebar = list.closest('.sidebar');
-        if (!sidebar) return null;
         const rect = sidebar.getBoundingClientRect();
         const x = Number(event.clientX);
         const y = Number(event.clientY);
@@ -309,7 +339,12 @@ function installSessionListScrollFallback() {
     // 且会话列表有溢出内容时兜底更新 scrollTop，确保任何鼠标与触控板均可顺畅浏览。
     document.addEventListener('wheel', event => {
         const list = resolveWheelSessionList(event);
-        if (scrollSessionList(list, event.deltaY, event.deltaMode)) event.preventDefault();
+        if (list) {
+            setSessionListPointerInside(true);
+            if (scrollSessionList(list, event.deltaY, event.deltaMode)) event.preventDefault();
+        } else {
+            setSessionListPointerInside(false);
+        }
     }, { capture: true, passive: false });
 
     // 主进程在 DOM 事件分发前截获原生 mouseWheel。这里只接收已经完成
@@ -329,11 +364,12 @@ function installSessionListScrollFallback() {
     sidebar?.addEventListener('pointerenter', onEnter, { passive: true });
     sidebar?.addEventListener('pointerleave', onLeave, { passive: true });
     document.addEventListener('pointermove', event => {
-        const currentSidebar = document.getElementById('session-list')?.closest('.sidebar');
-        if (currentSidebar && currentSidebar.contains(event.target)) {
-            setSessionListPointerInside(true);
-        }
+        setSessionListPointerInside(isPointerInsideSidebar(event));
     }, { passive: true });
+    document.addEventListener('pointerdown', event => {
+        setSessionListPointerInside(isPointerInsideSidebar(event));
+    }, { passive: true });
+    document.addEventListener('mouseleave', onLeave, { passive: true });
     window.addEventListener('blur', onLeave, { passive: true });
     if (typeof window.ResizeObserver === 'function') {
         const resizeObserver = new window.ResizeObserver(scheduleSessionListViewportSync);

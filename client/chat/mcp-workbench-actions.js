@@ -62,6 +62,28 @@
                 try { return await workbenchApi().loadMcpToolOperations?.(); }
                 catch (error) { return showToast(error.message || '运行记录加载失败', 'error'); }
             }
+            if (button.id === 'mcp-refresh-connection-accounts' || button.closest?.('#mcp-refresh-connection-accounts')) {
+                event.preventDefault();
+                try {
+                    await workbenchApi().loadMcpConnectionAccounts?.();
+                    return showToast('连接账户已刷新', 'success');
+                } catch (error) {
+                    return showToast(error.message || '连接账户刷新失败', 'error');
+                }
+            }
+            if (button.id === 'mcp-refresh-governance-hub' || button.closest?.('#mcp-refresh-governance-hub')) {
+                event.preventDefault();
+                try {
+                    await Promise.allSettled([
+                        workbenchApi().loadMcpConnectionAccounts?.(),
+                        window.Pivot?.moduleApi?.('mcp.credentials')?.load?.(),
+                        window.Pivot?.moduleApi?.('mcp.apiOperations')?.loadAndRender?.(document.getElementById('mcp-api-operations'))
+                    ]);
+                    return showToast('连接与凭据数据已刷新', 'success');
+                } catch (error) {
+                    return showToast(error.message || '刷新失败', 'error');
+                }
+            }
             if (button.dataset.mcpProductDescribe !== undefined) {
                 event.preventDefault();
                 try { return await workbenchApi().describeMcpProductTool?.(button); }

@@ -159,3 +159,51 @@ test('tool-library 路由安全初始化且不出现 path-to-regexp 异常', () 
     });
     assert.ok(router);
 });
+
+test('工具库目录卡片全面中文化且能力中文检索生效', () => {
+    const { rankTools } = require('../server/services/tool-discovery');
+    const tools = [
+        { name: 'agent.code', title: '代码执行', description: '执行受控脚本', capabilities: ['code.sandbox_eval'] },
+        { name: 'agent.browser', title: '浏览器自动化', description: '访问受控页面', capabilities: ['network.browser_visit'] }
+    ];
+    const ranked = rankTools('沙箱', tools);
+    assert.equal(ranked.length, 1);
+    assert.equal(ranked[0].tool.name, 'agent.code');
+
+    const fs = require('fs');
+    const vm = require('vm');
+    const path = require('path');
+    const code = fs.readFileSync(path.join(__dirname, '../client/chat/mcp-workbench-product.js'), 'utf8');
+    const exposed = {};
+    const sandbox = {
+        escapeHtml: str => String(str || ''),
+        window: {
+            Pivot: {
+                exposeModule: (name, mod) => { exposed[name] = mod; },
+                moduleApi: () => ({})
+            }
+        },
+        document: {
+            getElementById: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => []
+        }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(code, sandbox);
+
+    const mcpProduct = exposed['mcp.product'];
+    assert.ok(mcpProduct);
+    assert.equal(mcpProduct.capabilityBadgeLabel('code.sandbox_eval'), '沙箱执行');
+    assert.equal(mcpProduct.capabilityBadgeLabel('network.browser_visit'), '浏览器访问');
+    assert.equal(mcpProduct.capabilityBadgeLabel('workflow.control'), '工作流控制');
+    assert.equal(mcpProduct.capabilityBadgeLabel('model.invoke'), '模型调用');
+    assert.equal(mcpProduct.capabilityBadgeLabel('agent.execute'), '工具执行');
+    assert.equal(mcpProduct.capabilityBadgeLabel('system.observe'), '系统观察');
+
+    assert.equal(mcpProduct.toolDisplayName('Viz MCP Chart', 'viz.render'), '图表生成 Chart');
+    assert.equal(mcpProduct.serverDisplayName('visualization'), '图表服务');
+    assert.equal(mcpProduct.sourceBadgeLabel('builtin'), '系统工具');
+    assert.equal(mcpProduct.sourceBadgeLabel('mcp'), '工具服务');
+});
+

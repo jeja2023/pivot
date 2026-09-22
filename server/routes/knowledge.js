@@ -481,11 +481,18 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
     }));
 
     router.get('/knowledge/sources', authMiddleware, asyncHandler(async (req, res) => {
+        const isLan = req.query.kind === 'lan';
+        const kindCondition = isLan
+            ? "AND kind IN ('local_dir', 'lan_http', 'internal_api', 'database')"
+            : (req.query.kind ? "AND kind = ?" : "");
+        const params = isAdmin(req.user) ? [] : [req.user.id];
+        if (req.query.kind && !isLan) params.push(req.query.kind);
         const rows = await query(`
             SELECT * FROM knowledge_sources
             WHERE deleted_at IS NULL AND (${isAdmin(req.user) ? '1 = 1' : 'user_id = ?'})
+            ${kindCondition}
             ORDER BY updated_at DESC, id DESC
-        `, isAdmin(req.user) ? [] : [req.user.id]);
+        `, params);
         return res.json({ success: true, data: rows.map(publicSource) });
     }));
 

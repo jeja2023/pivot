@@ -16,8 +16,16 @@ test('personal capability catalog is backed only by authorized releases and gove
     assert.match(route, /listSkillCatalogForUser\(req\.user/);
     assert.match(client, /\/agents\/capabilities\/catalog\?limit=300/);
     assert.match(client, /capabilityKindLabel/);
+    assert.match(client, /skill:\s*'技能'/);
+    assert.match(client, /capabilityScopeLabel/);
+    assert.match(client, /capabilityTitleLabel/);
+    assert.match(client, /global:\s*'全局'/);
+    assert.match(client, /admin:\s*'管理员'/);
+    assert.match(client, /user:\s*'个人'/);
+    assert.match(route, /已发布技能/);
     assert.match(partial, /id="agent-capability-catalog-search"/);
     assert.match(partial, /id="agent-capability-catalog-list"/);
+    assert.match(partial, /已授权的技能、内置工具与受控连接/);
     assert.match(css, /\.agent-capability-catalog-list/);
     assert.match(css, /\.agent-capability-catalog-item/);
 });

@@ -231,6 +231,11 @@ function agentCleanCapabilityName(name) {
     return String(name || '')
         .replace(/^内置\s*/u, '')
         .replace(/^系统内置\s*/u, '')
+        .replace(/^Viz\s*MCP\s*/iu, '图表生成 ')
+        .replace(/^Report\s*MCP\s*/iu, '报告编排 ')
+        .replace(/^Documents\s*MCP\s*/iu, '文档解析 ')
+        .replace(/^Data\s*MCP\s*/iu, '数据处理 ')
+        .replace(/^Format\s*MCP\s*/iu, '格式转换 ')
         .replace(/\s*MCP$/iu, '')
         .trim();
 }
