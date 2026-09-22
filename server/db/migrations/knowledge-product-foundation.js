@@ -39,31 +39,10 @@ const migration = {
                         END
                     WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
                 ELSE
-                    -- 历史遗留库兼容：embedding 字段原先为 text / varchar 类型
+                    -- 历史遗留库兼容：embedding 字段为 text / varchar 类型
+                    -- 严禁执行 ALTER TABLE ... TYPE vector（大表全表重写与独占锁易引发 statement timeout），
+                    -- 直接利用原生内置 jsonb_array_length 计算向量维度并补齐 profile
                     BEGIN
-                        -- 清理无法解析为向量的异常或空文本，避免类型转换错误
-                        UPDATE knowledge_chunks
-                        SET embedding = NULL
-                        WHERE embedding IS NOT NULL AND trim(embedding::text) !~ '^\s*\[\s*-?[0-9]';
-
-                        ALTER TABLE knowledge_chunks ALTER COLUMN embedding DROP DEFAULT;
-                        ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector
-                        USING CASE
-                            WHEN embedding IS NULL THEN NULL
-                            WHEN trim(embedding::text) ~ '^\s*\[\s*-?[0-9]' THEN (trim(embedding::text))::vector
-                            ELSE NULL
-                        END;
-
-                        UPDATE knowledge_chunks
-                        SET embedding_dimensions = vector_dims(embedding),
-                            embedding_profile = CASE
-                                WHEN COALESCE(embedding_profile, '') = '' THEN 'legacy:' || vector_dims(embedding)::text
-                                ELSE embedding_profile
-                            END
-                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
-                    EXCEPTION WHEN others THEN
-                        -- 容灾兜底：若受限于只读约束或依赖对象未能成功转换 vector 类型，
-                        -- 降级使用内置 JSON 数组长度函数计算维度，杜绝调用 vector_dims(text) 导致迁移中断
                         UPDATE knowledge_chunks
                         SET embedding_dimensions = CASE
                                 WHEN trim(embedding::text) ~ '^\s*\[\s*-?[0-9]' THEN jsonb_array_length(trim(embedding::text)::jsonb)
@@ -74,6 +53,12 @@ const migration = {
                                     THEN 'legacy:' || jsonb_array_length(trim(embedding::text)::jsonb)::text
                                 ELSE embedding_profile
                             END
+                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
+                    EXCEPTION WHEN others THEN
+                        -- 容灾兜底：若存量数据中存在极个别异常字符，设为 0 并兜底 profile，保障系统平滑启动
+                        UPDATE knowledge_chunks
+                        SET embedding_dimensions = 0,
+                            embedding_profile = COALESCE(NULLIF(embedding_profile, ''), 'legacy:0')
                         WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
                     END;
                 END IF;

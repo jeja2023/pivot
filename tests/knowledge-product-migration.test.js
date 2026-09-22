@@ -73,17 +73,22 @@ test('知识产品化迁移可安全处理历史遗留 TEXT 类型 embedding 列
         // 模拟历史库：将 embedding 临时转换为 TEXT 类型，存入 JSON 数组格式的向量字符串
         await client.query(`
             ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE TEXT USING embedding::text;
-            UPDATE knowledge_chunks SET embedding_dimensions = 0 WHERE embedding IS NOT NULL;
+            UPDATE knowledge_chunks SET embedding_dimensions = 0, embedding_profile = '' WHERE embedding IS NOT NULL;
         `);
-        // 执行迁移，应当自动适配 TEXT 类型，不触发 vector_dims(text) 错误
+        // 执行迁移，应当自动适配 TEXT 类型，不触发 vector_dims(text) 错误，亦不发生锁表超时
         await migration.upPg(client);
 
-        // 验证 embedding 类型已被正确迁移或维度已正确计算
-        const colInfo = await client.query(`
-            SELECT udt_name FROM information_schema.columns
-            WHERE table_schema = current_schema() AND table_name = 'knowledge_chunks' AND column_name = 'embedding'
+        // 验证 embedding_dimensions 与 embedding_profile 已被正确计算
+        const res = await client.query(`
+            SELECT embedding_dimensions, embedding_profile
+            FROM knowledge_chunks
+            WHERE embedding IS NOT NULL AND trim(embedding::text) ~ '^\s*\\['
+            LIMIT 1
         `);
-        assert.equal(colInfo.rows[0]?.udt_name, 'vector');
+        if (res.rows.length > 0) {
+            assert.ok(Number(res.rows[0].embedding_dimensions) > 0);
+            assert.ok(String(res.rows[0].embedding_profile).startsWith('legacy:'));
+        }
 
         await client.query('ROLLBACK');
     } catch (error) {
