@@ -50,3 +50,24 @@ test('桌面打包只清理显式目标目录并校验独立输出路径', () =>
     assert.match(source, /fs\.rmSync\(electronOutputDir/);
     assert.doesNotMatch(source, /readdirSync\(root[\s\S]*startsWith\('dist-electron'\)/);
 });
+
+test('禁用自动更新的桌面包会移除占位 generic publish 配置', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-desktop-no-update-staging-'));
+    try {
+        ['mysql2', 'mssql', 'mongodb'].forEach(name => writePackage(root, name));
+        const staging = createDesktopBuildStaging(root, {
+            bundledConfig: { mode: 'remote', remoteUrl: 'https://pivot.example.com/', autoUpdate: { enabled: false } },
+            packageJson: {
+                name: 'fixture',
+                build: { files: ['desktop/**'], publish: [{ provider: 'generic', url: 'https://placeholder.invalid/' }] }
+            },
+            runtimeProfile: { config: { mode: 'remote' } },
+            environment: {}
+        });
+        const buildConfig = JSON.parse(fs.readFileSync(staging.builderConfigPath, 'utf8'));
+        assert.equal(Object.hasOwn(buildConfig, 'publish'), false);
+        staging.cleanup();
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});

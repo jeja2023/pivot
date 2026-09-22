@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.161",
+  "version": "0.1.162",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -56,7 +56,10 @@
     "clean:workspace": "node scripts/clean_workspace.js",
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
-    "dist:win": "node scripts/package_desktop.js nsis",
+    "dist:win": "node scripts/package_desktop.js nsis --release",
+    "dist:win:offline": "node scripts/package_desktop.js nsis --offline-release",
+    "dist:win:dev": "node scripts/package_desktop.js nsis --development",
+    "preflight:win-update": "node scripts/preflight_windows_update_release.js",
     "check:desktop:linux": "node scripts/check_desktop_build.js",
     "dist:linux": "node scripts/package_desktop.js deb --x64",
     "dist:linux:x64": "node scripts/package_desktop.js deb --x64",

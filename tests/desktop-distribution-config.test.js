@@ -3,7 +3,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { loadDistributionDesktopConfig } = require('../scripts/desktop_distribution_config');
+const {
+    assertProductionUpdateReleasePolicy,
+    loadDistributionDesktopConfig
+} = require('../scripts/desktop_distribution_config');
 
 test('正式桌面构建必须使用独立分发配置，而开发构建可使用仓库配置', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-distribution-config-'));
@@ -47,4 +50,25 @@ test('正式分发配置支持 HTTP 与 HTTPS 自动更新，并支持从 remote
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
+});
+
+test('Windows 自动更新发布必须显式启用更新并固定允许的更新源 Origin', () => {
+    const config = {
+        mode: 'remote',
+        remoteUrl: 'https://pivot.example.com/',
+        autoUpdate: {
+            enabled: true,
+            path: '/downloads/',
+            allowedOrigins: ['https://pivot.example.com']
+        }
+    };
+    assert.equal(assertProductionUpdateReleasePolicy(config), 'https://pivot.example.com/downloads/');
+    assert.throws(
+        () => assertProductionUpdateReleasePolicy({ ...config, autoUpdate: { ...config.autoUpdate, enabled: false } }),
+        /autoUpdate\.enabled=true/
+    );
+    assert.throws(
+        () => assertProductionUpdateReleasePolicy({ ...config, autoUpdate: { ...config.autoUpdate, allowedOrigins: [] } }),
+        /allowedOrigins/
+    );
 });

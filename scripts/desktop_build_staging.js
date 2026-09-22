@@ -61,6 +61,10 @@ function createDesktopBuildStaging(rootDir, {
                     }
                 ];
             }
+        } else if (manifest.build) {
+            // 开发/离线包不产生也不携带 generic 更新源元数据，避免 package.json
+            // 的占位 publish 配置被误写入 app-update.yml。
+            delete manifest.build.publish;
         }
         // staging 配置不再依赖配置文件所在目录；所有脚本都显式相对工作区解析。
         manifest.build.afterPack = path.join(root, 'scripts', 'after-pack.js');

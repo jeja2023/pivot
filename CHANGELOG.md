@@ -1,3 +1,21 @@
+## [v0.1.162] - 2026-09-22
+
+### Windows 客户端自动更新发布通道固化
+
+- 将 Windows 客户端构建明确分为三个互斥通道：`npm run dist:win` 是唯一可发布自动更新的正式通道；`npm run dist:win:offline` 仅生成已签名离线安装器并强制关闭自动更新；`npm run dist:win:dev` 仅供本地联调并强制关闭自动更新。开发/离线包不会再写入生产 `downloads/latest.yml`，避免自签名包误覆盖正式更新源。
+- 正式自动更新构建现在强制要求独立 `PIVOT_DISTRIBUTION_CONFIG`、`autoUpdate.enabled=true`、更新源 Origin 白名单、非回环更新地址、`PIVOT_DISTRIBUTION_STEALTH_SECRET`、受信任的 `PIVOT_WINDOWS_UPDATE_PUBLISHER` 与实际 Windows 签名凭据。缺少任一项会在构建前或构建时失败，禁止使用 `Pivot Local Dev` 自签名证书发布自动更新。
+- 新增 `npm run preflight:win-update`：在消耗打包资源前检查完整的正式更新发布条件；正式构建后继续校验安装器、`latest.yml`、blockmap、SHA-512、嵌入的 `config.json`、`app-update.yml`、generic feed 与签名发布者是否是同一版本链路。
+- 更新文件采用“安装器与 blockmap 先原子替换、`latest.yml` 最后替换”的发布顺序，避免已安装客户端读到指向尚未完整上传安装器的元数据。
+- 替换 Windows 更新签名读取实现：仅从 PowerShell 输出/临时文件读取签名状态、路径与发布者 Subject，规避证书对象 `ConvertTo-Json` 深度警告污染 stdout 导致 `Unexpected non-whitespace character after JSON` 的误失败；仍强制要求 Authenticode 状态有效且 Subject 与 `app-update.yml` 绑定的发布者匹配。
+
+#### 升级注意事项
+
+- 当前由 `CN=Pivot Local Dev` 签名的安装包不能作为生产自动更新源，也不能直接升级到采用新企业证书的安装包；应通过企业软件分发或受控人工安装先切换到由目标客户端信任的企业签名基线版本。
+- 自动更新仍为“自动检查和下载、用户点击重启后安装”，不会在用户无确认时静默覆盖正在使用的客户端。
+- Linux 安装包尚未纳入与 Windows 等同的受信签名和实机升级验收，不应作为生产自动升级能力承诺。
+
+详细发布记录见 [v0.1.162 发布记录](docs/releases/v0.1.162-Windows客户端自动更新发布通道固化.md)。
+
 ## [v0.1.161] - 2026-09-22
 
 ### 生产知识库权限边界与向量索引修复

@@ -1,5 +1,7 @@
 const { assertAllowedUpdateFeedUrl } = require('./update-policy');
+const { execFile } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const yaml = require('js-yaml');
 
@@ -84,6 +86,101 @@ function normalizePublisherNames(value) {
     return names.map(item => String(item || '').trim()).filter(Boolean);
 }
 
+function escapePowerShellLiteral(value) {
+    return String(value || '').replace(/'/g, "''");
+}
+
+function normalizeWindowsPath(value) {
+    return path.normalize(String(value || '')).toLowerCase();
+}
+
+function windowsPowerShellModulePath() {
+    const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    return [
+        path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+        path.join(programFiles, 'WindowsPowerShell', 'Modules')
+    ].join(path.delimiter);
+}
+
+function publisherMatchesSubject(publisherNames, subject) {
+    const normalizedSubject = String(subject || '').trim().replace(/\s+/g, ' ');
+    const commonName = /(?:^|,\s*)CN=([^,]+)/i.exec(normalizedSubject)?.[1]?.trim() || '';
+    return normalizePublisherNames(publisherNames).some(name => {
+        const expected = String(name || '').trim().replace(/\s+/g, ' ');
+        return expected === normalizedSubject
+            || expected.localeCompare(commonName, undefined, { sensitivity: 'accent' }) === 0;
+    });
+}
+
+function runPowerShellSignatureQuery(filePath, { execFileFn = execFile } = {}) {
+    const escapedPath = escapePowerShellLiteral(filePath);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-update-signature-'));
+    const outputPath = path.join(tempDir, 'signature.json');
+    const escapedOutputPath = escapePowerShellLiteral(outputPath);
+    const powershellPath = path.join(
+        process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows',
+        'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+    );
+    // 仅序列化校验所需标量，并写入临时文件。部分 Windows 镜像会把模块加载
+    // 进度/类型数据告警混入 stdout；若直接 JSON.parse stdout，更新校验会误失败。
+    const script = [
+        "$ErrorActionPreference = 'Stop'",
+        // 某些企业镜像预置了重复 TypeData；Security 模块虽报告导入警告，命令
+        // 仍可加载。显式捕获该告警，避免自动加载在 -NoProfile 下失败。
+        'try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop } catch { }',
+        `$signature = Get-AuthenticodeSignature -LiteralPath '${escapedPath}'`,
+        '$payload = [PSCustomObject]@{ Status = [int]$signature.Status; Path = [string]$signature.Path; Subject = [string]$signature.SignerCertificate.Subject } | ConvertTo-Json -Compress',
+        `[System.IO.File]::WriteAllText('${escapedOutputPath}', $payload, [System.Text.UTF8Encoding]::new($false))`
+    ].join('; ');
+    return new Promise((resolve, reject) => {
+        execFileFn(powershellPath, [
+            '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-Command', script
+        ], {
+            encoding: 'utf8',
+            windowsHide: true,
+            maxBuffer: 64 * 1024,
+            // Electron / Node 进程可能继承 PowerShell 7 或其他工具注入的模块
+            // 路径；Windows PowerShell 5.1 的 Security 模块会因此无法自动加载。
+            env: { ...process.env, PSModulePath: windowsPowerShellModulePath() }
+        }, (error, stdout, stderr) => {
+            try {
+                if (error) throw error;
+                if (stderr && String(stderr).trim()) throw new Error(String(stderr).trim());
+                return resolve(JSON.parse(fs.readFileSync(outputPath, 'utf8').trim()));
+            } catch (parseError) {
+                return reject(new Error(`Windows 更新签名校验结果格式无效：${parseError.message}`));
+            } finally {
+                try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+            }
+        });
+    });
+}
+
+async function verifyWindowsUpdateSignature(publisherNames, artifactPath, options = {}) {
+    const platform = options.platform || process.platform;
+    if (platform !== 'win32') return 'Windows 更新签名校验只能在 Windows 上执行。';
+    if (!artifactPath || !fs.existsSync(artifactPath)) return '待校验的 Windows 更新安装包不存在。';
+    try {
+        const signatureQuery = typeof options.signatureQuery === 'function'
+            ? options.signatureQuery
+            : runPowerShellSignatureQuery;
+        const result = await signatureQuery(artifactPath, options);
+        if (Number(result?.Status) !== 0) {
+            return `更新安装包 Authenticode 签名无效（状态 ${result?.Status ?? 'unknown'}）。`;
+        }
+        if (normalizeWindowsPath(result?.Path) !== normalizeWindowsPath(artifactPath)) {
+            return 'Windows 更新签名校验返回的文件路径与下载文件不一致。';
+        }
+        if (!publisherMatchesSubject(publisherNames, result?.Subject)) {
+            return `更新安装包签名发布者不匹配（实际 ${String(result?.Subject || '未知')}）。`;
+        }
+        return null;
+    } catch (error) {
+        return `无法验证 Windows 更新安装包签名：${serializeError(error)}`;
+    }
+}
+
 function verifyWindowsUpdateSigningConfig(updateConfig = {}, options = {}) {
     const platform = options.platform || process.platform;
     if (platform !== 'win32') return false;
@@ -113,38 +210,10 @@ function hardenWindowsAutoUpdater(autoUpdater, updateConfig = {}, options = {}) 
     if (!autoUpdater || typeof autoUpdater.verifyUpdateCodeSignature !== 'function') {
         throw new Error('当前更新器不支持 Windows 安装包签名校验，已拒绝检查更新。');
     }
-    const originalVerifier = typeof autoUpdater.verifyUpdateCodeSignature === 'function'
-        ? autoUpdater.verifyUpdateCodeSignature.bind(autoUpdater)
-        : null;
-    autoUpdater.verifyUpdateCodeSignature = async (publisherNames, tempUpdateFile) => {
-        if (originalVerifier) {
-            try {
-                const defaultErr = await originalVerifier(publisherNames, tempUpdateFile);
-                if (!defaultErr) return null;
-            } catch (_) {}
-        }
-        // 局域网无公网 CA 证书环境兼容：
-        // 只要安装包签名者的 Subject CN 包含预期的发布者名称（如 Pivot Local Dev），即判定局域网签名有效
-        try {
-            const cp = require('child_process');
-            const safePath = String(tempUpdateFile || '').replace(/'/g, "''");
-            const cmd = `Get-AuthenticodeSignature -LiteralPath '${safePath}' | ConvertTo-Json -Compress`;
-            const out = cp.execSync(`powershell.exe -NoProfile -NonInteractive -InputFormat None -Command "${cmd}"`, {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore'],
-                timeout: 20000
-            });
-            const data = JSON.parse(out || '{}');
-            const subject = String(data?.SignerCertificate?.Subject || '');
-            const expectedPublishers = Array.isArray(publisherNames) ? publisherNames : [publisherNames];
-            const isMatch = expectedPublishers.some(pub => {
-                const clean = String(pub || '').trim();
-                return clean && (subject.includes(`CN=${clean}`) || subject === clean);
-            });
-            if (isMatch) return null;
-        } catch (_) {}
-        return 'Windows 安装包签名发布者校验未通过';
-    };
+    const signatureVerifier = typeof options.verifySignature === 'function'
+        ? options.verifySignature
+        : verifyWindowsUpdateSignature;
+    autoUpdater.verifyUpdateCodeSignature = (publisherNames, artifactPath) => signatureVerifier(publisherNames, artifactPath, options);
     autoUpdater.disableWebInstaller = true;
     autoUpdater.allowDowngrade = false;
     return true;
@@ -353,6 +422,10 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
 
 module.exports = {
     hardenWindowsAutoUpdater,
+    publisherMatchesSubject,
+    runPowerShellSignatureQuery,
     setupAutoUpdater,
-    verifyWindowsUpdateSigningConfig
+    verifyWindowsUpdateSignature,
+    verifyWindowsUpdateSigningConfig,
+    windowsPowerShellModulePath
 };

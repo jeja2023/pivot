@@ -108,15 +108,19 @@ test('desktop development and packaging generate CSS bundles before starting Ele
 
 test('unpacked Windows smoke builds disable auto update unless a signed publisher profile is injected', () => {
     const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
-    assert.match(script, /config\.autoUpdate\.enabled = false/);
-    assert.match(script, /windowsTarget: buildTarget\.platform === 'win32'/);
-    assert.match(script, /windowsUpdatePublisher/);
+    assert.match(script, /windowsReleaseChannel/);
+    assert.match(script, /windowsUpdateRelease/);
+    assert.match(script, /enabled: false/);
+    assert.match(script, /skip Windows update feed publication/);
 });
 
 test('release desktop builds require a dedicated distribution configuration rather than the development config', () => {
     const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package_desktop.js'), 'utf8');
     const distributionConfig = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'desktop_distribution_config.js'), 'utf8');
-    assert.match(script, /requireDistributionConfig: !rawBuilderArgs\.includes\('--dir'\)/);
+    assert.match(script, /requireDistributionConfig: windowsRelease/);
+    assert.match(script, /publishWindowsUpdates: windowsUpdateRelease/);
+    assert.match(script, /verify_desktop_update_release\.js/);
+    assert.match(script, /electronOutputDir,[\s\S]*?win-unpacked.*?resources[\s\S]*?copyReleaseArtifactsToDownloads/);
     assert.match(distributionConfig, /PIVOT_DISTRIBUTION_CONFIG/);
 });
 

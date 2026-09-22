@@ -126,6 +126,10 @@ function autoProvisionDesktopEnvironment(rootDir, env = process.env, options = {
             }
         }
 
+        if (!String(env.PIVOT_DISTRIBUTION_CONFIG || '').trim() && options.requireDistributionConfig === true) {
+            throw new Error('Windows 正式发布必须显式提供 PIVOT_DISTRIBUTION_CONFIG，禁止使用自动生成的开发分发配置。');
+        }
+
         if (!String(env.PIVOT_DISTRIBUTION_CONFIG || '').trim()) {
             const autoConfigPath = ensureDefaultDistributionConfig(root);
             env.PIVOT_DISTRIBUTION_CONFIG = path.relative(root, autoConfigPath);

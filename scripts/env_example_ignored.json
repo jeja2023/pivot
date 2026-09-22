@@ -9,5 +9,6 @@
   "PIVOT_TEST_PG_SYNC": "PostgreSQL 测试同步 facade 开关。",
   "PIVOT_TEST_SYNC_BRIDGE_DIR": "测试同步桥临时目录。",
   "TEST_DATABASE_URL": "测试数据库连接串，仅供自动化测试。",
-  "WAYLAND_DISPLAY": "Linux Wayland 显示服务环境变量，由系统或桌面会话自动注入。"
+  "WAYLAND_DISPLAY": "Linux Wayland 显示服务环境变量，由系统或桌面会话自动注入。",
+  "WINDIR": "Windows 系统目录环境变量，由操作系统自动注入。"
 }

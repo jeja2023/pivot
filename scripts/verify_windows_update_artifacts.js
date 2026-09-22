@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { verifyWindowsUpdateSignature } = require('../desktop/updater');
 
 function normalizePublisherName(value) {
     return String(value || '').trim().replace(/\s+/g, ' ');
@@ -13,9 +14,8 @@ async function verifyWindowsUpdateArtifact(filePath, publisherName, options = {}
     if (!artifactPath || !fs.existsSync(artifactPath)) throw new Error(`Windows 更新签名验收找不到文件：${artifactPath || '<empty>'}`);
     if (!publisher) throw new Error('Windows 更新签名验收缺少预期发布者名称。');
 
-    const verifySignature = options.verifySignature || require('electron-updater/out/windowsExecutableCodeSignatureVerifier').verifySignature;
-    const logger = options.logger || { info() {}, warn() {}, error() {} };
-    const verificationError = await verifySignature([publisher], artifactPath, logger);
+    const verifySignature = options.verifySignature || verifyWindowsUpdateSignature;
+    const verificationError = await verifySignature([publisher], artifactPath, options);
     if (verificationError) {
         throw new Error(`Windows 更新签名验收失败：${path.basename(artifactPath)}\n${verificationError}`);
     }

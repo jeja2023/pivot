@@ -16,7 +16,11 @@ const {
     resolveUpdateUrlFromRemote
 } = require('../desktop/config');
 const { setupAutoUpdater } = require('../desktop/updater');
-const { hardenWindowsAutoUpdater, verifyWindowsUpdateSigningConfig } = require('../desktop/updater');
+const {
+    hardenWindowsAutoUpdater,
+    verifyWindowsUpdateSignature,
+    verifyWindowsUpdateSigningConfig
+} = require('../desktop/updater');
 const { resolveInitializedServer } = require('../desktop/local-server');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
 const { isTrustedExternalNavigation, normalizeTrustedExternalOrigins } = require('../desktop/external-navigation-policy');
@@ -117,22 +121,56 @@ test('desktop update policy supports LAN and intranet HTTP feeds', () => {
     );
 });
 
-test('Windows 更新仅接受与打包 app-update.yml 绑定的签名发布者，并禁止降级和 web installer', () => {
+test('Windows 更新仅接受与打包 app-update.yml 绑定的签名发布者，并禁止降级和 web installer', async () => {
     const root = require('node:fs').mkdtempSync(require('node:os').tmpdir() + path.sep + 'pivot-update-signing-');
     try {
         require('node:fs').writeFileSync(path.join(root, 'app-update.yml'), 'publisherName: Pivot Release Signing\n');
         const config = { publisherName: 'Pivot Release Signing' };
         assert.equal(verifyWindowsUpdateSigningConfig(config, { platform: 'win32', resourcesPath: root }), true);
         const updater = { verifyUpdateCodeSignature() {}, disableWebInstaller: false, allowDowngrade: true };
-        assert.equal(hardenWindowsAutoUpdater(updater, config, { platform: 'win32', resourcesPath: root }), true);
+        let verified = null;
+        assert.equal(hardenWindowsAutoUpdater(updater, config, {
+            platform: 'win32',
+            resourcesPath: root,
+            verifySignature: async (publishers, artifactPath) => {
+                verified = { publishers, artifactPath };
+                return null;
+            }
+        }), true);
         assert.equal(updater.disableWebInstaller, true);
         assert.equal(updater.allowDowngrade, false);
+        assert.equal(await updater.verifyUpdateCodeSignature(['Pivot Release Signing'], 'C:\\updates\\Pivot Setup.exe'), null);
+        assert.deepEqual(verified, { publishers: ['Pivot Release Signing'], artifactPath: 'C:\\updates\\Pivot Setup.exe' });
         assert.throws(
             () => hardenWindowsAutoUpdater(updater, { publisherName: 'Unexpected Publisher' }, { platform: 'win32', resourcesPath: root }),
             /发布者与客户端配置不一致/
         );
     } finally {
         require('node:fs').rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('Windows update signature verifier only accepts a valid signature with a matching publisher', async () => {
+    const artifact = path.join(require('node:fs').mkdtempSync(require('node:os').tmpdir() + path.sep + 'pivot-signature-'), 'Pivot Setup.exe');
+    require('node:fs').writeFileSync(artifact, 'installer');
+    const signatureQuery = async () => ({
+        Status: 0,
+        Path: artifact,
+        Subject: 'CN=Pivot Production Signing, O=Example Corp'
+    });
+    try {
+        assert.equal(await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, { platform: 'win32', signatureQuery }), null);
+        assert.match(
+            await verifyWindowsUpdateSignature(['Other Publisher'], artifact, { platform: 'win32', signatureQuery }),
+            /发布者不匹配/
+        );
+        const invalidStatus = async () => ({ Status: 1, Path: artifact, Subject: 'CN=Pivot Production Signing' });
+        assert.match(
+            await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, { platform: 'win32', signatureQuery: invalidStatus }),
+            /Authenticode 签名无效/
+        );
+    } finally {
+        require('node:fs').rmSync(path.dirname(artifact), { recursive: true, force: true });
     }
 });
 

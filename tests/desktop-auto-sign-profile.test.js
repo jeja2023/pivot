@@ -58,6 +58,26 @@ test('正式 Windows 更新包拒绝开发机自签名自动兜底', () => {
     }
 });
 
+test('Windows 正式发布拒绝自动生成的分发配置', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-production-config-'));
+    try {
+        assert.throws(
+            () => autoProvisionDesktopEnvironment(root, {
+                PIVOT_WINDOWS_UPDATE_PUBLISHER: 'Trusted Publisher',
+                CSC_LINK: 'trusted.pfx'
+            }, {
+                platform: 'win32',
+                isDirBuild: false,
+                requireTrustedSigning: true,
+                requireDistributionConfig: true
+            }),
+            /PIVOT_DISTRIBUTION_CONFIG/
+        );
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('autoProvisionDesktopEnvironment 保留用户显式传入的环境变量', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-preserve-'));
     try {

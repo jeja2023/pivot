@@ -10,9 +10,18 @@ const {
     writePlatformChecksumManifest
 } = require('./desktop-build-support');
 const { createDesktopBuildStaging } = require('./desktop_build_staging');
-const { loadDistributionDesktopConfig } = require('./desktop_distribution_config');
+const {
+    assertProductionUpdateReleasePolicy,
+    loadDistributionDesktopConfig
+} = require('./desktop_distribution_config');
 const { normalizeWindowsUpdatePublisher } = require('./desktop_update_signing');
 const { autoProvisionDesktopEnvironment } = require('./desktop_auto_sign_profile');
+const {
+    isTrustedWindowsRelease,
+    isWindowsUpdateRelease,
+    resolveWindowsReleaseChannel,
+    stripWindowsReleaseChannelArgs
+} = require('./desktop_release_channel');
 
 const root = path.resolve(__dirname, '..');
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
@@ -20,7 +29,9 @@ const electronBuilderInstallDeps = path.join(root, 'node_modules', 'electron-bui
 const projectVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const packageScriptArgs = process.argv.slice(2);
 const outputArg = packageScriptArgs.find(arg => arg.startsWith('--output-dir='));
-const rawBuilderArgs = packageScriptArgs.filter(arg => !arg.startsWith('--output-dir='));
+const windowsReleaseChannel = resolveWindowsReleaseChannel(packageScriptArgs);
+const rawBuilderArgs = stripWindowsReleaseChannelArgs(packageScriptArgs)
+    .filter(arg => !arg.startsWith('--output-dir='));
 
 function resolveElectronOutputDir(value = '') {
     const requested = String(value || 'dist-electron-remote').trim();
@@ -88,13 +99,23 @@ function prepareBundledDesktopConfig(options = {}) {
     const config = distribution.config || JSON.parse(original);
     delete config.stealthSecret;
     config.stealthSecret = secret;
-    if (config.autoUpdate?.enabled === true && options.windowsTarget) {
-        if (options.windowsUpdatePublisher) {
-            config.autoUpdate.publisherName = options.windowsUpdatePublisher;
+    if (options.windowsTarget) {
+        if (options.windowsUpdateRelease === true) {
+            assertProductionUpdateReleasePolicy(config);
+            if (!options.windowsUpdatePublisher || options.windowsUpdatePublisher === 'Pivot Local Dev') {
+                throw new Error('Windows 自动更新发布必须使用受信任签名发布者，不能使用 Pivot Local Dev。');
+            }
+            config.autoUpdate = { ...config.autoUpdate, publisherName: options.windowsUpdatePublisher };
         } else {
-            // --dir 冒烟包没有发布证书，不能在启动时走一条无法签名校验的更新链。
-            config.autoUpdate.enabled = false;
-            delete config.autoUpdate.publisherName;
+            // 开发、冒烟和离线安装包绝不携带可用更新链，防止自签名构建覆盖
+            // 生产 downloads/latest.yml 后被已安装客户端误下载。
+            config.autoUpdate = {
+                ...(config.autoUpdate || {}),
+                enabled: false,
+                url: '',
+                publisherName: '',
+                allowedOrigins: []
+            };
         }
     }
     if (distribution.sourcePath) console.log(`[desktop-config] 使用受控分发配置：${distribution.sourcePath}`);
@@ -119,7 +140,7 @@ function normalizeBuilderArgs(rawArgs) {
     return ['--win', ...rawArgs, ...extraArgs];
 }
 
-function copyReleaseArtifactsToDownloads(rawArgs, buildTarget) {
+function copyReleaseArtifactsToDownloads(rawArgs, buildTarget, { publishWindowsUpdates = false } = {}) {
     if (rawArgs.includes('--dir')) {
         console.log('> skip downloads release artifacts for unpacked build');
         return;
@@ -148,25 +169,43 @@ function copyReleaseArtifactsToDownloads(rawArgs, buildTarget) {
         return;
     }
 
+    if (!publishWindowsUpdates) {
+        console.log('> skip Windows update feed publication for development or offline release build');
+        return;
+    }
+
     const installerName = `Pivot Setup ${projectVersion}.exe`;
     const requiredArtifacts = [installerName, `${installerName}.blockmap`, 'latest.yml'];
     fs.mkdirSync(downloadsDir, { recursive: true });
 
+    const copyAtomically = (source, target) => {
+        const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+        fs.copyFileSync(source, temporary);
+        fs.renameSync(temporary, target);
+    };
     const copied = [];
-    for (const fileName of requiredArtifacts) {
+    // 必须最后替换 latest.yml：客户端只会在元数据出现后下载对应安装器，避免
+    // 网络卷或 bind mount 读到指向尚未就绪文件的发布描述。
+    const artifactFiles = requiredArtifacts.filter(fileName => fileName !== 'latest.yml');
+    for (const fileName of artifactFiles) {
         const source = path.join(electronOutputDir, fileName);
         if (!fs.existsSync(source)) {
             throw new Error(`未生成预期的桌面打包产物: ${source}`);
         }
         const target = path.join(downloadsDir, fileName);
-        fs.copyFileSync(source, target);
+        copyAtomically(source, target);
         copied.push(path.relative(root, target));
     }
 
     const installerSource = path.join(electronOutputDir, installerName);
     const latestInstallerTarget = path.join(downloadsDir, 'Pivot-Setup.exe');
-    fs.copyFileSync(installerSource, latestInstallerTarget);
+    copyAtomically(installerSource, latestInstallerTarget);
     copied.push(path.relative(root, latestInstallerTarget));
+
+    const latestSource = path.join(electronOutputDir, 'latest.yml');
+    const latestTarget = path.join(downloadsDir, 'latest.yml');
+    copyAtomically(latestSource, latestTarget);
+    copied.push(path.relative(root, latestTarget));
 
     const checksumFiles = [...requiredArtifacts, 'Pivot-Setup.exe'];
     const checksums = writePlatformChecksumManifest(downloadsDir, checksumFiles, buildTarget);
@@ -180,23 +219,26 @@ let desktopBuildStaging = null;
 
 try {
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
-    const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
-    const requireTrustedSigning = windowsRelease && Boolean(
-        process.env.PIVOT_REQUIRE_TRUSTED_SIGNING === '1' ||
-        process.env.PIVOT_REQUIRE_TRUSTED_SIGNING === 'true' ||
-        (process.env.CI && process.env.CI !== 'false')
-    );
+    const isWindowsTarget = buildTarget.platform === 'win32';
+    const isDirBuild = rawBuilderArgs.includes('--dir');
+    if (isWindowsTarget && isDirBuild && isTrustedWindowsRelease(windowsReleaseChannel)) {
+        throw new Error('Windows 自动更新或离线正式发布不能使用 --dir；请生成 NSIS 安装器。');
+    }
+    const windowsRelease = isWindowsTarget && !isDirBuild && isTrustedWindowsRelease(windowsReleaseChannel);
+    const windowsUpdateRelease = isWindowsTarget && !isDirBuild && isWindowsUpdateRelease(windowsReleaseChannel);
     autoProvisionDesktopEnvironment(root, process.env, {
         platform: buildTarget.platform,
-        isDirBuild: rawBuilderArgs.includes('--dir'),
-        requireTrustedSigning
+        isDirBuild,
+        requireTrustedSigning: windowsRelease,
+        requireDistributionConfig: windowsRelease
     });
     // Electron 包内不会保留构建脚本；在组装 asar 之前必须显式产出全部聊天样式包。
     run(process.execPath, [path.join('scripts', 'build_chat_css.js')]);
     const windowsUpdatePublisher = normalizeWindowsUpdatePublisher(process.env.PIVOT_WINDOWS_UPDATE_PUBLISHER);
     const bundledDesktopConfig = prepareBundledDesktopConfig({
-        requireDistributionConfig: !rawBuilderArgs.includes('--dir'),
-        windowsTarget: buildTarget.platform === 'win32',
+        requireDistributionConfig: windowsRelease,
+        windowsTarget: isWindowsTarget,
+        windowsUpdateRelease,
         windowsUpdatePublisher
     });
     desktopBuildStaging = createDesktopBuildStaging(root, {
@@ -234,23 +276,20 @@ try {
     if (windowsRelease) {
         const installerPath = path.join(electronOutputDir, `Pivot Setup ${projectVersion}.exe`);
         const appPath = path.join(electronOutputDir, 'win-unpacked', 'Pivot.exe');
-        const { DEFAULT_LOCAL_PUBLISHER } = require('./desktop_auto_sign_profile');
-        const isLocalDevBuild = (windowsUpdatePublisher || '').trim() === DEFAULT_LOCAL_PUBLISHER;
-        if (isLocalDevBuild) {
-            // 本地自签名测试包：自签名证书链未受信任根 CA 认可属正常现象，
-            // 且测试包的 autoUpdate.enabled = false，无需校验更新链签名。
-            // 仅验证产物文件存在且非零大小即可。
-            const fs2 = require('fs');
-            for (const artifactPath of [installerPath, appPath]) {
-                const stat = fs2.statSync(artifactPath);
-                if (!stat.isFile() || stat.size === 0) throw new Error(`本地测试包产物异常（文件不存在或为空）：${artifactPath}`);
-            }
-            console.log(`[desktop-sign] 本地测试包跳过更新链签名校验（自签名证书）：${require('path').basename(installerPath)}`);
-        } else {
-            run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
-        }
+        run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
     }
-    copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget);
+    if (windowsUpdateRelease) {
+        run(process.execPath, [
+            path.join('scripts', 'verify_desktop_update_release.js'),
+            electronOutputDir,
+            path.join(electronOutputDir, 'win-unpacked', 'resources'),
+            projectVersion,
+            windowsUpdatePublisher
+        ]);
+    }
+    // 只有构建输出的签名、元数据、feed 和客户端内嵌配置已完整通过验收后，
+    // 才允许将其发布到生产 downloads/。latest.yml 在复制函数内最后原子替换。
+    copyReleaseArtifactsToDownloads(rawBuilderArgs, buildTarget, { publishWindowsUpdates: windowsUpdateRelease });
 } catch (err) {
     runError = err;
 } finally {
