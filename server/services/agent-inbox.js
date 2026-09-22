@@ -40,7 +40,17 @@ async function listAgentInbox(user, options = {}) {
         query(`SELECT * FROM agent_approval_requests WHERE user_id = ? AND status IN ('pending', 'waiting') ORDER BY created_at ASC LIMIT ?`, [user.id, limit]),
         query(`SELECT id, title, goal, status, error_message, metadata, created_at, updated_at FROM agent_runs WHERE user_id = ? AND deleted_at IS NULL AND status IN ('running', 'queued', 'waiting_approval', 'approval_required', 'failed', 'error', 'completed_with_errors') ORDER BY updated_at DESC LIMIT ?`, [user.id, limit]),
         query(`SELECT * FROM agent_evolution_proposals WHERE user_id = ? AND status IN ('draft', 'pending', 'pending_review', 'sandbox_validate', 'validation_failed', 'versioned_draft') ORDER BY updated_at DESC LIMIT ?`, [user.id, limit])
-        ,query(`SELECT * FROM agent_inbox_events WHERE user_id = ? AND (snoozed_until IS NULL OR snoozed_until <= ?) AND (muted_until IS NULL OR muted_until <= ?) ORDER BY created_at DESC LIMIT ?`, [user.id, getBeijingTimestamp(), getBeijingTimestamp(), limit])
+        // v0.1.163 之前，agent_notifications 会额外镜像为同内容的 inbox event。
+        // 通知本身已是收件箱权威记录；保留旧镜像以便审计，但列表中必须排除，
+        // 否则一次工作流完成会出现两条完全相同的“需要我处理”。
+        ,query(`SELECT * FROM agent_inbox_events
+                WHERE user_id = ?
+                  AND event_key NOT LIKE 'notification:%'
+                  AND event_type NOT LIKE 'notification.%'
+                  AND (snoozed_until IS NULL OR snoozed_until <= ?)
+                  AND (muted_until IS NULL OR muted_until <= ?)
+                ORDER BY created_at DESC
+                LIMIT ?`, [user.id, getBeijingTimestamp(), getBeijingTimestamp(), limit])
     ]);
     notifications.forEach(row => items.push(item('notification', row.id, {
         title: row.title,

@@ -181,7 +181,6 @@ let agentRecoveryTimer = null;
 const createAgentNotification = createAgentNotificationFactory({
     getTimestamp: getBeijingTimestamp,
     publishUserEvent,
-    createInboxEvent: createAgentInboxEvent,
     deliverNotification: async (userId, notification) => {
         const channelRun = notification.run_id
             ? await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [notification.run_id])
