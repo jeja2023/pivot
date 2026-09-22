@@ -12,6 +12,7 @@ const DEFAULT_AUTO_UPDATE = {
     autoDownload: true,
     allowPrerelease: false,
     publisherName: '',
+    allowUntrustedRoot: false,
     installOnQuit: false,
     allowedOrigins: []
 };
@@ -184,6 +185,7 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
         autoDownload: merged.autoDownload !== false,
         allowPrerelease: merged.allowPrerelease === true,
         publisherName: typeof merged.publisherName === 'string' ? merged.publisherName.trim().replace(/\s+/g, ' ').slice(0, 256) : '',
+        allowUntrustedRoot: merged.allowUntrustedRoot === true,
         allowInsecureHttp: merged.allowInsecureHttp === true,
         installOnQuit: merged.installOnQuit !== false,
         allowedOrigins

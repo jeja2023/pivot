@@ -16,6 +16,8 @@
     "checkIntervalMinutes": 30,
     "autoDownload": true,
     "allowPrerelease": false,
+    "publisherName": "Pivot Local Dev",
+    "allowUntrustedRoot": true,
     "allowedOrigins": [
       "http://50.64.150.51:9006"
     ],

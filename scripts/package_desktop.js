@@ -25,6 +25,10 @@ const {
 } = require('./desktop_release_channel');
 
 const root = path.resolve(__dirname, '..');
+const envFile = path.join(root, '.env');
+if (fs.existsSync(envFile)) {
+    dotenv.config({ path: envFile });
+}
 const electronBuilderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
 const electronBuilderInstallDeps = path.join(root, 'node_modules', 'electron-builder', 'install-app-deps.js');
 const projectVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
