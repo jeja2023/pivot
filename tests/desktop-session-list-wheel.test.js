@@ -22,6 +22,7 @@ const viewport = {
 test('桌面侧栏滚轮桥只接管可滚动侧栏中的垂直 mouseWheel', () => {
     assert.equal(shouldForwardSessionListWheel({ type: 'mouseWheel', x: 120, y: 320, deltaY: 120 }, viewport), true);
     assert.equal(shouldForwardSessionListWheel({ type: 'mouseWheel', x: 400, y: 320, deltaY: 120 }, viewport), false);
+    assert.equal(shouldForwardSessionListWheel({ type: 'mouseWheel', x: 289, y: 320, deltaY: 120 }, viewport), false);
     assert.equal(shouldForwardSessionListWheel({ type: 'mouseWheel', x: 120, y: 20, deltaY: 120 }, viewport), false);
     assert.equal(shouldForwardSessionListWheel({ type: 'mouseWheel', x: 120, y: 320, deltaY: 0 }, viewport), false);
 });
@@ -61,6 +62,10 @@ test('主进程与 preload 共同使用原生 mouseWheel 桥，并保留可拖�
     assert.match(preload, /pivot-desktop:session-list-viewport/);
     assert.match(preload, /pivot-desktop:session-list-wheel/);
     assert.match(preload, /pointerInside: pointerInsideSessionList/);
+    assert.match(preload, /const getSessionListScrollRegion = list =>/);
+    assert.match(preload, /const isPointerInsideSessionList = event =>/);
+    assert.match(preload, /target\.closest\('#session-list, \.sidebar-session-section-label'\)/);
+    assert.doesNotMatch(preload, /if \(target\.closest\('\.sidebar'\)\) return true;/);
     assert.match(preload, /pointerenter/);
     assert.match(preload, /pointerleave/);
     assert.match(preload, /scrollbar-width:\s*thin\s*!important/);

@@ -41,12 +41,13 @@ test('共享资源按单位提供只读访问，写操作只允许所有者', ()
     assert.equal(canAccessSharedResource({ ...shared, scope: 'personal' }, sameUnit), false);
 });
 
-test('共享资源可以只授权给指定个人', () => {
+test('知识库文档严格按所有者隔离，普通用户不能因共享范围读取其他用户资源', () => {
     const shared = { user_id: owner.id, scope: 'shared', allowed_units: '', allowed_user_ids: String(otherUnit.id) };
     assert.equal(canAccessSharedResource(shared, otherUnit), true);
     assert.equal(canAccessSharedResource(shared, sameUnit), false);
-    assert.equal(canReadKnowledgeResource(shared, otherUnit), true);
+    assert.equal(canReadKnowledgeResource(shared, otherUnit), false);
     assert.equal(canReadKnowledgeResource(shared, sameUnit), false);
+    assert.equal(canReadKnowledgeResource(shared, admin), true);
 });
 
 test('全局工具资源允许读取但不允许写入', () => {
@@ -55,31 +56,31 @@ test('全局工具资源允许读取但不允许写入', () => {
     assert.equal(canAccessSharedResource(globalResource, otherUnit, true), false);
 });
 
-test('知识库资源判定与 SQL 过滤器绑定用户和单位范围', () => {
+test('知识库资源 SQL 过滤器仅允许所有者，管理员可跨用户读取', () => {
     const collection = { user_id: owner.id, scope: 'shared', allowed_units: '研发部' };
-    assert.equal(canReadKnowledgeResource(collection, sameUnit), true);
+    assert.equal(canReadKnowledgeResource(collection, sameUnit), false);
     assert.equal(canReadKnowledgeResource(collection, otherUnit), false);
 
     const collectionFilter = buildCollectionAccessFilter(sameUnit, 'c');
     assert.match(collectionFilter.sql, /c\.user_id = \?/);
-    assert.match(collectionFilter.sql, /c\.scope = 'shared'/);
-    assert.match(collectionFilter.sql, /c\.allowed_user_ids/);
-    assert.deepEqual(collectionFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id]);
+    assert.doesNotMatch(collectionFilter.sql, /scope = 'shared'/);
+    assert.deepEqual(collectionFilter.params, [sameUnit.id]);
 
     const documentFilter = buildDocumentAccessFilter(sameUnit, 'd', 'c');
-    assert.match(documentFilter.sql, /d\.collection_id IS NOT NULL/);
-    assert.match(documentFilter.sql, /c\.scope = 'shared'/);
-    assert.match(documentFilter.sql, /knowledge_permissions/);
-    assert.deepEqual(documentFilter.params, [sameUnit.id, sameUnit.unit, sameUnit.id, sameUnit.id, sameUnit.unit, sameUnit.role, sameUnit.id, sameUnit.id]);
+    assert.equal(documentFilter.sql, 'd.user_id = ?');
+    assert.deepEqual(documentFilter.params, [sameUnit.id]);
+
+    const adminFilter = buildDocumentAccessFilter(admin, 'd', 'c');
+    assert.equal(adminFilter.sql, '1 = 1');
+    assert.deepEqual(adminFilter.params, []);
 });
 
-test('单位白名单 SQL 使用精确 token 匹配，不把 % 和 _ 当作通配符', () => {
+test('知识库集合筛选不受普通用户单位字段影响', () => {
     const filter = buildCollectionAccessFilter({ id: 20, role: 'user', unit: '%' }, 'c');
-    assert.doesNotMatch(filter.sql, /LIKE/);
-    assert.match(filter.sql, /strpos\(/i);
-    assert.deepEqual(filter.params, [20, '%', 20]);
+    assert.equal(filter.sql, 'c.user_id = ?');
+    assert.deepEqual(filter.params, [20]);
 });
 
-test('Graph-RAG 汇总接受完整用户上下文以应用共享单位范围', async () => {
+test('Graph-RAG 汇总接受完整用户上下文以应用文档所有者隔离', async () => {
     await assert.doesNotReject(() => getGraphSummary(sameUnit));
 });

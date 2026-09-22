@@ -4,7 +4,7 @@ const { getBeijingTimestamp } = require('../time');
 const { buildRagSearchTerms } = require('./rag-tokenizer');
 const { detectDocType } = require('./rag-chunker');
 const knowledgeRepository = require('../repositories/knowledge');
-const { buildDocumentAccessFilter } = require('./knowledge-access');
+const { buildDocumentAccessFilter, normalizeKnowledgeUser } = require('./knowledge-access');
 
 const GRAPH_CONTEXT_ENTITY_LIMIT = 6;
 const GRAPH_CONTEXT_RELATION_LIMIT = 12;
@@ -14,33 +14,20 @@ const GRAPH_EXTRACTION_MODE = 'rule_heuristic';
 const GRAPH_QUALITY_NOTICE = '知识图谱由规则和启发式抽取生成，适合作为 Graph-RAG 辅助线索；生产问答前建议确认低可信关系、合并重复实体，并结合来源文档校验。';
 
 function buildGraphEntityAccessFilter(userOrId, alias = 'e') {
-    const access = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
-    const ownId = access.params[0];
+    const user = normalizeKnowledgeUser(userOrId);
+    if (user.isAdmin) return { sql: '1 = 1', params: [] };
     return {
-        sql: `(${alias}.user_id = ? OR EXISTS (
-            SELECT 1
-            FROM knowledge_entity_mentions m_access
-            JOIN knowledge_docs d_access ON d_access.id = m_access.doc_id
-            LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
-            WHERE m_access.entity_id = ${alias}.id
-              AND ${access.sql}
-        ))`,
-        params: [ownId, ...access.params]
+        sql: `${alias}.user_id = ?`,
+        params: [user.id]
     };
 }
 
 function buildGraphRelationAccessFilter(userOrId, alias = 'r') {
-    const access = buildDocumentAccessFilter(userOrId, 'd_access', 'c_access');
-    const ownId = access.params[0];
+    const user = normalizeKnowledgeUser(userOrId);
+    if (user.isAdmin) return { sql: '1 = 1', params: [] };
     return {
-        sql: `(${alias}.user_id = ? OR EXISTS (
-            SELECT 1
-            FROM knowledge_docs d_access
-            LEFT JOIN knowledge_collections c_access ON c_access.id = d_access.collection_id AND c_access.deleted_at IS NULL
-            WHERE d_access.id = ${alias}.source_doc_id
-              AND ${access.sql}
-        ))`,
-        params: [ownId, ...access.params]
+        sql: `${alias}.user_id = ?`,
+        params: [user.id]
     };
 }
 
@@ -232,12 +219,13 @@ async function clearKnowledgeGraphForDocument(docId) {
 }
 
 async function getGraphSummaryAsync(userOrId, scope = {}) {
+    const normalizedUser = normalizeKnowledgeUser(userOrId);
     const entityAccess = buildGraphEntityAccessFilter(userOrId, 'e');
     const relationAccess = buildGraphRelationAccessFilter(userOrId, 'r');
     const entityScope = buildGraphEntityScopeSql(scope);
     const relationScope = buildGraphRelationRecordScopeSql(scope, 'r');
     const mentionScope = buildGraphMentionScopeSql(scope, 'm');
-    const userId = entityAccess.params[0];
+    const userId = normalizedUser.id;
     const entityRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${entityAccess.sql} AND e.deleted_at IS NULL ${entityScope.sql}`, [...entityAccess.params, ...entityScope.params]);
     const entityCount = Number(entityRow?.count || 0);
 

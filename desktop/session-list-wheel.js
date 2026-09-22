@@ -47,11 +47,11 @@ function shouldForwardSessionListWheel(input = {}, viewport = {}) {
     if (x === null || y === null) return false;
 
     // Windows 显示缩放、无边框窗口与合成层切换时，主进程得到的 wheel 坐标
-    // 可能与渲染进程的 CSS 像素不一致。渲染进程已经通过 pointerenter 明确
-    // 确认光标位于会话列表时，优先信任该状态；坐标命中仍作为无 hover 状态下的兜底。
-    const xPad = 24;
-    const yPad = 24;
-    return state.pointerInside || (x >= Math.max(0, state.left - xPad) && x <= (state.right + xPad) && y >= state.top && y <= (state.bottom + yPad));
+    // 可能与渲染进程的 CSS 像素不一致。渲染进程仅在会话标题或会话列表内
+    // 才会确认 pointerInside，因此可作为坐标失配时的后备信号；普通坐标
+    // 命中不再扩展到右侧聊天区，避免抢走主内容区的滚轮。
+    const coordinatesHit = x >= state.left && x <= state.right && y >= state.top && y <= state.bottom;
+    return state.pointerInside || coordinatesHit;
 }
 
 module.exports = {

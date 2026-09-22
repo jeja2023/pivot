@@ -681,7 +681,14 @@ async function getKnowledgeQualityReport(userId) {
     const overview = (await knowledgeRepository.getDocumentQualityOverview(normalized.id)) || {};
     const problemDocs = (await knowledgeRepository.listProblemDocuments(normalized.id)) || [];
     const feedback = await getRagFeedbackSummary(normalized.id);
-    const graph = getGraphSummary(userId);
+    let graph = { entities: 0, relations: 0 };
+    try {
+        graph = await getGraphSummary(normalized);
+    } catch (error) {
+        // 图谱摘要是质量诊断的补充指标；其历史脏数据或独立查询超时不应让
+        // 文档质量总览整体不可用。
+        logger.warn({ err: error.message, userId: normalized.id }, '知识库质量报告的图谱摘要读取失败，已省略图谱指标');
+    }
     const duplicates = await listDuplicateKnowledgeDocuments(normalized.id);
     const signals = buildKnowledgeQualitySignals({ overview, feedback, graph, duplicates });
     const recommendations = [];

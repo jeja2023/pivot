@@ -1,3 +1,20 @@
+## [v0.1.160] - 2026-09-22
+
+### 知识库严格所有者隔离与桌面滚轮精确命中修复
+
+- 知识库集合、文档及 RAG 资源的访问控制从"共享范围 + 单位白名单"宽泛过滤彻底收紧为严格所有者隔离：`buildCollectionAccessFilter` 与 `buildDocumentAccessFilter` 普通用户均简化为 `user_id = ?`，`canReadKnowledgeResource` 只允许所有者与管理员；管理员保留跨用户只读权限（`1 = 1`），消除普通用户因 `scope = 'shared'` 或单位白名单读取他人资源的安全隐患。
+- 知识库产品文档（`getProductDocumentForUser`）访问判定从"所有者 OR 集合共享 OR `knowledge_permissions` 授权 OR 内容负责人/审核人"收紧为"管理员 OR 所有者"；`listProductDocumentsForUser` 在查询层直接加入 `owner_user_id = ?` 过滤，不再依赖后置循环，查询效率提升。
+- 修复 `getKnowledgeQualityReport` 将裸 `userId` 传入 `getGraphSummary` 导致图谱摘要逻辑异常的缺陷；改为传入完整规范化用户上下文并加入 `try/catch` 容错——图谱摘要失败只记录 `warn` 日志，不影响文档质量总览整体可用性。
+- 知识库工作台辅助统计失败提示细化：分别标注"统计摘要"、"质量诊断"、"图谱摘要"哪个面板不可用，并对每个 rejected promise 输出 `console.warn` 便于排查。
+- 桌面端（Electron）滚轮侦测区域精确化：新增 `getSessionListScrollRegion` 根据 `#session-list` 与 `.sidebar-session-section-label` 的实际矩形合并计算精确接管区域，替代原来取整个 `.sidebar` 边界框的方式；`isPointerInsideSidebar` 重命名为 `isPointerInsideSessionList`，`target.closest` 检测范围从 `.sidebar` 收窄到 `#session-list, .sidebar-session-section-label`；视口同步和滚轮转发均改用新区域计算，根治右侧聊天消息区滚轮在合成层切换期间被误判并重定向至会话列表的问题。
+
+#### 升级注意事项
+
+- 无新增数据库迁移，无新增环境变量；升级前按既有流程备份 PostgreSQL 与上传文件。
+- 本版本收紧知识库共享语义：普通用户不再能通过 `scope = 'shared'` 或单位白名单读取他人资源，如有合法跨用户共享需求须由管理员账号统一管理。
+
+详细发布记录见 [v0.1.160 发布记录](docs/releases/v0.1.160-知识库严格所有者隔离与桌面滚轮精确命中修复.md)。
+
 ## [v0.1.159] - 2026-09-22
 
 ### 工作台交互中文化治理与对话侧栏滚轮隔离

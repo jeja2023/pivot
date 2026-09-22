@@ -7,7 +7,6 @@ const crypto = require('crypto');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin } = require('../permissions');
-const { canReadKnowledgeResource } = require('./knowledge-access');
 const { buildRagSearchContent } = require('./rag-tokenizer');
 const { hydrateManualKnowledgeArticleEmbeddings } = require('./knowledge-manual-embeddings');
 
@@ -578,29 +577,7 @@ async function getProductDocumentForUser(documentId, user) {
         WHERE kd.id = ? AND kd.deleted_at IS NULL
     `, [id]);
     if (!row) return null;
-    if (isAdmin(user) || Number(row.owner_user_id) === Number(user.id)
-        || Number(row.content_owner_user_id) === Number(user.id)
-        || Number(row.verifier_user_id) === Number(user.id)) return row;
-    if (canReadKnowledgeResource({
-        user_id: row.owner_user_id,
-        scope: row.collection_scope,
-        allowed_units: row.collection_allowed_units,
-        allowed_user_ids: row.collection_allowed_user_ids
-    }, user)) return row;
-    const permission = await queryOne(`
-        SELECT 1 AS allowed
-        FROM knowledge_permissions
-        WHERE resource_type = 'document' AND resource_id = ?
-          AND permission IN ('viewer', 'commenter', 'editor', 'manager', 'owner')
-          AND (expires_at IS NULL OR expires_at > ?)
-          AND (
-            (principal_type = 'user' AND principal_id = ?)
-            OR (principal_type = 'unit' AND principal_id = ?)
-            OR (principal_type = 'role' AND principal_id = ?)
-          )
-        LIMIT 1
-    `, [id, getBeijingTimestamp(), String(user.id), String(user.unit || ''), String(user.role || 'user')]);
-    return permission?.allowed ? row : null;
+    return isAdmin(user) || Number(row.owner_user_id) === Number(user.id) ? row : null;
 }
 
 async function getCitationForUser(citationKey, user) {
@@ -905,10 +882,16 @@ async function listProductDocumentsForUser(user, { limit = 100, lifecycleStatus 
     const rows = await query(`
         SELECT id
         FROM knowledge_documents
-        WHERE deleted_at IS NULL ${status ? 'AND lifecycle_status = ?' : ''}
+        WHERE deleted_at IS NULL
+          ${isAdmin(user) ? '' : 'AND owner_user_id = ?'}
+          ${status ? 'AND lifecycle_status = ?' : ''}
         ORDER BY updated_at DESC, id DESC
         LIMIT ?
-    `, status ? [status, safeLimit * 3] : [safeLimit * 3]);
+    `, [
+        ...(isAdmin(user) ? [] : [user.id]),
+        ...(status ? [status] : []),
+        safeLimit
+    ]);
     const visible = [];
     for (const row of rows) {
         const document = await getProductDocumentForUser(row.id, user);

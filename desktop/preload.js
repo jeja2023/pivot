@@ -236,6 +236,28 @@ function installSessionListScrollFallback() {
     let viewportSyncScheduled = false;
     let pointerInsideSessionList = false;
 
+    // 会话标题与列表本身组成唯一允许接管滚轮的区域。不要使用整个
+    // .sidebar：右侧聊天区的原生滚轮有机会在合成层切换期间沿用之前的
+    // pointerInside 状态，进而被主进程错误转发到会话列表。
+    const getSessionListScrollRegion = list => {
+        if (!list) return null;
+        const listRect = list.getBoundingClientRect();
+        if (listRect.width <= 0 || listRect.height <= 0) return null;
+
+        const label = list.closest('.sidebar')?.querySelector('.sidebar-session-section-label');
+        const labelRect = label?.getBoundingClientRect();
+        if (!labelRect || labelRect.width <= 0 || labelRect.height <= 0) return listRect;
+
+        return {
+            left: Math.min(listRect.left, labelRect.left),
+            top: Math.min(listRect.top, labelRect.top),
+            right: Math.max(listRect.right, labelRect.right),
+            bottom: Math.max(listRect.bottom, labelRect.bottom),
+            width: Math.max(listRect.right, labelRect.right) - Math.min(listRect.left, labelRect.left),
+            height: Math.max(listRect.bottom, labelRect.bottom) - Math.min(listRect.top, labelRect.top)
+        };
+    };
+
     const setSessionListPointerInside = inside => {
         const next = inside === true;
         if (pointerInsideSessionList === next) return;
@@ -259,7 +281,12 @@ function installSessionListScrollFallback() {
             return;
         }
 
-        const rect = sidebar.getBoundingClientRect();
+        const rect = getSessionListScrollRegion(list);
+        if (!rect) {
+            pointerInsideSessionList = false;
+            ipcRenderer.send('pivot-desktop:session-list-viewport', { active: false });
+            return;
+        }
         const active = rect.width > 0 && rect.height > 0;
         ipcRenderer.send('pivot-desktop:session-list-viewport', {
             active,
@@ -279,7 +306,7 @@ function installSessionListScrollFallback() {
         window.requestAnimationFrame(publishSessionListViewport);
     };
 
-    const isPointerInsideSidebar = event => {
+    const isPointerInsideSessionList = event => {
         const currentList = document.getElementById('session-list');
         const currentSidebar = currentList?.closest('.sidebar');
         if (!currentList || !currentSidebar || currentSidebar.classList.contains('collapsed')) return false;
@@ -291,11 +318,10 @@ function installSessionListScrollFallback() {
         const target = event?.target;
         if (isVisibleModalTarget(target)) return false;
 
-        if (target && typeof target.closest === 'function') {
-            if (target.closest('.sidebar')) return true;
-        }
+        if (target && typeof target.closest === 'function'
+            && target.closest('#session-list, .sidebar-session-section-label')) return true;
 
-        const rect = currentSidebar.getBoundingClientRect();
+        const rect = getSessionListScrollRegion(currentList);
         if (!rect || rect.width <= 0 || rect.height <= 0) return false;
         const x = Number(event?.clientX);
         const y = Number(event?.clientY);
@@ -319,13 +345,13 @@ function installSessionListScrollFallback() {
 
         if (target && typeof target.closest === 'function') {
             if (target.closest('#session-list, .sidebar-session-section-label')) return list;
-            if (target.closest('.sidebar')) return list;
         }
 
         // Chromium/Electron 在无边框窗口、透明层或合成层切换后，偶尔会把
-        // wheel.target 报为 BODY/HTML/覆盖层。此时按指针坐标识别侧栏，避免
+        // wheel.target 报为 BODY/HTML/覆盖层。此时按指针坐标识别会话滚动区域，避免
         // 因错误的命中目标丢掉滚轮；真正可见的弹窗仍保持独立滚动。
-        const rect = sidebar.getBoundingClientRect();
+        const rect = getSessionListScrollRegion(list);
+        if (!rect) return null;
         const x = Number(event.clientX);
         const y = Number(event.clientY);
         return Number.isFinite(x) && Number.isFinite(y)
@@ -357,17 +383,18 @@ function installSessionListScrollFallback() {
 
     const list = document.getElementById('session-list');
     const sidebar = list?.closest('.sidebar');
+    const sessionLabel = sidebar?.querySelector('.sidebar-session-section-label');
     const onEnter = () => setSessionListPointerInside(true);
     const onLeave = () => setSessionListPointerInside(false);
     list?.addEventListener('pointerenter', onEnter, { passive: true });
     list?.addEventListener('pointerleave', onLeave, { passive: true });
-    sidebar?.addEventListener('pointerenter', onEnter, { passive: true });
-    sidebar?.addEventListener('pointerleave', onLeave, { passive: true });
+    sessionLabel?.addEventListener('pointerenter', onEnter, { passive: true });
+    sessionLabel?.addEventListener('pointerleave', onLeave, { passive: true });
     document.addEventListener('pointermove', event => {
-        setSessionListPointerInside(isPointerInsideSidebar(event));
+        setSessionListPointerInside(isPointerInsideSessionList(event));
     }, { passive: true });
     document.addEventListener('pointerdown', event => {
-        setSessionListPointerInside(isPointerInsideSidebar(event));
+        setSessionListPointerInside(isPointerInsideSessionList(event));
     }, { passive: true });
     document.addEventListener('mouseleave', onLeave, { passive: true });
     window.addEventListener('blur', onLeave, { passive: true });

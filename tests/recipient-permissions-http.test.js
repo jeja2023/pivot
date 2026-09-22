@@ -83,7 +83,7 @@ function cleanupUsers(userIds) {
     sql(`DELETE FROM users WHERE id IN (${placeholders})`).run(...userIds);
 }
 
-test('shared RAG recipients can list resources but cannot mutate documents or collections', async () => {
+test('non-admin RAG users cannot list or mutate another user\'s shared resources', async () => {
     const owner = await createTestUser('rag_owner', 'QA');
     const receiver = await createTestUser('rag_receiver', 'QA');
     const now = getBeijingTimestamp();
@@ -108,14 +108,14 @@ test('shared RAG recipients can list resources but cannot mutate documents or co
             token: receiver.accessToken
         });
         assert.equal(collections.status, 200);
-        assert.equal(collections.body.data.some(item => item.id === collectionId && item.read_only === true), true);
+        assert.equal(collections.body.data.some(item => item.id === collectionId), false);
 
         const docs = await request(appServer, {
             path: '/api/rag/docs',
             token: receiver.accessToken
         });
         assert.equal(docs.status, 200);
-        assert.equal(docs.body.data.some(item => item.id === docId && item.read_only === true), true);
+        assert.equal(docs.body.data.some(item => item.id === docId), false);
 
         const enable = await request(appServer, {
             method: 'PUT',
