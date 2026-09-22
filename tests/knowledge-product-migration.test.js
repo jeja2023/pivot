@@ -63,3 +63,34 @@ test('知识产品化迁移可在缺失所有新表的旧 PostgreSQL 库上安�
         client.release();
     }
 });
+
+test('知识产品化迁移可安全处理历史遗留 TEXT 类型 embedding 列', async () => {
+    const migration = migrations.find(item => item.id === '202609200004_knowledge_product_foundation');
+    assert.ok(migration && typeof migration.upPg === 'function');
+    const client = await getPgPool().connect();
+    try {
+        await client.query('BEGIN');
+        // 模拟历史库：将 embedding 临时转换为 TEXT 类型，存入 JSON 数组格式的向量字符串
+        await client.query(`
+            ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE TEXT USING embedding::text;
+            UPDATE knowledge_chunks SET embedding_dimensions = 0 WHERE embedding IS NOT NULL;
+        `);
+        // 执行迁移，应当自动适配 TEXT 类型，不触发 vector_dims(text) 错误
+        await migration.upPg(client);
+
+        // 验证 embedding 类型已被正确迁移或维度已正确计算
+        const colInfo = await client.query(`
+            SELECT udt_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'knowledge_chunks' AND column_name = 'embedding'
+        `);
+        assert.equal(colInfo.rows[0]?.udt_name, 'vector');
+
+        await client.query('ROLLBACK');
+    } catch (error) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        throw error;
+    } finally {
+        client.release();
+    }
+});
+

@@ -20,13 +20,64 @@ const migration = {
             ALTER TABLE IF EXISTS knowledge_documents ADD COLUMN IF NOT EXISTS content_owner_unit TEXT NOT NULL DEFAULT '';
             ALTER TABLE IF EXISTS knowledge_documents ADD COLUMN IF NOT EXISTS freshness_policy TEXT NOT NULL DEFAULT 'manual';
 
-            UPDATE knowledge_chunks
-            SET embedding_dimensions = vector_dims(embedding),
-                embedding_profile = CASE
-                    WHEN COALESCE(embedding_profile, '') = '' THEN 'legacy:' || vector_dims(embedding)::text
-                    ELSE embedding_profile
-                END
-            WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
+            DO $$
+            DECLARE
+                v_col_type text;
+            BEGIN
+                -- 获取 knowledge_chunks.embedding 的实际数据类型
+                SELECT udt_name INTO v_col_type
+                FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = 'knowledge_chunks'
+                  AND column_name = 'embedding';
+
+                IF v_col_type = 'vector' THEN
+                    UPDATE knowledge_chunks
+                    SET embedding_dimensions = vector_dims(embedding),
+                        embedding_profile = CASE
+                            WHEN COALESCE(embedding_profile, '') = '' THEN 'legacy:' || vector_dims(embedding)::text
+                            ELSE embedding_profile
+                        END
+                    WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
+                ELSE
+                    -- 历史遗留库兼容：embedding 字段原先为 text / varchar 类型
+                    BEGIN
+                        -- 清理无法解析为向量的异常或空文本，避免类型转换错误
+                        UPDATE knowledge_chunks
+                        SET embedding = NULL
+                        WHERE embedding IS NOT NULL AND trim(embedding::text) !~ '^\s*\[\s*-?[0-9]';
+
+                        ALTER TABLE knowledge_chunks ALTER COLUMN embedding DROP DEFAULT;
+                        ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector
+                        USING CASE
+                            WHEN embedding IS NULL THEN NULL
+                            WHEN trim(embedding::text) ~ '^\s*\[\s*-?[0-9]' THEN (trim(embedding::text))::vector
+                            ELSE NULL
+                        END;
+
+                        UPDATE knowledge_chunks
+                        SET embedding_dimensions = vector_dims(embedding),
+                            embedding_profile = CASE
+                                WHEN COALESCE(embedding_profile, '') = '' THEN 'legacy:' || vector_dims(embedding)::text
+                                ELSE embedding_profile
+                            END
+                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
+                    EXCEPTION WHEN others THEN
+                        -- 容灾兜底：若受限于只读约束或依赖对象未能成功转换 vector 类型，
+                        -- 降级使用内置 JSON 数组长度函数计算维度，杜绝调用 vector_dims(text) 导致迁移中断
+                        UPDATE knowledge_chunks
+                        SET embedding_dimensions = CASE
+                                WHEN trim(embedding::text) ~ '^\s*\[\s*-?[0-9]' THEN jsonb_array_length(trim(embedding::text)::jsonb)
+                                ELSE 0
+                            END,
+                            embedding_profile = CASE
+                                WHEN COALESCE(embedding_profile, '') = '' AND trim(embedding::text) ~ '^\s*\[\s*-?[0-9]'
+                                    THEN 'legacy:' || jsonb_array_length(trim(embedding::text)::jsonb)::text
+                                ELSE embedding_profile
+                            END
+                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
+                    END;
+                END IF;
+            END $$;
 
             CREATE TABLE IF NOT EXISTS knowledge_sources (
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -137,6 +137,60 @@ async function normalizeLegacyResidualColumnTypes(client) {
                         THEN trim("active_version"::text)::bigint ELSE NULL END;
                     ALTER TABLE "analysis_datasets" ALTER COLUMN "active_version" SET DEFAULT 1;
                 END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'knowledge_chunks'
+                      AND column_name = 'embedding' AND udt_name <> 'vector'
+                ) THEN
+                    UPDATE "knowledge_chunks"
+                    SET "embedding" = NULL
+                    WHERE "embedding" IS NOT NULL AND trim("embedding"::text) !~ '^\s*\[\s*-?[0-9]';
+
+                    ALTER TABLE "knowledge_chunks" ALTER COLUMN "embedding" DROP DEFAULT;
+                    ALTER TABLE "knowledge_chunks" ALTER COLUMN "embedding" TYPE vector
+                    USING CASE
+                        WHEN "embedding" IS NULL THEN NULL
+                        WHEN trim("embedding"::text) ~ '^\s*\[\s*-?[0-9]' THEN (trim("embedding"::text))::vector
+                        ELSE NULL
+                    END;
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'memories'
+                      AND column_name = 'embedding' AND udt_name <> 'vector'
+                ) THEN
+                    UPDATE "memories"
+                    SET "embedding" = NULL
+                    WHERE "embedding" IS NOT NULL AND trim("embedding"::text) !~ '^\s*\[\s*-?[0-9]';
+
+                    ALTER TABLE "memories" ALTER COLUMN "embedding" DROP DEFAULT;
+                    ALTER TABLE "memories" ALTER COLUMN "embedding" TYPE vector
+                    USING CASE
+                        WHEN "embedding" IS NULL THEN NULL
+                        WHEN trim("embedding"::text) ~ '^\s*\[\s*-?[0-9]' THEN (trim("embedding"::text))::vector
+                        ELSE NULL
+                    END;
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'regulation_articles'
+                      AND column_name = 'embedding' AND udt_name <> 'vector'
+                ) THEN
+                    UPDATE "regulation_articles"
+                    SET "embedding" = NULL
+                    WHERE "embedding" IS NOT NULL AND trim("embedding"::text) !~ '^\s*\[\s*-?[0-9]';
+
+                    ALTER TABLE "regulation_articles" ALTER COLUMN "embedding" DROP DEFAULT;
+                    ALTER TABLE "regulation_articles" ALTER COLUMN "embedding" TYPE vector
+                    USING CASE
+                        WHEN "embedding" IS NULL THEN NULL
+                        WHEN trim("embedding"::text) ~ '^\s*\[\s*-?[0-9]' THEN (trim("embedding"::text))::vector
+                        ELSE NULL
+                    END;
+                END IF;
             END $$;
         `);
     } catch (error) {
