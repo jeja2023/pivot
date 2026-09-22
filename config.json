@@ -1,8 +1,8 @@
 {
   "mode": "remote",
-  "environmentName": "Development machine",
-  "remoteUrl": "http://127.0.0.1:3000/",
-  "partition": "persist:pivot-development",
+  "environmentName": "Pivot Production",
+  "remoteUrl": "http://50.64.150.51:9006/",
+  "partition": "persist:pivot-client",
   "windowTitle": "Pivot 智枢",
   "allowExternalOpen": false,
   "allowedExternalOrigins": [],
@@ -16,7 +16,9 @@
     "checkIntervalMinutes": 30,
     "autoDownload": true,
     "allowPrerelease": false,
-    "allowedOrigins": [],
+    "allowedOrigins": [
+      "http://50.64.150.51:9006"
+    ],
     "installOnQuit": true
   }
 }

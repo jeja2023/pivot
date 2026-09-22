@@ -181,10 +181,15 @@ let desktopBuildStaging = null;
 try {
     const buildTarget = assertBuildHost(resolveBuildTarget(rawBuilderArgs));
     const windowsRelease = buildTarget.platform === 'win32' && !rawBuilderArgs.includes('--dir');
+    const requireTrustedSigning = windowsRelease && Boolean(
+        process.env.PIVOT_REQUIRE_TRUSTED_SIGNING === '1' ||
+        process.env.PIVOT_REQUIRE_TRUSTED_SIGNING === 'true' ||
+        (process.env.CI && process.env.CI !== 'false')
+    );
     autoProvisionDesktopEnvironment(root, process.env, {
         platform: buildTarget.platform,
         isDirBuild: rawBuilderArgs.includes('--dir'),
-        requireTrustedSigning: windowsRelease
+        requireTrustedSigning
     });
     // Electron 包内不会保留构建脚本；在组装 asar 之前必须显式产出全部聊天样式包。
     run(process.execPath, [path.join('scripts', 'build_chat_css.js')]);
