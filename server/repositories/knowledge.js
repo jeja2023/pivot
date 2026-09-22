@@ -167,7 +167,13 @@ async function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null,
     // 精确扫描。profile 也必须相同，不能让同维度的不同 embedding 模型混检。
     const indexedDistanceExpression = supportsHnswExpression
         ? `(c.embedding::vector(${vector.length})) <=> ?::vector`
-        : 'c.embedding <=> ?::vector';
+        : 'c.embedding::vector <=> ?::vector';
+    // 旧库的 embedding 可能仍是 TEXT。CASE 保证只有看起来像 pgvector
+    // 文本格式的值才会被转换，避免单条坏历史数据中断整次检索。
+    const safeEmbeddingDimensions = `CASE
+        WHEN trim(c.embedding::text) ~ '^\\s*\\[\\s*-?[0-9]' THEN vector_dims(c.embedding::vector)
+        ELSE 0
+    END`;
     const selectedColumns = vector
         ? `c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name, (1 - (${indexedDistanceExpression})) AS dense_score`
         : 'c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name';
@@ -195,7 +201,7 @@ async function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null,
     }
 
     const vectorPayload = JSON.stringify(vector);
-    const indexedRows = await query(baseSql(`AND c.embedding_dimensions = ? AND vector_dims(c.embedding) = ?${profile ? ' AND c.embedding_profile = ?' : ''}`), [
+    const indexedRows = await query(baseSql(`AND c.embedding_dimensions = ? AND (${safeEmbeddingDimensions}) = ?${profile ? ' AND c.embedding_profile = ?' : ''}`), [
         vectorPayload,
         ...accessParams,
         vector.length,
@@ -210,7 +216,7 @@ async function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null,
     const remaining = Math.min(Math.max(safeLimit - indexedRows.length, 1), 200);
     // 空 profile 只可能来自升级前的历史投影；它们不会进入 HNSW 主查询，
     // 仅在剩余 200 条的兼容池中参与，避免旧库升级后语义召回完全消失。
-    const legacyRows = await query(baseSql('AND COALESCE(c.embedding_dimensions, 0) = 0 AND vector_dims(c.embedding) = ?'), [
+    const legacyRows = await query(baseSql(`AND COALESCE(c.embedding_dimensions, 0) = 0 AND (${safeEmbeddingDimensions}) = ?`), [
         vectorPayload,
         ...accessParams,
         vector.length,

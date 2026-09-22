@@ -8,12 +8,12 @@
 - Agent 控制台与工具库界面全面中文化与目录弹窗化：Agent 控制台“可用技能与能力目录”支持通过按钮以专属模态弹窗快速打开浏览；卡片上的权限范围（`global`、`admin`、`user`）全面汉化为“全局”、“管理员”、“个人”；运行状态统一显示为“已启用”、“未启用”。
 - 工具库可用工具目录弹窗卡片全面中文化，内置能力（浏览器检查、资料库检索、渐进式发现等）提供友好的中文名称与参数说明；搜索与筛选框文字提示与图标严格居中对齐，搜索按钮水平对齐，输入框支持聚焦后提示语自动隐退。
 - 知识库“知识使用与治理”模态框层级梯度重构：明确主工作台（5600）、版本弹窗（6200）、新建数据源（6300）、全局 Alert 提示（7200）的层级关系，根治版本弹窗被遮挡在下层的问题；在全局实现标准 `window.Pivot.legacy.showAlert`，解决查看记录、差异与评测详情点击无反应的问题；局域网数据源增加分类过滤与标准新建弹窗。
-- 修复历史遗留文本向量列在产品化迁移中触发 `function vector_dims(text) does not exist` 及列类型强转引发 `statement timeout` 的故障：针对旧版本库中 `knowledge_chunks.embedding` 字段为 `text` 类型的情况，在迁移脚本 `202609200004_knowledge_product_foundation` 中引入类型探测，彻底摒弃阻塞启动的大表 `ALTER TABLE` 重写操作，直接利用 PostgreSQL 原生 `jsonb_array_length` 计算维度与补齐 profile，并为历史残缺数据提供安全容灾兜底，保障生产大库平滑极速启动。
+- 修复大规模历史知识库升级时 `202609200004_knowledge_product_foundation` 因全表回填触发 `statement timeout`、使服务无法启动的问题：迁移不再扫描或改写 `knowledge_chunks` 的存量向量；历史 `TEXT`/`vector` 值保持原样并在检索层安全兼容，新写入分块继续维护 `embedding_profile` 与 `embedding_dimensions`。历史大表外键以 `NOT VALID` 挂载，避免启动时全表校验；新写入仍受外键约束。失败迁移会由事务完整回滚，可直接换用新镜像重试，无需删表、修改 `schema_migrations` 或手工执行 `ALTER ... TYPE vector`。
 
 #### 升级注意事项
 
-- 本版本不涉及数据库表结构变更，未引入新增环境变量。
-- 升级部署后请按既有流程重新启动服务并构建静态资源包。
+- 未新增迁移 ID 或环境变量；升级前仍须按既有流程备份 PostgreSQL 与同一恢复点的上传文件。
+- 历史 `knowledge_chunks` 较大时，不要通过调大 `PG_STATEMENT_TIMEOUT_MS` 来规避旧镜像的迁移失败；请重新构建并部署包含本修复的镜像。部署后确认目标迁移已写入 `schema_migrations`，具体检查与后续维护步骤见生产 PostgreSQL 升级说明。
 
 详细发布记录见 [v0.1.159 发布记录](docs/releases/v0.1.159-工作台交互中文化治理与对话侧栏滚轮隔离.md)。
 

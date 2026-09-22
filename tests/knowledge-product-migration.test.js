@@ -1,9 +1,18 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const migrations = require('../server/db/migrations');
 const { getPgPool } = require('../server/db/pg-connection');
+
+test('知识产品化迁移不在启动时扫描历史 knowledge_chunks 大表', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../server/db/migrations/knowledge-product-foundation.js'), 'utf8');
+    assert.doesNotMatch(source, /UPDATE\s+knowledge_chunks/i);
+    assert.match(source, /knowledge_chunks_block_fk[\s\S]*?NOT VALID/i);
+    assert.match(source, /knowledge_docs_source_fk[\s\S]*?NOT VALID/i);
+});
 
 test('知识产品化迁移可在缺失所有新表的旧 PostgreSQL 库上安全补齐', async () => {
     const migration = migrations.find(item => item.id === '202609200004_knowledge_product_foundation');
@@ -75,20 +84,19 @@ test('知识产品化迁移可安全处理历史遗留 TEXT 类型 embedding 列
             ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE TEXT USING embedding::text;
             UPDATE knowledge_chunks SET embedding_dimensions = 0, embedding_profile = '' WHERE embedding IS NOT NULL;
         `);
-        // 执行迁移，应当自动适配 TEXT 类型，不触发 vector_dims(text) 错误，亦不发生锁表超时
+        // 执行迁移不得重写或扫描历史大表；TEXT 向量保留给检索层的有限兼容路径。
         await migration.upPg(client);
 
-        // 验证 embedding_dimensions 与 embedding_profile 已被正确计算
+        // 验证迁移没有试图把 TEXT 列改回 vector，也不要求全表回填元数据。
         const res = await client.query(`
-            SELECT embedding_dimensions, embedding_profile
-            FROM knowledge_chunks
-            WHERE embedding IS NOT NULL AND trim(embedding::text) ~ '^\s*\\['
-            LIMIT 1
+            SELECT data_type, udt_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'knowledge_chunks'
+              AND column_name = 'embedding'
         `);
-        if (res.rows.length > 0) {
-            assert.ok(Number(res.rows[0].embedding_dimensions) > 0);
-            assert.ok(String(res.rows[0].embedding_profile).startsWith('legacy:'));
-        }
+        assert.equal(res.rows.length, 1);
+        assert.equal(res.rows[0].data_type, 'text');
 
         await client.query('ROLLBACK');
     } catch (error) {
@@ -98,4 +106,3 @@ test('知识产品化迁移可安全处理历史遗留 TEXT 类型 embedding 列
         client.release();
     }
 });
-

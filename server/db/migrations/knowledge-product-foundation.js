@@ -20,49 +20,10 @@ const migration = {
             ALTER TABLE IF EXISTS knowledge_documents ADD COLUMN IF NOT EXISTS content_owner_unit TEXT NOT NULL DEFAULT '';
             ALTER TABLE IF EXISTS knowledge_documents ADD COLUMN IF NOT EXISTS freshness_policy TEXT NOT NULL DEFAULT 'manual';
 
-            DO $$
-            DECLARE
-                v_col_type text;
-            BEGIN
-                -- 获取 knowledge_chunks.embedding 的实际数据类型
-                SELECT udt_name INTO v_col_type
-                FROM information_schema.columns
-                WHERE table_schema = current_schema() AND table_name = 'knowledge_chunks'
-                  AND column_name = 'embedding';
-
-                IF v_col_type = 'vector' THEN
-                    UPDATE knowledge_chunks
-                    SET embedding_dimensions = vector_dims(embedding),
-                        embedding_profile = CASE
-                            WHEN COALESCE(embedding_profile, '') = '' THEN 'legacy:' || vector_dims(embedding)::text
-                            ELSE embedding_profile
-                        END
-                    WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
-                ELSE
-                    -- 历史遗留库兼容：embedding 字段为 text / varchar 类型
-                    -- 严禁执行 ALTER TABLE ... TYPE vector（大表全表重写与独占锁易引发 statement timeout），
-                    -- 直接利用原生内置 jsonb_array_length 计算向量维度并补齐 profile
-                    BEGIN
-                        UPDATE knowledge_chunks
-                        SET embedding_dimensions = CASE
-                                WHEN trim(embedding::text) ~ '^\s*\[\s*-?[0-9]' THEN jsonb_array_length(trim(embedding::text)::jsonb)
-                                ELSE 0
-                            END,
-                            embedding_profile = CASE
-                                WHEN COALESCE(embedding_profile, '') = '' AND trim(embedding::text) ~ '^\s*\[\s*-?[0-9]'
-                                    THEN 'legacy:' || jsonb_array_length(trim(embedding::text)::jsonb)::text
-                                ELSE embedding_profile
-                            END
-                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
-                    EXCEPTION WHEN others THEN
-                        -- 容灾兜底：若存量数据中存在极个别异常字符，设为 0 并兜底 profile，保障系统平滑启动
-                        UPDATE knowledge_chunks
-                        SET embedding_dimensions = 0,
-                            embedding_profile = COALESCE(NULLIF(embedding_profile, ''), 'legacy:0')
-                        WHERE embedding IS NOT NULL AND COALESCE(embedding_dimensions, 0) = 0;
-                    END;
-                END IF;
-            END $$;
+            -- 不在启动事务中扫描或回填历史 knowledge_chunks。生产大库中这类
+            -- UPDATE 会超过 statement_timeout，且事务回滚后每次重启都会重做。
+            -- 未回填的历史记录保留 embedding_dimensions=0；检索层会安全地将其
+            -- 作为有限兼容候选处理。新写入的记录始终携带 profile 与维度。
 
             CREATE TABLE IF NOT EXISTS knowledge_sources (
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -313,11 +274,11 @@ const migration = {
             DO $$ BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_chunks_block_fk') THEN
                     ALTER TABLE knowledge_chunks ADD CONSTRAINT knowledge_chunks_block_fk
-                        FOREIGN KEY (block_id) REFERENCES knowledge_blocks(id) ON DELETE SET NULL;
+                        FOREIGN KEY (block_id) REFERENCES knowledge_blocks(id) ON DELETE SET NULL NOT VALID;
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_docs_source_fk') THEN
                     ALTER TABLE knowledge_docs ADD CONSTRAINT knowledge_docs_source_fk
-                        FOREIGN KEY (source_id) REFERENCES knowledge_sources(id) ON DELETE SET NULL;
+                        FOREIGN KEY (source_id) REFERENCES knowledge_sources(id) ON DELETE SET NULL NOT VALID;
                 END IF;
             END $$;
         `);

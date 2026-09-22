@@ -1,7 +1,7 @@
 # Pivot 生产环境 PostgreSQL 主库运行与升级说明
 
 适用版本：v0.1.155 及后续 PostgreSQL-only 主库版本  
-更新日期：2026-09-20（v0.1.157 工具库控制面增量）
+更新日期：2026-09-22（大型历史知识库无阻塞升级说明）
 
 ## 1. 适用范围与不可变边界
 
@@ -69,6 +69,28 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 6. 以管理员账号抽查知识库来源、审核/发布、索引任务和质量评测；以普通账号抽查集合权限、引用预览、原件下载和聊天/Agent 知识检索。
 7. 对桌面端抽查一次已授权目录/数据库、SQLite 文件数据分析导入和本机 SQLite 只读工具，确认主库收敛未破坏本机能力。
+
+### 4.1 大型历史 `knowledge_chunks` 的升级处理
+
+`202609200004_knowledge_product_foundation` 已调整为启动时只进行必要的结构补齐，不再把历史 `knowledge_chunks` 的向量列转换、也不在启动事务中回填全部向量元数据。原因是存量分块多时，列重写、全表 `UPDATE` 或外键全表校验会超过普通 SQL 的 `PG_STATEMENT_TIMEOUT_MS`，导致迁移事务回滚并使容器反复启动失败。
+
+- 历史 `embedding` 为 `TEXT` 或 `vector` 均可保留；检索层会安全兼容可解析的历史向量文本。未携带 profile/维度的历史分块只走有限兼容候选，新写入或重建后的分块可正常进入按 profile/维度划分的 HNSW 索引。
+- `knowledge_chunks_block_fk` 与 `knowledge_docs_source_fk` 使用 `NOT VALID` 方式挂载：历史记录不会在启动时被全表验证，后续新增或更新仍会受外键约束。
+- 遇到 `57014: canceling statement due to statement timeout` 时，先确认部署的镜像包含该修复；**不要**通过增加 `PG_STATEMENT_TIMEOUT_MS`、删除历史分块、修改 `schema_migrations` 或手工把列改为 `vector` 来恢复启动。
+- 失败迁移在一个事务内执行，回滚后不会写入迁移记录。换用修复后的镜像启动成功后，使用下列只读 SQL 确认结果：
+
+  ```sql
+  SELECT id, description, applied_at
+  FROM schema_migrations
+  WHERE id = '202609200004_knowledge_product_foundation';
+  ```
+
+- 如需验证历史外键数据，可由 DBA 在服务恢复且完成数据核验后、另行安排维护窗口执行；不要把验证放在应用启动路径：
+
+  ```sql
+  ALTER TABLE knowledge_chunks VALIDATE CONSTRAINT knowledge_chunks_block_fk;
+  ALTER TABLE knowledge_docs VALIDATE CONSTRAINT knowledge_docs_source_fk;
+  ```
 
 ## 5. v0.1.155 知识库检查清单
 
