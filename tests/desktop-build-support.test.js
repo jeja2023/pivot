@@ -111,7 +111,7 @@ test('unpacked Windows smoke builds disable auto update unless a signed publishe
     assert.match(script, /windowsReleaseChannel/);
     assert.match(script, /windowsUpdateRelease/);
     assert.match(script, /enabled: false/);
-    assert.match(script, /skip Windows update feed publication/);
+    assert.match(script, /跳过开发或离线构建的 Windows 自动更新源发布/);
 });
 
 test('release desktop builds require a dedicated distribution configuration rather than the development config', () => {
