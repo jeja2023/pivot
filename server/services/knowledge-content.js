@@ -577,7 +577,23 @@ async function getProductDocumentForUser(documentId, user) {
         WHERE kd.id = ? AND kd.deleted_at IS NULL
     `, [id]);
     if (!row) return null;
-    return isAdmin(user) || Number(row.owner_user_id) === Number(user.id) ? row : null;
+    if (isAdmin(user) || Number(row.owner_user_id) === Number(user.id)
+        || Number(row.content_owner_user_id) === Number(user.id)
+        || Number(row.verifier_user_id) === Number(user.id)) return row;
+    const permission = await queryOne(`
+        SELECT 1 AS allowed
+        FROM knowledge_permissions
+        WHERE resource_type = 'document' AND resource_id = ?
+          AND permission IN ('viewer', 'commenter', 'editor', 'manager', 'owner')
+          AND (expires_at IS NULL OR expires_at > ?)
+          AND (
+            (principal_type = 'user' AND principal_id = ?)
+            OR (principal_type = 'unit' AND principal_id = ?)
+            OR (principal_type = 'role' AND principal_id = ?)
+          )
+        LIMIT 1
+    `, [id, getBeijingTimestamp(), String(user.id), String(user.unit || ''), String(user.role || 'user')]);
+    return permission?.allowed ? row : null;
 }
 
 async function getCitationForUser(citationKey, user) {
