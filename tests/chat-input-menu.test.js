@@ -53,6 +53,21 @@ test('聊天请求工具白名单会去重、清理空值并限制数量', () =>
     assert.equal(state.mcpToolAllowlist.length, 300);
 });
 
+test('工具授权续跑指定原始消息，并继续使用经过清理的路由覆盖', () => {
+    const state = buildChatRequestState({
+        body: {
+            content: '',
+            regenerate: true,
+            regenerateMessageId: '42',
+            routeOverrides: { tools: ['mcp.7.db.run_readonly_query', 'invalid.tool'] }
+        },
+        user: { id: 7 }
+    });
+    assert.equal(state.regenerate, true);
+    assert.equal(state.regenerateMessageId, 42);
+    assert.deepEqual(state.routeOverrides.tools, ['mcp.7.db.run_readonly_query']);
+});
+
 test('聊天输入框默认使用智能自适应，并将资料和工具控制收敛到 @ 与授权流程', () => {
     const shell = fs.readFileSync(path.resolve(__dirname, '../client/chat/partials/workspaces/chat-shell.html'), 'utf8');
     const workspace = fs.readFileSync(path.resolve(__dirname, '../client/chat/app-workspaces.js'), 'utf8');
@@ -70,7 +85,8 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.doesNotMatch(shell, /id="chat-rag-subpanel"/);
     assert.doesNotMatch(shell, /id="chat-mcp-subpanel"/);
     assert.match(autoRoute, /const getAutoRouteEnabled = \(\) => true/);
-    assert.match(autoRoute, /本会话已允许使用工具/);
+    assert.match(autoRoute, /const enableMcpFromRouteTrace = async/);
+    assert.doesNotMatch(autoRoute, /请重新发送这条消息/);
     assert.match(autoRoute, /MENTION_PAGE_SIZE = 6/);
     assert.match(autoRoute, /chat-route-mention-scope/);
     assert.match(autoRoute, /chat-route-mention-result-summary/);

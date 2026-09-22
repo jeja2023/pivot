@@ -467,6 +467,15 @@ test('公告路由定位有效通知并持久化用户确认状态', async () =>
     const ackRoute = router.stack.find(layer => layer.route?.path === '/announcements/:id/ack' && layer.route?.methods?.post);
     const dismissRoute = router.stack.find(layer => layer.route?.path === '/announcements/:id/dismiss' && layer.route?.methods?.post);
     const deleteRoute = router.stack.find(layer => layer.route?.path === '/admin/announcements/:id' && layer.route?.methods?.delete);
+    const adminListRoute = router.stack.find(layer => layer.route?.path === '/admin/announcements' && layer.route?.methods?.get);
+
+    const adminListRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(adminListRoute.route.stack.map(s => s.handle), {
+        query: {},
+        testUser: adminUser
+    }, adminListRes);
+    assert.deepEqual(adminListRes.body.permissions.allowedTargetTypes, ['all', 'unit', 'role', 'users']);
+    assert.equal(adminListRes.body.permissions.defaultTargetType, 'all');
 
     const createRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
     await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
@@ -583,6 +592,37 @@ test('公告路由定位有效通知并持久化用户确认状态', async () =>
         params: { id: String(publicCreateRes.body.id) },
         testUser: superAdmin
     }, stateRes);
+
+    const flexibleScopeAnnouncementIds = [];
+    for (const [targetType, targetValue] of [
+        ['all', ''],
+        ['unit', 'Finance'],
+        ['role', 'user'],
+        ['users', String(otherUser.id)]
+    ]) {
+        const flexibleScopeRes = { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+        await runExpressHandlers(createRoute.route.stack.map(s => s.handle), {
+            body: {
+                title: `普通管理员 ${targetType} 范围公告`,
+                content: '用于验证普通管理员可以选择完整投放范围。',
+                targetType,
+                targetValue,
+                status: 'draft'
+            },
+            testUser: adminUser
+        }, flexibleScopeRes);
+        assert.equal(flexibleScopeRes.statusCode, 200);
+        flexibleScopeAnnouncementIds.push(flexibleScopeRes.body.id);
+        const announcement = db.prepare('SELECT target_type, target_value FROM announcements WHERE id = ?').get(flexibleScopeRes.body.id);
+        assert.equal(announcement.target_type, targetType);
+        assert.equal(announcement.target_value, targetValue);
+    }
+    for (const announcementId of flexibleScopeAnnouncementIds) {
+        await runExpressHandlers(deleteRoute.route.stack.map(s => s.handle), {
+            params: { id: String(announcementId) },
+            testUser: adminUser
+        }, stateRes);
+    }
     const deleted = db.prepare('SELECT deleted_at FROM announcements WHERE id = ?').get(createRes.body.id);
     assert.ok(deleted.deleted_at);
     assert.ok(logs.some(log => log.action === '创建公告'));

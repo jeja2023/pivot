@@ -88,9 +88,8 @@
             targetTypeSelect.disabled = allowedTargetTypes.length === 1;
         }
         if (targetValueInput) {
-            const lockedUnitTarget = !permissions.canManageAll && (targetTypeSelect?.value || '') === 'unit';
             targetValueInput.disabled = targetTypeSelect?.value === 'all';
-            targetValueInput.readOnly = lockedUnitTarget;
+            targetValueInput.readOnly = false;
             if (!row.id && permissions.defaultTargetValue && targetTypeSelect?.value === permissions.defaultTargetType) {
                 targetValueInput.value = permissions.defaultTargetValue;
             }

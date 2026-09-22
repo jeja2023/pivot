@@ -30,6 +30,9 @@ function buildChatRequestState(req) {
         content,
         displayContent,
         regenerate: normalizeRegenerateFlag(body.regenerate),
+        regenerateMessageId: Number.isSafeInteger(Number(body.regenerateMessageId)) && Number(body.regenerateMessageId) > 0
+            ? Number(body.regenerateMessageId)
+            : null,
         chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
         autoRouteEnabled,
         routeOverrides: normalizeRouteOverrides(body.routeOverrides),

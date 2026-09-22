@@ -320,7 +320,6 @@
         const confirmed = await (window.Pivot.legacy.ensureChatMcpConsent?.() || Promise.resolve(true));
         if (!confirmed) return false;
         try { localStorage.setItem('pivot_chat_mcp_enabled', 'true'); } catch (_) {}
-        showToast('本会话已允许使用工具。请重新发送这条消息，系统会自动选择所需工具。', 'info');
         return true;
     };
     const setAvailable = value => { available = value !== false; syncState(); };

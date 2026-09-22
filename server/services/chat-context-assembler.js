@@ -58,6 +58,13 @@ function appendMcpContextForFinalAnswer(history = [], mcpContext = '') {
     ];
 }
 
+function requiresMcpConsentForRoute(routePlan = {}, mcpEnabled = false) {
+    if (mcpEnabled || routePlan?.shadow === true) return false;
+    const candidates = Array.isArray(routePlan?.tools?.candidates) ? routePlan.tools.candidates : [];
+    return routePlan?.tools?.action === 'candidate_only'
+        && candidates.some(candidate => String(candidate?.fullName || candidate?.name || '').trim());
+}
+
 function filterChatMcpToolsByAllowlist(tools = [], allowlist = null) {
     if (!Array.isArray(allowlist)) return tools;
     const allowed = new Set(allowlist.map(value => String(value || '').trim()).filter(Boolean));
@@ -120,6 +127,16 @@ async function assembleChatContext({
             timing: { routeDurationMs: 0, embeddingDurationMs: 0 }
         };
         writeSse(JSON.stringify(buildRouteSseEvent(routePlan)));
+    }
+
+    // 工具库首次使用需要用户在前端确认。此处在完成路由后立即暂停，
+    // 既不会调用模型生成一份无工具的重复回答，也不会执行任何工具。
+    // 前端确认后以 regenerate 复用已保存的同一条用户消息继续本轮请求。
+    if (requiresMcpConsentForRoute(routePlan, mcpEnabled)) {
+        return {
+            routePlan,
+            mcpConsentRequired: true
+        };
     }
 
     const effectiveRagScope = routePlan.execution?.rag?.scope || ragScope || {};
@@ -351,5 +368,6 @@ module.exports = {
     appendMcpContextForFinalAnswer,
     assembleChatContext,
     buildMcpFollowupInstruction,
-    filterChatMcpToolsByAllowlist
+    filterChatMcpToolsByAllowlist,
+    requiresMcpConsentForRoute
 };

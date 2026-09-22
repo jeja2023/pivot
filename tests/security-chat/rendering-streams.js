@@ -399,25 +399,26 @@ test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息',
     assert.match(graphCss, /overflow:\s*auto/);
 });
 
-test('聊天回答会保留知识库和工具库状态提示', () => {
+test('聊天回答仅在需要时显示紧凑的知识库和工具库凭据', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine.js'), 'utf8');
     const streaming = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8');
     const markdownCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'markdown.css'), 'utf8');
 
     assert.match(engine, /renderAssistantTraceEvent\?\.\(aiMsgEl, data\)/);
     assert.match(streaming, /function renderAssistantTraceEvent/);
-    assert.match(streaming, /回答依据和能力状态/);
-    assert.match(streaming, /可引用文档/);
-    assert.match(streaming, /sources\.join/);
-    assert.match(streaming, /知识库未命中足够相关内容，本轮会按普通聊天继续/);
+    assert.match(streaming, /回答参考与执行记录/);
+    assert.match(streaming, /label: '参考资料'/);
+    assert.match(streaming, /label: '已使用工具'/);
+    assert.doesNotMatch(streaming, /本轮按普通对话处理/);
+    assert.match(streaming, /授权后会自动继续，无需重新发送/);
+    assert.match(streaming, /chat-answer-evidence/);
     assert.match(streaming, /getAssistantTraceMcpActionName/);
-    assert.match(streaming, /正在使用工具库/);
-    assert.match(streaming, /工具库工具已完成/);
-    assert.match(streaming, /补充资料/);
+    assert.match(streaming, /type === 'mcp_consent_required'/);
     assert.match(streaming, /检查工具库/);
     assert.match(streaming, /openKnowledgeWorkbench/);
     assert.match(streaming, /openMcpWorkbench/);
     assert.match(markdownCss, /\.chat-answer-trace/);
+    assert.match(markdownCss, /\.chat-answer-evidence/);
     assert.match(markdownCss, /\.chat-answer-trace-item\.is-ready/);
     assert.match(markdownCss, /\.chat-answer-trace-item\.is-warning/);
     assert.match(markdownCss, /\.chat-answer-trace-action/);
@@ -466,6 +467,22 @@ test('聊天渲染器接受宽松的 ECharts 风格图表规格', () => {
 
     const html = sandbox.renderMarkdown(`\`\`\`chart\n${JSON.stringify(looseChartSpec, null, 2)}\n\`\`\``);
     assert.match(html, /pivot-echart-block/);
+});
+
+test('公文落款的右对齐缩进不会被渲染为代码块', () => {
+    const sandbox = createChatRenderSandbox();
+    const html = sandbox.renderMarkdown([
+        '以上请示，妥否，请批示。',
+        '',
+        '                    某某市发展和改革局',
+        '                      2026年9月20日'
+    ].join('\n'));
+    assert.match(html, /official-document-signoff/);
+    assert.match(html, /某某市发展和改革局<br>2026年9月20日/);
+    assert.doesNotMatch(html, /code-block/);
+
+    const codeHtml = sandbox.renderMarkdown('    const issuedAt = "2026年9月20日";');
+    assert.match(codeHtml, /code-block/);
 });
 
 test('聊天渲染器在流式输出期间延迟渲染 Pivot 图表块', () => {
@@ -538,12 +555,22 @@ test('聊天图表 SSE 捕获会存储图表事件且不向前转发', () => {
     assert.deepEqual(forwarded, [notice]);
 });
 
-test('chat send does not auto-enable MCP when toolbox is off', () => {
+test('chat send waits for explicit MCP authorization and can continue the original message', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine.js'), 'utf8');
+    const streaming = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8');
 
     assert.doesNotMatch(engine, /shouldAutoEnableMcpForPrompt\s*\(/);
     assert.doesNotMatch(engine, /activateChatMcpToggle\s*\(/);
     assert.match(engine, /if \(mcpEnabled\) \{\s*mcpConfirmed = mcpConfirmed \|\| await window\.Pivot\.legacy\.ensureChatMcpConsent\(\);/s);
+    assert.match(engine, /continueMcpRouteMessage/);
+    assert.match(engine, /regenerateMessageId/);
+    assert.match(engine, /resumeRouteOverrides/);
+    assert.match(streaming, /type === 'mcp_consent_required'/);
+    assert.match(streaming, /允许并继续/);
+    assert.match(streaming, /直接回答/);
+    assert.match(streaming, /excludeTools: true/);
+    assert.match(streaming, /chatTraceRouteOverrides/);
+    assert.match(streaming, /continueMcpRouteMessage\?\.\(messageId,/);
 });
 
 test('viewing a session record scrolls to bottom', () => {

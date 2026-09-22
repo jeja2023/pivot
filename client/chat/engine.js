@@ -382,8 +382,15 @@ window.Pivot.exposeModule('chat.agentBridge', {
 ]);
 
 // 发新消息时先中断上一次生成再串行接管，而不是拦下用户输入
-window.Pivot.legacy.sendMessage = async function(isRegenerate = false) {
-    const shouldRegenerate = isRegenerate === true;
+window.Pivot.legacy.sendMessage = async function(options = false) {
+    const sendOptions = options && typeof options === 'object'
+        ? options
+        : { regenerate: options === true };
+    const shouldRegenerate = sendOptions.regenerate === true;
+    const regenerateMessageId = Number.parseInt(sendOptions.regenerateMessageId, 10) || null;
+    const resumeRouteOverrides = sendOptions.routeOverrides && typeof sendOptions.routeOverrides === 'object'
+        ? sendOptions.routeOverrides
+        : null;
     // 空输入不应打断正在进行的生成
     if (!shouldRegenerate && !hasSendableChatPayload()) return;
 
@@ -400,7 +407,7 @@ window.Pivot.legacy.sendMessage = async function(isRegenerate = false) {
     // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
     if (sendEpoch !== latestSendEpoch) return;
 
-    const task = runSendMessage(shouldRegenerate);
+    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides);
     activeSendTask = task;
     try {
         await task;
@@ -409,7 +416,7 @@ window.Pivot.legacy.sendMessage = async function(isRegenerate = false) {
     }
 };
 
-async function runSendMessage(shouldRegenerate) {
+async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null) {
     const userVisibleContent = document.getElementById('user-input').value.trim();
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
@@ -472,7 +479,7 @@ async function runSendMessage(shouldRegenerate) {
     const ragPreference = chatInputMenu?.getRagPreference?.() || 'auto';
     const manualRagEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     const ragEnabled = ragPreference === 'disabled' ? false : (ragPreference === 'enabled' || autoRouteEnabled || manualRagEnabled);
-    const routeOverrides = chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {};
+    const routeOverrides = resumeRouteOverrides || chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {};
     const chatMode = chatInputMenu?.getChatMode?.() || 'normal';
     // 旧版本保存的工具启用状态不应绕过本会话的明确授权。
     // 只有用户在路由提示中完成授权后，才将 MCP 候选交给执行链路。
@@ -523,6 +530,7 @@ async function runSendMessage(shouldRegenerate) {
     let hasServerFinalStats = false;
     let agentRunId = '';
     let agentTrackingPromise = null;
+    let awaitingMcpConsent = false;
 
     const getElapsedSeconds = () => Math.max((Date.now() - startTime) / 1000, 0.001);
     const getAverageTps = (count = tokenCount) => {
@@ -547,6 +555,7 @@ async function runSendMessage(shouldRegenerate) {
                 modelId,
                 chatMode,
                 regenerate: shouldRegenerate,
+                regenerateMessageId,
                 autoRouteEnabled,
                 ragPreference,
                 routeOverrides,
@@ -767,7 +776,13 @@ async function runSendMessage(shouldRegenerate) {
                 }
                 if (data.type === 'route') {
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    if (data.status !== 'shadow') updateAssistantStatus('正在分析本轮关联的知识库和工具');
+                    if (data.status !== 'shadow') updateAssistantStatus('正在准备回答');
+                    return;
+                }
+                if (data.type === 'mcp_consent_required') {
+                    awaitingMcpConsent = true;
+                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
+                    updateAssistantStatus(data.message || '需要允许工具库后继续处理当前消息。');
                     return;
                 }
                 if (data.type === 'mcp') {
@@ -782,13 +797,10 @@ async function runSendMessage(shouldRegenerate) {
                 if (data.type === 'rag') {
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
                     updateAssistantStatus(data.message || '正在检索知识库');
-                    if (data.status === 'hit') showToast(data.message || '知识库已命中', 'info');
-                    if (data.status === 'empty') showToast(data.message || '知识库未命中', 'warning');
                     return;
                 }
                 if (data.type === 'memory') {
-                    window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    updateAssistantStatus(data.message || '正在检索个人记忆');
+                    // 个人记忆属于后台增强，不占用回答的可视状态。
                     return;
                 }
                 if (data.type === 'context_budget') {
@@ -875,6 +887,7 @@ async function runSendMessage(shouldRegenerate) {
             if (isViewingRequestSession()) updateAssistantStatus('连续 Agent 已接管，任务会在后台继续执行');
             return;
         }
+        if (awaitingMcpConsent) return;
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
         if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
 
@@ -944,3 +957,15 @@ async function runSendMessage(shouldRegenerate) {
         currentAbortController = null;
     }
 }
+
+async function continueMcpRouteMessage(messageId, routeOverrides = null) {
+    const regenerateMessageId = Number.parseInt(messageId, 10);
+    if (!Number.isSafeInteger(regenerateMessageId) || regenerateMessageId <= 0) {
+        throw new Error('未找到可继续处理的原始消息。');
+    }
+    return window.Pivot.legacy.sendMessage({ regenerate: true, regenerateMessageId, routeOverrides });
+}
+
+window.Pivot.exposeModule('chat.execution', {
+    continueMcpRouteMessage
+});

@@ -365,13 +365,51 @@ function getDisplayContent(role, content) {
     return role === 'user' ? stripInternalReferenceText(content) : content;
 }
 
+const OFFICIAL_SIGNOFF_DATE_PATTERN = /^(?:\d{4}年\d{1,2}月\d{1,2}日|\d{4}[./-]\d{1,2}[./-]\d{1,2}|[〇○一二三四五六七八九十零]{2,}年[〇○一二三四五六七八九十零]{1,3}月[〇○一二三四五六七八九十零]{1,3}日)$/;
+const OFFICIAL_SIGNOFF_ORGANIZATION_PATTERN = /(?:委员会|人民政府|政府|办公室|办事处|集团|总公司|分公司|公司|中心|机关|党支部|工会|局|厅|部|司|处|所|院|校|学校|大学|银行|协会|商会|支队|总队|大队|中队|站|厂|社|村|镇|街道)$/;
+const MARKDOWN_INDENTED_CODE_PATTERN = /^(?: {4,}| {0,3}\t)/;
+
+function isOfficialSignoffOrganization(value) {
+    const text = String(value || '').replace(/\s+/g, '');
+    return text.length >= 2
+        && text.length <= 80
+        && /[\u4e00-\u9fff]/.test(text)
+        && OFFICIAL_SIGNOFF_ORGANIZATION_PATTERN.test(text);
+}
+
+function normalizeIndentedOfficialSignoff(content) {
+    const lines = String(content || '').split(/\r?\n/);
+    let dateIndex = lines.length - 1;
+    while (dateIndex >= 0 && !lines[dateIndex].trim()) dateIndex -= 1;
+    if (dateIndex < 1) return String(content || '');
+
+    const organizationIndex = dateIndex - 1;
+    const organization = lines[organizationIndex].trim();
+    const date = lines[dateIndex].trim();
+    if (!OFFICIAL_SIGNOFF_DATE_PATTERN.test(date)
+        || !isOfficialSignoffOrganization(organization)
+        || !MARKDOWN_INDENTED_CODE_PATTERN.test(lines[organizationIndex])
+        || !MARKDOWN_INDENTED_CODE_PATTERN.test(lines[dateIndex])) {
+        return String(content || '');
+    }
+
+    // 公文落款常用空格右对齐；该缩进在 Markdown 中会被解析为代码块。
+    // 仅转换消息末尾的“落款单位 + 成文日期”组合，避免影响真实代码。
+    lines.splice(
+        organizationIndex,
+        2,
+        `<div class="official-document-signoff">${escapeCodeHtml(organization)}<br>${escapeCodeHtml(date)}</div>`
+    );
+    return lines.join('\n');
+}
+
 function normalizeMarkdown(content) {
     const normalizeText = (text) => text
         .replace(/\*\*[ \t]+([^*\n][^*\n]*?)[ \t]+\*\*/g, (_, inner) => `**${inner.trim()}**`)
         .replace(/__[ \t]+([^_\n][^_\n]*?)[ \t]+__/g, (_, inner) => `__${inner.trim()}__`);
     return String(content).split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map((block) => {
         if (/^(```|~~~)/.test(block)) return block;
-        return block.split(/(`[^`\n]*`)/g).map((part) => {
+        return normalizeIndentedOfficialSignoff(block).split(/(`[^`\n]*`)/g).map((part) => {
             if (/^`[^`\n]*`$/.test(part)) return part;
             return normalizeText(part);
         }).join('');

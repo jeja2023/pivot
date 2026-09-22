@@ -40,14 +40,6 @@ function getAssistantTraceMcpActionName(event = {}) {
     return toolName.split('.').pop().replace(/[_-]+/g, ' ').trim();
 }
 
-function formatAssistantTraceMcpActionText(event = {}, prefix = '正在使用工具库', fallback = '') {
-    const serverName = String(event?.serverName || '').trim();
-    const actionName = getAssistantTraceMcpActionName(event);
-    const target = [serverName, actionName].filter(Boolean).join(' / ');
-    if (target) return `${prefix}：${target}。`;
-    return String(event?.message || '').trim() || fallback;
-}
-
 function getAssistantTraceEventCopy(event = {}) {
     const type = String(event?.type || '').toLowerCase();
     const status = String(event?.status || '').toLowerCase();
@@ -62,55 +54,40 @@ function getAssistantTraceEventCopy(event = {}) {
         : [];
 
     if (type === 'route') {
-        const rag = event?.rag && typeof event.rag === 'object' ? event.rag : {};
-        const tools = event?.tools && typeof event.tools === 'object' ? event.tools : {};
-        const collections = Array.isArray(rag.collections) ? rag.collections : [];
-        const candidates = Array.isArray(tools.candidates) ? tools.candidates : [];
-        const ragNames = collections.map(item => String(item?.name || '').trim()).filter(Boolean).slice(0, 2);
-        const toolNames = candidates.map(item => String(item?.name || '').trim()).filter(Boolean).slice(0, 3);
-        const parts = [];
-        if (rag.action === 'retrieve' && ragNames.length) parts.push(`知识库：${ragNames.join('、')}`);
-        else if (rag.action === 'skip' && rag.reasonCode === 'conversation_only') parts.push('知识库：本轮无需检索');
-        if (tools.action === 'propose' && toolNames.length) parts.push(`工具候选：${toolNames.join('、')}`);
-        else if (tools.action === 'candidate_only') parts.push('工具：需要先开启并授权工具库');
-        if (!parts.length) parts.push('本轮按普通对话处理');
-        const shadow = status === 'shadow' || event.shadow === true;
+        // 路由计划会在每一轮都产生；普通对话、知识库命中和工具候选的结果
+        // 分别由正文、知识库/工具事件或专门的授权事件呈现，路由本身不显示。
+        return null;
+    }
+
+    if (type === 'mcp_consent_required') {
         return {
-            tool: 'route',
-            label: shadow ? '智能路由（评估）' : '智能路由',
-            tone: tools.action === 'candidate_only' ? 'warning' : shadow ? 'quiet' : 'info',
-            text: shadow ? `仅评估，未改变本轮执行：${parts.join('；')}` : parts.join('；'),
-            action: tools.action === 'candidate_only' ? 'mcp-consent' : '',
-            actionLabel: tools.action === 'candidate_only' ? '启用工具库' : ''
+            tool: 'mcp-consent',
+            label: '工具辅助',
+            tone: 'info',
+            text: '可以使用工具处理这条请求。授权后会自动继续，无需重新发送。',
+            action: 'mcp-consent',
+            actionLabel: '允许并继续',
+            secondaryAction: 'mcp-skip',
+            secondaryActionLabel: '直接回答',
+            userMessageId: Number(event?.userMessageId || 0) || null,
+            routeOverrides: event?.routeOverrides && typeof event.routeOverrides === 'object'
+                ? event.routeOverrides
+                : null
         };
     }
 
     if (type === 'rag') {
         if (status === 'hit') {
-            const sourceText = sources.length ? `：${sources.join('、')}` : '';
-            const scopeText = event?.scoped ? '当前范围' : '';
-            const hitPrefix = scopeText ? `知识库${scopeText}已命中` : '知识库已命中';
-            const citationText = citationCount > sourceCount ? `（${citationCount} 条引用片段）` : '';
             return {
                 tool: 'rag',
-                label: '知识库',
+                placement: 'footer',
+                label: '参考资料',
                 tone: 'ready',
-                text: sourceCount > 0
-                    ? `${hitPrefix} ${sourceCount} 份可引用文档${sourceText}${citationText}，会优先依据知识库回答。`
-                    : `${hitPrefix}相关文档，会优先依据知识库回答。`,
+                text: sourceCount > 0 ? `${sourceCount} 份资料` : `${citationCount || 1} 条资料`,
                 citationKeys
             };
         }
-        if (status === 'empty') {
-            return {
-                tool: 'rag',
-                label: '知识库',
-                tone: 'warning',
-                text: '知识库未命中足够相关内容，本轮会按普通聊天继续。',
-                action: 'rag',
-                actionLabel: '补充资料'
-            };
-        }
+        if (status === 'empty') return null;
         return {
             tool: 'rag',
             label: '知识库',
@@ -122,47 +99,19 @@ function getAssistantTraceEventCopy(event = {}) {
     }
 
     if (type === 'memory') {
-        const reasons = Array.isArray(event?.usageReasons) ? event.usageReasons.slice(0, 3) : [];
-        const reasonText = reasons.map(item => String(item?.reason || '').trim()).filter(Boolean).join('；');
-        if (status === 'hit') {
-            return {
-                tool: 'memory',
-                label: '个人记忆',
-                tone: 'ready',
-                text: `${message || `已检索到 ${Number(event?.memoryCount || reasons.length || 0)} 条相关长期记忆。`}${reasonText ? ` 使用原因：${reasonText}` : ''}`,
-                action: 'memory',
-                actionLabel: '查看记忆'
-            };
-        }
-        return { tool: 'memory', label: '个人记忆', tone: status === 'error' ? 'error' : 'info', text: message || '正在检索个人记忆。' };
+        // 长期记忆是后台上下文增强，不占用每轮回答的可视区域。
+        return null;
     }
 
     if (type === 'mcp') {
-        if (status === 'planning') {
-            return {
-                tool: 'mcp',
-                label: '工具库',
-                tone: 'info',
-                text: '正在判断本轮是否需要使用工具库。'
-            };
-        }
-        if (status === 'running') {
-            return {
-                tool: 'mcp',
-                label: '工具库',
-                tone: 'info',
-                text: formatAssistantTraceMcpActionText(event, '正在使用工具库', '正在使用工具库工具。')
-            };
-        }
+        if (status === 'planning' || status === 'running') return null;
         if (status === 'done') {
-            const doneText = getAssistantTraceMcpActionName(event)
-                ? formatAssistantTraceMcpActionText(event, '工具库工具已完成').replace(/。$/u, '，正在整理结果回答你。')
-                : (message || '工具库工具已完成，正在整理结果回答你。');
             return {
                 tool: 'mcp',
-                label: '工具库',
+                placement: 'footer',
+                label: '已使用工具',
                 tone: 'ready',
-                text: doneText
+                text: getAssistantTraceMcpActionName(event) || '工具库'
             };
         }
         if (status === 'empty') {
@@ -207,19 +156,21 @@ function getAssistantTraceEventCopy(event = {}) {
     return null;
 }
 
-function ensureAssistantTracePanel(messageContent) {
+function ensureAssistantTracePanel(messageContent, placement = 'prompt') {
     if (!messageContent) return null;
-    let panel = messageContent.querySelector('.chat-answer-trace');
+    const footer = placement === 'footer';
+    let panel = messageContent.querySelector(footer ? '.chat-answer-evidence' : '.chat-answer-trace');
     if (panel) return panel;
 
     panel = document.createElement('div');
-    panel.className = 'chat-answer-trace hidden';
-    panel.setAttribute('aria-label', '回答依据和能力状态');
+    panel.className = `${footer ? 'chat-answer-evidence' : 'chat-answer-trace'} hidden`;
+    panel.setAttribute('aria-label', footer ? '回答参考与执行记录' : '需要处理的操作');
     panel.setAttribute('aria-live', 'polite');
 
     const textBody = messageContent.querySelector('.text-body');
     if (textBody) {
-        messageContent.insertBefore(panel, textBody);
+        if (footer) textBody.insertAdjacentElement('afterend', panel);
+        else messageContent.insertBefore(panel, textBody);
     } else {
         messageContent.prepend(panel);
     }
@@ -230,7 +181,7 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
     const copy = getAssistantTraceEventCopy(event);
     if (!copy) return;
 
-    const panel = ensureAssistantTracePanel(messageContent);
+    const panel = ensureAssistantTracePanel(messageContent, copy.placement);
     if (!panel) return;
 
     let item = panel.querySelector(`[data-chat-trace-item="${copy.tool}"]`);
@@ -268,7 +219,19 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
         button.type = 'button';
         button.className = 'chat-answer-trace-action';
         button.dataset.chatTraceAction = copy.action;
+        if (copy.userMessageId) button.dataset.chatTraceUserMessageId = String(copy.userMessageId);
+        if (copy.routeOverrides) button.dataset.chatTraceRouteOverrides = JSON.stringify(copy.routeOverrides);
         button.textContent = copy.actionLabel;
+        item.appendChild(button);
+    }
+    if (copy.secondaryAction && copy.secondaryActionLabel) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chat-answer-trace-action';
+        button.dataset.chatTraceAction = copy.secondaryAction;
+        if (copy.userMessageId) button.dataset.chatTraceUserMessageId = String(copy.userMessageId);
+        if (copy.routeOverrides) button.dataset.chatTraceRouteOverrides = JSON.stringify(copy.routeOverrides);
+        button.textContent = copy.secondaryActionLabel;
         item.appendChild(button);
     }
 
@@ -288,7 +251,7 @@ function renderAssistantRouteMetadata(messageContent, routeMetadata = null) {
     });
 }
 
-function handleAssistantTraceAction(event) {
+async function handleAssistantTraceAction(event) {
     const citation = event.target.closest?.('[data-chat-trace-citation]');
     if (citation) {
         event.preventDefault();
@@ -311,7 +274,54 @@ function handleAssistantTraceAction(event) {
     const target = action.dataset.chatTraceAction;
     if (target === 'rag') window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
     if (target === 'mcp') window.Pivot.moduleApi('workspaces.navigation').openMcpWorkbench?.();
-    if (target === 'mcp-consent') window.Pivot.moduleApi('chat.inputMenu').enableMcpFromRouteTrace?.();
+    if (target === 'mcp-consent') {
+        const messageId = Number.parseInt(action.dataset.chatTraceUserMessageId, 10);
+        let routeOverrides = null;
+        try { routeOverrides = JSON.parse(action.dataset.chatTraceRouteOverrides || 'null'); } catch (_) {}
+        if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+            showToast('未找到可继续处理的原始消息。', 'error');
+            return;
+        }
+        action.disabled = true;
+        action.textContent = '正在授权…';
+        try {
+            const enabled = await window.Pivot.moduleApi('chat.inputMenu').enableMcpFromRouteTrace?.();
+            if (!enabled) {
+                action.disabled = false;
+                action.textContent = '允许并继续';
+                return;
+            }
+            action.textContent = '正在继续…';
+            action.closest('.message')?.remove();
+            await window.Pivot.moduleApi('chat.execution')?.continueMcpRouteMessage?.(messageId, routeOverrides);
+        } catch (error) {
+            action.disabled = false;
+            action.textContent = '允许并继续';
+            showToast(error.message || '开启工具库后继续处理失败', 'error');
+        }
+    }
+    if (target === 'mcp-skip') {
+        const messageId = Number.parseInt(action.dataset.chatTraceUserMessageId, 10);
+        let routeOverrides = {};
+        try { routeOverrides = JSON.parse(action.dataset.chatTraceRouteOverrides || '{}') || {}; } catch (_) {}
+        if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+            showToast('未找到可继续处理的原始消息。', 'error');
+            return;
+        }
+        action.disabled = true;
+        action.textContent = '正在继续…';
+        try {
+            action.closest('.message')?.remove();
+            await window.Pivot.moduleApi('chat.execution')?.continueMcpRouteMessage?.(messageId, {
+                ...routeOverrides,
+                excludeTools: true
+            });
+        } catch (error) {
+            action.disabled = false;
+            action.textContent = '直接回答';
+            showToast(error.message || '继续普通回答失败', 'error');
+        }
+    }
     if (target === 'memory') window.Pivot.moduleApi('chat.memoryActions').openChatMemoryManagement?.();
 }
 

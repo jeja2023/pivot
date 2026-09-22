@@ -8,6 +8,7 @@ const {
     normalizeRouteOverrides
 } = require('../server/services/semantic-router');
 const { getChatAutoRouteConfig } = require('../server/services/chat-route-config');
+const { requiresMcpConsentForRoute } = require('../server/services/chat-context-assembler');
 const { buildChatPromptCache, isPromptCacheUnsupported } = require('../server/services/model-stream-service');
 const { flushPendingChatRouteMetrics, recordChatRouteMetric } = require('../server/services/chat-route-observability');
 
@@ -142,6 +143,9 @@ test('未确认 MCP 时只表达待授权状态，不产生工具执行候选', 
     assert.equal(plan.execution.tools.shouldPlan, false);
     assert.deepEqual(plan.execution.tools.candidates, []);
     assert.equal(plan.tools.candidates[0].fullName, tool.fullName);
+    assert.equal(requiresMcpConsentForRoute(plan, false), true);
+    assert.equal(requiresMcpConsentForRoute(plan, true), false);
+    assert.equal(requiresMcpConsentForRoute({ ...plan, shadow: true }, false), false);
 });
 
 test('影子模式保持原始 RAG 与 MCP 执行集合，并透出安全摘要', async () => {

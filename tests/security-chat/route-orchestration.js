@@ -126,6 +126,51 @@ test('聊天重新生成沿用显式 Agent 模式并复用原用户消息', asyn
     }
 });
 
+test('工具授权续跑可指定原始消息，且不会重复保存用户消息', async () => {
+    const upstream = await startFakeUpstream({
+        handler(req, res) {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const usesRequestedMessage = body.includes('需要工具协助的原始请求');
+                res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+                res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: usesRequestedMessage ? '已续跑指定的原始请求。' : '错误的续跑消息。' } }] })}\n\ndata: [DONE]\n\n`);
+            });
+        }
+    });
+    const fixture = createChatFixture({ prefix: 'chat_targeted_regenerate', upstreamUrl: upstream.url });
+    const original = await saveUserMessage({
+        sessionId: fixture.sessionId,
+        userId: fixture.userId,
+        content: '需要工具协助的原始请求',
+        modelId: fixture.modelId
+    });
+    await saveUserMessage({
+        sessionId: fixture.sessionId,
+        userId: fixture.userId,
+        content: '不应被续跑的后续请求',
+        modelId: fixture.modelId
+    });
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '',
+            modelId: fixture.modelId,
+            regenerate: true,
+            regenerateMessageId: Number(original.lastInsertRowid)
+        });
+        assert.match(result.streamedContent, /已续跑指定的原始请求/);
+        const messages = readSessionMessages(fixture);
+        assert.equal(messages.filter(row => row.role === 'user').length, 2);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
 test('普通回答模式不会因消息内容创建持久化 Agent', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['你好，普通聊天回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_short_message', upstreamUrl: upstream.url });

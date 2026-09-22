@@ -38,7 +38,17 @@
     gap: 5px;
     margin-bottom: 8px;
 }
+.chat-answer-evidence {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
 .chat-answer-trace.hidden {
+    display: none;
+}
+.chat-answer-evidence.hidden {
     display: none;
 }
 .chat-answer-trace-item {
@@ -55,14 +65,31 @@
     background: #f8fafc;
     border: 1px solid rgba(148, 163, 184, 0.24);
 }
+.chat-answer-evidence .chat-answer-trace-item {
+    display: inline-flex;
+    flex: 0 1 auto;
+    gap: 5px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    background: var(--bg-side, rgba(248, 250, 252, 0.82));
+    box-shadow: none;
+}
 .chat-answer-trace-item strong {
     color: #0f172a;
     font-size: 0.76rem;
     line-height: 1.2;
 }
+.chat-answer-evidence .chat-answer-trace-item strong {
+    font-size: 0.7rem;
+}
 .chat-answer-trace-item span {
     flex: 1 1 180px;
     min-width: 0;
+}
+.chat-answer-evidence .chat-answer-trace-item > span {
+    flex: 0 1 auto;
 }
 .chat-answer-trace-item.is-ready {
     color: #047857;
@@ -110,6 +137,10 @@
     font-size: 0.74rem;
     line-height: 1.35;
     cursor: pointer;
+}
+.chat-answer-trace-action:disabled {
+    cursor: wait;
+    opacity: 0.65;
 }
 .chat-answer-trace-action:hover {
     background: rgba(15, 23, 42, 0.14);
@@ -217,6 +248,14 @@
 }
 .message-content p { margin-bottom: 6px; }
 .message-content p:last-child { margin-bottom: 0; }
+.official-document-signoff {
+    width: fit-content;
+    max-width: 100%;
+    margin: 12px 0 0 auto;
+    overflow-wrap: anywhere;
+    line-height: 1.8;
+    text-align: right;
+}
 
 /* Markdown 标题样式 (Headings) */
 .message-content h1, .message-content h2, .message-content h3,

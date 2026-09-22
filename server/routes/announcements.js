@@ -65,9 +65,11 @@ const getAnnouncementAdminPermissions = (user) => ({
     canManageAll: isSuperAdmin(user),
     canCreate: isAdmin(user),
     canShowOnLogin: isSuperAdmin(user),
-    allowedTargetTypes: isSuperAdmin(user) ? ['all', 'unit', 'role', 'users'] : ['unit'],
-    defaultTargetType: isSuperAdmin(user) ? 'all' : 'unit',
-    defaultTargetValue: isSuperAdmin(user) ? '' : String(user?.unit || '')
+    // 发布公告是管理员的职责；普通管理员仍然只能管理自己创建的公告，
+    // 但不应被限制为只能向自己的单位投放。
+    allowedTargetTypes: isAdmin(user) ? ['all', 'unit', 'role', 'users'] : [],
+    defaultTargetType: 'all',
+    defaultTargetValue: ''
 });
 
 const enforceAnnouncementAdminScope = (req, res, payload, current = null) => {
@@ -79,18 +81,13 @@ const enforceAnnouncementAdminScope = (req, res, payload, current = null) => {
         res.status(400).json({ error: '登录页公告必须面向全员投放' });
         return false;
     }
-    if (isSuperAdmin(req.user)) return true;
-    if (!req.user?.unit) {
-        res.status(403).json({ error: '当前管理员未配置单位，无法发布单位公告' });
+    if (!isAdmin(req.user)) {
+        res.status(403).json({ error: '仅管理员可以发布公告' });
         return false;
     }
+    if (isSuperAdmin(req.user)) return true;
     if (current && Number(current.created_by) !== Number(req.user.id)) {
         res.status(403).json({ error: '仅可管理自己创建的公告' });
-        return false;
-    }
-    const unitValues = splitTargetValue(payload.targetValue);
-    if (payload.targetType !== 'unit' || unitValues.length !== 1 || unitValues[0] !== req.user.unit) {
-        res.status(403).json({ error: '普通管理员仅可向自己的单位发布公告' });
         return false;
     }
     return true;
@@ -243,8 +240,8 @@ function createAnnouncementsRouter({
         const conditions = ['a.deleted_at IS NULL'];
         const params = [];
         if (!isSuperAdmin(req.user)) {
-            conditions.push("a.created_by = ? AND a.target_type = 'unit' AND a.target_value = ?");
-            params.push(req.user.id, String(req.user.unit || ''));
+            conditions.push('a.created_by = ?');
+            params.push(req.user.id);
         }
         if (status) {
             conditions.push('a.status = ?');

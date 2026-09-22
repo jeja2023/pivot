@@ -170,7 +170,8 @@ function createChatRouter({
             visibleContent,
             mcpToolAllowlist,
             ragScope,
-            chatMode
+            chatMode,
+            regenerateMessageId
         } = chatState;
         const agentExecutionAllowed = readAgentExecutionEnabled();
         let regenerationMessages = null;
@@ -225,7 +226,9 @@ function createChatRouter({
         if (regenerate && sessionId) {
             try {
                 regenerationMessages = await sessionsRepository.listMessages(sessionId, userId);
-                const sourceMessage = [...regenerationMessages].reverse().find(message => message?.role === 'user');
+                const sourceMessage = regenerateMessageId
+                    ? regenerationMessages.find(message => Number(message?.id) === regenerateMessageId && message?.role === 'user')
+                    : [...regenerationMessages].reverse().find(message => message?.role === 'user');
                 if (sourceMessage) {
                     regenerationUserMessageId = Number(sourceMessage.id || 0) || null;
                     modelContent = typeof sourceMessage.content === 'string'
@@ -594,6 +597,22 @@ function createChatRouter({
         }), { ragEnabled, mcpEnabled });
         if (contextResult.errorEnded) return res.end();
         let { visionHistory, disableChatThinking, routePlan } = contextResult;
+        if (contextResult.mcpConsentRequired) {
+            releaseSemaphore();
+            finishChatTrace('completed', {
+                mode: 'mcp_consent_required',
+                toolCandidates: routePlan?.tools?.candidates?.length || 0
+            });
+            writeSse(JSON.stringify({
+                type: 'mcp_consent_required',
+                message: '发现可辅助本轮请求的工具。确认后会自动继续处理当前消息。',
+                userMessageId,
+                routeOverrides: routePlan?.overrides || {},
+                routeMetadata: buildRouteMetadata(routePlan)
+            }));
+            writeSse('[DONE]');
+            return res.end();
+        }
 
         try {
             const { response } = await withObservabilitySpan(chatTrace, 'model_stream_open', () => openChatModelStream({
