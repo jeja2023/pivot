@@ -17,6 +17,7 @@ const {
     getExtension,
     buildReportDataSource
 } = require('./builtin-mcp-common');
+const { normalizeRelativeEntryPath } = require('./agent-path-safety');
 
 function listReportTools() {
     return [
@@ -26,6 +27,7 @@ function listReportTools() {
             description: '列出配置目录下可访问的报表/数据文件。',
             inputSchema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                     query: { type: 'string' },
                     limit: { type: 'number', minimum: 1, maximum: 200 }
@@ -38,6 +40,7 @@ function listReportTools() {
             description: '读取单个报表/数据文件的元数据、工作表和样本行。',
             inputSchema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                     path: { type: 'string' },
                     sheet: { type: 'string' },
@@ -52,6 +55,7 @@ function listReportTools() {
             description: '按列筛选并限制行数，查询 CSV/XLS/XLSX 表格。',
             inputSchema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                     path: { type: 'string' },
                     sheet: { type: 'string' },
@@ -68,6 +72,7 @@ function listReportTools() {
             description: '对比两个报表/数据文件的工作表、表头和样本行。',
             inputSchema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                     leftPath: { type: 'string' },
                     rightPath: { type: 'string' },
@@ -87,10 +92,22 @@ async function resolveReportFile(config, fileRef) {
         err.status = 400;
         throw err;
     }
-    const tokenMatch = raw.match(/^(\d+):(.*)$/);
-    const candidates = tokenMatch
-        ? [{ root: config.roots[Number(tokenMatch[1])], relative: tokenMatch[2] }]
-        : config.roots.map(root => ({ root, relative: raw }));
+    let parsedReference;
+    try {
+        const tokenMatch = raw.match(/^(\d+):(.*)$/);
+        const rootIndex = tokenMatch ? Number.parseInt(tokenMatch[1], 10) : null;
+        const relative = tokenMatch ? tokenMatch[2] : raw;
+        if (rootIndex !== null && (!Number.isSafeInteger(rootIndex) || rootIndex < 0 || rootIndex >= config.roots.length)) throw new Error('目录索引不在授权目录白名单内。');
+        parsedReference = { rootIndex, relative: normalizeRelativeEntryPath(relative, { allowSubdirectories: true }) };
+    } catch (error) {
+        const err = new Error('文件路径必须是授权目录白名单内的相对候选路径，不允许绝对路径、路径穿越或符号链接跳转。');
+        err.code = 'REPORT_PATH_DENIED';
+        err.status = 403;
+        throw err;
+    }
+    const candidates = parsedReference.rootIndex !== null
+        ? [{ root: config.roots[parsedReference.rootIndex], relative: parsedReference.relative }]
+        : config.roots.map(root => ({ root, relative: parsedReference.relative }));
 
     for (const item of candidates) {
         if (!item.root) continue;
@@ -133,9 +150,23 @@ async function resolveReportFile(config, fileRef) {
     throw err;
 }
 
+function scoreReportCandidate(relativePath, query) {
+    const needle = String(query || '').trim().toLowerCase();
+    if (!needle) return 0;
+    const relative = String(relativePath || '').toLowerCase();
+    const base = path.basename(relative);
+    if (base === needle) return 1;
+    if (base.startsWith(needle)) return 0.9;
+    if (relative.includes(needle)) return 0.7;
+    const tokens = needle.split(/\s+/).filter(Boolean);
+    const matched = tokens.filter(token => relative.includes(token)).length;
+    return tokens.length ? matched / tokens.length * 0.6 : 0;
+}
+
 async function listReportFiles(config, query = '', limit = 50) {
     const needle = String(query || '').trim().toLowerCase();
     const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const candidateCap = Math.min(Math.max(max * 10, 200), 2000);
     const results = [];
     const queue = [];
     const visitedDirectories = new Set();
@@ -147,7 +178,7 @@ async function listReportFiles(config, query = '', limit = 50) {
     }
     const extensionSet = new Set(config.extensions);
     let scanned = 0;
-    for (let queueIndex = 0; queueIndex < queue.length && results.length < max && scanned < 5000; queueIndex += 1) {
+    for (let queueIndex = 0; queueIndex < queue.length && results.length < candidateCap && scanned < 5000; queueIndex += 1) {
         const current = queue[queueIndex];
         if (visitedDirectories.has(current.dir)) continue;
         visitedDirectories.add(current.dir);
@@ -193,10 +224,12 @@ async function listReportFiles(config, query = '', limit = 50) {
                 size: stat.size,
                 updatedAt: stat.mtime.toISOString()
             });
-            if (results.length >= max) break;
+            if (results.length >= candidateCap) break;
         }
     }
-    return { files: results, scanned };
+    results.sort((left, right) => scoreReportCandidate(right.relativePath, needle) - scoreReportCandidate(left.relativePath, needle)
+        || String(left.relativePath).localeCompare(String(right.relativePath)));
+    return { files: results.slice(0, max), scanned };
 }
 function normalizeReportHeaders(row = []) {
     const usedHeaders = new Map();

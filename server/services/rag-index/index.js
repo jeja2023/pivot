@@ -18,7 +18,10 @@ const {
     safeIndexKnowledgeGraphForChunks
 } = require('../knowledge-graph');
 const knowledgeRepository = require('../../repositories/knowledge');
-const { createRetrievalScopeBuilder } = require('./retrieval-scope-builder');
+const {
+    buildRetrievalScopeSql,
+    normalizeRetrievalScope
+} = require('./retrieval-scope-builder');
 const { attachCitationKeys: attachCitationKeysBase } = require('./citation-keys');
 const {
     getEmbeddingConfig,
@@ -33,9 +36,14 @@ const { recordSlowRagRetrieval } = require('../observability');
 const {
     applyFeedbackRanking,
     attachCitationConfidence,
-    calculateCitationConfidence
+    calculateCitationConfidence,
+    rejectLowConfidenceResults,
+    rerankHybridCandidates
 } = require('./ranking');
 const {
+    buildFtsOrQuery,
+    buildKeywordCandidates,
+    buildPostgresTsQuery,
     buildRagCacheScope: buildRagCacheScopeBase,
     formatInjectedContext,
     loadRagFeedbackSignals: loadRagFeedbackSignalsBase,
@@ -54,6 +62,7 @@ const {
     getEmbeddingRuntimeGuardUser,
     requestEmbedding,
     requestEmbeddings,
+    testEmbeddingConnection,
     generateEmbedding,
     generateEmbeddings,
     generateEmbeddingsAdaptive,
@@ -136,93 +145,6 @@ function computeVectorNorm(vector) {
 function clearChunkEmbeddingCache() {
     chunkEmbeddingCache.clear();
 }
-
-function buildKeywordCandidates(query, limit = 8) {
-    return buildRagSearchTerms(query, limit);
-}
-
-function buildFtsOrQuery(keywords) {
-    return keywords
-        .map(term => `"${String(term).replace(/"/g, '""')}"`)
-        .join(' OR ');
-}
-
-// PostgreSQL `simple` 分词器对中文不会自动分词。search_content 已在入库时
-// 展开 CJK n-gram，因此查询端也用相同词元构造 to_tsquery 的 OR 表达式。
-// 仅保留字母、数字和下划线，防止用户输入进入 tsquery 操作符语法。
-function buildPostgresTsQuery(keywords = []) {
-    return (Array.isArray(keywords) ? keywords : [])
-        .map(term => String(term || '').replace(/[^\p{L}\p{N}_]/gu, '').trim())
-        .filter(Boolean)
-        .slice(0, 32)
-        .map(term => `'${term.replace(/'/g, "''")}'`)
-        .join(' | ');
-}
-
-function normalizeScopeIdList(value, max = 50) {
-    const values = Array.isArray(value) ? value : [value];
-    return [...new Set(values
-        .map(item => Number.parseInt(item, 10))
-        .filter(item => Number.isSafeInteger(item) && item > 0))]
-        .slice(0, max);
-}
-
-function normalizeScopeTagList(value, max = 20) {
-    const values = Array.isArray(value) ? value : [value];
-    return [...new Set(values
-        .flatMap(item => String(item || '').split(/[,，;；\s\n]+/))
-        .map(item => item.trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40))
-        .filter(Boolean))]
-        .slice(0, max);
-}
-
-function normalizeScopeEnumList(value, allowed, max = 20) {
-    const values = Array.isArray(value) ? value : [value];
-    return [...new Set(values
-        .flatMap(item => String(item || '').split(/[,，;；\s\n]+/))
-        .map(item => item.trim().toLowerCase())
-        .filter(item => allowed.has(item)))]
-        .slice(0, max);
-}
-
-function normalizeScopeDate(value) {
-    const text = String(value || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.test(text)) return '';
-    const date = new Date(text.replace(' ', 'T'));
-    return Number.isNaN(date.getTime()) ? '' : text;
-}
-
-function normalizeRetrievalScope(scope = {}) {
-    const raw = scope && typeof scope === 'object' ? scope : {};
-    const filters = raw.filters && typeof raw.filters === 'object' ? raw.filters : raw;
-    const collectionIds = normalizeScopeIdList(raw.collectionIds ?? raw.collectionId);
-    const tagNames = normalizeScopeTagList(raw.tagNames ?? raw.tagName ?? raw.tag);
-    const verifiedStatuses = normalizeScopeEnumList(filters.verifiedStatus ?? filters.verifiedStatuses ?? (filters.verified === true ? 'verified' : ''), new Set(['verified', 'unverified', 'expired']), 3);
-    const lifecycleStatuses = normalizeScopeEnumList(filters.lifecycleStatus ?? filters.lifecycleStatuses, new Set(['draft', 'review', 'published', 'expired', 'archived']), 5);
-    const sourceKinds = normalizeScopeEnumList(filters.sourceKind ?? filters.sourceKinds, new Set(['upload', 'local_dir', 'lan_http', 'database', 'internal_api', 'manual']), 6);
-    const ownerUnits = normalizeScopeTagList(filters.ownerUnit ?? filters.ownerUnits, 20);
-    const updatedAfter = normalizeScopeDate(filters.updatedAfter);
-    const parts = [];
-    if (collectionIds.length) parts.push(`collections:${collectionIds.join(',')}`);
-    if (tagNames.length) parts.push(`tags:${tagNames.join(',')}`);
-    if (verifiedStatuses.length) parts.push(`verified:${verifiedStatuses.join(',')}`);
-    if (lifecycleStatuses.length) parts.push(`lifecycle:${lifecycleStatuses.join(',')}`);
-    if (sourceKinds.length) parts.push(`sources:${sourceKinds.join(',')}`);
-    if (ownerUnits.length) parts.push(`owners:${ownerUnits.join(',')}`);
-    if (updatedAfter) parts.push(`updated:${updatedAfter}`);
-    return {
-        collectionIds,
-        tagNames,
-        verifiedStatuses,
-        lifecycleStatuses,
-        sourceKinds,
-        ownerUnits,
-        updatedAfter,
-        cacheKey: parts.length ? parts.join(';') : 'all'
-    };
-}
-
-const buildRetrievalScopeSql = createRetrievalScopeBuilder(normalizeRetrievalScope);
 
 function buildRagCacheScope(userId, config = {}, scope = {}, user = null) {
     return buildRagCacheScopeBase(userId, config, scope, user, buildRetrievalScopeSql);
@@ -636,6 +558,8 @@ async function debugRetrieveContext(userId, query, {
     let scored = [];
     let gated = [];
     let usedKeywordFallback = false;
+    let confidenceRejected = false;
+    let confidenceRejectionReason = '';
     try {
         const [vector, graphCandidates, feedbackSignals] = await Promise.all([
             Array.isArray(queryVector) ? Promise.resolve(queryVector) : generateEmbedding(normalizedQuery, null, null, userId, { user }),
@@ -645,7 +569,16 @@ async function debugRetrieveContext(userId, query, {
         const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
         scored = applyFeedbackRanking(scoreCandidatesHybrid(candidates, vector, hybrid), feedbackSignals);
+        scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
+        const confidenceGate = rejectLowConfidenceResults(gated, {
+            scoreThreshold: config.scoreThreshold,
+            minRerankScore: config.rerankThreshold,
+            minCitationConfidence: config.citationConfidenceThreshold
+        });
+        gated = confidenceGate.accepted;
+        confidenceRejected = confidenceGate.rejected;
+        confidenceRejectionReason = confidenceGate.reason;
     } catch (e) {
         usedKeywordFallback = true;
         logger.warn({ err: e.message }, 'RAG 调试向量生成失败，已回退到关键词检索');
@@ -668,6 +601,15 @@ async function debugRetrieveContext(userId, query, {
                 entry: null
             })), fallbackFeedbackSignals);
         gated = scored.filter(item => item.denseScore > config.scoreThreshold);
+        scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
+        const confidenceGate = rejectLowConfidenceResults(scored.filter(item => item.denseScore > config.scoreThreshold), {
+            scoreThreshold: config.scoreThreshold,
+            minRerankScore: config.rerankThreshold,
+            minCitationConfidence: config.citationConfidenceThreshold
+        });
+        gated = confidenceGate.accepted;
+        confidenceRejected = confidenceGate.rejected;
+        confidenceRejectionReason = confidenceGate.reason;
     }
     // matches 展示全部候选评分（便于调参）；注入上下文只取门控+MMR 结果。
     const selected = await attachCitationKeys(attachCitationConfidence(applyMMR(gated, safeTopK, hybrid.mmrLambda), config.scoreThreshold));
@@ -691,9 +633,12 @@ async function debugRetrieveContext(userId, query, {
         scope: normalizedScope,
         hybrid,
         ranking: {
-            mode: usedKeywordFallback ? 'keyword_fallback' : 'hybrid_dual_rrf_mmr',
+            mode: confidenceRejected ? 'confidence_rejected' : (usedKeywordFallback ? 'keyword_fallback' : 'hybrid_dual_rrf_mmr'),
             selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
-            gatedCount: gated.length
+            gatedCount: gated.length,
+            confidenceRejectionReason,
+            rerankThreshold: config.rerankThreshold,
+            citationConfidenceThreshold: config.citationConfidenceThreshold
         },
         injectedContext: formatInjectedContext(selected, config.scoreThreshold) + (graphContext.context || '')
     };
@@ -757,6 +702,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         let topChunks = [];
         let topScore = 0;
         let usedKeywordFallback = false;
+        let confidenceRejected = false;
         let chunks = lexicalCandidates;
         try {
             const [queryVector, graphCandidates, feedbackSignals] = await Promise.all([
@@ -772,11 +718,18 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 options.user || null
             );
             chunks = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
-            const scored = applyFeedbackRanking(scoreCandidatesHybrid(chunks, queryVector, hybrid), feedbackSignals);
+            let scored = applyFeedbackRanking(scoreCandidatesHybrid(chunks, queryVector, hybrid), feedbackSignals);
+            scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);
-            // 软门控筛选后做 MMR 去重，取最终 topK。
+            // 软门控、rerank 和可信度拒答后再做 MMR 去重，取最终 topK。
             const gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
-            topChunks = attachCitationConfidence(applyMMR(gated, config.topK, hybrid.mmrLambda), config.scoreThreshold);
+            const confidenceGate = rejectLowConfidenceResults(gated, {
+                scoreThreshold: config.scoreThreshold,
+                minRerankScore: config.rerankThreshold,
+                minCitationConfidence: config.citationConfidenceThreshold
+            });
+            confidenceRejected = confidenceGate.rejected;
+            topChunks = applyMMR(confidenceGate.accepted, config.topK, hybrid.mmrLambda);
         } catch (e) {
             usedKeywordFallback = true;
             logger.warn({ err: e.message }, 'RAG 查询向量生成失败，已回退到关键词检索');
@@ -786,20 +739,29 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             ]);
             chunks = mergeIndependentCandidates(lexicalCandidates, [], graphCandidates);
             topChunks = applyFeedbackRanking(scoreKeywordChunks(chunks, normalizedQuery)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, config.topK), feedbackSignals);
-            topChunks = attachCitationConfidence(topChunks, config.scoreThreshold);
-            topScore = topChunks.length > 0 ? topChunks[0].score : 0;
+                .sort((a, b) => b.score - a.score), feedbackSignals);
+            topChunks = rerankHybridCandidates(topChunks, normalizedQuery, { scoreThreshold: config.scoreThreshold });
+            const confidenceGate = rejectLowConfidenceResults(topChunks, {
+                scoreThreshold: config.scoreThreshold,
+                minRerankScore: config.rerankThreshold,
+                minCitationConfidence: config.citationConfidenceThreshold
+            });
+            confidenceRejected = confidenceGate.rejected;
+            topChunks = confidenceGate.accepted.slice(0, config.topK);
+            topScore = topChunks.length > 0 ? topChunks[0].denseScore || topChunks[0].score : 0;
         }
 
         if (topChunks.length === 0 && !graphContext.context) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
             recordRetrieval({
-                status: 'no_match',
+                status: confidenceRejected ? 'confidence_rejected' : 'no_match',
                 durationMs: Date.now() - startedAt,
                 candidates: chunks.length,
                 matches: 0,
-                topScore
+                topScore,
+                confidenceRejected,
+                rerankThreshold: config.rerankThreshold,
+                citationConfidenceThreshold: config.citationConfidenceThreshold
             });
             return '';
         }
@@ -929,34 +891,6 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
     }
 }
 
-async function testEmbeddingConnection(config = {}, user = null) {
-    const startedAt = Date.now();
-    try {
-        const httpConfig = {
-            url: config.apiUrl || '',
-            model: config.model || '',
-            apiKey: config.apiKey || ''
-        };
-        const vector = await requestEmbedding('测试向量生成 (智枢 Test Connection)', httpConfig, { user });
-
-        if (!Array.isArray(vector) || vector.length === 0) {
-            throw new Error('生成的向量数据无效');
-        }
-
-        return {
-            success: true,
-            dimension: vector.length,
-            durationMs: Date.now() - startedAt
-        };
-    } catch (e) {
-        logger.error({ err: e.message, config: { ...config, apiKey: config.apiKey ? '***' : '' } }, '向量模型连接测试失败');
-        return {
-            success: false,
-            error: e.message,
-            durationMs: Date.now() - startedAt
-        };
-    }
-}
 module.exports = {
     getEmbeddingConfig,
     generateEmbedding,

@@ -20,6 +20,7 @@ const { activeRelease, get: getCatalogRelease, releaseItems } = require('./tool-
 const { assertUsable, resolveBoundConnection } = require('./connection-accounts');
 const { recordToolInvocationEvent } = require('./tool-invocation-events');
 const { acquire: acquireToolExecutionGuard, executeWithRetry } = require('./tool-execution-guard');
+const { normalizeRelativeEntryPath } = require('./agent-path-safety');
 
 const SOURCE_NAMES = new Set(['agent', 'chat', 'workflow', 'manual_test', 'mcp_rpc', 'mcp_manual', 'openai', 'desktop', 'data_analysis']);
 
@@ -170,6 +171,28 @@ async function resolveConnection({ input = {}, item = null, user = null, options
     return null;
 }
 
+
+function validateScopedReportPaths(toolName, input = {}) {
+    const short = shortToolName(toolName);
+    const fields = short === 'reports.read_file_summary' || short === 'reports.query_table'
+        ? ['path']
+        : short === 'reports.compare_files' ? ['leftPath', 'rightPath'] : [];
+    for (const field of fields) {
+        const raw = String(input?.[field] || '').trim();
+        const match = raw.match(/^(\d+):(.*)$/);
+        const relative = match ? match[2] : raw;
+        if (match && !Number.isSafeInteger(Number.parseInt(match[1], 10))) throw new Error('报表目录索引无效。');
+        try { normalizeRelativeEntryPath(relative, { allowSubdirectories: true }); }
+        catch (_) {
+            const error = new Error('报表路径必须是授权目录内的相对候选路径。');
+            error.code = 'REPORT_PATH_DENIED';
+            error.status = 403;
+            error.category = 'policy';
+            throw error;
+        }
+    }
+}
+
 function policyErrorForDecision(decision = {}) {
     const result = {
         decision: decision.decision || 'denied',
@@ -222,6 +245,7 @@ function createToolPolicyEngine(deps = {}) {
         }
         const effectiveRun = virtualRun(user, { ...effectiveOptions, run });
         const catalog = await resolveCatalogReference(safeName || tool.name, tool, { ...effectiveOptions, input: sanitizedInput }, deps);
+        validateScopedReportPaths(safeName, sanitizedInput);
         const issues = validateToolInput(tool, sanitizedInput);
         if (issues.length) {
             const error = policyErrorForDecision({ decision: 'denied', tool, reasons: [`工具输入契约校验失败：${issues[0]}`], reasonCodes: ['tool_input_invalid'] });

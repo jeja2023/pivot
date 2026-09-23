@@ -106,6 +106,8 @@ function getRagConfig(overrides = {}, userId = null) {
     const defaultCandidateLimit = clampInteger(process.env.RAG_CANDIDATE_LIMIT, 300, 20, ragLimits.candidateLimitMax || 1000);
     const defaultChunkSize = clampInteger(process.env.RAG_CHUNK_SIZE, 500, 200, ragLimits.chunkSizeMax || 2000);
     const defaultChunkOverlap = clampInteger(process.env.RAG_CHUNK_OVERLAP, 100, 0, Math.floor(defaultChunkSize / 2));
+    const defaultRerankThreshold = clampNumber(process.env.RAG_RERANK_THRESHOLD, 0.30, 0, 1);
+    const defaultCitationConfidenceThreshold = clampNumber(process.env.RAG_CITATION_CONFIDENCE_THRESHOLD, 0.42, 0, 1);
 
     const scoreThreshold = clampNumber(
         overrides.scoreThreshold ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.scoreThreshold) ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
@@ -143,7 +145,9 @@ function getRagConfig(overrides = {}, userId = null) {
         topK,
         candidateLimit,
         chunkSize,
-        chunkOverlap
+        chunkOverlap,
+        rerankThreshold: clampNumber(overrides.rerankThreshold ?? defaultRerankThreshold, defaultRerankThreshold, 0, 1),
+        citationConfidenceThreshold: clampNumber(overrides.citationConfidenceThreshold ?? defaultCitationConfidenceThreshold, defaultCitationConfidenceThreshold, 0, 1)
     };
 }
 

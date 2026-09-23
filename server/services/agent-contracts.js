@@ -46,11 +46,37 @@ function resolveToolContractCapabilities(definition = {}, toolName = '', source 
     return resolveRegisteredToolCapabilities(toolName, source);
 }
 
+
+function enforceStrictInputSchema(schema, isRoot = false) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+    const next = { ...schema };
+    if (next.type === 'object' || next.properties) {
+        const hasDeclaredFields = Object.prototype.hasOwnProperty.call(next, 'properties')
+            || Array.isArray(next.required);
+        const hasDynamicMapSchema = Object.prototype.hasOwnProperty.call(next, 'additionalProperties')
+            && next.additionalProperties !== false;
+        // 有明确字段定义的对象严格拒绝未知字段；没有 properties 的嵌套对象视为动态 Map，
+        // 由工具作者自行决定其 additionalProperties 约束，避免破坏 fields/headers/sections。
+        if (hasDeclaredFields || isRoot) {
+            if (!hasDynamicMapSchema) next.additionalProperties = false;
+        }
+        if (next.properties && typeof next.properties === 'object') {
+            next.properties = Object.fromEntries(Object.entries(next.properties).map(([key, value]) => [key, enforceStrictInputSchema(value, false)]));
+        }
+        if (next.additionalProperties && typeof next.additionalProperties === 'object') next.additionalProperties = enforceStrictInputSchema(next.additionalProperties, false);
+    }
+    if (next.items && typeof next.items === 'object') next.items = enforceStrictInputSchema(next.items, false);
+    if (Array.isArray(next.anyOf)) next.anyOf = next.anyOf.map(value => enforceStrictInputSchema(value, false));
+    if (Array.isArray(next.oneOf)) next.oneOf = next.oneOf.map(value => enforceStrictInputSchema(value, false));
+    if (Array.isArray(next.allOf)) next.allOf = next.allOf.map(value => enforceStrictInputSchema(value, false));
+    return next;
+}
+
 function normalizeToolContract(definition = {}) {
     const source = String(definition.source || (String(definition.name || '').startsWith('mcp.') ? 'mcp' : 'builtin'));
     const riskLevel = normalizeRisk(definition.risk_level ?? definition.riskLevel ?? definition.risk,
         source === 'mcp' ? 4 : inferRiskLevel(definition.name, definition));
-    const inputSchema = normalizeJsonSchema(definition.input_schema || definition.inputSchema || definition.parameters || { type: 'object', properties: {} });
+    const inputSchema = enforceStrictInputSchema(normalizeJsonSchema(definition.input_schema || definition.inputSchema || definition.parameters || { type: 'object', properties: {} }), true);
     const timeout = definition.timeout && typeof definition.timeout === 'object' ? definition.timeout : {};
     const toolName = String(definition.name || '');
     const sideEffect = Boolean((definition.side_effect ?? definition.sideEffect) || /(?:write|upload|delete|export|send|message|http|insert|update|upsert|replace|publish)/i.test(toolName));
@@ -128,5 +154,6 @@ module.exports = {
     normalizeToolConcurrency,
     normalizeRisk,
     normalizeToolContract,
-    validateToolInput
+    validateToolInput,
+    enforceStrictInputSchema
 };

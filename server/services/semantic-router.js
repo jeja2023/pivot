@@ -180,6 +180,11 @@ function buildRouteMetadata(plan = {}) {
         version: 1,
         mode: String(plan.mode || 'legacy'),
         shadow: plan.shadow === true,
+        taskState: plan.taskState ? {
+            hash: String(plan.taskState.hash || ''),
+            evidenceNeeds: Array.isArray(plan.taskState.evidenceNeeds) ? plan.taskState.evidenceNeeds.slice(0, 8) : [],
+            toolIntent: plan.taskState.toolIntent || {}
+        } : null,
         rag: {
             action: String(plan.rag?.action || 'skip'),
             confidence: Number(plan.rag?.confidence || 0),
@@ -230,7 +235,8 @@ function createSemanticRouter(deps = {}) {
     async function resolveRoutePlan({ prompt, user, state = {}, availableMcpTools = [], signal = null, env = process.env } = {}) {
         const startedAt = Date.now();
         const config = getConfig(env);
-        const cleanPrompt = normalizeRoutePrompt(prompt);
+        const structuredTaskState = state.taskState && typeof state.taskState === 'object' ? state.taskState : null;
+        const cleanPrompt = normalizeRoutePrompt(structuredTaskState?.retrievalQuery || structuredTaskState?.currentQuestion || prompt);
         const overrides = normalizeRouteOverrides(state.routeOverrides);
         const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
         const legacyExecution = buildLegacyExecution(state, legacyTools);
@@ -415,7 +421,12 @@ function createSemanticRouter(deps = {}) {
             version: 1,
             mode,
             shadow,
-            query: { textHash: routePromptHash(cleanPrompt), source: 'current_prompt' },
+            query: { textHash: routePromptHash(cleanPrompt), source: structuredTaskState ? 'task_state.retrievalQuery' : 'current_prompt' },
+            taskState: structuredTaskState ? {
+                hash: String(structuredTaskState.hash || ''),
+                evidenceNeeds: Array.isArray(structuredTaskState.evidenceNeeds) ? structuredTaskState.evidenceNeeds.slice(0, 8) : [],
+                toolIntent: structuredTaskState.toolIntent || {}
+            } : null,
             rag,
             tools,
             overrides,

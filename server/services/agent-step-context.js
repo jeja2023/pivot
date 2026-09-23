@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { normalizeTaskState } = require('./structured-task-state');
 
 const AGENT_STEP_CONTEXT_SCHEMA_VERSION = 1;
 
@@ -121,6 +122,12 @@ function buildWorldState({ run = {}, modelCfg = null, toolList = [], contextConf
         } : null,
         tools: normalizeToolSnapshot(toolList),
         context: contextConfig && typeof contextConfig === 'object' ? contextConfig : {},
+        task: normalizeTaskState(contextConfig?.taskState || {
+            goal: contextConfig?.goal || run.goal || '',
+            currentQuestion: contextConfig?.currentQuestion || contextConfig?.goal || run.goal || '',
+            retrievalQuery: contextConfig?.retrievalQuery || contextConfig?.goal || run.goal || '',
+            source: contextConfig?.taskState ? 'task_state' : 'context_config'
+        }),
         environment: environment && typeof environment === 'object' ? environment : {},
         memory: memory && typeof memory === 'object' ? memory : {},
         resume: resumeContext && typeof resumeContext === 'object' ? {

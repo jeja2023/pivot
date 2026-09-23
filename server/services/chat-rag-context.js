@@ -1,3 +1,15 @@
+
+function buildRagInsufficientContextMessage(reason = 'no_reliable_match') {
+    return [
+        'PIVOT_RAG_INSUFFICIENT_BEGIN',
+        '【知识库拒答状态】',
+        '本轮任务需要知识库依据，但检索没有得到达到可信度门槛的可靠结果。',
+        '回答时只能明确说明“知识库中未找到足够依据”，可以列出缺少的信息；不得使用通用常识、历史对话或模型记忆补全结论，不得伪造引用。',
+        '拒答原因: ' + String(reason || 'no_reliable_match').slice(0, 120),
+        'PIVOT_RAG_INSUFFICIENT_END'
+    ].join('\n');
+}
+
 function buildRagContextMessage(ragContext) {
     return [
         'PIVOT_RAG_CONTEXT_BEGIN',
@@ -52,6 +64,7 @@ function summarizeRagContextSources(ragContext, limit = 3) {
 }
 
 module.exports = {
+    buildRagInsufficientContextMessage,
     buildRagContextMessage,
     injectRagContextBeforeLatestUser,
     summarizeRagContextSources

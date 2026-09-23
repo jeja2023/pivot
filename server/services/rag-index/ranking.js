@@ -98,9 +98,70 @@ function attachCitationConfidence(items, scoreThreshold = 0) {
     }));
 }
 
+
+function rankingTokens(value) {
+    const source = String(value || '').toLowerCase();
+    const tokens = new Set((source.match(/[a-z0-9_./:-]{2,}/g) || []));
+    const cjk = source.replace(/[^\u4e00-\u9fff]/g, '');
+    for (let index = 0; index < cjk.length - 1; index += 1) tokens.add(cjk.slice(index, index + 2));
+    return tokens;
+}
+
+/**
+ * 轻量确定性 rerank：在双通道召回之后重新比较问题词覆盖、短语命中、标题命中
+ * 和融合分。它不扩大候选集合，也不绕过 ACL；低质量候选会在下一道拒答门被丢弃。
+ */
+function rerankHybridCandidates(items, query, { scoreThreshold = 0 } = {}) {
+    const list = Array.isArray(items) ? items : [];
+    const queryText = String(query || '').toLowerCase().trim();
+    const queryTerms = rankingTokens(queryText);
+    const maxFused = list.reduce((max, item) => Math.max(max, Number(item?.fused ?? item?.score) || 0), 0);
+    const denseDenominator = Math.max(1 - Number(scoreThreshold || 0), 0.1);
+    return list.map(item => {
+        const body = String(item?.headingPath || '') + '\n' + String(item?.text || item?.content || '');
+        const lowerBody = body.toLowerCase();
+        const heading = String(item?.headingPath || '').toLowerCase();
+        let matched = 0;
+        queryTerms.forEach(term => { if (lowerBody.includes(term)) matched += 1; });
+        const termCoverage = queryTerms.size ? matched / queryTerms.size : 0;
+        const phraseMatch = queryText.length >= 2 && lowerBody.includes(queryText) ? 1 : 0;
+        const headingCoverage = queryTerms.size && [...queryTerms].some(term => heading.includes(term)) ? 1 : 0;
+        const dense = Number(item?.denseScore ?? item?.score);
+        const denseQuality = Number.isFinite(dense) ? clamp((dense - Number(scoreThreshold || 0)) / denseDenominator) : 0;
+        const fusedQuality = maxFused > 0 ? clamp(Number(item?.fused ?? item?.score) / maxFused) : 0;
+        const rerankScore = clamp(
+            fusedQuality * 0.45
+            + termCoverage * 0.25
+            + denseQuality * 0.15
+            + phraseMatch * 0.1
+            + headingCoverage * 0.05
+        );
+        return { ...item, termCoverage, phraseMatch, headingCoverage, rerankScore, rankScore: rerankScore };
+    }).sort((a, b) => (
+        Number(b.rerankScore || 0) - Number(a.rerankScore || 0)
+        || Number(b.fused || b.score || 0) - Number(a.fused || a.score || 0)
+        || Number(a.chunkId || 0) - Number(b.chunkId || 0)
+    ));
+}
+
+function rejectLowConfidenceResults(items, { scoreThreshold = 0, minRerankScore = 0.3, minCitationConfidence = 0.42, minMargin = 0.02 } = {}) {
+    const ranked = attachCitationConfidence(items, scoreThreshold);
+    if (!ranked.length) return { accepted: [], rejected: true, reason: 'empty' };
+    const top = ranked[0];
+    const second = ranked[1];
+    const margin = second ? Number(top.rerankScore || 0) - Number(second.rerankScore || 0) : 1;
+    if (Number(top.rerankScore || 0) < minRerankScore) return { accepted: [], rejected: true, reason: 'rerank_below_threshold', top, margin };
+    if (Number(top.citationConfidence || 0) < minCitationConfidence) return { accepted: [], rejected: true, reason: 'citation_confidence_below_threshold', top, margin };
+    if (Number(top.rerankScore || 0) < 0.55 && margin < minMargin) return { accepted: [], rejected: true, reason: 'ambiguous_top_result', top, margin };
+    const accepted = ranked.filter(item => Number(item.rerankScore || 0) >= minRerankScore && Number(item.citationConfidence || 0) >= minCitationConfidence);
+    return { accepted, rejected: accepted.length === 0, reason: accepted.length ? 'accepted' : 'all_candidates_below_threshold', top, margin };
+}
+
 module.exports = {
     applyFeedbackRanking,
     attachCitationConfidence,
     calculateCitationConfidence,
-    feedbackAdjustment
+    feedbackAdjustment,
+    rejectLowConfidenceResults,
+    rerankHybridCandidates
 };

@@ -4,6 +4,7 @@ const { query, queryOne } = require('../../db/client');
 const { normalizeCacheQuery } = require('../rag-cache');
 const { getHybridRetrievalConfig } = require('../rag-config');
 const { calculateCitationConfidence } = require('./ranking');
+const { buildRagSearchTerms } = require('../rag-tokenizer');
 
 async function loadRagFeedbackSignals(userId, queryText, logger = console) {
     const normalizedQuery = normalizeCacheQuery(queryText);
@@ -96,6 +97,8 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
         `k=${Number(config.topK || 0)}`,
         `c=${Number(config.candidateLimit || 0)}`,
         `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
+        `rr=${Number(config.rerankThreshold || 0).toFixed(3)}`,
+        `cc=${Number(config.citationConfidenceThreshold || 0).toFixed(3)}`,
         `rrf=${hybrid.rrfK}:${hybrid.wDense}:${hybrid.wFts}`,
         `mmr=${hybrid.mmrLambda}:${hybrid.ftsRankFloor}`,
         `scope=${scopeFilter.normalized.cacheKey}|unit=${String(user?.unit || '')}|shared=${user ? '1' : '0'}`,
@@ -152,7 +155,32 @@ function normalizeRetrievalDebugMatch(match, scoreThreshold, rank = 0, selectedI
     };
 }
 
+function buildKeywordCandidates(query, limit = 8) {
+    return buildRagSearchTerms(query, limit);
+}
+
+function buildFtsOrQuery(keywords) {
+    return keywords
+        .map(term => `"${String(term).replace(/"/g, '""')}"`)
+        .join(' OR ');
+}
+
+// PostgreSQL `simple` 分词器对中文不会自动分词。search_content 已在入库时
+// 展开 CJK n-gram，因此查询端也用相同词元构造 to_tsquery 的 OR 表达式。
+// 仅保留字母、数字和下划线，防止用户输入进入 tsquery 操作符语法。
+function buildPostgresTsQuery(keywords = []) {
+    return (Array.isArray(keywords) ? keywords : [])
+        .map(term => String(term || '').replace(/[^\p{L}\p{N}_]/gu, '').trim())
+        .filter(Boolean)
+        .slice(0, 32)
+        .map(term => `'${term.replace(/'/g, "''")}'`)
+        .join(' | ');
+}
+
 module.exports = {
+    buildFtsOrQuery,
+    buildKeywordCandidates,
+    buildPostgresTsQuery,
     buildRagCacheScope,
     formatInjectedContext,
     loadRagFeedbackSignals,

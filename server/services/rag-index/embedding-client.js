@@ -553,7 +553,37 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 
+async function testEmbeddingConnection(config = {}, user = null) {
+    const startedAt = Date.now();
+    try {
+        const httpConfig = {
+            url: config.apiUrl || '',
+            model: config.model || '',
+            apiKey: config.apiKey || ''
+        };
+        const vector = await requestEmbedding('测试向量生成 (智枢 Test Connection)', httpConfig, { user });
+
+        if (!Array.isArray(vector) || vector.length === 0) {
+            throw new Error('生成的向量数据无效');
+        }
+
+        return {
+            success: true,
+            dimension: vector.length,
+            durationMs: Date.now() - startedAt
+        };
+    } catch (e) {
+        logger.error({ err: e.message, config: { ...config, apiKey: config.apiKey ? '***' : '' } }, '向量模型连接测试失败');
+        return {
+            success: false,
+            error: e.message,
+            durationMs: Date.now() - startedAt
+        };
+    }
+}
+
 module.exports = {
+    testEmbeddingConnection,
     DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS,
     DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS,
     MAX_EMBEDDING_REQUEST_TIMEOUT_MS,

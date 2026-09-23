@@ -60,6 +60,31 @@ const MCP_CHAT_TOOL_TITLES = {
     'browser.screenshot': '截取本机网页'
 };
 
+
+const MAX_MCP_PLANNER_CANDIDATES = 8;
+
+function pruneMcpPlannerCandidates(tools = [], taskState = null) {
+    const source = Array.isArray(tools) ? tools : [];
+    if (source.length <= MAX_MCP_PLANNER_CANDIDATES) return source;
+    const intent = taskState?.toolIntent || {};
+    const requested = new Set(Array.isArray(intent.requestedCapabilities) ? intent.requestedCapabilities : []);
+    const needsLocal = intent.requiresLocalFiles === true || requested.has('filesystem.read_workspace');
+    const needsBrowser = requested.has('browser.inspect');
+    const needsData = requested.has('data.query');
+    const score = tool => {
+        const name = String(tool?.name || tool?.fullName || '').toLowerCase();
+        let value = 0;
+        if (needsLocal && name.includes('reports.')) value += 100;
+        if (needsBrowser && name.includes('browser.')) value += 100;
+        if (needsData && (name.includes('db.') || name.includes('query') || name.includes('table'))) value += 90;
+        if (tool?.localDevice?.online === true) value += 5;
+        return value;
+    };
+    return source.slice().sort((left, right) => score(right) - score(left)
+        || String(left?.fullName || left?.name || '').localeCompare(String(right?.fullName || right?.name || '')))
+        .slice(0, MAX_MCP_PLANNER_CANDIDATES);
+}
+
 function compactText(value, maxLength = 12000) {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (!text) return '';
@@ -301,11 +326,15 @@ async function maybeBuildChartAfterDataTool({ selected, result, intentTools, use
     return compactText(extractMcpResultText(chartResult, writeSse), 12000);
 }
 
-function buildChatMcpPlannerMessages(history, userPrompt, tools) {
-    const recentMessages = history
-        .filter(message => ['user', 'assistant'].includes(message.role) && typeof message.content === 'string')
-        .slice(-8)
-        .map(message => ({ role: message.role, content: compactText(message.content, 1200) }));
+function buildChatMcpPlannerMessages(_history, userPrompt, tools, taskState = null) {
+    const structuredTask = taskState && typeof taskState === 'object' ? {
+        goal: taskState.goal || '',
+        currentQuestion: taskState.currentQuestion || userPrompt,
+        retrievalQuery: taskState.retrievalQuery || userPrompt,
+        constraints: Array.isArray(taskState.constraints) ? taskState.constraints.slice(0, 12) : [],
+        evidenceNeeds: Array.isArray(taskState.evidenceNeeds) ? taskState.evidenceNeeds.slice(0, 8) : [],
+        toolIntent: taskState.toolIntent || {}
+    } : null;
     return [
         {
             role: 'system',
@@ -329,8 +358,8 @@ function buildChatMcpPlannerMessages(history, userPrompt, tools) {
         {
             role: 'user',
             content: [
-                '最近对话:',
-                compactText(recentMessages, 6000),
+                '结构化任务状态（仅使用本对象进行工具规划，不读取完整聊天记录）:',
+                compactText(structuredTask || { currentQuestion: userPrompt }, 6000),
                 '',
                 '用户本轮问题:',
                 userPrompt
@@ -497,7 +526,7 @@ function buildMcpFailureHint(error, stage = 'planning') {
     ].join('\n');
 }
 
-async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null, signal = null }) {
+async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null, signal = null, taskState = null }) {
     const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
         const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
@@ -537,7 +566,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
     let mcpStage = 'planning';
     try {
         writeSse(JSON.stringify({ type: 'mcp', status: 'planning', message: '正在判断是否需要调用工具库工具' }));
-        const plannerTools = filterMcpToolsForPlanner(intentTools, userPrompt);
+        const plannerTools = pruneMcpPlannerCandidates(filterMcpToolsForPlanner(intentTools, userPrompt), taskState);
         if (!plannerTools.length) {
             const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
                 ? localBridgeReportMissingReason(tools, user, userPrompt, localMcpBridgeDebug)
@@ -587,7 +616,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             if (context) return context;
             mcpStage = 'planning';
         }
-        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools), user, { signal });
+        const plannerText = await callChatMcpPlanner(modelCfg, buildChatMcpPlannerMessages(history, userPrompt, plannerTools, taskState), user, { signal });
         const plan = parsePlannerJson(plannerText);
         const plannedTool = plan?.action === 'tool' ? resolvePlannerTool(plan.tool, plannerTools, userPrompt) : null;
         if (!plan || plan.action !== 'tool' || !plannedTool) {
