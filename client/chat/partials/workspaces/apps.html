@@ -459,6 +459,163 @@
                         </div>
                     </div>
                 </div>
+                <div id="presentations-view" class="presentations-view hidden">
+                    <section class="presentation-workbench" aria-label="PPT 制作工作台">
+                        <div id="presentation-library" class="presentation-library">
+                            <div class="presentation-library-head">
+                                <div>
+                                    <h4>我的演示文稿</h4>
+                                    <p>从主题、模板或已有材料快速制作可编辑 PPT。</p>
+                                </div>
+                                <div class="presentation-library-actions">
+                                    <button id="presentation-create-ai-btn" class="btn-primary" type="button">AI 创建</button>
+                                    <button id="presentation-create-blank-btn" class="btn-secondary" type="button">空白创建</button>
+                                    <button id="presentation-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                                </div>
+                            </div>
+                            <div id="presentation-template-strip" class="presentation-template-strip" aria-label="可选模板"></div>
+                            <div id="presentation-library-status" class="presentation-status" role="status" aria-live="polite"></div>
+                            <div id="presentation-library-list" class="presentation-library-list" aria-live="polite"></div>
+                        </div>
+
+                        <div id="presentation-editor" class="presentation-editor hidden">
+                            <header class="presentation-editor-head">
+                                <div class="presentation-editor-title-wrap">
+                                    <button id="presentation-back-to-library-btn" class="btn-secondary" type="button">返回文稿库</button>
+                                    <input id="presentation-title-input" class="presentation-title-input" aria-label="演示文稿名称" maxlength="160">
+                                    <span id="presentation-save-state" class="presentation-save-state" role="status">已保存</span>
+                                </div>
+                                <div class="presentation-editor-actions">
+                                    <button id="presentation-undo-btn" class="btn-secondary" type="button">撤销</button>
+                                    <button id="presentation-redo-btn" class="btn-secondary" type="button">重做</button>
+                                    <button id="presentation-check-btn" class="btn-secondary" type="button">质量检查</button>
+                                    <button id="presentation-export-pptx-btn" class="btn-primary" type="button">导出 PPTX</button>
+                                    <button id="presentation-export-pdf-btn" class="btn-secondary" type="button">PDF</button>
+                                    <button id="presentation-export-png-btn" class="btn-secondary" type="button">PNG</button>
+                                </div>
+                            </header>
+                            <div class="presentation-editor-layout">
+                                <aside class="presentation-slide-rail">
+                                    <div class="presentation-rail-head"><strong>页面</strong><div><button id="presentation-add-slide-btn" class="btn-secondary" type="button">+ 页面</button><button id="presentation-duplicate-slide-btn" class="btn-secondary" type="button" title="复制当前页">复制</button></div></div>
+                                    <div class="presentation-page-actions"><button id="presentation-move-slide-up-btn" class="btn-secondary" type="button">上移</button><button id="presentation-move-slide-down-btn" class="btn-secondary" type="button">下移</button><button id="presentation-delete-slide-btn" class="btn-secondary" type="button">删除</button></div>
+                                    <div id="presentation-slide-list" class="presentation-slide-list" aria-label="幻灯片列表"></div>
+                                </aside>
+                                <main class="presentation-stage-wrap">
+                                    <div class="presentation-stage-toolbar">
+                                        <label>布局 <select id="presentation-layout-select" class="form-input"></select></label>
+                                        <label>缩放 <select id="presentation-zoom-select" class="form-input"><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="1">100%</option></select></label>
+                                        <span id="presentation-slide-meta" class="presentation-slide-meta"></span>
+                                    </div>
+                                    <div id="presentation-stage-scroll" class="presentation-stage-scroll">
+                                        <div id="presentation-stage" class="presentation-stage" role="application" aria-label="演示文稿画布"></div>
+                                    </div>
+                                </main>
+                                <aside class="presentation-inspector">
+                                    <div class="presentation-inspector-tabs" role="tablist">
+                                        <button class="is-active" type="button" data-presentation-panel="properties">属性</button>
+                                        <button type="button" data-presentation-panel="template">模板</button>
+                                        <button type="button" data-presentation-panel="ai">AI 助手</button>
+                                        <button type="button" data-presentation-panel="issues">检查</button>
+                                        <button type="button" data-presentation-panel="versions">版本</button>
+                                    </div>
+                                    <div id="presentation-properties-panel" class="presentation-inspector-panel">
+                                        <div id="presentation-selection-empty" class="presentation-empty-note">选择页面中的元素以编辑属性。</div>
+                                        <form id="presentation-properties-form" class="presentation-properties-form hidden">
+                                            <label>内容<textarea id="presentation-element-text" class="form-input" rows="6"></textarea></label>
+                                            <div class="presentation-property-grid">
+                                                <label>X<input id="presentation-element-x" class="form-input" type="number" step="1"></label>
+                                                <label>Y<input id="presentation-element-y" class="form-input" type="number" step="1"></label>
+                                                <label>宽<input id="presentation-element-width" class="form-input" type="number" step="1"></label>
+                                                <label>高<input id="presentation-element-height" class="form-input" type="number" step="1"></label>
+                                                <label>旋转<input id="presentation-element-rotation" class="form-input" type="number" min="-360" max="360" step="1"></label>
+                                            </div>
+                                            <div id="presentation-text-style-fields" class="presentation-property-grid">
+                                                <label>字号<input id="presentation-element-font-size" class="form-input" type="number" min="6" max="96"></label>
+                                                <label>文字颜色<input id="presentation-element-color" class="form-input" type="color"></label>
+                                                <label>对齐<select id="presentation-element-align" class="form-input"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+                                                <label>字重<select id="presentation-element-weight" class="form-input"><option value="400">常规</option><option value="700">加粗</option></select></label>
+                                            </div>
+                                            <div id="presentation-shape-style-fields" class="presentation-property-grid hidden">
+                                                <label>填充颜色<input id="presentation-shape-fill" class="form-input" type="color"></label>
+                                                <label>边框颜色<input id="presentation-shape-stroke" class="form-input" type="color"></label>
+                                                <label>边框宽度<input id="presentation-shape-stroke-width" class="form-input" type="number" min="0" max="20" step="1"></label>
+                                                <label>透明度<input id="presentation-shape-opacity" class="form-input" type="number" min="0" max="1" step="0.1"></label>
+                                            </div>
+                                            <div id="presentation-image-style-fields" class="presentation-property-grid hidden">
+                                                <label>适应方式<select id="presentation-image-fit" class="form-input"><option value="cover">裁剪填充</option><option value="contain">完整显示</option><option value="stretch">拉伸填充</option></select></label>
+                                                <label>透明度<input id="presentation-image-opacity" class="form-input" type="number" min="0" max="1" step="0.1"></label>
+                                            </div>
+                                            <label id="presentation-element-data-field" class="hidden">表格或图表数据（JSON）<textarea id="presentation-element-data" class="form-input" rows="7" spellcheck="false"></textarea></label>
+                                            <div class="presentation-inspector-actions"><button id="presentation-layer-down-btn" class="btn-secondary" type="button">下移一层</button><button id="presentation-layer-up-btn" class="btn-secondary" type="button">上移一层</button><button id="presentation-delete-element-btn" class="btn-danger" type="button">删除元素</button></div>
+                                        </form>
+                                        <div class="presentation-element-actions">
+                                            <button id="presentation-add-text-btn" class="btn-secondary" type="button">添加文本</button>
+                                            <button id="presentation-add-shape-btn" class="btn-secondary" type="button">添加形状</button>
+                                            <button id="presentation-add-table-btn" class="btn-secondary" type="button">添加表格</button>
+                                            <button id="presentation-add-chart-btn" class="btn-secondary" type="button">添加图表</button>
+                                            <button id="presentation-import-data-chart-btn" class="btn-secondary" type="button">导入数据图表</button>
+                                            <button id="presentation-upload-image-btn" class="btn-secondary" type="button">插入图片</button>
+                                            <input id="presentation-image-input" class="hidden" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif">
+                                        </div>
+                                    </div>
+                                    <div id="presentation-template-panel" class="presentation-inspector-panel hidden"><div class="presentation-template-panel-head"><strong>选择主题模板</strong><div><button id="presentation-import-template-btn" class="btn-secondary hidden" type="button">导入</button><button id="presentation-export-template-btn" class="btn-secondary" type="button">导出当前</button><button id="presentation-save-template-btn" class="btn-secondary hidden" type="button">保存为组织模板</button></div></div><input id="presentation-template-package-input" class="hidden" type="file" accept=".json,application/json"><div id="presentation-template-list" class="presentation-template-list"></div></div>
+                                    <div id="presentation-ai-panel" class="presentation-inspector-panel hidden">
+                                        <label>对当前页面的要求<textarea id="presentation-ai-instruction" class="form-input" rows="5" placeholder="例如：将内容压缩成三项行动建议，保留事实和数字。"></textarea></label>
+                                        <button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button>
+                                        <p class="presentation-ai-note">AI 先生成建议，确认后才会替换当前页面。</p>
+                                    </div>
+                                    <div id="presentation-issues-panel" class="presentation-inspector-panel hidden"><div id="presentation-issues-list" class="presentation-issues-list"></div></div>
+                                    <div id="presentation-versions-panel" class="presentation-inspector-panel hidden"><div class="presentation-version-head"><strong>历史版本</strong><button id="presentation-refresh-versions-btn" class="btn-secondary" type="button">刷新</button></div><div id="presentation-versions-list" class="presentation-versions-list"></div></div>
+                                </aside>
+                            </div>
+                        </div>
+
+                        <div id="presentation-create-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-create-title">
+                            <div class="modal presentation-create-dialog">
+                                <div class="presentation-create-dialog-head"><h3 id="presentation-create-title">AI 创建演示文稿</h3><p>先生成可调整的大纲，确认后再生成页面。</p></div>
+                                <form id="presentation-create-form" class="presentation-create-form">
+                                    <label>演示主题<input id="presentation-create-topic" class="form-input" maxlength="300" placeholder="例如：2026 年数字化项目阶段工作汇报" required></label>
+                                    <div class="presentation-property-grid">
+                                        <label>目标页数<input id="presentation-create-pages" class="form-input" type="number" min="3" max="30" value="8"></label>
+                                        <label>目标受众<input id="presentation-create-audience" class="form-input" maxlength="200" placeholder="例如：管理层"></label>
+                                    </div>
+                                    <label>演示目的<input id="presentation-create-purpose" class="form-input" maxlength="300" placeholder="例如：说明阶段成果、风险和下一步计划"></label>
+                                    <label>表达风格<input id="presentation-create-style" class="form-input" maxlength="200" value="专业、简洁、可演示"></label>
+                                    <label>选择模板<select id="presentation-create-template" class="form-input"></select></label>
+                                    <label>已有材料（可选）<textarea id="presentation-create-material" class="form-input" rows="7" placeholder="粘贴背景材料、数据和原始说明。AI 只会基于这里提供的事实生成内容。"></textarea></label>
+                                    <label>上传材料（可选，Word/PDF/表格/Markdown）<input id="presentation-create-material-file" class="form-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm"></label>
+                                    <div class="presentation-create-actions"><button id="presentation-create-cancel-btn" class="btn-secondary" type="button">取消</button><button id="presentation-create-submit-btn" class="btn-primary" type="submit">生成大纲</button></div>
+                                </form>
+                            </div>
+                        </div>
+                        <div id="presentation-outline-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-outline-title">
+                            <div class="modal presentation-outline-dialog">
+                                <div class="presentation-create-dialog-head"><h3 id="presentation-outline-title">确认演示大纲</h3><p>可以修改标题与要点；确认后将按此结构生成可编辑页面。</p></div>
+                                <textarea id="presentation-outline-editor" class="form-input presentation-outline-editor" rows="18"></textarea>
+                                <div id="presentation-outline-warnings" class="presentation-outline-warnings"></div>
+                                <div class="presentation-create-actions"><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回修改</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
+                            </div>
+                        </div>
+                        <div id="presentation-data-chart-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-data-chart-title">
+                            <div class="modal presentation-create-dialog">
+                                <div class="presentation-create-dialog-head"><h3 id="presentation-data-chart-title">从数据分析插入图表</h3><p>图表将保留数据集与聚合条件引用，之后仍可在画布中移动、缩放和导出。</p></div>
+                                <form id="presentation-data-chart-form" class="presentation-create-form">
+                                    <label>数据集<select id="presentation-chart-dataset" class="form-input"></select></label>
+                                    <div class="presentation-property-grid">
+                                        <label>分类字段<select id="presentation-chart-x-field" class="form-input"></select></label>
+                                        <label>数值字段<select id="presentation-chart-y-field" class="form-input"></select></label>
+                                    </div>
+                                    <div class="presentation-property-grid">
+                                        <label>图表类型<select id="presentation-chart-type" class="form-input"><option value="bar">柱状图</option><option value="line">折线图</option><option value="area">面积图</option><option value="pie">饼图</option></select></label>
+                                        <label>聚合方式<select id="presentation-chart-aggregation" class="form-input"><option value="sum">求和</option><option value="count">计数</option><option value="avg">平均值</option><option value="max">最大值</option><option value="min">最小值</option></select></label>
+                                    </div>
+                                    <label>图表标题<input id="presentation-chart-title" class="form-input" maxlength="120" placeholder="留空则根据字段自动生成"></label>
+                                    <div class="presentation-create-actions"><button id="presentation-data-chart-cancel-btn" class="btn-secondary" type="button">取消</button><button id="presentation-data-chart-submit-btn" class="btn-primary" type="submit">插入图表</button></div>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
+                </div>
             </div>
         </div>
     </section>

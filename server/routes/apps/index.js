@@ -6,6 +6,7 @@ const { createRegulationsRouter } = require('./regulations');
 const { createDocumentProcessingRouter } = require('./document-processing');
 const { createOcrRouter } = require('./ocr');
 const { createPdfToolsRouter } = require('./pdf-tools');
+const { createPresentationsRouter } = require('./presentations');
 const { asyncHandler, normalizeLimit } = require('../../http');
 const { logger } = require('../../logger');
 const { estimateTokens } = require('../../llm');
@@ -331,6 +332,8 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.use('/apps/pdf-tools', createPdfToolsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
+
+    router.use(createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
 
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ datasets: await listDatasets(req.user.id) });

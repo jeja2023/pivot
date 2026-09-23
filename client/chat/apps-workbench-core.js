@@ -1,6 +1,16 @@
 // 应用中心工作区：集中承载面向业务场景的轻量应用。
 const PIVOT_APP_REGISTRY = [
     {
+        id: 'presentations',
+        name: 'PPT 制作',
+        category: '办公创作',
+        description: '使用 AI、模板和数据快速制作可编辑演示文稿，支持 PPTX、PDF 和 PNG 导出。',
+        icon: 'presentation',
+        tags: ['AI 生成', '主题模板', 'PPTX 导出'],
+        status: 'available',
+        openMode: 'inline'
+    },
+    {
         id: 'official-writing',
         name: '公文写作',
         category: '办公写作',
@@ -393,6 +403,15 @@ function setAppsWorkbenchVisibility(open) {
 }
 
 function getAppIconSvg(icon) {
+    if (icon === 'presentation') {
+        return `
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="14" rx="2"></rect>
+                <path d="M8 21h8"></path><path d="M12 18v3"></path>
+                <path d="M7 14V10"></path><path d="M11 14V7"></path><path d="M15 14v-2"></path>
+            </svg>
+        `;
+    }
     if (icon === 'file-text') {
         return `
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -526,6 +545,7 @@ function showAppsHome() {
     document.getElementById('regulations-view')?.classList.add('hidden');
     document.getElementById('ocr-view')?.classList.add('hidden');
     document.getElementById('pdf-tools-view')?.classList.add('hidden');
+    document.getElementById('presentations-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.add('hidden');
     setAppsTitle('应用中心', '打开面向具体业务场景的工作台，常用能力会沉淀在这里，而不是挤在侧栏里。');
     setAppsWorkbenchState();
@@ -541,6 +561,7 @@ async function showOfficialWritingApp() {
     document.getElementById('regulations-view')?.classList.add('hidden');
     document.getElementById('ocr-view')?.classList.add('hidden');
     document.getElementById('pdf-tools-view')?.classList.add('hidden');
+    document.getElementById('presentations-view')?.classList.add('hidden');
     document.getElementById('apps-back-btn')?.classList.remove('hidden');
     setAppsTitle('公文写作', '管理已创建公文，选择文种和名称后进入单篇编辑。');
     await loadOfficialWritingState();
@@ -596,6 +617,16 @@ async function showPdfToolsAppFromRegistry() {
     await window.Pivot.legacy.showPdfToolsApp?.();
 }
 
+async function showPresentationsAppFromRegistry() {
+    const presentations = window.Pivot?.moduleApi?.('apps.presentations');
+    if (typeof presentations?.showPresentationsApp === 'function') {
+        await presentations.showPresentationsApp();
+        return;
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations.js');
+    await window.Pivot?.moduleApi?.('apps.presentations')?.showPresentationsApp?.();
+}
+
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
@@ -639,6 +670,13 @@ function openRegisteredApp(appId) {
                 handleFailure();
             });
     }
+    if (app.id === 'presentations') {
+        showPresentationsAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
+            .catch(() => {
+                handleFailure();
+            });
+    }
 }
 
 window.Pivot?.exposeModule?.('workspaces.apps', {
@@ -653,7 +691,8 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     { globalName: 'setAppsSessionValue', exportName: 'setAppsSessionValue' },
     { globalName: 'setAppsWorkbenchState', exportName: 'setAppsWorkbenchState' },
     { globalName: 'setAppsWorkbenchVisibility', exportName: 'setAppsWorkbenchVisibility' },
-    { globalName: 'showRegulationsAppFromRegistry', exportName: 'showRegulationsAppFromRegistry' }
+    { globalName: 'showRegulationsAppFromRegistry', exportName: 'showRegulationsAppFromRegistry' },
+    { globalName: 'showPresentationsAppFromRegistry', exportName: 'showPresentationsAppFromRegistry' }
 ]);
 
 function createEmptyOfficialWritingDoc() {

@@ -51,7 +51,8 @@ const migrationModules = [
     require('./chat-adaptive-routing'),
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
-    require('./knowledge-database-query-templates')
+    require('./knowledge-database-query-templates'),
+    require('./presentation-workbench')
 ];
 
 module.exports = migrationModules

@@ -1,0 +1,15 @@
+/* PPT 编辑器的页面与版本控制补充样式，独立于画布基础样式以避免压缩源文件难以维护。 */
+.presentation-rail-head > div { display: flex; gap: 4px; }
+.presentation-page-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 7px; border-bottom: 1px solid rgba(148, 163, 184, 0.14); }
+.presentation-page-actions .btn-secondary { height: 28px; padding: 0 3px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
+.presentation-inspector-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.presentation-inspector-actions .btn-secondary,
+.presentation-version-head .btn-secondary { height: 30px; padding: 0 8px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
+.presentation-version-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.presentation-version-head strong { font-size: 0.78rem; }
+.presentation-versions-list { display: grid; gap: 8px; }
+.presentation-version-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 9px; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 8px; }
+.presentation-version-row > div { display: grid; min-width: 0; gap: 3px; }
+.presentation-version-row strong { font-size: 0.73rem; }
+.presentation-version-row span { overflow: hidden; color: var(--text-muted); font-size: 0.65rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.presentation-version-row .btn-secondary { height: 28px; padding: 0 8px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }

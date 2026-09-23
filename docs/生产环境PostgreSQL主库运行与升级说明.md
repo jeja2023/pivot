@@ -45,7 +45,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
   → 写入 Schema 注释与默认系统配置
 ```
 
-`server/db/schema/pg-schema.snapshot.json` 是主库的原生 DDL 来源。当前基线包含 104 张表、184 个外键和 172 个索引；迁移注册表中的 69 条迁移均为 PostgreSQL `upPg` 迁移。
+`server/db/schema/pg-schema.snapshot.json` 是主库的原生 DDL 来源。部署增量能力时，启动过程会继续执行迁移注册表中尚未登记的 PostgreSQL `upPg` 迁移；不要通过手工建表、删表或修改迁移记录替代应用启动迁移。
 
 历史建表和补列已由 schema 快照接管。不要手工把历史 SQLite DDL、FTS5 虚表或 SQLite `PRAGMA` 迁回生产库。
 
@@ -134,6 +134,20 @@ WHERE schemaname = current_schema()
 | 连接账户 | `connection_accounts` 只保存加密凭据引用；管理/API 响应、工具 Schema、调用日志和模型上下文不出现令牌原文。 |
 | 工作流兼容 | 若新 Release 标记为破坏性变更，相关已发布工作流显示 stale，重新确认后才可再次发布。 |
 | 运行治理 | 工具调用事件可关联 actor、release、策略决定、Trace 和安全摘要；任务取消、限流和熔断不绕过统一策略入口。 |
+
+### v0.1.164 PPT 制作应用增量检查
+
+`v0.1.164` 会自动应用 `202609220001_presentation_workbench_foundation`，新增 `presentation_documents`、`presentation_versions`、`presentation_templates`、`presentation_assets` 和 `presentation_exports`。该迁移只新增演示文稿的业务表和索引；可下载的 PPTX、PDF、PNG 继续使用既有 `agent_artifacts`、`agent_artifact_objects`、`agent_artifact_renditions` 与下载交付表，不会创建面向浏览器暴露的文件路径。
+
+| 检查项 | 预期结果 |
+| --- | --- |
+| `schema_migrations` | 已登记 `202609220001_presentation_workbench_foundation`。 |
+| 文稿隔离 | `presentation_documents`、模板与素材查询均按 `tenant_id + owner_user_id` 过滤；不同账号不能凭文稿 ID 或 CAS 引用读取内容。 |
+| Artifact 链路 | 新建文稿有独立 `agent_artifacts` 记录；导出后存在对应 `agent_artifact_renditions` 与 `presentation_exports` 记录。 |
+| 渲染结果 | 在 PowerPoint/WPS 抽样打开 PPTX，并抽样比对应用预览、PDF 与 PNG 的中文字形、文本位置和图表显示。 |
+| 素材治理 | 素材对象使用 `presentation_asset` 类型的 CAS 记录；不存在直接暴露的 `storage_key`、绝对路径或任意远程图片 URL。 |
+
+升级前备份 PostgreSQL 与现有 Artifact/CAS 存储目录。生产镜像或桌面安装包重新构建前应运行 `npm ci`，确保使用锁定的 `pptxgenjs@4.0.1`；若应用账户没有创建表、索引或外键的权限，迁移会在事务内失败且不会写入 `schema_migrations`，应先修正权限后重启，不要手工插入迁移记录。
 
 ## 6. 禁止执行的旧流程
 
