@@ -8,12 +8,11 @@ const { getBeijingTimestamp } = require('../../time');
 const { assertTenantContext } = require('../agent-tenant-context');
 const { createStandaloneArtifact, getAgentArtifactForUser } = require('../agent-artifacts');
 const { buildCasRef, incrementRefCount, parseCasRef, putBuffer, readBuffer, statObject } = require('../agent-artifact-cas');
-const { recordDeliveryEvent } = require('../agent-artifact-delivery');
 const { isAdmin } = require('../../permissions');
 const { readTypedEnv } = require('../../config/env-registry');
 const { getBuiltInTemplate, listBuiltInTemplates } = require('./presentation-templates');
 const { importPptxTemplatePackage } = require('./presentation-pptx-template-import');
-const { isVbaFilename, isMacroEnabledPresentation, scanVbaSource } = require('./presentation-vba');
+const { isVbaFilename, scanVbaSource } = require('./presentation-vba');
 const {
     collectPresentationAssetRefs,
     computePresentationDigest,
@@ -23,7 +22,7 @@ const {
 const { runPresentationValidation } = require('./presentation-validation');
 const { publishPresentationRealtime } = require('./presentation-realtime');
 const { createCollabService } = require('./presentation-collab-service');
-const { createRemoteService, remoteTokenHash, remotePublicContent } = require('./presentation-remote-service');
+const { createRemoteService } = require('./presentation-remote-service');
 const { createExportService } = require('./presentation-export-service');
 
 const MAX_TITLE_LENGTH = 160;
@@ -35,7 +34,6 @@ const FONT_MIME_TYPES = new Set(['font/ttf', 'font/otf', 'font/woff', 'font/woff
 const AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp4', 'audio/aac']);
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
 const ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', 'text/markdown', 'application/vnd.ms-powerpoint.presentation.macroenabled.12', 'application/vnd.ms-powerpoint.slideshow.macroenabled.12']);
-const EXPORT_FORMATS = new Set(['pptx', 'pdf', 'png']);
 
 function publicError(message, status = 400, code = 'PRESENTATION_INVALID') {
     const error = new Error(message);
@@ -967,7 +965,6 @@ module.exports = {
     listPresentationTemplates,
     listPresentationVersions,
     listPresentations,
-    importPresentationTemplate,
     importPresentationTemplateFile,
     normalizeTemplatePackage,
     removePresentationCollaborator,

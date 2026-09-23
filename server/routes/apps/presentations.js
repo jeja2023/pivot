@@ -42,7 +42,6 @@ const {
     listPresentationTemplates,
     listPresentationVersions,
     listPresentations,
-    importPresentationTemplate,
     importPresentationTemplateFile,
     removePresentationCollaborator,
     resolvePresentationComment,

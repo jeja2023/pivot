@@ -128,7 +128,5 @@ function createRemoteService(deps) {
 }
 
 module.exports = {
-    remoteTokenHash,
-    remotePublicContent,
     createRemoteService
 };

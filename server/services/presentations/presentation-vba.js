@@ -17,6 +17,5 @@ function scanVbaSource(buffer, filename = '') {
 }
 
 function isVbaFilename(filename) { return /\.(?:bas|vba)$/i.test(String(filename || '')); }
-function isMacroEnabledPresentation(filename) { return /\.(?:pptm|ppsm)$/i.test(String(filename || '')); }
 
-module.exports = { isMacroEnabledPresentation, isVbaFilename, scanVbaSource };
+module.exports = { isVbaFilename, scanVbaSource };

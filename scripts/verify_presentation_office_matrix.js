@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('node:fs');
-const path = require('node:path');
 const JSZip = require('jszip');
 const { defaultPresentation } = require('../server/services/presentations/presentation-schema');
 const { getBuiltInTemplate } = require('../server/services/presentations/presentation-templates');

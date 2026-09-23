@@ -591,11 +591,16 @@ function openAppsWorkbench(options = {}) {
     }
     const targetApp = options?.app || getStoredAppsActiveApp();
     if (targetApp === 'presentations') {
-        showPresentationsAppFromRegistry(options).then(async () => {
-            if (options?.presentationId) {
-                await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
-            }
-        }).catch(() => showAppsHome());
+        const launch = window.Pivot?.legacy?.showPresentationsAppFromRegistry;
+        if (typeof launch === 'function') {
+            launch(options).then(async () => {
+                if (options?.presentationId) {
+                    await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
+                }
+            }).catch(() => showAppsHome());
+        } else {
+            showAppsHome();
+        }
     } else if (targetApp === 'official-writing') {
         showOfficialWritingApp().then(() => {
             if (options?.docId && typeof switchOfficialWritingDoc === 'function') {

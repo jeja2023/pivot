@@ -56,14 +56,7 @@
         element.dataset.state = mode;
     } function canEditActivePresentation() {
         return state.active?.isOwner !== false || state.active?.collaboratorRole === 'editor' || (typeof isAdminUser === 'function' && isAdminUser());
-    } function inferAssetType(file) {
-        const mime = String(file?.type || '').toLowerCase(); const name = String(file?.name || '').toLowerCase();
-        if (/^font\//.test(mime) || /\.(ttf|otf|woff2?)$/.test(name)) return 'font';
-        if (/^audio\//.test(mime) || /\.(mp3|wav|ogg|aac|m4a)$/.test(name)) return 'audio';
-        if (/^video\//.test(mime) || /\.(mp4|webm|mov)$/.test(name)) return 'video';
-        if (/\.(pdf|docx|xlsx|txt|md)$/.test(name) || /^(application\/pdf|text\/plain|text\/markdown)/.test(mime)) return 'attachment';
-        return 'image';
-    } function fontFamilyFromFile(file) { return String(file?.name || '自定义字体').replace(/\.(ttf|otf|woff2?)$/i, '').replace(/[._-]+/g, ' ').trim().slice(0, 80) || '自定义字体'; }
+    }
     async function ensureThemeFonts() {
         const content = activeContent(); if (!content?.theme?.fontAssets || typeof FontFace === 'undefined') return;
         for (const [kind, ref] of Object.entries(content.theme.fontAssets)) {
@@ -541,7 +534,6 @@
     async function loadAssets() { return presenter()?.loadAssets?.(state); }
     function applyFontAsset(asset, kind) { return presenter()?.applyFontAsset?.(asset, kind, state, { recordHistory, renderEditor, toast }); }
     function insertAssetFromLibrary(asset) { return presenter()?.insertAssetFromLibrary?.(asset, state, { recordHistory, renderEditor }); }
-    function renderAssetsPanel() { return presenter()?.renderAssetsPanel?.(state); }
     function assetByRef(ref) { return state.assets?.find(asset => asset.ref === ref) || null; }
     async function loadPresentationMetrics() { return presenter()?.loadPresentationMetrics?.(); }
     function renderTemplatePanel() { return presenter()?.renderTemplatePanel?.(state, { templateById, renderTemplates }); }
@@ -552,9 +544,7 @@
     async function exportCurrentTemplate() { return presenter()?.exportCurrentTemplate?.(state, { templateById, toast }); }
     async function importTemplatePackage(file) { return presenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
     function renderSpeakerNotes() { return presenter()?.renderSpeakerNotes?.(state); }
-    function presenterTextElement(element) { return presenter()?.presenterTextElement?.(element, state); }
     function renderPresenterMode() { return presenter()?.renderPresenterMode?.(state); }
-    function updatePresenterTimer() { return presenter()?.updatePresenterTimer?.(state); }
     async function openPresenterMode() { return presenter()?.openPresenterMode?.(state, { saveActive, syncRemoteSlide }); }
     function closePresenterMode() { return presenter()?.closePresenterMode?.(state); }
     function movePresenterSlide(delta) { return presenter()?.movePresenterSlide?.(delta, state, { syncRemoteSlide }); }
@@ -564,7 +554,6 @@
         if (!issues.length) { const empty = document.createElement('div'); empty.className = 'presentation-empty-note'; empty.textContent = '暂无问题。导出前仍可再次执行质量检查。'; list.appendChild(empty); return; }
         issues.forEach(issue => { const item = document.createElement('button'); item.type = 'button'; item.className = `presentation-issue is-${issue.level || 'info'}`; item.dataset.presentationIssueSlide = issue.slideId || ''; item.dataset.presentationIssueElement = issue.elementId || ''; const title = document.createElement('strong'); title.textContent = issue.message; const tip = document.createElement('span'); tip.textContent = issue.suggestion || ''; item.append(title, tip); list.appendChild(item); });
     }
-    function renderVersions() { return presenter()?.renderVersions?.(state, { formatTime }); }
     async function loadVersions() { return presenter()?.loadVersions?.(state, { formatTime }); }
     async function restoreVersion(version) { return presenter()?.restoreVersion?.(version, state, { saveActive, resetHistory, renderEditor, formatTime, toast }); }
     function switchPanel(name) {
@@ -628,8 +617,6 @@ function setSelectedImageAsCover() {
             activeSlide().elements.push({ id, type: 'image', x: 180, y: 180, width: 600, height: 360, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], assetRef: data.asset.ref, fit: 'cover', opacity: 1, intrinsicWidth: Number(data.asset.pixelWidth || 0), intrinsicHeight: Number(data.asset.pixelHeight || 0), alt: data.asset.filename }); state.selectedElementId = id; state.selectedElementIds = [id]; recordHistory(); renderEditor(); toast('图片已插入');
         } finally { setSaveState('待保存', 'dirty'); }
     }
-    function populateChartDatasetSelect() { return presenter()?.populateChartDatasetSelect?.(state); }
-    function populateChartFields(dataset) { return presenter()?.populateChartFields?.(dataset); }
     async function loadChartDatasetFields() { return presenter()?.loadChartDatasetFields?.(); }
     async function openDataChartModal() { return presenter()?.openDataChartModal?.(state, { toast }); }
     async function importDataChart() { return presenter()?.importDataChart?.(state, { recordHistory, renderEditor, toast }); }
@@ -939,6 +926,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-outline-back-btn')) { byId('presentation-outline-modal')?.classList.add('hidden'); openCreateModal(); return; }
             if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-library-reset-btn')) { resetLibraryFilters(); return; }
+            if (event.target.closest('#presentation-sync-btn') || event.target.closest('#presentation-save-state')) { syncRemotePresentation().catch(error => toast(error.message, 'error')); return; }
         });
         view.addEventListener('submit', event => {
             if (collab()?.handleCollabSubmit?.(event)) return;
@@ -947,7 +935,7 @@ function setSelectedImageAsCover() {
             if (event.target?.id === 'presentation-data-chart-form') { event.preventDefault(); importDataChart().catch(error => toast(error.message, 'error')); }
         });
         view.addEventListener('input', event => { if (['presentation-library-search', 'presentation-library-tag', 'presentation-library-created-by'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-title-input' && state.active?.content) { state.active.content.title = event.target.value.slice(0, 160); state.active.title = state.active.content.title; recordHistory(); } if (event.target?.id === 'presentation-speaker-notes') { const slide = activeSlide(); if (slide) { slide.speakerNotes = event.target.value.slice(0, 8000); scheduleSave(); } } if (event.target?.closest('#presentation-properties-form') && event.target?.id !== 'presentation-element-data') updateElementFromForm(); });
-        view.addEventListener('change', event => { if (['presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-library-favorite-only') { state.libraryFilters.favorite = Boolean(event.target.checked); loadDocuments().catch(error => toast(error.message, 'error')); return; } if (event.target?.id === 'presentation-speaker-notes') { recordHistory(); return; } if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-replace-image-input') replaceSelectedImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 0.65; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
+        view.addEventListener('change', event => { if (['presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-library-favorite-only') { state.libraryFilters.favorite = Boolean(event.target.checked); loadDocuments().catch(error => toast(error.message, 'error')); return; } if (event.target?.id === 'presentation-speaker-notes') { recordHistory(); return; } if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-replace-image-input') replaceSelectedImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-rich-asset-input') uploadRichAsset(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 0.65; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
         view.addEventListener('pointerdown', event => { const node = event.target.closest('[data-presentation-element-id]'); const element = selectedElement(); if (node && element && node.dataset.presentationElementId === element.id) startDrag(event, element); });
         window.addEventListener('pointermove', moveDrag); window.addEventListener('pointerup', endDrag);
         view.addEventListener('keydown', event => {
@@ -971,5 +959,5 @@ function setSelectedImageAsCover() {
         }
         if (!state.active) { byId('presentation-library')?.classList.remove('hidden'); byId('presentation-editor')?.classList.add('hidden'); }
     }
-    window.Pivot?.exposeModule?.('apps.presentations', { ready: true, showPresentationsApp, loadDocuments, openPresentation });
+    window.Pivot?.exposeModule?.('apps.presentations', { ready: true, showPresentationsApp, loadDocuments, openPresentation, renderPresenterMode, syncRemotePresentation });
 })();

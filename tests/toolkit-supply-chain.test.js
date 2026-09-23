@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const test = require('node:test');
-const { validateToolkitManifest, validateToolkitTools, verifyToolkitSignature, reviewToolkitRelease } = require('../server/services/toolkit-supply-chain');
+const { validateToolkitManifest, validateToolkitTools, verifyToolkitSignature } = require('../server/services/toolkit-supply-chain');
 
 function signableManifest() {
     return {

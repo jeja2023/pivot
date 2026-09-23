@@ -3,7 +3,6 @@
 
     const API = '/api/apps/presentations';
     const byId = id => document.getElementById(id);
-    const deepClone = value => JSON.parse(JSON.stringify(value));
 
     async function requestJson(url, options = {}) {
         const res = await apiFetch(url, options);
@@ -164,6 +163,7 @@
         updatePresenterTimer(state);
         renderPresenterMode(state);
         byId('presentation-presenter-modal')?.classList.remove('hidden');
+        syncRemoteSlide?.().catch(() => {});
     }
 
     function closePresenterMode(state) {

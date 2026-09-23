@@ -174,7 +174,7 @@ function closeOperationsModal() {
     }
 }
 
-function bindOperationsModal(reload) {
+function bindOperationsModal(_reload) {
     const target = operationsModal();
     if (!target || target.dataset.bound === '1') return;
     target.dataset.bound = '1';
