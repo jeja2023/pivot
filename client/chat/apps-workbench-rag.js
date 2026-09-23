@@ -1,4 +1,4 @@
-/* global showOcrAppFromRegistry, showPdfToolsAppFromRegistry */
+/* global showOcrAppFromRegistry, showPdfToolsAppFromRegistry, showPresentationsAppFromRegistry */
 // ===== 知识库检索接入 =====
 
 // 缓存知识库最近一次检索结果，供插入和引用操作复用。
@@ -591,16 +591,11 @@ function openAppsWorkbench(options = {}) {
     }
     const targetApp = options?.app || getStoredAppsActiveApp();
     if (targetApp === 'presentations') {
-        const launch = window.Pivot?.legacy?.showPresentationsAppFromRegistry;
-        if (typeof launch === 'function') {
-            launch(options).then(async () => {
-                if (options?.presentationId) {
-                    await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
-                }
-            }).catch(() => showAppsHome());
-        } else {
-            showAppsHome();
-        }
+        showPresentationsAppFromRegistry(options).then(async () => {
+            if (options?.presentationId) {
+                await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
+            }
+        }).catch(() => showAppsHome());
     } else if (targetApp === 'official-writing') {
         showOfficialWritingApp().then(() => {
             if (options?.docId && typeof switchOfficialWritingDoc === 'function') {
@@ -615,9 +610,9 @@ function openAppsWorkbench(options = {}) {
         } else {
             showAppsHome();
         }
-    } else if (targetApp === 'ocr') {
+    } else if (targetApp === 'ocr' || getStoredAppsActiveApp() === 'ocr') {
         showOcrAppFromRegistry().catch(() => showAppsHome());
-    } else if (targetApp === 'pdf-tools') {
+    } else if (targetApp === 'pdf-tools' || getStoredAppsActiveApp() === 'pdf-tools') {
         showPdfToolsAppFromRegistry().catch(() => showAppsHome());
     } else {
         showAppsHome();
