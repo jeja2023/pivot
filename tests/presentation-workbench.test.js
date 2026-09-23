@@ -315,7 +315,9 @@ test('导出器遵守备注选项并继续生成三种受控格式', async () =>
     ]);
     const withNotes = await JSZip.loadAsync(pptxWithNotes.buffer);
     const withoutNotes = await JSZip.loadAsync(pptxWithoutNotes.buffer);
-    assert.ok(Object.keys(withNotes.files).some(name => /^ppt\/notesSlides\//.test(name)));
-    assert.equal(Object.keys(withoutNotes.files).some(name => /^ppt\/notesSlides\//.test(name)), false);
+    const noteXmlWith = await withNotes.file('ppt/notesSlides/notesSlide1.xml')?.async('string') || '';
+    const noteXmlWithout = await withoutNotes.file('ppt/notesSlides/notesSlide1.xml')?.async('string') || '';
+    assert.ok(noteXmlWith.includes('演讲者备注'));
+    assert.equal(noteXmlWithout.includes('演讲者备注'), false);
     assert.equal(pngHigh.buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
 });

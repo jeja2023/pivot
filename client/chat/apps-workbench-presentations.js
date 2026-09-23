@@ -2,41 +2,12 @@
     if (window.Pivot?.moduleApi?.('apps.presentations')?.ready) return;
     const API = '/api/apps/presentations';
     const state = {
-        templates: [],
-        documents: [],
-        libraryFilters: { search: '', tag: '', favorite: false, templateId: '', status: '', createdBy: '', updatedFrom: '', updatedTo: '' },
-        libraryFilterTimer: null,
-        assets: [],
-        pendingAssetType: '',
-        fontFaceUrls: new Map(),
-        coverUrls: new Map(),
-        active: null,
-        selectedSlideId: '',
-        selectedElementId: '',
-        selectedElementIds: [],
-        elementClipboard: null,
-        panel: 'properties',
-        zoom: 0.65,
-        history: [],
-        historyIndex: -1,
-        saveTimer: null,
-        saving: false,
-        pendingOutline: null,
-        pendingCreate: null,
-        aiAbortController: null,
-        aiRequestKey: '',
-        presenterIndex: 0,
-        presenterStartedAt: 0,
-        presenterTimer: null,
-        syncTimer: null,
-        realtimeSource: null,
-        dirty: false,
-        remoteVersionAvailable: false,
-        remoteSession: null,
-        imageUrls: new Map(),
-        drag: null,
-        dataSets: [],
-        versions: [],
+        templates: [], documents: [], assets: [], pendingAssetType: '', fontFaceUrls: new Map(), coverUrls: new Map(), imageUrls: new Map(), dataSets: [], versions: [],
+        libraryFilters: { search: '', tag: '', favorite: false, templateId: '', status: '', createdBy: '', updatedFrom: '', updatedTo: '' }, libraryFilterTimer: null,
+        active: null, selectedSlideId: '', selectedElementId: '', selectedElementIds: [], elementClipboard: null, panel: 'properties', zoom: 0.65,
+        history: [], historyIndex: -1, saveTimer: null, saving: false, dirty: false, remoteVersionAvailable: false, remoteSession: null, drag: null,
+        pendingOutline: null, pendingCreate: null, aiAbortController: null, aiRequestKey: '',
+        presenterIndex: 0, presenterStartedAt: 0, presenterTimer: null, syncTimer: null, realtimeSource: null,
         exportOptions: { aspectRatio: '', includeNotes: true, includePageNumbers: true, showSourceRefs: true, imageQuality: 'standard', fontStrategy: 'embed' }
     };
     const byId = id => document.getElementById(id);
@@ -73,7 +44,7 @@
     } function isAiAbort(error, controller = null) {
         return controller?.signal?.aborted === true || error?.name === 'AbortError' || /aborted|取消/i.test(String(error?.message || ''));
     } function setStatus(message = '', type = '') {
-        const element = byId('presentation-library-status');
+        const element = byId('presentation-library-status-banner') || byId('presentation-library-status-message');
         if (!element) return;
         element.textContent = message;
         element.dataset.type = type;
@@ -333,6 +304,12 @@
     function scheduleLibraryFilter() {
         syncLibraryFilters(); clearTimeout(state.libraryFilterTimer);
         state.libraryFilterTimer = window.setTimeout(() => loadDocuments().catch(error => toast(error.message, 'error')), 250);
+    }
+    function resetLibraryFilters() {
+        ['presentation-library-search', 'presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-library-tag'].forEach(id => setInput(id, ''));
+        const fav = byId('presentation-library-favorite-only'); if (fav) fav.checked = false;
+        syncLibraryFilters(); state.libraryFilters.favorite = false;
+        loadDocuments().catch(error => toast(error.message, 'error'));
     }
     async function updateDocumentTags(id, currentTags) {
         const tags = await window.Pivot.legacy.showInputPrompt?.({ title: '编辑文稿标签', message: '用逗号分隔，最多 12 个', value: (currentTags || []).join(', '), width: 520 });
@@ -960,7 +937,8 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-refresh-versions-btn')) { loadVersions().catch(error => toast(error.message, 'error')); return; }
             const restore = event.target.closest('[data-presentation-restore-version]'); if (restore) { restoreVersion(Number(restore.dataset.presentationRestoreVersion)).catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-outline-back-btn')) { byId('presentation-outline-modal')?.classList.add('hidden'); openCreateModal(); return; }
-            if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); }
+            if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-library-reset-btn')) { resetLibraryFilters(); return; }
         });
         view.addEventListener('submit', event => {
             if (collab()?.handleCollabSubmit?.(event)) return;

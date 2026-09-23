@@ -474,17 +474,18 @@
                                 </div>
                             </div>
                             <div class="presentation-library-filters">
-                                <input id="presentation-library-search" class="form-input" type="search" maxlength="160" placeholder="搜索标题或正文">
-                                <input id="presentation-library-created-by" class="form-input" maxlength="120" placeholder="筛选创建者">
-                                <select id="presentation-library-template" class="form-input" aria-label="筛选模板"><option value="">全部模板</option></select>
-                                <select id="presentation-library-status" class="form-input" aria-label="筛选状态"><option value="">全部状态</option><option value="draft">草稿</option><option value="needs_attention">需处理</option><option value="ready">已完成</option><option value="archived">已归档</option></select>
-                                <input id="presentation-library-updated-from" class="form-input" type="date" aria-label="更新时间起始">
-                                <input id="presentation-library-updated-to" class="form-input" type="date" aria-label="更新时间截止">
-                                <input id="presentation-library-tag" class="form-input" maxlength="32" placeholder="筛选标签">
+                                <input id="presentation-library-search" class="form-input" type="search" maxlength="160" placeholder="搜索标题或正文" title="搜索标题或正文">
+                                <input id="presentation-library-created-by" class="form-input" maxlength="120" placeholder="创建者" title="筛选创建者">
+                                <select id="presentation-library-template" class="form-input" aria-label="筛选模板" title="筛选模板"><option value="">全部模板</option></select>
+                                <select id="presentation-library-status" class="form-input" aria-label="筛选状态" title="筛选状态"><option value="">全部状态</option><option value="draft">草稿</option><option value="needs_attention">需处理</option><option value="ready">已完成</option><option value="archived">已归档</option></select>
+                                <input id="presentation-library-updated-from" class="form-input" type="date" aria-label="更新时间起始" title="更新时间起始">
+                                <input id="presentation-library-updated-to" class="form-input" type="date" aria-label="更新时间截止" title="更新时间截止">
+                                <input id="presentation-library-tag" class="form-input" maxlength="32" placeholder="标签" title="筛选标签">
                                 <label class="presentation-library-favorite-filter"><input id="presentation-library-favorite-only" type="checkbox"> 仅收藏</label>
+                                <button id="presentation-library-reset-btn" class="btn-secondary presentation-library-reset-btn" type="button" title="重置全部筛选">重置</button>
                             </div>
                             <div id="presentation-template-strip" class="presentation-template-strip" aria-label="可选模板"></div>
-                            <div id="presentation-library-status" class="presentation-status" role="status" aria-live="polite"></div>
+                            <div id="presentation-library-status-banner" class="presentation-status" role="status" aria-live="polite"></div>
                             <div id="presentation-library-list" class="presentation-library-list" aria-live="polite"></div>
                         </div>
 
