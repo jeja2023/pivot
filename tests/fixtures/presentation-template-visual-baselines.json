@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "renderer": "presentation-renderer",
+  "templates": {
+    "business-blue": {
+      "sha256": "36a9ed5a1fb97f0a7689e2f7933d09b863f5caaef041c169de669cc8356b15bb",
+      "width": 1280,
+      "height": 720
+    },
+    "technology-dark": {
+      "sha256": "307e5414ba067c4a5e904bc189a097e785c4911d27e0c9cfa6e7324fcd5c3fd6",
+      "width": 1280,
+      "height": 720
+    },
+    "government-clean": {
+      "sha256": "7e52574e12b17b9c74d2eca45bcd28978890775d8f07d08d3dce6dcfbcfdf555",
+      "width": 1280,
+      "height": 720
+    },
+    "party-red": {
+      "sha256": "1ca07bff4cb802c623bfc49bc79d9a7f93d170b56179eb74f400e9f5a997bc2b",
+      "width": 1280,
+      "height": 720
+    },
+    "training-green": {
+      "sha256": "cd810478825e3e36e08b6f95b47008331c2d009bbc5958940d10e71ed2bedbb2",
+      "width": 1280,
+      "height": 720
+    },
+    "data-insight": {
+      "sha256": "53ba3929d6c47c582fbce6b3d36f8ba294be00f1cae921857555b53768c7e90e",
+      "width": 1280,
+      "height": 720
+    },
+    "minimal-white": {
+      "sha256": "e9889686845a0d7fe3c5c1911aacddca4e4426d1e0abe84a9478d5f446fb6e4e",
+      "width": 1280,
+      "height": 720
+    },
+    "public-welfare": {
+      "sha256": "400ba67a5a726049527ee16bd645f4d9056d5e992ffc227ce42cf77625d980bb",
+      "width": 1280,
+      "height": 720
+    }
+  }
+}

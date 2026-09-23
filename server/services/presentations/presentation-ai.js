@@ -64,6 +64,49 @@ function buildSlidesMessages(body = {}) {
     ];
 }
 
+function buildContinueMessages(body = {}) {
+    const presentation = body.presentation && typeof body.presentation === 'object' ? body.presentation : {};
+    const template = getBuiltInTemplate(body.templateId || presentation.template?.id || 'business-blue') || getBuiltInTemplate('business-blue');
+    const additionalSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
+    const existing = (presentation.slides || []).slice(-12).map(slide => ({ title: (slide.elements || []).filter(item => item.type === 'text').sort((a, b) => Number(b.style?.fontSize || 0) - Number(a.style?.fontSize || 0))[0]?.content?.text || '', layoutId: slide.layoutId || '' }));
+    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => '来源 ' + (item.id || '') + ' / ' + clamp(item.title || '', 120) + '：' + clamp(item.text || '', 5000)).join('\n') : '';
+    return [
+        { role: 'system', content: presentationAiSystemPrompt() },
+        { role: 'user', content: [
+            '为现有演示文稿只新增 ' + additionalSlides + ' 页，不要重写或重复已有页面。',
+            '文稿主题：' + clamp(presentation.title || body.title || body.topic || '演示文稿', 300),
+            '补写要求：' + clamp(body.instruction || '延续当前结构补充后续内容。', 1000),
+            '模板：' + template.name + '，主色：' + template.theme.colors.primary,
+            '已有页面摘要：' + JSON.stringify(existing).slice(0, 12000),
+            materials ? '材料：\n' + materials : '材料：未提供。不得编造精确事实。',
+            '仅返回新增页面，返回格式：{\"title\":\"...\",\"slides\":[{\"id\":\"slide_new_1\",\"type\":\"content\",\"layoutId\":\"title-content\",\"elements\":[...],\"speakerNotes\":\"\",\"sourceRefs\":[]}],\"assumptions\":[],\"warnings\":[]}',
+            'slides 数量必须恰好为 ' + additionalSlides + '；仅可使用 text、shape、table、chart 元素，不能引用外部 URL。'
+        ].join('\n') }
+    ];
+}
+
+function buildRewriteMessages(body = {}) {
+    const slide = body.slide && typeof body.slide === 'object' ? body.slide : {};
+    const title = body.title || slide.title || '当前页面';
+    const outline = { title, slides: [{ title, purpose: body.instruction || '根据用户要求重写当前页面', layoutHint: slide.layoutId || 'title-content', keyPoints: (slide.elements || []).filter(item => item.type === 'text').map(item => item.content && item.content.text || '').filter(Boolean), sourceRefs: slide.sourceRefs || [] }] };
+    return buildSlidesMessages({ ...body, title, topic: body.topic || title, outline, instruction: body.instruction || '重写当前页面，保留事实和来源引用。' });
+}
+
+function buildValidationMessages(body = {}) {
+    const presentation = body.presentation && typeof body.presentation === 'object' ? body.presentation : {};
+    return [{ role: 'system', content: presentationAiSystemPrompt() }, { role: 'user', content: ['请检查下面演示文稿中的事实、数字、引用和内容逻辑。只返回 JSON，不要返回 Markdown。', '无法从来源确认的数字、日期、政策名称或组织名称必须列为 warning，不得自行补全。', '返回格式：{"status":"passed|warning|blocked","issues":[{"severity":"blocking|warning|info","slideId":"","elementId":"","code":"FACT_UNVERIFIED","message":"","suggestion":""}],"assumptions":[]}', JSON.stringify(presentation).slice(0, 50000)].join('\n') }];
+}
+
+function parseValidationProposal(content) {
+    const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+    const start = text.indexOf('{'); const end = text.lastIndexOf('}');
+    if (start < 0 || end <= start) throw presentationError('AI 未返回可解析的检查结果 JSON。', 422, 'PRESENTATION_AI_VALIDATION_INVALID');
+    let result;
+    try { result = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw presentationError('AI 返回的检查结果 JSON 无效。', 422, 'PRESENTATION_AI_VALIDATION_INVALID'); }
+    const issues = Array.isArray(result.issues) ? result.issues.slice(0, 200).map(issue => ({ severity: ['blocking', 'warning', 'info'].includes(String(issue && issue.severity)) ? String(issue.severity) : 'warning', slideId: String(issue && issue.slideId || '').slice(0, 96), elementId: String(issue && issue.elementId || '').slice(0, 96), code: String(issue && issue.code || 'AI_REVIEW').slice(0, 64), message: String(issue && issue.message || '').slice(0, 500), suggestion: String(issue && issue.suggestion || '').slice(0, 500) })) : [];
+    return { status: ['passed', 'warning', 'blocked'].includes(String(result.status)) ? String(result.status) : (issues.some(item => item.severity === 'blocking') ? 'blocked' : issues.length ? 'warning' : 'passed'), issues, assumptions: Array.isArray(result.assumptions) ? result.assumptions.slice(0, 50).map(item => String(item).slice(0, 500)) : [] };
+}
+
 function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9' } = {}) {
     const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
     const start = text.indexOf('{');
@@ -86,4 +129,4 @@ function parsePresentationProposal(content, { templateId = 'business-blue', titl
     return { ...proposal, presentation: contentObject };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, parsePresentationProposal, presentationAiSystemPrompt };
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, parsePresentationProposal, parseValidationProposal, presentationAiSystemPrompt };

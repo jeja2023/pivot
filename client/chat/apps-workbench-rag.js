@@ -589,19 +589,30 @@ function openAppsWorkbench(options = {}) {
         showAppsHome();
         return;
     }
-    if (getStoredAppsActiveApp() === 'official-writing') {
-        showOfficialWritingApp().catch(() => showAppsHome());
-    } else if (getStoredAppsActiveApp() === 'data-analysis') {
+    const targetApp = options?.app || getStoredAppsActiveApp();
+    if (targetApp === 'presentations') {
+        showPresentationsAppFromRegistry(options).then(async () => {
+            if (options?.presentationId) {
+                await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
+            }
+        }).catch(() => showAppsHome());
+    } else if (targetApp === 'official-writing') {
+        showOfficialWritingApp().then(() => {
+            if (options?.docId && typeof switchOfficialWritingDoc === 'function') {
+                switchOfficialWritingDoc(options.docId, { openEditor: true });
+            }
+        }).catch(() => showAppsHome());
+    } else if (targetApp === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
-    } else if (getStoredAppsActiveApp() === 'regulations') {
+    } else if (targetApp === 'regulations') {
         if (typeof window.Pivot.legacy.showRegulationsAppFromRegistry === 'function') {
             window.Pivot.legacy.showRegulationsAppFromRegistry().catch(() => showAppsHome());
         } else {
             showAppsHome();
         }
-    } else if (getStoredAppsActiveApp() === 'ocr') {
+    } else if (targetApp === 'ocr') {
         showOcrAppFromRegistry().catch(() => showAppsHome());
-    } else if (getStoredAppsActiveApp() === 'pdf-tools') {
+    } else if (targetApp === 'pdf-tools') {
         showPdfToolsAppFromRegistry().catch(() => showAppsHome());
     } else {
         showAppsHome();

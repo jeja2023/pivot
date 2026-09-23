@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.164",
+  "version": "0.1.167",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -77,7 +77,9 @@
     "predev": "node scripts/build_chat_css.js",
     "check:config-registry": "node scripts/generate_config_registry_docs.js --check",
     "generate:config-docs": "node scripts/generate_config_registry_docs.js",
-    "precheck": "node scripts/build_chat_css.js"
+    "precheck": "node scripts/build_chat_css.js",
+    "benchmark:presentation": "node scripts/benchmark_presentation_rendering.js",
+    "verify:presentation:office": "node scripts/verify_presentation_office_matrix.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",
@@ -103,6 +105,7 @@
     "helmet": "^8.3.0",
     "js-yaml": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
+    "jszip": "^3.10.1",
     "mongodb": "^7.6.0",
     "mssql": "^12.7.1",
     "multer": "^2.3.0",

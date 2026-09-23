@@ -680,7 +680,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/apps-model-selector.js', '/chat/apps-workbench-core.js', '/chat/apps-workbench-editor.js',
         '/chat/apps-workbench-proofread.js', '/chat/apps-workbench-ai.js', '/chat/apps-workbench-rewrite.js',
         '/chat/apps-workbench-export.js', '/chat/apps-workbench-rag.js', '/chat/apps-workbench-regulations.js',
-        '/chat/apps-workbench-ocr.js', '/chat/apps-workbench-pdf-tools.js', '/chat/apps-workbench-presentations.js'
+        '/chat/apps-workbench-ocr.js', '/chat/apps-workbench-pdf-tools.js', '/chat/apps-workbench-presentations-collab.js', '/chat/apps-workbench-presentations-presenter.js', '/chat/apps-workbench-presentations.js'
     ],
     agent: [
         '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',

@@ -52,7 +52,15 @@ const migrationModules = [
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
     require('./knowledge-database-query-templates'),
-    require('./presentation-workbench')
+    require('./presentation-workbench'),
+    require('./presentation-collaboration'),
+    require('./presentation-product-governance'),
+    require('./presentation-organization-controls'),
+    require('./presentation-brand-assets'),
+    require('./presentation-library-features'),
+    require('./presentation-rich-media'),
+    require('./presentation-remote-presenting'),
+    require('./presentation-cover-customization')
 ];
 
 module.exports = migrationModules

@@ -12,7 +12,7 @@ const { getAgentLearningOverview } = require('./agent-learning');
 
 const SHORTCUT_SETTING_KEY = 'personal_workbench.shortcuts';
 const DEFAULT_SHORTCUTS = ['official-writing', 'data-analysis', 'regulations', 'ocr', 'pdf-tools'];
-const ALLOWED_SHORTCUTS = new Set([...DEFAULT_SHORTCUTS, 'workflows']);
+const ALLOWED_SHORTCUTS = new Set([...DEFAULT_SHORTCUTS, 'workflows', 'presentations']);
 const MAX_SHORTCUTS = 6;
 
 function normalizeShortcuts(value) {
@@ -27,7 +27,7 @@ async function safe(action, fallback) {
     try { return await action(); } catch (_) { return fallback; }
 }
 
-function toRecentWork(kind, record) {
+function toRecentWork(kind, record, extra = {}) {
     if (kind === 'session') {
         return {
             id: record.id,
@@ -38,11 +38,21 @@ function toRecentWork(kind, record) {
         };
     }
     if (kind === 'artifact') {
+        const artifactType = String(record.type || 'summary');
+        const isPresentation = artifactType === 'presentation';
+        const isOfficialWriting = artifactType === 'official_writing';
+        const targetId = extra.presentationClientId || record.presentation_client_id || (isPresentation ? record.client_id : null) || record.id;
         return {
             id: record.id,
-            kind,
-            title: record.title || '未命名成果',
-            meta: `${record.type || '成果'}${record.run_title ? ` · ${record.run_title}` : ''}`,
+            kind: isPresentation ? 'presentation' : kind,
+            artifactType,
+            targetId,
+            presentationId: isPresentation ? targetId : undefined,
+            runId: record.run_id || null,
+            title: record.title || (isPresentation ? '未命名演示文稿' : (isOfficialWriting ? '未命名公文' : '未命名成果')),
+            meta: isPresentation
+                ? '演示文稿'
+                : (isOfficialWriting ? '公文' : `${record.type || '成果'}${record.run_title ? ` · ${record.run_title}` : ''}`),
             updatedAt: record.updated_at || record.created_at || null
         };
     }
@@ -102,9 +112,29 @@ async function getPersonalWorkbench(user) {
         // 系统通知与事件仅未读事项需要用户处理
         return Boolean(item.unread);
     });
+
+    const presentationArtifactIds = (artifacts || [])
+        .filter(a => a && String(a.type || '') === 'presentation')
+        .map(a => a.id)
+        .filter(Boolean);
+    const presentationMap = new Map();
+    if (presentationArtifactIds.length) {
+        const placeholders = presentationArtifactIds.map(() => '?').join(',');
+        const pRows = await safe(() => query(`
+            SELECT client_id, artifact_id
+            FROM presentation_documents
+            WHERE artifact_id IN (${placeholders}) AND deleted_at IS NULL
+        `, presentationArtifactIds), []);
+        (pRows || []).forEach(r => {
+            if (r?.artifact_id && r?.client_id) presentationMap.set(Number(r.artifact_id), String(r.client_id));
+        });
+    }
+
     const recentWork = [
         ...sessions.map(record => toRecentWork('session', record)),
-        ...artifacts.map(record => toRecentWork('artifact', record)),
+        ...artifacts.map(record => toRecentWork('artifact', record, {
+            presentationClientId: presentationMap.get(Number(record.id))
+        })),
         ...runs.map(record => toRecentWork('run', record))
     ]
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))

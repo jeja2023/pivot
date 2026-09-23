@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const unzipper = require('unzipper');
+const JSZip = require('jszip');
 const { PDFDocument } = require('pdf-lib');
 const sharp = require('sharp');
 const {
@@ -14,8 +18,11 @@ const {
 const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('../server/services/presentations/presentation-templates');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
-const { parsePresentationProposal } = require('../server/services/presentations/presentation-ai');
-const { normalizeTemplatePackage } = require('../server/services/presentations/presentation-service');
+const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages } = require('../server/services/presentations/presentation-ai');
+const { normalizeTemplatePackage, applyTemplateBrandControls, inferPresentationAssetType, presentationFromArtifactText } = require('../server/services/presentations/presentation-service');
+const { scanVbaSource } = require('../server/services/presentations/presentation-vba');
+const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
+const { importPptxTemplatePackage } = require('../server/services/presentations/presentation-pptx-template-import');
 
 function testPresentation() {
     return defaultPresentation({ title: '季度项目汇报', template: getBuiltInTemplate('business-blue') });
@@ -145,4 +152,132 @@ test('PPT 页数上限保持产品防护边界', () => {
     const presentation = testPresentation();
     presentation.slides = Array.from({ length: MAX_SLIDES + 1 }, (_, index) => ({ ...presentation.slides[0], id: `slide_${index}` }));
     assert.equal(validatePresentation(presentation).valid, false);
+});
+
+
+test('PPT AI 扩展协议支持继续生成、页面改写和事实校验结果归一化', () => {
+    const proposal = parsePresentationProposal(JSON.stringify({ title: '扩展测试', slides: [{ id: 's1', type: 'content', layoutId: 'title-content', elements: [{ id: 't', type: 'text', x: 80, y: 80, width: 800, height: 100, content: { text: '改写后' }, style: { fontSize: 30, color: '#1F2937' } }], sourceRefs: [] }] }), { title: '扩展测试', templateId: 'business-blue' });
+    assert.equal(buildContinueMessages({ outline: { title: '扩展测试' } }).length, 2);
+    assert.equal(buildRewriteMessages({ title: '扩展测试', slide: proposal.presentation.slides[0], instruction: '精简' }).length, 2);
+    assert.equal(buildValidationMessages({ presentation: proposal.presentation }).length, 2);
+    const validation = parseValidationProposal(JSON.stringify({ status: 'warning', issues: [{ severity: 'warning', slideId: 's1', code: 'FACT_UNVERIFIED', message: '数字待核实' }], assumptions: ['需补充来源'] }));
+    assert.equal(validation.status, 'warning');
+    assert.equal(validation.issues[0].code, 'FACT_UNVERIFIED');
+});
+
+
+test('组织品牌控制会锁定 Logo、页脚、页码和字体，保存时可重新施加', () => {
+    const presentation = testPresentation();
+    presentation.slides[0].elements[0].style.fontFamily = 'Unapproved Font';
+    const controlled = applyTemplateBrandControls(presentation, {
+        definition: {
+            theme: presentation.theme,
+            brandControls: {
+                footerText: 'Pivot 组织内部资料',
+                logoAssetRef: 'artifact-cas://0123456789abcdef',
+                lockBrandElements: true,
+                lockFonts: true,
+                showPageNumber: true
+            }
+        }
+    });
+    const elements = controlled.slides[0].elements;
+    assert.ok(elements.some(item => item.id === 'pivotBrand_footer' && item.locked));
+    assert.ok(elements.some(item => item.id === 'pivotBrand_page' && item.locked));
+    assert.ok(elements.some(item => item.id === 'pivotBrand_logo' && item.locked && item.assetRef === 'artifact-cas://0123456789abcdef'));
+    assert.equal(elements.find(item => item.id === 'title').style.fontFamily, presentation.theme.fonts.heading);
+    const cleared = applyTemplateBrandControls(controlled, { definition: { theme: presentation.theme, brandControls: {} } });
+    assert.equal(cleared.slides[0].elements.some(item => item.id.startsWith('pivotBrand_')), false);
+});
+
+
+test('受限 PPTX 模板导入提取主题、比例和布局，并拒绝非 OOXML 包', async () => {
+    const pptx = await renderPresentation(testPresentation(), 'pptx');
+    const imported = await importPptxTemplatePackage(pptx.buffer, { filename: '外部汇报模板.pptx' });
+    assert.equal(imported.name, '外部汇报模板');
+    assert.equal(imported.aspectRatio, '16:9');
+    assert.ok(imported.definition.theme.colors.primary.startsWith('#'));
+    assert.ok(imported.definition.layouts.length >= 1);
+    await assert.rejects(() => importPptxTemplatePackage(Buffer.from('not a pptx')), /PPTX|OOXML/);
+});
+
+
+test('八套内置主题均可生成固定尺寸的 PNG 视觉回归基准', async () => {
+    const templates = listBuiltInTemplates();
+    const results = await Promise.all(templates.map(async template => {
+        const presentation = defaultPresentation({ title: template.name + '基准页', template });
+        const rendered = await renderPresentation(presentation, 'png');
+        const metadata = await sharp(rendered.buffer).metadata();
+        return { id: template.id, width: metadata.width, height: metadata.height, format: metadata.format, bytes: rendered.buffer.length, sha256: crypto.createHash('sha256').update(rendered.buffer).digest('hex') };
+    }));
+    assert.equal(results.length, 8);
+    const baselinePath = path.join(__dirname, 'fixtures', 'presentation-template-visual-baselines.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    results.forEach(result => {
+        assert.equal(result.width, baseline.templates[result.id]?.width, result.id);
+        assert.equal(result.height, baseline.templates[result.id]?.height, result.id);
+        assert.equal(result.format, 'png', result.id);
+        assert.ok(result.bytes > 1000, result.id);
+        assert.equal(result.sha256, baseline.templates[result.id]?.sha256, result.id + ' 的视觉基准发生变化；如为有意设计更新，请重新生成基准。');
+    });
+});
+
+
+test('20 页普通文稿在本地受控渲染预算内生成 PDF 和 PPTX', async () => {
+    const presentation = testPresentation();
+    const original = JSON.parse(JSON.stringify(presentation.slides[0]));
+    presentation.slides = Array.from({ length: 20 }, (_, index) => ({
+        ...JSON.parse(JSON.stringify(original)), id: 'performance_slide_' + index, index,
+        elements: JSON.parse(JSON.stringify(original.elements)).map((element, elementIndex) => ({
+            ...element, id: element.id + '_' + index + '_' + elementIndex,
+            ...(element.content ? { content: { ...element.content, text: (element.content.text || '') + ' ' + index } } : {})
+        }))
+    }));
+    const pdfStartedAt = Date.now(); const pdf = await renderPresentation(presentation, 'pdf'); const pdfDuration = Date.now() - pdfStartedAt;
+    const pptxStartedAt = Date.now(); const pptx = await renderPresentation(presentation, 'pptx'); const pptxDuration = Date.now() - pptxStartedAt;
+    assert.equal(pdf.buffer.subarray(0, 4).toString(), '%PDF');
+    assert.equal(pptx.buffer.subarray(0, 2).toString(), 'PK');
+    assert.ok(pdfDuration < 15_000, '20 页 PDF 预览渲染超过 15 秒预算');
+    assert.ok(pptxDuration < 30_000, '20 页 PPTX 导出超过 30 秒预算');
+});
+
+
+test('PPT 高级 IR 支持图示、媒体、附件、元素动画和页面转场', async () => {
+    const presentation = testPresentation();
+    const ref = 'artifact-cas://0123456789abcdef';
+    presentation.slides[0].transition = { type: 'push', durationMs: 700, direction: 'left' };
+    presentation.slides[0].elements.push({ id: 'diagram_1', type: 'diagram', x: 80, y: 420, width: 920, height: 150, rotation: 0, zIndex: 20, locked: false, visible: true, sourceRefs: [], diagramType: 'process', items: ['规划', '执行', '复盘'], style: { fill: '#EFF6FF', stroke: '#2563EB', textColor: '#1E3A8A', fontSize: 16 }, animation: { type: 'fade', durationMs: 500 } });
+    presentation.slides[0].elements.push({ id: 'media_1', type: 'media', mediaType: 'audio', assetRef: ref, x: 100, y: 600, width: 300, height: 80, rotation: 0, zIndex: 21, locked: false, visible: true, sourceRefs: [], autoPlay: false, loop: false, showControls: true, alt: '提示音' });
+    const normalized = normalizePresentation(presentation);
+    assert.equal(normalized.slides[0].transition.type, 'push');
+    assert.equal(normalized.slides[0].elements.find(item => item.id === 'diagram_1').animation.type, 'fade');
+    assert.ok(collectPresentationAssetRefs(normalized).includes(ref));
+    const wav = Buffer.alloc(44); wav.write('RIFF', 0); wav.writeUInt32LE(36, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(8000, 28); wav.writeUInt16LE(1, 32); wav.writeUInt16LE(8, 34); wav.write('data', 36); wav.writeUInt32LE(0, 40);
+    const [png, pdf, pptx] = await Promise.all(['png', 'pdf', 'pptx'].map(format => renderPresentation(normalized, format, { assetResolver: async candidate => candidate === ref ? { buffer: wav, mimeType: 'audio/wav' } : null })));
+    assert.equal(png.buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(pdf.buffer.subarray(0, 4).toString(), '%PDF');
+    const zip = await JSZip.loadAsync(pptx.buffer);
+    assert.match(await zip.file('ppt/slides/slide1.xml').async('string'), /<p:transition\b/);
+});
+
+test('PPT 受控字体、宏静态扫描和运营指标具有安全边界', async () => {
+    assert.equal(inferPresentationAssetType({ originalname: 'font.ttf', mimetype: 'application/octet-stream', buffer: Buffer.from([0, 1, 0, 0]) }), 'font');
+    assert.equal(inferPresentationAssetType({ originalname: 'sound.wav', mimetype: 'application/octet-stream', buffer: Buffer.from('RIFFxxxxWAVE') }), 'audio');
+    assert.equal(scanVbaSource(Buffer.from('Sub Demo()\nMsgBox "ok"\nEnd Sub'), 'demo.bas').allowed, true);
+    assert.equal(scanVbaSource(Buffer.from('Sub Auto_Open()\nShell "cmd.exe"\nEnd Sub'), 'bad.bas').allowed, false);
+    recordPresentationOutcome('test', { outcome: 'success', durationMs: 12, format: 'pptx' });
+    assert.ok(getPresentationMetricsSnapshot().counters.some(item => item.labels.operation === 'test'));
+});
+
+
+test('自定义封面和 Agent 产物转换均保留受控来源引用', () => {
+    const ref = 'artifact-cas://0123456789abcdef';
+    const presentation = testPresentation();
+    presentation.metadata.coverAssetRef = ref;
+    assert.ok(collectPresentationAssetRefs(normalizePresentation(presentation)).includes(ref));
+    const template = getBuiltInTemplate('business-blue');
+    const converted = presentationFromArtifactText({ title: '产物转换', template: { ...template, definition: { theme: template.theme, layouts: template.layouts } }, text: '# 背景\n背景内容\n# 结论\n结论内容', artifactId: 7 });
+    const checked = normalizePresentation(converted);
+    assert.equal(checked.sources[0].type, 'agent_artifact');
+    assert.ok(checked.slides.length >= 1);
 });

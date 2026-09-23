@@ -143,9 +143,19 @@ async function verifyUploadedMagic(file) {
     if (ext === '.webp') return actualData.length >= 12 && actualData.subarray(0, 4).toString('ascii') === 'RIFF' && actualData.subarray(8, 12).toString('ascii') === 'WEBP';
     if (ext === '.bmp') return actualData.length >= 2 && actualData[0] === 0x42 && actualData[1] === 0x4d;
     if (ext === '.pdf') return actualData.length >= 5 && actualData.subarray(0, 5).toString('ascii') === '%PDF-';
-    if (ext === '.docx' || ext === '.xlsx') return actualData.length >= 4 && actualData[0] === 0x50 && actualData[1] === 0x4b && actualData[2] === 0x03 && actualData[3] === 0x04;
+    if (ext === '.docx' || ext === '.xlsx' || ext === '.pptx' || ext === '.pptm' || ext === '.ppsm') return actualData.length >= 4 && actualData[0] === 0x50 && actualData[1] === 0x4b && actualData[2] === 0x03 && actualData[3] === 0x04;
     if (ext === '.doc' || ext === '.xls') return actualData.length >= 4 && actualData[0] === 0xd0 && actualData[1] === 0xcf && actualData[2] === 0x11 && actualData[3] === 0xe0;
     if (ext === '.zip') return actualData.length >= 4 && actualData.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    if (ext === '.ttf') return actualData.length >= 4 && actualData[0] === 0x00 && actualData[1] === 0x01 && actualData[2] === 0x00 && actualData[3] === 0x00;
+    if (ext === '.otf') return actualData.length >= 4 && actualData.subarray(0, 4).toString('ascii') === 'OTTO';
+    if (ext === '.woff') return actualData.length >= 4 && actualData.subarray(0, 4).toString('ascii') === 'wOFF';
+    if (ext === '.woff2') return actualData.length >= 4 && actualData.subarray(0, 4).toString('ascii') === 'wOF2';
+    if (ext === '.wav') return actualData.length >= 12 && actualData.subarray(0, 4).toString('ascii') === 'RIFF' && actualData.subarray(8, 12).toString('ascii') === 'WAVE';
+    if (ext === '.aac') return actualData.length >= 2 && actualData[0] === 0xff && (actualData[1] & 0xf6) === 0xf0;
+    if (ext === '.mp3') return actualData.length >= 3 && (actualData.subarray(0, 3).toString('ascii') === 'ID3' || (actualData[0] === 0xff && (actualData[1] & 0xe0) === 0xe0));
+    if (ext === '.ogg') return actualData.length >= 4 && actualData.subarray(0, 4).toString('ascii') === 'OggS';
+    if (ext === '.mp4' || ext === '.m4a' || ext === '.mov') return actualData.length >= 12 && actualData.subarray(4, 8).toString('ascii') === 'ftyp';
+    if (ext === '.webm') return actualData.length >= 4 && actualData[0] === 0x1a && actualData[1] === 0x45 && actualData[2] === 0xdf && actualData[3] === 0xa3;
 
     const checkLen = Math.min(bytesRead, 512);
     return checkLen === 0 || !actualData.subarray(0, checkLen).includes(0);

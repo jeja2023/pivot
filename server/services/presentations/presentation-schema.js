@@ -16,7 +16,11 @@ const ASPECT_RATIOS = Object.freeze({
     '16:9': Object.freeze({ width: 1280, height: 720 }),
     '4:3': Object.freeze({ width: 960, height: 720 })
 });
-const ELEMENT_TYPES = Object.freeze(['text', 'image', 'shape', 'table', 'chart']);
+const ELEMENT_TYPES = Object.freeze(['text', 'image', 'shape', 'table', 'chart', 'media', 'diagram', 'attachment']);
+const MEDIA_TYPES = Object.freeze(['audio', 'video']);
+const TRANSITION_TYPES = Object.freeze(['none', 'fade', 'push', 'wipe', 'split', 'cover', 'uncover']);
+const DIAGRAM_TYPES = Object.freeze(['process', 'cycle', 'hierarchy', 'relationship']);
+const ANIMATION_TYPES = Object.freeze(['none', 'fade', 'zoom', 'wipe', 'fly']);
 const CHART_TYPES = Object.freeze(['bar', 'line', 'area', 'pie']);
 const SHAPE_TYPES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right', 'justify']);
@@ -85,6 +89,13 @@ function normalizeStringArray(value, maxItems, maxLength, label) {
     return value.map(item => normalizeBoundedText(item, '', maxLength, label, { allowEmpty: false }));
 }
 
+function normalizeAnimation(input = {}) {
+    const source = isPlainObject(input) ? input : {};
+    const type = String(source.type || 'none');
+    if (!ANIMATION_TYPES.includes(type)) throw presentationError('不支持的元素动画类型。', 400, 'PRESENTATION_ANIMATION_INVALID');
+    return { type, durationMs: type === 'none' ? 0 : normalizeNumber(source.durationMs ?? source.duration_ms, 500, 100, 10000, '动画时长'), delayMs: type === 'none' ? 0 : normalizeNumber(source.delayMs ?? source.delay_ms, 0, 0, 10000, '动画延迟'), direction: normalizeBoundedText(source.direction, '', 24, '动画方向', { allowEmpty: true }) };
+}
+
 function normalizeBounds(input = {}, canvas = ASPECT_RATIOS['16:9']) {
     const x = normalizeNumber(input.x, 0, 0, canvas.width, '元素横坐标');
     const y = normalizeNumber(input.y, 0, 0, canvas.height, '元素纵坐标');
@@ -126,7 +137,8 @@ function normalizeElement(input, canvas, index) {
         zIndex: normalizeNumber(input.zIndex, index + 1, -1000, 1000, '元素层级'),
         locked: normalizeBoolean(input.locked),
         visible: normalizeBoolean(input.visible, true),
-        sourceRefs: normalizeStringArray(input.sourceRefs, 50, 160, '元素来源引用')
+        sourceRefs: normalizeStringArray(input.sourceRefs, 50, 160, '元素来源引用'),
+        animation: normalizeAnimation(input.animation)
     };
     if (type === 'text') {
         return {
@@ -147,6 +159,27 @@ function normalizeElement(input, canvas, index) {
             opacity: normalizeNumber(input.opacity, 1, 0, 1, '图片透明度'),
             alt: normalizeBoundedText(input.alt, '', 300, '图片替代文本', { allowEmpty: true })
         };
+    }
+    if (type === 'media') {
+        const assetRef = String(input.assetRef ?? input.asset_ref ?? '').trim();
+        if (!CAS_REF_PATTERN.test(assetRef)) throw presentationError('音视频必须引用当前租户受控的素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID');
+        const posterAssetRef = String(input.posterAssetRef ?? input.poster_asset_ref ?? '').trim();
+        if (posterAssetRef && !CAS_REF_PATTERN.test(posterAssetRef)) throw presentationError('媒体海报必须引用当前租户受控的素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID');
+        const mediaType = String(input.mediaType || input.media_type || 'video');
+        if (!MEDIA_TYPES.includes(mediaType)) throw presentationError('仅支持音频或视频媒体。', 400, 'PRESENTATION_MEDIA_TYPE_INVALID');
+        return { ...base, mediaType, assetRef, posterAssetRef, autoPlay: normalizeBoolean(input.autoPlay ?? input.auto_play), loop: normalizeBoolean(input.loop), showControls: normalizeBoolean(input.showControls ?? input.show_controls, true), alt: normalizeBoundedText(input.alt, '', 300, '媒体替代文本', { allowEmpty: true }) };
+    }
+    if (type === 'attachment') {
+        const assetRef = String(input.assetRef ?? input.asset_ref ?? '').trim();
+        if (!CAS_REF_PATTERN.test(assetRef)) throw presentationError('附件必须引用当前租户受控的素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID');
+        return { ...base, assetRef, filename: normalizeBoundedText(input.filename, '附件', 240, '附件名称'), description: normalizeBoundedText(input.description, '', 500, '附件说明', { allowEmpty: true }) };
+    }
+    if (type === 'diagram') {
+        const diagramType = String(input.diagramType || input.diagram_type || 'process');
+        if (!DIAGRAM_TYPES.includes(diagramType)) throw presentationError('不支持的图示类型。', 400, 'PRESENTATION_DIAGRAM_TYPE_INVALID');
+        const items = normalizeStringArray(input.items, 12, 240, '图示节点');
+        if (items.length < 2) throw presentationError('图示至少需要两个节点。', 400, 'PRESENTATION_DIAGRAM_INVALID');
+        return { ...base, diagramType, items, style: { fill: normalizeColor(input.style?.fill, '#EFF6FF'), stroke: normalizeColor(input.style?.stroke, '#2563EB'), textColor: normalizeColor(input.style?.textColor, '#1E3A8A'), fontSize: normalizeNumber(input.style?.fontSize, 16, 6, 48, '图示字号') } };
     }
     if (type === 'shape') {
         const shapeType = String(input.shapeType || 'rect');
@@ -227,6 +260,10 @@ function normalizeSlide(input, canvas, index) {
         ids.add(normalized.id);
         return normalized;
     }).sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id));
+    const transitionInput = input.transition && isPlainObject(input.transition) ? input.transition : {};
+    const transitionType = String(transitionInput.type || 'none');
+    if (!TRANSITION_TYPES.includes(transitionType)) throw presentationError('不支持的页面转场类型。', 400, 'PRESENTATION_TRANSITION_INVALID');
+    const transition = { type: transitionType, durationMs: transitionType === 'none' ? 0 : normalizeNumber(transitionInput.durationMs ?? transitionInput.duration_ms, 500, 100, 10000, '转场时长'), direction: normalizeBoundedText(transitionInput.direction, '', 24, '转场方向', { allowEmpty: true }) };
     return {
         id: normalizeId(input.id || `slide_${index + 1}`, '页面标识'),
         index,
@@ -244,7 +281,8 @@ function normalizeSlide(input, canvas, index) {
         },
         elements,
         speakerNotes: normalizeBoundedText(input.speakerNotes, '', 12000, '演讲者备注', { allowEmpty: true, trim: false }),
-        sourceRefs: normalizeStringArray(input.sourceRefs, 100, 160, '页面来源引用')
+        sourceRefs: normalizeStringArray(input.sourceRefs, 100, 160, '页面来源引用'),
+        transition
     };
 }
 
@@ -262,6 +300,10 @@ function normalizeTheme(input = {}) {
         fonts: {
             heading: normalizeBoundedText(input.fonts?.heading, 'Microsoft YaHei', 120, '标题字体'),
             body: normalizeBoundedText(input.fonts?.body, 'Microsoft YaHei', 120, '正文字体')
+        },
+        fontAssets: {
+            heading: input.fontAssets?.heading ? (() => { const ref = String(input.fontAssets.heading).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('标题字体必须引用受控字体素材。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : '',
+            body: input.fontAssets?.body ? (() => { const ref = String(input.fontAssets.body).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('正文字体必须引用受控字体素材。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : ''
         },
         chartPalette: normalizeStringArray(input.chartPalette, 12, 7, '图表色板').map(color => normalizeColor(color))
     };
@@ -307,6 +349,7 @@ function normalizePresentation(input, options = {}) {
         }) : [],
         metadata: {
             aiGenerated: normalizeBoolean(input.metadata?.aiGenerated),
+            coverAssetRef: input.metadata?.coverAssetRef ? (() => { const ref = String(input.metadata.coverAssetRef).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('封面图片必须引用受控素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : '',
             language: normalizeBoundedText(input.metadata?.language, 'zh-CN', 24, '语言'),
             updatedAt: normalizeBoundedText(input.metadata?.updatedAt, '', 64, '更新时间', { allowEmpty: true })
         }
@@ -377,8 +420,12 @@ function collectPresentationAssetRefs(presentation) {
     const refs = new Set();
     checked.slides.forEach(slide => {
         if (slide.background.imageAssetRef) refs.add(slide.background.imageAssetRef);
+        if (checked.theme.fontAssets?.heading) refs.add(checked.theme.fontAssets.heading);
+        if (checked.theme.fontAssets?.body) refs.add(checked.theme.fontAssets.body);
+        if (checked.metadata?.coverAssetRef) refs.add(checked.metadata.coverAssetRef);
         slide.elements.forEach(element => {
-            if (element.type === 'image' && element.assetRef) refs.add(element.assetRef);
+            if (['image', 'media', 'attachment'].includes(element.type) && element.assetRef) refs.add(element.assetRef);
+            if (element.type === 'media' && element.posterAssetRef) refs.add(element.posterAssetRef);
         });
     });
     return [...refs].sort();

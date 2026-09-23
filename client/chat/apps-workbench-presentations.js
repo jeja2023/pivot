@@ -5,6 +5,12 @@
     const state = {
         templates: [],
         documents: [],
+        libraryFilters: { search: '', tag: '', favorite: false },
+        libraryFilterTimer: null,
+        assets: [],
+        pendingAssetType: '',
+        fontFaceUrls: new Map(),
+        coverUrls: new Map(),
         active: null,
         selectedSlideId: '',
         selectedElementId: '',
@@ -16,6 +22,16 @@
         saving: false,
         pendingOutline: null,
         pendingCreate: null,
+        aiAbortController: null,
+        aiRequestKey: '',
+        presenterIndex: 0,
+        presenterStartedAt: 0,
+        presenterTimer: null,
+        syncTimer: null,
+        realtimeSource: null,
+        dirty: false,
+        remoteVersionAvailable: false,
+        remoteSession: null,
         imageUrls: new Map(),
         drag: null,
         dataSets: [],
@@ -32,12 +48,45 @@
     async function requestJson(url, options = {}) {
         const res = await apiFetch(url, options);
         const data = await res.clone().json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error?.message || data?.error || data?.message || `请求失败（${res.status}）`);
+        if (!res.ok) {
+            const error = new Error(data?.error?.message || data?.error || data?.message || `请求失败（${res.status}）`);
+            error.status = res.status; error.code = data?.code || data?.error?.code || '';
+            throw error;
+        }
         return data;
     }
 
     function jsonOptions(body) {
         return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    }
+
+    function newAiRequestKey() {
+        return 'ppt-ai-' + (globalThis.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+    }
+
+    function beginAiRequest() {
+        state.aiAbortController?.abort();
+        state.aiAbortController = new AbortController();
+        state.aiRequestKey = newAiRequestKey();
+        return state.aiAbortController;
+    }
+
+    function endAiRequest(controller) {
+        if (state.aiAbortController === controller) { state.aiAbortController = null; state.aiRequestKey = ''; }
+    }
+
+    function abortAiRequest() {
+        if (!state.aiAbortController) return false;
+        state.aiAbortController.abort();
+        return true;
+    }
+
+    function aiJsonOptions(body, controller) {
+        return { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': state.aiRequestKey || newAiRequestKey() }, body: JSON.stringify(body), signal: controller.signal };
+    }
+
+    function isAiAbort(error, controller = null) {
+        return controller?.signal?.aborted === true || error?.name === 'AbortError' || /aborted|取消/i.test(String(error?.message || ''));
     }
 
     function setStatus(message = '', type = '') {
@@ -53,6 +102,34 @@
         if (!element) return;
         element.textContent = message;
         element.dataset.state = mode;
+    }
+
+    function canEditActivePresentation() {
+        return state.active?.isOwner !== false || state.active?.collaboratorRole === 'editor' || (typeof isAdminUser === 'function' && isAdminUser());
+    }
+
+    function inferAssetType(file) {
+        const mime = String(file?.type || '').toLowerCase(); const name = String(file?.name || '').toLowerCase();
+        if (/^font\//.test(mime) || /\.(ttf|otf|woff2?)$/.test(name)) return 'font';
+        if (/^audio\//.test(mime) || /\.(mp3|wav|ogg|aac|m4a)$/.test(name)) return 'audio';
+        if (/^video\//.test(mime) || /\.(mp4|webm|mov)$/.test(name)) return 'video';
+        if (/\.(pdf|docx|xlsx|txt|md)$/.test(name) || /^(application\/pdf|text\/plain|text\/markdown)/.test(mime)) return 'attachment';
+        return 'image';
+    }
+
+    function fontFamilyFromFile(file) { return String(file?.name || '自定义字体').replace(/\.(ttf|otf|woff2?)$/i, '').replace(/[._-]+/g, ' ').trim().slice(0, 80) || '自定义字体'; }
+
+    async function ensureThemeFonts() {
+        const content = activeContent(); if (!content?.theme?.fontAssets || typeof FontFace === 'undefined') return;
+        for (const [kind, ref] of Object.entries(content.theme.fontAssets)) {
+            if (!ref || state.fontFaceUrls.has(ref)) continue;
+            try {
+                const response = await apiFetch(API + '/assets/content/by-ref?ref=' + encodeURIComponent(ref) + '&presentationId=' + encodeURIComponent(state.active?.id || ''));
+                if (!response.ok) continue;
+                const url = URL.createObjectURL(await response.blob()); const family = kind === 'heading' ? content.theme.fonts.heading : content.theme.fonts.body;
+                const font = new FontFace(family, 'url(' + JSON.stringify(url) + ')'); await font.load(); document.fonts.add(font); state.fontFaceUrls.set(ref, url); renderStage();
+            } catch (_) {}
+        }
     }
 
     function activeContent() {
@@ -102,8 +179,9 @@
     }
 
     function scheduleSave() {
-        if (!state.active?.id) return;
+        if (!state.active?.id || !canEditActivePresentation()) return;
         clearTimeout(state.saveTimer);
+        state.dirty = true;
         setSaveState('待保存', 'dirty');
         state.saveTimer = window.setTimeout(() => saveActive().catch(error => {
             setSaveState('保存失败', 'error');
@@ -112,7 +190,7 @@
     }
 
     async function saveActive({ force = false } = {}) {
-        if (!state.active?.id || state.saving) return;
+        if (!state.active?.id || state.saving || !canEditActivePresentation()) return;
         clearTimeout(state.saveTimer);
         state.saveTimer = null;
         const content = activeContent();
@@ -127,11 +205,64 @@
             state.active.content = data.presentation.content || content;
             state.active.validation = data.presentation.validation || state.active.validation;
             state.documents = state.documents.map(item => item.id === state.active.id ? { ...item, ...state.active } : item);
+            state.dirty = false; state.remoteVersionAvailable = false;
             setSaveState('已保存', 'saved');
             renderIssues();
         } finally {
             state.saving = false;
         }
+    }
+
+    async function refreshRemotePresentation({ force = false } = {}) {
+        if (!state.active?.id || state.saving) return false;
+        const data = await requestJson(API + '/' + encodeURIComponent(state.active.id), { cache: 'no-store' });
+        const remote = data.presentation; if (!remote || Number(remote.version || 0) <= Number(state.active.version || 0)) return false;
+        if (state.dirty && !force) {
+            if (!state.remoteVersionAvailable) { state.remoteVersionAvailable = true; setSaveState('远端有更新', 'dirty'); toast('协作者已保存新版本。请先保存、恢复版本或点击“同步”后再继续编辑。', 'warning'); }
+            return true;
+        }
+        const keepSlideId = state.selectedSlideId; state.active = remote; state.selectedSlideId = remote.content?.slides?.some(slide => slide.id === keepSlideId) ? keepSlideId : remote.content?.slides?.[0]?.id || ''; state.selectedElementId = ''; state.remoteVersionAvailable = false; state.dirty = false; resetHistory(); renderEditor(); setSaveState('已同步远端版本', 'saved'); toast('已同步协作者的最新版本。'); return true;
+    }
+
+    function revokePresentationAccess() {
+        if (!state.active?.id) return;
+        closePresenterMode(); stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat();
+        state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1; state.dirty = false;
+        byId('presentation-editor')?.classList.add('hidden'); byId('presentation-library')?.classList.remove('hidden');
+        toast('你已被移出该演示文稿，当前访问已撤销。', 'warning'); loadDocuments().catch(() => {});
+    }
+
+    function stopPresentationRealtime() {
+        if (state.realtimeSource) { state.realtimeSource.close(); state.realtimeSource = null; }
+    }
+
+    function startPresentationRealtime() {
+        stopPresentationRealtime();
+        if (!state.active?.id || !window.EventSource) return;
+        const source = new EventSource('/api/events', { withCredentials: true });
+        state.realtimeSource = source;
+        const onPresentationEvent = event => {
+            let payload; try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
+            if (String(payload.presentationId || '') !== String(state.active?.id || '')) return;
+            if (payload.type === 'presentation.access_revoked') { revokePresentationAccess(); return; }
+            if (payload.type === 'presentation.updated') refreshRemotePresentation().catch(() => {});
+            if (payload.type === 'presentation.comments') collab()?.loadComments(state.active?.id);
+            if (payload.type === 'presentation.collaborators') { collab()?.loadCollaborators?.(); refreshRemotePresentation().catch(() => {}); }
+        };
+        ['presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'].forEach(type => source.addEventListener(type, onPresentationEvent));
+        source.onerror = () => { /* polling remains the reconnect-safe fallback */ };
+    }
+
+    function startPresentationSync() {
+        clearInterval(state.syncTimer); state.syncTimer = window.setInterval(() => refreshRemotePresentation().catch(() => {}), 5000);
+    }
+
+    function stopPresentationSync() { clearInterval(state.syncTimer); state.syncTimer = null; state.remoteVersionAvailable = false; }
+
+    async function syncRemotePresentation() {
+        if (!state.active?.id) return;
+        if (state.dirty) { const accepted = await window.Pivot.legacy.showConfirm?.('同步协作者版本', '当前有尚未保存的本地修改。同步会丢弃这些本地修改；请先保存或从版本历史恢复。'); if (!accepted) return; }
+        await refreshRemotePresentation({ force: true });
     }
 
     function templateById(id) {
@@ -140,6 +271,29 @@
 
     function textElement(id, x, y, width, height, text, style = {}) {
         return { id, type: 'text', x, y, width, height, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text }, style: { fontFamily: 'Microsoft YaHei', fontSize: 20, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, italic: false, underline: false, bullet: false, padding: 0, ...style } };
+    }
+
+    const PRESENTATION_LAYOUT_LABELS = Object.freeze({
+        cover: '封面页',
+        section: '章节过渡页',
+        'title-content': '标题与正文',
+        'two-column': '双栏图文',
+        'three-card': '三栏卡片',
+        'image-focus': '大图重点页',
+        chart: '数据图表页',
+        'data-chart': '数据图表页',
+        table: '数据表格页',
+        'data-table': '数据表格页',
+        quote: '引用重点页',
+        summary: '总结行动页'
+    });
+
+    function presentationLayoutLabel(layoutId) {
+        const id = String(layoutId || '').trim();
+        if (PRESENTATION_LAYOUT_LABELS[id]) return PRESENTATION_LAYOUT_LABELS[id];
+        const layouts = templateById(state.active?.template?.id)?.definition?.layouts || [];
+        const configuredName = layouts.find(layout => layout.id === id)?.name?.trim();
+        return configuredName || '自定义布局';
     }
 
     function emptySlide(index) {
@@ -186,10 +340,31 @@
 
     async function loadDocuments() {
         setStatus('正在加载演示文稿…');
-        const data = await requestJson(`${API}?limit=100`, { cache: 'no-store' });
+        const params = new URLSearchParams({ limit: '100' });
+        if (state.libraryFilters.search) params.set('search', state.libraryFilters.search);
+        if (state.libraryFilters.tag) params.set('tag', state.libraryFilters.tag);
+        if (state.libraryFilters.favorite) params.set('favorite', 'true');
+        const data = await requestJson(API + '?' + params.toString(), { cache: 'no-store' });
         state.documents = Array.isArray(data.presentations) ? data.presentations : [];
-        setStatus(state.documents.length ? '' : '还没有演示文稿，选择模板后开始创建。');
+        setStatus(state.documents.length ? '' : '还没有匹配的演示文稿，可调整搜索或新建。');
         renderLibrary();
+    }
+
+    function scheduleLibraryFilter() {
+        clearTimeout(state.libraryFilterTimer);
+        state.libraryFilterTimer = window.setTimeout(() => loadDocuments().catch(error => toast(error.message, 'error')), 250);
+    }
+
+    async function updateDocumentTags(id, currentTags) {
+        const tags = await window.Pivot.legacy.showInputPrompt?.({ title: '编辑文稿标签', message: '用逗号分隔，最多 12 个', value: (currentTags || []).join(', '), width: 520 });
+        if (tags === undefined || tags === null) return;
+        await requestJson(API + '/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: tags.split(/[，,]/).map(item => item.trim()).filter(Boolean) }) });
+        await loadDocuments();
+    }
+
+    async function toggleFavoriteDocument(id, favorite) {
+        await requestJson(API + '/' + encodeURIComponent(id) + '/favorite', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite: !favorite }) });
+        await loadDocuments();
     }
 
     function renderTemplates(host, { compact = false } = {}) {
@@ -211,23 +386,29 @@
     }
 
     function renderLibrary() {
+        // 文稿库可在旧脚本热更新后首次打开；防御性初始化避免封面缓存缺失阻断整个 PPT 应用。
+        if (!(state.coverUrls instanceof Map)) state.coverUrls = new Map();
+        state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear();
         const list = byId('presentation-library-list');
         renderTemplates(byId('presentation-template-strip'), { compact: true });
         if (!list) return;
         list.replaceChildren();
         if (!state.documents.length) {
-            const empty = document.createElement('div'); empty.className = 'presentation-empty-state'; empty.textContent = '暂无演示文稿。可从 AI 创建、空白创建或选择上方模板开始。'; list.appendChild(empty); return;
+            const empty = document.createElement('div'); empty.className = 'presentation-empty-state'; empty.textContent = '暂无演示文稿。可从 AI 创建、空白创建或调整筛选条件开始。'; list.appendChild(empty); return;
         }
         state.documents.forEach(documentItem => {
-            const card = document.createElement('article'); card.className = 'presentation-doc-card';
+            const card = document.createElement('article'); card.className = 'presentation-doc-card' + (documentItem.favorite ? ' is-favorite' : '');
             const swatch = document.createElement('div'); swatch.className = 'presentation-doc-swatch'; swatch.style.background = templateById(documentItem.template?.id)?.definition?.theme?.colors?.primary || '#1769AA';
             const main = document.createElement('div'); main.className = 'presentation-doc-main';
-            const title = document.createElement('strong'); title.textContent = documentItem.title;
-            const meta = document.createElement('span'); meta.textContent = `版本 ${documentItem.version || 1} · ${formatTime(documentItem.updatedAt)} · ${statusLabel(documentItem.status)}`;
+            const title = document.createElement('strong'); title.textContent = (documentItem.favorite ? '★ ' : '') + documentItem.title;
+            const meta = document.createElement('span'); const owner = documentItem.isOwner === false ? '共享 · ' + ({ editor: '可编辑', commenter: '可评论', viewer: '只读' }[documentItem.collaboratorRole] || '协作者') + ' · ' : ''; meta.textContent = owner + '版本 ' + (documentItem.version || 1) + ' · ' + formatTime(documentItem.updatedAt) + ' · ' + statusLabel(documentItem.status);
             main.append(title, meta);
+            const tags = Array.isArray(documentItem.tags) ? documentItem.tags : []; if (tags.length) { const tagLine = document.createElement('small'); tagLine.className = 'presentation-doc-tags'; tagLine.textContent = tags.map(tag => '#' + tag).join(' '); main.appendChild(tagLine); }
             const actions = document.createElement('div'); actions.className = 'presentation-doc-actions';
-            [['打开', 'open'], ['复制', 'duplicate'], ['删除', 'delete']].forEach(([label, action]) => { const button = document.createElement('button'); button.type = 'button'; button.className = action === 'open' ? 'btn-primary' : 'btn-secondary'; button.textContent = label; button.dataset.presentationAction = action; button.dataset.presentationId = documentItem.id; actions.appendChild(button); });
+            [['打开', 'open'], [documentItem.favorite ? '取消收藏' : '收藏', 'favorite'], ...((documentItem.isOwner !== false || documentItem.collaboratorRole === 'editor') ? [['标签', 'tags']] : []), ...(documentItem.isOwner !== false ? [['复制', 'duplicate']] : [])].forEach(([label, action]) => { const button = document.createElement('button'); button.type = 'button'; button.className = action === 'open' ? 'btn-primary' : 'btn-secondary'; button.textContent = label; button.dataset.presentationAction = action; button.dataset.presentationId = documentItem.id; button.dataset.presentationFavorite = documentItem.favorite ? 'true' : 'false'; button.dataset.presentationTags = JSON.stringify(tags); actions.appendChild(button); });
+            if (documentItem.isOwner !== false) { const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary'; button.textContent = '删除'; button.dataset.presentationAction = 'delete'; button.dataset.presentationId = documentItem.id; actions.appendChild(button); }
             card.append(swatch, main, actions); list.appendChild(card);
+            if (documentItem.coverAssetRef) { apiFetch(API + '/assets/content/by-ref?ref=' + encodeURIComponent(documentItem.coverAssetRef) + '&presentationId=' + encodeURIComponent(documentItem.id)).then(response => response.ok ? response.blob() : null).then(blob => { if (!blob || !card.isConnected) return; const url = URL.createObjectURL(blob); state.coverUrls.set(documentItem.id, url); swatch.style.backgroundImage = 'url(\"' + url + '\")'; swatch.style.backgroundSize = 'cover'; swatch.style.backgroundPosition = 'center'; }).catch(() => {}); }
         });
     }
 
@@ -241,6 +422,9 @@
         return { draft: '草稿', needs_attention: '待检查', ready: '可交付', archived: '已归档' }[value] || value || '草稿';
     }
 
+    const collab = () => window.Pivot?.moduleApi?.('apps.presentations.collab');
+    const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
+
     async function openPresentation(id) {
         await saveActive({ force: true });
         setStatus('正在打开演示文稿…');
@@ -253,22 +437,50 @@
         byId('presentation-editor')?.classList.remove('hidden');
         setStatus('');
         renderEditor();
+        collab()?.startPresenceHeartbeat(id, () => state.selectedSlideId);
+        startPresentationSync();
+        startPresentationRealtime();
+        collab()?.loadComments(id);
     }
 
     function closeEditor() {
+        closePresenterMode();
+        if (state.remoteSession?.id) stopRemotePresentation().catch(() => {});
+        stopPresentationRealtime();
+        stopPresentationSync();
+        collab()?.stopPresenceHeartbeat();
         saveActive({ force: true }).catch(() => {});
         state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1;
-        state.imageUrls.forEach(url => URL.revokeObjectURL(url)); state.imageUrls.clear();
+        state.imageUrls.forEach(url => URL.revokeObjectURL(url)); state.imageUrls.clear(); state.fontFaceUrls.forEach(url => URL.revokeObjectURL(url)); state.fontFaceUrls.clear(); if (state.coverUrls instanceof Map) { state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear(); }
         byId('presentation-editor')?.classList.add('hidden');
         byId('presentation-library')?.classList.remove('hidden');
         loadDocuments().catch(error => toast(error.message, 'error'));
     }
 
+    async function startRemotePresentation() { return presenter()?.startRemotePresentation?.(state, { toast }); }
+    async function syncRemoteSlide() { return presenter()?.syncRemoteSlide?.(state); }
+    async function stopRemotePresentation() { return presenter()?.stopRemotePresentation?.(state, { toast }); }
+
     function renderEditor() {
         if (!state.active?.content) return;
         const titleInput = byId('presentation-title-input');
         if (titleInput && document.activeElement !== titleInput) titleInput.value = state.active.content.title || state.active.title;
-        renderSlideList(); renderStage(); renderProperties(); renderTemplatePanel(); renderIssues(); updateUndoRedo();
+        ensureThemeFonts().catch(() => {});
+        renderSlideList(); renderStage(); renderProperties(); renderSpeakerNotes(); renderTemplatePanel(); renderIssues(); updateUndoRedo();
+        const editable = canEditActivePresentation();
+        const admin = typeof isAdminUser === 'function' && isAdminUser();
+        document.querySelector('[data-presentation-panel="metrics"]')?.classList.toggle('hidden', !admin);
+        byId('presentation-title-input')?.toggleAttribute('readonly', !editable);
+        byId('presentation-speaker-notes')?.toggleAttribute('disabled', !editable);
+        ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-check-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable));
+        const canExport = state.active?.isOwner !== false || (typeof isAdminUser === 'function' && isAdminUser());
+        ['presentation-export-pptx-btn', 'presentation-export-pdf-btn', 'presentation-export-png-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !canExport));
+        byId('presentation-remote-start-btn')?.toggleAttribute('disabled', !canExport);
+        byId('presentation-remote-start-btn')?.classList.toggle('hidden', Boolean(state.remoteSession?.id));
+        byId('presentation-remote-stop-btn')?.classList.toggle('hidden', !state.remoteSession?.id);
+        document.querySelectorAll('#presentation-properties-form input, #presentation-properties-form textarea, #presentation-properties-form select').forEach(input => input.toggleAttribute('disabled', !editable));
+        collab()?.renderPresenceBar();
+        collab()?.renderComments();
     }
 
     function renderSlideList() {
@@ -282,7 +494,7 @@
             const preview = document.createElement('div'); preview.className = 'presentation-slide-thumb-preview'; preview.style.background = slide.background.fill;
             const title = slide.elements.find(element => element.type === 'text' && Number(element.style?.fontSize || 0) >= 24)?.content?.text || `第 ${index + 1} 页`;
             const previewTitle = document.createElement('strong'); previewTitle.textContent = String(title).slice(0, 30); preview.appendChild(previewTitle);
-            const label = document.createElement('small'); label.textContent = slide.layoutId;
+            const label = document.createElement('small'); label.textContent = presentationLayoutLabel(slide.layoutId);
             button.append(number, preview, label); list.appendChild(button);
         });
     }
@@ -296,7 +508,7 @@
         const cached = state.imageUrls.get(element.assetRef);
         if (cached) { node.style.backgroundImage = `url("${cached}")`; return; }
         try {
-            const res = await apiFetch(`${API}/assets/content/by-ref?ref=${encodeURIComponent(element.assetRef)}`);
+            const res = await apiFetch(`${API}/assets/content/by-ref?ref=${encodeURIComponent(element.assetRef)}&presentationId=${encodeURIComponent(state.active?.id || '')}`);
             if (!res.ok) return;
             const url = URL.createObjectURL(await res.blob());
             state.imageUrls.set(element.assetRef, url);
@@ -319,7 +531,7 @@
             const node = document.createElement('div');
             node.className = `presentation-canvas-element presentation-canvas-${element.type}${element.id === state.selectedElementId ? ' is-selected' : ''}`;
             node.dataset.presentationElementId = element.id;
-            Object.assign(node.style, cssElement(element)); node.style.zIndex = String(element.zIndex || 1);
+            Object.assign(node.style, cssElement(element)); node.style.zIndex = String(element.zIndex || 1); if (element.animation?.type && element.animation.type !== 'none') { node.classList.add('presentation-animate-' + element.animation.type); node.style.animationDuration = String(element.animation.durationMs || 500) + 'ms'; node.style.animationDelay = String(element.animation.delayMs || 0) + 'ms'; }
             if (element.type === 'text') {
                 node.textContent = element.content?.text || '';
                 node.style.fontFamily = element.style?.fontFamily || 'Microsoft YaHei'; node.style.fontSize = `${Number(element.style?.fontSize || 18) * state.zoom}px`;
@@ -333,50 +545,41 @@
                 renderTableElement(node, element);
             } else if (element.type === 'chart') {
                 renderChartElement(node, element);
+            } else if (element.type === 'diagram') {
+                renderDiagramElement(node, element);
+            } else if (element.type === 'media') {
+                renderMediaElement(node, element);
+            } else if (element.type === 'attachment') {
+                renderAttachmentElement(node, element);
             }
             stage.appendChild(node);
         });
         const meta = byId('presentation-slide-meta');
-        if (meta) meta.textContent = `第 ${slide.index + 1} / ${content.slides.length} 页 · ${slide.layoutId}`;
+        if (meta) meta.textContent = `第 ${slide.index + 1} / ${content.slides.length} 页 · ${presentationLayoutLabel(slide.layoutId)}`;
         populateLayoutSelect(slide);
+        const transitionSelect = byId('presentation-transition-select'); if (transitionSelect) transitionSelect.value = slide.transition?.type || 'none';
     }
 
-    function renderTableElement(node, element) {
-        const table = document.createElement('table');
-        const head = document.createElement('thead'); const body = document.createElement('tbody');
-        const makeRow = (cells, header) => { const row = document.createElement('tr'); cells.forEach(cell => { const item = document.createElement(header ? 'th' : 'td'); item.textContent = cell; row.appendChild(item); }); return row; };
-        head.appendChild(makeRow(element.columns || [], true)); (element.rows || []).forEach(row => body.appendChild(makeRow(row, false))); table.append(head, body); table.style.setProperty('--presentation-header-fill', element.style?.headerFill || '#1769AA'); table.style.setProperty('--presentation-header-color', element.style?.headerColor || '#FFFFFF'); table.style.setProperty('--presentation-cell-fill', element.style?.cellFill || '#FFFFFF'); table.style.setProperty('--presentation-cell-color', element.style?.cellColor || '#1F2937'); table.style.setProperty('--presentation-border-color', element.style?.borderColor || '#CBD5E1'); table.style.fontSize = `${Number(element.style?.fontSize || 14) * state.zoom}px`; node.appendChild(table);
+    function renderDiagramElement(node, element) {
+        node.classList.add('presentation-diagram-element');
+        const items = element.items || []; const horizontal = element.diagramType !== 'hierarchy';
+        items.forEach((text, index) => { const chip = document.createElement('span'); chip.textContent = text; chip.style.background = element.style?.fill || '#EFF6FF'; chip.style.borderColor = element.style?.stroke || '#2563EB'; chip.style.color = element.style?.textColor || '#1E3A8A'; chip.style.fontSize = (Number(element.style?.fontSize || 16) * state.zoom) + 'px'; node.appendChild(chip); if (index < items.length - 1) { const arrow = document.createElement('i'); arrow.textContent = horizontal ? '→' : '↓'; node.appendChild(arrow); } });
+        node.classList.toggle('is-vertical', !horizontal);
     }
 
-    function renderChartElement(node, element) {
-        const values = (element.data?.rows || []).map(row => Number(row[1]) || 0); const max = Math.max(1, ...values.map(value => Math.abs(value))); const palette = element.options?.colors?.length ? element.options.colors : ['#1769AA', '#5B8FF9', '#61DDAA', '#F59E0B'];
-        const title = document.createElement('strong'); title.className = 'presentation-chart-title'; title.textContent = element.title || ''; node.appendChild(title);
-        const chart = document.createElement('div'); chart.className = `presentation-chart presentation-chart-${element.chartType}`;
-        values.forEach((value, index) => { const item = document.createElement('div'); item.className = 'presentation-chart-item'; const mark = document.createElement('i'); mark.style.background = palette[index % palette.length]; mark.style.setProperty('--chart-value', `${Math.max(4, Math.abs(value) / max * 100)}%`); const label = document.createElement('span'); label.textContent = String(element.data.rows[index]?.[0] || ''); item.append(mark, label); chart.appendChild(item); }); node.appendChild(chart);
+    function renderMediaElement(node, element) {
+        node.classList.add('presentation-media-element'); node.textContent = element.mediaType === 'audio' ? '🔊 音频媒体' : '▶ 视频媒体';
+        if (element.posterAssetRef) { node.style.backgroundSize = 'cover'; node.style.backgroundPosition = 'center'; renderImage({ assetRef: element.posterAssetRef }, node); }
     }
 
-    function populateLayoutSelect(slide) {
-        const select = byId('presentation-layout-select'); if (!select) return;
-        const template = templateById(state.active?.template?.id); const layouts = template?.definition?.layouts || [];
-        select.replaceChildren(); layouts.forEach(layout => { const option = document.createElement('option'); option.value = layout.id; option.textContent = layout.name; option.selected = layout.id === slide.layoutId; select.appendChild(option); });
+    function renderAttachmentElement(node, element) {
+        node.classList.add('presentation-attachment-element'); node.textContent = '📎 ' + (element.filename || '附件');
     }
 
-    function applyLayoutToSlide(layoutId) {
-        const slide = activeSlide(); if (!slide) return;
-        const textElements = slide.elements.filter(element => element.type === 'text').sort((a, b) => (b.style?.fontSize || 0) - (a.style?.fontSize || 0));
-        const title = textElements[0]; const body = textElements.filter(element => element !== title);
-        const nonTitle = slide.elements.filter(element => element !== title);
-        if (layoutId === 'cover' && title) { title.x = 88; title.y = 205; title.width = 1104; title.height = 96; title.style.align = 'center'; body.forEach((element, index) => { element.x = 180; element.y = 345 + index * 72; element.width = 920; element.height = 54; if (element.type === 'text') element.style.align = 'center'; }); }
-        if (layoutId === 'section' && title) { title.x = 130; title.y = 280; title.width = 1020; title.height = 100; title.style.align = 'center'; title.style.fontSize = Math.max(36, title.style.fontSize); }
-        if (layoutId === 'title-content' && title) { title.x = 80; title.y = 58; title.width = 1120; title.height = 72; title.style.align = 'left'; body.forEach((element, index) => { element.x = 100; element.y = 180 + index * 200; element.width = 1040; element.height = index ? 150 : 390; }); }
-        if (layoutId === 'two-column' && title) { title.x = 80; title.y = 54; title.width = 1120; title.height = 72; nonTitle.forEach((element, index) => { const column = index % 2; const row = Math.floor(index / 2); element.x = 80 + column * 570; element.y = 170 + row * 250; element.width = 530; element.height = 220; }); }
-        if (layoutId === 'three-card' && title) { title.x = 80; title.y = 54; title.width = 1120; title.height = 72; nonTitle.forEach((element, index) => { element.x = 70 + (index % 3) * 390; element.y = 190 + Math.floor(index / 3) * 240; element.width = 350; element.height = 210; }); }
-        if (layoutId === 'image-focus' && title) { title.x = 80; title.y = 54; title.width = 1120; title.height = 72; nonTitle.forEach((element, index) => { element.x = index === 0 ? 80 : 810; element.y = index === 0 ? 160 : 185; element.width = index === 0 ? 670 : 330; element.height = index === 0 ? 420 : 260; }); }
-        if ((layoutId === 'chart' || layoutId === 'table') && title) { title.x = 80; title.y = 54; title.width = 1120; title.height = 72; nonTitle.forEach((element, index) => { element.x = index === 0 ? 80 : 930; element.y = index === 0 ? 155 : 185; element.width = index === 0 ? 800 : 240; element.height = index === 0 ? 440 : 290; }); }
-        if (layoutId === 'quote') { nonTitle.forEach((element, index) => { element.x = 160; element.y = 190 + index * 220; element.width = 960; element.height = 170; if (element.type === 'text') element.style.align = 'center'; }); }
-        if (layoutId === 'summary' && title) { title.x = 80; title.y = 54; title.width = 1120; title.height = 72; nonTitle.forEach((element, index) => { element.x = 110; element.y = 175 + index * 160; element.width = 1010; element.height = 125; }); }
-        slide.layoutId = layoutId;
-    }
+    function renderTableElement(node, element) { return presenter()?.renderTableElement?.(node, element, state.zoom); }
+    function renderChartElement(node, element) { return presenter()?.renderChartElement?.(node, element); }
+    function populateLayoutSelect(slide) { return presenter()?.populateLayoutSelect?.(slide, state, templateById); }
+    function applyLayoutToSlide(layoutId) { return presenter()?.applyLayoutToSlide?.(layoutId, state); }
 
     function renderProperties() {
         const element = selectedElement(); const empty = byId('presentation-selection-empty'); const form = byId('presentation-properties-form');
@@ -384,6 +587,7 @@
         if (!element) return;
         setInput('presentation-element-text', element.type === 'text' ? element.content?.text || '' : '');
         ['x', 'y', 'width', 'height', 'rotation'].forEach(key => setInput(`presentation-element-${key}`, element[key]));
+        setInput('presentation-element-animation', element.animation?.type || 'none'); setInput('presentation-element-animation-duration', element.animation?.durationMs || 500);
         byId('presentation-text-style-fields')?.classList.toggle('hidden', element.type !== 'text');
         if (element.type === 'text') { setInput('presentation-element-font-size', element.style.fontSize); setInput('presentation-element-color', element.style.color); setInput('presentation-element-align', element.style.align); setInput('presentation-element-weight', element.style.fontWeight); }
         byId('presentation-shape-style-fields')?.classList.toggle('hidden', element.type !== 'shape');
@@ -399,41 +603,26 @@
 
     function setInput(id, value) { const input = byId(id); if (input && document.activeElement !== input) input.value = value ?? ''; }
 
-    function renderTemplatePanel() {
-        renderTemplates(byId('presentation-template-list'));
-        const canManage = typeof isAdminUser === 'function' && isAdminUser();
-        byId('presentation-save-template-btn')?.classList.toggle('hidden', !canManage);
-        byId('presentation-import-template-btn')?.classList.toggle('hidden', !canManage);
-    }
-
-    async function saveAsOrganizationTemplate() {
-        if (!state.active?.content) return;
-        const name = await window.Pivot.legacy.showInputPrompt?.({ title: '保存为组织模板', message: '模板名称', value: `${state.active.content.title} 模板`, required: true, width: 480 });
-        if (!name) return;
-        const currentTemplate = templateById(state.active.template?.id);
-        const definition = { theme: state.active.content.theme, layouts: currentTemplate?.definition?.layouts || [] };
-        const data = await requestJson(`${API}/templates`, jsonOptions({ name, description: `由 ${state.active.content.title} 保存的组织模板`, definition, aspectRatio: state.active.content.aspectRatio, scope: 'organization', publish: true }));
-        state.templates.push(data.template); renderTemplatePanel(); renderLibrary(); toast('组织模板已发布。');
-    }
-
-    async function exportCurrentTemplate() {
-        const templateId = state.active?.content?.template?.id || state.active?.template?.id;
-        if (!templateId) return;
-        const response = await apiFetch(`${API}/templates/${encodeURIComponent(templateId)}/package`);
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data?.error || '导出模板失败。');
-        }
-        downloadBlob(`${templateById(templateId)?.name || 'PPT模板'}.pivot-ppt-template.json`, await response.blob());
-        toast('模板包已开始下载。');
-    }
-
-    async function importTemplatePackage(file) {
-        if (!file) return;
-        const form = new FormData(); form.append('file', file);
-        const data = await requestJson(`${API}/templates/import`, { method: 'POST', body: form });
-        state.templates.push(data.template); renderTemplatePanel(); renderLibrary(); toast('模板已导入并发布。');
-    }
+    async function loadAssets() { return presenter()?.loadAssets?.(state); }
+    function applyFontAsset(asset, kind) { return presenter()?.applyFontAsset?.(asset, kind, state, { recordHistory, renderEditor, toast }); }
+    function insertAssetFromLibrary(asset) { return presenter()?.insertAssetFromLibrary?.(asset, state, { recordHistory, renderEditor }); }
+    function renderAssetsPanel() { return presenter()?.renderAssetsPanel?.(state); }
+    function assetByRef(ref) { return state.assets?.find(asset => asset.ref === ref) || null; }
+    async function loadPresentationMetrics() { return presenter()?.loadPresentationMetrics?.(); }
+    function renderTemplatePanel() { return presenter()?.renderTemplatePanel?.(state, { templateById, renderTemplates }); }
+    async function saveAsOrganizationTemplate() { return presenter()?.saveAsTemplate?.('organization', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
+    async function saveAsDepartmentTemplate() { return presenter()?.saveAsTemplate?.('department', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
+    async function submitCurrentTemplateReview() { return presenter()?.submitCurrentTemplateReview?.(state, { templateById, renderTemplatePanel, toast }); }
+    async function reviewCurrentTemplate() { return presenter()?.reviewCurrentTemplate?.(state, { templateById, renderTemplatePanel, toast }); }
+    async function exportCurrentTemplate() { return presenter()?.exportCurrentTemplate?.(state, { templateById, toast }); }
+    async function importTemplatePackage(file) { return presenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
+    function renderSpeakerNotes() { return presenter()?.renderSpeakerNotes?.(state); }
+    function presenterTextElement(element) { return presenter()?.presenterTextElement?.(element, state); }
+    function renderPresenterMode() { return presenter()?.renderPresenterMode?.(state); }
+    function updatePresenterTimer() { return presenter()?.updatePresenterTimer?.(state); }
+    async function openPresenterMode() { return presenter()?.openPresenterMode?.(state, { saveActive, syncRemoteSlide }); }
+    function closePresenterMode() { return presenter()?.closePresenterMode?.(state); }
+    function movePresenterSlide(delta) { return presenter()?.movePresenterSlide?.(delta, state, { syncRemoteSlide }); }
 
     function renderIssues() {
         const list = byId('presentation-issues-list'); if (!list) return;
@@ -442,43 +631,32 @@
         issues.forEach(issue => { const item = document.createElement('button'); item.type = 'button'; item.className = `presentation-issue is-${issue.level || 'info'}`; item.dataset.presentationIssueSlide = issue.slideId || ''; item.dataset.presentationIssueElement = issue.elementId || ''; const title = document.createElement('strong'); title.textContent = issue.message; const tip = document.createElement('span'); tip.textContent = issue.suggestion || ''; item.append(title, tip); list.appendChild(item); });
     }
 
-    function renderVersions() {
-        const list = byId('presentation-versions-list'); if (!list) return;
-        list.replaceChildren();
-        if (!state.versions.length) { const empty = document.createElement('div'); empty.className = 'presentation-empty-note'; empty.textContent = '暂无可恢复版本。保存后会自动在这里留下版本记录。'; list.appendChild(empty); return; }
-        state.versions.forEach(version => {
-            const row = document.createElement('article'); row.className = 'presentation-version-row';
-            const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = `版本 ${version.version}`; const meta = document.createElement('span'); meta.textContent = `${formatTime(version.createdAt)} · ${version.note || '保存演示文稿'}`; info.append(title, meta);
-            const restore = document.createElement('button'); restore.type = 'button'; restore.className = 'btn-secondary'; restore.dataset.presentationRestoreVersion = String(version.version); restore.textContent = '恢复'; row.append(info, restore); list.appendChild(row);
-        });
-    }
-
-    async function loadVersions() {
-        if (!state.active?.id) return;
-        const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/versions`);
-        state.versions = Array.isArray(data.versions) ? data.versions : [];
-        renderVersions();
-    }
-
-    async function restoreVersion(version) {
-        if (!state.active?.id) return;
-        const accepted = await window.Pivot.legacy.showConfirm?.('恢复演示文稿版本', `将以历史版本 ${version} 创建一个新的当前版本，当前内容仍会保留在版本历史中。`);
-        if (!accepted) return;
-        await saveActive({ force: true });
-        const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/rollback`, jsonOptions({ version, note: `用户恢复版本 ${version}` }));
-        state.active = data.presentation; state.selectedSlideId = state.active.content?.slides?.[0]?.id || ''; state.selectedElementId = ''; resetHistory(); renderEditor(); await loadVersions(); toast(`已恢复版本 ${version}。`);
-    }
+    function renderVersions() { return presenter()?.renderVersions?.(state, { formatTime }); }
+    async function loadVersions() { return presenter()?.loadVersions?.(state, { formatTime }); }
+    async function restoreVersion(version) { return presenter()?.restoreVersion?.(version, state, { saveActive, resetHistory, renderEditor, formatTime, toast }); }
 
     function switchPanel(name) {
         state.panel = name;
         document.querySelectorAll('[data-presentation-panel]').forEach(button => button.classList.toggle('is-active', button.dataset.presentationPanel === name));
-        ['properties', 'template', 'ai', 'issues', 'versions'].forEach(panel => byId(`presentation-${panel}-panel`)?.classList.toggle('hidden', panel !== name));
+        ['properties', 'template', 'ai', 'assets', 'metrics', 'notes', 'comments', 'issues', 'versions'].forEach(panel => byId(`presentation-${panel}-panel`)?.classList.toggle('hidden', panel !== name));
         if (name === 'versions') loadVersions().catch(error => toast(error.message, 'error'));
+        if (name === 'comments') collab()?.loadComments(state.active?.id);
+        if (name === 'notes') renderSpeakerNotes();
+        if (name === 'assets') loadAssets().catch(error => toast(error.message, 'error'));
+        if (name === 'metrics') loadPresentationMetrics().catch(error => toast(error.message, 'error'));
+    }
+
+function setSelectedImageAsCover() {
+        const element = selectedElement(); const content = activeContent();
+        if (!element || element.type !== 'image' || !content) { toast('请先选择图片元素。', 'warning'); return; }
+        content.metadata = { ...(content.metadata || {}), coverAssetRef: element.assetRef }; recordHistory(); renderEditor(); toast('已将所选图片设为文稿封面。');
     }
 
     function updateElementFromForm() {
         const element = selectedElement(); if (!element) return;
+        if (element.locked) { toast('该元素由组织品牌模板锁定，不能编辑。', 'warning'); return; }
         ['x', 'y', 'width', 'height', 'rotation'].forEach(key => { const value = Number(byId(`presentation-element-${key}`)?.value); if (Number.isFinite(value)) element[key] = Math.round(value); });
+        const animationType = byId('presentation-element-animation')?.value || element.animation?.type || 'none'; const animationDuration = Number(byId('presentation-element-animation-duration')?.value); element.animation = { type: animationType, durationMs: animationType === 'none' ? 0 : (Number.isFinite(animationDuration) ? animationDuration : 500), delayMs: 0, direction: '' };
         if (element.type === 'text') {
             element.content.text = byId('presentation-element-text')?.value || '';
             element.style.fontSize = Number(byId('presentation-element-font-size')?.value) || element.style.fontSize;
@@ -506,24 +684,12 @@
         const id = `text_${Date.now()}`; slide.elements.push(textElement(id, 120, 260, 600, 80, '双击或在右侧编辑文字')); state.selectedElementId = id; recordHistory(); renderEditor();
     }
 
-    function addShape() {
-        const slide = activeSlide(); if (!slide) return;
-        const template = templateById(state.active.template?.id); const id = `shape_${Date.now()}`; slide.elements.push({ id, type: 'shape', x: 180, y: 260, width: 300, height: 150, rotation: 0, zIndex: 5, locked: false, visible: true, sourceRefs: [], shapeType: 'roundRect', style: { fill: template?.definition?.theme?.colors?.secondary || '#5B8FF9', stroke: template?.definition?.theme?.colors?.primary || '#1769AA', strokeWidth: 1, opacity: 1, radius: 16 } }); state.selectedElementId = id; recordHistory(); renderEditor();
-    }
+    function addShape() { const s = activeSlide(); if (!s) return; const t = templateById(state.active.template?.id); const id = `shape_${Date.now()}`; s.elements.push({ id, type: 'shape', x: 180, y: 260, width: 300, height: 150, rotation: 0, zIndex: 5, locked: false, visible: true, sourceRefs: [], shapeType: 'roundRect', style: { fill: t?.definition?.theme?.colors?.secondary || '#5B8FF9', stroke: t?.definition?.theme?.colors?.primary || '#1769AA', strokeWidth: 1, opacity: 1, radius: 16 } }); state.selectedElementId = id; recordHistory(); renderEditor(); }
+    function addTable() { const s = activeSlide(); if (!s) return; const id = `table_${Date.now()}`; s.elements.push({ id, type: 'table', x: 120, y: 250, width: 760, height: 260, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [], columns: ['指标', '当前值', '说明'], rows: [['目标', '请填写', '待补充'], ['进度', '请填写', '待补充']], style: { headerFill: '#1769AA', headerColor: '#FFFFFF', cellFill: '#FFFFFF', cellColor: '#1F2937', borderColor: '#CBD5E1', fontSize: 14 } }); state.selectedElementId = id; recordHistory(); renderEditor(); }
+    function addChart() { const s = activeSlide(); if (!s) return; const id = `chart_${Date.now()}`; s.elements.push({ id, type: 'chart', x: 180, y: 210, width: 720, height: 360, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [], chartType: 'bar', title: '示例趋势', data: { columns: ['阶段', '数值'], rows: [['第一阶段', 35], ['第二阶段', 62], ['第三阶段', 85]] }, options: { showLegend: false, showLabels: true, colors: ['#1769AA', '#5B8FF9', '#61DDAA'] } }); state.selectedElementId = id; recordHistory(); renderEditor(); }
+    function addDiagram() { const s = activeSlide(); if (!s) return; const id = 'diagram_' + Date.now(); const t = templateById(state.active?.template?.id); const c = t?.definition?.theme?.colors || {}; s.elements.push({ id, type: 'diagram', x: 120, y: 240, width: 920, height: 180, rotation: 0, zIndex: 9, locked: false, visible: true, sourceRefs: [], diagramType: 'process', items: ['规划', '执行', '复盘'], style: { fill: c.background || '#EFF6FF', stroke: c.primary || '#2563EB', textColor: c.text || '#1E3A8A', fontSize: 16 } }); state.selectedElementId = id; recordHistory(); renderEditor(); }
 
-    function addTable() {
-        const slide = activeSlide(); if (!slide) return;
-        const id = `table_${Date.now()}`;
-        slide.elements.push({ id, type: 'table', x: 120, y: 250, width: 760, height: 260, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [], columns: ['指标', '当前值', '说明'], rows: [['目标', '请填写', '待补充'], ['进度', '请填写', '待补充']], style: { headerFill: '#1769AA', headerColor: '#FFFFFF', cellFill: '#FFFFFF', cellColor: '#1F2937', borderColor: '#CBD5E1', fontSize: 14 } });
-        state.selectedElementId = id; recordHistory(); renderEditor();
-    }
-
-    function addChart() {
-        const slide = activeSlide(); if (!slide) return;
-        const id = `chart_${Date.now()}`;
-        slide.elements.push({ id, type: 'chart', x: 180, y: 210, width: 720, height: 360, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [], chartType: 'bar', title: '示例趋势', data: { columns: ['阶段', '数值'], rows: [['第一阶段', 35], ['第二阶段', 62], ['第三阶段', 85]] }, options: { showLegend: false, showLabels: true, colors: ['#1769AA', '#5B8FF9', '#61DDAA'] } });
-        state.selectedElementId = id; recordHistory(); renderEditor();
-    }
+    async function uploadRichAsset(file) { return presenter()?.uploadRichAsset?.(file, state, { setSaveState, recordHistory, renderEditor, toast }); }
 
     async function uploadImage(file) {
         if (!file || !activeSlide()) return;
@@ -535,52 +701,11 @@
         } finally { setSaveState('待保存', 'dirty'); }
     }
 
-    function populateChartDatasetSelect() {
-        const select = byId('presentation-chart-dataset'); if (!select) return;
-        select.replaceChildren();
-        if (!state.dataSets.length) { const option = document.createElement('option'); option.value = ''; option.textContent = '暂无可用数据集'; select.appendChild(option); return; }
-        state.dataSets.forEach(dataset => { const option = document.createElement('option'); option.value = dataset.id; option.textContent = dataset.name || dataset.id; select.appendChild(option); });
-    }
-
-    function populateChartFields(dataset) {
-        const x = byId('presentation-chart-x-field'); const y = byId('presentation-chart-y-field'); if (!x || !y) return;
-        x.replaceChildren(); y.replaceChildren();
-        const columns = dataset?.columns || [];
-        const normalized = columns.map(column => ({ key: column.key || column.name || column, name: column.name || column.key || column, type: column.type || '' }));
-        normalized.forEach(column => { const option = document.createElement('option'); option.value = column.key; option.textContent = column.name; x.appendChild(option); });
-        const countOption = document.createElement('option'); countOption.value = ''; countOption.textContent = '（计数时无需数值字段）'; y.appendChild(countOption);
-        normalized.filter(column => /number|integer|decimal|float|double/i.test(column.type) || column.isNumeric === true).forEach(column => { const option = document.createElement('option'); option.value = column.key; option.textContent = column.name; y.appendChild(option); });
-        if (y.options.length === 1) normalized.slice(0, 1).forEach(column => { const option = document.createElement('option'); option.value = column.key; option.textContent = `${column.name}（将尝试转为数值）`; y.appendChild(option); });
-    }
-
-    async function loadChartDatasetFields() {
-        const id = byId('presentation-chart-dataset')?.value; if (!id) return;
-        const data = await requestJson(`/api/apps/data-analysis/datasets/${encodeURIComponent(id)}`);
-        populateChartFields(data.dataset);
-    }
-
-    async function openDataChartModal() {
-        const data = await requestJson('/api/apps/data-analysis/datasets');
-        state.dataSets = Array.isArray(data.datasets) ? data.datasets : [];
-        if (!state.dataSets.length) { toast('请先在“数据分析”应用中导入数据集。', 'warning'); return; }
-        populateChartDatasetSelect();
-        await loadChartDatasetFields();
-        byId('presentation-data-chart-modal')?.classList.remove('hidden');
-    }
-
-    async function importDataChart() {
-        const datasetId = byId('presentation-chart-dataset')?.value; const xField = byId('presentation-chart-x-field')?.value; const yField = byId('presentation-chart-y-field')?.value;
-        if (!datasetId || !xField) { toast('请选择数据集和分类字段。', 'error'); return; }
-        const button = byId('presentation-data-chart-submit-btn'); button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成…';
-        try {
-            const data = await requestJson(`${API}/data-chart`, jsonOptions({ datasetId, xField, yField, chartType: byId('presentation-chart-type')?.value || 'bar', aggregation: yField ? (byId('presentation-chart-aggregation')?.value || 'sum') : 'count', title: byId('presentation-chart-title')?.value || '' }));
-            const chart = data.chart; const id = `chart_${Date.now()}`; const sourceId = `dataset_${datasetId}`;
-            const dataset = state.dataSets.find(item => String(item.id) === String(datasetId));
-            const content = activeContent();
-            if (!content.sources.some(source => source.id === sourceId)) content.sources.push({ id: sourceId, title: dataset?.name || `数据集 ${datasetId}`, type: 'data_analysis', locator: chart.binding?.queryDigest || '', digest: '' });
-            activeSlide().elements.push({ id, ...chart, x: 180, y: 210, width: 720, height: 360, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [sourceId] }); state.selectedElementId = id; byId('presentation-data-chart-modal')?.classList.add('hidden'); recordHistory(); renderEditor(); toast('数据图表已插入，来源引用已保留。');
-        } finally { button?.removeAttribute('disabled'); if (button) button.textContent = '插入图表'; }
-    }
+    function populateChartDatasetSelect() { return presenter()?.populateChartDatasetSelect?.(state); }
+    function populateChartFields(dataset) { return presenter()?.populateChartFields?.(dataset); }
+    async function loadChartDatasetFields() { return presenter()?.loadChartDatasetFields?.(); }
+    async function openDataChartModal() { return presenter()?.openDataChartModal?.(state, { toast }); }
+    async function importDataChart() { return presenter()?.importDataChart?.(state, { recordHistory, renderEditor, toast }); }
 
     async function createBlank(templateId = '') {
         const template = templateId || state.templates[0]?.id || 'business-blue';
@@ -589,13 +714,16 @@
         finally { setStatus(''); }
     }
 
+    async function openArtifactCreateModal() { return presenter()?.openArtifactCreateModal?.(populateTemplateSelect, toast); }
+    async function createFromArtifact() { return presenter()?.createFromArtifact?.(state, { loadDocuments, openPresentation, toast }); }
+
     function openCreateModal() {
         populateTemplateSelect(byId('presentation-create-template'));
         byId('presentation-create-modal')?.classList.remove('hidden');
         window.setTimeout(() => byId('presentation-create-topic')?.focus(), 0);
     }
 
-    function closeCreateModal() { byId('presentation-create-modal')?.classList.add('hidden'); }
+    function closeCreateModal() { abortAiRequest(); byId('presentation-create-modal')?.classList.add('hidden'); }
 
     function populateTemplateSelect(select) {
         if (!select) return; select.replaceChildren(); state.templates.forEach(template => { const option = document.createElement('option'); option.value = template.id; option.textContent = template.name; select.appendChild(option); });
@@ -608,44 +736,103 @@
 
     async function generateOutline() {
         const request = createRequestFromForm(); if (!request.topic) { toast('请输入演示主题。', 'error'); return; }
-        const button = byId('presentation-create-submit-btn'); button?.setAttribute('disabled', ''); button && (button.textContent = '正在生成…');
+        const button = byId('presentation-create-submit-btn'); const controller = beginAiRequest();
+        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成大纲…';
         try {
             const file = byId('presentation-create-material-file')?.files?.[0];
             if (file) {
                 button && (button.textContent = '正在提取材料…');
                 const form = new FormData(); form.append('file', file);
-                const extracted = await requestJson(`${API}/materials/extract`, { method: 'POST', body: form });
+                const extracted = await requestJson(API + '/materials/extract', { method: 'POST', body: form, signal: controller.signal });
                 request.materials = [...request.materials, extracted.material].slice(0, 20);
             }
             button && (button.textContent = '正在生成大纲…');
-            const data = await requestJson(`${API}/ai/outline`, jsonOptions(request)); state.pendingCreate = request; state.pendingOutline = data.outline; byId('presentation-outline-editor').value = JSON.stringify(data.outline, null, 2); byId('presentation-outline-warnings').textContent = (data.outline.warnings || data.outline.assumptions || []).join('\n'); closeCreateModal(); byId('presentation-outline-modal')?.classList.remove('hidden');
-        }
-        finally { button?.removeAttribute('disabled'); if (button) button.textContent = '生成大纲'; }
+            const data = await requestJson(API + '/ai/outline', aiJsonOptions(request, controller));
+            state.pendingCreate = request; state.pendingOutline = data.outline; byId('presentation-outline-editor').value = JSON.stringify(data.outline, null, 2); byId('presentation-outline-warnings').textContent = (data.outline.warnings || data.outline.assumptions || []).join('\n'); closeCreateModal(); byId('presentation-outline-modal')?.classList.remove('hidden');
+        } catch (error) {
+            if (isAiAbort(error, controller)) { toast('AI 大纲生成已取消。', 'warning'); return; }
+            throw error;
+        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = '生成大纲'; }
     }
 
     async function generateSlides() {
         let outline;
         try { outline = JSON.parse(byId('presentation-outline-editor')?.value || ''); } catch (_) { toast('大纲 JSON 格式无效，请修正后再生成。', 'error'); return; }
-        const button = byId('presentation-outline-confirm-btn'); button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成页面…';
+        const button = byId('presentation-outline-confirm-btn'); const controller = beginAiRequest();
+        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成页面…';
         try {
             const request = { ...state.pendingCreate, outline, title: outline.title || state.pendingCreate.topic };
-            const data = await requestJson(`${API}/ai/slides`, jsonOptions(request));
+            const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
             const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, content: data.proposal.presentation }));
             byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id); toast('AI 初稿已生成，可继续在画布中编辑。');
-        } finally { button?.removeAttribute('disabled'); if (button) button.textContent = '生成页面'; }
+        } catch (error) {
+            if (isAiAbort(error, controller)) { toast('AI 页面生成已取消。', 'warning'); return; }
+            throw error;
+        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = '生成页面'; }
     }
 
     async function rewriteCurrentSlide() {
         const slide = activeSlide(); if (!slide || !state.active?.content) return;
         const instruction = byId('presentation-ai-instruction')?.value.trim(); if (!instruction) { toast('请先输入改写要求。', 'error'); return; }
-        const outline = { title: state.active.content.title, slides: [{ title: slide.elements.find(item => item.type === 'text' && item.style.fontSize >= 24)?.content?.text || '', purpose: instruction, layoutHint: slide.layoutId, keyPoints: slide.elements.filter(item => item.type === 'text').map(item => item.content.text) }] };
-        const button = byId('presentation-ai-rewrite-btn'); button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成建议…';
+        const button = byId('presentation-ai-rewrite-btn'); const controller = beginAiRequest();
+        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成建议…';
         try {
-            const data = await requestJson(`${API}/ai/slides`, jsonOptions({ title: state.active.content.title, topic: state.active.content.title, templateId: state.active.template?.id, outline, instruction }));
+            const data = await requestJson(API + '/ai/rewrite', aiJsonOptions({ title: state.active.content.title, topic: state.active.content.title, templateId: state.active.template?.id, slide, instruction, materials: state.active.content.sources || [] }, controller));
             const proposed = data.proposal.presentation?.slides?.[0]; if (!proposed) throw new Error('AI 未返回可用页面。');
             const accepted = await window.Pivot.legacy.showConfirm?.('应用 AI 页面建议', 'AI 将替换当前页面内容。你可以通过“撤销”恢复原页面。');
             if (accepted) { const index = state.active.content.slides.findIndex(item => item.id === slide.id); proposed.id = slide.id; proposed.index = index; state.active.content.slides[index] = proposed; state.selectedElementId = ''; recordHistory(); renderEditor(); toast('已应用 AI 页面建议。'); }
-        } finally { button?.removeAttribute('disabled'); if (button) button.textContent = 'AI 改写当前页'; }
+        } catch (error) {
+            if (isAiAbort(error, controller)) { toast('AI 页面改写已取消。', 'warning'); return; }
+            throw error;
+        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = 'AI 改写当前页'; }
+    }
+
+    function nextPresentationElementId(prefix, index) {
+        return prefix + '_' + Date.now() + '_' + index + '_' + Math.random().toString(36).slice(2, 7);
+    }
+
+    async function continuePresentation() {
+        const content = activeContent(); const current = activeSlide();
+        if (!content || !current) return;
+        const rawCount = await window.Pivot.legacy.showInputPrompt?.({ title: '继续生成页面', message: '新增页数（1–10）', value: '1', required: true, width: 420 });
+        if (!rawCount) return;
+        const additionalSlideCount = Math.max(1, Math.min(Number.parseInt(rawCount, 10) || 1, 10));
+        const instruction = byId('presentation-ai-instruction')?.value.trim() || '延续当前结构补充后续内容。';
+        const button = byId('presentation-ai-continue-btn'); const controller = beginAiRequest();
+        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成…';
+        try {
+            const data = await requestJson(API + '/ai/continue', aiJsonOptions({ title: content.title, topic: content.title, templateId: content.template?.id, presentation: content, additionalSlideCount, instruction, materials: [] }, controller));
+            const generated = data.proposal?.presentation?.slides || [];
+            if (generated.length !== additionalSlideCount) throw new Error('AI 未返回请求数量的新增页面。');
+            const accepted = await window.Pivot.legacy.showConfirm?.('插入 AI 新增页面', '将把 ' + generated.length + ' 页插入当前页之后；可通过“撤销”恢复。');
+            if (!accepted) return;
+            const insertionIndex = content.slides.findIndex(item => item.id === current.id) + 1;
+            const inserted = generated.map((slide, slideIndex) => ({ ...slide, id: nextPresentationElementId('slide', slideIndex), index: insertionIndex + slideIndex, elements: (slide.elements || []).map((element, elementIndex) => ({ ...element, id: nextPresentationElementId('element', slideIndex + '_' + elementIndex) })) }));
+            content.slides.splice(insertionIndex, 0, ...inserted); content.slides.forEach((slide, index) => { slide.index = index; });
+            state.selectedSlideId = inserted[0]?.id || state.selectedSlideId; state.selectedElementId = ''; recordHistory(); renderEditor(); toast('已插入 ' + inserted.length + ' 页 AI 内容。');
+        } catch (error) {
+            if (isAiAbort(error, controller)) { toast('AI 继续生成已取消。', 'warning'); return; }
+            throw error;
+        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = '继续生成页面'; }
+    }
+
+    async function runAiContentValidation() {
+        const content = activeContent(); if (!content) return;
+        const button = byId('presentation-ai-validate-btn'); const controller = beginAiRequest();
+        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在检查…';
+        try {
+            await saveActive({ force: true });
+            const data = await requestJson(API + '/ai/validate', aiJsonOptions({ presentation: content, materials: [] }, controller));
+            const deterministic = state.active?.validation?.issues || [];
+            const aiIssues = (data.validation?.issues || []).map(issue => ({ ...issue, level: issue.severity === 'blocking' ? 'blocking' : issue.severity === 'warning' ? 'warning' : 'info', message: 'AI 内容检查：' + (issue.message || '发现待核实问题') }));
+            const assumptions = (data.validation?.assumptions || []).map((text, index) => ({ level: 'warning', code: 'AI_ASSUMPTION_' + index, slideId: '', elementId: '', message: 'AI 待核实假设：' + text, suggestion: '补充来源或人工确认。' }));
+            const level = aiIssues.some(issue => issue.level === 'blocking') ? 'blocked' : aiIssues.some(issue => issue.level === 'warning') || assumptions.length ? 'warning' : (state.active.validation?.status || 'passed');
+            state.active.validation = { ...(state.active.validation || {}), status: level, issues: [...deterministic, ...aiIssues, ...assumptions], aiValidation: { status: data.validation?.status || 'passed', checkedAt: new Date().toISOString() } };
+            switchPanel('issues'); renderIssues(); toast(aiIssues.length || assumptions.length ? 'AI 内容检查发现 ' + (aiIssues.length + assumptions.length) + ' 项待处理事项。' : 'AI 内容检查未发现新增问题。', aiIssues.some(issue => issue.level === 'blocking') ? 'warning' : 'success');
+        } catch (error) {
+            if (isAiAbort(error, controller)) { toast('AI 内容检查已取消。', 'warning'); return; }
+            throw error;
+        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = 'AI 内容检查'; }
     }
 
     async function runCheck() {
@@ -654,17 +841,7 @@
         finally { setSaveState('已保存', 'saved'); }
     }
 
-    function downloadBlob(name, blob) { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
-
-    async function exportPresentation(format) {
-        if (!state.active?.id) return; await saveActive({ force: true }); setSaveState(`正在导出 ${format.toUpperCase()}…`, 'saving');
-        try {
-            const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({ format, ...(format === 'png' ? { slideIndex: activeSlide()?.index || 0 } : {}) })); const rendition = created.rendition;
-            const tokenResult = await requestJson(`/api/agents/renditions/${encodeURIComponent(rendition.id)}/download-token`, jsonOptions({}));
-            const response = await apiFetch(`/api/agents/renditions/${encodeURIComponent(rendition.id)}/download?token=${encodeURIComponent(tokenResult.token)}`); if (!response.ok) throw new Error('下载导出文件失败。');
-            downloadBlob(`${state.active.content.title || '演示文稿'}.${format}`, await response.blob()); toast(`${format.toUpperCase()} 已生成并开始下载。`);
-        } finally { setSaveState('已保存', 'saved'); }
-    }
+    async function exportPresentation(format) { return presenter()?.exportPresentation?.(format, state, { saveActive, setSaveState, activeSlide, toast }); }
 
     async function applyTemplate(templateId) {
         if (!state.active?.id || !templateId || templateId === state.active.template?.id) return;
@@ -701,6 +878,7 @@
 
     function changeLayer(delta) {
         const element = selectedElement(); if (!element) return;
+        if (element.locked) { toast('该元素由组织品牌模板锁定，不能调整层级。', 'warning'); return; }
         element.zIndex = Math.max(-1000, Math.min(1000, Number(element.zIndex || 0) + delta)); recordHistory(); renderEditor();
     }
 
@@ -714,13 +892,16 @@
     function bindEvents(view) {
         view.addEventListener('click', event => {
             const template = event.target.closest('[data-presentation-template-id]'); if (template) { if (state.active) applyTemplate(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); else createBlank(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); return; }
-            const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; if (docAction.dataset.presentationAction === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (docAction.dataset.presentationAction === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (docAction.dataset.presentationAction === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); return; }
-            const slideButton = event.target.closest('[data-presentation-slide-id]'); if (slideButton) { state.selectedSlideId = slideButton.dataset.presentationSlideId; state.selectedElementId = ''; renderEditor(); return; }
+            const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; const action = docAction.dataset.presentationAction; if (action === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (action === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (action === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); if (action === 'favorite') toggleFavoriteDocument(id, docAction.dataset.presentationFavorite === 'true').catch(error => toast(error.message, 'error')); if (action === 'tags') { let tags = []; try { tags = JSON.parse(docAction.dataset.presentationTags || '[]'); } catch (_) {} updateDocumentTags(id, tags).catch(error => toast(error.message, 'error')); } return; }
+            const slideButton = event.target.closest('[data-presentation-slide-id]'); if (slideButton) { state.selectedSlideId = slideButton.dataset.presentationSlideId; state.selectedElementId = ''; renderEditor(); collab()?.sendPresenceHeartbeat?.(); syncRemoteSlide().catch(() => {}); return; }
             const elementNode = event.target.closest('[data-presentation-element-id]'); if (elementNode) { state.selectedElementId = elementNode.dataset.presentationElementId; renderStage(); renderProperties(); return; }
             const panel = event.target.closest('[data-presentation-panel]'); if (panel) { switchPanel(panel.dataset.presentationPanel); return; }
             const issue = event.target.closest('[data-presentation-issue-slide]'); if (issue) { state.selectedSlideId = issue.dataset.presentationIssueSlide || state.selectedSlideId; const elementId = String(issue.dataset.presentationIssueElement || '').split(',')[0]; state.selectedElementId = elementId; renderEditor(); return; }
+            if (collab()?.handleCollabClick?.(event)) return;
             if (event.target.closest('#presentation-create-ai-btn')) { openCreateModal(); return; }
             if (event.target.closest('#presentation-create-blank-btn')) { createBlank().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-create-from-artifact-btn')) { openArtifactCreateModal().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-artifact-cancel-btn')) { byId('presentation-artifact-modal')?.classList.add('hidden'); return; }
             if (event.target.closest('#presentation-refresh-btn')) { loadDocuments().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-back-to-library-btn')) { closeEditor(); return; }
             if (event.target.closest('#presentation-undo-btn')) { restoreHistory(state.historyIndex - 1); return; }
@@ -736,37 +917,76 @@
             if (event.target.closest('#presentation-add-chart-btn')) { addChart(); return; }
             if (event.target.closest('#presentation-import-data-chart-btn')) { openDataChartModal().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-save-template-btn')) { saveAsOrganizationTemplate().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-save-department-template-btn')) { saveAsDepartmentTemplate().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-submit-template-review-btn')) { submitCurrentTemplateReview().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-review-template-btn')) { reviewCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-template-btn')) { exportCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-import-template-btn')) { byId('presentation-template-package-input')?.click(); return; }
             if (event.target.closest('#presentation-upload-image-btn')) { byId('presentation-image-input')?.click(); return; }
-            if (event.target.closest('#presentation-delete-element-btn')) { const slide = activeSlide(); if (slide && state.selectedElementId) { slide.elements = slide.elements.filter(item => item.id !== state.selectedElementId); state.selectedElementId = ''; recordHistory(); renderEditor(); } return; }
+            if (event.target.closest('#presentation-add-diagram-btn')) { addDiagram(); return; }
+            if (event.target.closest('#presentation-insert-media-btn')) { state.pendingAssetType = 'media'; byId('presentation-rich-asset-input')?.click(); return; }
+            if (event.target.closest('#presentation-insert-attachment-btn')) { state.pendingAssetType = 'attachment'; byId('presentation-rich-asset-input')?.click(); return; }
+            if (event.target.closest('#presentation-upload-font-btn')) { state.pendingAssetType = 'font'; byId('presentation-rich-asset-input')?.click(); return; }
+            if (event.target.closest('#presentation-assets-refresh-btn')) { loadAssets().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-metrics-refresh-btn')) { loadPresentationMetrics().catch(error => toast(error.message, 'error')); return; }
+            const assetAction = event.target.closest('[data-presentation-asset-action]'); if (assetAction) { const asset = assetByRef(assetAction.dataset.presentationAssetRef); if (!asset) return; if (assetAction.dataset.presentationAssetAction === 'insert') insertAssetFromLibrary(asset); else if (assetAction.dataset.presentationAssetAction === 'font-heading') applyFontAsset(asset, 'heading'); else if (assetAction.dataset.presentationAssetAction === 'font-body') applyFontAsset(asset, 'body'); return; }
+            if (event.target.closest('#presentation-set-cover-btn')) { setSelectedImageAsCover(); return; }
+            if (event.target.closest('#presentation-delete-element-btn')) { const slide = activeSlide(); const element = selectedElement(); if (element?.locked) { toast('该元素由组织品牌模板锁定，不能删除。', 'warning'); return; } if (slide && state.selectedElementId) { slide.elements = slide.elements.filter(item => item.id !== state.selectedElementId); state.selectedElementId = ''; recordHistory(); renderEditor(); } return; }
             if (event.target.closest('#presentation-layer-up-btn')) { changeLayer(1); return; }
             if (event.target.closest('#presentation-layer-down-btn')) { changeLayer(-1); return; }
             if (event.target.closest('#presentation-check-btn')) { runCheck().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-presenter-btn') || event.target.closest('#presentation-notes-presenter-btn')) { openPresenterMode().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-remote-start-btn')) { startRemotePresentation().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-remote-stop-btn')) { stopRemotePresentation().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-presenter-prev-btn')) { movePresenterSlide(-1); return; }
+            if (event.target.closest('#presentation-presenter-next-btn')) { movePresenterSlide(1); return; }
+            if (event.target.closest('#presentation-presenter-close-btn')) { closePresenterMode(); return; }
             if (event.target.closest('#presentation-export-pptx-btn')) { exportPresentation('pptx').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-pdf-btn')) { exportPresentation('pdf').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-png-btn')) { exportPresentation('png').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-ai-rewrite-btn')) { rewriteCurrentSlide().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-ai-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-create-cancel-btn')) { closeCreateModal(); return; }
+        if (event.target.closest('#presentation-create-stop-btn') || event.target.closest('#presentation-outline-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-data-chart-cancel-btn')) { byId('presentation-data-chart-modal')?.classList.add('hidden'); return; }
             if (event.target.closest('#presentation-refresh-versions-btn')) { loadVersions().catch(error => toast(error.message, 'error')); return; }
             const restore = event.target.closest('[data-presentation-restore-version]'); if (restore) { restoreVersion(Number(restore.dataset.presentationRestoreVersion)).catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-outline-back-btn')) { byId('presentation-outline-modal')?.classList.add('hidden'); openCreateModal(); return; }
             if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); }
         });
-        view.addEventListener('submit', event => { if (event.target?.id === 'presentation-create-form') { event.preventDefault(); generateOutline().catch(error => toast(error.message, 'error')); } if (event.target?.id === 'presentation-data-chart-form') { event.preventDefault(); importDataChart().catch(error => toast(error.message, 'error')); } });
-        view.addEventListener('input', event => { if (event.target?.id === 'presentation-title-input' && state.active?.content) { state.active.content.title = event.target.value.slice(0, 160); state.active.title = state.active.content.title; recordHistory(); } if (event.target?.closest('#presentation-properties-form') && event.target?.id !== 'presentation-element-data') updateElementFromForm(); });
-        view.addEventListener('change', event => { if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 0.65; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
+        view.addEventListener('submit', event => {
+            if (collab()?.handleCollabSubmit?.(event)) return;
+            if (event.target?.id === 'presentation-create-form') { event.preventDefault(); generateOutline().catch(error => toast(error.message, 'error')); }
+        if (event.target?.id === 'presentation-artifact-form') { event.preventDefault(); createFromArtifact().catch(error => toast(error.message, 'error')); }
+            if (event.target?.id === 'presentation-data-chart-form') { event.preventDefault(); importDataChart().catch(error => toast(error.message, 'error')); }
+        });
+        view.addEventListener('input', event => { if (event.target?.id === 'presentation-library-search' || event.target?.id === 'presentation-library-tag') { state.libraryFilters.search = byId('presentation-library-search')?.value.trim() || ''; state.libraryFilters.tag = byId('presentation-library-tag')?.value.trim() || ''; scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-title-input' && state.active?.content) { state.active.content.title = event.target.value.slice(0, 160); state.active.title = state.active.content.title; recordHistory(); } if (event.target?.id === 'presentation-speaker-notes') { const slide = activeSlide(); if (slide) { slide.speakerNotes = event.target.value.slice(0, 8000); scheduleSave(); } } if (event.target?.closest('#presentation-properties-form') && event.target?.id !== 'presentation-element-data') updateElementFromForm(); });
+        view.addEventListener('change', event => { if (event.target?.id === 'presentation-library-favorite-only') { state.libraryFilters.favorite = Boolean(event.target.checked); loadDocuments().catch(error => toast(error.message, 'error')); return; } if (event.target?.id === 'presentation-speaker-notes') { recordHistory(); return; } if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 0.65; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
         view.addEventListener('pointerdown', event => { const node = event.target.closest('[data-presentation-element-id]'); const element = selectedElement(); if (node && element && node.dataset.presentationElementId === element.id) startDrag(event, element); });
         window.addEventListener('pointermove', moveDrag); window.addEventListener('pointerup', endDrag);
+        view.addEventListener('keydown', event => {
+            const modal = byId('presentation-presenter-modal');
+            if (!modal || modal.classList.contains('hidden')) return;
+            if (event.key === 'Escape') { event.preventDefault(); closePresenterMode(); }
+            if (event.key === 'ArrowLeft') { event.preventDefault(); movePresenterSlide(-1); }
+            if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); movePresenterSlide(1); }
+        });
+        window.addEventListener('beforeunload', () => { stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat?.(); closePresenterMode(); });
     }
 
     async function duplicateDocument(id) { const data = await requestJson(`${API}/${encodeURIComponent(id)}/duplicate`, jsonOptions({})); await loadDocuments(); await openPresentation(data.presentation.id); toast('已创建演示文稿副本。'); }
     async function deleteDocument(id) { const accepted = await window.Pivot.legacy.showConfirm?.('删除演示文稿', '删除后文稿将归档，不会影响已导出的历史文件。'); if (!accepted) return; await requestJson(`${API}/${encodeURIComponent(id)}`, { method: 'DELETE' }); await loadDocuments(); toast('演示文稿已归档。'); }
 
-    async function showPresentationsApp() {
+    async function showPresentationsApp(options = {}) {
         ensureView(); hideOtherAppViews();
-        await loadTemplates(); await loadDocuments();
+        try { await loadTemplates(); } catch (error) { throw new Error('加载 PPT 模板失败：' + (error.message || '未知错误')); }
+        try { await loadDocuments(); } catch (error) { throw new Error('加载 PPT 文稿库失败：' + (error.message || '未知错误')); }
+        if (options?.presentationId) {
+            await openPresentation(options.presentationId);
+            return;
+        }
         if (!state.active) { byId('presentation-library')?.classList.remove('hidden'); byId('presentation-editor')?.classList.add('hidden'); }
     }
 

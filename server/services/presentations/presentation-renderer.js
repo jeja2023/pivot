@@ -4,12 +4,13 @@
 const fs = require('fs/promises');
 const path = require('path');
 const PptxGenJS = require('pptxgenjs');
+const JSZip = require('jszip');
 const { PDFDocument, rgb, degrees } = require('pdf-lib');
 const fontkit = require('@pdf-lib/fontkit');
 const sharp = require('sharp');
 const { normalizePresentation } = require('./presentation-schema');
 
-const PRESENTATION_RENDERER_VERSION = 'presentation-1.0.0';
+const PRESENTATION_RENDERER_VERSION = 'presentation-1.165.0';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_MIME = 'application/pdf';
 const PNG_MIME = 'image/png';
@@ -111,6 +112,60 @@ function createChartSvg(element, width, height) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${pieces}</svg>`;
 }
 
+function rawDataUri(asset) {
+    if (!asset?.buffer || !asset?.mimeType) return '';
+    return 'data:' + asset.mimeType + ';base64,' + Buffer.from(asset.buffer).toString('base64');
+}
+
+function mediaExtension(mimeType, fallback = 'mp4') {
+    const type = String(mimeType || '').toLowerCase();
+    if (type.includes('mpeg')) return 'mp3';
+    if (type.includes('wav')) return 'wav';
+    if (type.includes('ogg')) return 'ogg';
+    if (type.includes('webm')) return 'webm';
+    if (type.includes('quicktime')) return 'mov';
+    return fallback;
+}
+
+function diagramSvg(element) {
+    const count = element.items.length; const horizontal = element.diagramType !== 'hierarchy';
+    const gap = 18; const width = element.width; const height = element.height;
+    const nodeWidth = horizontal ? Math.max(80, (width - gap * (count - 1)) / count) : Math.max(100, width * 0.45);
+    const nodeHeight = horizontal ? Math.max(48, height * 0.55) : Math.max(38, (height - gap * (count - 1)) / count);
+    const pieces = [];
+    element.items.forEach((text, index) => {
+        const x = horizontal ? index * (nodeWidth + gap) : (width - nodeWidth) / 2;
+        const y = horizontal ? (height - nodeHeight) / 2 : index * (nodeHeight + gap);
+        if (index > 0) { const px = horizontal ? x - gap : width / 2; const py = horizontal ? height / 2 : y - gap; const ax = horizontal ? x - 5 : width / 2; const ay = horizontal ? height / 2 : y - 5; pieces.push('<line x1="' + px + '" y1="' + py + '" x2="' + ax + '" y2="' + ay + '" stroke="' + element.style.stroke + '" stroke-width="2" marker-end="url(#arrow)"/>'); }
+        pieces.push('<rect x="' + x + '" y="' + y + '" width="' + nodeWidth + '" height="' + nodeHeight + '" rx="12" fill="' + element.style.fill + '" stroke="' + element.style.stroke + '"/>');
+        pieces.push('<text x="' + (x + nodeWidth / 2) + '" y="' + (y + nodeHeight / 2 + element.style.fontSize * 0.35) + '" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="' + element.style.fontSize + '" fill="' + element.style.textColor + '">' + escapeXml(text) + '</text>');
+    });
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="' + element.style.stroke + '"/></marker></defs>' + pieces.join('') + '</svg>';
+}
+
+function transitionXml(transition) {
+    if (!transition || transition.type === 'none') return '';
+    const speed = transition.durationMs <= 400 ? 'fast' : transition.durationMs >= 1200 ? 'slow' : 'med';
+    const directionMap = { left: 'l', right: 'r', up: 'u', down: 'd', in: 'in', out: 'out' };
+    const direction = directionMap[String(transition.direction || '').toLowerCase()] || '';
+    const type = transition.type;
+    const inner = type === 'fade' ? '<p:fade/>' : type === 'split' ? '<p:split' + (direction ? ' dir="' + direction + '"' : '') + '/>' : '<p:' + type + (direction ? ' dir="' + direction + '"' : '') + '/>';
+    return '<p:transition spd="' + speed + '" advClick="1">' + inner + '</p:transition>';
+}
+
+async function applyPptxTransitions(buffer, presentation) {
+    if (!presentation.slides.some(slide => slide.transition?.type && slide.transition.type !== 'none')) return buffer;
+    const zip = await JSZip.loadAsync(buffer);
+    for (let index = 0; index < presentation.slides.length; index += 1) {
+        const transition = transitionXml(presentation.slides[index].transition); if (!transition) continue;
+        const name = 'ppt/slides/slide' + (index + 1) + '.xml'; const file = zip.file(name); if (!file) continue;
+        const xml = await file.async('string');
+        const clean = xml.replace(/<p:transition\b[\s\S]*?<\/p:transition>|<p:transition\b[^>]*\/>/g, '');
+        zip.file(name, clean.replace('</p:sld>', transition + '</p:sld>'));
+    }
+    return await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+}
+
 async function resolveDataUri(ref, assetResolver) {
     if (!ref || typeof assetResolver !== 'function') return '';
     const asset = await assetResolver(ref);
@@ -144,6 +199,23 @@ async function slideSvg(slide, presentation, options = {}) {
         if (element.type === 'image') {
             const data = await resolveDataUri(element.assetRef, options.assetResolver);
             if (data) pieces.push(`<image href="${data}" x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" opacity="${element.opacity}" preserveAspectRatio="xMidYMid ${element.fit === 'contain' ? 'meet' : element.fit === 'stretch' ? 'none' : 'slice'}"/>`);
+            continue;
+        }
+        if (element.type === 'media') {
+            const poster = await resolveDataUri(element.posterAssetRef, options.assetResolver);
+            if (poster) pieces.push('<image href="' + poster + '" x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" preserveAspectRatio="xMidYMid meet"/>');
+            pieces.push('<rect x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" rx="10" fill="' + (poster ? '#000000' : '#0F172A') + '" fill-opacity="' + (poster ? '0.22' : '1') + '" stroke="#64748B"/>');
+            pieces.push('<text x="' + (element.x + element.width / 2) + '" y="' + (element.y + element.height / 2) + '" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="22" fill="#FFFFFF">' + (element.mediaType === 'audio' ? '🔊 音频' : '▶ 视频') + '</text>');
+            continue;
+        }
+        if (element.type === 'attachment') {
+            pieces.push('<rect x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" rx="8" fill="#F8FAFC" stroke="#64748B"/>');
+            pieces.push('<text x="' + (element.x + 14) + '" y="' + (element.y + 28) + '" font-family="Microsoft YaHei, sans-serif" font-size="16" fill="#1E293B">📎 ' + escapeXml(element.filename) + '</text>');
+            continue;
+        }
+        if (element.type === 'diagram') {
+            const diagram = diagramSvg(element);
+            pieces.push('<g transform="translate(' + element.x + ' ' + element.y + ')">' + diagram.replace(/^<svg[^>]*>|<\/svg>$/g, '') + '</g>');
             continue;
         }
         if (element.type === 'chart') {
@@ -190,6 +262,21 @@ async function loadCjkFont(pdf) {
     return buffer ? await pdf.embedFont(buffer, { subset: true }) : null;
 }
 
+async function loadPresentationPdfFonts(pdf, presentation, options = {}) {
+    const fallback = await loadCjkFont(pdf) || await pdf.embedFont('Helvetica');
+    const load = async ref => {
+        if (!ref || typeof options.assetResolver !== 'function') return null;
+        try { const asset = await options.assetResolver(ref); return asset?.buffer ? await pdf.embedFont(asset.buffer, { subset: true }) : null; } catch (_) { return null; }
+    };
+    const heading = await load(presentation.theme.fontAssets?.heading) || fallback;
+    const body = await load(presentation.theme.fontAssets?.body) || heading || fallback;
+    return { fallback, heading, body };
+}
+
+function pdfFontForElement(fonts, presentation, element) {
+    return element?.style?.fontFamily === presentation.theme.fonts.heading ? fonts.heading : element?.style?.fontFamily === presentation.theme.fonts.body ? fonts.body : fonts.fallback;
+}
+
 function drawPdfText(page, font, text, element, pdfHeight) {
     const size = Math.max(6, elementFontSizePx(element) * 0.75);
     const maxWidth = Math.max(1, element.width * 0.75 - element.style.padding * 1.5);
@@ -208,7 +295,7 @@ function drawPdfText(page, font, text, element, pdfHeight) {
 
 async function renderPdf(presentation, options = {}) {
     const pdf = await PDFDocument.create();
-    const font = await loadCjkFont(pdf) || await pdf.embedFont('Helvetica');
+    const fonts = await loadPresentationPdfFonts(pdf, presentation, options);
     const width = presentation.width * 0.75;
     const height = presentation.height * 0.75;
     for (const slide of presentation.slides) {
@@ -244,7 +331,7 @@ async function renderPdf(presentation, options = {}) {
                 continue;
             }
             if (element.type === 'text') {
-                drawPdfText(page, font, element.content.text, element, height);
+                drawPdfText(page, pdfFontForElement(fonts, presentation, element), element.content.text, element, height);
                 continue;
             }
             if (element.type === 'table') {
@@ -256,8 +343,24 @@ async function renderPdf(presentation, options = {}) {
                     const fill = hexToRgb(header ? element.style.headerFill : element.style.cellFill);
                     const stroke = hexToRgb(element.style.borderColor);
                     page.drawRectangle({ x: (element.x + colIndex * colWidth) * 0.75, y: height - (element.y + (rowIndex + 1) * rowHeight) * 0.75, width: colWidth * 0.75, height: rowHeight * 0.75, color: rgb(fill.r, fill.g, fill.b), borderColor: rgb(stroke.r, stroke.g, stroke.b), borderWidth: 0.5 });
-                    drawPdfText(page, font, String(cell), { ...element, x: element.x + colIndex * colWidth, y: element.y + rowIndex * rowHeight, width: colWidth, height: rowHeight, style: { ...element.style, color: header ? element.style.headerColor : element.style.cellColor } }, height);
+                    drawPdfText(page, fonts.body || fonts.fallback, String(cell), { ...element, x: element.x + colIndex * colWidth, y: element.y + rowIndex * rowHeight, width: colWidth, height: rowHeight, style: { ...element.style, color: header ? element.style.headerColor : element.style.cellColor } }, height);
                 }));
+                continue;
+            }
+            if (element.type === 'media' || element.type === 'attachment') {
+                const posterRef = element.type === 'media' ? element.posterAssetRef : '';
+                const asset = posterRef ? await options.assetResolver?.(posterRef) : null;
+                let poster = null;
+                if (asset?.buffer) { try { const data = /^image\/(?:png|jpe?g)$/i.test(asset.mimeType) ? asset.buffer : await sharp(asset.buffer).png().toBuffer(); poster = /^image\/png/i.test(asset.mimeType) ? await pdf.embedPng(data) : await pdf.embedJpg(data); } catch (_) {} }
+                page.drawRectangle({ x: element.x * 0.75, y, width: element.width * 0.75, height: element.height * 0.75, color: rgb(0.06, 0.09, 0.16), borderColor: rgb(0.4, 0.45, 0.52), borderWidth: 1 });
+                if (poster) page.drawImage(poster, { x: element.x * 0.75, y, width: element.width * 0.75, height: element.height * 0.75, opacity: 0.8 });
+                const label = element.type === 'attachment' ? '附件：' + element.filename : (element.mediaType === 'audio' ? '音频媒体' : '视频媒体');
+                page.drawText(label, { x: element.x * 0.75 + 10, y: y + element.height * 0.375, size: 12, font: fonts.body || fonts.fallback, color: rgb(1, 1, 1) });
+                continue;
+            }
+            if (element.type === 'diagram') {
+                const diagramPng = await sharp(Buffer.from(diagramSvg(element))).png().toBuffer();
+                const image = await pdf.embedPng(diagramPng); page.drawImage(image, { x: element.x * 0.75, y, width: element.width * 0.75, height: element.height * 0.75 });
                 continue;
             }
             if (element.type === 'chart') {
@@ -348,6 +451,25 @@ async function renderPptx(presentation, options = {}) {
                 slide.addImage({ data, ...pos, transparency: Math.round((1 - element.opacity) * 100) });
                 continue;
             }
+            if (element.type === 'media') {
+                const asset = await options.assetResolver?.(element.assetRef);
+                if (asset?.buffer && asset?.mimeType) {
+                    try { slide.addMedia({ type: element.mediaType, data: rawDataUri(asset), ext: mediaExtension(asset.mimeType, element.mediaType === 'audio' ? 'mp3' : 'mp4'), ...pos }); }
+                    catch (_) { slide.addShape(pptx.ShapeType.rect, { ...pos, fill: { color: '0F172A' }, line: { color: '64748B', width: 1 } }); slide.addText(element.mediaType === 'audio' ? '音频媒体' : '视频媒体', { ...pos, color: 'FFFFFF', fontSize: 14, align: 'center', valign: 'mid' }); }
+                }
+                continue;
+            }
+            if (element.type === 'attachment') {
+                slide.addShape(pptx.ShapeType.roundRect, { ...pos, rectRadius: 0.08, fill: { color: 'F8FAFC' }, line: { color: '64748B', width: 1 } });
+                slide.addText('附件：' + element.filename, { ...pos, margin: 0.08, color: '1E293B', fontSize: 11, valign: 'mid' });
+                continue;
+            }
+            if (element.type === 'diagram') {
+                const count = element.items.length; const horizontal = element.diagramType !== 'hierarchy';
+                const gap = 0.12; const nodeW = horizontal ? Math.max(0.8, (pos.w - gap * (count - 1)) / count) : Math.max(1.2, pos.w * 0.45); const nodeH = horizontal ? Math.max(0.45, pos.h * 0.55) : Math.max(0.35, (pos.h - gap * (count - 1)) / count);
+                element.items.forEach((text, index) => { const x = horizontal ? pos.x + index * (nodeW + gap) : pos.x + (pos.w - nodeW) / 2; const y = horizontal ? pos.y + (pos.h - nodeH) / 2 : pos.y + index * (nodeH + gap); if (index > 0) { const prevX = horizontal ? x - gap : pos.x + pos.w / 2; const prevY = horizontal ? pos.y + pos.h / 2 : y - gap; const nextX = horizontal ? x - 0.04 : pos.x + pos.w / 2; const nextY = horizontal ? pos.y + pos.h / 2 : y - 0.04; slide.addShape(pptx.ShapeType.line, { x: prevX, y: prevY, w: nextX - prevX, h: nextY - prevY, line: { color: pptColor(element.style.stroke), width: 1.5, beginArrowType: 'none', endArrowType: 'triangle' } }); } slide.addShape(pptx.ShapeType.roundRect, { x, y, w: nodeW, h: nodeH, fill: { color: pptColor(element.style.fill) }, line: { color: pptColor(element.style.stroke), width: 1 } }); slide.addText(text, { x, y, w: nodeW, h: nodeH, margin: 0.03, color: pptColor(element.style.textColor), fontSize: element.style.fontSize * 0.75, align: 'center', valign: 'mid', fit: 'shrink' }); });
+                continue;
+            }
             if (element.type === 'chart') {
                 const categories = element.data.rows.map(row => String(row[0]));
                 const series = element.data.columns.slice(1).map((name, seriesIndex) => ({ name, labels: categories, values: element.data.rows.map(row => Number(row[seriesIndex + 1]) || 0) }));
@@ -362,7 +484,8 @@ async function renderPptx(presentation, options = {}) {
         }
         if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
     }
-    return await pptx.write({ outputType: 'nodebuffer' });
+    const raw = await pptx.write({ outputType: 'nodebuffer' });
+    return await applyPptxTransitions(Buffer.from(raw), presentation);
 }
 
 async function renderPresentation(input, format, options = {}) {

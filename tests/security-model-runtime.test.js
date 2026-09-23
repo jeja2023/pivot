@@ -287,3 +287,12 @@ test('getModelEndpointRuntimeStatus accepts direct model rows and immediately sy
     assert.equal(status[0].configuredMaxConcurrent, 4);
     assert.equal(status[0].concurrency.max, 4);
 });
+
+
+test('熔断提示不会重复拼接同一段模型端点错误', () => {
+    const { runtime } = loadModelRuntimeHarness();
+    const repeated = '模型端点暂时熔断，约 60 秒后可重试。模型端点暂时熔断，约 60 秒后可重试。';
+    assert.equal(runtime.buildCircuitOpenMessage(60, repeated), '模型端点暂时熔断，约 60 秒后可重试。');
+    assert.equal(runtime.buildCircuitOpenMessage(59, 'Request failed with status code 502'), '模型端点暂时熔断，约 59 秒后可重试。 上次错误：Request failed with status code 502');
+    assert.equal(runtime.normalizeCircuitErrorDetail('AI_ENDPOINT_CIRCUIT_OPEN'), '');
+});

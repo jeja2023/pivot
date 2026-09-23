@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1729,
+  "total": 1781,
   "entries": [
     {
       "file": "server/auth.js",
@@ -184,6 +184,38 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/presentation-brand-assets.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-collaboration.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/presentation-cover-customization.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-library-features.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-organization-controls.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-product-governance.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-remote-presenting.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-rich-media.js",
+      "count": 2
+    },
+    {
       "file": "server/db/migrations/presentation-workbench.js",
       "count": 2
     },
@@ -278,6 +310,10 @@
     {
       "file": "server/routes/announcements.js",
       "count": 13
+    },
+    {
+      "file": "server/routes/apps/presentations.js",
+      "count": 6
     },
     {
       "file": "server/routes/attachments.js",
@@ -757,11 +793,27 @@
     },
     {
       "file": "server/services/personal-workbench.js",
-      "count": 3
+      "count": 4
+    },
+    {
+      "file": "server/services/presentations/presentation-collab-service.js",
+      "count": 12
+    },
+    {
+      "file": "server/services/presentations/presentation-export-service.js",
+      "count": 4
+    },
+    {
+      "file": "server/services/presentations/presentation-realtime.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/presentations/presentation-remote-service.js",
+      "count": 5
     },
     {
       "file": "server/services/presentations/presentation-service.js",
-      "count": 24
+      "count": 32
     },
     {
       "file": "server/services/provider-usage-calibration.js",

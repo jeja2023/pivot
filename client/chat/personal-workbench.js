@@ -16,11 +16,13 @@
         calendar: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>',
         fileText: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></svg>',
         dataset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>',
-        plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>'
+        plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+        presentation: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/><path d="M7 14V10"/><path d="M11 14V7"/><path d="M15 14v-2"/></svg>'
     };
 
     const shortcutCatalog = {
         'official-writing': { label: '公文写作', hint: '起草、润色与规范排版', iconSvg: ICONS['official-writing'] },
+        presentations: { label: 'PPT 制作', hint: 'AI 生成与结构化演示文稿', iconSvg: ICONS.presentation },
         'data-analysis': { label: '数据分析', hint: '导入、透视与 AI 图表', iconSvg: ICONS['data-analysis'] },
         regulations: { label: '法规查询', hint: '条文分级与制度检索', iconSvg: ICONS.regulations },
         ocr: { label: '文字识别', hint: '图片与扫描件高精提取', iconSvg: ICONS.ocr },
@@ -133,9 +135,11 @@
                 return statusLabel ? `任务状态：${statusLabel}` : match;
             });
 
-            const metaText = bodyText
+            const baseMetaText = bodyText
                 ? (bodyText.includes('·') ? bodyText : `${bodyText} · ${formatRelativeTime(item.updatedAt || item.createdAt)}`)
                 : `等待处理 · ${formatRelativeTime(item.updatedAt || item.createdAt)}`;
+            const duplicateCount = Math.max(1, Number(item.duplicateCount || 1));
+            const metaText = duplicateCount > 1 ? `${baseMetaText} · 同类提醒 ×${duplicateCount}` : baseMetaText;
             appendText(copy, 'span', 'personal-row-meta', metaText);
 
             const badgeText = item.badgeText || (
@@ -279,20 +283,28 @@
             const row = document.createElement('button');
             row.type = 'button';
             row.className = 'personal-row personal-recent-row';
-            row.dataset.personalRecentKind = item.kind || '';
-            row.dataset.personalRecentId = item.id || '';
+            const kind = item.kind || 'session';
+            const artifactType = item.artifactType || (kind === 'presentation' ? 'presentation' : '');
+            const targetId = item.targetId || item.id || '';
+            row.dataset.personalRecentKind = kind;
+            row.dataset.personalRecentId = targetId;
+            if (artifactType) row.dataset.personalRecentArtifactType = artifactType;
+            if (item.targetId) row.dataset.personalRecentTargetId = item.targetId;
+            if (item.runId) row.dataset.personalRecentRunId = item.runId;
 
             const iconBox = document.createElement('span');
-            const kind = item.kind || 'session';
-            const boxClass = item.iconBoxClass || (kind === 'artifact' ? 'icon-box-blue' : kind === 'session' ? 'icon-box-green' : 'icon-box-amber');
+            const isPpt = kind === 'presentation' || artifactType === 'presentation';
+            const isDoc = artifactType === 'official_writing';
+            const boxClass = item.iconBoxClass || (isPpt ? 'icon-box-blue' : kind === 'artifact' ? (isDoc ? 'icon-box-blue' : 'icon-box-purple') : kind === 'session' ? 'icon-box-green' : 'icon-box-amber');
             iconBox.className = `personal-row-icon-box ${boxClass}`;
-            PivotSafeHtml.setHtml(iconBox, item.iconSvg || (kind === 'artifact' ? ICONS.fileText : kind === 'session' ? ICONS.chat : ICONS.dataset));
+            const iconSvg = item.iconSvg || (isPpt ? ICONS.presentation : (isDoc || kind === 'artifact') ? ICONS.fileText : kind === 'session' ? ICONS.chat : ICONS.dataset);
+            PivotSafeHtml.setHtml(iconBox, iconSvg);
             iconBox.setAttribute('aria-hidden', 'true');
 
             const copy = document.createElement('span');
             copy.className = 'personal-row-copy';
-            appendText(copy, 'strong', 'personal-row-title', item.title || '未命名工作');
-            let metaText = String(item.meta || '最近更新');
+            appendText(copy, 'strong', 'personal-row-title', item.title || (isPpt ? '未命名演示文稿' : (isDoc ? '未命名公文' : '未命名工作')));
+            let metaText = String(item.meta || (isPpt ? '演示文稿' : (isDoc ? '公文' : '最近更新')));
             metaText = metaText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
                 const statusLabel = window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s);
                 return statusLabel ? `任务状态：${statusLabel}` : match;
@@ -429,6 +441,8 @@
         }
         if (key === 'automation' || key === 'tasks') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks' });
         if (key === 'apps') return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ home: true });
+        if (key === 'presentations') return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ app: 'presentations' });
+        if (key === 'official-writing') return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ app: 'official-writing' });
         if (key === 'knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
         if (key === 'workflows') return window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench?.({ tab: 'workflows' });
         await window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.();
@@ -586,12 +600,37 @@
     async function handleRecentWork(button) {
         const kind = button.dataset.personalRecentKind;
         const id = button.dataset.personalRecentId;
+        const artifactType = button.dataset.personalRecentArtifactType;
+        const targetId = button.dataset.personalRecentTargetId || id;
+        const runId = button.dataset.personalRecentRunId;
+
         if (kind === 'session' && id) {
             window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
             return window.Pivot.moduleApi?.('chat.sessions')?.selectSession?.(id, undefined, { refreshSidebar: true });
         }
-        if (kind === 'run' && id) return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', query: id });
-        if (kind === 'artifact') return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
+        if (kind === 'presentation' || artifactType === 'presentation') {
+            return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({
+                app: 'presentations',
+                presentationId: targetId
+            });
+        }
+        if (artifactType === 'official_writing') {
+            return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({
+                app: 'official-writing',
+                docId: targetId
+            });
+        }
+        if (runId || (kind === 'run' && id)) {
+            const effectiveRunId = runId || id;
+            const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
+            if (effectiveRunId && typeof openAgentRun === 'function') {
+                return openAgentRun(effectiveRunId, { returnTab: 'workbench', returnSubview: 'tasks', returnLabel: '个人工作台' });
+            }
+            return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', query: effectiveRunId });
+        }
+        if (kind === 'artifact') {
+            return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
+        }
         window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
         return window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     }

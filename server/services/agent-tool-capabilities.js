@@ -59,6 +59,7 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'system.health': ['system.observe'],
     'system.modelRuntime': ['system.observe'],
     // 文档渲染与产物交付（落地方案 §7）
+    'presentation.create_from_artifact': ['document.render'],
     'artifact.render': ['document.render'],
     'artifact.list_renditions': ['artifact.read']
 });

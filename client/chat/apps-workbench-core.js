@@ -1,4 +1,3 @@
-// 应用中心工作区：集中承载面向业务场景的轻量应用。
 const PIVOT_APP_REGISTRY = [
     {
         id: 'presentations',
@@ -617,64 +616,73 @@ async function showPdfToolsAppFromRegistry() {
     await window.Pivot.legacy.showPdfToolsApp?.();
 }
 
-async function showPresentationsAppFromRegistry() {
+async function showPresentationsAppFromRegistry(options = {}) {
+    setStoredAppsActiveApp('presentations');
     const presentations = window.Pivot?.moduleApi?.('apps.presentations');
     if (typeof presentations?.showPresentationsApp === 'function') {
-        await presentations.showPresentationsApp();
-        return;
+        return await presentations.showPresentationsApp(options);
     }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-collab.js');
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-presenter.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations.js');
-    await window.Pivot?.moduleApi?.('apps.presentations')?.showPresentationsApp?.();
+    const loaded = window.Pivot?.moduleApi?.('apps.presentations');
+    if (typeof loaded?.showPresentationsApp !== 'function') throw new Error('PPT 制作模块未能完成加载，请刷新页面后重试。');
+    return await loaded.showPresentationsApp(options);
 }
 
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
     setAppsWorkbenchState('loading', '正在打开' + app.name + '…');
-    const handleFailure = () => {
+    const handleFailure = (error) => {
+        const raw = String(error?.message || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const detail = raw && raw.length <= 240
+            ? app.name + '无法打开：' + raw
+            : app.name + '暂时无法打开，请检查网络或稍后重试。';
+        console.error('[apps] open failed', { appId: app.id, error: raw || 'unknown' });
         showAppsHome();
-        setAppsWorkbenchState('error', app.name + '暂时无法打开，请检查网络或稍后重试。', { retryApp: app.id });
+        setAppsWorkbenchState('error', detail, { retryApp: app.id });
     };
     if (app.id === 'official-writing') {
         showOfficialWritingApp()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
     if (app.id === 'data-analysis') {
         showDataAnalysisAppFromRegistry()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
     if (app.id === 'regulations') {
         showRegulationsAppFromRegistry()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
     if (app.id === 'ocr') {
         showOcrAppFromRegistry()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
     if (app.id === 'pdf-tools') {
         showPdfToolsAppFromRegistry()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
     if (app.id === 'presentations') {
         showPresentationsAppFromRegistry()
             .then(() => setAppsWorkbenchState())
-            .catch(() => {
-                handleFailure();
+            .catch(error => {
+                handleFailure(error);
             });
     }
 }

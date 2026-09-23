@@ -55,6 +55,9 @@ function runPresentationValidation(input) {
         if (slide.type !== 'cover' && !hasTitle) {
             issues.push(makeIssue('info', 'TITLE_MISSING', slide.id, null, '页面缺少明显标题。', '建议添加标题以便观众理解当前页面重点。'));
         }
+        if (slide.transition?.type && slide.transition.type !== 'none' && slide.transition.durationMs > 5000) {
+            issues.push(makeIssue('warning', 'TRANSITION_TOO_LONG', slide.id, null, '页面转场时间过长。', '建议将转场控制在 5 秒以内。'));
+        }
         visible.forEach(element => {
             if (element.type === 'text') {
                 const lines = estimatedTextLines(element);
@@ -74,6 +77,18 @@ function runPresentationValidation(input) {
             }
             if (element.type === 'image' && !element.assetRef) {
                 issues.push(makeIssue('blocking', 'IMAGE_MISSING', slide.id, element.id, '图片素材缺失。', '请重新上传或替换图片。'));
+            }
+            if (element.type === 'media' && !element.assetRef) {
+                issues.push(makeIssue('blocking', 'MEDIA_MISSING', slide.id, element.id, '音视频素材缺失。', '请重新上传或替换媒体。'));
+            }
+            if (element.type === 'attachment' && !element.assetRef) {
+                issues.push(makeIssue('blocking', 'ATTACHMENT_MISSING', slide.id, element.id, '附件素材缺失。', '请重新上传或替换附件。'));
+            }
+            if (element.type === 'diagram' && (element.items || []).length < 2) {
+                issues.push(makeIssue('blocking', 'DIAGRAM_INVALID', slide.id, element.id, '图示节点不足。', '请至少保留两个图示节点。'));
+            }
+            if (element.animation?.type !== 'none' && element.animation.durationMs > 5000) {
+                issues.push(makeIssue('warning', 'ANIMATION_TOO_LONG', slide.id, element.id, '元素动画时间过长，可能影响演示节奏。', '建议将单个元素动画控制在 5 秒以内。'));
             }
             const contentText = element.type === 'text'
                 ? element.content?.text

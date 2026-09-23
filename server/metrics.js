@@ -14,6 +14,7 @@ const {
 const { getAgentGovernanceMetricsSnapshot } = require('./services/agent-governance-metrics');
 const { getRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 const { getQueueDiagnostics } = require('./services/db-write-queue');
+const { getPresentationMetricsSnapshot } = require('./services/presentations/presentation-metrics');
 
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10);
@@ -243,6 +244,21 @@ function appendAgentGovernanceMetrics(lines) {
     counter('pivot_workflow_iteration_item_total', 'Iteration item terminal outcomes.', snapshot.workflow.iterationItemTotal, 'status');
 }
 
+function appendPresentationMetrics(lines) {
+    const snapshot = getPresentationMetricsSnapshot();
+    lines.push('# HELP pivot_presentation_operations_total Presentation operations by outcome and format.');
+    lines.push('# TYPE pivot_presentation_operations_total counter');
+    snapshot.counters.forEach(item => lines.push(line(item.name, item.labels, item.value)));
+    lines.push('# HELP pivot_presentation_operation_duration_ms Presentation operation duration histogram in milliseconds.');
+    lines.push('# TYPE pivot_presentation_operation_duration_ms histogram');
+    snapshot.histograms.forEach(item => {
+        item.buckets.forEach(bucket => lines.push(line(item.name + '_bucket', { ...item.labels, le: bucket.limit }, bucket.count)));
+        lines.push(line(item.name + '_bucket', { ...item.labels, le: '+Inf' }, item.count));
+        lines.push(line(item.name + '_sum', item.labels, item.sumMs));
+        lines.push(line(item.name + '_count', item.labels, item.count));
+    });
+}
+
 async function renderPrometheusMetrics() {
     const lines = [];
     lines.push('# HELP pivot_http_request_duration_seconds HTTP request latency histogram.');
@@ -302,6 +318,7 @@ async function renderPrometheusMetrics() {
 
     const rag = getRagMetricsSnapshot();
     appendAgentGovernanceMetrics(lines);
+    appendPresentationMetrics(lines);
     lines.push('# HELP pivot_rag_retrievals_total Total RAG retrieval attempts.');
     lines.push('# TYPE pivot_rag_retrievals_total counter');
     lines.push(line('pivot_rag_retrievals_total', {}, rag.retrievals));

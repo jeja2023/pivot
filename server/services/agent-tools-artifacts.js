@@ -18,6 +18,18 @@ function jsonSchema(properties = {}, required = []) {
 function getArtifactToolDefinitions() {
     return [
         {
+            name: 'presentation.create_from_artifact',
+            title: '从产物创建演示文稿',
+            description: '把当前用户有权访问的文本产物转换为版本化、可编辑的 PPT 演示文稿。只创建受控源稿和后续渲染能力，不会下载、发送或写入本机文件。',
+            capabilities: ['document.render'],
+            input_schema: jsonSchema({
+                artifactId: { type: 'integer', minimum: 1, description: '要转换的文本产物 ID。' },
+                title: { type: 'string', maxLength: 160, description: '可选演示文稿标题。' },
+                templateId: { type: 'string', maxLength: 96, default: 'business-blue', description: 'Pivot 受控模板 ID。' },
+                tags: { type: 'array', items: { type: 'string' }, maxItems: 12 }
+            }, ['artifactId'])
+        },
+        {
             name: 'artifact.render',
             title: '文档渲染',
             description: '把结构化文档中间表示（Document IR）渲染为可下载的正式文档，支持公文版式 DOCX、CJK PDF、XLSX、HTML 与 Markdown。只产出渲染结果，不会写入用户磁盘。',
@@ -54,6 +66,11 @@ function resolveToolCallId(context = {}) {
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
+    if (name === 'presentation.create_from_artifact') {
+        const { createPresentationFromArtifact } = require('./presentations/presentation-service');
+        const presentation = await createPresentationFromArtifact(user, input.artifactId, { title: input.title, templateId: input.templateId, tags: input.tags });
+        return { presentationId: presentation.id, artifactId: presentation.artifactId, title: presentation.title, version: presentation.version, deliveryHint: '演示文稿源稿已创建。用户可在 PPT 制作应用中继续编辑并选择导出格式。', text: '已从产物创建可编辑 PPT：' + presentation.title };
+    }
     const { createRendition, listRenditionsForArtifact } = require('./agent-artifact-renditions');
     if (name === 'artifact.list_renditions') {
         const rows = await listRenditionsForArtifact(input.artifactId, user);
@@ -96,7 +113,7 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
     };
 }
 
-const ARTIFACT_TOOL_NAMES = Object.freeze(['artifact.render', 'artifact.list_renditions']);
+const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.create_from_artifact', 'artifact.render', 'artifact.list_renditions']);
 
 module.exports = {
     ARTIFACT_TOOL_NAMES,

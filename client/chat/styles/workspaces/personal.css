@@ -293,7 +293,9 @@
     box-sizing: border-box;
 }
 
-.personal-workbench-view .sr-only {
+.personal-workspace-view .sr-only,
+.personal-workbench-view .sr-only,
+.sr-only {
     position: absolute;
     width: 1px;
     height: 1px;

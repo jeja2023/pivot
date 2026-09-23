@@ -172,13 +172,30 @@ function syncConfiguredRuntimes(models = getActiveEndpointModels()) {
         }
     }
 }
+function normalizeCircuitErrorDetail(value) {
+    let detail = String(value || '')
+        .replace(/模型端点暂时熔断[，,]?\s*约?\s*\d+\s*秒后可重试[。.]?/g, ' ')
+        .replace(/AI_ENDPOINT_CIRCUIT_OPEN/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (detail.length > 800) detail = detail.slice(0, 800) + '…';
+    return detail;
+}
+
+function buildCircuitOpenMessage(retrySeconds, lastError = '') {
+    const retry = Math.max(1, Number.parseInt(retrySeconds, 10) || 1);
+    const base = '模型端点暂时熔断，约 ' + retry + ' 秒后可重试。';
+    const detail = normalizeCircuitErrorDetail(lastError);
+    return detail ? base + ' 上次错误：' + detail : base;
+}
+
 async function acquireModelSlot(modelCfg, options = {}) {
     const runtime = ensureRuntime(modelCfg);
     const now = Date.now();
     if (runtime.circuitOpenUntil > now) {
         const retrySeconds = Math.ceil((runtime.circuitOpenUntil - now) / 1000);
         throw new ConcurrencyLimitError(
-            `模型端点暂时熔断，约 ${retrySeconds} 秒后可重试。${runtime.lastError || ''}`.trim(),
+            buildCircuitOpenMessage(retrySeconds, runtime.lastError),
             'AI_ENDPOINT_CIRCUIT_OPEN'
         );
     }
@@ -342,6 +359,7 @@ module.exports = {
     startModelEndpointMonitor,
     getModelEndpointRuntimeStatus,
     syncConfiguredRuntimes,
-    normalizeEndpointKey
+    buildCircuitOpenMessage,
+    normalizeCircuitErrorDetail
 };
 

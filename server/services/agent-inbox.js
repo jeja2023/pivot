@@ -19,6 +19,72 @@ async function createAgentInboxEvent(user, input = {}) {
     return row;
 }
 
+function normalizeCircuitNotificationBody(value) {
+    const text = String(value || '').trim();
+    const matches = [...text.matchAll(/模型端点暂时熔断[，,]?\s*约?\s*\d+\s*秒后可重试[。.]?/g)];
+    if (!matches.length) return text;
+    const base = matches[0][0].replace(/[.]$/, '。');
+    let detail = text.replace(/模型端点暂时熔断[，,]?\s*约?\s*\d+\s*秒后可重试[。.]?/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[·；;，,。s]+|[·；;，,。s]+$/g, '')
+        .trim();
+    return detail ? base + ' 上次错误：' + detail : base;
+}
+
+const CIRCUIT_NOTIFICATION_DEDUPE_WINDOW_MS = 15 * 60 * 1000;
+
+function isCircuitNotification(entry) {
+    return /模型端点暂时熔断/.test(String(entry?.body || ''));
+}
+
+function notificationTimestamp(entry) {
+    const timestamp = new Date(String(entry?.updatedAt || entry?.createdAt || '').replace(' ', 'T')).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function notificationDeduplicationKey(entry) {
+    if (entry?.sourceType !== 'notification') return '';
+    const title = String(entry.title || '').replace(/\s+/g, ' ').trim();
+    if (!/(?:失败|异常|熔断|错误)/.test(title)) return '';
+    if (isCircuitNotification(entry)) {
+        const timestamp = notificationTimestamp(entry);
+        // 无可信时间戳时绝不跨运行合并，避免测试/旧数据把真实独立事故吞掉。
+        if (timestamp <= 0) return entry.runId ? ['circuit-run', entry.runId, String(entry.type || ''), title].join('|') : '';
+        const bucket = Math.floor(timestamp / CIRCUIT_NOTIFICATION_DEDUPE_WINDOW_MS);
+        return ['circuit', bucket, String(entry.type || ''), title].join('|');
+    }
+    return entry.runId ? [entry.runId, String(entry.type || ''), title].join('|') : '';
+}
+
+function notificationDiagnosticScore(entry) {
+    const body = String(entry?.body || '');
+    let score = Math.min(body.length, 100) / 100;
+    if (/(?:status code|HTTP\s*\d{3}|ECONN|ETIMEDOUT|timeout|超时|错误：)/i.test(body)) score += 5;
+    if (!/模型端点暂时熔断[，,]?\s*约?\s*\d+\s*秒后可重试。?\s*模型端点暂时熔断/i.test(body)) score += 1;
+    return score;
+}
+
+function dedupeInboxNotifications(items = []) {
+    const selected = new Map();
+    const output = [];
+    items.forEach(entry => {
+        const normalized = entry?.sourceType === 'notification'
+            ? { ...entry, body: normalizeCircuitNotificationBody(entry.body), duplicateCount: 1, relatedRunIds: entry.runId ? [entry.runId] : [] }
+            : entry;
+        const key = notificationDeduplicationKey(normalized);
+        if (!key) { output.push(normalized); return; }
+        const existing = selected.get(key);
+        if (!existing) { selected.set(key, normalized); output.push(normalized); return; }
+        const aggregate = notificationDiagnosticScore(normalized) > notificationDiagnosticScore(existing) ? normalized : existing;
+        const duplicateCount = Number(existing.duplicateCount || 1) + 1;
+        const relatedRunIds = [...new Set([...(existing.relatedRunIds || []), ...(normalized.relatedRunIds || [])])];
+        const merged = { ...aggregate, duplicateCount, relatedRunIds };
+        const index = output.indexOf(existing); if (index >= 0) output[index] = merged;
+        selected.set(key, merged);
+    });
+    return output;
+}
+
 function item(kind, id, data) {
     return {
         id: `${kind}:${id}`,
@@ -118,7 +184,8 @@ async function listAgentInbox(user, options = {}) {
         actions: ['mark_read', 'snooze', 'mute']
     })));
     const type = String(options.type || '').trim();
-    const filtered = type ? items.filter(entry => entry.sourceType === type) : items;
+    const deduped = dedupeInboxNotifications(items);
+    const filtered = type ? deduped.filter(entry => entry.sourceType === type) : deduped;
     filtered.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
     return {
         data: filtered.slice(0, limit),
@@ -172,4 +239,4 @@ async function markInboxItem(user, sourceType, sourceId, action = 'read', value 
     return null;
 }
 
-module.exports = { createAgentInboxEvent, listAgentInbox, markInboxItem };
+module.exports = { createAgentInboxEvent, listAgentInbox, markInboxItem, normalizeCircuitNotificationBody, dedupeInboxNotifications, notificationDeduplicationKey };

@@ -158,3 +158,26 @@ test('用户个人信息弹窗支持展示真实注册时间，并在缺少时�
     assert.match(personalClient, /personal-user-created-at/);
     assert.match(personalClient, /系统初始用户/);
 });
+
+
+test('需要我处理会规范化熔断消息并合并同一运行的重复失败通知', () => {
+    const { normalizeCircuitNotificationBody, dedupeInboxNotifications } = require('../server/services/agent-inbox');
+    const repeated = '模型端点暂时熔断，约 60 秒后可重试。模型端点暂时熔断，约 60 秒后可重试。';
+    assert.equal(normalizeCircuitNotificationBody(repeated), '模型端点暂时熔断，约 60 秒后可重试。');
+    assert.equal(
+        normalizeCircuitNotificationBody('模型端点暂时熔断，约 60 秒后可重试。Request failed with status code 502'),
+        '模型端点暂时熔断，约 60 秒后可重试。 上次错误：Request failed with status code 502'
+    );
+    const now = '2026-09-23 10:00:00';
+    const items = dedupeInboxNotifications([
+        { id: 'notification:1', sourceType: 'notification', sourceId: 1, runId: 'run_1', type: 'error', title: '智能体运行失败', body: repeated, createdAt: now },
+        { id: 'notification:2', sourceType: 'notification', sourceId: 2, runId: 'run_2', type: 'error', title: '智能体运行失败', body: '模型端点暂时熔断，约 60 秒后可重试。Request failed with status code 502', createdAt: '2026-09-23 10:06:00' },
+        { id: 'notification:3', sourceType: 'notification', sourceId: 3, runId: 'run_3', type: 'error', title: '智能体运行失败', body: '另一项任务失败', createdAt: now },
+        { id: 'notification:4', sourceType: 'notification', sourceId: 4, runId: 'run_4', type: 'error', title: '智能体运行失败', body: '模型端点暂时熔断，约 60 秒后可重试。', createdAt: '2026-09-23 10:20:00' }
+    ]);
+    assert.equal(items.length, 3);
+    const circuit = items.find(item => item.duplicateCount === 2);
+    assert.match(circuit.body, /status code 502/);
+    assert.deepEqual(circuit.relatedRunIds.sort(), ['run_1', 'run_2']);
+    assert.ok(!circuit.body.includes('可重试。模型端点'));
+});
