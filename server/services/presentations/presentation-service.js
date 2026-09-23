@@ -2,6 +2,7 @@
 
 /** 演示文稿、模板、素材、版本和受控导出的业务服务。 */
 const crypto = require('crypto');
+const sharp = require('sharp');
 const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { assertTenantContext } = require('../agent-tenant-context');
@@ -121,6 +122,7 @@ function toPublicPresentation(row, { includeContent = false } = {}) {
         deletedAt: row.deleted_at || null,
         coverAssetRef: String(row.cover_asset_ref || ''),
         tags: parseJson(row.tags_json, []),
+        ownerName: String(row.owner_nickname || row.owner_username || ''),
         favorite: row.favorite === true || row.favorite === 'true' || Number(row.favorite || 0) === 1,
         isOwner: row.is_owner === undefined ? true : (row.is_owner === true || row.is_owner === 'true' || Number(row.is_owner || 0) === 1),
         collaboratorRole: row.collaborator_role || null
@@ -447,18 +449,25 @@ async function listPresentations(user, options = {}) {
     const templateId = String(options.templateId || options.template_id || '').trim().slice(0, 96);
     const status = ['draft', 'needs_attention', 'ready', 'archived'].includes(String(options.status)) ? String(options.status) : '';
     const tag = String(options.tag || '').trim().slice(0, 32);
+    const createdBy = String(options.createdBy || options.created_by || '').trim().slice(0, 120);
+    const updatedFrom = /^\d{4}-\d{2}-\d{2}$/.test(String(options.updatedFrom || options.updated_from || '')) ? String(options.updatedFrom || options.updated_from) : '';
+    const updatedTo = /^\d{4}-\d{2}-\d{2}$/.test(String(options.updatedTo || options.updated_to || '')) ? String(options.updatedTo || options.updated_to) : '';
     const favoriteOnly = options.favorite === true || String(options.favorite || '') === 'true';
     const conditions = ['d.tenant_id = ?', 'd.deleted_at IS NULL', '(d.owner_user_id = ? OR pc.user_id IS NOT NULL)'];
     const params = [tenant.tenantId, user.id];
-    if (search) { const escaped = search.replace(/[%_\\]/g, char => '\\' + char); const like = '%' + escaped + '%'; conditions.push('(d.title ILIKE ? OR pv.content_json ILIKE ?)'); params.push(like, like); }
+    if (search) { const escaped = search.replace(/[\\%_]/g, char => '\\' + char); const like = '%' + escaped + '%'; conditions.push('(d.title ILIKE ? OR pv.content_json ILIKE ?)'); params.push(like, like); }
     if (templateId) { conditions.push('d.template_id = ?'); params.push(templateId); }
     if (status) { conditions.push('d.status = ?'); params.push(status); }
-    if (tag) { conditions.push('d.tags_json LIKE ?'); params.push('%' + tag.replace(/[\%_]/g, '\$&') + '%'); }
+    if (tag) { const escaped = tag.replace(/[\\%_]/g, char => '\\' + char); conditions.push("d.tags_json LIKE ? ESCAPE '\\'"); params.push('%' + escaped + '%'); }
+    if (createdBy) { const escaped = createdBy.replace(/[\\%_]/g, char => '\\' + char); conditions.push("(owner.username ILIKE ? ESCAPE '\\' OR COALESCE(owner.nickname, '') ILIKE ? ESCAPE '\\')"); params.push('%' + escaped + '%', '%' + escaped + '%'); }
+    if (updatedFrom) { conditions.push('d.updated_at >= ?::date'); params.push(updatedFrom); }
+    if (updatedTo) { conditions.push("d.updated_at < (?::date + INTERVAL '1 day')"); params.push(updatedTo); }
     if (favoriteOnly) conditions.push('pf.presentation_id IS NOT NULL');
     const rows = await query(`
-        SELECT d.*, pc.role AS collaborator_role, (d.owner_user_id = ?) AS is_owner,
+        SELECT d.*, owner.username AS owner_username, owner.nickname AS owner_nickname, pc.role AS collaborator_role, (d.owner_user_id = ?) AS is_owner,
                CASE WHEN pf.presentation_id IS NULL THEN false ELSE true END AS favorite
         FROM presentation_documents d
+        LEFT JOIN users owner ON owner.id = d.owner_user_id
         LEFT JOIN presentation_versions pv ON pv.presentation_id = d.id AND pv.version = d.current_version
         LEFT JOIN presentation_collaborators pc ON pc.presentation_id = d.id AND pc.user_id = ?
         LEFT JOIN presentation_document_favorites pf ON pf.presentation_id = d.id AND pf.tenant_id = d.tenant_id AND pf.user_id = ?
@@ -719,6 +728,16 @@ async function rollbackPresentation(user, clientId, version, note = '') {
     return await savePresentationContent(user, clientId, { baseVersion: current.version, title: current.title, content: target.content, note: String(note || `恢复版本 ${target.version}`).slice(0, 500) });
 }
 
+async function inspectPresentationImageMetadata(file, assetType) {
+    if (assetType !== 'image') return { pixelWidth: 0, pixelHeight: 0 };
+    try {
+        const metadata = await sharp(file.buffer, { animated: false, limitInputPixels: 48_000_000 }).metadata();
+        return { pixelWidth: Math.max(0, Number(metadata.width) || 0), pixelHeight: Math.max(0, Number(metadata.height) || 0) };
+    } catch (_) {
+        return { pixelWidth: 0, pixelHeight: 0 };
+    }
+}
+
 async function uploadPresentationAsset(user, file, options = {}) {
     if (!file?.buffer || !Buffer.isBuffer(file.buffer)) throw publicError('请选择图片素材。', 400, 'PRESENTATION_ASSET_REQUIRED');
     const mimeType = String(file.mimetype || '').toLowerCase();
@@ -734,15 +753,16 @@ async function uploadPresentationAsset(user, file, options = {}) {
     if (scope !== 'private' && !isAdmin(user)) throw publicError('只有管理员可以上传组织或部门品牌素材。', 403, 'PRESENTATION_ASSET_SCOPE_FORBIDDEN');
     if (scope === 'department' && !departmentName) throw publicError('部门品牌素材必须指定部门。', 400, 'PRESENTATION_ASSET_DEPARTMENT_REQUIRED');
     const tenant = await assertTenantContext(user);
+    const dimensions = await inspectPresentationImageMetadata(file, assetType);
     const stored = await putBuffer({ buffer: file.buffer, mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_asset', retentionDays: 365 });
     await incrementRefCount(stored.objectId, 1);
     const row = await queryOne(`
-        INSERT INTO presentation_assets (tenant_id, owner_user_id, object_id, filename, mime_type, byte_size, content_digest, asset_type, scope, department_name, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-        ON CONFLICT (tenant_id, owner_user_id, object_id) DO UPDATE SET filename = EXCLUDED.filename, asset_type = EXCLUDED.asset_type, scope = EXCLUDED.scope, department_name = EXCLUDED.department_name
+        INSERT INTO presentation_assets (tenant_id, owner_user_id, object_id, filename, mime_type, byte_size, content_digest, asset_type, scope, department_name, pixel_width, pixel_height, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ON CONFLICT (tenant_id, owner_user_id, object_id) DO UPDATE SET filename = EXCLUDED.filename, asset_type = EXCLUDED.asset_type, scope = EXCLUDED.scope, department_name = EXCLUDED.department_name, pixel_width = EXCLUDED.pixel_width, pixel_height = EXCLUDED.pixel_height
         RETURNING *
-    `, [tenant.tenantId, user.id, stored.objectId, String(file.originalname || '图片素材').replace(/[\\/]/g, '_').slice(0, 240), mimeType, stored.byteSize, stored.contentDigest, assetType, scope, departmentName]);
-    return { id: Number(row.id), ref: buildCasRef(stored.objectId), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), contentDigest: row.content_digest, assetType: row.asset_type || 'image', scope: row.scope, departmentName: row.department_name || '', createdAt: row.created_at };
+    `, [tenant.tenantId, user.id, stored.objectId, String(file.originalname || '图片素材').replace(/[\\/]/g, '_').slice(0, 240), mimeType, stored.byteSize, stored.contentDigest, assetType, scope, departmentName, dimensions.pixelWidth, dimensions.pixelHeight]);
+    return { id: Number(row.id), ref: buildCasRef(stored.objectId), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), contentDigest: row.content_digest, assetType: row.asset_type || 'image', scope: row.scope, departmentName: row.department_name || '', pixelWidth: Number(row.pixel_width || 0), pixelHeight: Number(row.pixel_height || 0), createdAt: row.created_at };
 }
 
 async function findPresentationAssetForUser(user, objectId) {
@@ -793,9 +813,13 @@ async function listPresentationAssets(user, options = {}) {
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 80, 200));
     const conditions = ['tenant_id = ?', 'deleted_at IS NULL', access.sql]; const params = [tenant.tenantId, ...access.params];
     if (type) { conditions.push('asset_type = ?'); params.push(type); }
-    if (search) { conditions.push('filename ILIKE ?'); params.push('%' + search.replace(/[\%_]/g, '\async function getPresentationAsset(user, assetId) {') + '%'); }
+    if (search) {
+        const escaped = search.replace(/[\\%_]/g, char => '\\' + char);
+        conditions.push("filename ILIKE ? ESCAPE '\\'");
+        params.push('%' + escaped + '%');
+    }
     const rows = await query('SELECT * FROM presentation_assets WHERE ' + conditions.join(' AND ') + ' ORDER BY created_at DESC, id DESC LIMIT ?', [...params, limit]);
-    return rows.map(row => ({ id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), assetType: row.asset_type || 'image', scope: row.scope, departmentName: row.department_name || '', createdAt: row.created_at }));
+    return rows.map(row => ({ id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), assetType: row.asset_type || 'image', scope: row.scope, departmentName: row.department_name || '', pixelWidth: Number(row.pixel_width || 0), pixelHeight: Number(row.pixel_height || 0), createdAt: row.created_at }));
 }
 
 async function getPresentationAsset(user, assetId) {
@@ -808,7 +832,7 @@ async function getPresentationAsset(user, assetId) {
     `, [Number.parseInt(assetId, 10), tenant.tenantId, ...access.params]);
     if (!row) return null;
     const loaded = await readBuffer({ objectId: row.object_id, tenantId: tenant.tenantId, tenantScoped: true });
-    return { asset: { id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), scope: row.scope, departmentName: row.department_name || '' }, buffer: loaded.buffer };
+    return { asset: { id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), scope: row.scope, departmentName: row.department_name || '', pixelWidth: Number(row.pixel_width || 0), pixelHeight: Number(row.pixel_height || 0) }, buffer: loaded.buffer };
 }
 
 async function getPresentationAssetByRef(user, ref, options = {}) {
@@ -817,7 +841,7 @@ async function getPresentationAssetByRef(user, ref, options = {}) {
     const { tenant, row } = await findPresentationAssetForPresentation(user, objectId, options.presentationId || options.presentation_id);
     if (!row) return null;
     const loaded = await readBuffer({ objectId: row.object_id, tenantId: tenant.tenantId, tenantScoped: true });
-    return { asset: { id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), scope: row.scope, departmentName: row.department_name || '' }, buffer: loaded.buffer };
+    return { asset: { id: Number(row.id), ref: buildCasRef(row.object_id), filename: row.filename, mimeType: row.mime_type, byteSize: Number(row.byte_size), scope: row.scope, departmentName: row.department_name || '', pixelWidth: Number(row.pixel_width || 0), pixelHeight: Number(row.pixel_height || 0) }, buffer: loaded.buffer };
 }
 
 async function resolvePresentationAssets(user, content, options = {}) {

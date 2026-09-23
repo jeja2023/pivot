@@ -149,6 +149,21 @@ WHERE schemaname = current_schema()
 
 升级前备份 PostgreSQL 与现有 Artifact/CAS 存储目录。生产镜像或桌面安装包重新构建前应运行 `npm ci`，确保使用锁定的 `pptxgenjs@4.0.1`；若应用账户没有创建表、索引或外键的权限，迁移会在事务内失败且不会写入 `schema_migrations`，应先修正权限后重启，不要手工插入迁移记录。
 
+
+### v0.1.168 PPT 产品级验收收口增量检查
+
+`v0.1.168` 会自动应用 `202609230003_presentation_quality_metadata`。该迁移在 `presentation_assets` 增加 `pixel_width`、`pixel_height`，并新增 `presentation_documents` 的租户更新时间索引；不迁移、不复制、不向浏览器暴露已有 CAS 对象内容。
+
+| 检查项 | 预期结果 |
+| --- | --- |
+| `schema_migrations` | 已登记 `202609230003_presentation_quality_metadata`。 |
+| 素材质量元数据 | 新上传图片保存宽高像素值；历史图片保留 `0`，只是不参与低分辨率提示，不影响既有导出。 |
+| 文稿库筛选 | 创建者、更新时间、模板、状态、标签和收藏均只在当前租户与授权文稿范围内生效；搜索中的 `%`、`_` 作为普通文字处理。 |
+| 导出变体 | 16:9/4:3、备注、页码、来源标记、字体策略和图片质量均通过受控 IR 变体生成；不得以客户端 CSS 或裸下载地址伪造导出设置。 |
+| 4:3 兼容 | PPTX 使用 PptxGenJS 的 `LAYOUT_4x3`；上线后在安装 PowerPoint/WPS/LibreOffice 的目标机抽样执行真实打开、保存、重开验证。 |
+
+升级时先完成 PostgreSQL 与 Artifact/CAS 备份，部署后重启服务，并在 `/version.json` 或前端更新提示中确认版本为 `v0.1.168`。未安装 Office 的服务器只能完成 OOXML、PDF、PNG 和服务端渲染验收，不得将其记作 Office 实机验收通过。
+
 ## 6. 禁止执行的旧流程
 
 下列已删除脚本及其等价流程不适用于 v0.1.155：

@@ -149,3 +149,26 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(editor, /uploadRichAsset/);
     assert.match(editor, /setSelectedImageAsCover/);
 });
+
+
+test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项与质量元数据', () => {
+    const workspace = source('client/chat/partials/workspaces/apps.html');
+    const editor = source('client/chat/apps-workbench-presentations.js');
+    const presenter = source('client/chat/apps-workbench-presentations-presenter.js');
+    const service = source('server/services/presentations/presentation-service.js');
+    const validation = source('server/services/presentations/presentation-validation.js');
+    const exporter = source('server/services/presentations/presentation-export-service.js');
+    const renderer = source('server/services/presentations/presentation-renderer.js');
+    const qualityMigration = source('server/db/migrations/presentation-quality-metadata.js');
+    ['presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-create-duration', 'presentation-create-language', 'presentation-create-needs-charts', 'presentation-create-retain-sources', 'presentation-create-must-include', 'presentation-create-prohibited-content', 'presentation-copy-element-btn', 'presentation-group-elements-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-export-options-modal'].forEach(id => assert.ok(workspace.includes('id="' + id + '"'), id));
+    ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage', 'saveExportOptions'].forEach(name => assert.ok(editor.includes('function ' + name), name));
+    assert.ok(presenter.includes('aspectRatio: options.aspectRatio'));
+    assert.ok(service.includes('pixel_width'));
+    assert.ok(service.includes('owner.username ILIKE'));
+    assert.ok(service.includes('updated_at >= ?::date'));
+    ['SOURCE_ATTRIBUTION_MISSING', 'FONT_FALLBACK_RISK', 'IMAGE_LOW_RESOLUTION', 'DATA_SOURCE_MISSING'].forEach(code => assert.ok(validation.includes(code), code));
+    assert.ok(exporter.includes('preparePresentationForExport'));
+    assert.ok(exporter.includes('includePageNumbers'));
+    assert.ok(renderer.includes('LAYOUT_4x3'));
+    assert.ok(qualityMigration.includes('pixel_width'));
+});

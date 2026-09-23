@@ -135,6 +135,7 @@ function normalizeElement(input, canvas, index) {
         type,
         ...normalizeBounds(input, canvas),
         zIndex: normalizeNumber(input.zIndex, index + 1, -1000, 1000, '元素层级'),
+        groupId: input.groupId || input.group_id ? normalizeId(input.groupId || input.group_id, '元素组合标识') : '',
         locked: normalizeBoolean(input.locked),
         visible: normalizeBoolean(input.visible, true),
         sourceRefs: normalizeStringArray(input.sourceRefs, 50, 160, '元素来源引用'),
@@ -157,6 +158,8 @@ function normalizeElement(input, canvas, index) {
             assetRef,
             fit: ['cover', 'contain', 'stretch'].includes(String(input.fit || 'cover')) ? String(input.fit || 'cover') : 'cover',
             opacity: normalizeNumber(input.opacity, 1, 0, 1, '图片透明度'),
+            intrinsicWidth: normalizeNumber(input.intrinsicWidth ?? input.intrinsic_width, 0, 0, 100000, '图片像素宽度'),
+            intrinsicHeight: normalizeNumber(input.intrinsicHeight ?? input.intrinsic_height, 0, 0, 100000, '图片像素高度'),
             alt: normalizeBoundedText(input.alt, '', 300, '图片替代文本', { allowEmpty: true })
         };
     }

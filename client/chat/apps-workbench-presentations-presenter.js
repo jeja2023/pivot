@@ -352,7 +352,7 @@
         } else if (asset.assetType === 'attachment') {
             slide.elements.push({ id, type: 'attachment', assetRef: asset.ref, filename: asset.filename, description: '', x: 160, y: 420, width: 480, height: 70, rotation: 0, zIndex: 9, locked: false, visible: true, sourceRefs: [] });
         } else if (asset.assetType === 'image') {
-            slide.elements.push({ id, type: 'image', assetRef: asset.ref, x: 180, y: 180, width: 600, height: 360, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], fit: 'cover', opacity: 1, alt: asset.filename });
+            slide.elements.push({ id, type: 'image', assetRef: asset.ref, x: 180, y: 180, width: 600, height: 360, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], fit: 'cover', opacity: 1, intrinsicWidth: Number(asset.pixelWidth || 0), intrinsicHeight: Number(asset.pixelHeight || 0), alt: asset.filename });
         } else return;
         state.selectedElementId = id;
         recordHistory?.();
@@ -389,7 +389,7 @@
             } else if (assetType === 'attachment') {
                 slide.elements.push({ id, type: 'attachment', assetRef: asset.ref, filename: asset.filename, description: '', x: 160, y: 420, width: 480, height: 70, rotation: 0, zIndex: 9, locked: false, visible: true, sourceRefs: [] });
             } else {
-                slide.elements.push({ id, type: 'image', x: 180, y: 180, width: 600, height: 360, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], assetRef: asset.ref, fit: 'cover', opacity: 1, alt: asset.filename });
+                slide.elements.push({ id, type: 'image', x: 180, y: 180, width: 600, height: 360, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], assetRef: asset.ref, fit: 'cover', opacity: 1, intrinsicWidth: Number(asset.pixelWidth || 0), intrinsicHeight: Number(asset.pixelHeight || 0), alt: asset.filename });
             }
             state.selectedElementId = id;
             recordHistory?.();
@@ -612,8 +612,9 @@
         await saveActive?.({ force: true });
         setSaveState?.(`正在导出 ${format.toUpperCase()}…`, 'saving');
         try {
+            const options = state.exportOptions || {};
             const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({
-                format,
+                format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
                 ...(format === 'png' ? { slideIndex: activeSlide?.()?.index || 0 } : {})
             }));
             const rendition = created.rendition;

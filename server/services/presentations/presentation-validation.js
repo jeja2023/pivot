@@ -6,6 +6,14 @@ const { hasSensitiveContent } = require('../long-term-memory/memory-utils');
 // 记忆治理规则覆盖常见凭据与证件格式；演示场景再补充中文字段标签，
 // 避免“密码：***”这类面向展示的文本因 Unicode 单词边界而漏报。
 const PRESENTATION_SENSITIVE_LABEL_RE = /(?:密码|密钥|令牌|访问令牌|授权码|API\s*(?:密钥|Key)|身份证(?:号)?|银行卡(?:号)?|手机号|手机号码)\s*[:：=]/i;
+const SYSTEM_FONT_FAMILIES = new Set(['microsoft yahei', '微软雅黑', 'noto sans sc', 'noto sans cjk sc', 'arial', 'helvetica', 'times new roman', 'calibri', 'cambria', 'sans-serif', 'serif']);
+
+function hasKnownFont(element, presentation) {
+    const family = String(element.style?.fontFamily || '').trim().toLowerCase();
+    if (!family || SYSTEM_FONT_FAMILIES.has(family)) return true;
+    const fontAssets = presentation.theme?.fontAssets || {};
+    return Object.values(fontAssets).some(Boolean) && [presentation.theme?.fonts?.heading, presentation.theme?.fonts?.body].map(value => String(value || '').trim().toLowerCase()).includes(family);
+}
 
 function hasPresentationSensitiveContent(value) {
     const text = String(value || '');
@@ -55,6 +63,10 @@ function runPresentationValidation(input) {
         if (slide.type !== 'cover' && !hasTitle) {
             issues.push(makeIssue('info', 'TITLE_MISSING', slide.id, null, '页面缺少明显标题。', '建议添加标题以便观众理解当前页面重点。'));
         }
+        const slideSourceRefs = new Set([...slide.sourceRefs, ...visible.flatMap(element => element.sourceRefs || [])]);
+        if (presentation.sources.length && !slideSourceRefs.size) {
+            issues.push(makeIssue('warning', 'SOURCE_ATTRIBUTION_MISSING', slide.id, null, '页面使用了材料来源但没有保留页面或元素级来源引用。', '请将关键结论、数字或摘录关联到对应来源。'));
+        }
         if (slide.transition?.type && slide.transition.type !== 'none' && slide.transition.durationMs > 5000) {
             issues.push(makeIssue('warning', 'TRANSITION_TOO_LONG', slide.id, null, '页面转场时间过长。', '建议将转场控制在 5 秒以内。'));
         }
@@ -74,9 +86,18 @@ function runPresentationValidation(input) {
                 if (!slide.background.imageAssetRef && contrastRatio(element.style.color, slide.background.fill) < 3) {
                     issues.push(makeIssue('warning', 'LOW_CONTRAST', slide.id, element.id, '文字与背景对比度不足。', '请调整文字颜色或背景色以增强可读性。'));
                 }
+                if (!hasKnownFont(element, presentation)) {
+                    issues.push(makeIssue('warning', 'FONT_FALLBACK_RISK', slide.id, element.id, '当前字体没有受控字体素材或已知系统回退，导出后可能发生版式变化。', '请改用主题字体，或将该字体作为受控字体素材上传并绑定到主题。'));
+                }
             }
             if (element.type === 'image' && !element.assetRef) {
                 issues.push(makeIssue('blocking', 'IMAGE_MISSING', slide.id, element.id, '图片素材缺失。', '请重新上传或替换图片。'));
+            }
+            if (element.type === 'image' && element.intrinsicWidth && element.intrinsicHeight && (element.intrinsicWidth < 800 || element.intrinsicHeight < 450)) {
+                issues.push(makeIssue('warning', 'IMAGE_LOW_RESOLUTION', slide.id, element.id, '图片分辨率偏低，可能影响投屏或导出清晰度。', '建议替换为至少 800×450 像素的原图。'));
+            }
+            if (['chart', 'table'].includes(element.type) && presentation.sources.length && !((element.sourceRefs || []).length || (slide.sourceRefs || []).length)) {
+                issues.push(makeIssue('warning', 'DATA_SOURCE_MISSING', slide.id, element.id, '数据表或图表未关联来源，无法核对数据结论。', '请关联数据集或材料来源后再导出。'));
             }
             if (element.type === 'media' && !element.assetRef) {
                 issues.push(makeIssue('blocking', 'MEDIA_MISSING', slide.id, element.id, '音视频素材缺失。', '请重新上传或替换媒体。'));

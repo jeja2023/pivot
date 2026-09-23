@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1781,
+  "total": 1783,
   "entries": [
     {
       "file": "server/auth.js",
@@ -205,6 +205,10 @@
     },
     {
       "file": "server/db/migrations/presentation-product-governance.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/presentation-quality-metadata.js",
       "count": 2
     },
     {

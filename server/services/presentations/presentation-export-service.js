@@ -6,7 +6,8 @@ const { assertTenantContext } = require('../agent-tenant-context');
 const { getAgentArtifactForUser } = require('../agent-artifacts');
 const { buildCasRef, incrementRefCount, putBuffer } = require('../agent-artifact-cas');
 const { recordDeliveryEvent } = require('../agent-artifact-delivery');
-const { computePresentationDigest } = require('./presentation-schema');
+const { computePresentationDigest, normalizePresentation } = require('./presentation-schema');
+const { runPresentationValidation } = require('./presentation-validation');
 const { PRESENTATION_RENDERER_VERSION, renderPresentation } = require('./presentation-renderer');
 
 const EXPORT_FORMATS = new Set(['pptx', 'pdf', 'png']);
@@ -24,6 +25,50 @@ function serializeJson(value) {
     return JSON.stringify(value);
 }
 
+function normalizeExportOptions(options = {}) {
+    return {
+        slideIndex: Number.isInteger(Number(options.slideIndex)) ? Number(options.slideIndex) : undefined,
+        aspectRatio: ['16:9', '4:3'].includes(String(options.aspectRatio || '')) ? String(options.aspectRatio) : '',
+        includeNotes: options.includeNotes !== false,
+        includePageNumbers: options.includePageNumbers !== false,
+        showSourceRefs: options.showSourceRefs !== false,
+        imageQuality: ['standard', 'high'].includes(String(options.imageQuality || '')) ? String(options.imageQuality) : 'standard',
+        fontStrategy: ['embed', 'fallback'].includes(String(options.fontStrategy || '')) ? String(options.fontStrategy) : 'embed'
+    };
+}
+
+function preparePresentationForExport(content, options = {}) {
+    const source = normalizePresentation(content);
+    const next = JSON.parse(JSON.stringify(source));
+    const targetRatio = options.aspectRatio || source.aspectRatio;
+    const targetSize = targetRatio === '4:3' ? { width: 960, height: 720 } : { width: 1280, height: 720 };
+    if (targetRatio !== source.aspectRatio) {
+        const scaleX = targetSize.width / source.width; const scaleY = targetSize.height / source.height;
+        next.aspectRatio = targetRatio;
+        next.slides.forEach(slide => slide.elements.forEach(element => {
+            element.x = Math.max(0, Math.min(targetSize.width, Math.round(element.x * scaleX)));
+            element.y = Math.max(0, Math.min(targetSize.height, Math.round(element.y * scaleY)));
+            element.width = Math.max(1, Math.min(targetSize.width - element.x, Math.round(element.width * scaleX)));
+            element.height = Math.max(1, Math.min(targetSize.height - element.y, Math.round(element.height * scaleY)));
+        }));
+    }
+    if (!options.includePageNumbers) next.slides.forEach(slide => { slide.elements = slide.elements.filter(element => element.id !== 'pivotBrand_page'); });
+    if (options.fontStrategy === 'fallback') {
+        next.theme.fonts = { heading: 'Microsoft YaHei', body: 'Microsoft YaHei' }; next.theme.fontAssets = { heading: '', body: '' };
+        next.slides.forEach(slide => slide.elements.forEach(element => { if (element.type === 'text') element.style.fontFamily = element.style.fontSize >= 24 ? 'Microsoft YaHei' : 'Microsoft YaHei'; }));
+    }
+    if (options.showSourceRefs) {
+        const sourceTitle = new Map(next.sources.map(source => [source.id, source.title]));
+        next.slides.forEach(slide => {
+            const refs = [...new Set([...slide.sourceRefs, ...slide.elements.flatMap(element => element.sourceRefs || [])])].filter(ref => sourceTitle.has(ref));
+            if (!refs.length || slide.elements.some(element => element.id === 'pivotExport_sources')) return;
+            const width = targetSize.width; const height = targetSize.height;
+            slide.elements.push({ id: 'pivotExport_sources', type: 'text', x: 48, y: height - 30, width: width - 96, height: 18, rotation: 0, zIndex: 999, locked: true, visible: true, sourceRefs: refs, content: { text: '来源：' + refs.map(ref => sourceTitle.get(ref)).join('；') }, style: { fontFamily: 'Microsoft YaHei', fontSize: 9, fontWeight: 400, color: '#64748B', align: 'left', verticalAlign: 'middle', lineHeight: 1.1, italic: false, underline: false, bullet: false, padding: 0 } });
+        });
+    }
+    return normalizePresentation(next);
+}
+
 function createExportService(deps) {
     const { getPresentationRow, assertPresentationOwnerOrAdmin, toPublicPresentation, resolvePresentationAssets } = deps;
 
@@ -37,16 +82,19 @@ function createExportService(deps) {
         const tenant = await assertTenantContext(user);
         const artifact = await getAgentArtifactForUser(current.artifactId, user);
         if (!artifact) throw publicError('演示文稿产物不存在或无权导出。', 404, 'PRESENTATION_ARTIFACT_NOT_FOUND');
-        const irDigest = computePresentationDigest(current.content);
+        const normalizedOptions = normalizeExportOptions(options);
+        const exportContent = preparePresentationForExport(current.content, normalizedOptions);
+        const exportValidation = runPresentationValidation(exportContent);
+        const irDigest = computePresentationDigest(exportContent);
         const existing = await queryOne(`
             SELECT * FROM agent_artifact_renditions
             WHERE tenant_id = ? AND artifact_id = ? AND ir_digest = ? AND format = ? AND renderer_version = ? AND status = 'ready'
         `, [tenant.tenantId, artifact.id, irDigest, normalizedFormat, PRESENTATION_RENDERER_VERSION]);
-        if (existing) return { rendition: existing, reused: true, validation: current.validation };
-        const contentBuffer = Buffer.from(serializeJson(current.content), 'utf8');
+        if (existing) return { rendition: existing, reused: true, validation: runPresentationValidation(preparePresentationForExport(current.content, normalizeExportOptions(options))) };
+        const contentBuffer = Buffer.from(serializeJson(exportContent), 'utf8');
         const irObject = await putBuffer({ buffer: contentBuffer, mimeType: 'application/json; charset=utf-8', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_ir' });
-        const assets = await resolvePresentationAssets(user, current.content, { presentationId: current.id });
-        const rendered = await renderPresentation(current.content, normalizedFormat, { slideIndex: options.slideIndex, assetResolver: async ref => assets.get(ref) || null });
+        const assets = await resolvePresentationAssets(user, exportContent, { presentationId: current.id });
+        const rendered = await renderPresentation(exportContent, normalizedFormat, { ...normalizedOptions, assetResolver: async ref => assets.get(ref) || null });
         const output = await putBuffer({ buffer: rendered.buffer, mimeType: rendered.mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: `presentation_${normalizedFormat}` });
         const runId = `standalone-artifact:${artifact.id}`;
         const toolCallId = `presentation:${artifact.id}:v${current.version}:${normalizedFormat}`;
@@ -65,17 +113,17 @@ function createExportService(deps) {
             ON CONFLICT (presentation_id, version, format, renderer_version) DO UPDATE SET rendition_id = EXCLUDED.rendition_id, status = 'ready', updated_at = NOW()
             RETURNING *
         `, [currentRow.id, current.version, rendition.id, normalizedFormat, PRESENTATION_RENDERER_VERSION, user.id]);
-        const validationDecision = current.validation?.status === 'blocked'
-            ? `用户在 ${Number(current.validation?.summary?.blocking || 0)} 个阻断级版式问题仍存在时发起导出。`
-            : current.validation?.status === 'warning'
-                ? `用户在 ${Number(current.validation?.summary?.warnings || 0)} 个建议修复项仍存在时发起导出。`
+        const validationDecision = exportValidation.status === 'blocked'
+            ? `用户在 ${Number(exportValidation.summary?.blocking || 0)} 个阻断级版式问题仍存在时发起导出。`
+            : exportValidation.status === 'warning'
+                ? `用户在 ${Number(exportValidation.summary?.warnings || 0)} 个建议修复项仍存在时发起导出。`
                 : '';
         await recordDeliveryEvent({
             tenantId: tenant.tenantId, renditionId: rendition.id, runId, toolCallId, actorType: 'user', actorId: String(user.id),
             eventType: 'presentation_render', pathHint: `${current.title}.${normalizedFormat}`, contentDigest: output.contentDigest,
             decisionReason: validationDecision
         });
-        return { rendition, reused: false, validation: current.validation, durationMs: rendered.durationMs };
+        return { rendition, reused: false, validation: exportValidation, durationMs: rendered.durationMs };
     }
 
     async function listPresentationExports(user, clientId) {
@@ -96,5 +144,6 @@ function createExportService(deps) {
 }
 
 module.exports = {
-    createExportService
+    createExportService,
+    preparePresentationForExport
 };

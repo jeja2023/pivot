@@ -23,6 +23,7 @@ const { normalizeTemplatePackage, applyTemplateBrandControls, inferPresentationA
 const { scanVbaSource } = require('../server/services/presentations/presentation-vba');
 const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
 const { importPptxTemplatePackage } = require('../server/services/presentations/presentation-pptx-template-import');
+const { buildOutlineMessages, buildSlidesMessages } = require('../server/services/presentations/presentation-ai');
 
 function testPresentation() {
     return defaultPresentation({ title: '季度项目汇报', template: getBuiltInTemplate('business-blue') });
@@ -280,4 +281,41 @@ test('自定义封面和 Agent 产物转换均保留受控来源引用', () => {
     const checked = normalizePresentation(converted);
     assert.equal(checked.sources[0].type, 'agent_artifact');
     assert.ok(checked.slides.length >= 1);
+});
+
+
+test('质量检查覆盖来源、字体、图片清晰度和数据来源治理', () => {
+    const presentation = testPresentation();
+    presentation.sources = [{ id: 'source_1', title: '项目材料', type: 'material', locator: '第 1 页', digest: '' }];
+    presentation.slides[0].elements[0].style.fontFamily = 'Uncontrolled Custom Font';
+    presentation.slides[0].elements.push({ id: 'low_res', type: 'image', x: 700, y: 220, width: 300, height: 180, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], assetRef: 'artifact-cas://0123456789abcdef', fit: 'cover', opacity: 1, intrinsicWidth: 320, intrinsicHeight: 180, alt: '' });
+    presentation.slides[0].elements.push({ id: 'chart_without_source', type: 'chart', x: 120, y: 460, width: 500, height: 180, rotation: 0, zIndex: 9, locked: false, visible: true, sourceRefs: [], chartType: 'bar', title: '趋势', data: { columns: ['阶段', '数值'], rows: [['一季度', 1]] }, options: { showLegend: false, showLabels: true, colors: ['#1769AA'] } });
+    const result = runPresentationValidation(presentation);
+    assert.ok(result.issues.some(issue => issue.code === 'SOURCE_ATTRIBUTION_MISSING'));
+    assert.ok(result.issues.some(issue => issue.code === 'FONT_FALLBACK_RISK'));
+    assert.ok(result.issues.some(issue => issue.code === 'IMAGE_LOW_RESOLUTION'));
+    assert.ok(result.issues.some(issue => issue.code === 'DATA_SOURCE_MISSING'));
+});
+
+test('AI 创建协议传递语言、时长、图表、引用及内容边界', () => {
+    const body = { topic: '年度经营复盘', audience: '管理层', purpose: '明确行动计划', duration: '20 分钟', pageCount: 8, language: 'zh-CN,en-US', style: '正式', needsCharts: true, retainSourceRefs: true, mustInclude: '收入、风险、行动', prohibitedContent: '未经核实数据', materials: [{ id: 'source_1', title: '经营材料', text: '收入增长 10%' }] };
+    const outline = buildOutlineMessages(body).at(-1).content;
+    const slides = buildSlidesMessages({ ...body, outline: { title: body.topic, slides: [] } }).at(-1).content;
+    ['输出语言：zh-CN,en-US', '演示时长：20 分钟', '必须包含：收入、风险、行动', '禁止出现：未经核实数据', '数据图表：需要'].forEach(expected => assert.ok(outline.includes(expected), expected));
+    assert.ok(slides.includes('来源引用：重要数字、结论和材料摘录必须保留 sourceRefs'));
+});
+
+test('导出器遵守备注选项并继续生成三种受控格式', async () => {
+    const presentation = testPresentation();
+    presentation.slides[0].speakerNotes = '演讲者备注';
+    const [pptxWithNotes, pptxWithoutNotes, pngHigh] = await Promise.all([
+        renderPresentation(presentation, 'pptx', { includeNotes: true }),
+        renderPresentation(presentation, 'pptx', { includeNotes: false }),
+        renderPresentation(presentation, 'png', { imageQuality: 'high' })
+    ]);
+    const withNotes = await JSZip.loadAsync(pptxWithNotes.buffer);
+    const withoutNotes = await JSZip.loadAsync(pptxWithoutNotes.buffer);
+    assert.ok(Object.keys(withNotes.files).some(name => /^ppt\/notesSlides\//.test(name)));
+    assert.equal(Object.keys(withoutNotes.files).some(name => /^ppt\/notesSlides\//.test(name)), false);
+    assert.equal(pngHigh.buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
 });

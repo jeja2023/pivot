@@ -252,7 +252,8 @@ async function slideSvg(slide, presentation, options = {}) {
 async function renderPng(presentation, options = {}) {
     const slideIndex = Math.max(0, Math.min(Number.parseInt(options.slideIndex, 10) || 0, presentation.slides.length - 1));
     const svg = await slideSvg(presentation.slides[slideIndex], presentation, options);
-    return await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer();
+    const pipeline = sharp(Buffer.from(svg));
+    return options.imageQuality === 'high' ? pipeline.png({ compressionLevel: 6 }) .toBuffer() : pipeline.png({ compressionLevel: 9 }).toBuffer();
 }
 
 async function loadCjkFont(pdf) {
@@ -395,7 +396,7 @@ function pointOptions(element, presentation) {
 
 async function renderPptx(presentation, options = {}) {
     const pptx = new PptxGenJS();
-    pptx.layout = presentation.aspectRatio === '4:3' ? 'LAYOUT_STANDARD' : 'LAYOUT_WIDE';
+    pptx.layout = presentation.aspectRatio === '4:3' ? 'LAYOUT_4x3' : 'LAYOUT_WIDE';
     pptx.author = 'Pivot';
     pptx.company = 'Pivot';
     pptx.subject = presentation.title;
@@ -482,7 +483,7 @@ async function renderPptx(presentation, options = {}) {
                 }
             }
         }
-        if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
+        if (options.includeNotes !== false && slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
     }
     const raw = await pptx.write({ outputType: 'nodebuffer' });
     return await applyPptxTransitions(Buffer.from(raw), presentation);

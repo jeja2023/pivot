@@ -31,7 +31,12 @@ function buildOutlineMessages(body = {}) {
                 `演示目的：${clamp(body.purpose || '说明背景、方案与行动建议', 300)}`,
                 `演示时长：${clamp(body.duration || '', 60) || '未指定'}`,
                 `目标页数：${pages}`,
+                `输出语言：${clamp(body.language || 'zh-CN', 40)}`,
                 `风格：${clamp(body.style || '专业、简洁、可演示', 200)}`,
+                `数据图表：${body.needsCharts === true ? '需要；仅在材料存在可核实数值时安排图表页' : '按内容需要决定，不得编造数据'}`,
+                `来源引用：${body.retainSourceRefs === false ? '仅保留内部来源关系，不在页面文字中展示来源' : '对重要事实、数字和结论保留来源引用'}`,
+                body.mustInclude ? `必须包含：${clamp(body.mustInclude, 1000)}` : '',
+                body.prohibitedContent ? `禁止出现：${clamp(body.prohibitedContent, 1000)}；如材料涉及该内容，只能提示用户处理，不得在页面正文输出。` : '',
                 materials ? `材料：\n${materials}` : '材料：未提供，请输出必要的待核实假设。',
                 '',
                 '返回格式：',
@@ -51,8 +56,13 @@ function buildSlidesMessages(body = {}) {
         {
             role: 'user', content: [
                 `主题：${clamp(body.topic || outline.title, 300)}`,
+                `输出语言：${clamp(body.language || 'zh-CN', 40)}`,
                 body.instruction ? `当前页改写要求：${clamp(body.instruction, 1000)}` : '',
                 `模板：${template.name}，主色：${template.theme.colors.primary}，正文色：${template.theme.colors.text}`,
+                `数据图表：${body.needsCharts === true ? '材料有可核实数值时必须生成相应图表页，并为图表保留来源。' : '无可核实数值时不要生成图表。'}`,
+                `来源引用：${body.retainSourceRefs === false ? '保留内部 sourceRefs，但不要在视觉正文中额外展示。' : '重要数字、结论和材料摘录必须保留 sourceRefs。'}`,
+                body.mustInclude ? `必须包含：${clamp(body.mustInclude, 1000)}` : '',
+                body.prohibitedContent ? `禁止出现：${clamp(body.prohibitedContent, 1000)}` : '',
                 `大纲：${JSON.stringify(outline).slice(0, 24000)}`,
                 materials ? `材料：\n${materials}` : '材料：未提供。',
                 '',
@@ -107,7 +117,7 @@ function parseValidationProposal(content) {
     return { status: ['passed', 'warning', 'blocked'].includes(String(result.status)) ? String(result.status) : (issues.some(item => item.severity === 'blocking') ? 'blocked' : issues.length ? 'warning' : 'passed'), issues, assumptions: Array.isArray(result.assumptions) ? result.assumptions.slice(0, 50).map(item => String(item).slice(0, 500)) : [] };
 }
 
-function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9' } = {}) {
+function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN' } = {}) {
     const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
@@ -124,7 +134,7 @@ function parsePresentationProposal(content, { templateId = 'business-blue', titl
         theme: template.theme,
         slides: proposal.slides,
         sources: Array.isArray(proposal.sources) ? proposal.sources : [],
-        metadata: { aiGenerated: true, language: 'zh-CN' }
+        metadata: { aiGenerated: true, language: clamp(language, 24) || 'zh-CN' }
     });
     return { ...proposal, presentation: contentObject };
 }
