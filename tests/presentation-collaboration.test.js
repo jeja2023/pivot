@@ -232,7 +232,14 @@ test('数据库集成：演示文稿评论线程组织、解决状态与协作�
             await deletePresentation(owner, presentation.id).catch(() => {});
             await pool().query('DELETE FROM presentation_documents WHERE client_id = $1', [presentation.id]);
         }
-        await pool().query('DELETE FROM users WHERE id IN ($1, $2, $3)', [owner.id, collaborator.id, stranger.id]);
-        await pool().query('DELETE FROM organizations WHERE id = $1', [tenantId]);
+        const userIds = [owner?.id, collaborator?.id, stranger?.id].filter(Boolean);
+        if (userIds.length) {
+            await pool().query('DELETE FROM agent_artifacts WHERE user_id = ANY($1::int[])', [userIds]);
+            await pool().query('DELETE FROM agent_artifact_objects WHERE owner_user_id = ANY($1::int[])', [userIds]);
+            await pool().query('DELETE FROM users WHERE id = ANY($1::int[])', [userIds]);
+        }
+        if (tenantId) {
+            await pool().query('DELETE FROM organizations WHERE id = $1', [tenantId]);
+        }
     }
 });
