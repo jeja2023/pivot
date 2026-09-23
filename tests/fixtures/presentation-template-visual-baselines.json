@@ -42,5 +42,13 @@
       "width": 1280,
       "height": 720
     }
+  },
+  "platforms": {
+    "linux": {
+      "business-blue": {
+        "sha256": "faafaa3caf9e4e33f9bb5dc0df4bde521c8835c1561cde1e2a9aae27274d6dee"
+      }
+    }
   }
 }
+

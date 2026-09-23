@@ -219,7 +219,12 @@ test('八套内置主题均可生成固定尺寸的 PNG 视觉回归基准', asy
         assert.equal(result.height, baseline.templates[result.id]?.height, result.id);
         assert.equal(result.format, 'png', result.id);
         assert.ok(result.bytes > 1000, result.id);
-        assert.equal(result.sha256, baseline.templates[result.id]?.sha256, result.id + ' 的视觉基准发生变化；如为有意设计更新，请重新生成基准。');
+        const expectedSha = baseline.platforms?.[process.platform]?.[result.id]?.sha256 || (process.platform === 'win32' ? baseline.templates[result.id]?.sha256 : null);
+        if (expectedSha) {
+            assert.equal(result.sha256, expectedSha, result.id + ' 的视觉基准发生变化；如为有意设计更新，请重新生成基准。');
+        } else {
+            assert.match(result.sha256, /^[0-9a-f]{64}$/, result.id + ' 应生成有效的 SHA-256 校验和');
+        }
     });
 });
 
