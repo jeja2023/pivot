@@ -150,6 +150,22 @@ test('AI 页面提案必须经过受控 PPT IR 校验', () => {
     assert.equal(proposal.presentation.theme.name, '商务蓝汇报');
 });
 
+test('AI 页面提案兼容代码围栏、尾随逗号和字符串中的原始换行', () => {
+    const source = JSON.stringify({
+        title: 'JSON 容错演示',
+        slides: [{
+            id: 'slide_1', type: 'content', layoutId: 'title-content',
+            elements: [{ id: 'title', type: 'text', x: 80, y: 80, width: 900, height: 100, content: { text: '有效标题' }, style: { fontSize: 32, color: '#1F2937' } }],
+            speakerNotes: '稳定备注', sourceRefs: []
+        }]
+    });
+    const malformed = source.replace('稳定备注', '第一行\n第二行').replace(/}$/, ',}');
+    const fenced = '模型附言\n' + String.fromCharCode(96).repeat(3) + 'json\n' + malformed + '\n' + String.fromCharCode(96).repeat(3);
+    const proposal = parsePresentationProposal(fenced, { title: 'JSON 容错演示' });
+    assert.equal(proposal.presentation.title, 'JSON 容错演示');
+    assert.equal(proposal.presentation.slides[0].speakerNotes, '第一行\n第二行');
+});
+
 test('AI 页面提案会安全跳过缺少列的表格和不完整图表，不阻断整份演示生成', () => {
     const proposal = {
         title: 'AI 生成容错验证',

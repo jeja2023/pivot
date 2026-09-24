@@ -107,12 +107,90 @@ function buildValidationMessages(body = {}) {
     return [{ role: 'system', content: presentationAiSystemPrompt() }, { role: 'user', content: ['请检查下面演示文稿中的事实、数字、引用和内容逻辑。只返回 JSON，不要返回 Markdown。', '无法从来源确认的数字、日期、政策名称或组织名称必须列为 warning，不得自行补全。', '返回格式：{"status":"passed|warning|blocked","issues":[{"severity":"blocking|warning|info","slideId":"","elementId":"","code":"FACT_UNVERIFIED","message":"","suggestion":""}],"assumptions":[]}', JSON.stringify(presentation).slice(0, 50000)].join('\n') }];
 }
 
+function extractAiJsonObject(content) {
+    const source = String(content || '').replace(/^\uFEFF/, '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const start = source.indexOf('{');
+    if (start < 0) return '';
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+        const char = source[index];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') quoted = false;
+            continue;
+        }
+        if (char === '"') { quoted = true; continue; }
+        if (char === '{') depth += 1;
+        if (char === '}') {
+            depth -= 1;
+            if (depth === 0) return source.slice(start, index + 1);
+        }
+    }
+    return source.slice(start);
+}
+
+function escapeAiJsonStringControls(source) {
+    let output = '';
+    let quoted = false;
+    let escaped = false;
+    for (const char of source) {
+        if (!quoted) {
+            output += char;
+            if (char === '"') quoted = true;
+            continue;
+        }
+        if (escaped) { output += char; escaped = false; continue; }
+        if (char === '\\') { output += char; escaped = true; continue; }
+        if (char === '"') { output += char; quoted = false; continue; }
+        if (char === '\n') { output += '\\n'; continue; }
+        if (char === '\r') { output += '\\r'; continue; }
+        if (char === '\t') { output += '\\t'; continue; }
+        if (char.charCodeAt(0) < 0x20) { output += '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'); continue; }
+        output += char;
+    }
+    return output;
+}
+
+function removeAiJsonTrailingCommas(source) {
+    let output = '';
+    let quoted = false;
+    let escaped = false;
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (quoted) {
+            output += char;
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') quoted = false;
+            continue;
+        }
+        if (char === '"') { output += char; quoted = true; continue; }
+        if (char === ',') {
+            let next = index + 1;
+            while (/\s/.test(source[next] || '')) next += 1;
+            if (source[next] === '}' || source[next] === ']') continue;
+        }
+        output += char;
+    }
+    return output;
+}
+
+function parseAiJsonObject(content, message, code) {
+    const raw = extractAiJsonObject(content);
+    if (!raw) throw presentationError(message, 422, code);
+    try { return JSON.parse(raw); }
+    catch (_) {
+        const repaired = removeAiJsonTrailingCommas(escapeAiJsonStringControls(raw));
+        try { return JSON.parse(repaired); }
+        catch (_) { throw presentationError(message, 422, code); }
+    }
+}
+
 function parseValidationProposal(content) {
-    const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
-    const start = text.indexOf('{'); const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) throw presentationError('AI 未返回可解析的检查结果 JSON。', 422, 'PRESENTATION_AI_VALIDATION_INVALID');
-    let result;
-    try { result = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw presentationError('AI 返回的检查结果 JSON 无效。', 422, 'PRESENTATION_AI_VALIDATION_INVALID'); }
+    const result = parseAiJsonObject(content, 'AI 返回的检查结果 JSON 无效。', 'PRESENTATION_AI_VALIDATION_INVALID');
     const issues = Array.isArray(result.issues) ? result.issues.slice(0, 200).map(issue => ({ severity: ['blocking', 'warning', 'info'].includes(String(issue && issue.severity)) ? String(issue.severity) : 'warning', slideId: String(issue && issue.slideId || '').slice(0, 96), elementId: String(issue && issue.elementId || '').slice(0, 96), code: String(issue && issue.code || 'AI_REVIEW').slice(0, 64), message: String(issue && issue.message || '').slice(0, 500), suggestion: String(issue && issue.suggestion || '').slice(0, 500) })) : [];
     return { status: ['passed', 'warning', 'blocked'].includes(String(result.status)) ? String(result.status) : (issues.some(item => item.severity === 'blocking') ? 'blocked' : issues.length ? 'warning' : 'passed'), issues, assumptions: Array.isArray(result.assumptions) ? result.assumptions.slice(0, 50).map(item => String(item).slice(0, 500)) : [] };
 }
@@ -266,12 +344,7 @@ function repairAiPresentationProposal(proposal, options = {}) {
 }
 
 function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [] } = {}) {
-    const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) throw presentationError('AI 未返回可解析的演示文稿 JSON。', 422, 'PRESENTATION_AI_JSON_INVALID');
-    let proposal;
-    try { proposal = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw presentationError('AI 返回的演示文稿 JSON 无效。', 422, 'PRESENTATION_AI_JSON_INVALID'); }
+    let proposal = parseAiJsonObject(content, 'AI 返回的演示文稿 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID');
     if (!Array.isArray(proposal.slides)) return proposal;
     proposal = repairAiPresentationProposal(proposal, { aspectRatio, sources });
     const template = getBuiltInTemplate(templateId) || getBuiltInTemplate('business-blue');

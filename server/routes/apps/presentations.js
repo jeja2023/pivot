@@ -122,6 +122,17 @@ async function callPresentationAi({ req, logAction, messages, source, auditActio
     return { ...result, model: modelCfg.model_name };
 }
 
+function isPresentationAiJsonError(error) {
+    return ['PRESENTATION_AI_JSON_INVALID', 'PRESENTATION_AI_VALIDATION_INVALID'].includes(String(error?.code || ''));
+}
+
+function buildAiJsonRepairMessages(content) {
+    return [
+        { role: 'system', content: '你是 JSON 修复器。只能输出一个有效 JSON 对象，不要输出 Markdown、代码围栏、解释或思考过程。保留原回答中的事实和结构；不要添加未提供的数据、来源或外部链接。' },
+        { role: 'user', content: '下面是一次生成失败的 AI 原始回答。请只修复 JSON 语法并返回完整对象：\n' + String(content || '').slice(0, 60000) }
+    ];
+}
+
 function requestAbortSignal(req, res) {
     const controller = new AbortController();
     const onAbort = () => { if (!controller.signal.aborted) controller.abort(new Error('PPT AI 请求已取消。')); };
@@ -340,8 +351,22 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (idem?.cached) return res.json(idem.cached);
         const abort = requestAbortSignal(req, res);
         try {
-            const result = await callPresentationAi({ req, logAction: writeLog, messages, source: options.source || 'presentation_ai', auditAction: options.auditAction || 'PPT AI操作', maxTokens: options.maxTokens || 4000, signal: abort.signal });
-            const payload = await options.parse(result);
+            let result = await callPresentationAi({ req, logAction: writeLog, messages, source: options.source || 'presentation_ai', auditAction: options.auditAction || 'PPT AI操作', maxTokens: options.maxTokens || 4000, signal: abort.signal });
+            let payload;
+            try {
+                payload = await options.parse(result);
+            } catch (error) {
+                if (!options.retryMalformedJson || !isPresentationAiJsonError(error) || abort.signal.aborted) throw error;
+                try {
+                    result = await callPresentationAi({ req, logAction: writeLog, messages: buildAiJsonRepairMessages(result.content), source: (options.source || 'presentation_ai') + '_json_repair', auditAction: (options.auditAction || 'PPT AI操作') + ' JSON 修复', maxTokens: options.maxTokens || 4000, signal: abort.signal });
+                    payload = await options.parse(result);
+                } catch (_) {
+                    const failure = new Error('AI 返回的页面数据格式不完整，系统已自动重试一次仍无法修复，请重新生成。');
+                    failure.status = 422;
+                    failure.code = 'PRESENTATION_AI_JSON_REPAIR_FAILED';
+                    throw failure;
+                }
+            }
             const response = { ...payload, model: result.model, usage: result.usage, contextBudget: result.contextBudget, requestId: req.id || req.get?.('x-request-id') || '' };
             await finishAiIdempotency(idem, response);
             recordPresentationOutcome(options.source || 'ai', { outcome: 'success', durationMs: Date.now() - startedAt, source: options.source || 'ai' });
@@ -357,7 +382,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/ai/outline', authMiddleware, asyncHandler(async (req, res) => {
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!String(body.topic || '').trim()) return res.status(400).json({ error: '请输入演示主题。', code: 'PRESENTATION_TOPIC_REQUIRED' });
-        return runAiRequest(req, res, body, buildOutlineMessages(body), { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600, parse: async result => {
+        return runAiRequest(req, res, body, buildOutlineMessages(body), { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600, retryMalformedJson: true, parse: async result => {
             let outline; try { outline = parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language }); } catch (error) { error.status = error.status || 422; throw error; }
             return { outline };
         }});
@@ -366,7 +391,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/ai/slides', authMiddleware, asyncHandler(async (req, res) => {
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!body.outline || typeof body.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
-        return runAiRequest(req, res, body, buildSlidesMessages(body), { source: 'presentation_slides', auditAction: 'PPT AI生成页面', maxTokens: 6000, parse: async result => {
+        return runAiRequest(req, res, body, buildSlidesMessages(body), { source: 'presentation_slides', auditAction: 'PPT AI生成页面', maxTokens: 6000, retryMalformedJson: true, parse: async result => {
             const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (proposal.presentation) {
                 const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
@@ -381,7 +406,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!body.outline && !body.presentation) return res.status(400).json({ error: '请提供当前大纲或演示文稿。', code: 'PRESENTATION_CONTEXT_REQUIRED' });
         const requestedSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
-        return runAiRequest(req, res, { ...body, additionalSlideCount: requestedSlides }, buildContinueMessages({ ...body, additionalSlideCount: requestedSlides }), { source: 'presentation_continue', auditAction: 'PPT AI继续生成', maxTokens: Math.min(6000, 1100 * requestedSlides), parse: async result => {
+        return runAiRequest(req, res, { ...body, additionalSlideCount: requestedSlides }, buildContinueMessages({ ...body, additionalSlideCount: requestedSlides }), { source: 'presentation_continue', auditAction: 'PPT AI继续生成', maxTokens: Math.min(6000, 1100 * requestedSlides), retryMalformedJson: true, parse: async result => {
             const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (!Array.isArray(proposal.presentation?.slides) || proposal.presentation.slides.length !== requestedSlides) {
                 const error = new Error('AI 返回的新增页数与请求不一致，请重试。'); error.status = 422; error.code = 'PRESENTATION_AI_CONTINUE_COUNT_INVALID'; throw error;
@@ -393,13 +418,13 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/ai/rewrite', authMiddleware, asyncHandler(async (req, res) => {
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!body.slide || typeof body.slide !== 'object') return res.status(400).json({ error: '请提供要改写的页面。', code: 'PRESENTATION_SLIDE_REQUIRED' });
-        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
+        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
     }));
 
     router.post('/apps/presentations/ai/validate', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
         if (!body.presentation || typeof body.presentation !== 'object') return res.status(400).json({ error: '请提供待检查的演示文稿。', code: 'PRESENTATION_REQUIRED' });
-        return runAiRequest(req, res, body, buildValidationMessages(body), { source: 'presentation_validate', auditAction: 'PPT AI内容检查', maxTokens: 3000, parse: async result => ({ validation: parseValidationProposal(result.content) }) });
+        return runAiRequest(req, res, body, buildValidationMessages(body), { source: 'presentation_validate', auditAction: 'PPT AI内容检查', maxTokens: 3000, retryMalformedJson: true, parse: async result => ({ validation: parseValidationProposal(result.content) }) });
     }));
 
     router.post('/apps/presentations/data-chart', authMiddleware, asyncHandler(async (req, res) => {

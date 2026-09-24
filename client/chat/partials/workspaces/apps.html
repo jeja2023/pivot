@@ -904,9 +904,6 @@
                                             <h3 id="presentation-create-title">AI 创建演示文稿</h3>
                                             <p>先生成可调整的大纲，确认后再生成页面。</p>
                                         </div>
-                                        <button id="presentation-create-header-close-btn" class="presentation-dialog-close-btn" type="button" aria-label="关闭">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                        </button>
                                     </div>
                                 </div>
                                 <form id="presentation-create-form" class="presentation-create-form">
@@ -1137,21 +1134,17 @@
                             <div class="modal presentation-outline-dialog">
                                 <div class="presentation-create-dialog-head">
                                     <h3 id="presentation-outline-title">确认演示大纲</h3>
-                                    <p>调整演示标题、章节和每页要点；确认后将按此结构生成可编辑页面。</p>
+                                    <p>以下按大纲层级展示章节、主题和要点；确认后将按此结构生成可编辑页面。</p>
                                 </div>
                                 <div class="presentation-outline-review">
-                                    <label class="presentation-outline-title-field" for="presentation-outline-title-input">
-                                        <span>演示标题</span>
-                                        <input id="presentation-outline-title-input" class="form-input" maxlength="160" autocomplete="off">
-                                    </label>
                                     <div class="presentation-outline-meta" aria-live="polite">
                                         <span id="presentation-outline-page-count"></span>
-                                        <span>每页要点一行一条</span>
+                                        <span>大纲预览</span>
                                     </div>
-                                    <div id="presentation-outline-sections" class="presentation-outline-sections"></div>
+                                    <section id="presentation-outline-markdown" class="presentation-outline-markdown" aria-label="演示大纲预览"></section>
                                 </div>
                                 <div id="presentation-outline-warnings" class="presentation-outline-warnings"></div>
-                                <div class="presentation-create-actions presentation-outline-actions"><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回修改</button><button id="presentation-outline-stop-btn" class="btn-secondary" type="button">停止生成</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
+                                <div class="presentation-create-actions presentation-outline-actions"><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回调整要求</button><button id="presentation-outline-stop-btn" class="btn-secondary" type="button">停止生成</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
                             </div>
                         </div>
 <div id="presentation-presenter-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-presenter-title"><div class="modal presentation-presenter-dialog"><div class="presentation-create-dialog-head"><h3 id="presentation-presenter-title">演示者模式</h3><p><span id="presentation-presenter-timer">00:00</span> · <span id="presentation-presenter-counter"></span></p></div><div id="presentation-presenter-preview" class="presentation-presenter-preview"></div><section class="presentation-presenter-notes"><strong>提词与备注</strong><div id="presentation-presenter-notes-text" tabindex="0"></div></section><div class="presentation-create-actions"><button id="presentation-presenter-prev-btn" class="btn-secondary" type="button">上一页</button><button id="presentation-presenter-next-btn" class="btn-primary" type="button">下一页</button><button id="presentation-presenter-close-btn" class="btn-secondary" type="button">结束演示</button></div></div></div>

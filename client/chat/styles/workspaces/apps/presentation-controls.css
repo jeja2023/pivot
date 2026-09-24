@@ -2063,10 +2063,83 @@
 .presentation-outline-review {
     display: grid;
     min-height: 0;
-    gap: 14px;
+    gap: 10px;
     padding: 18px 22px;
     overflow-y: auto;
     background: var(--bg-side);
+}
+
+.presentation-outline-markdown {
+    min-height: 280px;
+    margin: 0;
+    padding: 18px 20px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+    color: var(--text-main);
+    font-size: 0.8rem;
+    line-height: 1.55;
+}
+
+.presentation-outline-document-title {
+    margin: 0 0 18px;
+    color: var(--text-main);
+    font-size: 1.15rem;
+    line-height: 1.35;
+}
+
+.presentation-outline-document-section {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.presentation-outline-document-section:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+}
+
+.presentation-outline-document-section-title {
+    margin: 0 0 12px;
+    color: var(--primary);
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.presentation-outline-document-topic {
+    margin: 14px 0 0;
+    padding: 0 0 0 14px;
+    border-left: 3px solid color-mix(in srgb, var(--primary) 44%, var(--border));
+}
+
+.presentation-outline-document-topic-title {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+
+.presentation-outline-document-purpose {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.presentation-outline-document-points {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0 0;
+    padding: 0;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.presentation-outline-document-point {
+    margin: 0;
 }
 
 .presentation-outline-title-field,
@@ -2261,6 +2334,12 @@
         margin-right: 14px;
     }
 
+    .presentation-outline-markdown {
+        min-height: 240px;
+        padding: 14px;
+        font-size: 0.76rem;
+    }
+
     .presentation-outline-slide-head {
         grid-template-columns: auto minmax(0, 1fr);
     }
@@ -2278,4 +2357,3 @@
         flex: 1 1 auto;
     }
 }
-

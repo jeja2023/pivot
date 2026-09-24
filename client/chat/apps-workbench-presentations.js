@@ -945,7 +945,7 @@ function setSelectedImageAsCover() {
         if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-ai-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
-            if (event.target.closest('#presentation-create-cancel-btn') || event.target.closest('#presentation-create-header-close-btn') || event.target.id === 'presentation-create-modal') { closeCreateModal(); return; }
+            if (event.target.closest('#presentation-create-cancel-btn') || event.target.id === 'presentation-create-modal') { closeCreateModal(); return; }
         if (event.target.closest('#presentation-create-stop-btn') || event.target.closest('#presentation-outline-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-data-chart-cancel-btn')) { byId('presentation-data-chart-modal')?.classList.add('hidden'); return; }
             if (event.target.closest('#presentation-refresh-versions-btn')) { loadVersions().catch(error => toast(error.message, 'error')); return; }

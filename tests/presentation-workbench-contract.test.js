@@ -15,6 +15,7 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     const scripts = source('client/chat/app-workspaces.js');
     const workspace = source('client/chat/partials/workspaces/apps.html');
     const editor = source('client/chat/apps-workbench-presentations.js');
+    const presenter = source('client/chat/apps-workbench-presentations-presenter.js');
     assert.match(registry, /id:\s*'presentations'/);
     assert.match(registry, /showPresentationsAppFromRegistry/);
     assert.match(scripts, /apps-workbench-presentations\.js/);
@@ -40,9 +41,16 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-set-cover-btn"/);
     assert.match(workspace, /id="presentation-element-animation"/);
     assert.match(workspace, /id="presentation-sync-btn"/);
-    assert.match(workspace, /id="presentation-outline-title-input"/);
-    assert.match(workspace, /id="presentation-outline-sections"/);
+    assert.match(workspace, /id="presentation-outline-markdown"/);
+    assert.match(workspace, /演示大纲预览/);
     assert.doesNotMatch(workspace, /id="presentation-outline-editor"/);
+    assert.doesNotMatch(workspace, /id="presentation-outline-title-input"/);
+    assert.doesNotMatch(workspace, /id="presentation-outline-sections"/);
+    assert.match(presenter, /function renderOutlineDocument/);
+    assert.match(presenter, /presentation-outline-document-section-title/);
+    assert.doesNotMatch(presenter, /function outlineMarkdown/);
+    assert.doesNotMatch(presenter, /createElement\('ul'\)/);
+    assert.doesNotMatch(presenter, /presentation-outline-page-number/);
     assert.match(editor, /function renderOutlineReview/);
     assert.match(editor, /function collectOutlineFromReview/);
     assert.doesNotMatch(editor, /JSON\.parse\(byId\('presentation-outline-editor'\)/);
@@ -110,6 +118,8 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(presentationRoutes, /Idempotency-Key/);
     assert.match(presentationRoutes, /AbortController/);
     assert.match(presentationRoutes, /PRESENTATION_AI_CANCELLED/);
+    assert.match(presentationRoutes, /retryMalformedJson:\s*true/);
+    assert.match(presentationRoutes, /PRESENTATION_AI_JSON_REPAIR_FAILED/);
     const service = source('server/services/presentations/presentation-service.js');
     assert.match(service, /owner_user_id = ?/);
     assert.match(service, /status IN \('draft', 'pending_review', 'unpublished'\)/);
