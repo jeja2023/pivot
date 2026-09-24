@@ -781,6 +781,126 @@
         node.appendChild(chart);
     }
 
+    // ==========================================
+    // 12. 大纲确认与结构化编辑
+    // ==========================================
+    function outlineText(value, fallback = '', maxLength = 500) {
+        const text = String(value ?? fallback).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+        return text.slice(0, maxLength);
+    }
+    function outlineTextList(value, maxItems = 12, maxLength = 500) {
+        if (!Array.isArray(value)) return [];
+        return value.map(item => outlineText(item, '', maxLength)).filter(Boolean).slice(0, maxItems);
+    }
+    function outlineLayout(value, pageIndex, pageCount, labels = {}) {
+        const layout = String(value || '').trim();
+        if (labels[layout]) return layout;
+        if (pageIndex === 0) return 'cover';
+        if (pageIndex === pageCount - 1) return 'summary';
+        return 'title-content';
+    }
+    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}) {
+        const source = input && typeof input === 'object' ? input : {};
+        const rawSections = Array.isArray(source.outline) ? source.outline : (Array.isArray(source.slides) ? [{ section: '演示内容', slides: source.slides }] : []);
+        const totalSlides = rawSections.reduce((total, section) => total + (Array.isArray(section?.slides) ? section.slides.length : 0), 0);
+        let pageIndex = 0;
+        const outline = rawSections.map((section, sectionIndex) => {
+            const slides = (Array.isArray(section?.slides) ? section.slides : []).map((slide, slideIndex) => {
+                const currentIndex = pageIndex;
+                pageIndex += 1;
+                return {
+                    title: outlineText(slide?.title, `第 ${currentIndex + 1} 页`, 160),
+                    purpose: outlineText(slide?.purpose, '', 500),
+                    layoutHint: outlineLayout(slide?.layoutHint, currentIndex, totalSlides, labels),
+                    keyPoints: outlineTextList(slide?.keyPoints, 12, 500),
+                    sourceRefs: outlineTextList(slide?.sourceRefs, 50, 160),
+                    order: slideIndex
+                };
+            });
+            return { section: outlineText(section?.section, `第 ${sectionIndex + 1} 部分`, 120), slides };
+        }).filter(section => section.slides.length);
+        if (!outline.length) throw new Error('AI 未生成可编辑的大纲，请返回修改后重新生成。');
+        return {
+            title: outlineText(source.title, fallbackTitle || '未命名演示文稿', 160),
+            outline,
+            assumptions: outlineTextList(source.assumptions, 50, 500),
+            warnings: outlineTextList(source.warnings, 50, 500)
+        };
+    }
+    function createOutlineField(label, control) {
+        const field = document.createElement('label'); field.className = 'presentation-outline-field';
+        const caption = document.createElement('span'); caption.textContent = label;
+        field.append(caption, control); return field;
+    }
+    function renderOutlineWarnings(outline) {
+        const target = byId('presentation-outline-warnings'); if (!target) return;
+        const messages = [...outline.assumptions.map(item => ({ label: '待确认', text: item })), ...outline.warnings.map(item => ({ label: '提示', text: item }))];
+        target.replaceChildren(); target.classList.toggle('hidden', messages.length === 0);
+        messages.forEach(message => {
+            const row = document.createElement('p'); const label = document.createElement('strong');
+            label.textContent = message.label; row.append(label, document.createTextNode(message.text)); target.appendChild(row);
+        });
+    }
+    function renderOutlineReview(input, state, { labels = {} } = {}) {
+        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels);
+        state.pendingOutline = outline;
+        const title = byId('presentation-outline-title-input'); if (title) title.value = outline.title;
+        const sections = byId('presentation-outline-sections'); if (!sections) return;
+        sections.replaceChildren(); let pageNumber = 0;
+        outline.outline.forEach((section, sectionIndex) => {
+            const sectionNode = document.createElement('section'); sectionNode.className = 'presentation-outline-section'; sectionNode.dataset.presentationOutlineSection = String(sectionIndex);
+            const sectionInput = document.createElement('input'); sectionInput.className = 'form-input'; sectionInput.maxLength = 120; sectionInput.value = section.section; sectionInput.dataset.presentationOutlineField = 'section';
+            sectionNode.appendChild(createOutlineField('章节', sectionInput));
+            const slides = document.createElement('div'); slides.className = 'presentation-outline-slides';
+            section.slides.forEach((slide, slideIndex) => {
+                pageNumber += 1;
+                const page = document.createElement('article'); page.className = 'presentation-outline-slide'; page.dataset.presentationOutlineSlide = String(slideIndex);
+                const header = document.createElement('div'); header.className = 'presentation-outline-slide-head';
+                const index = document.createElement('span'); index.className = 'presentation-outline-page-number'; index.textContent = String(pageNumber);
+                const pageLabel = document.createElement('strong'); pageLabel.textContent = `第 ${pageNumber} 页`;
+                const layout = document.createElement('select'); layout.className = 'form-input'; layout.dataset.presentationOutlineField = 'layout';
+                Object.entries(labels).forEach(([id, label]) => layout.add(new Option(label, id, false, id === slide.layoutHint)));
+                header.append(index, pageLabel, layout);
+                const pageTitle = document.createElement('input'); pageTitle.className = 'form-input'; pageTitle.maxLength = 160; pageTitle.value = slide.title; pageTitle.dataset.presentationOutlineField = 'title';
+                const purpose = document.createElement('textarea'); purpose.className = 'form-input'; purpose.rows = 2; purpose.maxLength = 500; purpose.value = slide.purpose; purpose.dataset.presentationOutlineField = 'purpose';
+                const keyPoints = document.createElement('textarea'); keyPoints.className = 'form-input'; keyPoints.rows = Math.max(3, Math.min(6, slide.keyPoints.length + 1)); keyPoints.maxLength = 4000; keyPoints.value = slide.keyPoints.join('\n'); keyPoints.dataset.presentationOutlineField = 'keyPoints';
+                page.append(header, createOutlineField('页面标题', pageTitle), createOutlineField('页面目标', purpose), createOutlineField('核心要点', keyPoints));
+                slides.appendChild(page);
+            });
+            sectionNode.appendChild(slides); sections.appendChild(sectionNode);
+        });
+        const count = byId('presentation-outline-page-count'); if (count) count.textContent = `共 ${pageNumber} 页`;
+        renderOutlineWarnings(outline);
+    }
+    function collectOutlineFromReview(state, { labels = {} } = {}) {
+        const original = normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels);
+        const titleInput = byId('presentation-outline-title-input');
+        const title = outlineText(titleInput?.value, '', 160);
+        if (!title) throw new Error('请填写演示标题。');
+        const sectionNodes = Array.from(byId('presentation-outline-sections')?.querySelectorAll('[data-presentation-outline-section]') || []);
+        let pageNumber = 0;
+        const outline = sectionNodes.map((sectionNode, sectionIndex) => {
+            const section = outlineText(sectionNode.querySelector('[data-presentation-outline-field="section"]')?.value, `第 ${sectionIndex + 1} 部分`, 120);
+            const slides = Array.from(sectionNode.querySelectorAll('[data-presentation-outline-slide]')).map((slideNode, slideIndex) => {
+                const originalSlide = original.outline[sectionIndex]?.slides?.[slideIndex] || {};
+                pageNumber += 1;
+                const pageTitle = outlineText(slideNode.querySelector('[data-presentation-outline-field="title"]')?.value, '', 160);
+                if (!pageTitle) throw new Error(`请填写第 ${pageNumber} 页的标题。`);
+                const purpose = outlineText(slideNode.querySelector('[data-presentation-outline-field="purpose"]')?.value, '', 500);
+                const keyPoints = String(slideNode.querySelector('[data-presentation-outline-field="keyPoints"]')?.value || '')
+                    .split(/\r?\n/).map(item => outlineText(item.replace(/^[•-]\s*/, ''), '', 500)).filter(Boolean).slice(0, 12);
+                if (!keyPoints.length) throw new Error(`请至少填写第 ${pageNumber} 页的一条核心要点。`);
+                const layout = outlineLayout(slideNode.querySelector('[data-presentation-outline-field="layout"]')?.value, pageNumber - 1, 0, labels);
+                return { title: pageTitle, purpose, layoutHint: layout, keyPoints, sourceRefs: originalSlide.sourceRefs || [] };
+            });
+            return { section, slides };
+        }).filter(section => section.slides.length);
+        if (!outline.length) throw new Error('请至少保留一个章节和一页内容。');
+        const result = { title, outline, assumptions: original.assumptions, warnings: original.warnings };
+        state.pendingOutline = result;
+        return result;
+    }
+
     window.Pivot?.exposeModule?.('apps.presentations.presenter', {
         ready: true,
         startRemotePresentation,
@@ -819,6 +939,8 @@
         openArtifactCreateModal,
         createFromArtifact,
         renderTableElement,
-        renderChartElement
+        renderChartElement,
+        renderOutlineReview,
+        collectOutlineFromReview
     });
 })();

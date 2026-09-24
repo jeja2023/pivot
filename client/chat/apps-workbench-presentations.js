@@ -218,12 +218,9 @@
     }
     function hideOtherAppViews() {
         ['apps-home-view', 'official-writing-view', 'data-analysis-view', 'regulations-view', 'ocr-view', 'pdf-tools-view'].forEach(id => byId(id)?.classList.add('hidden'));
-        byId('presentations-view')?.classList.remove('hidden');
-        byId('apps-back-btn')?.classList.remove('hidden');
-        const title = byId('apps-workspace-title');
-        const desc = byId('apps-workspace-desc');
-        if (title) title.textContent = 'PPT 制作';
-        if (desc) desc.textContent = '从主题、模板、材料与数据生成可编辑演示文稿，并在导出前完成版式检查。';
+        byId('presentations-view')?.classList.remove('hidden'); byId('apps-back-btn')?.classList.remove('hidden');
+        const title = byId('apps-workspace-title'), desc = byId('apps-workspace-desc');
+        if (title) title.textContent = 'PPT 制作'; if (desc) desc.textContent = '从主题、模板、材料与数据生成可编辑演示文稿，并在导出前完成版式检查。';
     }
     async function loadTemplates() {
         const data = await requestJson(`${API}/templates`);
@@ -248,13 +245,7 @@
         renderLibrary();
     }
     function syncLibraryFilters() {
-        state.libraryFilters.search = byId('presentation-library-search')?.value.trim() || '';
-        state.libraryFilters.tag = byId('presentation-library-tag')?.value.trim() || '';
-        state.libraryFilters.templateId = byId('presentation-library-template')?.value || '';
-        state.libraryFilters.status = byId('presentation-library-status')?.value || '';
-        state.libraryFilters.createdBy = byId('presentation-library-created-by')?.value.trim() || '';
-        state.libraryFilters.updatedFrom = byId('presentation-library-updated-from')?.value || '';
-        state.libraryFilters.updatedTo = byId('presentation-library-updated-to')?.value || '';
+        state.libraryFilters = { ...state.libraryFilters, search: byId('presentation-library-search')?.value.trim() || '', tag: byId('presentation-library-tag')?.value.trim() || '', templateId: byId('presentation-library-template')?.value || '', status: byId('presentation-library-status')?.value || '', createdBy: byId('presentation-library-created-by')?.value.trim() || '', updatedFrom: byId('presentation-library-updated-from')?.value || '', updatedTo: byId('presentation-library-updated-to')?.value || '' };
     }
     function scheduleLibraryFilter() {
         state.libraryPage = 1;
@@ -675,6 +666,8 @@ function setSelectedImageAsCover() {
             materials: byId('presentation-create-material')?.value.trim() ? [{ id: 'source_1', title: '用户提供的材料', text: byId('presentation-create-material').value.trim() }] : []
         };
     }
+    function renderOutlineReview(input) { return presenter()?.renderOutlineReview?.(input, state, { labels: PRESENTATION_LAYOUT_LABELS }); }
+    function collectOutlineFromReview() { return presenter()?.collectOutlineFromReview?.(state, { labels: PRESENTATION_LAYOUT_LABELS }); }
     async function generateOutline() {
         const request = createRequestFromForm(); if (!request.topic) { toast('请输入演示主题。', 'error'); return; }
         if (!request.model) { requirePresentationAiModel(); return; }
@@ -690,7 +683,7 @@ function setSelectedImageAsCover() {
             }
             button && (button.textContent = '正在生成大纲…');
             const data = await requestJson(API + '/ai/outline', aiJsonOptions(request, controller));
-            state.pendingCreate = request; state.pendingOutline = data.outline; byId('presentation-outline-editor').value = JSON.stringify(data.outline, null, 2); byId('presentation-outline-warnings').textContent = (data.outline.warnings || data.outline.assumptions || []).join('\n'); closeCreateModal(); byId('presentation-outline-modal')?.classList.remove('hidden');
+            state.pendingCreate = request; closeCreateModal(); renderOutlineReview(data.outline); byId('presentation-outline-modal')?.classList.remove('hidden');
         } catch (error) {
             if (isAiAbort(error, controller)) { toast('AI 大纲生成已取消。', 'warning'); return; }
             throw error;
@@ -698,14 +691,17 @@ function setSelectedImageAsCover() {
     }
     async function generateSlides() {
         let outline;
-        try { outline = JSON.parse(byId('presentation-outline-editor')?.value || ''); } catch (_) { toast('大纲 JSON 格式无效，请修正后再生成。', 'error'); return; }
+        try { outline = collectOutlineFromReview(); } catch (error) { toast(error.message || '大纲内容无效，请检查后再生成。', 'error'); return; }
+        if (!state.pendingCreate) { toast('创建参数已失效，请重新生成大纲。', 'error'); return; }
         const button = byId('presentation-outline-confirm-btn'); const controller = beginAiRequest();
         button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成页面…';
         try {
             const request = { ...state.pendingCreate, outline, title: outline.title || state.pendingCreate.topic };
             const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
             const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, content: data.proposal.presentation }));
-            byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id); toast('AI 初稿已生成，可继续在画布中编辑。');
+            byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id);
+            const warnings = Array.isArray(data.proposal?.warnings) ? data.proposal.warnings.filter(Boolean) : [];
+            toast(warnings.length ? 'AI 初稿已生成；' + warnings.length + ' 项数据或元素提示已安全处理，可在画布中补充。' : 'AI 初稿已生成，可继续在画布中编辑。', warnings.length ? 'warning' : 'success');
         } catch (error) {
             if (isAiAbort(error, controller)) { toast('AI 页面生成已取消。', 'warning'); return; }
             throw error;

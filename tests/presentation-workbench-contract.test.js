@@ -40,6 +40,12 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-set-cover-btn"/);
     assert.match(workspace, /id="presentation-element-animation"/);
     assert.match(workspace, /id="presentation-sync-btn"/);
+    assert.match(workspace, /id="presentation-outline-title-input"/);
+    assert.match(workspace, /id="presentation-outline-sections"/);
+    assert.doesNotMatch(workspace, /id="presentation-outline-editor"/);
+    assert.match(editor, /function renderOutlineReview/);
+    assert.match(editor, /function collectOutlineFromReview/);
+    assert.doesNotMatch(editor, /JSON\.parse\(byId\('presentation-outline-editor'\)/);
     assert.match(editor, /exposeModule\?\.\('apps\.presentations'/);
     assert.doesNotMatch(editor, /window\.Pivot\.legacy\.showPresentationsApp\s*=/);
 });

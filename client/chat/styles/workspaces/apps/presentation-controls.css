@@ -2039,4 +2039,243 @@
     transform: translateY(-1px);
 }
 
+/* AI 大纲确认页只展示可理解的编辑字段，内部结构由脚本在提交时组装。 */
+.presentation-outline-dialog {
+    width: min(920px, calc(100vw - 32px)) !important;
+    max-height: calc(100vh - 40px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    background: var(--bg-main) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    text-align: left !important;
+}
+
+.presentation-outline-dialog .presentation-create-dialog-head {
+    flex: 0 0 auto;
+    padding: 18px 22px 14px;
+    background: var(--bg-main);
+    border-bottom: 1px solid var(--border);
+}
+
+.presentation-outline-review {
+    display: grid;
+    min-height: 0;
+    gap: 14px;
+    padding: 18px 22px;
+    overflow-y: auto;
+    background: var(--bg-side);
+}
+
+.presentation-outline-title-field,
+.presentation-outline-field {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+    color: var(--text-main);
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-align: left;
+}
+
+.presentation-outline-title-field {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.presentation-outline-title-field .form-input,
+.presentation-outline-field .form-input,
+.presentation-outline-slide-head .form-input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    border-color: var(--border);
+    background: var(--bg-main);
+    color: var(--text-main);
+    box-sizing: border-box;
+}
+
+.presentation-outline-title-field .form-input {
+    min-height: 38px;
+    font-size: 0.92rem;
+    font-weight: 750;
+}
+
+.presentation-outline-field textarea.form-input {
+    min-height: 52px;
+    padding: 8px 10px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.presentation-outline-title-field .form-input:focus,
+.presentation-outline-field .form-input:focus,
+.presentation-outline-slide-head .form-input:focus {
+    border-color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.presentation-outline-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.presentation-outline-meta span:first-child {
+    color: var(--primary);
+    font-weight: 750;
+}
+
+.presentation-outline-sections {
+    display: grid;
+    gap: 16px;
+}
+
+.presentation-outline-section {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.presentation-outline-section:first-child {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.presentation-outline-section > .presentation-outline-field .form-input {
+    min-height: 34px;
+    font-size: 0.82rem;
+    font-weight: 750;
+}
+
+.presentation-outline-slides {
+    display: grid;
+    gap: 10px;
+}
+
+.presentation-outline-slide {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.presentation-outline-slide-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(126px, 0.32fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.presentation-outline-slide-head strong {
+    overflow: hidden;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.presentation-outline-page-number {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--bg-main);
+    font-size: 0.7rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.presentation-outline-slide-head select.form-input {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+}
+
+.presentation-outline-warnings {
+    display: grid;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin: 0 22px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-side);
+    color: var(--text-main);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.presentation-outline-warnings p {
+    margin: 0;
+}
+
+.presentation-outline-warnings strong {
+    margin-right: 6px;
+    color: var(--primary);
+}
+
+.presentation-outline-actions {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 14px 22px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-main);
+}
+
+@media (max-width: 680px) {
+    .presentation-outline-dialog {
+        width: calc(100vw - 20px) !important;
+        max-height: calc(100vh - 20px) !important;
+    }
+
+    .presentation-outline-review {
+        padding: 14px;
+    }
+
+    .presentation-outline-dialog .presentation-create-dialog-head,
+    .presentation-outline-actions {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .presentation-outline-warnings {
+        margin-left: 14px;
+        margin-right: 14px;
+    }
+
+    .presentation-outline-slide-head {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .presentation-outline-slide-head select.form-input {
+        grid-column: 1 / -1;
+    }
+
+    .presentation-outline-actions {
+        justify-content: stretch;
+    }
+
+    .presentation-outline-actions .btn-secondary,
+    .presentation-outline-actions .btn-primary {
+        flex: 1 1 auto;
+    }
+}
 

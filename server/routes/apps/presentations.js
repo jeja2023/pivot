@@ -79,11 +79,19 @@ async function removeUpload(file) {
 
 function normalizeMaterials(body) {
     if (!Array.isArray(body?.materials)) return [];
+    const usedIds = new Set();
     return body.materials.slice(0, 20).map((item, index) => ({
         id: String(item?.id || `source_${index + 1}`).trim().slice(0, 96),
         title: String(item?.title || '材料').trim().slice(0, 240),
         text: String(item?.text || '').trim().slice(0, MAX_MATERIAL_TEXT)
-    })).filter(item => item.text);
+    })).filter(item => item.text).map((item, index) => {
+        const base = String(item.id || 'source_' + (index + 1)).trim().slice(0, 96).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^_+/, '') || 'source_' + (index + 1);
+        let id = /^[A-Za-z0-9]/.test(base) ? base : 'source_' + base;
+        let suffix = 2;
+        while (usedIds.has(id)) { id = base.slice(0, 90) + '_' + suffix; suffix += 1; }
+        usedIds.add(id);
+        return { ...item, id };
+    });
 }
 
 async function callPresentationAi({ req, logAction, messages, source, auditAction, maxTokens, signal }) {
@@ -359,7 +367,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!body.outline || typeof body.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
         return runAiRequest(req, res, body, buildSlidesMessages(body), { source: 'presentation_slides', auditAction: 'PPT AI生成页面', maxTokens: 6000, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language });
+            const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (proposal.presentation) {
                 const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                 proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
@@ -374,7 +382,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (!body.outline && !body.presentation) return res.status(400).json({ error: '请提供当前大纲或演示文稿。', code: 'PRESENTATION_CONTEXT_REQUIRED' });
         const requestedSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
         return runAiRequest(req, res, { ...body, additionalSlideCount: requestedSlides }, buildContinueMessages({ ...body, additionalSlideCount: requestedSlides }), { source: 'presentation_continue', auditAction: 'PPT AI继续生成', maxTokens: Math.min(6000, 1100 * requestedSlides), parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language });
+            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (!Array.isArray(proposal.presentation?.slides) || proposal.presentation.slides.length !== requestedSlides) {
                 const error = new Error('AI 返回的新增页数与请求不一致，请重试。'); error.status = 422; error.code = 'PRESENTATION_AI_CONTINUE_COUNT_INVALID'; throw error;
             }
@@ -385,7 +393,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/ai/rewrite', authMiddleware, asyncHandler(async (req, res) => {
         const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
         if (!body.slide || typeof body.slide !== 'object') return res.status(400).json({ error: '请提供要改写的页面。', code: 'PRESENTATION_SLIDE_REQUIRED' });
-        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language }) }) });
+        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
     }));
 
     router.post('/apps/presentations/ai/validate', authMiddleware, asyncHandler(async (req, res) => {

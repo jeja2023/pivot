@@ -68,7 +68,7 @@ function buildSlidesMessages(body = {}) {
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
                 '{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"cover","elements":[{"id":"title","type":"text","x":80,"y":180,"width":1120,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}',
-                '仅可使用 text、shape、table、chart 元素；不要输出 image 或任意外部 URL。坐标基于 1280x720，元素不能越界。图表仅在材料给出数值数据时使用。'
+                '仅可使用 text、shape、table、chart 元素；不要输出 image 或任意外部 URL。坐标基于 1280x720，元素不能越界。图表仅在材料给出数值数据时使用。表格必须提供至少一个非空 columns 字段，所有 rows 的列数必须与 columns 一致；无法提供可核实表格数据时，改用 text 元素。图表必须提供至少两个 data.columns 字段及其对应数值行。'
             ].join('\n')
         }
     ];
@@ -117,7 +117,155 @@ function parseValidationProposal(content) {
     return { status: ['passed', 'warning', 'blocked'].includes(String(result.status)) ? String(result.status) : (issues.some(item => item.severity === 'blocking') ? 'blocked' : issues.length ? 'warning' : 'passed'), issues, assumptions: Array.isArray(result.assumptions) ? result.assumptions.slice(0, 50).map(item => String(item).slice(0, 500)) : [] };
 }
 
-function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN' } = {}) {
+const AI_ALLOWED_ELEMENT_TYPES = new Set(['text', 'shape', 'table', 'chart']);
+const AI_CHART_TYPES = new Set(['bar', 'line', 'area', 'pie']);
+
+function isAiObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeAiText(value, fallback = '', maxLength = 500) {
+    const text = String(value ?? fallback).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    return text.slice(0, maxLength);
+}
+
+function normalizeAiId(value, fallback) {
+    const base = normalizeAiText(value, fallback, 96).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^_+/, '') || fallback;
+    return /^[A-Za-z0-9]/.test(base) ? base : 'item_' + base;
+}
+
+function uniqueAiId(value, fallback, used) {
+    const base = normalizeAiId(value, fallback);
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+        candidate = base.slice(0, 90) + '_' + suffix;
+        suffix += 1;
+    }
+    used.add(candidate);
+    return candidate;
+}
+
+function normalizeAiNumber(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(number * 100) / 100));
+}
+
+function normalizeAiColor(value, fallback) {
+    const text = String(value || '').trim();
+    const match = text.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!match) return fallback;
+    const hex = match[1].toUpperCase();
+    return '#' + (hex.length === 3 ? hex.split('').map(item => item + item).join('') : hex);
+}
+
+function normalizeAiBounds(element, canvas) {
+    const x = normalizeAiNumber(element?.x, 80, 0, canvas.width - 1);
+    const y = normalizeAiNumber(element?.y, 80, 0, canvas.height - 1);
+    const width = normalizeAiNumber(element?.width, Math.min(480, canvas.width - x), 1, canvas.width - x);
+    const height = normalizeAiNumber(element?.height, Math.min(180, canvas.height - y), 1, canvas.height - y);
+    return { x, y, width, height, rotation: normalizeAiNumber(element?.rotation, 0, -360, 360), zIndex: normalizeAiNumber(element?.zIndex, 1, -1000, 1000) };
+}
+
+function normalizeAiSourceRefs(value, sourceIds) {
+    if (!Array.isArray(value)) return [];
+    return value.map(item => String(item || '').trim()).filter(ref => sourceIds.has(ref)).slice(0, 50);
+}
+
+function normalizeAiTableElement(element) {
+    const columns = Array.isArray(element?.columns) ? element.columns : element?.data?.columns;
+    if (!Array.isArray(columns)) return null;
+    const normalizedColumns = columns.map(value => String(value ?? '').trim()).filter(Boolean).slice(0, 20);
+    if (!normalizedColumns.length) return null;
+    const rows = Array.isArray(element?.rows) ? element.rows : element?.data?.rows;
+    const normalizedRows = Array.isArray(rows)
+        ? rows.filter(Array.isArray).map(row => normalizedColumns.map((_, index) => String(row[index] ?? '').slice(0, 2000))).slice(0, 100)
+        : [];
+    return { ...element, columns: normalizedColumns, rows: normalizedRows, style: isAiObject(element?.style) ? element.style : {} };
+}
+
+function normalizeAiChartElement(element) {
+    const columns = Array.isArray(element?.data?.columns) ? element.data.columns.map(value => String(value ?? '').trim()).filter(Boolean).slice(0, 12) : [];
+    if (columns.length < 2) return null;
+    const rows = Array.isArray(element?.data?.rows) ? element.data.rows : [];
+    const normalizedRows = rows.filter(row => Array.isArray(row) && row.length >= columns.length).map(row => {
+        const values = [String(row[0] ?? '').slice(0, 160)];
+        for (let index = 1; index < columns.length; index += 1) {
+            const value = Number(row[index]);
+            if (!Number.isFinite(value)) return null;
+            values.push(value);
+        }
+        return values;
+    }).filter(Boolean).slice(0, 500);
+    if (!normalizedRows.length) return null;
+    return { ...element, chartType: AI_CHART_TYPES.has(String(element?.chartType || '')) ? String(element.chartType) : 'bar', data: { ...(isAiObject(element?.data) ? element.data : {}), columns, rows: normalizedRows }, options: isAiObject(element?.options) ? element.options : {} };
+}
+
+function normalizeAiElement(element, context) {
+    const { canvas, sourceIds, slideIndex, elementIndex, usedIds } = context;
+    if (!isAiObject(element) || !AI_ALLOWED_ELEMENT_TYPES.has(String(element.type || ''))) return null;
+    const type = String(element.type);
+    let normalized = { ...element, type, id: uniqueAiId(element.id, 'element_' + (slideIndex + 1) + '_' + (elementIndex + 1), usedIds), ...normalizeAiBounds(element, canvas), locked: false, visible: element.visible !== false, sourceRefs: normalizeAiSourceRefs(element.sourceRefs, sourceIds) };
+    if (type === 'table') {
+        normalized = normalizeAiTableElement(normalized);
+        if (!normalized) return null;
+    }
+    if (type === 'chart') {
+        normalized = normalizeAiChartElement(normalized);
+        if (!normalized) return null;
+    }
+    if (type === 'text') {
+        const style = isAiObject(normalized.style) ? normalized.style : {};
+        normalized.content = { text: normalizeAiText(isAiObject(normalized.content) ? normalized.content.text : (normalized.content ?? normalized.text), '', 16000) };
+        normalized.style = { ...style, color: normalizeAiColor(style.color, '#1F2937'), fontSize: normalizeAiNumber(style.fontSize, 18, 6, 96), fontWeight: normalizeAiNumber(style.fontWeight, 400, 100, 900), lineHeight: normalizeAiNumber(style.lineHeight, 1.35, 0.8, 3), padding: normalizeAiNumber(style.padding, 0, 0, 80) };
+    }
+    if (type === 'shape') {
+        const style = isAiObject(normalized.style) ? normalized.style : {};
+        normalized.shapeType = ['rect', 'roundRect', 'ellipse', 'line'].includes(String(normalized.shapeType || '')) ? String(normalized.shapeType) : 'rect';
+        normalized.style = { ...style, fill: normalizeAiColor(style.fill, '#FFFFFF'), stroke: normalizeAiColor(style.stroke, '#CBD5E1'), strokeWidth: normalizeAiNumber(style.strokeWidth, 1, 0, 20), opacity: normalizeAiNumber(style.opacity, 1, 0, 1), radius: normalizeAiNumber(style.radius, 12, 0, 100) };
+    }
+    return normalized;
+}
+
+function normalizeAiSources(sources) {
+    const usedIds = new Set();
+    return (Array.isArray(sources) ? sources : []).slice(0, 500).map((source, index) => ({
+        id: uniqueAiId(source?.id, 'source_' + (index + 1), usedIds),
+        title: normalizeAiText(source?.title, '材料', 240), type: normalizeAiText(source?.type, 'material', 48), locator: normalizeAiText(source?.locator, '', 500), digest: normalizeAiText(source?.digest, '', 160)
+    }));
+}
+
+function repairAiPresentationProposal(proposal, options = {}) {
+    if (!proposal || typeof proposal !== 'object' || !Array.isArray(proposal.slides)) return proposal;
+    const canvas = String(options.aspectRatio || '16:9') === '4:3' ? { width: 960, height: 720 } : { width: 1280, height: 720 };
+    const sources = normalizeAiSources(options.sources);
+    const sourceIds = new Set(sources.map(source => source.id));
+    const warnings = Array.isArray(proposal.warnings) ? proposal.warnings.map(value => String(value).slice(0, 500)) : [];
+    const usedSlideIds = new Set();
+    const slides = proposal.slides.slice(0, 100).map((slide, slideIndex) => {
+        const safeSlide = isAiObject(slide) ? slide : {};
+        const usedElementIds = new Set();
+        const elements = (Array.isArray(safeSlide.elements) ? safeSlide.elements : []).slice(0, 100).flatMap((element, elementIndex) => {
+            const normalized = normalizeAiElement(element, { canvas, sourceIds, slideIndex, elementIndex, usedIds: usedElementIds });
+            if (normalized) return [normalized];
+            if (element?.type === 'table') {
+                warnings.push('第 ' + (slideIndex + 1) + ' 页的第 ' + (elementIndex + 1) + ' 个表格缺少有效列，已改为不生成该表格。');
+            } else if (element?.type === 'chart') {
+                warnings.push('第 ' + (slideIndex + 1) + ' 页的第 ' + (elementIndex + 1) + ' 个图表缺少可核实的数据，已改为不生成该图表。');
+            } else {
+                warnings.push('第 ' + (slideIndex + 1) + ' 页包含不受支持的元素，已跳过该元素。');
+            }
+            return [];
+        });
+        if (!elements.length) elements.push({ id: uniqueAiId('content_placeholder', 'content_placeholder_' + (slideIndex + 1), usedElementIds), type: 'text', x: 80, y: 180, width: Math.min(960, canvas.width - 160), height: 120, rotation: 0, zIndex: 1, locked: false, visible: true, sourceRefs: [], content: { text: '本页内容待补充' }, style: { fontSize: 24, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, padding: 0 } });
+        const background = isAiObject(safeSlide.background) ? safeSlide.background : {};
+        return { ...safeSlide, id: uniqueAiId(safeSlide.id, 'slide_' + (slideIndex + 1), usedSlideIds), type: normalizeAiText(safeSlide.type, 'content', 48), layoutId: normalizeAiText(safeSlide.layoutId, 'title-content', 96), background: { fill: normalizeAiColor(background.fill, '#FFFFFF'), imageAssetRef: '', opacity: normalizeAiNumber(background.opacity, 1, 0, 1) }, elements, speakerNotes: normalizeAiText(safeSlide.speakerNotes, '', 12000), sourceRefs: normalizeAiSourceRefs(safeSlide.sourceRefs, sourceIds) };
+    });
+    return { ...proposal, slides, sources, warnings };
+}
+
+function parsePresentationProposal(content, { templateId = 'business-blue', title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [] } = {}) {
     const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
@@ -125,6 +273,7 @@ function parsePresentationProposal(content, { templateId = 'business-blue', titl
     let proposal;
     try { proposal = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw presentationError('AI 返回的演示文稿 JSON 无效。', 422, 'PRESENTATION_AI_JSON_INVALID'); }
     if (!Array.isArray(proposal.slides)) return proposal;
+    proposal = repairAiPresentationProposal(proposal, { aspectRatio, sources });
     const template = getBuiltInTemplate(templateId) || getBuiltInTemplate('business-blue');
     const contentObject = normalizePresentation({
         presentationId: 'proposal',
@@ -133,10 +282,10 @@ function parsePresentationProposal(content, { templateId = 'business-blue', titl
         template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest },
         theme: template.theme,
         slides: proposal.slides,
-        sources: Array.isArray(proposal.sources) ? proposal.sources : [],
+        sources: proposal.sources,
         metadata: { aiGenerated: true, language: clamp(language, 24) || 'zh-CN' }
     });
     return { ...proposal, presentation: contentObject };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, parsePresentationProposal, parseValidationProposal, presentationAiSystemPrompt };
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, parsePresentationProposal, parseValidationProposal, repairAiPresentationProposal };

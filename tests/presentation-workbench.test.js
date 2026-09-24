@@ -19,7 +19,7 @@ const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('
 const { exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
-const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages } = require('../server/services/presentations/presentation-ai');
+const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
 const { normalizeTemplatePackage, applyTemplateBrandControls, inferPresentationAssetType, presentationFromArtifactText } = require('../server/services/presentations/presentation-service');
 const { scanVbaSource } = require('../server/services/presentations/presentation-vba');
 const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
@@ -148,6 +148,60 @@ test('AI 页面提案必须经过受控 PPT IR 校验', () => {
     }), { title: '测试文稿', templateId: 'business-blue' });
     assert.equal(proposal.presentation.slides.length, 1);
     assert.equal(proposal.presentation.theme.name, '商务蓝汇报');
+});
+
+test('AI 页面提案会安全跳过缺少列的表格和不完整图表，不阻断整份演示生成', () => {
+    const proposal = {
+        title: 'AI 生成容错验证',
+        slides: [{
+            id: 'slide_1', type: 'content', layoutId: 'title-content', background: { fill: '#FFFFFF' },
+            elements: [
+                { id: 'title', type: 'text', x: 80, y: 60, width: 1120, height: 80, content: { text: '有效页面标题' }, style: { fontSize: 32, fontWeight: 700, color: '#1F2937', align: 'left' } },
+                { id: 'empty_table', type: 'table', x: 80, y: 180, width: 500, height: 260, columns: [], rows: [] },
+                { id: 'empty_chart', type: 'chart', x: 620, y: 180, width: 500, height: 260, chartType: 'bar', data: { columns: ['类别'], rows: [] } }
+            ], speakerNotes: '', sourceRefs: []
+        }]
+    };
+    const repaired = repairAiPresentationProposal(proposal);
+    assert.equal(repaired.slides[0].elements.some(element => element.id === 'empty_table'), false);
+    assert.equal(repaired.slides[0].elements.some(element => element.id === 'empty_chart'), false);
+    assert.match(repaired.warnings.join('\n'), /表格缺少有效列/);
+    assert.match(repaired.warnings.join('\n'), /图表缺少可核实的数据/);
+    const parsed = parsePresentationProposal(JSON.stringify(proposal), { title: proposal.title });
+    assert.equal(parsed.presentation.slides[0].elements.some(element => element.type === 'table'), false);
+    assert.equal(parsed.presentation.slides[0].elements.some(element => element.type === 'chart'), false);
+});
+
+test('AI 页面提案会修复模型常见的标识、边界与来源引用问题', () => {
+    const proposal = {
+        title: '模型容错矩阵',
+        slides: [{
+            id: '重复页面', type: 'content', layoutId: 'title-content', sourceRefs: ['source_1', 'unknown'],
+            elements: [
+                { id: '重复元素', type: 'text', x: -120, y: 20, width: 5000, height: 90, content: { text: '第一页标题' }, style: { color: '#fff', fontSize: 180, fontWeight: 9999 }, sourceRefs: ['source_1', 'unknown'] },
+                { id: '重复元素', type: 'table', x: 80, y: 180, width: 500, height: 220, data: { columns: ['事项', '状态'], rows: [['需求', '完成'], ['联调']] }, sourceRefs: ['source_1'] },
+                { id: 'unsupported', type: 'image', x: 80, y: 420, width: 200, height: 120, assetRef: 'https://example.invalid/x.png' }
+            ], speakerNotes: ''
+        }, {
+            id: '重复页面', type: 'content', layoutId: 'title-content',
+            elements: [{ id: 'chart', type: 'chart', x: 700, y: 120, width: 800, height: 520, chartType: 'unknown', data: { columns: ['月份', '数量'], rows: [['一月', 12], ['二月', 24]] }, sourceRefs: ['source_1'] }], sourceRefs: []
+        }]
+    };
+    const parsed = parsePresentationProposal(JSON.stringify(proposal), { title: proposal.title, aspectRatio: '4:3', sources: [{ id: 'source_1', title: '项目材料', type: 'material' }] });
+    const [first, second] = parsed.presentation.slides;
+    assert.notEqual(first.id, second.id);
+    assert.equal(first.sourceRefs.join(','), 'source_1');
+    assert.equal(first.elements.some(element => element.type === 'image'), false);
+    assert.equal(first.elements[0].x, 0);
+    assert.ok(first.elements[0].width <= 960);
+    assert.equal(first.elements[0].style.color, '#FFFFFF');
+    assert.equal(first.elements[0].style.fontSize, 96);
+    const table = first.elements.find(element => element.type === 'table');
+    assert.deepEqual(table.columns, ['事项', '状态']);
+    assert.deepEqual(table.rows[1], ['联调', '']);
+    const chart = second.elements.find(element => element.type === 'chart');
+    assert.equal(chart.chartType, 'bar');
+    assert.equal(chart.sourceRefs.join(','), 'source_1');
 });
 
 test('PPT 页数上限保持产品防护边界', () => {
