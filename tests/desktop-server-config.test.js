@@ -15,6 +15,7 @@ const {
     saveUserDesktopConfig
 } = require('../desktop/config');
 const { isTrustedRendererUrl } = require('../desktop/navigation-policy');
+const { installRendererPermissionPolicy } = require('../desktop/renderer-permissions');
 
 test('Desktop Server Config: 用户自定义配置路径与持久化', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-desktop-config-test-'));
@@ -109,11 +110,28 @@ test('Desktop Preload: 会话列表有独立的样式和滚轮兜底，且不暴
     assert.doesNotMatch(preload, /setServerConfig\s*\(/);
 });
 
-test('Desktop main process explicitly denies remote renderer permission prompts', () => {
-    const policy = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'renderer-permissions.js'), 'utf8');
-    assert.match(policy, /setPermissionRequestHandler/);
-    assert.match(policy, /callback\(false\)/);
-    assert.match(policy, /setPermissionCheckHandler/);
+test('Desktop main process only permits microphone prompts from trusted renderers', () => {
+    let permissionRequestHandler = null;
+    let permissionCheckHandler = null;
+    installRendererPermissionPolicy({
+        setPermissionRequestHandler(handler) { permissionRequestHandler = handler; },
+        setPermissionCheckHandler(handler) { permissionCheckHandler = handler; }
+    }, {
+        isTrustedRenderer: targetUrl => targetUrl === 'https://pivot.example'
+    });
+
+    const webContents = { getURL: () => 'https://pivot.example/chat' };
+    const request = (permission, details) => {
+        let granted = null;
+        permissionRequestHandler(webContents, permission, value => { granted = value; }, details);
+        return granted;
+    };
+
+    assert.equal(request('media', { securityOrigin: 'https://pivot.example', mediaTypes: ['audio'] }), true);
+    assert.equal(request('media', { securityOrigin: 'https://pivot.example', mediaTypes: ['video'] }), false);
+    assert.equal(request('media', { securityOrigin: 'https://untrusted.example', mediaTypes: ['audio'] }), false);
+    assert.equal(request('notifications', { securityOrigin: 'https://pivot.example' }), false);
+    assert.equal(permissionCheckHandler(webContents, 'media', 'https://pivot.example'), false);
 });
 
 test('Desktop Server Config: 服务端健康探测与签名握手', async () => {

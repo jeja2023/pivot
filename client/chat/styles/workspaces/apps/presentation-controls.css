@@ -2,14 +2,2041 @@
 .presentation-rail-head > div { display: flex; gap: 4px; }
 .presentation-page-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 7px; border-bottom: 1px solid rgba(148, 163, 184, 0.14); }
 .presentation-page-actions .btn-secondary { height: 28px; padding: 0 3px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
-.presentation-inspector-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ==========================================================================
+   演示文稿右侧检查器（属性、模板、素材、AI助手、备注、评论、检查、版本、运营）
+   深度布局与样式优化：系统绿色主题（#10a37f）、规整双行标签栏、全面板高质感体验
+   ========================================================================== */
+
+/* 布局宽度扩展：从原先 282px 增至 330px，提供充裕的操作与排版空间 */
+.presentation-editor-layout {
+    grid-template-columns: 196px minmax(0, 1fr) 330px;
+}
+
+.presentation-inspector {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: #ffffff;
+    border-left: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: -2px 0 10px rgba(15, 23, 42, 0.025);
+    z-index: 3;
+}
+
+/* 顶部标签栏：规整双行药丸卡片布局，无横向截断、无滚动隐蔽，全部按键 100% 完整可见 */
+.presentation-inspector-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    padding: 6px 7px !important;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18) !important;
+    overflow: visible !important;
+    white-space: normal !important;
+    flex-shrink: 0 !important;
+}
+.presentation-inspector-tabs button {
+    flex: 1 1 44px;
+    min-width: 42px;
+    height: 27px;
+    padding: 0 3px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.69rem;
+    font-weight: 750;
+    letter-spacing: -0.2px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    user-select: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+.presentation-inspector-tabs button:hover {
+    background: #f8fafc;
+    color: #0f172a;
+    border-color: rgba(16, 163, 127, 0.35);
+    box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
+}
+.presentation-inspector-tabs button.is-active {
+    background: #10a37f !important;
+    color: #ffffff !important;
+    border-color: #10a37f !important;
+    box-shadow: 0 2px 5px rgba(16, 163, 127, 0.28) !important;
+    font-weight: 800;
+}
+.presentation-inspector-tabs button.is-active .presentation-comments-badge {
+    background: #ffffff;
+    color: #10a37f;
+}
+.presentation-comments-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    line-height: 1;
+    border-radius: 999px;
+    background: #10a37f;
+    color: #ffffff;
+    font-size: 0.58rem;
+    font-weight: 800;
+    margin-left: 2px;
+}
+
+/* 检查器主体内容滚动面板 */
+.presentation-inspector-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 13px 13px 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #ffffff;
+    gap: 11px;
+}
+.presentation-inspector-panel::-webkit-scrollbar {
+    width: 5px;
+}
+.presentation-inspector-panel::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 4px;
+}
+
+/* 公共：面板头部与副标题 */
+.presentation-panel-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.presentation-panel-title-group strong {
+    font-size: 0.83rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-panel-subtitle,
+.presentation-issues-sub,
+.presentation-version-sub,
+.presentation-metrics-sub {
+    font-size: 0.65rem;
+    color: #64748b;
+    line-height: 1.35;
+}
+.presentation-info-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-left: 3px solid #10a37f;
+    font-size: 0.68rem;
+    line-height: 1.45;
+}
+.presentation-info-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    background: rgba(16, 163, 127, 0.1);
+    color: #10a37f;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+.presentation-info-card-icon svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+}
+.presentation-info-card-text strong {
+    display: block;
+    font-size: 0.71rem;
+    font-weight: 800;
+    color: #1e293b;
+    margin-bottom: 2px;
+}
+.presentation-info-card-text p {
+    margin: 0;
+    color: #64748b;
+}
+
+/* ==========================================================================
+   1. 模板面板（Template Panel）
+   ========================================================================== */
+#presentation-template-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 13px 13px 0 13px !important;
+    gap: 8px !important;
+}
+.presentation-template-panel-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    margin-bottom: 2px;
+    flex-shrink: 0 !important;
+}
+.presentation-template-panel-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.presentation-template-panel-title-row strong {
+    font-size: 0.83rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-template-actions-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.presentation-template-panel-head .btn-secondary {
+    height: 27px;
+    padding: 0 9px;
+    border-radius: 6px;
+    font-size: 0.69rem;
+    font-weight: 750;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    color: #334155;
+    transition: all 0.15s ease;
+}
+.presentation-template-panel-head .btn-secondary:hover {
+    background: #ffffff;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.38);
+    box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
+}
+.presentation-template-list {
+    display: grid;
+    gap: 8px;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-right: 2px !important;
+    padding-bottom: 14px !important;
+}
+.presentation-template-list::-webkit-scrollbar {
+    width: 5px;
+}
+.presentation-template-list::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+}
+.presentation-template-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(16, 163, 127, 0.5);
+}
+.presentation-template-list .presentation-template-card {
+    min-height: auto;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    border-left: 4px solid var(--presentation-template-color, #1769aa);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.025);
+    display: grid;
+    gap: 4px;
+    cursor: pointer;
+    text-align: left;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.presentation-template-list .presentation-template-card:hover {
+    border-color: rgba(16, 163, 127, 0.35);
+    border-left-color: var(--presentation-template-color, #1769aa);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
+}
+.presentation-template-list .presentation-template-card.is-active {
+    border-color: #10a37f;
+    border-left-color: var(--presentation-template-color, #1769aa);
+    border-left-width: 5px;
+    background: linear-gradient(90deg, rgba(16, 163, 127, 0.035) 0%, #ffffff 100%);
+    box-shadow: 0 0 0 1.5px rgba(16, 163, 127, 0.25), 0 2px 6px rgba(16, 163, 127, 0.06);
+}
+.presentation-template-list .presentation-template-card strong {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.presentation-template-list .presentation-template-card.is-active strong::after {
+    content: "当前使用";
+    font-size: 0.6rem;
+    font-weight: 750;
+    color: #10a37f;
+    background: rgba(16, 163, 127, 0.1);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.presentation-template-list .presentation-template-card span {
+    font-size: 0.69rem;
+    line-height: 1.4;
+    color: #64748b;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.presentation-template-list .presentation-template-card small {
+    font-size: 0.64rem;
+    font-weight: 750;
+    color: #059669;
+    background: #f0fdf4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    width: fit-content;
+}
+
+/* ==========================================================================
+   2. 素材面板（Assets Panel）
+   ========================================================================== */
+#presentation-assets-panel .presentation-template-panel-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    margin-bottom: 4px;
+}
+#presentation-assets-panel .presentation-template-panel-head strong {
+    font-size: 0.83rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+#presentation-assets-refresh-btn {
+    height: 27px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 0.69rem;
+    font-weight: 700;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    color: #334155;
+}
+#presentation-assets-refresh-btn:hover {
+    background: #ffffff;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.4);
+}
+.presentation-assets-quick-toolbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+    margin-bottom: 6px;
+}
+.presentation-assets-quick-toolbar .btn-secondary {
+    height: 28px;
+    padding: 0 4px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 750;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    color: #334155;
+    transition: all 0.15s ease;
+}
+.presentation-assets-quick-toolbar .btn-secondary:hover {
+    background: #ffffff;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.35);
+    box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
+}
+#presentation-assets-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 13px 13px 0 13px !important;
+    gap: 8px !important;
+}
+#presentation-assets-panel .presentation-template-panel-head,
+#presentation-assets-panel .presentation-assets-quick-toolbar {
+    flex-shrink: 0 !important;
+}
+.presentation-assets-list {
+    display: grid;
+    gap: 7px;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-right: 2px !important;
+    padding-bottom: 14px !important;
+}
+.presentation-assets-list::-webkit-scrollbar {
+    width: 5px;
+}
+.presentation-assets-list::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+}
+.presentation-assets-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(16, 163, 127, 0.5);
+}
+#presentation-assets-panel .presentation-ai-note {
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    padding: 8px 10px !important;
+    border-top: 1px solid rgba(148, 163, 184, 0.16) !important;
+}
+.presentation-asset-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 11px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+    transition: all 0.15s ease;
+}
+.presentation-asset-row:hover {
+    border-color: rgba(16, 163, 127, 0.35);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+.presentation-asset-row strong {
+    font-size: 0.74rem;
+    font-weight: 750;
+    color: #0f172a;
+}
+.presentation-asset-row small {
+    font-size: 0.65rem;
+    color: #64748b;
+}
+.presentation-asset-row .btn-secondary {
+    height: 25px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 0.67rem;
+    font-weight: 750;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.3);
+    background: #f0fdf4;
+}
+.presentation-asset-row .btn-secondary:hover {
+    background: #10a37f;
+    color: #ffffff;
+    border-color: #10a37f;
+}
+
+/* ==========================================================================
+   3. AI 助手面板（AI Assistant Panel）
+   ========================================================================== */
+#presentation-ai-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+.presentation-inspector-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+.presentation-inspector-section-head strong {
+    font-size: 0.83rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-ai-badge,
+.presentation-notes-badge {
+    font-size: 0.62rem;
+    font-weight: 750;
+    color: #10a37f;
+    background: #f0fdf4;
+    border: 1px solid rgba(16, 163, 127, 0.25);
+    padding: 1px 7px;
+    border-radius: 999px;
+}
+.presentation-ai-model-selector {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+}
+.presentation-ai-model-selector span {
+    font-size: 0.72rem;
+    font-weight: 750;
+    color: #334155;
+}
+.presentation-ai-model-selector .form-input {
+    height: 33px;
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: #ffffff;
+    font-size: 0.76rem;
+    font-weight: 650;
+    color: #0f172a;
+    padding: 0 10px;
+    transition: all 0.15s ease;
+}
+.presentation-ai-model-selector .form-input:focus {
+    border-color: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+.presentation-ai-prompt-group {
+    display: grid;
+    gap: 6px;
+}
+.presentation-ai-prompt-group label {
+    font-size: 0.72rem;
+    font-weight: 750;
+    color: #334155;
+    margin: 0;
+}
+#presentation-ai-instruction {
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: #ffffff;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    padding: 8px 10px;
+    resize: vertical;
+    min-height: 72px;
+    transition: all 0.15s ease;
+}
+#presentation-ai-instruction:focus {
+    border-color: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+.presentation-ai-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 2px;
+}
+.presentation-ai-chip {
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(16, 163, 127, 0.2);
+    background: #f0fdf4;
+    color: #065f46;
+    font-size: 0.65rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.presentation-ai-chip:hover {
+    background: #dcfce7;
+    border-color: #10a37f;
+    transform: translateY(-1px);
+}
+.presentation-ai-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+    margin-top: 4px !important;
+}
+.presentation-ai-actions button {
+    height: 33px;
+    padding: 0 8px;
+    border-radius: 7px;
+    font-size: 0.72rem;
+    font-weight: 750;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+#presentation-ai-rewrite-btn.btn-primary {
+    background: linear-gradient(135deg, #10a37f 0%, #0d8a6b 100%) !important;
+    border: 1px solid #10a37f !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
+}
+#presentation-ai-rewrite-btn.btn-primary:hover {
+    background: linear-gradient(135deg, #0d8a6b 0%, #0a7359 100%) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35);
+}
+#presentation-ai-continue-btn.btn-secondary,
+#presentation-ai-validate-btn.btn-secondary {
+    background: #ffffff !important;
+    border: 1px solid rgba(148, 163, 184, 0.28) !important;
+    color: #1e293b !important;
+}
+#presentation-ai-continue-btn.btn-secondary:hover,
+#presentation-ai-validate-btn.btn-secondary:hover {
+    background: #f8fafc !important;
+    border-color: rgba(16, 163, 127, 0.5) !important;
+    color: #10a37f !important;
+    transform: translateY(-1px);
+}
+#presentation-ai-stop-btn.btn-secondary {
+    background: #ffffff !important;
+    border: 1px solid rgba(220, 38, 38, 0.25) !important;
+    color: #dc2626 !important;
+}
+#presentation-ai-stop-btn.btn-secondary:hover {
+    background: #fef2f2 !important;
+    border-color: #dc2626 !important;
+}
+.presentation-ai-note {
+    margin: 4px 0 0;
+    padding: 8px 10px;
+    border-radius: 7px;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    color: #64748b;
+    font-size: 0.68rem;
+    line-height: 1.5;
+}
+
+/* ==========================================================================
+   4. 属性面板（Properties Panel）
+   ========================================================================== */
+.presentation-empty-note {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 26px 14px;
+    border: 1px dashed rgba(16, 163, 127, 0.28);
+    border-radius: 10px;
+    background: linear-gradient(180deg, #f8fafc 0%, #f0fdf4 100%);
+    color: #475569;
+    text-align: center;
+    gap: 6px;
+}
+.presentation-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    background: #ffffff;
+    color: #10a37f;
+    box-shadow: 0 2px 8px rgba(16, 163, 127, 0.12);
+    margin-bottom: 2px;
+}
+.presentation-empty-note strong {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-empty-note p {
+    margin: 0;
+    font-size: 0.71rem;
+    line-height: 1.45;
+    color: #64748b;
+}
+
+.presentation-properties-form {
+    display: grid;
+    gap: 9px;
+}
+.presentation-form-section {
+    display: grid;
+    gap: 6px;
+    padding: 9px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.presentation-form-section-title {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #334155;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+.presentation-property-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+.presentation-property-grid label {
+    display: grid;
+    gap: 3px;
+    color: #64748b;
+    font-size: 0.67rem;
+    font-weight: 750;
+}
+.presentation-property-grid .form-input,
+.presentation-properties-form .form-input {
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: #ffffff;
+    font-size: 0.76rem;
+    color: #0f172a;
+    transition: all 0.15s ease;
+}
+.presentation-properties-form .form-input:focus {
+    border-color: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+.presentation-properties-form textarea.form-input {
+    height: auto;
+    padding: 6px 8px;
+    line-height: 1.45;
+}
+
+.presentation-inspector-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
 .presentation-inspector-actions .btn-secondary,
-.presentation-version-head .btn-secondary { height: 30px; padding: 0 8px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
-.presentation-version-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.presentation-version-head strong { font-size: 0.78rem; }
-.presentation-versions-list { display: grid; gap: 8px; }
-.presentation-version-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 9px; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 8px; }
-.presentation-version-row > div { display: grid; min-width: 0; gap: 3px; }
-.presentation-version-row strong { font-size: 0.73rem; }
-.presentation-version-row span { overflow: hidden; color: var(--text-muted); font-size: 0.65rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.presentation-version-row .btn-secondary { height: 28px; padding: 0 8px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
+.presentation-inspector-actions .btn-danger {
+    height: 28px;
+    padding: 0 4px;
+    border-radius: 6px;
+    font-size: 0.67rem;
+    font-weight: 750;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+.presentation-inspector-actions .btn-secondary {
+    background: #ffffff;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    color: #334155;
+}
+.presentation-inspector-actions .btn-secondary:hover {
+    background: #f8fafc;
+    border-color: rgba(16, 163, 127, 0.4);
+    color: #10a37f;
+}
+.presentation-inspector-actions .btn-danger {
+    background: #fff5f5;
+    border: 1px solid rgba(220, 38, 38, 0.25);
+    color: #dc2626;
+}
+.presentation-inspector-actions .btn-danger:hover {
+    background: #dc2626;
+    color: #ffffff;
+    border-color: #dc2626;
+}
+
+.presentation-element-actions {
+    margin-top: 8px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+}
+.presentation-element-actions .btn-secondary {
+    height: 29px;
+    padding: 0 5px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 750;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    color: #334155;
+    transition: all 0.15s ease;
+}
+.presentation-element-actions .btn-secondary:hover {
+    background: #f0fdf4;
+    border-color: rgba(16, 163, 127, 0.4);
+    color: #10a37f;
+    transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   5. 备注面板（Notes Panel）
+   ========================================================================== */
+#presentation-notes-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.presentation-notes-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 180px;
+}
+.presentation-speaker-notes-input {
+    width: 100%;
+    min-height: 190px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: #ffffff;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: #1e293b;
+    resize: vertical;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+.presentation-speaker-notes-input:focus {
+    border-color: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+.presentation-notes-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+#presentation-notes-presenter-btn.btn-primary {
+    height: 35px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #10a37f 0%, #0d8a6b 100%) !important;
+    border: 1px solid #10a37f !important;
+    color: #ffffff !important;
+    font-size: 0.74rem;
+    font-weight: 750;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+#presentation-notes-presenter-btn.btn-primary:hover {
+    background: linear-gradient(135deg, #0d8a6b 0%, #0a7359 100%) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35);
+}
+
+/* ==========================================================================
+   6. 评论与批注面板（Comments Panel）
+   ========================================================================== */
+#presentation-comments-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.presentation-comments-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+.presentation-comments-scope-toggle {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 6px;
+    background: #f1f5f9;
+    gap: 2px;
+}
+.presentation-comments-scope-toggle .btn-secondary {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    border: none !important;
+    background: transparent !important;
+    color: #64748b !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.presentation-comments-scope-toggle .btn-secondary:hover {
+    color: #0f172a !important;
+}
+.presentation-comments-scope-toggle .btn-secondary.is-active {
+    background: #ffffff !important;
+    color: #10a37f !important;
+    font-weight: 800;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.presentation-comment-form {
+    display: grid;
+    gap: 7px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+#presentation-comment-input {
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: #ffffff;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    padding: 8px 10px;
+    resize: vertical;
+    transition: all 0.15s ease;
+}
+#presentation-comment-input:focus {
+    border-color: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+.presentation-comment-form-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+.presentation-comment-form-actions .btn-primary {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 750;
+    background: linear-gradient(135deg, #10a37f 0%, #0d8a6b 100%) !important;
+    border: 1px solid #10a37f !important;
+    color: #ffffff !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.presentation-comment-form-actions .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
+}
+.presentation-comments-list {
+    display: grid;
+    gap: 8px;
+}
+.presentation-comment-card {
+    display: grid;
+    gap: 6px;
+    padding: 10px 11px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+    transition: all 0.15s ease;
+}
+.presentation-comment-card:hover {
+    border-color: rgba(16, 163, 127, 0.35);
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.04);
+}
+.presentation-comment-card.is-resolved {
+    background: #f8fafc;
+    border-style: dashed;
+    opacity: 0.78;
+}
+.presentation-comment-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+.presentation-comment-author {
+    font-size: 0.74rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-comment-time {
+    font-size: 0.65rem;
+    color: #94a3b8;
+}
+.presentation-comment-slide-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #f0fdf4;
+    color: #10a37f;
+    border: 1px solid rgba(16, 163, 127, 0.2);
+    font-size: 0.62rem;
+    font-weight: 750;
+}
+.presentation-comment-body {
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: #334155;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.presentation-comment-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 2px;
+}
+.presentation-comment-actions button {
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    color: #475569;
+    font-size: 0.66rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.presentation-comment-actions button:hover {
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.4);
+    background: #ffffff;
+}
+.presentation-comment-actions button.btn-danger-text:hover {
+    color: #dc2626;
+    border-color: rgba(220, 38, 38, 0.3);
+    background: #fff5f5;
+}
+.presentation-comment-replies {
+    display: grid;
+    gap: 6px;
+    margin-top: 6px;
+    padding-left: 10px;
+    border-left: 2px solid rgba(16, 163, 127, 0.25);
+}
+.presentation-reply-box {
+    display: grid;
+    gap: 6px;
+    margin-top: 6px;
+}
+.presentation-reply-box textarea {
+    font-size: 0.73rem;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+}
+.presentation-reply-box-actions button {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 0.66rem;
+    font-weight: 750;
+}
+
+/* ==========================================================================
+   7. 检查面板（Issues Panel）
+   ========================================================================== */
+#presentation-issues-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.presentation-issues-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+#presentation-check-issues-btn {
+    height: 27px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 0.69rem;
+    font-weight: 700;
+    color: #10a37f;
+    background: #f0fdf4;
+    border: 1px solid rgba(16, 163, 127, 0.3);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+#presentation-check-issues-btn:hover {
+    background: #10a37f;
+    color: #ffffff;
+    border-color: #10a37f;
+}
+.presentation-issues-list {
+    display: grid;
+    gap: 7px;
+}
+.presentation-issue {
+    display: grid;
+    gap: 4px;
+    padding: 10px 11px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--text-main);
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+    transition: all 0.15s ease;
+}
+.presentation-issue:hover {
+    border-color: #10a37f !important;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05);
+}
+.presentation-issue strong {
+    font-size: 0.75rem;
+    font-weight: 800;
+    line-height: 1.35;
+    color: #0f172a;
+}
+.presentation-issue span {
+    color: #64748b;
+    font-size: 0.68rem;
+    line-height: 1.4;
+}
+.presentation-issue.is-blocking {
+    border-left: 4px solid #ef4444 !important;
+    background: linear-gradient(90deg, #fef2f2 0%, #ffffff 100%);
+}
+.presentation-issue.is-warning {
+    border-left: 4px solid #f59e0b !important;
+    background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%);
+}
+.presentation-issue.is-info {
+    border-left: 4px solid #10a37f !important;
+    background: linear-gradient(90deg, #f0fdf4 0%, #ffffff 100%);
+}
+
+/* ==========================================================================
+   8. 版本控制面板（Versions Panel）
+   ========================================================================== */
+#presentation-versions-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.presentation-version-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+.presentation-version-head strong {
+    font-size: 0.83rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-version-head .btn-secondary {
+    height: 27px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 0.69rem;
+    font-weight: 750;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    color: #334155;
+    transition: all 0.15s ease;
+}
+.presentation-version-head .btn-secondary:hover {
+    background: #ffffff;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.4);
+}
+.presentation-versions-list {
+    display: grid;
+    gap: 7px;
+}
+.presentation-version-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 7px;
+    padding: 9px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+    transition: all 0.15s ease;
+}
+.presentation-version-row:hover {
+    border-color: rgba(16, 163, 127, 0.35);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+.presentation-version-row > div {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+.presentation-version-row strong {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.presentation-version-row span {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.presentation-version-row .btn-secondary {
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 5px;
+    font-size: 0.67rem;
+    font-weight: 750;
+    color: #10a37f;
+    border: 1px solid rgba(16, 163, 127, 0.3);
+    background: #f0fdf4;
+    transition: all 0.15s ease;
+}
+.presentation-version-row .btn-secondary:hover {
+    background: #10a37f;
+    color: #ffffff;
+    border-color: #10a37f;
+}
+
+/* ==========================================================================
+   9. 运营面板（Metrics Panel）
+   ========================================================================== */
+#presentation-metrics-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.presentation-metrics-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+.presentation-metrics-head .btn-secondary {
+    height: 27px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 0.69rem;
+    font-weight: 750;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    color: #334155;
+}
+.presentation-metrics-head .btn-secondary:hover {
+    background: #ffffff;
+    color: #10a37f;
+    border-color: rgba(16, 163, 127, 0.4);
+}
+.presentation-metrics-summary {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1px solid rgba(16, 163, 127, 0.25);
+    color: #065f46;
+    font-size: 0.72rem;
+    font-weight: 750;
+    border-radius: 8px;
+    padding: 9px 12px;
+    box-shadow: 0 1px 3px rgba(16, 163, 127, 0.08);
+}
+#presentation-metrics-panel .presentation-issues-list .presentation-issue {
+    border-left: 3px solid #10a37f !important;
+}
+
+/* ==========================================================================
+   导出选项弹窗深度优化（Export Options Modal）
+   ========================================================================== */
+.presentation-export-dialog {
+    width: min(520px, calc(100vw - 32px)) !important;
+    max-height: calc(100vh - 40px) !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border-radius: 14px !important;
+    background: #ffffff !important;
+    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+    text-align: left !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.presentation-export-dialog .presentation-create-dialog-head {
+    padding: 18px 24px 14px !important;
+    background: linear-gradient(180deg, #f8fbfa 0%, #ffffff 100%) !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16) !important;
+    flex-shrink: 0 !important;
+}
+
+.presentation-export-dialog .presentation-create-dialog-title-group h3 {
+    margin: 0 0 4px 0;
+    color: #0f172a;
+    font-size: 1.15rem;
+    font-weight: 750;
+    letter-spacing: -0.2px;
+}
+
+.presentation-export-dialog .presentation-create-dialog-title-group p {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.presentation-export-form {
+    padding: 20px 24px 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    text-align: left;
+}
+
+.presentation-export-section {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    text-align: left;
+}
+
+.presentation-export-section-title {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #475569;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+}
+
+.presentation-export-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+}
+
+.presentation-export-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+    text-align: left;
+}
+
+.presentation-export-label-hint {
+    font-size: 0.68rem;
+    font-weight: normal;
+    color: #94a3b8;
+}
+
+.presentation-export-select {
+    width: 100% !important;
+    height: 38px !important;
+    padding: 0 12px !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+    background: #ffffff !important;
+    font-size: 0.8rem !important;
+    color: #1e293b !important;
+    outline: none !important;
+    transition: all 0.15s ease !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+}
+
+.presentation-export-select:focus {
+    border-color: #10a37f !important;
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.15) !important;
+}
+
+.presentation-export-checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.presentation-export-checkbox-card {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    padding: 10px 14px !important;
+    border-radius: 9px !important;
+    background: #f8fafc !important;
+    border: 1px solid rgba(148, 163, 184, 0.18) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    user-select: none !important;
+    text-align: left !important;
+    margin: 0 !important;
+}
+
+.presentation-export-checkbox-card:hover {
+    background: #f0fdf4 !important;
+    border-color: rgba(16, 163, 127, 0.35) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.06);
+}
+
+.presentation-export-checkbox-card input[type="checkbox"] {
+    width: 17px !important;
+    height: 17px !important;
+    margin-top: 2px !important;
+    accent-color: #10a37f !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+}
+
+.presentation-export-checkbox-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    text-align: left;
+}
+
+.presentation-export-checkbox-content strong {
+    font-size: 0.78rem;
+    font-weight: 750;
+    color: #1e293b;
+    line-height: 1.35;
+    text-align: left;
+}
+
+.presentation-export-checkbox-content p {
+    margin: 0;
+    font-size: 0.7rem;
+    color: #64748b;
+    line-height: 1.4;
+    text-align: left;
+}
+
+.presentation-export-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.presentation-export-actions {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+    padding-top: 14px !important;
+    margin-top: 4px !important;
+    border-top: 1px solid rgba(148, 163, 184, 0.16) !important;
+}
+
+.presentation-export-actions .btn-secondary {
+    height: 35px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: #ffffff;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.presentation-export-actions .btn-secondary:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.presentation-export-actions .btn-primary {
+    height: 35px;
+    padding: 0 18px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 750;
+    background: #10a37f;
+    border: 1px solid #10a37f;
+    color: #ffffff;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
+    transition: all 0.15s ease;
+}
+
+.presentation-export-actions .btn-primary:hover {
+    background: #0d8a6a;
+    border-color: #0d8a6a;
+    box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35);
+    transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   11. 演示文稿协作与单位共享弹窗（Collaboration & Unit Sharing Dialog）
+   ========================================================================== */
+.presentation-collab-dialog {
+    width: min(680px, calc(100vw - 32px)) !important;
+    max-height: calc(100vh - 40px) !important;
+    padding: 0 !important;
+    border-radius: 14px !important;
+    background: #ffffff !important;
+    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+    border: 1px solid rgba(148, 163, 184, 0.22) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+.presentation-collab-dialog .presentation-create-dialog-head {
+    padding: 18px 22px 14px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    background: #ffffff;
+}
+
+.presentation-collab-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 22px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* 标签切换栏（Segmented Tabs） */
+.presentation-collab-tabs {
+    display: flex;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: 9px;
+    gap: 3px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.presentation-collab-tab {
+    flex: 1;
+    height: 32px !important;
+    padding: 0 10px !important;
+    font-size: 0.76rem !important;
+    font-weight: 700 !important;
+    color: #64748b !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 7px !important;
+    cursor: pointer !important;
+    transition: all 0.16s ease !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    user-select: none !important;
+    box-shadow: none !important;
+}
+
+.presentation-collab-tab:hover {
+    color: #1e293b !important;
+    background: rgba(255, 255, 255, 0.6) !important;
+}
+
+.presentation-collab-tab.is-active {
+    background: #ffffff !important;
+    color: #10a37f !important;
+    font-weight: 800 !important;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* 统一面板卡片容器 */
+.presentation-collab-panel {
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+/* 模式一：按单位选人 2x2 对齐网格 */
+.presentation-collab-grid-unit-user {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+}
+
+/* 模式二：直接搜索用户 单行对齐网格 */
+.presentation-collab-grid-search {
+    display: grid;
+    grid-template-columns: 1fr 170px auto;
+    gap: 10px;
+}
+
+.presentation-collab-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.presentation-collab-label {
+    font-size: 0.72rem;
+    font-weight: 750;
+    color: #475569;
+    display: block;
+    line-height: 1.2;
+}
+
+.presentation-collab-label-placeholder {
+    visibility: hidden;
+    user-select: none;
+}
+
+.presentation-collab-select {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    padding: 0 28px 0 10px !important;
+    border-radius: 7px !important;
+    border: 1px solid rgba(148, 163, 184, 0.28) !important;
+    background-color: #ffffff !important;
+    font-size: 0.78rem !important;
+    color: #1e293b !important;
+    transition: all 0.15s ease !important;
+    box-sizing: border-box !important;
+    cursor: pointer !important;
+}
+
+.presentation-collab-input {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    padding: 0 10px !important;
+    border-radius: 7px !important;
+    border: 1px solid rgba(148, 163, 184, 0.28) !important;
+    background-color: #ffffff !important;
+    font-size: 0.78rem !important;
+    color: #1e293b !important;
+    transition: all 0.15s ease !important;
+    box-sizing: border-box !important;
+}
+
+.presentation-collab-select:focus,
+.presentation-collab-input:focus {
+    border-color: #10a37f !important;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.16) !important;
+    outline: none !important;
+}
+
+.presentation-collab-btn-cell {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.presentation-collab-btn-wrap {
+    display: flex;
+    align-items: flex-end;
+}
+
+.presentation-collab-submit-btn {
+    height: 36px !important;
+    padding: 0 16px !important;
+    border-radius: 7px !important;
+    font-size: 0.78rem !important;
+    font-weight: 750 !important;
+    background: #10a37f !important;
+    border: 1px solid #10a37f !important;
+    color: #ffffff !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+}
+
+.presentation-collab-grid-unit-user .presentation-collab-submit-btn {
+    width: 100% !important;
+}
+
+.presentation-collab-grid-search .presentation-collab-submit-btn {
+    width: auto !important;
+    min-width: 96px !important;
+}
+
+.presentation-collab-submit-btn:hover {
+    background: #0d8a6a !important;
+    border-color: #0d8a6a !important;
+    box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35) !important;
+    transform: translateY(-1px);
+}
+
+/* 单位批量授权面板 */
+.presentation-collab-unit-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.presentation-collab-unit-desc {
+    padding: 8px 12px;
+    background: #f0fdf4;
+    border: 1px solid rgba(16, 163, 127, 0.22);
+    border-radius: 8px;
+    font-size: 0.72rem;
+    color: #065f46;
+    line-height: 1.45;
+}
+
+.presentation-collab-units-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 2px;
+}
+
+.presentation-collab-unit-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1.5px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
+    background: #ffffff;
+    cursor: pointer;
+    transition: all 0.16s ease;
+    user-select: none;
+}
+
+.presentation-collab-unit-card:hover {
+    border-color: #10a37f;
+    background: #f8fafc;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+.presentation-collab-unit-card.is-selected {
+    border-color: #10a37f;
+    background: #ecfdf5;
+    box-shadow: 0 0 0 1px #10a37f, 0 2px 6px rgba(16, 163, 127, 0.12);
+}
+
+.presentation-collab-check-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid #cbd5e1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    color: transparent;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.presentation-collab-unit-card.is-selected .presentation-collab-check-icon {
+    background: #10a37f;
+    border-color: #10a37f;
+    color: #ffffff;
+}
+
+.presentation-collab-unit-icon {
+    color: #64748b;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.presentation-collab-unit-card.is-selected .presentation-collab-unit-icon {
+    color: #10a37f;
+}
+
+.presentation-collab-unit-card strong {
+    flex: 1;
+    font-size: 0.76rem;
+    font-weight: 750;
+    color: #1e293b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.presentation-collab-unit-card small {
+    font-size: 0.66rem;
+    font-weight: 750;
+    color: #64748b;
+    background: rgba(148, 163, 184, 0.16);
+    padding: 1px 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.presentation-collab-unit-card.is-selected small {
+    color: #065f46;
+    background: rgba(16, 163, 127, 0.2);
+}
+
+.presentation-collab-unit-actions-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.presentation-collab-unit-actions-row .presentation-collab-role-field {
+    width: 200px;
+    flex-shrink: 0;
+}
+
+/* 协作者列表展示区 */
+.presentation-collab-list-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.presentation-collab-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.presentation-collab-list-head strong {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #1e293b;
+}
+
+.presentation-collab-badge {
+    font-size: 0.68rem;
+    font-weight: 750;
+    background: #f1f5f9;
+    color: #475569;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.presentation-collab-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.presentation-collab-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: #f8fafc;
+    transition: all 0.15s ease;
+}
+
+.presentation-collab-row:hover {
+    background: #ffffff;
+    border-color: rgba(148, 163, 184, 0.35);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+.presentation-collab-row.is-owner {
+    background: linear-gradient(135deg, #f0fdf4 0%, #f8fafc 100%);
+    border-color: rgba(16, 163, 127, 0.3);
+}
+
+.presentation-collab-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-collab-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.presentation-collab-avatar.is-owner {
+    background: linear-gradient(135deg, #10a37f 0%, #0d8a6b 100%);
+}
+
+.presentation-collab-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.presentation-collab-name-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.presentation-collab-name-line strong {
+    font-size: 0.78rem;
+    font-weight: 750;
+    color: #1e293b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.presentation-collab-username {
+    font-size: 0.68rem;
+    color: #64748b;
+}
+
+.presentation-collab-unit-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.66rem;
+    color: #475569;
+    background: rgba(148, 163, 184, 0.14);
+    padding: 1px 6px;
+    border-radius: 4px;
+    width: fit-content;
+}
+
+.presentation-collab-unit-badge svg {
+    flex-shrink: 0;
+    stroke: #64748b;
+}
+
+.presentation-collab-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.presentation-collab-role-tag {
+    font-size: 0.68rem;
+    font-weight: 750;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.presentation-collab-role-tag.is-owner {
+    background: #dcfce7;
+    color: #15803d;
+    border: 1px solid rgba(22, 163, 74, 0.2);
+}
+
+.presentation-collab-role-tag.is-editor {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.presentation-collab-role-tag.is-commenter {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid rgba(217, 119, 6, 0.2);
+}
+
+.presentation-collab-role-tag.is-viewer {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.presentation-collab-remove-btn {
+    height: 26px !important;
+    padding: 0 9px !important;
+    font-size: 0.68rem !important;
+    font-weight: 750 !important;
+    border-radius: 6px !important;
+    border: 1px solid rgba(220, 38, 38, 0.25) !important;
+    background: #ffffff !important;
+    color: #dc2626 !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+.presentation-collab-remove-btn:hover {
+    background: #fef2f2 !important;
+    border-color: #dc2626 !important;
+    color: #b91c1c !important;
+}
+
+.presentation-collab-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 22px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    background: #f8fafc;
+}
+
+.presentation-collab-actions .btn-secondary {
+    height: 34px;
+    padding: 0 18px;
+    border-radius: 7px;
+    font-size: 0.77rem;
+    font-weight: 700;
+    background: #ffffff;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.presentation-collab-actions .btn-secondary:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.presentation-collab-actions .btn-primary {
+    height: 34px;
+    padding: 0 22px;
+    border-radius: 7px;
+    font-size: 0.77rem;
+    font-weight: 750;
+    background: #10a37f;
+    border: 1px solid #10a37f;
+    color: #ffffff;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
+    transition: all 0.15s ease;
+}
+
+.presentation-collab-actions .btn-primary:hover {
+    background: #0d8a6a;
+    border-color: #0d8a6a;
+    box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35);
+    transform: translateY(-1px);
+}
+
+

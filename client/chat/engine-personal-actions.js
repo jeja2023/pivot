@@ -1,8 +1,86 @@
 /* 聊天中的显式记忆与浏览器语音输入；不进入消息发送主循环。 */
 /* global API_BASE, apiFetch, currentSessionId, showToast */
 (function () {
-    let activeSpeechRecognition = null;
+    let activeVoiceSession = null;
+    let pendingVoiceRequest = null;
+    let voiceRequestSequence = 0;
     let memoryIntentPreview = null;
+
+    const MICROPHONE_PERMISSION_MESSAGE = '请在系统或浏览器设置中允许本应用访问麦克风后重试';
+
+    function setVoiceButtonState(active) {
+        const button = document.getElementById('chat-voice-input');
+        button?.setAttribute('aria-pressed', active ? 'true' : 'false');
+        button?.classList.toggle('is-recording', active);
+        if (active) button?.setAttribute('aria-busy', 'true');
+        else button?.removeAttribute('aria-busy');
+    }
+
+    function stopMediaStream(stream) {
+        stream?.getTracks?.().forEach(track => {
+            try { track.stop(); } catch (_) {}
+        });
+    }
+
+    function releaseVoiceSession(session, { abortRecognition = false } = {}) {
+        if (!session || session.released) return;
+        session.released = true;
+
+        if (activeVoiceSession === session) {
+            activeVoiceSession = null;
+            setVoiceButtonState(false);
+        }
+
+        const recognition = session.recognition;
+        session.recognition = null;
+        if (recognition) {
+            recognition.onresult = null;
+            recognition.onerror = null;
+            recognition.onend = null;
+            if (abortRecognition) {
+                if (typeof recognition.abort === 'function') {
+                    try { recognition.abort(); } catch (_) {}
+                } else {
+                    try { recognition.stop?.(); } catch (_) {}
+                }
+            }
+        }
+
+        const mediaRecorder = session.mediaRecorder;
+        session.mediaRecorder = null;
+        if (mediaRecorder) {
+            mediaRecorder.ondataavailable = null;
+            mediaRecorder.onerror = null;
+            mediaRecorder.onstop = null;
+            if (mediaRecorder.state !== 'inactive') {
+                try { mediaRecorder.stop(); } catch (_) {}
+            }
+        }
+
+        stopMediaStream(session.stream);
+        session.stream = null;
+        session.chunks.length = 0;
+    }
+
+    function voiceInputErrorMessage(error) {
+        const details = [error?.error, error?.name, error?.code, error?.message, error]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+        if (/(not-allowed|notallowed|permission-denied|permissiondenied)/.test(details)) return MICROPHONE_PERMISSION_MESSAGE;
+        if (/(not-found|notfound|devicesnotfound|overconstrained)/.test(details)) return '未检测到可用的麦克风设备，请连接或启用麦克风后重试。';
+        if (/(not-readable|notreadable|trackstarterror|audio-capture)/.test(details)) return '麦克风正在被其他应用占用，请关闭占用程序后重试。';
+        if (/(not-supported|notsupported|media devices api|speechrecognition)/.test(details)) return '当前浏览器不支持语音输入，请使用支持麦克风访问和语音识别的浏览器。';
+        if (/securityerror|secure context|https/.test(details)) return '当前页面不满足浏览器麦克风访问要求，请使用 HTTPS 或受信任的本地地址后重试。';
+        return '语音输入失败，请重试。';
+    }
+
+    function stopChatVoiceInput() {
+        pendingVoiceRequest = null;
+        voiceRequestSequence += 1;
+        releaseVoiceSession(activeVoiceSession, { abortRecognition: true });
+        setVoiceButtonState(false);
+    }
 
     function setChatMemoryMenuOpen(open) {
         const panel = document.getElementById('chat-memory-menu-panel');
@@ -106,51 +184,91 @@
         return data;
     }
 
-    function startChatVoiceInput() {
+    async function startChatVoiceInput() {
         const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
-        const button = document.getElementById('chat-voice-input');
         const input = document.getElementById('user-input');
-        if (!Recognition) { showToast('当前浏览器未提供本地语音转写接口；可改用支持 Web Speech 的浏览器。', 'warning'); return null; }
+        const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+        if (!Recognition || !getUserMedia) {
+            showToast('当前浏览器不支持语音输入，请使用支持麦克风访问和语音识别的浏览器。', 'warning');
+            return null;
+        }
         if (!input) return null;
-        if (activeSpeechRecognition) { activeSpeechRecognition.stop(); return null; }
-        const original = String(input.value || '').trim();
-        const recognition = new Recognition();
-        recognition.lang = navigator.language || 'zh-CN';
-        recognition.interimResults = true;
-        recognition.continuous = false;
-        let finalTranscript = '';
-        const stop = () => {
-            if (activeSpeechRecognition !== recognition) return;
-            activeSpeechRecognition = null;
-            button?.setAttribute('aria-pressed', 'false');
-            button?.classList.remove('is-recording');
-            button?.removeAttribute('aria-busy');
-        };
-        recognition.onresult = event => {
-            let interimTranscript = '';
-            for (let index = event.resultIndex; index < event.results.length; index += 1) {
-                const transcript = String(event.results[index]?.[0]?.transcript || '');
-                if (event.results[index].isFinal) finalTranscript += transcript;
-                else interimTranscript += transcript;
+
+        if (activeVoiceSession || pendingVoiceRequest !== null) {
+            stopChatVoiceInput();
+            return null;
+        }
+
+        const requestId = ++voiceRequestSequence;
+        pendingVoiceRequest = requestId;
+        setVoiceButtonState(true);
+        let stream = null;
+        let session = null;
+
+        try {
+            // Keep the user activation from the button click while explicitly requesting microphone access.
+            stream = await getUserMedia({ audio: true });
+            if (pendingVoiceRequest !== requestId) {
+                stopMediaStream(stream);
+                return null;
             }
-            const prefix = original ? `${original}${/[\s。！？!?]$/.test(original) ? '' : ' '}` : '';
-            input.value = `${prefix}${finalTranscript || interimTranscript}`.trim();
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        };
-        recognition.onerror = event => { if (!['aborted', 'no-speech'].includes(String(event.error || ''))) showToast(`语音输入失败：${event.error || '浏览器拒绝访问麦克风'}`, 'error'); };
-        recognition.onend = stop;
-        activeSpeechRecognition = recognition;
-        button?.setAttribute('aria-pressed', 'true');
-        button?.setAttribute('aria-busy', 'true');
-        button?.classList.add('is-recording');
-        try { recognition.start(); } catch (error) { stop(); showToast(error.message || '无法启动语音输入。', 'error'); }
-        return recognition;
+
+            const recognition = new Recognition();
+            session = {
+                chunks: [],
+                mediaRecorder: null,
+                recognition,
+                released: false,
+                stream
+            };
+            activeVoiceSession = session;
+            pendingVoiceRequest = null;
+
+            const original = String(input.value || '').trim();
+            let finalTranscript = '';
+            recognition.lang = navigator.language || 'zh-CN';
+            recognition.interimResults = true;
+            recognition.continuous = false;
+            recognition.onresult = event => {
+                let interimTranscript = '';
+                for (let index = event.resultIndex; index < event.results.length; index += 1) {
+                    const transcript = String(event.results[index]?.[0]?.transcript || '');
+                    if (event.results[index].isFinal) finalTranscript += transcript;
+                    else interimTranscript += transcript;
+                }
+                const prefix = original ? `${original}${/[\s。！？!?]$/.test(original) ? '' : ' '}` : '';
+                input.value = `${prefix}${finalTranscript || interimTranscript}`.trim();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            recognition.onerror = event => {
+                const shouldReport = activeVoiceSession === session;
+                releaseVoiceSession(session);
+                if (shouldReport && !['aborted', 'no-speech'].includes(String(event.error || '').toLowerCase())) {
+                    showToast(voiceInputErrorMessage(event), 'error');
+                }
+            };
+            recognition.onend = () => releaseVoiceSession(session);
+            recognition.start();
+            return recognition;
+        } catch (error) {
+            const shouldReport = pendingVoiceRequest === requestId || activeVoiceSession === session;
+            if (session) releaseVoiceSession(session, { abortRecognition: true });
+            else stopMediaStream(stream);
+            if (pendingVoiceRequest === requestId) pendingVoiceRequest = null;
+            if (shouldReport) {
+                setVoiceButtonState(false);
+                showToast(voiceInputErrorMessage(error), 'error');
+            }
+            return null;
+        }
     }
 
     document.getElementById('chat-memory-intent-close')?.addEventListener('click', closeMemoryIntentModal);
     document.getElementById('chat-memory-intent-preview-btn')?.addEventListener('click', () => previewMemoryIntent().catch(error => showToast(error.message || '无法预览记忆操作', 'error')));
     document.getElementById('chat-memory-intent-apply')?.addEventListener('click', () => applyMemoryIntent().catch(error => showToast(error.message || '记忆操作失败', 'error')));
     document.getElementById('chat-memory-intent-modal')?.addEventListener('click', event => { if (event.target.id === 'chat-memory-intent-modal') closeMemoryIntentModal(); });
+    globalThis.addEventListener('pagehide', stopChatVoiceInput, { capture: true });
+    globalThis.addEventListener('beforeunload', stopChatVoiceInput, { capture: true });
 
-    window.Pivot?.exposeModule?.('chat.memoryActions', { applyMemoryIntent, closeMemoryIntentModal, openChatMemoryManagement, openMemoryIntentModal, previewMemoryIntent, rememberCurrentChatInput, setChatMemoryMenuOpen, startChatVoiceInput });
+    window.Pivot?.exposeModule?.('chat.memoryActions', { applyMemoryIntent, closeMemoryIntentModal, openChatMemoryManagement, openMemoryIntentModal, previewMemoryIntent, rememberCurrentChatInput, setChatMemoryMenuOpen, startChatVoiceInput, stopChatVoiceInput });
 })();

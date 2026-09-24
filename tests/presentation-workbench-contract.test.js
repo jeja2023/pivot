@@ -163,6 +163,7 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     ['presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-create-duration', 'presentation-create-language', 'presentation-create-needs-charts', 'presentation-create-retain-sources', 'presentation-create-must-include', 'presentation-create-prohibited-content', 'presentation-copy-element-btn', 'presentation-group-elements-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-export-options-modal'].forEach(id => assert.ok(workspace.includes('id="' + id + '"'), id));
     ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage', 'saveExportOptions'].forEach(name => assert.ok(editor.includes('function ' + name), name));
     assert.ok(presenter.includes('aspectRatio: options.aspectRatio'));
+    assert.match(source('server/routes/apps/presentations.js'), /aspectRatio: req\.body\?\.aspectRatio/);
     assert.ok(service.includes('pixel_width'));
     assert.ok(service.includes('owner.username ILIKE'));
     assert.ok(service.includes('updated_at >= ?::date'));

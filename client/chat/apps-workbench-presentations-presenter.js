@@ -31,6 +31,15 @@
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
+    function exportFilename(title, format) {
+        const safeTitle = String(title || '演示文稿')
+            .replace(/[\\/:*?"<>|\u0000-\u001F]+/g, '_')
+            .replace(/^\.+|\.+$/g, '')
+            .trim()
+            .slice(0, 120) || '演示文稿';
+        return `${safeTitle}.${format}`;
+    }
+
     function inferAssetType(file) {
         const mime = String(file?.type || '').toLowerCase();
         const name = String(file?.name || '').toLowerCase();
@@ -608,23 +617,37 @@
     // 8. 产物导出 PPTX / PDF / PNG
     // ==========================================
     async function exportPresentation(format, state, { saveActive, setSaveState, activeSlide, toast } = {}) {
-        if (!state.active?.id) return;
-        await saveActive?.({ force: true });
+        if (!state.active?.id) throw new Error('请先打开要导出的演示文稿。');
+        if (state.exporting) return;
+        state.exporting = true;
+        const exportButtons = ['presentation-export-pptx-btn', 'presentation-export-pdf-btn', 'presentation-export-png-btn'].map(byId).filter(Boolean);
+        const disabledBeforeExport = new Set(exportButtons.filter(button => button.disabled));
+        exportButtons.forEach(button => button.setAttribute('disabled', ''));
+        let exported = false;
         setSaveState?.(`正在导出 ${format.toUpperCase()}…`, 'saving');
         try {
+            await saveActive?.({ force: true });
             const options = state.exportOptions || {};
             const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({
                 format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
                 ...(format === 'png' ? { slideIndex: activeSlide?.()?.index || 0 } : {})
             }));
             const rendition = created.rendition;
+            if (!rendition?.id) throw new Error('导出服务未返回可下载的文件。');
             const tokenResult = await requestJson(`/api/agents/renditions/${encodeURIComponent(rendition.id)}/download-token`, jsonOptions({}));
+            if (!tokenResult?.token) throw new Error('下载令牌获取失败。');
             const response = await apiFetch(`/api/agents/renditions/${encodeURIComponent(rendition.id)}/download?token=${encodeURIComponent(tokenResult.token)}`);
             if (!response.ok) throw new Error('下载导出文件失败。');
-            downloadBlob(`${state.active.content.title || '演示文稿'}.${format}`, await response.blob());
+            downloadBlob(exportFilename(state.active.content.title, format), await response.blob());
+            exported = true;
             toast?.(`${format.toUpperCase()} 已生成并开始下载。`);
         } finally {
-            setSaveState?.('已保存', 'saved');
+            state.exporting = false;
+            exportButtons.forEach(button => {
+                if (disabledBeforeExport.has(button)) button.setAttribute('disabled', '');
+                else button.removeAttribute('disabled');
+            });
+            setSaveState?.(exported ? '已保存' : '导出失败', exported ? 'saved' : 'error');
         }
     }
 

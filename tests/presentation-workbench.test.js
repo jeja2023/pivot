@@ -16,6 +16,7 @@ const {
     validatePresentation
 } = require('../server/services/presentations/presentation-schema');
 const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('../server/services/presentations/presentation-templates');
+const { exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
 const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages } = require('../server/services/presentations/presentation-ai');
@@ -325,4 +326,15 @@ test('导出器遵守备注选项并继续生成三种受控格式', async () =>
     assert.ok(noteXmlWith.includes('演讲者备注'));
     assert.equal(noteXmlWithout.includes('演讲者备注'), false);
     assert.equal(pngHigh.buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+});
+
+test('导出缓存配置区分 PPTX 备注和 PNG 的页面及清晰度选项', () => {
+    const pptxWithNotes = exportRendererVersion('pptx', normalizeExportOptions({ includeNotes: true }));
+    const pptxWithoutNotes = exportRendererVersion('pptx', normalizeExportOptions({ includeNotes: false }));
+    const pngStandard = exportRendererVersion('png', normalizeExportOptions({ slideIndex: 0, imageQuality: 'standard' }));
+    const pngHigh = exportRendererVersion('png', normalizeExportOptions({ slideIndex: 0, imageQuality: 'high' }));
+    const pngOtherSlide = exportRendererVersion('png', normalizeExportOptions({ slideIndex: 1, imageQuality: 'standard' }));
+    assert.notEqual(pptxWithNotes, pptxWithoutNotes);
+    assert.notEqual(pngStandard, pngHigh);
+    assert.notEqual(pngStandard, pngOtherSlide);
 });

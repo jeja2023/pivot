@@ -26,7 +26,9 @@ const WINDOWS_RESERVED_NAMES = new Set([
 const DELIVERY_EXTENSION_BY_FORMAT = Object.freeze({
     docx: '.docx',
     pdf: '.pdf',
+    pptx: '.pptx',
     xlsx: '.xlsx',
+    png: '.png',
     html: '.html',
     md: '.md',
     txt: '.txt',

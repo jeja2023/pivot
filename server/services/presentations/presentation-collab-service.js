@@ -177,9 +177,10 @@ function createCollabService(deps) {
     async function listPresentationCollaborators(user, clientId) {
         const current = await getPresentationRow(user, clientId, { includeContent: false });
         if (!current) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
-        const owner = await queryOne('SELECT id, username, nickname FROM users WHERE id = ?', [current.owner_user_id]);
+        const owner = await queryOne("SELECT id, username, nickname, COALESCE(NULLIF(unit, ''), '未分配单位') AS unit FROM users WHERE id = ?", [current.owner_user_id]);
         const rows = await query(`
-            SELECT pc.*, COALESCE(NULLIF(u.nickname, ''), u.username) AS user_name, u.username
+            SELECT pc.*, COALESCE(NULLIF(u.nickname, ''), u.username) AS user_name, u.username,
+                   COALESCE(NULLIF(u.unit, ''), '未分配单位') AS unit
             FROM presentation_collaborators pc
             JOIN users u ON u.id = pc.user_id
             WHERE pc.presentation_id = ?
@@ -189,15 +190,43 @@ function createCollabService(deps) {
             owner: {
                 userId: Number(owner?.id || current.owner_user_id),
                 userName: owner?.nickname || owner?.username || '所有人',
-                username: owner?.username || ''
+                username: owner?.username || '',
+                unit: owner?.unit || '未分配单位'
             },
             collaborators: rows.map(r => ({
                 id: Number(r.id),
                 userId: Number(r.user_id),
                 userName: r.user_name || '协作者',
                 username: r.username || '',
+                unit: r.unit || '未分配单位',
                 role: r.role,
                 createdAt: r.created_at
+            }))
+        };
+    }
+
+    async function listCollaboratorCandidates(user, clientId) {
+        const current = await getPresentationRow(user, clientId, { includeContent: false });
+        if (!current) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
+        const rows = await query(`
+            SELECT id, username, nickname, COALESCE(NULLIF(unit, ''), '通用单位') AS unit
+            FROM users
+            WHERE deleted_at IS NULL AND (status IS NULL OR status = 'active')
+            ORDER BY unit ASC, COALESCE(NULLIF(nickname, ''), username) ASC
+        `);
+        const unitMap = new Map();
+        rows.forEach(r => {
+            const count = unitMap.get(r.unit) || 0;
+            unitMap.set(r.unit, count + 1);
+        });
+        const units = Array.from(unitMap.entries()).map(([name, count]) => ({ name, count }));
+        return {
+            units,
+            users: rows.map(r => ({
+                id: Number(r.id),
+                username: r.username,
+                nickname: r.nickname || r.username,
+                unit: r.unit
             }))
         };
     }
@@ -208,20 +237,55 @@ function createCollabService(deps) {
         if (Number(current.owner_user_id) !== Number(user.id) && !isAdmin(user)) {
             throw publicError('只有文稿所有者或管理员可以添加协作者。', 403, 'PRESENTATION_COLLABORATOR_ADMIN_REQUIRED');
         }
+        const role = ['editor', 'viewer', 'commenter'].includes(String(body.role)) ? String(body.role) : 'editor';
+        const tenant = await assertTenantContext(user);
+
+        const targetUnits = Array.isArray(body.units)
+            ? body.units.map(u => String(u || '').trim()).filter(Boolean)
+            : (body.unit ? [String(body.unit).trim()].filter(Boolean) : []);
+
+        if (targetUnits.length > 0) {
+            const placeholders = targetUnits.map(() => '?').join(',');
+            const members = await query(`
+                SELECT id, username, nickname, unit FROM users
+                WHERE unit IN (${placeholders})
+                  AND deleted_at IS NULL
+                  AND (status IS NULL OR status = 'active')
+            `, targetUnits);
+
+            const validMembers = members.filter(m => Number(m.id) !== Number(current.owner_user_id));
+            if (!validMembers.length) {
+                throw publicError(`所选单位（${targetUnits.join('、')}）下暂无可添加的其他成员。`, 400, 'UNIT_MEMBERS_EMPTY');
+            }
+
+            for (const member of validMembers) {
+                await execute(`
+                    INSERT INTO presentation_collaborators (tenant_id, presentation_id, user_id, role, invited_by, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                    ON CONFLICT (presentation_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
+                `, [tenant.tenantId, current.id, member.id, role, user.id]);
+            }
+
+            publishPresentationRealtime(current.id, 'presentation.collaborators', { presentationId: current.client_id, changedBy: user.id }).catch(() => {});
+            return {
+                batch: true,
+                count: validMembers.length,
+                units: targetUnits,
+                role
+            };
+        }
+
         const usernameOrId = String(body.username || body.userId || '').trim();
-        if (!usernameOrId) throw publicError('必须指定协作者用户名或用户 ID。', 400, 'PRESENTATION_COLLABORATOR_REQUIRED');
+        if (!usernameOrId) throw publicError('必须指定协作者用户名、用户 ID 或选择授权单位。', 400, 'PRESENTATION_COLLABORATOR_REQUIRED');
 
         const targetUser = await queryOne(`
-            SELECT id, username, nickname FROM users
+            SELECT id, username, nickname, COALESCE(NULLIF(unit, ''), '未分配单位') AS unit FROM users
             WHERE username = ? OR id = ?
         `, [usernameOrId, /^\d+$/.test(usernameOrId) ? Number(usernameOrId) : -1]);
         if (!targetUser) throw publicError('用户不存在。', 404, 'USER_NOT_FOUND');
         if (Number(targetUser.id) === Number(current.owner_user_id)) {
             throw publicError('文稿所有者无需作为协作者添加。', 400, 'PRESENTATION_COLLABORATOR_IS_OWNER');
         }
-
-        const role = ['editor', 'viewer', 'commenter'].includes(String(body.role)) ? String(body.role) : 'editor';
-        const tenant = await assertTenantContext(user);
 
         const row = await queryOne(`
             INSERT INTO presentation_collaborators (tenant_id, presentation_id, user_id, role, invited_by, created_at, updated_at)
@@ -236,6 +300,7 @@ function createCollabService(deps) {
             userId: Number(targetUser.id),
             userName: targetUser.nickname || targetUser.username,
             username: targetUser.username,
+            unit: targetUser.unit,
             role: row.role,
             createdAt: row.created_at
         };
@@ -260,6 +325,7 @@ function createCollabService(deps) {
         resolvePresentationComment,
         deletePresentationComment,
         listPresentationCollaborators,
+        listCollaboratorCandidates,
         addPresentationCollaborator,
         removePresentationCollaborator
     };

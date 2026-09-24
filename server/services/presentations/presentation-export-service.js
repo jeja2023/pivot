@@ -1,11 +1,13 @@
 'use strict';
 
 /** 演示文稿受控导出与交付渲染服务。 */
+const crypto = require('crypto');
 const { query, queryOne } = require('../../db/client');
 const { assertTenantContext } = require('../agent-tenant-context');
 const { getAgentArtifactForUser } = require('../agent-artifacts');
 const { buildCasRef, incrementRefCount, putBuffer } = require('../agent-artifact-cas');
 const { recordDeliveryEvent } = require('../agent-artifact-delivery');
+const { canonicalJson } = require('../canonical-json');
 const { computePresentationDigest, normalizePresentation } = require('./presentation-schema');
 const { runPresentationValidation } = require('./presentation-validation');
 const { PRESENTATION_RENDERER_VERSION, renderPresentation } = require('./presentation-renderer');
@@ -27,7 +29,7 @@ function serializeJson(value) {
 
 function normalizeExportOptions(options = {}) {
     return {
-        slideIndex: Number.isInteger(Number(options.slideIndex)) ? Number(options.slideIndex) : undefined,
+        slideIndex: Number.isInteger(Number(options.slideIndex)) ? Number(options.slideIndex) : 0,
         aspectRatio: ['16:9', '4:3'].includes(String(options.aspectRatio || '')) ? String(options.aspectRatio) : '',
         includeNotes: options.includeNotes !== false,
         includePageNumbers: options.includePageNumbers !== false,
@@ -35,6 +37,16 @@ function normalizeExportOptions(options = {}) {
         imageQuality: ['standard', 'high'].includes(String(options.imageQuality || '')) ? String(options.imageQuality) : 'standard',
         fontStrategy: ['embed', 'fallback'].includes(String(options.fontStrategy || '')) ? String(options.fontStrategy) : 'embed'
     };
+}
+
+function exportRendererVersion(format, options = {}) {
+    const renderOptions = format === 'pptx'
+        ? { includeNotes: options.includeNotes !== false }
+        : format === 'png'
+            ? { imageQuality: options.imageQuality || 'standard', slideIndex: Number(options.slideIndex || 0) }
+            : {};
+    const optionDigest = crypto.createHash('sha256').update(canonicalJson(renderOptions)).digest('hex').slice(0, 8);
+    return `${PRESENTATION_RENDERER_VERSION}.${optionDigest}`;
 }
 
 function preparePresentationForExport(content, options = {}) {
@@ -86,11 +98,13 @@ function createExportService(deps) {
         const exportContent = preparePresentationForExport(current.content, normalizedOptions);
         const exportValidation = runPresentationValidation(exportContent);
         const irDigest = computePresentationDigest(exportContent);
+        // PPTX 备注、PNG 页码与清晰度不会改变文稿 IR，需通过确定性渲染配置区分缓存。
+        const rendererVersion = exportRendererVersion(normalizedFormat, normalizedOptions);
         const existing = await queryOne(`
             SELECT * FROM agent_artifact_renditions
             WHERE tenant_id = ? AND artifact_id = ? AND ir_digest = ? AND format = ? AND renderer_version = ? AND status = 'ready'
-        `, [tenant.tenantId, artifact.id, irDigest, normalizedFormat, PRESENTATION_RENDERER_VERSION]);
-        if (existing) return { rendition: existing, reused: true, validation: runPresentationValidation(preparePresentationForExport(current.content, normalizeExportOptions(options))) };
+        `, [tenant.tenantId, artifact.id, irDigest, normalizedFormat, rendererVersion]);
+        if (existing) return { rendition: existing, reused: true, validation: exportValidation };
         const contentBuffer = Buffer.from(serializeJson(exportContent), 'utf8');
         const irObject = await putBuffer({ buffer: contentBuffer, mimeType: 'application/json; charset=utf-8', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_ir' });
         const assets = await resolvePresentationAssets(user, exportContent, { presentationId: current.id });
@@ -104,7 +118,7 @@ function createExportService(deps) {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', NOW())
             ON CONFLICT (tenant_id, artifact_id, ir_digest, format, renderer_version) DO UPDATE SET status = 'ready', failure_reason = NULL
             RETURNING *
-        `, [tenant.tenantId, artifact.id, runId, toolCallId, user.id, buildCasRef(irObject.objectId), irDigest, normalizedFormat, PRESENTATION_RENDERER_VERSION, output.contentDigest, output.mimeType, output.byteSize, buildCasRef(output.objectId)]);
+        `, [tenant.tenantId, artifact.id, runId, toolCallId, user.id, buildCasRef(irObject.objectId), irDigest, normalizedFormat, rendererVersion, output.contentDigest, output.mimeType, output.byteSize, buildCasRef(output.objectId)]);
         await incrementRefCount(irObject.objectId, 1);
         await incrementRefCount(output.objectId, 1);
         await queryOne(`
@@ -112,7 +126,7 @@ function createExportService(deps) {
             VALUES (?, ?, ?, ?, ?, 'ready', ?, NOW(), NOW())
             ON CONFLICT (presentation_id, version, format, renderer_version) DO UPDATE SET rendition_id = EXCLUDED.rendition_id, status = 'ready', updated_at = NOW()
             RETURNING *
-        `, [currentRow.id, current.version, rendition.id, normalizedFormat, PRESENTATION_RENDERER_VERSION, user.id]);
+        `, [currentRow.id, current.version, rendition.id, normalizedFormat, rendererVersion, user.id]);
         const validationDecision = exportValidation.status === 'blocked'
             ? `用户在 ${Number(exportValidation.summary?.blocking || 0)} 个阻断级版式问题仍存在时发起导出。`
             : exportValidation.status === 'warning'
@@ -145,5 +159,7 @@ function createExportService(deps) {
 
 module.exports = {
     createExportService,
+    exportRendererVersion,
+    normalizeExportOptions,
     preparePresentationForExport
 };

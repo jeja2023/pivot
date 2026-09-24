@@ -37,6 +37,7 @@ const {
     getPresentationAssetByRef,
     getPresentationVersion,
     listPresentationCollaborators,
+    listCollaboratorCandidates,
     listPresentationComments,
     listPresentationExports,
     listPresentationTemplates,
@@ -486,7 +487,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/:id/export', authMiddleware, asyncHandler(async (req, res) => {
         const startedAt = Date.now(); const format = req.body?.format || '';
         try {
-            const result = await createPresentationExport(req.user, req.params.id, format, { slideIndex: req.body?.slideIndex, includeNotes: req.body?.includeNotes, includePageNumbers: req.body?.includePageNumbers, showSourceRefs: req.body?.showSourceRefs, imageQuality: req.body?.imageQuality, fontStrategy: req.body?.fontStrategy });
+            const result = await createPresentationExport(req.user, req.params.id, format, { slideIndex: req.body?.slideIndex, aspectRatio: req.body?.aspectRatio, includeNotes: req.body?.includeNotes, includePageNumbers: req.body?.includePageNumbers, showSourceRefs: req.body?.showSourceRefs, imageQuality: req.body?.imageQuality, fontStrategy: req.body?.fontStrategy });
             recordPresentationOutcome('export', { outcome: 'success', durationMs: Date.now() - startedAt, format });
             writeLog(req, '导出PPT演示文稿', `文稿: ${req.params.id}，格式: ${format}，复用: ${result.reused ? '是' : '否'}`);
             res.status(result.reused ? 200 : 201).json({ success: true, rendition: result.rendition, reused: result.reused, validation: result.validation, durationMs: result.durationMs || 0 });
@@ -547,6 +548,10 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     }));
     router.get('/apps/presentations/:id/collaborators', authMiddleware, asyncHandler(async (req, res) => {
         const result = await listPresentationCollaborators(req.user, req.params.id);
+        res.json(result);
+    }));
+    router.get('/apps/presentations/:id/collaborator-candidates', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await listCollaboratorCandidates(req.user, req.params.id);
         res.json(result);
     }));
     router.post('/apps/presentations/:id/collaborators', authMiddleware, asyncHandler(async (req, res) => {

@@ -10,7 +10,10 @@
         comments: [],
         commentsFilter: 'slide',
         activeReplyId: null,
-        collaborators: []
+        collaborators: [],
+        activeTab: 'unit-user',
+        selectedBatchUnits: new Set(),
+        candidates: { units: [], users: [] }
     };
 
     const byId = id => document.getElementById(id);
@@ -311,53 +314,356 @@
     }
 
     // ==========================================
-    // 3. Collaborators (协作者管理)
+    // 3. Collaborators (演示文稿协作者管理)
     // ==========================================
     function openCollaboratorsModal() {
         if (!state.activePresentationId) return;
-        byId('presentation-collaborators-modal')?.classList.remove('hidden');
+        const modal = byId('presentation-collaborators-modal');
+        modal?.classList.remove('hidden');
+        if (modal && !modal.dataset.collabBound) {
+            modal.dataset.collabBound = 'true';
+            modal.addEventListener('change', handleCollabChange);
+        }
+        switchCollabTab('unit-user');
+        loadCollaboratorCandidates().catch(() => {});
         loadCollaborators().catch(err => toast(err.message, 'error'));
     }
 
     function closeCollaboratorsModal() {
+        try {
+            const usernameInput = byId('presentation-collab-username');
+            if (usernameInput) usernameInput.value = '';
+            const userSelect = byId('presentation-collab-unit-user-select') || byId('presentation-collab-user-select');
+            if (userSelect) userSelect.value = '';
+            if (state.selectedBatchUnits instanceof Set) {
+                state.selectedBatchUnits.clear();
+            } else {
+                state.selectedBatchUnits = new Set();
+            }
+        } catch (_) {}
         byId('presentation-collaborators-modal')?.classList.add('hidden');
+    }
+
+    async function saveCollaboratorsAndClose() {
+        if (!state.activePresentationId) {
+            closeCollaboratorsModal();
+            return;
+        }
+        try {
+            if (state.activeTab === 'unit-user') {
+                const username = byId('presentation-collab-unit-user-select')?.value;
+                if (username) {
+                    const role = byId('presentation-collab-unit-user-role')?.value || 'editor';
+                    await addCollaborator(username, role);
+                } else {
+                    toast('协作设置已保存。');
+                }
+            } else if (state.activeTab === 'search') {
+                const username = byId('presentation-collab-username')?.value?.trim();
+                if (username) {
+                    const role = byId('presentation-collab-role')?.value || 'editor';
+                    await addCollaborator(username, role);
+                } else {
+                    toast('协作设置已保存。');
+                }
+            } else if (state.activeTab === 'unit') {
+                if (state.selectedBatchUnits instanceof Set && state.selectedBatchUnits.size > 0) {
+                    await submitBatchUnitAuthorization();
+                } else {
+                    toast('协作设置已保存。');
+                }
+            } else {
+                toast('协作设置已保存。');
+            }
+        } catch (err) {
+            toast(err?.message || '保存协作设置失败，请重试。', 'error');
+        } finally {
+            closeCollaboratorsModal();
+        }
+    }
+
+    function switchCollabTab(tab) {
+        state.activeTab = tab;
+        byId('presentation-collab-tab-unit-user')?.classList.toggle('is-active', tab === 'unit-user');
+        byId('presentation-collab-tab-search-user')?.classList.toggle('is-active', tab === 'search');
+        byId('presentation-collab-tab-unit')?.classList.toggle('is-active', tab === 'unit');
+
+        byId('presentation-collab-form')?.classList.toggle('hidden', tab !== 'unit-user');
+        byId('presentation-collab-search-form')?.classList.toggle('hidden', tab !== 'search');
+        byId('presentation-collab-unit-panel')?.classList.toggle('hidden', tab !== 'unit');
+    }
+
+    function handleCollabChange(event) {
+        if (event.target?.id === 'presentation-collab-unit-filter') {
+            updateUserSelectOptions();
+        }
+    }
+
+    async function loadCollaboratorCandidates() {
+        if (!state.activePresentationId) return;
+        try {
+            const data = await requestJson(`${API}/${encodeURIComponent(state.activePresentationId)}/collaborator-candidates`);
+            state.candidates = {
+                units: Array.isArray(data.units) ? data.units : [],
+                users: Array.isArray(data.users) ? data.users : []
+            };
+            renderCandidateControls();
+        } catch (_) {}
+    }
+
+    function createSvgIcon(type, size = 12) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', String(size));
+        svg.setAttribute('height', String(size));
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        if (type === 'check') {
+            svg.setAttribute('stroke-width', '3');
+            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            poly.setAttribute('points', '20 6 9 17 4 12');
+            svg.appendChild(poly);
+        } else if (type === 'unit') {
+            svg.setAttribute('stroke-width', '2');
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', 'M3 21h18M3 7v14M21 7v14M9 3h6v18H9zM9 7h6M9 11h6M9 15h6');
+            svg.appendChild(path);
+        }
+        return svg;
+    }
+
+    function createUnitBadge(unitName) {
+        const badge = document.createElement('div');
+        badge.className = 'presentation-collab-unit-badge';
+        badge.appendChild(createSvgIcon('unit', 11));
+        const text = document.createElement('span');
+        text.textContent = unitName || '未分配单位';
+        badge.appendChild(text);
+        return badge;
+    }
+
+    function renderCandidateControls() {
+        const unitFilter = byId('presentation-collab-unit-filter');
+        if (unitFilter) {
+            const currentVal = unitFilter.value;
+            unitFilter.replaceChildren();
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = `全部单位 (${state.candidates.users.length} 人)`;
+            unitFilter.appendChild(allOpt);
+            state.candidates.units.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.name;
+                opt.textContent = `${u.name} (${u.count} 人)`;
+                unitFilter.appendChild(opt);
+            });
+            if (currentVal && state.candidates.units.some(u => u.name === currentVal)) {
+                unitFilter.value = currentVal;
+            }
+        }
+
+        const datalist = byId('presentation-collab-user-datalist');
+        if (datalist) {
+            datalist.replaceChildren();
+            state.candidates.users.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.username;
+                opt.textContent = `${u.nickname || u.username}（${u.unit || '未分配单位'}）`;
+                datalist.appendChild(opt);
+            });
+        }
+
+        const unitsGroup = byId('presentation-collab-units-group');
+        if (unitsGroup) {
+            unitsGroup.replaceChildren();
+            if (!state.candidates.units.length) {
+                const note = document.createElement('div');
+                note.className = 'presentation-empty-note';
+                note.textContent = '暂无单位数据';
+                unitsGroup.appendChild(note);
+            } else {
+                state.candidates.units.forEach(u => {
+                    const card = document.createElement('div');
+                    card.className = 'presentation-collab-unit-card' + (state.selectedBatchUnits.has(u.name) ? ' is-selected' : '');
+                    card.dataset.collabUnit = u.name;
+
+                    const checkIcon = document.createElement('span');
+                    checkIcon.className = 'presentation-collab-check-icon';
+                    checkIcon.appendChild(createSvgIcon('check', 12));
+
+                    const icon = document.createElement('span');
+                    icon.className = 'presentation-collab-unit-icon';
+                    icon.appendChild(createSvgIcon('unit', 13));
+
+                    const name = document.createElement('strong');
+                    name.textContent = u.name;
+
+                    const count = document.createElement('small');
+                    count.textContent = `${u.count}人`;
+
+                    card.append(checkIcon, icon, name, count);
+                    unitsGroup.appendChild(card);
+                });
+            }
+        }
+
+        updateUserSelectOptions();
+    }
+
+    function updateUserSelectOptions() {
+        const userSelect = byId('presentation-collab-unit-user-select') || byId('presentation-collab-user-select');
+        if (!userSelect) return;
+        const selectedUnit = byId('presentation-collab-unit-filter')?.value || '';
+        userSelect.replaceChildren();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = selectedUnit ? `选择 ${selectedUnit} 成员…` : '点击选择单位成员…';
+        userSelect.appendChild(placeholder);
+
+        const filteredUsers = selectedUnit
+            ? state.candidates.users.filter(u => u.unit === selectedUnit)
+            : state.candidates.users;
+
+        filteredUsers.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.username;
+            opt.textContent = selectedUnit
+                ? `${u.nickname || u.username}（@${u.username}）`
+                : `${u.nickname || u.username} · ${u.unit || '未分配'}`;
+            userSelect.appendChild(opt);
+        });
+    }
+
+    async function submitBatchUnitAuthorization() {
+        if (!state.activePresentationId) return;
+        const units = state.selectedBatchUnits instanceof Set ? Array.from(state.selectedBatchUnits) : [];
+        if (!units.length) {
+            toast('请先点击勾选需要授权的单位。', 'warning');
+            return;
+        }
+        const role = byId('presentation-collab-batch-role')?.value || 'editor';
+        const roleNames = { editor: '编辑者', commenter: '评论者', viewer: '查看者' };
+        try {
+            const data = await requestJson(`${API}/${encodeURIComponent(state.activePresentationId)}/collaborators`, jsonOptions({
+                units,
+                role
+            }));
+            if (state.selectedBatchUnits instanceof Set) state.selectedBatchUnits.clear();
+            renderCandidateControls();
+            await loadCollaborators();
+            toast(`已成功为单位「${units.join('、')}」的 ${data.collaborator?.count || data.count || ''} 位成员添加「${roleNames[role] || role}」权限。`);
+        } catch (err) {
+            toast(err?.message || '批量授权失败，请重试。', 'error');
+        }
     }
 
     async function loadCollaborators() {
         if (!state.activePresentationId) return;
         const data = await requestJson(`${API}/${encodeURIComponent(state.activePresentationId)}/collaborators`);
+        state.owner = data.owner || null;
         state.collaborators = Array.isArray(data.collaborators) ? data.collaborators : [];
         renderCollaborators();
     }
 
     function renderCollaborators() {
         const list = byId('presentation-collaborators-list');
+        const countBadge = byId('presentation-collab-list-count');
         if (!list) return;
         list.replaceChildren();
-        if (!state.collaborators.length) {
+
+        const totalCount = state.collaborators.length + (state.owner ? 1 : 0);
+        if (countBadge) countBadge.textContent = totalCount + ' 人';
+
+        if (!state.owner && !state.collaborators.length) {
             const empty = document.createElement('div');
             empty.className = 'presentation-empty-note';
-            empty.textContent = '暂无其他协作者。输入用户名即可添加。';
+            empty.textContent = '暂无其他协作者。可按成员搜索或按单位批量授权。';
             list.appendChild(empty);
             return;
         }
+
+        // 1. 置顶渲染文稿所有者行
+        if (state.owner) {
+            const ownerRow = document.createElement('div');
+            ownerRow.className = 'presentation-collab-row is-owner';
+
+            const userWrap = document.createElement('div');
+            userWrap.className = 'presentation-collab-user';
+
+            const avatar = document.createElement('div');
+            avatar.className = 'presentation-collab-avatar is-owner';
+            avatar.textContent = (state.owner.userName || state.owner.username || '主').slice(0, 1).toUpperCase();
+
+            const info = document.createElement('div');
+            info.className = 'presentation-collab-info';
+
+            const nameLine = document.createElement('div');
+            nameLine.className = 'presentation-collab-name-line';
+            const name = document.createElement('strong');
+            name.textContent = state.owner.userName || state.owner.username;
+            const handle = document.createElement('span');
+            handle.className = 'presentation-collab-username';
+            handle.textContent = state.owner.username ? `@${state.owner.username}` : '';
+            nameLine.append(name, handle);
+
+            const unitTag = createUnitBadge(state.owner.unit);
+
+            info.append(nameLine, unitTag);
+            userWrap.append(avatar, info);
+
+            const ownerBadge = document.createElement('span');
+            ownerBadge.className = 'presentation-collab-role-tag is-owner';
+            ownerBadge.textContent = '所有者';
+
+            ownerRow.append(userWrap, ownerBadge);
+            list.appendChild(ownerRow);
+        }
+
+        // 2. 协作者列表
         const roleNames = { editor: '编辑者', commenter: '评论者', viewer: '查看者' };
         state.collaborators.forEach(c => {
             const row = document.createElement('div');
             row.className = 'presentation-collab-row';
-            const user = document.createElement('div');
-            user.className = 'presentation-collab-user';
-            user.textContent = c.userName || c.username || c.userId;
+
+            const userWrap = document.createElement('div');
+            userWrap.className = 'presentation-collab-user';
+
+            const avatar = document.createElement('div');
+            avatar.className = 'presentation-collab-avatar';
+            avatar.textContent = (c.userName || c.username || '协').slice(0, 1).toUpperCase();
+
+            const info = document.createElement('div');
+            info.className = 'presentation-collab-info';
+
+            const nameLine = document.createElement('div');
+            nameLine.className = 'presentation-collab-name-line';
+            const name = document.createElement('strong');
+            name.textContent = c.userName || c.username || `用户 #${c.userId}`;
+            const handle = document.createElement('span');
+            handle.className = 'presentation-collab-username';
+            handle.textContent = c.username ? `@${c.username}` : '';
+            nameLine.append(name, handle);
+
+            const unitTag = createUnitBadge(c.unit);
+
+            info.append(nameLine, unitTag);
+            userWrap.append(avatar, info);
+
+            const actionsWrap = document.createElement('div');
+            actionsWrap.className = 'presentation-collab-row-actions';
+
             const tag = document.createElement('span');
-            tag.className = 'presentation-collab-role-tag';
+            tag.className = 'presentation-collab-role-tag is-' + c.role;
             tag.textContent = roleNames[c.role] || c.role;
-            user.appendChild(tag);
+
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
-            removeBtn.className = 'btn-danger';
+            removeBtn.className = 'btn-danger presentation-collab-remove-btn';
             removeBtn.textContent = '移除';
             removeBtn.dataset.collabRemoveUser = String(c.userId);
-            row.append(user, removeBtn);
+
+            actionsWrap.append(tag, removeBtn);
+            row.append(userWrap, actionsWrap);
             list.appendChild(row);
         });
     }
@@ -386,6 +692,25 @@
     function handleCollabClick(event) {
         if (event.target.closest('#presentation-collaborators-btn')) { openCollaboratorsModal(); return true; }
         if (event.target.closest('#presentation-collaborators-close-btn')) { closeCollaboratorsModal(); return true; }
+        if (event.target.closest('#presentation-collaborators-save-btn')) { saveCollaboratorsAndClose().catch(error => toast(error?.message || '保存失败，请重试。', 'error')); return true; }
+        if (event.target.closest('#presentation-collab-tab-unit-user') || event.target.closest('#presentation-collab-tab-user')) { switchCollabTab('unit-user'); return true; }
+        if (event.target.closest('#presentation-collab-tab-search-user')) { switchCollabTab('search'); return true; }
+        if (event.target.closest('#presentation-collab-tab-unit')) { switchCollabTab('unit'); return true; }
+        const unitCard = event.target.closest('.presentation-collab-unit-card');
+        if (unitCard) {
+            const unit = unitCard.dataset.collabUnit;
+            if (!(state.selectedBatchUnits instanceof Set)) {
+                state.selectedBatchUnits = new Set();
+            }
+            if (state.selectedBatchUnits.has(unit)) state.selectedBatchUnits.delete(unit);
+            else state.selectedBatchUnits.add(unit);
+            unitCard.classList.toggle('is-selected', state.selectedBatchUnits.has(unit));
+            return true;
+        }
+        if (event.target.closest('#presentation-collab-batch-submit-btn')) {
+            submitBatchUnitAuthorization();
+            return true;
+        }
         const removeCollab = event.target.closest('[data-collab-remove-user]');
         if (removeCollab) { removeCollaborator(removeCollab.dataset.collabRemoveUser).catch(error => toast(error.message, 'error')); return true; }
         if (event.target.closest('#presentation-comments-filter-slide')) { setCommentsFilter('slide'); return true; }
@@ -416,7 +741,30 @@
         }
         if (event.target?.id === 'presentation-collab-form') {
             event.preventDefault();
-            addCollaborator(byId('presentation-collab-username')?.value, byId('presentation-collab-role')?.value).catch(error => toast(error.message, 'error'));
+            const username = byId('presentation-collab-unit-user-select')?.value;
+            const role = byId('presentation-collab-unit-user-role')?.value || 'editor';
+            if (!username) {
+                toast('请先从成员下拉列表中选择需要添加的成员。', 'warning');
+                return true;
+            }
+            addCollaborator(username, role).then(() => {
+                const sel = byId('presentation-collab-unit-user-select');
+                if (sel) sel.value = '';
+            }).catch(error => toast(error.message, 'error'));
+            return true;
+        }
+        if (event.target?.id === 'presentation-collab-search-form') {
+            event.preventDefault();
+            const username = byId('presentation-collab-username')?.value?.trim();
+            const role = byId('presentation-collab-role')?.value || 'editor';
+            if (!username) {
+                toast('请输入需要添加的用户名或工号。', 'warning');
+                return true;
+            }
+            addCollaborator(username, role).then(() => {
+                const input = byId('presentation-collab-username');
+                if (input) input.value = '';
+            }).catch(error => toast(error.message, 'error'));
             return true;
         }
         return false;
@@ -437,6 +785,7 @@
         deleteComment,
         openCollaboratorsModal,
         closeCollaboratorsModal,
+        saveCollaboratorsAndClose,
         loadCollaborators,
         addCollaborator,
         removeCollaborator,

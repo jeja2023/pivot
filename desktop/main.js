@@ -516,7 +516,9 @@ function createMainWindow(config) {
         }
     });
     const webSession = mainWindow.webContents.session;
-    installRendererPermissionPolicy(webSession);
+    installRendererPermissionPolicy(webSession, {
+        isTrustedRenderer: targetUrl => isTrustedMainRendererUrl(targetUrl)
+    });
     attachStealthHeaderInterceptor(webSession);
     installSessionListWheelBridge(mainWindow);
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {

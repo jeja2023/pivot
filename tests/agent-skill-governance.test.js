@@ -147,6 +147,8 @@ test('路径安全工具拒绝穿越、符号链接、保留名、ADS 与尾随�
     // 扩展名由服务端按 format 决定，不接受可执行扩展名。
     assert.equal(buildDeliveryFilename('../../evil.exe', 'pdf'), 'evil.pdf');
     assert.equal(buildDeliveryFilename('年度报告', 'docx'), '年度报告.docx');
+    assert.equal(buildDeliveryFilename('年度汇报.pptx', 'pptx'), '年度汇报.pptx');
+    assert.equal(buildDeliveryFilename('第 1 页.png', 'png'), '第 1 页.png');
     assert.throws(() => buildDeliveryFilename('x', 'exe'), /不支持的交付格式/);
     const existing = new Set(['/root/年度报告.docx', '/root/年度报告 (2).docx']);
     const resolved = resolveNonConflictingPath('/root', '年度报告.docx', { exists: target => existing.has(String(target).replace(/\\/g, '/')) });

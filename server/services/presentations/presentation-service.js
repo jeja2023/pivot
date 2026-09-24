@@ -913,6 +913,7 @@ const {
     resolvePresentationComment,
     deletePresentationComment,
     listPresentationCollaborators,
+    listCollaboratorCandidates,
     addPresentationCollaborator,
     removePresentationCollaborator
 } = collabService;
@@ -960,6 +961,7 @@ module.exports = {
     getPresentationAssetByRef,
     getPresentationVersion,
     listPresentationCollaborators,
+    listCollaboratorCandidates,
     listPresentationComments,
     listPresentationExports,
     listPresentationTemplates,
