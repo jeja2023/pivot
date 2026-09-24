@@ -56,6 +56,7 @@ function worldStateBody(worldState = {}) {
 
 function diffWorldState(previous, current, path = '', changes = []) {
     if (Object.is(previous, current)) return changes;
+    if (JSON.stringify(previous) === JSON.stringify(current)) return changes;
     const previousObject = previous && typeof previous === 'object' && !Array.isArray(previous);
     const currentObject = current && typeof current === 'object' && !Array.isArray(current);
     if (!previousObject || !currentObject) {

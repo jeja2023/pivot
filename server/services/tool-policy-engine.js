@@ -184,9 +184,9 @@ function validateScopedReportPaths(toolName, input = {}) {
         if (match && !Number.isSafeInteger(Number.parseInt(match[1], 10))) throw new Error('报表目录索引无效。');
         try { normalizeRelativeEntryPath(relative, { allowSubdirectories: true }); }
         catch (_) {
-            const error = new Error('报表路径必须是授权目录内的相对候选路径。');
+            const error = new Error('报表文件未找到或超出授权目录');
             error.code = 'REPORT_PATH_DENIED';
-            error.status = 403;
+            error.status = 404;
             error.category = 'policy';
             throw error;
         }

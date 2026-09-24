@@ -70,8 +70,12 @@ function normalizeToolInput(toolName, input = {}, run = {}) {
         normalized.model = String(run.chosen_model_id ?? run.model_id_selected ?? run.model_id ?? run.modelId ?? '').trim();
     }
     if (String(toolName || '').trim() === 'agent.content_review' && !normalized.records) {
-        normalized.records = normalized.rows ?? normalized.data ?? normalized.items ?? normalized.content
-            ?? normalized.text ?? normalized.articles ?? normalized.news_list ?? normalized.results;
+        const aliasKey = ['rows', 'data', 'items', 'content', 'text', 'articles', 'news_list', 'results']
+            .find(key => Object.prototype.hasOwnProperty.call(normalized, key));
+        if (aliasKey) {
+            normalized.records = normalized[aliasKey];
+            delete normalized[aliasKey];
+        }
     }
     return normalized;
 }

@@ -522,7 +522,9 @@ test('RAG 配置会限制不安全检索参数', () => {
         topK: 5,
         candidateLimit: 20,
         chunkSize: 240,
-        chunkOverlap: 120
+        chunkOverlap: 120,
+        rerankThreshold: 0.3,
+        citationConfidenceThreshold: 0.42
     });
 });
 

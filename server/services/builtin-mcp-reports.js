@@ -100,9 +100,9 @@ async function resolveReportFile(config, fileRef) {
         if (rootIndex !== null && (!Number.isSafeInteger(rootIndex) || rootIndex < 0 || rootIndex >= config.roots.length)) throw new Error('目录索引不在授权目录白名单内。');
         parsedReference = { rootIndex, relative: normalizeRelativeEntryPath(relative, { allowSubdirectories: true }) };
     } catch (error) {
-        const err = new Error('文件路径必须是授权目录白名单内的相对候选路径，不允许绝对路径、路径穿越或符号链接跳转。');
+        const err = new Error('报表文件未找到或超出授权目录');
         err.code = 'REPORT_PATH_DENIED';
-        err.status = 403;
+        err.status = 404;
         throw err;
     }
     const candidates = parsedReference.rootIndex !== null

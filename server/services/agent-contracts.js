@@ -47,17 +47,17 @@ function resolveToolContractCapabilities(definition = {}, toolName = '', source 
 }
 
 
-function enforceStrictInputSchema(schema, isRoot = false) {
+function enforceStrictInputSchema(schema, _isRoot = false) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
     const next = { ...schema };
     if (next.type === 'object' || next.properties) {
-        const hasDeclaredFields = Object.prototype.hasOwnProperty.call(next, 'properties')
-            || Array.isArray(next.required);
+        const hasDeclaredFields = (next.properties && typeof next.properties === 'object' && Object.keys(next.properties).length > 0)
+            || (Array.isArray(next.required) && next.required.length > 0);
         const hasDynamicMapSchema = Object.prototype.hasOwnProperty.call(next, 'additionalProperties')
             && next.additionalProperties !== false;
         // 有明确字段定义的对象严格拒绝未知字段；没有 properties 的嵌套对象视为动态 Map，
         // 由工具作者自行决定其 additionalProperties 约束，避免破坏 fields/headers/sections。
-        if (hasDeclaredFields || isRoot) {
+        if (hasDeclaredFields) {
             if (!hasDynamicMapSchema) next.additionalProperties = false;
         }
         if (next.properties && typeof next.properties === 'object') {
