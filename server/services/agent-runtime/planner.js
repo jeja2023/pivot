@@ -45,10 +45,22 @@ function chatHistoryMessages(contextConfig = {}) {
 function chatAgentContextMessages(contextConfig = {}) {
     const chatAgent = contextConfig?.chatAgent;
     if (!chatAgent || typeof chatAgent !== 'object') return [];
+    const contextText = value => value && typeof value === 'object' && !Array.isArray(value)
+        ? String(value.content || '').trim()
+        : String(value || '').trim();
     return [
-        chatAgent.memoryContext ? { role: 'user', content: String(chatAgent.memoryContext) } : null,
-        chatAgent.ragContext ? { role: 'user', content: String(chatAgent.ragContext) } : null
+        !contextText(contextConfig.longTermMemoryContext) && contextText(chatAgent.memoryContext)
+            ? { role: 'user', content: contextText(chatAgent.memoryContext) } : null,
+        contextText(chatAgent.ragContext) ? { role: 'user', content: contextText(chatAgent.ragContext) } : null
     ].filter(Boolean);
+}
+
+function longTermMemoryContextMessages(contextConfig = {}) {
+    const value = contextConfig?.longTermMemoryContext;
+    const content = value && typeof value === 'object' && !Array.isArray(value)
+        ? String(value.content || '').trim()
+        : String(value || '').trim();
+    return content ? [{ role: 'user', content }] : [];
 }
 
 function buildCurrentGoalContent(goal, observations, contextConfig = {}) {
@@ -122,6 +134,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             ].join('\n')
         },
         ...chatHistoryMessages(contextConfig),
+        ...longTermMemoryContextMessages(contextConfig),
         ...chatAgentContextMessages(contextConfig),
         ...observationMessages(observations),
         {
@@ -135,7 +148,8 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
     const finalContext = {
         chatHistory: options.chatHistory,
-        chatAgent: options.chatAgent
+        chatAgent: options.chatAgent,
+        longTermMemoryContext: options.longTermMemoryContext
     };
     const messages = [
         {
@@ -143,6 +157,7 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             content: '你是 Pivot Agent。请将 Agent 的观察记录总结为清晰的最终答案。如适用，请说明局限性和有用的后续步骤。输出请使用中文。'
         },
         ...chatHistoryMessages(finalContext),
+        ...longTermMemoryContextMessages(finalContext),
         ...chatAgentContextMessages(finalContext),
         ...observationMessages(observations),
         {
@@ -191,6 +206,7 @@ function isMissingFinalAnswer(value) {
 module.exports = {
     buildPlannerMessages,
     chatHistoryMessages,
+    longTermMemoryContextMessages,
     observationMessages,
     synthesizeFinalAnswer,
     isMissingFinalAnswer

@@ -1,4 +1,5 @@
 const { getContext } = require('../llm');
+const { readTypedEnv } = require('../config/env-registry');
 const { shouldDisableChatThinking } = require('./models');
 const {
     ContextLengthExceededError,
@@ -22,7 +23,9 @@ const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-c
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
 const {
     buildLongTermMemoryContextMessage,
+    compareMemoryRetrievalShadow,
     injectLongTermMemoryBeforeLatestUser,
+    recordMemoryUsage,
     retrieveLongTermMemories
 } = require('./long-term-memory');
 const { buildStructuredTaskState } = require('./structured-task-state');
@@ -118,6 +121,7 @@ async function assembleChatContext({
 }) {
     const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
+    let pendingMemoryUsage = null;
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     // 检索只使用本轮结构化任务状态中的 currentQuestion/retrievalQuery，
     // 不把完整聊天记录直接作为知识库或工具路由查询。完整 history 仅用于最终回答上下文。
@@ -200,7 +204,7 @@ async function assembleChatContext({
         && isRagEnabled()
         && Boolean(retrievalQuery);
     const [memoryResult, ragResult] = await Promise.allSettled([
-        memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user }) : Promise.resolve([]),
+        memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
         shouldRetrieveRag ? retrieveContext(userId, retrievalQuery, null, {
             user: req.user,
             scope: effectiveRagScope,
@@ -227,6 +231,17 @@ async function assembleChatContext({
             });
             if (memoryMessage) {
                 history = injectLongTermMemoryBeforeLatestUser(history, memoryMessage);
+                pendingMemoryUsage = {
+                    matches: memoryMatches.filter(memory => memoryMessage.metadata?.memoryIds?.includes(memory.id)),
+                    queryText: memoryQuery
+                };
+                if (readTypedEnv('PIVOT_LONG_TERM_MEMORY_SHADOW_MODE')) {
+                    void compareMemoryRetrievalShadow(userId, memoryQuery, memoryMatches, {
+                        user: req.user,
+                        sessionId,
+                        limit: memoryMatches.length
+                    }).catch(error => req.log.warn({ sessionId, userId, err: error.message }, '长期记忆影子排序比较失败'));
+                }
                 writeSse(JSON.stringify({
                     type: 'memory',
                     status: 'hit',
@@ -383,6 +398,22 @@ async function assembleChatContext({
     try {
         const budgetResult = fitMessagesToContextBudget(visionHistory, modelCfg);
         visionHistory = budgetResult.messages;
+        if (pendingMemoryUsage?.matches?.length) {
+            const memoryPresent = visionHistory.some(message => String(message?.content || '').includes('PIVOT_LONG_TERM_MEMORY_BEGIN'));
+            const trimmed = !memoryPresent
+                || Number(budgetResult.metadata.trimmedMemoryContexts || 0) > 0
+                || Number(budgetResult.metadata.droppedMemoryContexts || 0) > 0;
+            try {
+                await recordMemoryUsage(userId, pendingMemoryUsage.matches, {
+                    eventType: trimmed ? 'trimmed' : 'injected',
+                    sessionId,
+                    queryText: pendingMemoryUsage.queryText,
+                    reason: trimmed ? 'context_budget_trimmed' : ''
+                });
+            } catch (error) {
+                req.log.warn({ sessionId, userId, err: error.message }, '长期记忆实际注入事件记录失败');
+            }
+        }
         if (budgetResult.metadata.adjusted) {
             req.log.warn({
                 sessionId,

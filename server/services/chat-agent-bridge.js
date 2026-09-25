@@ -33,6 +33,13 @@ function clampText(value, max = CHAT_AGENT_HISTORY_ITEM_CHARS) {
     return `${text.slice(0, Math.max(0, max - 36)).trimEnd()}\n...[聊天上下文已截断]`;
 }
 
+function contextText(value, max = CHAT_AGENT_CONTEXT_CHARS) {
+    const source = value && typeof value === 'object' && !Array.isArray(value)
+        ? value.content
+        : value;
+    return clampText(source, max);
+}
+
 function normalizeChatContent(content, max = CHAT_AGENT_HISTORY_ITEM_CHARS) {
     if (!Array.isArray(content)) return clampText(content, max);
     return content.map(part => {
@@ -106,9 +113,9 @@ function buildChatAgentMetadata({
                 role: 'user',
                 content: normalizeChatContent(currentContent, MAX_CHAT_AGENT_GOAL_LENGTH)
             },
-            memoryContext: clampText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
+            memoryContext: contextText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
             memoryUsageReasons: Array.isArray(memoryUsageReasons) ? memoryUsageReasons.slice(0, 20) : [],
-            ragContext: clampText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
+            ragContext: contextText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
             createdAt: getBeijingTimestamp()
         },
         chatHistory: normalizeChatHistory(history)
@@ -139,7 +146,7 @@ async function prepareChatAgentContext({
             const memoryMessage = buildLongTermMemoryContextMessage(matches, {
                 inputBudget: modelCfg ? getModelContextBudget(modelCfg).inputBudget : 4000
             });
-            memoryContext = memoryMessage || '';
+            memoryContext = memoryMessage?.content || '';
             memoryUsageReasons = memoryMessage?.metadata?.usageReasons || [];
         } catch (error) {
             logger.warn({ userId, err: error.message }, '普通聊天 Agent 长期记忆检索失败');
@@ -157,10 +164,10 @@ async function prepareChatAgentContext({
     }
 
     return {
-        memoryContext: clampText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
+        memoryContext: contextText(memoryContext, CHAT_AGENT_CONTEXT_CHARS),
         memoryCount,
         memoryUsageReasons,
-        ragContext: clampText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
+        ragContext: contextText(ragContext, CHAT_AGENT_CONTEXT_CHARS),
         ragSummary
     };
 }
@@ -344,6 +351,7 @@ module.exports = {
     CHAT_AGENT_BRIDGE_VERSION,
     CHAT_AGENT_HISTORY_LIMIT,
     buildChatAgentMetadata,
+    contextText,
     getChatBridgeMetadata,
     isChatAgentRun,
     normalizeChatHistory,

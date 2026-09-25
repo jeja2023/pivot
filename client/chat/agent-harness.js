@@ -682,6 +682,8 @@
         state.memoryPolicy = data.policy || {};
         const autoCapture = document.getElementById('agent-memory-auto-capture');
         if (autoCapture) autoCapture.checked = state.memoryPolicy.autoCapture !== false;
+        const requireConfirmation = document.getElementById('agent-memory-require-confirmation');
+        if (requireConfirmation) requireConfirmation.checked = state.memoryPolicy.requireConfirmation === true;
         const blocked = new Set(state.memoryPolicy.blockedCategories || []);
         document.querySelectorAll('[data-agent-memory-blocked]').forEach(input => { input.checked = blocked.has(input.value); });
         return state.memoryPolicy;
@@ -690,7 +692,11 @@
     async function saveMemoryPolicy() {
         const blockedCategories = [...document.querySelectorAll('[data-agent-memory-blocked]:checked')].map(input => input.value);
         try {
-            const data = await apiJson(`${API_BASE}/memories/policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoCapture: document.getElementById('agent-memory-auto-capture')?.checked !== false, blockedCategories }) });
+            const data = await apiJson(`${API_BASE}/memories/policy`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                autoCapture: document.getElementById('agent-memory-auto-capture')?.checked !== false,
+                requireConfirmation: document.getElementById('agent-memory-require-confirmation')?.checked === true,
+                blockedCategories
+            }) });
             state.memoryPolicy = data.policy;
             setNotice('记忆治理策略已保存。敏感信息始终不会持久化。', 'success');
         } catch (error) {

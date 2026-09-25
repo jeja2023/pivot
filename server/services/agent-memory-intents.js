@@ -68,8 +68,9 @@ async function applyMemoryIntent(user, input = {}) {
     if (intent.action === 'remember') {
         const created = await upsertMemory(user.id, {
             content: intent.content, type: 'preference', scope: 'user', salience: 0.8, confidence: 0.9,
+            origin: 'explicit', assertedBy: 'user',
             sourceSessionId: input.sourceSessionId || input.source_session_id || null
-        }, { user, confirmed: true });
+        }, { user, confirmed: true, explicit: true, origin: 'explicit', assertedBy: 'user' });
         if (created?.skipped) throw intentError('该内容不符合当前记忆策略或可能包含敏感信息。', 'MEMORY_INTENT_BLOCKED', 422);
         return { action: intent.action, result: created, message: created.merged ? '已合并到现有个人记忆。' : '已保存为个人长期记忆。' };
     }

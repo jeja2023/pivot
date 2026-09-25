@@ -9,6 +9,7 @@ const {
     getMemoryMergeSuggestions,
     getMemorySummary,
     getMemorySource,
+    getMemoryUsage,
     listMemoryExtractionJobs,
     listMemories,
     mergeMemories,
@@ -23,6 +24,14 @@ const {
 } = require('../services/long-term-memory');
 const { getMemoryPolicy, listMemoryPolicyVersions, updateMemoryPolicy } = require('../services/memory-governance');
 const { applyMemoryIntent, previewMemoryIntent } = require('../services/agent-memory-intents');
+const {
+    createMemoryEvaluationCase,
+    deleteMemoryEvaluationCase,
+    listMemoryEvaluationCases,
+    listMemoryEvaluationRuns,
+    runMemoryEvaluation,
+    updateMemoryEvaluationCase
+} = require('../services/long-term-memory/memory-evaluation-runner');
 
 function normalizeMemoryId(raw) {
     const id = Number.parseInt(raw, 10);
@@ -102,11 +111,46 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         res.json({ success: true, summary });
     }));
 
+    router.get('/memories/evaluations/cases', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, cases: await listMemoryEvaluationCases(req.user, req.query || {}) });
+    }));
+
+    router.post('/memories/evaluations/cases', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluationCase = await createMemoryEvaluationCase(req.user, req.body || {});
+        if (!evaluationCase) return res.status(400).json({ error: '评测名称和问题不能为空。' });
+        res.status(201).json({ success: true, case: evaluationCase });
+    }));
+
+    router.put('/memories/evaluations/cases/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const evaluationCase = await updateMemoryEvaluationCase(req.user, req.params.id, req.body || {});
+        if (!evaluationCase) return res.status(404).json({ error: '未找到指定的记忆评测用例。' });
+        res.json({ success: true, case: evaluationCase });
+    }));
+
+    router.delete('/memories/evaluations/cases/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const deleted = await deleteMemoryEvaluationCase(req.user, req.params.id);
+        if (!deleted) return res.status(404).json({ error: '未找到指定的记忆评测用例。' });
+        res.json({ success: true });
+    }));
+
+    router.post('/memories/evaluations/run', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await runMemoryEvaluation(req.user, req.body || {});
+        if (typeof logAction === 'function') logAction(req, '运行长期记忆评测', `用例数: ${result.run.summary?.cases || 0}`);
+        res.json({ success: true, ...result });
+    }));
+
+    router.get('/memories/evaluations/runs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, runs: await listMemoryEvaluationRuns(req.user, req.query || {}) });
+    }));
+
     router.get('/memories/export', authMiddleware, asyncHandler(async (req, res) => {
         const exportData = await exportMemories(req.user.id, {
             status: req.query.status || 'all',
             type: req.query.type || '',
-            search: req.query.search || ''
+            search: req.query.search || '',
+            offset: req.query.offset,
+            pageSize: req.query.pageSize || req.query.limit,
+            maxRecords: req.query.maxRecords
         });
         res.json({
             success: true,
@@ -174,8 +218,14 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
                 salience: req.body?.salience ?? 0.8,
                 confidence: req.body?.confidence ?? 0.9,
                 expiresAt: req.body?.expiresAt || req.body?.expires_at || null,
+                validFrom: req.body?.validFrom || req.body?.valid_from || null,
+                scopeReference: req.body?.scopeReference || req.body?.scope_reference || '',
+                projectId: req.body?.projectId || req.body?.project_id || '',
+                factKey: req.body?.factKey || req.body?.fact_key || '',
+                origin: 'explicit',
+                assertedBy: 'user',
                 ...source
-            }, { user: req.user, confirmed: true });
+            }, { user: req.user, confirmed: true, explicit: true, origin: 'explicit', assertedBy: 'user' });
             if (result?.skipped) {
                 return res.status(422).json({ error: result.reason === 'invalid_or_sensitive' ? '该内容疑似包含敏感信息或过短，不能保存为长期记忆。' : '当前记忆策略不允许保存该内容。', code: `MEMORY_REMEMBER_${String(result.reason || 'REJECTED').toUpperCase()}` });
             }
@@ -270,9 +320,9 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
     router.get('/memories/:id/usage', authMiddleware, asyncHandler(async (req, res) => {
         const id = normalizeMemoryId(req.params.id);
         if (!id) return res.status(400).json({ error: '记忆 ID 参数非法', code: 'MEMORY_ID_INVALID' });
-        const memory = await getMemorySource(req.user.id, id);
-        if (!memory) return res.status(404).json({ error: '未找到指定的长期记忆记录', code: 'MEMORY_NOT_FOUND' });
-        res.json({ success: true, usage: { memoryId: id, reason: '该记忆在检索中按相关性、重要度、置信度和近期性排序；只有满足相关性或高重要度时才注入上下文。', source: memory } });
+        const usage = await getMemoryUsage(req.user.id, id, { limit: req.query.limit });
+        if (!usage) return res.status(404).json({ error: '未找到指定的长期记忆记录', code: 'MEMORY_NOT_FOUND' });
+        res.json({ success: true, usage: { memoryId: id, ...usage } });
     }));
 
     router.put('/memories/:id', authMiddleware, asyncHandler(async (req, res) => {

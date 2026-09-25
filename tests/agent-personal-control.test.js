@@ -10,6 +10,7 @@ const { serializeFeedback } = require('../server/services/agent-feedback');
 const { normalizeGoalInput, normalizeTriggerSpec } = require('../server/services/agent-goals');
 const { calculateToolScore, normalizeReliabilitySignal } = require('../server/services/agent-tool-reliability');
 const { isSafeLearningInstruction, normalizeSettings } = require('../server/services/agent-learning');
+const profileService = fs.readFileSync(path.resolve(__dirname, '../server/services/agent-profile.js'), 'utf8');
 
 test('personal Agent profile is normalized into bounded, explicit fields', () => {
     const profile = normalizeAgentProfile({
@@ -23,6 +24,13 @@ test('personal Agent profile is normalized into bounded, explicit fields', () =>
     assert.equal(profile.communicationStyle.tone, 'concise');
     assert.deepEqual(profile.memoryPolicy.blockedCategories, ['fact']);
     assert.match(buildAgentProfileContext(profile), /PIVOT_AGENT_PROFILE_BEGIN/);
+});
+
+test('档案中的兼容 memoryPolicy 不会成为长期记忆治理的第二个权威来源', () => {
+    assert.match(profileService, /getMemoryPolicy/);
+    assert.match(profileService, /updateMemoryPolicy/);
+    assert.match(profileService, /delete incoming\.memoryPolicy/);
+    assert.match(profileService, /专用策略存储/);
 });
 
 test('memory governance classifies sensitive data and temporary context safely', () => {

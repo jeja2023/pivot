@@ -641,6 +641,8 @@ test('long-term memory table and modals use shared controls', () => {
 
     assert.match(memoryPartial, /<table class="data-table compact-table memories-table">/);
     assert.match(memoryPartial, /id="pagination-memories" class="pagination"/);
+    assert.match(memoryPartial, /id="memory-evaluation-run-btn"/);
+    assert.match(memoryPartial, /id="memory-evaluation-case-form"/);
     assert.match(memoryPartial, /class="modal model-modal memory-modal memory-edit-modal"/);
     assert.match(memoryPartial, /class="modal model-modal memory-modal memory-source-modal"/);
     assert.match(memoryPartial, /class="model-modal-header memory-modal-header"/);
@@ -667,7 +669,9 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(memorySettings, /params\.set\('limit', String\(limit\)\)/);
     assert.match(memorySettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
     assert.match(memorySettings, /renderMemoryPagination\('memories', total, requestedPage\)/);
-    assert.match(memorySettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
+    assert.match(memorySettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*pending: '待确认',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
+    assert.match(memorySettings, /fetchMemoryEvaluationRuns/);
+    assert.match(memorySettings, /runMemoryEvaluation/);
     assert.match(memorySettings, /formatMemoryStatusLabel\(memory\.status\)/);
     assert.doesNotMatch(memorySettings, /escapeHtml\(memory\.status \|\| 'active'\)/);
     assert.match(adminSettings, /const selectedMemory = memory\.getCurrentMemory\(memoryId\);/);

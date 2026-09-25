@@ -3,6 +3,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
+const { revokeMemoriesForSourceMessages, revokeMemoriesForSourceSession, cancelMemoryExtractionJobs } = require('../services/long-term-memory');
 const { getBeijingTimestamp } = require('../time');
 const { buildFtsQuery } = require('../search');
 const { compactSessionMemory, getSessionContextMeta } = require('../llm');
@@ -747,10 +748,14 @@ function createSessionsRouter({
 
     router.delete('/messages/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { id } = req.params;
+        const source = await queryOne('SELECT id, session_id FROM messages WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [id, req.user.id]);
         const msgDeleted = await execute(
             'UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
             [getBeijingTimestamp(), id, req.user.id]
         );
+        if (msgDeleted > 0 && source) {
+            await revokeMemoriesForSourceMessages(req.user.id, [source.id], { reason: 'source_message_deleted' });
+        }
         if (msgDeleted > 0) logAction(req, '删除消息', `消息ID: ${id}`);
         res.json({ success: msgDeleted > 0 });
     }));
@@ -768,6 +773,12 @@ function createSessionsRouter({
             await trx.execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL', [now, sessionId, userId]);
             sessionDeleted = await trx.execute('UPDATE sessions SET deleted_at = ?, deleted_by_user = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [now, now, sessionId, userId]);
         });
+        if (sessionDeleted > 0) {
+            await Promise.all([
+                revokeMemoriesForSourceSession(userId, sessionId, { reason: 'source_session_deleted' }),
+                cancelMemoryExtractionJobs(userId, { sessionId, reason: 'SOURCE_SESSION_DELETED' })
+            ]);
+        }
         logAction(req, '删除对话', `删除会话ID: ${sessionId}`);
         res.json({ success: sessionDeleted > 0 });
     }));

@@ -1,10 +1,24 @@
 const crypto = require('crypto');
 
 const MEMORY_SETTING_KEY = 'long_term_memory_enabled';
+const MEMORY_REVISION_SETTING_KEY = 'long_term_memory_revision';
 const MEMORY_STATUS = Object.freeze({
     active: 'active',
+    pending: 'pending',
     deleted: 'deleted',
     disabled: 'disabled'
+});
+const MEMORY_ORIGINS = Object.freeze({
+    automatic: 'automatic',
+    explicit: 'explicit',
+    learning: 'learning',
+    imported: 'imported'
+});
+const MEMORY_ASSERTED_BY = Object.freeze({
+    user: 'user',
+    assistant: 'assistant',
+    system: 'system',
+    external: 'external'
 });
 const MEMORY_TYPES = Object.freeze({
     preference: 'preference',
@@ -51,6 +65,18 @@ const SENSITIVE_PATTERNS = [
     /-----BEGIN [A-Z ]*PRIVATE KEY-----/
 ];
 
+// 长期记忆会被重放到后续提示中；即使不含凭据，指令型内容也不得持久化。
+const UNSAFE_MEMORY_INSTRUCTION_PATTERNS = [
+    /ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|rules?|messages?)/i,
+    /忽略(?:所有|之前|前文|上文|以上)?(?:指令|规则|消息|提示)/,
+    /(?:system|developer)\s*(?:prompt|message|instruction)/i,
+    /(?:系统|开发者)(?:提示词|消息|指令)/,
+    /reveal\s+(?:the\s+)?(?:system\s+prompt|secret|token|password)/i,
+    /(?:泄露|显示|输出)(?:系统提示词|密钥|令牌|密码)/,
+    /<\/?(?:system|developer|instruction|tool)[^>]*>/i,
+    /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/u
+];
+
 
 function clamp(value, min, max, fallback) {
     const parsed = Number(value);
@@ -67,6 +93,25 @@ function normalizeMemoryScope(scope) {
     const value = String(scope || '').trim().toLowerCase();
     if (['user', 'project', 'session', 'global'].includes(value)) return value;
     return 'user';
+}
+
+function normalizeMemoryOrigin(origin) {
+    const value = String(origin || '').trim().toLowerCase();
+    return Object.values(MEMORY_ORIGINS).includes(value) ? value : MEMORY_ORIGINS.automatic;
+}
+
+function normalizeMemoryAssertedBy(value, fallback = MEMORY_ASSERTED_BY.user) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return Object.values(MEMORY_ASSERTED_BY).includes(normalized) ? normalized : fallback;
+}
+
+function normalizeScopeReference(value) {
+    return String(value || '').trim().slice(0, 160);
+}
+
+function normalizeFactKey(value, type, content) {
+    const provided = String(value || '').trim().toLowerCase().replace(/[^a-z0-9:_-]+/g, '').slice(0, 160);
+    return provided || fingerprintMemory(type, content);
 }
 
 function normalizeMemoryContent(content) {
@@ -97,6 +142,11 @@ function parseJsonArray(value) {
 function hasSensitiveContent(text) {
     const value = String(text || '');
     return SENSITIVE_PATTERNS.some(pattern => pattern.test(value));
+}
+
+function hasUnsafeMemoryInstruction(text) {
+    const value = String(text || '');
+    return UNSAFE_MEMORY_INSTRUCTION_PATTERNS.some(pattern => pattern.test(value));
 }
 
 function normalizeComparableText(text) {
@@ -142,7 +192,10 @@ function normalizeOptionalTimestamp(value) {
 
 module.exports = {
     MEMORY_SETTING_KEY,
+    MEMORY_REVISION_SETTING_KEY,
     MEMORY_STATUS,
+    MEMORY_ORIGINS,
+    MEMORY_ASSERTED_BY,
     MEMORY_TYPES,
     MEMORY_TYPE_LABELS,
     DEFAULT_RETRIEVAL_BUDGET_RATIO,
@@ -163,10 +216,15 @@ module.exports = {
     clamp,
     normalizeMemoryType,
     normalizeMemoryScope,
+    normalizeMemoryOrigin,
+    normalizeMemoryAssertedBy,
+    normalizeScopeReference,
+    normalizeFactKey,
     normalizeMemoryContent,
     normalizeSourceMessageIds,
     parseJsonArray,
     hasSensitiveContent,
+    hasUnsafeMemoryInstruction,
     normalizeComparableText,
     fingerprintMemory,
     contentText,

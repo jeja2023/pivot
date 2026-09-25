@@ -118,6 +118,14 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.doesNotMatch(html, /<col class="memory-col-source">/);
     assert.match(js, /const colspan = 8/);
     assert.match(js, /<div class="memory-action-buttons">[\s\S]*?data-memory-action="source"[\s\S]*?data-memory-action="edit"/);
+    assert.match(html, /id="memory-evaluation-run-btn"/);
+    assert.match(html, /id="memory-evaluation-case-form"/);
+    assert.match(js, /fetchMemoryEvaluationRuns/);
+    assert.match(js, /runMemoryEvaluation/);
+    assert.match(html, /id="memory-edit-scope"/);
+    assert.match(html, /id="memory-edit-valid-from"/);
+    assert.match(html, /id="memory-edit-expires-at"/);
+    assert.match(js, /function toDateTimeLocal/);
     assert.match(css, /\.memory-modal-header[\s\S]*?display:\s*flex;/);
     assert.match(css, /\.memory-source-close[\s\S]*?margin-left:\s*auto;/);
 });

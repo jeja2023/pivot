@@ -367,7 +367,7 @@ async function receiveChannelMessage(bindingId, payload = {}, headers = {}) {
             modelCfg = models[0] || null;
         }
         if (!modelCfg) throw gatewayError('渠道绑定未找到当前账号可用模型。', 'AGENT_CHANNEL_GATEWAY_MODEL_UNAVAILABLE', 409);
-        const context = await prepareChatAgentContext({ userId: user.id, user, modelCfg, modelContent: messageContent });
+        const context = await prepareChatAgentContext({ userId: user.id, user, sessionId: channelSession.session_id, modelCfg, modelContent: messageContent });
         const metadata = {
             ...buildChatAgentMetadata({
                 sessionId: channelSession.session_id,

@@ -68,6 +68,14 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 长期记忆
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_LONG_TERM_MEMORY_SHADOW_MODE` | boolean | `false` | true / false | 仅影子比较旧版与新版长期记忆排序，不改变实际注入结果；用于灰度前评测。 |
+| `LONG_TERM_MEMORY_MIN_RELEVANCE` | number | `0.08` | 0.01–0.95 | 长期记忆进入最终上下文的最低融合相关性，避免仅因重要度而注入无关记忆。 |
+| `LONG_TERM_MEMORY_LOW_VALUE_ARCHIVE_DAYS` | integer | `180` | 30–3650 | 低重要度、低置信度且长期未使用的历史片段自动归档天数。 |
+
 ## 工具库执行治理
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

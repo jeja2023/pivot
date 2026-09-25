@@ -1,6 +1,8 @@
 const { sanitizeUserVisibleText } = require('../../llm');
 const { requeueAgentRunAfterLeaseLoss } = require('./lease-loss');
 const { buildToolTraceContext } = require('../tool-trace-context');
+const { resolveRunLongTermMemory } = require('./run-memory');
+const { continueRunFromCheckpoint: continueRunFromCheckpointHelper } = require('./run-continuation');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -11,10 +13,6 @@ const {
     isRunCancelled,
     AGENT_DEFAULT_TIMEOUT_MS,
     AGENT_TOOL_TIMEOUT_MS,
-    AGENT_AUTO_CONTINUE_ON_TIMEOUT,
-    AGENT_AUTO_CONTINUE_ON_STEP_LIMIT,
-    AGENT_MAX_AUTO_CONTINUATIONS,
-    AGENT_MAX_TOTAL_RUNTIME_MS,
     AGENT_ANSWER_MIN_MAX_TOKENS,
     getRunForUser,
     getRunUser,
@@ -85,75 +83,7 @@ const {
     logger,
     getBeijingTimestamp,
     } = deps;
-    function runStartedAtMs(run = {}) {
-        const parsed = Date.parse(String(run.started_at || run.created_at || '').replace(' ', 'T'));
-        return Number.isFinite(parsed) ? parsed : Date.now();
-    }
-    function autoContinuationState(run = {}) {
-        const value = getRunMetadata(run).autoContinuation;
-        return value && typeof value === 'object' ? value : {};
-    }
-    async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'timeout' }) {
-        const enabled = reason === 'step_limit' ? AGENT_AUTO_CONTINUE_ON_STEP_LIMIT : AGENT_AUTO_CONTINUE_ON_TIMEOUT;
-        if (!enabled || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
-        const prior = autoContinuationState(run);
-        const count = Math.max(Number.parseInt(prior.count, 10) || 0, 0);
-        const elapsedMs = Math.max(Date.now() - runStartedAtMs(run), 0);
-        if (count >= AGENT_MAX_AUTO_CONTINUATIONS || elapsedMs >= AGENT_MAX_TOTAL_RUNTIME_MS) return false;
-        const currentStatus = await getRunStatus(runId);
-        if (TERMINAL_STATUSES.has(currentStatus)) return false;
-        // 工具尚未提交时不能立刻续跑：底层进程可能仍在收尾，直接再次执行会制造
-        // 重复副作用。幂等工具可由既有恢复机制重放，非幂等工具必须走人工审批。
-        const pendingTool = await queryOne(`
-            SELECT checkpoint_id FROM agent_run_checkpoints
-            WHERE run_id = ? AND checkpoint_type = 'tool' AND status = 'pending'
-            ORDER BY step_index DESC, id DESC LIMIT 1
-        `, [runId]);
-        if (pendingTool) return false;
-        const resumeContext = await buildAgentResumeContext(runId);
-        if (reason === 'step_limit' && Number(resumeContext.latestStepIndex || 0) <= 0) return false;
-        const nextCount = count + 1;
-        const resumeFromStep = Math.max(
-            Number(run.resume_from_step || 0),
-            Number(resumeContext.latestStepIndex || 0),
-            0
-        );
-        const now = getBeijingTimestamp();
-        await setRunMetadata(runId, {
-            resumeContext,
-            autoContinuation: {
-                count: nextCount,
-                max: AGENT_MAX_AUTO_CONTINUATIONS,
-                totalRuntimeMs: elapsedMs,
-                totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS,
-                reason,
-                lastReason: String(error?.message || '任务时间片结束').slice(0, 1000),
-                lastAt: now
-            }
-        });
-        await updateRun(runId, {
-            status: 'queued',
-            error_message: '',
-            resume_from_step: resumeFromStep,
-            last_heartbeat_at: now,
-            updated_at: now
-        });
-        const title = reason === 'step_limit' ? '当前时间片达到轮次上限，自动续跑' : '任务时间片结束，自动续跑';
-        await insertStep(runId, (await listSteps(runId)).length + 1, {
-            type: 'control',
-            title: `${title}：${nextCount}/${AGENT_MAX_AUTO_CONTINUATIONS}`,
-            output: {
-                reason: String(error?.message || ''),
-                resumeFromStep,
-                checkpointCount: Number(resumeContext.checkpointCount || 0),
-                elapsedMs,
-                totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS
-            }
-        });
-        await createAgentNotification(user.id, runId, 'info', '任务将从安全检查点继续', `${title}，已准备第 ${nextCount} 次自动续跑。`);
-        enqueueAgentRun(runId, user);
-        return true;
-    }
+    const continueRunFromCheckpoint = options => continueRunFromCheckpointHelper(options, deps);
 
     async function runAgent(runId, user) {
     const runController = new AbortController();
@@ -262,6 +192,17 @@ const {
         }
 
         const runtimeMetadata = getRunMetadata(run);
+        const {
+            longTermMemoryContext,
+            recordActualMemoryUsage,
+            recordPlannerMemoryUsage
+        } = await resolveRunLongTermMemory({
+            run,
+            user,
+            modelCfg,
+            contextConfig: parseJsonObject(run.context_config) || {},
+            logger
+        });
         let plannerChatHistory = Array.isArray(runtimeMetadata.chatHistory) ? runtimeMetadata.chatHistory : [];
         let plannerCurrentMessage = runtimeMetadata.chatBridge?.currentMessage || null;
         if (runtimeMetadata.chatBridge && run.session_id && user?.id) {
@@ -310,8 +251,8 @@ const {
         }
         const chatBridge = runtimeMetadata.chatBridge;
         const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, currentMessage: plannerCurrentMessage }, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null }
-            : { agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null };
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }, longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null }
+            : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null };
         if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
             const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
             toolList = toolList.map(tool => {
@@ -360,7 +301,7 @@ const {
         let stopReason = '';
         if (isStreamingToolsEnabled(modelCfg)) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
-            if (chatBridge) {
+            if (chatBridge || longTermMemoryContext) {
                 streamingDeps.synthesizeFinalAnswer = (streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, options = {}) => (
                     synthesizeFinalAnswer(streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, {
                         ...options,
@@ -368,6 +309,7 @@ const {
                     })
                 );
             }
+            await recordActualMemoryUsage();
             const streamingResult = await tryRunAgentStreaming({
                 run,
                 user,
@@ -460,12 +402,14 @@ const {
                 feedbackSignals: getRunMetadata(run).feedbackSignals || null,
                 skillTitle: getRunMetadata(run).skillTitle || '',
                 skillInstructions: getRunMetadata(run).skillInstructions || '',
+                longTermMemoryContext,
                 chatHistory: plannerChatHistory,
                 chatAgent: runtimeMetadata.chatBridge
-                    ? { ...runtimeMetadata.chatBridge, currentMessage: plannerCurrentMessage }
+                    ? { ...runtimeMetadata.chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }
                     : null
             };
             const plannerMessages = buildPlannerMessages(run.goal, plannerToolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
+            await recordPlannerMemoryUsage(plannerMessages);
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',

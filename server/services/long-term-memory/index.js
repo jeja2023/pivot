@@ -1,41 +1,36 @@
 const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
-const { KeyedConcurrencyGuard } = require('../concurrency');
-const { getAccessibleModelAsync } = require('../models');
-const { generateEmbedding, cosineSimilarity } = require('../rag-index');
-const {
-    getUserSettingValueAsync,
-    setUserSettingAsync
-} = require('../user-settings');
 
 const {
     MEMORY_SETTING_KEY,
     MEMORY_STATUS,
+    MEMORY_ORIGINS,
+    MEMORY_ASSERTED_BY,
     MEMORY_TYPES,
     MEMORY_TYPE_LABELS,
-    DEFAULT_MAX_INJECTED_MEMORIES,
     MIN_MEMORY_CONTENT_CHARS,
     EXTRACTION_TIMEOUT_MS,
     MODEL_EXTRACTION_TIMEOUT_MS,
     MEMORY_JOB_STATUS,
-    DEFAULT_MEMORY_JOB_MAX_ATTEMPTS,
-    MEMORY_JOB_STALE_LOCK_MINUTES,
-    DEFAULT_COMPLETED_JOB_RETENTION_DAYS,
     clamp,
     normalizeMemoryType,
     normalizeMemoryScope,
+    normalizeMemoryOrigin,
+    normalizeMemoryAssertedBy,
+    normalizeScopeReference,
+    normalizeFactKey,
     normalizeMemoryContent,
     normalizeSourceMessageIds,
     parseJsonArray,
     hasSensitiveContent,
-    normalizeComparableText,
+    hasUnsafeMemoryInstruction,
     fingerprintMemory,
     createMemoryValidationError,
     normalizeOptionalTimestamp
 } = require('./memory-utils');
-const { serializeMemory, serializeMemoryJob, buildMemoryJobDedupeKey } = require('./memory-serialization');
 
+const { serializeMemory } = require('./memory-serialization');
 const {
     extractMemoryCandidatesWithModel,
     extractMemoryCandidatesFromMessages,
@@ -45,14 +40,12 @@ const {
     clearModelExtractionCooldown
 } = require('./memory-extraction');
 const { mergeMemoryContent } = require('./memory-merge');
+const { ensureMemoryVectorIndex } = require('./memory-vector-index');
 const {
-    parseEmbedding,
-    keywordScore,
-    recencyScore,
     buildLongTermMemoryContextMessage,
     injectLongTermMemoryBeforeLatestUser
 } = require('./memory-retrieval');
-const { filterMemoriesForRetrieval, resolveMemoryGovernance } = require('../memory-governance');
+const { resolveMemoryGovernance } = require('../memory-governance');
 const {
     getMemorySummary,
     getMemoryJobSummary,
@@ -61,9 +54,44 @@ const {
     invalidateMemoryQualityCache
 } = require('./memory-quality');
 
-const extractionGuard = new KeyedConcurrencyGuard({
-    maxConcurrent: Math.max(1, Number.parseInt(process.env.LONG_TERM_MEMORY_EXTRACTION_MAX_CONCURRENT, 10) || 2)
-});
+const {
+    isLongTermMemoryEnabled,
+    setLongTermMemoryEnabled,
+    lockMemoryGateState,
+    assertMemoryWriteGate
+} = require('./memory-gate');
+
+const {
+    embeddingDimensions,
+    maybeGenerateMemoryEmbedding,
+    archiveExpiredMemories,
+    startLongTermMemoryMaintenanceRunner
+} = require('./memory-maintenance');
+
+const {
+    recordMemoryUsage,
+    compareMemoryRetrievalShadow,
+    getMemoryUsage
+} = require('./memory-usage');
+
+const {
+    getMemorySource,
+    revokeMemoriesForSourceMessages,
+    revokeMemoriesForSourceSession
+} = require('./memory-sources');
+
+const { retrieveLongTermMemories } = require('./memory-retrieval-query');
+
+const {
+    setRunMemoryExtractionHandler,
+    cancelMemoryExtractionJobs,
+    enqueueMemoryExtractionJob,
+    scheduleMemoryExtraction,
+    processMemoryExtractionJobs,
+    listMemoryExtractionJobs,
+    retryFailedMemoryExtractionJobs,
+    cleanupMemoryExtractionJobs
+} = require('./memory-jobs');
 
 async function getMemoryRow(userId, memoryId, options = {}) {
     const id = Number.parseInt(memoryId, 10);
@@ -74,18 +102,6 @@ async function getMemoryRow(userId, memoryId, options = {}) {
         FROM memories
         WHERE id = ? AND user_id = ?${includeDeleted ? '' : ' AND status != ?'}
     `, includeDeleted ? [id, userId] : [id, userId, MEMORY_STATUS.deleted]);
-}
-
-async function isLongTermMemoryEnabled(userId) {
-    const value = await getUserSettingValueAsync(userId, MEMORY_SETTING_KEY);
-    if (value === undefined) return true;
-    return value !== 'false';
-}
-
-async function setLongTermMemoryEnabled(userId, enabled) {
-    const value = enabled ? 'true' : 'false';
-    await setUserSettingAsync(userId, MEMORY_SETTING_KEY, value, { updatedAt: getBeijingTimestamp() });
-    return await isLongTermMemoryEnabled(userId);
 }
 
 async function listMemories(userId, options = {}) {
@@ -128,18 +144,58 @@ async function listMemories(userId, options = {}) {
     };
 }
 
-async function softDeleteMemory(userId, memoryId) {
+async function upsertMemorySuppression(trx, userId, memory, reason = 'user_forget') {
+    const fingerprint = fingerprintMemory(memory.type, memory.content);
+    await trx.execute(`
+        INSERT INTO memory_suppressions (
+            user_id, fingerprint, source_session_id, source_message_ids, reason, created_at, released_at, released_by
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, '')
+        ON CONFLICT(user_id, fingerprint) DO UPDATE SET
+            source_session_id = excluded.source_session_id,
+            source_message_ids = excluded.source_message_ids,
+            reason = excluded.reason,
+            created_at = excluded.created_at,
+            released_at = NULL,
+            released_by = ''
+    `, [
+        Number(userId),
+        fingerprint,
+        memory.source_session_id || null,
+        JSON.stringify(parseJsonArray(memory.source_message_ids)),
+        String(reason || 'user_forget').slice(0, 80),
+        getBeijingTimestamp()
+    ]);
+    return fingerprint;
+}
+
+async function softDeleteMemory(userId, memoryId, options = {}) {
+    const memory = await getMemoryRow(userId, memoryId, { includeDeleted: true });
+    if (!memory || memory.status === MEMORY_STATUS.deleted) return false;
     invalidateMemoryQualityCache(userId);
     const now = getBeijingTimestamp();
-    const changes = await execute(`
-        UPDATE memories
-        SET status = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND status != ?
-    `, [MEMORY_STATUS.deleted, now, memoryId, userId, MEMORY_STATUS.deleted]);
-    return changes > 0;
+    await transaction(async trx => {
+        if (options.suppress !== false) {
+            await upsertMemorySuppression(trx, userId, memory, options.reason || 'user_forget');
+        }
+        await trx.execute(`
+            UPDATE memories
+            SET status = ?, revoked_at = ?, revocation_reason = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? AND status != ?
+        `, [
+            MEMORY_STATUS.deleted,
+            now,
+            String(options.reason || 'user_forget').slice(0, 80),
+            now,
+            memory.id,
+            Number(userId),
+            MEMORY_STATUS.deleted
+        ]);
+    });
+    return true;
 }
 
 async function updateMemoryStatus(userId, memoryId, status) {
+    if (status === MEMORY_STATUS.deleted) return softDeleteMemory(userId, memoryId);
     invalidateMemoryQualityCache(userId);
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
     const now = getBeijingTimestamp();
@@ -164,6 +220,10 @@ async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STAT
     const ids = normalizeMemoryIds(memoryIds);
     if (ids.length === 0) return { updated: 0 };
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
+    if (normalized === MEMORY_STATUS.deleted) {
+        const results = await Promise.all(ids.map(id => softDeleteMemory(userId, id)));
+        return { updated: results.filter(Boolean).length, ids };
+    }
     const now = getBeijingTimestamp();
     const changes = await execute(`
         UPDATE memories
@@ -173,47 +233,37 @@ async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STAT
     return { updated: changes, ids };
 }
 
-async function archiveExpiredMemories(userId, options = {}) {
-    invalidateMemoryQualityCache(userId);
-    const now = getBeijingTimestamp();
-    const status = Object.values(MEMORY_STATUS).includes(options.status) ? options.status : MEMORY_STATUS.disabled;
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 500, 1000));
-    const rows = await query(`
-        SELECT id
-        FROM memories
-        WHERE user_id = ?
-          AND status = ?
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?
-        ORDER BY expires_at ASC, id ASC
-        LIMIT ?
-    `, [userId, MEMORY_STATUS.active, now, limit]);
-    if (rows.length === 0) return { archived: 0, ids: [] };
-    const ids = rows.map(row => row.id);
-    const changes = await execute(`
-        UPDATE memories
-        SET status = ?,
-            updated_at = ?
-        WHERE user_id = ?
-          AND id IN (${ids.map(() => '?').join(',')})
-    `, [status, now, userId, ...ids]);
-    return { archived: changes, ids, status };
-}
-
 async function exportMemories(userId, options = {}) {
-    const listed = await listMemories(userId, {
-        status: options.status || 'all',
-        type: options.type || '',
-        search: options.search || '',
-        limit: Math.min(Number.parseInt(options.limit, 10) || 500, 500),
-        offset: options.offset || 0
-    });
+    const pageSize = Math.max(1, Math.min(Number.parseInt(options.pageSize || options.limit, 10) || 500, 500));
+    const maxRecords = Math.max(pageSize, Math.min(Number.parseInt(options.maxRecords, 10) || 10000, 100000));
+    const memories = [];
+    let offset = Math.max(0, Number.parseInt(options.offset, 10) || 0);
+    let total = 0;
+    let enabled = true;
+    while (memories.length < maxRecords) {
+        const listed = await listMemories(userId, {
+            status: options.status || 'all',
+            type: options.type || '',
+            search: options.search || '',
+            limit: Math.min(pageSize, maxRecords - memories.length),
+            offset
+        });
+        total = listed.total;
+        enabled = listed.enabled;
+        memories.push(...listed.memories);
+        offset += listed.memories.length;
+        if (listed.memories.length < pageSize || offset >= total) break;
+    }
     const summary = await getMemorySummary(userId);
     return {
         exportedAt: getBeijingTimestamp(),
-        version: 1,
+        version: 2,
         summary,
-        memories: listed.memories
+        enabled,
+        total,
+        complete: memories.length >= total,
+        nextOffset: memories.length >= total ? null : offset,
+        memories
     };
 }
 
@@ -226,11 +276,20 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     if (content.length < MIN_MEMORY_CONTENT_CHARS) {
         throw createMemoryValidationError('Memory content is too short');
     }
-    if (hasSensitiveContent(content)) {
-        throw createMemoryValidationError('Sensitive content cannot be stored as long-term memory', 'SENSITIVE_MEMORY');
+    if (hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content)) {
+        throw createMemoryValidationError('Sensitive or instruction-like content cannot be stored as long-term memory', 'UNSAFE_MEMORY');
     }
     const type = Object.prototype.hasOwnProperty.call(updates, 'type') ? normalizeMemoryType(updates.type) : normalizeMemoryType(existing.type);
     const scope = Object.prototype.hasOwnProperty.call(updates, 'scope') ? normalizeMemoryScope(updates.scope) : normalizeMemoryScope(existing.scope);
+    const scopeReference = Object.prototype.hasOwnProperty.call(updates, 'scopeReference')
+        ? normalizeScopeReference(updates.scopeReference)
+        : normalizeScopeReference(existing.scope_reference);
+    const projectId = Object.prototype.hasOwnProperty.call(updates, 'projectId')
+        ? normalizeScopeReference(updates.projectId)
+        : normalizeScopeReference(existing.project_id);
+    const factKey = Object.prototype.hasOwnProperty.call(updates, 'factKey')
+        ? normalizeFactKey(updates.factKey, type, content)
+        : normalizeFactKey(existing.fact_key, type, content);
     const salience = Object.prototype.hasOwnProperty.call(updates, 'salience')
         ? clamp(updates.salience, 0, 1, Number(existing.salience || 0.5))
         : Number(existing.salience || 0.5);
@@ -243,66 +302,95 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     if (status === MEMORY_STATUS.deleted) {
         throw createMemoryValidationError('Use delete endpoint to remove a memory');
     }
-    const expiresAt = Object.prototype.hasOwnProperty.call(updates, 'expiresAt')
-        ? normalizeOptionalTimestamp(updates.expiresAt)
+    const expiresAt = Object.prototype.hasOwnProperty.call(updates, 'expiresAt') || Object.prototype.hasOwnProperty.call(updates, 'expires_at')
+        ? normalizeOptionalTimestamp(updates.expiresAt ?? updates.expires_at)
         : existing.expires_at;
+    const validFrom = Object.prototype.hasOwnProperty.call(updates, 'validFrom') || Object.prototype.hasOwnProperty.call(updates, 'valid_from')
+        ? normalizeOptionalTimestamp(updates.validFrom ?? updates.valid_from)
+        : existing.valid_from;
     const now = getBeijingTimestamp();
     const embedding = hasContent && content !== existing.content && !options.skipEmbedding
         ? await maybeGenerateMemoryEmbedding(content, userId, options.user || null)
         : existing.embedding;
+    const revisionChanged = content !== existing.content
+        || type !== normalizeMemoryType(existing.type)
+        || factKey !== normalizeFactKey(existing.fact_key, existing.type, existing.content);
+    if (revisionChanged) {
+        const updated = await transaction(async trx => {
+            const inserted = await trx.queryOne(`
+                INSERT INTO memories (
+                    user_id, scope, scope_reference, project_id, type, governance_class, retention_mode,
+                    sensitive, origin, asserted_by, fact_key, supersedes_id, content, embedding, embedding_status,
+                    embedding_dimensions, search_content, salience, confidence, source_session_id, source_message_ids,
+                    status, valid_from, expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
+            `, [
+                Number(userId), scope, scopeReference, projectId, type,
+                existing.governance_class || 'fact', existing.retention_mode || 'persistent',
+                existing.sensitive === true || existing.sensitive === 1,
+                normalizeMemoryOrigin(existing.origin), normalizeMemoryAssertedBy(existing.asserted_by),
+                factKey, existing.id, content, embedding, embedding ? 'ready' : 'lexical_ready', embeddingDimensions(embedding), content,
+                salience, confidence, existing.source_session_id || null,
+                JSON.stringify(parseJsonArray(existing.source_message_ids)), status, validFrom, expiresAt, now, now
+            ]);
+            await trx.execute(`
+                INSERT INTO memory_source_evidence (
+                    memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
+                )
+                SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, ?
+                FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
+                ON CONFLICT(memory_id, message_id) DO NOTHING
+            `, [inserted.id, now, existing.id, Number(userId)]);
+            await trx.execute(`
+                UPDATE memories
+                SET status = ?, revocation_reason = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+            `, [MEMORY_STATUS.disabled, 'superseded', now, existing.id, Number(userId)]);
+            return inserted;
+        });
+        return serializeMemory(updated);
+    }
     await execute(`
         UPDATE memories
         SET scope = ?,
+            scope_reference = ?,
+            project_id = ?,
             type = ?,
+            fact_key = ?,
             content = ?,
             embedding = ?,
+            embedding_status = ?,
+            embedding_dimensions = ?,
+            search_content = ?,
             salience = ?,
             confidence = ?,
             status = ?,
+            valid_from = ?,
             expires_at = ?,
             updated_at = ?
         WHERE id = ? AND user_id = ?
-    `, [scope, type, content, embedding, salience, confidence, status, expiresAt, now, existing.id, userId]);
+    `, [
+        scope,
+        scopeReference,
+        projectId,
+        type,
+        factKey,
+        content,
+        embedding,
+        embedding ? 'ready' : 'lexical_ready',
+        embeddingDimensions(embedding),
+        content,
+        salience,
+        confidence,
+        status,
+        validFrom,
+        expiresAt,
+        now,
+        existing.id,
+        userId
+    ]);
     const updated = await queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [existing.id, userId]);
     return serializeMemory(updated);
-}
-
-async function getMemorySource(userId, memoryId) {
-    const row = await getMemoryRow(userId, memoryId);
-    if (!row) return null;
-    const sourceIds = parseJsonArray(row.source_message_ids);
-    let messages = [];
-    if (sourceIds.length > 0) {
-        const placeholders = sourceIds.map(() => '?').join(',');
-        const rows = await query(`
-            SELECT id, session_id, role, content, created_at
-            FROM messages
-            WHERE user_id = ?
-              AND id IN (${placeholders})
-              AND deleted_at IS NULL
-            ORDER BY id ASC
-        `, [userId, ...sourceIds]);
-        messages = rows.map(message => ({
-            id: message.id,
-            sessionId: message.session_id,
-            role: message.role,
-            content: message.content || '',
-            createdAt: message.created_at || null
-        }));
-    }
-    const session = row.source_session_id
-        ? await queryOne('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ?', [row.source_session_id, userId])
-        : null;
-    return {
-        memory: serializeMemory(row),
-        session: session ? {
-            id: session.id,
-            title: session.title || '',
-            createdAt: session.created_at || null,
-            updatedAt: session.updated_at || null
-        } : null,
-        messages
-    };
 }
 
 async function mergeMemories(userId, targetId, sourceId, options = {}) {
@@ -319,8 +407,8 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     }
     const now = getBeijingTimestamp();
     const content = mergeMemoryContent(target, source);
-    if (hasSensitiveContent(content)) {
-        throw createMemoryValidationError('Sensitive content cannot be stored as long-term memory', 'SENSITIVE_MEMORY');
+    if (hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content)) {
+        throw createMemoryValidationError('Sensitive or instruction-like content cannot be stored as long-term memory', 'UNSAFE_MEMORY');
     }
     const sourceMessageIds = [...new Set([
         ...parseJsonArray(target.source_message_ids),
@@ -335,6 +423,8 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
             UPDATE memories
             SET content = ?,
                 embedding = ?,
+                embedding_status = ?,
+                embedding_dimensions = ?,
                 salience = ?,
                 confidence = ?,
                 source_session_id = COALESCE(source_session_id, ?),
@@ -344,6 +434,8 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
         `, [
             content,
             embedding,
+            embedding ? 'ready' : 'lexical_ready',
+            embeddingDimensions(embedding),
             Math.max(Number(target.salience || 0), Number(source.salience || 0)),
             Math.max(Number(target.confidence || 0), Number(source.confidence || 0)),
             source.source_session_id || null,
@@ -352,6 +444,14 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
             target.id,
             userId
         ]);
+        await trx.execute(`
+            INSERT INTO memory_source_evidence (
+                memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
+            )
+            SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, ?
+            FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
+            ON CONFLICT(memory_id, message_id) DO NOTHING
+        `, [target.id, now, source.id, Number(userId)]);
         await trx.execute(`
             UPDATE memories
             SET status = ?, updated_at = ?
@@ -368,48 +468,180 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     };
 }
 
-async function findSimilarMemory(userId, type, content) {
+async function findSimilarMemory(userId, type, content, factKey = '') {
     const fingerprint = fingerprintMemory(type, content);
     const rows = await query(`
         SELECT *
         FROM memories
         WHERE user_id = ? AND type = ? AND status = ?
-        ORDER BY updated_at DESC
-        LIMIT 200
+        ORDER BY updated_at DESC, id DESC
     `, [userId, type, MEMORY_STATUS.active]);
-    return rows.find(row => fingerprintMemory(row.type, row.content) === fingerprint)
-        || rows.find(row => {
-            const a = normalizeComparableText(row.content);
-            const b = normalizeComparableText(content);
-            if (!a || !b) return false;
-            return a.includes(b) || b.includes(a);
-        })
-        || null;
+    const exact = rows.find(row => fingerprintMemory(row.type, row.content) === fingerprint) || null;
+    const sameFact = factKey
+        ? rows.find(row => String(row.fact_key || '') === String(factKey) && !exact) || null
+        : null;
+    return { exact, sameFact };
 }
 
-async function maybeGenerateMemoryEmbedding(content, userId, user = null) {
-    try {
-        const vector = await generateEmbedding(content, null, null, userId, { user, source: 'memory_embedding' });
-        return JSON.stringify(vector);
-    } catch (err) {
-        logger.warn({ userId, err: err.message }, '长期记忆向量生成失败，已保留为关键词可检索记忆');
-        return null;
+async function areCandidateSourcesActive(userId, candidate = {}, origin = MEMORY_ORIGINS.automatic) {
+    if (![MEMORY_ORIGINS.automatic, MEMORY_ORIGINS.learning].includes(normalizeMemoryOrigin(origin))) return true;
+    const sessionId = normalizeScopeReference(candidate.sourceSessionId || candidate.source_session_id);
+    if (sessionId) {
+        const session = await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [sessionId, Number(userId)]);
+        if (!session) return false;
     }
+    const sourceMessageIds = normalizeSourceMessageIds(candidate.sourceMessageIds);
+    if (!sourceMessageIds.length) return true;
+    const row = await queryOne(`
+        SELECT COUNT(*) AS count
+        FROM messages
+        WHERE user_id = ? AND deleted_at IS NULL AND id IN (${sourceMessageIds.map(() => '?').join(',')})
+    `, [Number(userId), ...sourceMessageIds]);
+    return Number(row?.count || 0) === sourceMessageIds.length;
+}
+
+async function findActiveMemorySuppression(userId, fingerprint, candidate = {}) {
+    const rows = await query(`
+        SELECT id, fingerprint, source_session_id, source_message_ids
+        FROM memory_suppressions
+        WHERE user_id = ? AND released_at IS NULL
+        ORDER BY id DESC LIMIT 500
+    `, [Number(userId)]);
+    const sourceSessionId = normalizeScopeReference(candidate.sourceSessionId || candidate.source_session_id);
+    const sourceMessageIds = new Set(normalizeSourceMessageIds(candidate.sourceMessageIds));
+    return rows.find(row => {
+        if (String(row.fingerprint || '') === fingerprint) return true;
+        if (sourceSessionId && String(row.source_session_id || '') === sourceSessionId) return true;
+        const suppressedIds = parseJsonArray(row.source_message_ids).map(Number);
+        return suppressedIds.some(id => sourceMessageIds.has(id));
+    }) || null;
+}
+
+async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin = MEMORY_ORIGINS.automatic, assertedBy = MEMORY_ASSERTED_BY.user) {
+    const sourceMessageIds = normalizeSourceMessageIds(candidate.sourceMessageIds);
+    const sessionId = String(candidate.sourceSessionId || '').trim() || null;
+    if (sourceMessageIds.length === 0) return;
+    for (const messageId of sourceMessageIds) {
+        await trx.execute(`
+            INSERT INTO memory_source_evidence (
+                memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(memory_id, message_id) DO UPDATE SET
+                session_id = COALESCE(excluded.session_id, memory_source_evidence.session_id),
+                source_kind = excluded.source_kind,
+                asserted_by = excluded.asserted_by
+        `, [
+            Number(memoryId),
+            Number(userId),
+            sessionId,
+            messageId,
+            normalizeMemoryOrigin(origin),
+            normalizeMemoryAssertedBy(assertedBy),
+            getBeijingTimestamp()
+        ]);
+    }
+}
+
+async function stagePendingMemory(userId, candidate, options, fields = {}) {
+    const now = getBeijingTimestamp();
+    const existing = await queryOne(`
+        SELECT id FROM memories
+        WHERE user_id = ? AND type = ? AND fact_key = ? AND status IN (?, ?)
+        ORDER BY id DESC LIMIT 1
+    `, [Number(userId), fields.type, fields.factKey, MEMORY_STATUS.active, MEMORY_STATUS.pending]);
+    if (existing) return { staged: true, deduped: true, id: existing.id, reason: 'confirmation_required' };
+    const row = await transaction(async trx => {
+        const lockedGate = await lockMemoryGateState(userId, trx);
+        if (!lockedGate.enabled || lockedGate.revision !== Number(options.memoryRevision || 0)) {
+            const error = new Error('记忆写入门禁状态已变化。');
+            error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
+            throw error;
+        }
+        const inserted = await trx.queryOne(`
+            INSERT INTO memories (
+                user_id, scope, scope_reference, project_id, type, governance_class, retention_mode,
+                sensitive, origin, asserted_by, fact_key, content, embedding, embedding_dimensions, embedding_status,
+                search_content, salience, confidence, source_session_id, source_message_ids,
+                status, valid_from, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, NULL, 0, 'lexical_ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [
+            Number(userId),
+            fields.scope,
+            fields.scopeReference,
+            fields.projectId,
+            fields.type,
+            fields.governance.category,
+            fields.governance.retentionMode,
+            fields.origin,
+            fields.assertedBy,
+            fields.factKey,
+            fields.content,
+            fields.content,
+            fields.salience,
+            fields.confidence,
+            candidate.sourceSessionId || null,
+            JSON.stringify(fields.sourceMessageIds),
+            MEMORY_STATUS.pending,
+            normalizeOptionalTimestamp(candidate.validFrom || candidate.valid_from) || now,
+            candidate.expiresAt || null,
+            now,
+            now
+        ]);
+        await writeMemoryEvidence(trx, inserted.id, userId, candidate, fields.origin, fields.assertedBy);
+        return inserted;
+    });
+    invalidateMemoryQualityCache(userId);
+    return { staged: true, id: row?.id, reason: 'confirmation_required' };
 }
 
 async function upsertMemory(userId, candidate, options = {}) {
     const content = normalizeMemoryContent(candidate.content);
-    if (content.length < MIN_MEMORY_CONTENT_CHARS || hasSensitiveContent(content)) {
+    if (content.length < MIN_MEMORY_CONTENT_CHARS || hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content)) {
         return { skipped: true, reason: 'invalid_or_sensitive' };
     }
+    const gate = await assertMemoryWriteGate(userId, options);
+    if (!gate.allowed) return { skipped: true, reason: gate.reason };
     const type = normalizeMemoryType(candidate.type);
-    const governance = await resolveMemoryGovernance(userId, { type, category: candidate.governanceClass || candidate.category, content, retentionMode: candidate.retentionMode }, options); if (!governance.allowed) return { skipped: true, reason: governance.reason || 'memory_policy_blocked' };
+    const origin = normalizeMemoryOrigin(candidate.origin || options.origin);
+    const assertedBy = normalizeMemoryAssertedBy(candidate.assertedBy || options.assertedBy,
+        origin === MEMORY_ORIGINS.learning ? MEMORY_ASSERTED_BY.system : MEMORY_ASSERTED_BY.user);
+    if (options.requireActiveSources === true && !(await areCandidateSourcesActive(userId, candidate, origin))) {
+        return { skipped: true, reason: 'source_revoked' };
+    }
+    const governance = await resolveMemoryGovernance(userId, {
+        type,
+        category: candidate.governanceClass || candidate.category,
+        content,
+        retentionMode: candidate.retentionMode,
+        origin,
+        explicit: origin === MEMORY_ORIGINS.explicit
+    }, options);
     const scope = normalizeMemoryScope(candidate.scope);
+    const scopeReference = normalizeScopeReference(candidate.scopeReference || candidate.scope_reference);
+    const projectId = normalizeScopeReference(candidate.projectId || candidate.project_id);
     const salience = clamp(candidate.salience, 0, 1, 0.5);
     const confidence = clamp(candidate.confidence, 0, 1, 0.6);
     const sourceMessageIds = normalizeSourceMessageIds(candidate.sourceMessageIds);
+    const factKey = normalizeFactKey(candidate.factKey || candidate.fact_key, type, content);
+    const validFrom = normalizeOptionalTimestamp(candidate.validFrom || candidate.valid_from) || getBeijingTimestamp();
+    if (!governance.allowed) {
+        if (governance.reason === 'confirmation_required' && options.stagePending === true) {
+            return stagePendingMemory(userId, candidate, options, {
+                type, origin, assertedBy, governance, scope, scopeReference, projectId,
+                salience, confidence, sourceMessageIds, factKey, content
+            });
+        }
+        return { skipped: true, reason: governance.reason || 'memory_policy_blocked' };
+    }
+    const fingerprint = fingerprintMemory(type, content);
+    const suppression = await findActiveMemorySuppression(userId, fingerprint, candidate);
+    if (suppression && !(origin === MEMORY_ORIGINS.explicit && options.confirmed === true)) {
+        return { skipped: true, reason: 'suppressed_by_user' };
+    }
     const now = getBeijingTimestamp();
-    const existing = await findSimilarMemory(userId, type, content);
+    const similar = await findSimilarMemory(userId, type, content, factKey);
+    const existing = similar.exact;
 
     if (existing) {
         invalidateMemoryQualityCache(userId);
@@ -417,349 +649,108 @@ async function upsertMemory(userId, candidate, options = {}) {
             ...parseJsonArray(existing.source_message_ids),
             ...sourceMessageIds
         ])].slice(-20);
-        const mergedContent = content.length > String(existing.content || '').length ? content : existing.content;
-        await execute(`
-            UPDATE memories
-            SET content = ?,
-                scope = ?,
-                salience = ?,
-                confidence = ?,
-                source_session_id = COALESCE(?, source_session_id),
-                source_message_ids = ?,
-                updated_at = ?
-            WHERE id = ? AND user_id = ?
-        `, [
-            mergedContent,
-            scope,
-            Math.max(Number(existing.salience || 0), salience),
-            Math.max(Number(existing.confidence || 0), confidence),
-            candidate.sourceSessionId || null,
-            JSON.stringify(mergedMessageIds),
-            now,
-            existing.id,
-            userId
-        ]);
+        await transaction(async trx => {
+            const lockedGate = await lockMemoryGateState(userId, trx);
+            if (!lockedGate.enabled || lockedGate.revision !== gate.gate.revision) {
+                const error = new Error('记忆写入门禁状态已变化。');
+                error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
+                throw error;
+            }
+            await trx.execute(`
+                UPDATE memories
+                SET scope = ?, scope_reference = ?, project_id = ?, salience = ?, confidence = ?,
+                    source_session_id = COALESCE(?, source_session_id), source_message_ids = ?,
+                    search_content = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+            `, [
+                scope,
+                scopeReference,
+                projectId,
+                Math.max(Number(existing.salience || 0), salience),
+                Math.max(Number(existing.confidence || 0), confidence),
+                candidate.sourceSessionId || null,
+                JSON.stringify(mergedMessageIds),
+                content,
+                now,
+                existing.id,
+                userId
+            ]);
+            await writeMemoryEvidence(trx, existing.id, userId, candidate, origin, assertedBy);
+        });
         return { merged: true, id: existing.id };
     }
 
     const embedding = options.skipEmbedding ? null : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
-    const row = await queryOne(`
-        INSERT INTO memories (
-            user_id, scope, type, governance_class, retention_mode, sensitive, content, embedding, salience, confidence, source_session_id, source_message_ids, status, expires_at, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-    `, [
-        userId,
-        scope,
-        type, governance.category, governance.retentionMode,
-        content,
-        embedding,
-        salience,
-        confidence,
-        candidate.sourceSessionId || null,
-        JSON.stringify(sourceMessageIds),
-        MEMORY_STATUS.active,
-        candidate.expiresAt || null,
-        now,
-        now
-    ]);
+    const dimensions = embeddingDimensions(embedding);
+    const finalGate = await assertMemoryWriteGate(userId, { ...options, memoryRevision: gate.gate.revision });
+    if (!finalGate.allowed) return { skipped: true, reason: finalGate.reason };
+    const row = await transaction(async trx => {
+        const lockedGate = await lockMemoryGateState(userId, trx);
+        if (!lockedGate.enabled || lockedGate.revision !== gate.gate.revision) {
+            const error = new Error('记忆写入门禁状态已变化。');
+            error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
+            throw error;
+        }
+        if (suppression && origin === MEMORY_ORIGINS.explicit && options.confirmed === true) {
+            await trx.execute(`
+                UPDATE memory_suppressions
+                SET released_at = ?, released_by = ?
+                WHERE id = ? AND user_id = ?
+            `, [now, 'user', suppression.id, Number(userId)]);
+        }
+        if (similar.sameFact) {
+            await trx.execute(`
+                UPDATE memories SET status = ?, supersedes_id = ?, updated_at = ?
+                WHERE id = ? AND user_id = ? AND status = ?
+            `, [MEMORY_STATUS.disabled, null, now, similar.sameFact.id, Number(userId), MEMORY_STATUS.active]);
+        }
+        const inserted = await trx.queryOne(`
+            INSERT INTO memories (
+                user_id, scope, scope_reference, project_id, type, governance_class, retention_mode,
+                sensitive, origin, asserted_by, fact_key, supersedes_id, content, embedding, embedding_status,
+                embedding_dimensions, search_content, salience, confidence, source_session_id, source_message_ids,
+                status, valid_from, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        `, [
+            userId,
+            scope,
+            scopeReference,
+            projectId,
+            type,
+            governance.category,
+            governance.retentionMode,
+            origin,
+            assertedBy,
+            factKey,
+            similar.sameFact?.id || null,
+            content,
+            embedding,
+            embedding ? 'ready' : 'lexical_ready',
+            dimensions,
+            content,
+            salience,
+            confidence,
+            candidate.sourceSessionId || null,
+            JSON.stringify(sourceMessageIds),
+            MEMORY_STATUS.active,
+            validFrom,
+            candidate.expiresAt || null,
+            now,
+            now
+        ]);
+        await writeMemoryEvidence(trx, inserted.id, userId, candidate, origin, assertedBy);
+        return inserted;
+    });
     invalidateMemoryQualityCache(userId);
-    return { inserted: true, id: row?.id };
+    if (dimensions > 0) void ensureMemoryVectorIndex(dimensions).catch(error => logger.warn({ userId, err: error.message }, '长期记忆向量索引检查失败'));
+    return { inserted: true, id: row?.id, supersededId: similar.sameFact?.id || null };
 }
 
-async function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelId = null } = {}) {
-    if (!userId || !sessionId || !Array.isArray(messageIds) || messageIds.length === 0) {
-        return { queued: false, reason: 'missing_context' };
-    }
-    if (!(await isLongTermMemoryEnabled(userId))) {
-        return { queued: false, reason: 'disabled' };
-    }
+async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, memoryRevision } = {}) {
     const ids = normalizeSourceMessageIds(messageIds);
-    if (ids.length === 0) return { queued: false, reason: 'missing_context' };
-    const now = getBeijingTimestamp();
-    const dedupeKey = buildMemoryJobDedupeKey(userId, sessionId, ids);
-    const existing = await queryOne(`
-        SELECT *
-        FROM memory_extraction_jobs
-        WHERE dedupe_key = ?
-          AND status IN (?, ?)
-        ORDER BY id DESC
-        LIMIT 1
-    `, [dedupeKey, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running]);
-    if (existing) {
-        return {
-            queued: true,
-            deduped: true,
-            job: serializeMemoryJob(existing),
-            messageIds: ids
-        };
-    }
-
-    const row = await queryOne(`
-        INSERT INTO memory_extraction_jobs (
-            user_id, session_id, message_ids, model_id, dedupe_key,
-            status, attempts, max_attempts, created_at, updated_at, next_run_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-        RETURNING id
-    `, [
-        userId,
-        sessionId,
-        JSON.stringify(ids),
-        modelId || null,
-        dedupeKey,
-        MEMORY_JOB_STATUS.queued,
-        DEFAULT_MEMORY_JOB_MAX_ATTEMPTS,
-        now,
-        now,
-        now
-    ]);
-    const insertedId = row?.id;
-
-    const insertedJob = await queryOne('SELECT * FROM memory_extraction_jobs WHERE id = ?', [insertedId]);
-    return {
-        queued: true,
-        job: serializeMemoryJob(insertedJob),
-        messageIds: ids
-    };
-}
-
-async function resolveMemoryJobUser(row) {
-    const user = await queryOne('SELECT id, username, nickname, unit, role, status FROM users WHERE id = ? AND status = ?', [row.user_id, 'active']);
-    return user || { id: row.user_id, role: 'user' };
-}
-
-async function resolveMemoryJobModel(row, user) {
-    if (!row.model_id) return null;
-    const model = await getAccessibleModelAsync(row.model_id, user);
-    if (!model || model.secret_error) return null;
-    return model;
-}
-
-function triggerMemoryExtractionWorker() {
-    setTimeout(() => {
-        processMemoryExtractionJobs()
-            .catch(err => {
-                if (/database connection is not open/i.test(String(err.message || ''))) return;
-                logger.warn({ err: err.message }, '长期记忆抽取工作线程失败');
-            });
-    }, 0).unref?.();
-}
-
-async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, triggerWorker = true } = {}) {
-    void user;
-    const queued = await enqueueMemoryExtractionJob({
-        userId,
-        sessionId,
-        messageIds,
-        modelId: modelCfg?.id || null
-    });
-    if (!queued.queued) {
-        return { scheduled: false, reason: queued.reason };
-    }
-    if (triggerWorker) {
-        triggerMemoryExtractionWorker();
-    }
-    return {
-        scheduled: true,
-        queued: true,
-        deduped: queued.deduped === true,
-        jobId: queued.job?.id || null,
-        messageIds: queued.messageIds
-    };
-}
-
-async function claimMemoryExtractionJobs(limit = 5) {
-    const now = getBeijingTimestamp();
-    const staleBefore = getBeijingTimestamp(new Date(Date.now() - MEMORY_JOB_STALE_LOCK_MINUTES * 60000));
-    const rows = await query(`
-        SELECT *
-        FROM memory_extraction_jobs
-        WHERE (
-            status = ? AND COALESCE(next_run_at, created_at) <= ?
-        ) OR (
-            status = ? AND locked_at IS NOT NULL AND locked_at < ?
-        )
-        ORDER BY COALESCE(next_run_at, created_at) ASC, id ASC
-        LIMIT ?
-    `, [MEMORY_JOB_STATUS.queued, now, MEMORY_JOB_STATUS.running, staleBefore, Math.max(1, Math.min(Number(limit) || 5, 20))]);
-
-    const claimed = [];
-    for (const row of rows) {
-        const changes = await execute(`
-            UPDATE memory_extraction_jobs
-            SET status = ?,
-                locked_at = ?,
-                attempts = attempts + 1,
-                updated_at = ?
-            WHERE id = ?
-              AND (
-                  status = ?
-                  OR (status = ? AND locked_at IS NOT NULL AND locked_at < ?)
-              )
-        `, [MEMORY_JOB_STATUS.running, now, now, row.id, MEMORY_JOB_STATUS.queued, MEMORY_JOB_STATUS.running, staleBefore]);
-        if (changes > 0) {
-            const freshRow = await queryOne('SELECT * FROM memory_extraction_jobs WHERE id = ?', [row.id]);
-            if (freshRow) claimed.push(freshRow);
-        }
-    }
-    return claimed;
-}
-
-function nextMemoryJobRunAt(attempts) {
-    const delaySeconds = Math.min(3600, Math.max(15, 15 * (2 ** Math.max(0, Number(attempts || 1) - 1))));
-    return getBeijingTimestamp(new Date(Date.now() + delaySeconds * 1000));
-}
-
-async function finishMemoryExtractionJob(jobId, status, fields = {}) {
-    const now = getBeijingTimestamp();
-    await execute(`
-        UPDATE memory_extraction_jobs
-        SET status = ?,
-            locked_at = NULL,
-            last_error = ?,
-            result = ?,
-            next_run_at = ?,
-            completed_at = ?,
-            updated_at = ?
-        WHERE id = ?
-    `, [
-        status,
-        fields.lastError || null,
-        fields.result ? JSON.stringify(fields.result).slice(0, 4000) : null,
-        fields.nextRunAt || null,
-        [MEMORY_JOB_STATUS.succeeded, MEMORY_JOB_STATUS.failed, MEMORY_JOB_STATUS.skipped].includes(status) ? now : null,
-        now,
-        jobId
-    ]);
-}
-
-async function processMemoryExtractionJob(row) {
-    const user = await resolveMemoryJobUser(row);
-    const modelCfg = await resolveMemoryJobModel(row, user);
-    const result = await runMemoryExtraction({
-        userId: row.user_id,
-        sessionId: row.session_id,
-        messageIds: parseJsonArray(row.message_ids),
-        user,
-        modelCfg
-    });
-    const finalStatus = result.skipped ? MEMORY_JOB_STATUS.skipped : MEMORY_JOB_STATUS.succeeded;
-    await finishMemoryExtractionJob(row.id, finalStatus, { result });
-    return result;
-}
-
-async function processMemoryExtractionJobs(options = {}) {
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 5, 20));
-    const rows = await claimMemoryExtractionJobs(limit);
-    const results = [];
-    for (const row of rows) {
-        const key = `${row.user_id}:${row.session_id}:${row.id}`;
-        try {
-            const result = await extractionGuard.run(key, () => processMemoryExtractionJob(row));
-            results.push({ id: row.id, ok: true, result });
-        } catch (err) {
-            const latest = (await queryOne('SELECT attempts, max_attempts FROM memory_extraction_jobs WHERE id = ?', [row.id])) || row;
-            const attempts = Number(latest.attempts || row.attempts || 1);
-            const maxAttempts = Number(latest.max_attempts || DEFAULT_MEMORY_JOB_MAX_ATTEMPTS);
-            const exhausted = attempts >= maxAttempts;
-            await finishMemoryExtractionJob(row.id, exhausted ? MEMORY_JOB_STATUS.failed : MEMORY_JOB_STATUS.queued, {
-                lastError: String(err.message || err).slice(0, 1000),
-                nextRunAt: exhausted ? null : nextMemoryJobRunAt(attempts)
-            });
-            results.push({ id: row.id, ok: false, error: err.message || String(err), retry: !exhausted });
-        }
-    }
-    return {
-        claimed: rows.length,
-        succeeded: results.filter(item => item.ok).length,
-        failed: results.filter(item => !item.ok && !item.retry).length,
-        retried: results.filter(item => item.retry).length,
-        results
-    };
-}
-
-async function listMemoryExtractionJobs(userId, options = {}) {
-    const status = String(options.status || 'all');
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 50, 200));
-    const offset = Math.max(0, Number.parseInt(options.offset, 10) || 0);
-    const where = ['user_id = ?'];
-    const params = [userId];
-    if (status !== 'all' && Object.values(MEMORY_JOB_STATUS).includes(status)) {
-        where.push('status = ?');
-        params.push(status);
-    }
-    const rows = await query(`
-        SELECT *
-        FROM memory_extraction_jobs
-        WHERE ${where.join(' AND ')}
-        ORDER BY id DESC
-        LIMIT ? OFFSET ?
-    `, [...params, limit, offset]);
-    const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM memory_extraction_jobs WHERE ${where.join(' AND ')}`, params);
-    const total = Number(totalRow?.count || 0);
-    const summary = await getMemoryJobSummary(userId);
-    return { total, jobs: rows.map(serializeMemoryJob), summary };
-}
-
-async function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
-    const ids = normalizeMemoryIds(jobIds);
-    const now = getBeijingTimestamp();
-    const where = ['user_id = ?', 'status = ?'];
-    const params = [userId, MEMORY_JOB_STATUS.failed];
-    if (ids.length > 0) {
-        where.push(`id IN (${ids.map(() => '?').join(',')})`);
-        params.push(...ids);
-    }
-    const changes = await execute(`
-        UPDATE memory_extraction_jobs
-        SET status = ?,
-            locked_at = NULL,
-            last_error = NULL,
-            next_run_at = ?,
-            updated_at = ?
-        WHERE ${where.join(' AND ')}
-    `, [MEMORY_JOB_STATUS.queued, now, now, ...params]);
-    if (changes > 0) triggerMemoryExtractionWorker();
-    return { queued: changes };
-}
-
-async function cleanupMemoryExtractionJobs(userId, options = {}) {
-    const retentionDays = Math.max(1, Math.min(Number.parseInt(options.retentionDays, 10) || DEFAULT_COMPLETED_JOB_RETENTION_DAYS, 365));
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 1000, 5000));
-    const cutoff = getBeijingTimestamp(new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000));
-    const rows = await query(`
-        SELECT id
-        FROM memory_extraction_jobs
-        WHERE user_id = ?
-          AND status IN (?, ?, ?)
-          AND COALESCE(completed_at, updated_at, created_at) < ?
-        ORDER BY COALESCE(completed_at, updated_at, created_at) ASC, id ASC
-        LIMIT ?
-    `, [
-        userId,
-        MEMORY_JOB_STATUS.succeeded,
-        MEMORY_JOB_STATUS.failed,
-        MEMORY_JOB_STATUS.skipped,
-        cutoff,
-        limit
-    ]);
-    if (rows.length === 0) return { deleted: 0, cutoff, retentionDays };
-    const ids = rows.map(row => row.id);
-    const changes = await execute(`
-        DELETE FROM memory_extraction_jobs
-        WHERE user_id = ?
-          AND id IN (${ids.map(() => '?').join(',')})
-    `, [userId, ...ids]);
-    return { deleted: changes, cutoff, retentionDays };
-}
-
-async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null } = {}) {
-    const ids = normalizeSourceMessageIds(messageIds);
-    if (!(await isLongTermMemoryEnabled(userId)) || ids.length === 0) {
-        return { skipped: true };
-    }
+    const gate = await assertMemoryWriteGate(userId, { memoryRevision });
+    if (!gate.allowed || ids.length === 0) return { skipped: true, reason: !gate.allowed ? gate.reason : 'missing_context' };
     const placeholders = ids.map(() => '?').join(',');
     const messages = await query(`
         SELECT id, session_id, role, content
@@ -770,10 +761,13 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     let extractor = 'heuristic';
     let candidates = [];
     let modelFallbackReason = null;
+    let modelCompleted = false;
     if (modelCfg?.url && !isModelExtractionCircuitOpen(modelCfg)) {
         try {
-            candidates = await extractMemoryCandidatesWithModel(messages, { sessionId, user, modelCfg });
-            if (candidates.length > 0) extractor = 'model';
+            const extracted = await extractMemoryCandidatesWithModel(messages, { sessionId, user, modelCfg });
+            candidates = extracted.candidates || [];
+            modelCompleted = extracted.completed === true;
+            extractor = 'model';
             clearModelExtractionCooldown(modelCfg);
         } catch (err) {
             const timedOut = isModelExtractionTimeoutError(err);
@@ -793,7 +787,9 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     } else if (modelCfg?.url) {
         modelFallbackReason = 'cooldown';
     }
-    if (candidates.length === 0) {
+    // 模型合法返回空候选代表明确“不保存”；只有服务或熔断异常才允许使用
+    // 受限的规则兜底。
+    if (!modelCompleted && candidates.length === 0) {
         candidates = extractMemoryCandidatesFromMessages(messages, { sessionId });
         extractor = 'heuristic';
     }
@@ -801,76 +797,29 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     const results = [];
     for (const candidate of candidates) {
         if (Date.now() - startedAt > EXTRACTION_TIMEOUT_MS) break;
-        results.push(await upsertMemory(userId, candidate, { user }));
+        results.push(await upsertMemory(userId, candidate, {
+            user,
+            memoryRevision: gate.gate.revision,
+            origin: MEMORY_ORIGINS.automatic,
+            assertedBy: MEMORY_ASSERTED_BY.user,
+            stagePending: true,
+            requireActiveSources: true
+        }));
     }
     return {
         candidates: candidates.length,
         extractor,
+        modelCompleted,
         modelFallbackReason,
         inserted: results.filter(item => item.inserted).length,
+        staged: results.filter(item => item.staged).length,
         merged: results.filter(item => item.merged).length,
         skipped: results.filter(item => item.skipped).length
     };
 }
 
-async function retrieveLongTermMemories(userId, queryText, options = {}) {
-    if (!(await isLongTermMemoryEnabled(userId))) return [];
-    const normalizedQuery = String(queryText || '').trim();
-    if (!normalizedQuery) return [];
-    const now = getBeijingTimestamp();
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || DEFAULT_MAX_INJECTED_MEMORIES, 20));
-    const rows = await filterMemoriesForRetrieval(userId, await query(`
-        SELECT *
-        FROM memories
-        WHERE user_id = ?
-          AND status = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-        ORDER BY salience DESC, confidence DESC, updated_at DESC
-        LIMIT 200
-    `, [userId, MEMORY_STATUS.active, now]));
-    if (rows.length === 0) return [];
-
-    let queryVector = null;
-    if (rows.some(row => row.embedding)) {
-        try {
-            queryVector = await generateEmbedding(normalizedQuery, null, null, userId, {
-                user: options.user || null,
-                source: 'memory_embedding'
-            });
-        } catch (err) {
-            logger.warn({ userId, err: err.message }, '长期记忆查询向量生成失败，已回退关键词排序');
-        }
-    }
-
-    const scored = rows.map(row => {
-        const vector = queryVector ? parseEmbedding(row.embedding) : null;
-        const semantic = vector && vector.length === queryVector.length
-            ? Math.max(0, cosineSimilarity(queryVector, vector))
-            : 0;
-        const lexical = keywordScore(row, normalizedQuery);
-        const relevance = queryVector ? Math.max(semantic, lexical * 0.75) : lexical;
-        const salience = clamp(row.salience, 0, 1, 0.5);
-        const confidence = clamp(row.confidence, 0, 1, 0.6);
-        const recent = recencyScore(row);
-        const score = relevance * 0.52 + salience * 0.22 + confidence * 0.16 + recent * 0.10;
-        return {
-            ...serializeMemory(row),
-            score,
-            relevance,
-            recent,
-            usageReason: relevance >= 0.75 ? '与当前任务高度相关' : salience >= 0.75 ? '重要度较高，作为补充上下文' : '结合近期使用和置信度排序'
-        };
-    })
-        .filter(item => item.relevance > 0 || item.salience >= 0.75)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
-
-    if (scored.length > 0) {
-        const ids = scored.map(item => item.id);
-        await execute(`UPDATE memories SET last_used_at = ? WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [now, userId, ...ids]);
-    }
-    return scored;
-}
+// 连接后台工作线程
+setRunMemoryExtractionHandler(runMemoryExtraction);
 
 module.exports = {
     MEMORY_SETTING_KEY,
@@ -880,7 +829,9 @@ module.exports = {
     MEMORY_TYPE_LABELS,
     buildLongTermMemoryContextMessage,
     archiveExpiredMemories,
+    cancelMemoryExtractionJobs,
     cleanupMemoryExtractionJobs,
+    compareMemoryRetrievalShadow,
     enqueueMemoryExtractionJob,
     exportMemories,
     extractMemoryCandidatesFromMessages,
@@ -889,17 +840,22 @@ module.exports = {
     getMemoryQualitySummary,
     getMemorySummary,
     getMemorySource,
+    getMemoryUsage,
     injectLongTermMemoryBeforeLatestUser,
     isLongTermMemoryEnabled,
     listMemoryExtractionJobs,
     listMemories,
     mergeMemories,
     processMemoryExtractionJobs,
+    recordMemoryUsage,
     retrieveLongTermMemories,
     retryFailedMemoryExtractionJobs,
+    revokeMemoriesForSourceMessages,
+    revokeMemoriesForSourceSession,
     runMemoryExtraction,
     scheduleMemoryExtraction,
     setLongTermMemoryEnabled,
+    startLongTermMemoryMaintenanceRunner,
     softDeleteMemory,
     updateMemory,
     updateMemoryStatus,

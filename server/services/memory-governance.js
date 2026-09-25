@@ -1,7 +1,7 @@
-const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
+const { setUserSettingAsync } = require('./user-settings');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { hasSensitiveContent, normalizeMemoryType } = require('./long-term-memory/memory-utils');
+const { hasSensitiveContent, hasUnsafeMemoryInstruction, normalizeMemoryType } = require('./long-term-memory/memory-utils');
 
 const MEMORY_POLICY_KEY = 'agent_memory_policy';
 const MEMORY_CATEGORIES = Object.freeze(['fact', 'preference', 'temporary', 'sensitive']);
@@ -30,7 +30,10 @@ function parsePolicy(value) {
 }
 
 async function getMemoryPolicy(userId) {
-    const policy = parsePolicy(await getUserSettingValueAsync(userId, MEMORY_POLICY_KEY));
+    // 记忆策略属于写入控制面，不能使用尽力而为的设置缓存；数据库异常不能
+    // 被误判为用户没有配置策略。
+    const setting = await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [Number(userId), MEMORY_POLICY_KEY]);
+    const policy = parsePolicy(setting?.value);
     try {
         const latest = await queryOne('SELECT version, effective_at FROM agent_memory_policy_versions WHERE user_id = ? ORDER BY version DESC LIMIT 1', [Number(userId)]);
         return { ...policy, version: Number(latest?.version || 1), effectiveAt: latest?.effective_at || null };
@@ -62,7 +65,7 @@ function parsePolicyArray(value) {
 }
 
 function classifyMemory({ type = '', category = '', content = '' } = {}) {
-    if (hasSensitiveContent(content) || String(category).toLowerCase() === 'sensitive') return 'sensitive';
+    if (hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content) || String(category).toLowerCase() === 'sensitive') return 'sensitive';
     const requested = String(category || '').trim().toLowerCase();
     if (MEMORY_CATEGORIES.includes(requested) && requested !== 'sensitive') return requested;
     const normalizedType = normalizeMemoryType(type);
@@ -79,14 +82,17 @@ function normalizeMemoryGovernance(input = {}) {
 async function evaluateMemoryCapture(userId, input = {}) {
     const category = classifyMemory(input);
     const policy = await getMemoryPolicy(userId);
-    const blocked = category === 'sensitive' || !policy.autoCapture || policy.blockedCategories.includes(category);
+    const explicit = input.explicit === true || input.origin === 'explicit';
+    // 自动捕获和类别开关只约束后台提取。用户显式确认的“记住”是独立动作，
+    // 但仍绝不允许持久化敏感或指令型内容。
+    const blocked = category === 'sensitive' || (!explicit && (!policy.autoCapture || policy.blockedCategories.includes(category)));
     return {
         allowed: !blocked,
         category,
-        requiresConfirmation: !blocked && policy.requireConfirmation,
+        requiresConfirmation: !explicit && !blocked && policy.requireConfirmation,
         reason: category === 'sensitive' ? 'sensitive_never_persist'
-            : !policy.autoCapture ? 'auto_capture_disabled'
-                : policy.blockedCategories.includes(category) ? 'category_blocked' : ''
+            : !explicit && !policy.autoCapture ? 'auto_capture_disabled'
+                : !explicit && policy.blockedCategories.includes(category) ? 'category_blocked' : ''
     };
 }
 
@@ -96,7 +102,10 @@ async function resolveMemoryGovernance(userId, input = {}, options = {}) {
     try {
         const capture = await evaluateMemoryCapture(userId, { ...input, category: governance.category });
         if (!capture.allowed || (capture.requiresConfirmation && options.confirmed !== true)) return { ...governance, allowed: false, reason: capture.reason || 'confirmation_required' };
-    } catch (_) {}
+    } catch (error) {
+        // 自动持久化必须失败关闭；明确原因让任务在策略存储暂时异常后可重试。
+        return { ...governance, allowed: false, reason: 'memory_policy_unavailable', errorCode: error?.code || '' };
+    }
     return { ...governance, allowed: true, reason: '' };
 }
 

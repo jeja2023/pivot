@@ -211,10 +211,12 @@ function normalizeContextConfig(value) {
         .map(item => Number.parseInt(item, 10))
         .filter(item => Number.isSafeInteger(item) && item > 0)
         .slice(0, 12))];
+    const projectId = String(parsed.projectId ?? parsed.project_id ?? '').trim().slice(0, 160);
     return {
         mode,
         notes: String(parsed.notes || '').trim().slice(0, 1000),
-        collectionIds
+        collectionIds,
+        ...(projectId ? { projectId } : {})
     };
 }
 

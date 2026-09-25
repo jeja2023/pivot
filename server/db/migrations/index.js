@@ -64,7 +64,12 @@ const migrationModules = [
     require('./presentation-quality-metadata'),
     require('./presentation-template-versions'),
     require('./presentation-template-source-metadata'),
-    require('./presentation-template-import-jobs')
+    require('./presentation-template-import-jobs'),
+    require('./long-term-memory-productization'),
+    require('./long-term-memory-evaluations'),
+    require('./long-term-memory-embedding-recovery'),
+    require('./long-term-memory-search-index'),
+    require('./long-term-memory-validity-window')
 ];
 
 module.exports = migrationModules

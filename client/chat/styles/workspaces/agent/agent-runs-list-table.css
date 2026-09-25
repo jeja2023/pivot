@@ -912,6 +912,32 @@
     padding-top: 8px;
 }
 
+.agent-memory-context-row {
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.agent-memory-context-row > strong {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+}
+
+.agent-memory-context-row .agent-context-actions {
+    flex: 0 0 auto;
+    gap: 4px;
+    padding-top: 0;
+}
+
+.agent-memory-context-row .agent-context-actions .btn-secondary,
+.agent-memory-context-row .agent-context-actions .btn-danger-outline {
+    min-height: 23px;
+    height: 23px;
+    padding: 0 6px;
+    font-size: 0.65rem;
+    white-space: nowrap;
+}
+
 /* 响应式断点 */
 @media (max-width: 1200px) {
     .agent-tasks-context-pane {

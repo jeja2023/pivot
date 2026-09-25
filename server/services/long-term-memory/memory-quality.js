@@ -2,6 +2,7 @@ const { query, queryOne } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const {
     MEMORY_JOB_STATUS,
+    MEMORY_SETTING_KEY,
     MEMORY_STATUS,
     MEMORY_TYPES,
     normalizeMemoryType
@@ -50,10 +51,11 @@ async function getMemorySummary(userId, isLongTermMemoryEnabled) {
     `, [userId]);
     const enabled = typeof isLongTermMemoryEnabled === 'function'
         ? await isLongTermMemoryEnabled(userId)
-        : true;
+        : (await queryOne('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', [Number(userId), MEMORY_SETTING_KEY]))?.value !== 'false';
     const summary = {
         enabled,
         active: 0,
+        pending: 0,
         deleted: 0,
         disabled: 0,
         byType: Object.fromEntries(Object.values(MEMORY_TYPES).map(type => [type, 0]))
@@ -63,6 +65,8 @@ async function getMemorySummary(userId, isLongTermMemoryEnabled) {
         if (row.status === MEMORY_STATUS.active) {
             summary.active += count;
             summary.byType[normalizeMemoryType(row.type)] = (summary.byType[normalizeMemoryType(row.type)] || 0) + count;
+        } else if (row.status === MEMORY_STATUS.pending) {
+            summary.pending += count;
         } else if (row.status === MEMORY_STATUS.deleted) {
             summary.deleted += count;
         } else if (row.status === MEMORY_STATUS.disabled) {

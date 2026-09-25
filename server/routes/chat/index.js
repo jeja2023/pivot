@@ -402,6 +402,7 @@ function createChatRouter({
                 const agentContext = await prepareChatAgentContext({
                     userId,
                     user: req.user,
+                    sessionId,
                     modelCfg,
                     modelContent,
                     ragEnabled,

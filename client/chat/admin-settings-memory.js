@@ -29,6 +29,7 @@ const ENHANCED_MEMORY_TYPE_LABELS = {
 };
 const MEMORY_STATUS_LABELS = {
     active: '活跃',
+    pending: '待确认',
     disabled: '禁用',
     deleted: '已删除'
 };
@@ -42,6 +43,13 @@ function getCurrentMemory(memoryId) {
     return currentLongTermMemories.find(memory => String(memory.id) === String(memoryId)) || null;
 }
 
+function toDateTimeLocal(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+    return match ? `${match[1]}T${match[2]}` : '';
+}
+
 function renderEnhancedMemorySummary(summary = {}) {
     const grid = document.getElementById('memory-summary-grid');
     if (!grid) return;
@@ -49,6 +57,7 @@ function renderEnhancedMemorySummary(summary = {}) {
     const items = [
         ['启用状态', summary.enabled ? '已启用' : '已关闭'],
         ['活跃记忆', Number(summary.active || 0)],
+        ['待确认', Number(summary.pending || 0)],
         ['用户偏好', Number(byType.preference || 0)],
         ['项目事实', Number(byType.fact || 0)],
         ['长期决策', Number(byType.decision || 0)],
@@ -136,7 +145,11 @@ window.Pivot.legacy.openMemoryEditModal = function(memory) {
     const contentInput = document.getElementById('memory-edit-content');
     const salienceInput = document.getElementById('memory-edit-salience');
     const confidenceInput = document.getElementById('memory-edit-confidence');
-    if (!modal || !idInput || !typeInput || !contentInput || !salienceInput || !confidenceInput) {
+    const scopeInput = document.getElementById('memory-edit-scope');
+    const scopeReferenceInput = document.getElementById('memory-edit-scope-reference');
+    const validFromInput = document.getElementById('memory-edit-valid-from');
+    const expiresAtInput = document.getElementById('memory-edit-expires-at');
+    if (!modal || !idInput || !typeInput || !contentInput || !salienceInput || !confidenceInput || !scopeInput || !scopeReferenceInput || !validFromInput || !expiresAtInput) {
         return showToast('记忆编辑窗口加载异常，请刷新后重试', 'error');
     }
     if (!memory) return showToast('记忆数据已刷新，请重新加载后再编辑', 'error');
@@ -145,6 +158,10 @@ window.Pivot.legacy.openMemoryEditModal = function(memory) {
     contentInput.value = memory.content || '';
     salienceInput.value = Number(memory.salience || 0).toFixed(2);
     confidenceInput.value = Number(memory.confidence || 0).toFixed(2);
+    scopeInput.value = memory.scope || 'user';
+    scopeReferenceInput.value = memory.scope === 'project' ? (memory.projectId || memory.scopeReference || '') : (memory.scopeReference || '');
+    validFromInput.value = toDateTimeLocal(memory.validFrom);
+    expiresAtInput.value = toDateTimeLocal(memory.expiresAt);
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     contentInput.focus();
@@ -161,6 +178,7 @@ function renderMemorySource(data = {}) {
     if (!body) return;
     const session = data.session || {};
     const messages = Array.isArray(data.messages) ? data.messages : [];
+    const evidence = Array.isArray(data.evidence) ? data.evidence : [];
     PivotSafeHtml.setHtml(body, `
         <div class="memory-source-meta">
             <strong>${escapeHtml(session.title || session.id || '-')}</strong>
@@ -177,6 +195,7 @@ function renderMemorySource(data = {}) {
                 </article>
             `).join('') : '<p class="muted">暂无可追溯消息</p>'}
         </div>
+        ${evidence.length ? `<div class="memory-source-list">${evidence.map(item => `<article class="memory-source-message"><div><strong>${escapeHtml(item.assertedBy || 'user')}</strong><span>${escapeHtml(item.sourceKind || 'automatic')}</span></div><pre>${escapeHtml(`会话：${item.sessionId || '-'}；消息：${item.messageId || '-'}`)}</pre></article>`).join('')}</div>` : ''}
     `);
 }
 
@@ -207,7 +226,8 @@ async function openMemoryUsageModal(memoryId) {
     modal.setAttribute('aria-hidden', 'false');
     try {
         const usage = await fetchMemoryUsage(memoryId);
-        PivotSafeHtml.setHtml(body, `<div class="memory-source-meta"><strong>为何使用这条记忆</strong><span>记忆 #${escapeHtml(String(usage.memoryId || memoryId))}</span></div><div class="memory-source-message"><pre>${escapeHtml(usage.reason || '该记忆与当前任务相关。')}</pre></div>`);
+        const events = Array.isArray(usage.events) ? usage.events : [];
+        PivotSafeHtml.setHtml(body, `<div class="memory-source-meta"><strong>实际使用记录</strong><span>记忆 #${escapeHtml(String(usage.memoryId || memoryId))}</span></div>${events.length ? `<div class="memory-source-list">${events.map(event => `<article class="memory-source-message"><div><strong>${escapeHtml(event.eventType || 'injected')}</strong><span>${escapeHtml(event.createdAt || '')}</span></div><pre>${escapeHtml(`原因：${event.reason || '-'}\n会话：${event.sessionId || '-'}\n任务：${event.runId || '-'}\n排名：${event.rank || '-'}；分数：${event.score == null ? '-' : Number(event.score).toFixed(3)}`)}</pre></article>`).join('')}</div>` : '<p class="muted">这条记忆尚未被实际注入到可用上下文。</p>'}`);
     } catch (error) {
         PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(error.message || '记忆使用说明加载失败')}</p>`);
     }
@@ -331,9 +351,12 @@ function renderProductMemoryRows(memories = []) {
             <td class="text-center memory-action-cell">
                 <div class="memory-action-buttons">
                     <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
+                    <button class="btn-secondary" data-memory-action="usage" data-memory-id="${memory.id}">使用记录</button>
                     <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
                     ${memory.status === 'active'
                         ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`
+                        : memory.status === 'pending'
+                            ? `<button class="btn-primary" data-memory-action="restore" data-memory-id="${memory.id}">确认</button>`
                         : `<button class="btn-secondary" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`}
                     <button class="btn-danger" data-memory-action="delete" data-memory-id="${memory.id}">删除</button>
                 </div>
@@ -382,6 +405,141 @@ async function cleanupMemoryJobs() {
     return data;
 }
 
+function parseMemoryEvaluationIds(value) {
+    return [...new Set(String(value || '').split(',')
+        .map(item => Number.parseInt(item.trim(), 10))
+        .filter(id => Number.isSafeInteger(id) && id > 0))].slice(0, 100);
+}
+
+async function fetchMemoryEvaluationRuns() {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/runs?limit=8`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测记录加载失败');
+    return Array.isArray(data.runs) ? data.runs : [];
+}
+
+async function fetchMemoryEvaluationCases() {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/cases?limit=100`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测用例加载失败');
+    return Array.isArray(data.cases) ? data.cases : [];
+}
+
+function renderMemoryEvaluation(runs = []) {
+    const summary = document.getElementById('memory-evaluation-summary');
+    const list = document.getElementById('memory-evaluation-runs');
+    const latest = runs[0]?.summary || null;
+    if (summary) {
+        if (!latest) {
+            PivotSafeHtml.setHtml(summary, '<span>暂无评测记录</span>');
+        } else {
+            const metrics = [
+                ['用例', Number(latest.cases || 0)],
+                ['通过率', latest.passRate == null ? '-' : `${Math.round(Number(latest.passRate) * 100)}%`],
+                ['Recall@8', latest.recallAt8 == null ? '-' : `${Math.round(Number(latest.recallAt8) * 100)}%`],
+                ['无关注入', latest.irrelevantRate == null ? '-' : `${Math.round(Number(latest.irrelevantRate) * 100)}%`],
+                ['禁止命中', latest.forbiddenHitRate == null ? '-' : `${Math.round(Number(latest.forbiddenHitRate) * 100)}%`]
+            ];
+            PivotSafeHtml.setHtml(summary, metrics.map(([label, value]) => `<span>${escapeHtml(label)} ${escapeHtml(String(value))}</span>`).join(''));
+        }
+    }
+    if (list) {
+        PivotSafeHtml.setHtml(list, runs.length
+            ? runs.map(run => `<span class="memory-evaluation-run">#${escapeHtml(String(run.id))} ${escapeHtml(run.createdAt || '')} · ${escapeHtml(String(run.summary?.passed || 0))}/${escapeHtml(String(run.summary?.cases || 0))}</span>`).join('')
+            : '创建用例后即可运行当前账号的记忆检索评测。');
+    }
+}
+
+function renderMemoryEvaluationCases(cases = []) {
+    const container = document.getElementById('memory-evaluation-cases');
+    if (!container) return;
+    if (!cases.length) {
+        PivotSafeHtml.setHtml(container, '<span class="muted">暂无评测用例。</span>');
+        return;
+    }
+    PivotSafeHtml.setHtml(container, cases.map(item => `
+        <article class="memory-evaluation-case">
+            <span>${escapeHtml(item.name || '')}</span>
+            <span>${escapeHtml(item.query || '')}</span>
+            <span>期望 ${escapeHtml((item.expectedMemoryIds || []).join(',') || '-')} / 禁止 ${escapeHtml((item.forbiddenMemoryIds || []).join(',') || '-')}</span>
+            <div class="memory-evaluation-case-actions">
+                <button class="btn-secondary" type="button" data-memory-evaluation-action="edit" data-memory-evaluation-id="${Number(item.id)}">编辑</button>
+                <button class="btn-danger" type="button" data-memory-evaluation-action="delete" data-memory-evaluation-id="${Number(item.id)}">删除</button>
+            </div>
+        </article>
+    `).join(''));
+}
+
+let currentMemoryEvaluationCases = [];
+
+function getMemoryEvaluationCase(id) {
+    return currentMemoryEvaluationCases.find(item => String(item.id) === String(id)) || null;
+}
+
+async function loadMemoryEvaluations() {
+    try {
+        const [runs, cases] = await Promise.all([fetchMemoryEvaluationRuns(), fetchMemoryEvaluationCases()]);
+        currentMemoryEvaluationCases = cases;
+        renderMemoryEvaluation(runs);
+        renderMemoryEvaluationCases(cases);
+    } catch (error) {
+        showToast(error.message || '记忆评测记录加载失败', 'error');
+    }
+}
+
+async function createMemoryEvaluationCase(payload) {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/cases`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测用例创建失败');
+    return data.case;
+}
+
+async function updateMemoryEvaluationCase(id, payload) {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/cases/${encodeURIComponent(String(id))}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测用例更新失败');
+    return data.case;
+}
+
+async function deleteMemoryEvaluationCase(id) {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/cases/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测用例删除失败');
+    return data;
+}
+
+function fillMemoryEvaluationForm(item) {
+    const form = document.getElementById('memory-evaluation-case-form');
+    if (!form || !item) return;
+    document.getElementById('memory-evaluation-id').value = item.id || '';
+    document.getElementById('memory-evaluation-name').value = item.name || '';
+    document.getElementById('memory-evaluation-query').value = item.query || '';
+    document.getElementById('memory-evaluation-expected').value = (item.expectedMemoryIds || []).join(',');
+    document.getElementById('memory-evaluation-forbidden').value = (item.forbiddenMemoryIds || []).join(',');
+    form.querySelector('button[type="submit"]').textContent = '更新用例';
+}
+
+function resetMemoryEvaluationForm() {
+    const form = document.getElementById('memory-evaluation-case-form');
+    form?.reset();
+    const id = document.getElementById('memory-evaluation-id');
+    if (id) id.value = '';
+    form?.querySelector('button[type="submit"]') && (form.querySelector('button[type="submit"]').textContent = '添加用例');
+}
+
+async function runMemoryEvaluation() {
+    const res = await apiFetch(`${API_BASE}/memories/evaluations/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '记忆评测运行失败');
+    return data;
+}
+
 async function archiveExpiredMemories() {
     const res = await apiFetch(`${API_BASE}/memories/maintenance/archive-expired`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'disabled' }) });
     const data = await res.json();
@@ -406,10 +564,12 @@ window.Pivot.legacy.loadMemories = async function(page = pageState.memories || 1
     const requestedPage = Math.max(1, Number.parseInt(page, 10) || 1);
     pageState.memories = requestedPage;
     try {
-        const [memoriesRes, qualitySummary, jobsData] = await Promise.all([
+        const [memoriesRes, qualitySummary, jobsData, evaluationRuns, evaluationCases] = await Promise.all([
             apiFetch(`${API_BASE}/memories?${memoryQueryParams(requestedPage).toString()}`),
             fetchMemoryQuality().catch(() => ({})),
-            fetchMemoryJobs().catch(() => ({}))
+            fetchMemoryJobs().catch(() => ({})),
+            fetchMemoryEvaluationRuns().catch(() => []),
+            fetchMemoryEvaluationCases().catch(() => [])
         ]);
         const data = await memoriesRes.json();
         if (!memoriesRes.ok) throw new Error(data.error || '长期记忆加载失败');
@@ -426,6 +586,9 @@ window.Pivot.legacy.loadMemories = async function(page = pageState.memories || 1
         renderMemoryPagination('memories', total, requestedPage);
         renderMemoryQualityPanel(qualitySummary);
         renderMemoryJobsPanel(jobsData);
+        renderMemoryEvaluation(evaluationRuns);
+        currentMemoryEvaluationCases = evaluationCases;
+        renderMemoryEvaluationCases(evaluationCases);
     } catch (e) {
         renderMemoryPagination('memories', 0, 1);
         showToast(e.message || '长期记忆加载失败', 'error');
@@ -434,17 +597,36 @@ window.Pivot.legacy.loadMemories = async function(page = pageState.memories || 1
 
 window.Pivot.legacy.exportMemories = async function() {
     try {
-        const res = await apiFetch(`${API_BASE}/memories/export?${memoryQueryParams().toString()}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '长期记忆导出失败');
-        const blob = new Blob([JSON.stringify(data.export, null, 2)], { type: 'application/json' });
+        const base = memoryQueryParams();
+        base.set('status', document.getElementById('memory-status-filter')?.value || 'all');
+        base.set('pageSize', '500');
+        base.set('maxRecords', '100000');
+        base.delete('limit');
+        base.delete('offset');
+        const memories = [];
+        let offset = 0;
+        let exportMeta = null;
+        while (true) {
+            const params = new URLSearchParams(base);
+            params.set('offset', String(offset));
+            const res = await apiFetch(`${API_BASE}/memories/export?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '长期记忆导出失败');
+            exportMeta = data.export || {};
+            memories.push(...(Array.isArray(exportMeta.memories) ? exportMeta.memories : []));
+            if (exportMeta.complete || exportMeta.nextOffset == null) break;
+            offset = Number(exportMeta.nextOffset);
+            if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('长期记忆导出分页状态异常');
+        }
+        const exportData = { ...exportMeta, memories, complete: true, exportedCount: memories.length };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = `pivot-memories-${Date.now()}.json`;
         link.click();
         URL.revokeObjectURL(url);
-        showToast('长期记忆已导出');
+        showToast(`长期记忆已导出 ${memories.length} 条`);
     } catch (e) {
         showToast(e.message || '长期记忆导出失败', 'error');
     }
@@ -459,8 +641,17 @@ window.Pivot?.exposeModule?.('settings.memory', {
     getCurrentMemory,
     mergeMemoryPair,
     openMemoryUsageModal,
+    parseMemoryEvaluationIds,
+    getMemoryEvaluationCase,
+    fillMemoryEvaluationForm,
+    resetMemoryEvaluationForm,
+    createMemoryEvaluationCase,
+    updateMemoryEvaluationCase,
+    deleteMemoryEvaluationCase,
     retryMemoryJobs,
     saveMemory,
     selectedMemoryIds,
-    updateMemoryStatus
+    updateMemoryStatus,
+    runMemoryEvaluation,
+    loadMemoryEvaluations
 });

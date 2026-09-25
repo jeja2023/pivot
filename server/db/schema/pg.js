@@ -10,7 +10,7 @@ const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
-const PG_SCHEMA_VERSION = '20260920.3';
+const PG_SCHEMA_VERSION = '20260926.5';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
 
 const PG_HELPER_FUNCTIONS = [

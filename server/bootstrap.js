@@ -17,6 +17,7 @@ const {
 const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
 const { createSkillReleaseBreakerRunner } = require('./services/agent-skill-breaker');
 const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
+const { startLongTermMemoryMaintenanceRunner } = require('./services/long-term-memory');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -100,6 +101,7 @@ function startBackgroundServices({
         startAgentScheduleRunner,
         startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
         startSkillReleaseBreakerRunner: () => createSkillReleaseBreakerRunner().start(),
+        startLongTermMemoryMaintenanceRunner,
         startRuntimeDiagnostics
     }
 }) {
@@ -132,6 +134,7 @@ function startBackgroundServices({
         if (typeof dependencies.startSkillReleaseBreakerRunner === 'function') {
             runBackgroundTask(dependencies.startSkillReleaseBreakerRunner, logger, '技能发布熔断巡检器启动失败');
         }
+        runBackgroundTask(dependencies.startLongTermMemoryMaintenanceRunner, logger, '长期记忆生命周期巡检器启动失败');
     });
 }
 

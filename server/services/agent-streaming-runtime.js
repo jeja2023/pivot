@@ -128,8 +128,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             ? `${systemPrompt}\n\n当前会话系统提示词：${String(chatAgent.systemPrompt).slice(0, 12000)}`
             : systemPrompt;
         const contextMessages = [
-            chatAgent?.memoryContext ? { role: 'user', content: chatAgent.memoryContext } : null,
-            chatAgent?.ragContext ? { role: 'user', content: chatAgent.ragContext } : null
+            chatContext?.longTermMemoryContext ? { role: 'user', content: typeof chatContext.longTermMemoryContext === 'object' ? String(chatContext.longTermMemoryContext.content || '') : String(chatContext.longTermMemoryContext) } : null,
+            !chatContext?.longTermMemoryContext && chatAgent?.memoryContext ? { role: 'user', content: typeof chatAgent.memoryContext === 'object' ? String(chatAgent.memoryContext.content || '') : String(chatAgent.memoryContext) } : null,
+            chatAgent?.ragContext ? { role: 'user', content: typeof chatAgent.ragContext === 'object' ? String(chatAgent.ragContext.content || '') : String(chatAgent.ragContext) } : null
         ].filter(Boolean);
         const currentMessageParts = Array.isArray(chatAgent?.currentMessage?.content)
             ? chatAgent.currentMessage.content.filter(part => part && typeof part === 'object')

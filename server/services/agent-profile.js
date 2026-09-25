@@ -1,5 +1,6 @@
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { getMemoryPolicy, updateMemoryPolicy } = require('./memory-governance');
 
 const PROFILE_SETTING_VERSION = 1;
 const MAX_LIST_ITEMS = 24;
@@ -18,6 +19,8 @@ const DEFAULT_AGENT_PROFILE = Object.freeze({
         verbosity: 'balanced',
         format: 'structured'
     },
+    // 仅作兼容投影。捕获和审批以 `agent_memory_policy` 为唯一权威，运行时
+    // 不读取此 JSON 字段。
     memoryPolicy: {
         autoCapture: true,
         blockedCategories: [],
@@ -77,6 +80,7 @@ function normalizeAgentProfile(value = {}, base = DEFAULT_AGENT_PROFILE) {
             verbosity: clampText(style.verbosity ?? current.communicationStyle.verbosity, 32) || 'balanced',
             format: clampText(style.format ?? current.communicationStyle.format, 64) || 'structured'
         },
+        // 仅用于兼容归一化；`getAgentProfile` 总会改用专用策略存储的投影。
         memoryPolicy: {
             autoCapture: policy.autoCapture !== false,
             blockedCategories,
@@ -112,7 +116,12 @@ async function getAgentProfile(userId) {
         } catch (_) {}
         return getAgentProfile(normalizedUserId);
     }
-    return serializeProfile(row, normalizedUserId);
+    const profile = serializeProfile(row, normalizedUserId);
+    try {
+        // 旧客户端仍可读取该字段，但档案 JSON 不会成为第二个记忆策略权威。
+        profile.memoryPolicy = await getMemoryPolicy(normalizedUserId);
+    } catch (_) {}
+    return profile;
 }
 
 async function updateAgentProfile(userId, patch = {}, options = {}) {
@@ -127,10 +136,17 @@ async function updateAgentProfile(userId, patch = {}, options = {}) {
         error.code = 'PROFILE_VERSION_CONFLICT';
         throw error;
     }
-    const incoming = patch?.profile && typeof patch.profile === 'object' ? patch.profile : patch;
+    const rawIncoming = patch?.profile && typeof patch.profile === 'object' ? patch.profile : patch;
+    const incoming = rawIncoming && typeof rawIncoming === 'object' ? { ...rawIncoming } : {};
+    const memoryPolicyPatch = incoming.memoryPolicy && typeof incoming.memoryPolicy === 'object' ? incoming.memoryPolicy : null;
+    // 旧客户端的档案负载可能携带 memoryPolicy；将其写入专用策略存储后，
+    // 不再持久化到档案 JSON。
+    delete incoming.memoryPolicy;
+    if (memoryPolicyPatch) await updateMemoryPolicy(normalizedUserId, memoryPolicyPatch);
     const requestedFieldVersions = patch?.fieldVersions || patch?.field_versions || options.fieldVersions || {};
     const changedFields = Object.keys(incoming || {}).filter(key => !['expectedVersion', 'expected_version', 'fieldVersions', 'field_versions'].includes(key));
     const profile = normalizeAgentProfile({ ...current, ...(incoming || {}) }, current);
+    if (memoryPolicyPatch && changedFields.length === 0) return getAgentProfile(normalizedUserId);
     const now = getBeijingTimestamp();
     if (changedFields.length && requestedFieldVersions && typeof requestedFieldVersions === 'object' && Object.keys(requestedFieldVersions).length) {
         const result = await transaction(async trx => {

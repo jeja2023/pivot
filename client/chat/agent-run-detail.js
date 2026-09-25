@@ -613,6 +613,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-create-skill-draft]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runPersonalContext')?.createSkillDraftFromRun?.(run.id).catch(error => window.Pivot?.legacy?.showToast?.(error.message || '生成 Skill 草稿失败', 'error')));
     container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
     window.Pivot?.moduleApi?.('agent.runPersonalContext')?.bindSkillMatchPause?.(container, run);
+    window.Pivot?.moduleApi?.('agent.runPersonalContext')?.bindMemoryActions?.(container, run);
     container.querySelectorAll('[data-agent-dag-rerun-node]').forEach(btn => {
         btn.addEventListener('click', () => window.Pivot.legacy.rerunAgentDagNode(run.id, btn.dataset.agentDagRerunNode || ''));
     });

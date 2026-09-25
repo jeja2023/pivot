@@ -1,5 +1,5 @@
 const { transaction } = require('../db/client');
-const { exportMemories } = require('./long-term-memory');
+const { exportMemories, cancelMemoryExtractionJobs, setLongTermMemoryEnabled } = require('./long-term-memory');
 const { getAgentProfile } = require('./agent-profile');
 const { listAgentFeedback } = require('./agent-feedback');
 const { listEvolutionProposals } = require('./agent-evolution');
@@ -24,9 +24,19 @@ async function exportAgentPersonalData(user) {
 async function deleteAgentPersonalData(user, _options = {}) {
     const now = getBeijingTimestamp();
     const result = {};
+    // 删除前递增记忆修订号，避免已运行的抽取任务在事务提交后重新写回记录。
+    await setLongTermMemoryEnabled(user.id, false);
+    result.memoryJobsCancelled = await cancelMemoryExtractionJobs(user.id, { reason: 'PERSONAL_DATA_DELETED' });
     await transaction(async trx => {
-        const memory = await trx.execute("UPDATE memories SET status = 'deleted', updated_at = ? WHERE user_id = ? AND status != 'deleted'", [now, user.id]);
-        result.memories = memory;
+        // 此接口是明确的个人数据擦除请求。它不同于普通“忘记”操作，会移除
+        // 私有正文、来源、抑制项、使用事件和评测数据，而不是仅保留软删除标记。
+        result.memoryUsageEvents = await trx.execute('DELETE FROM memory_usage_events WHERE user_id = ?', [user.id]);
+        result.memoryEvidence = await trx.execute('DELETE FROM memory_source_evidence WHERE user_id = ?', [user.id]);
+        result.memorySuppressions = await trx.execute('DELETE FROM memory_suppressions WHERE user_id = ?', [user.id]);
+        result.memoryEvaluationRuns = await trx.execute('DELETE FROM memory_evaluation_runs WHERE user_id = ?', [user.id]);
+        result.memoryEvaluationCases = await trx.execute('DELETE FROM memory_evaluation_cases WHERE user_id = ?', [user.id]);
+        result.memories = await trx.execute('DELETE FROM memories WHERE user_id = ?', [user.id]);
+        result.memoryJobsDeleted = await trx.execute('DELETE FROM memory_extraction_jobs WHERE user_id = ?', [user.id]);
         for (const [name, sql] of Object.entries({
             feedback: 'DELETE FROM agent_feedback WHERE user_id = ?',
             learningJobs: 'DELETE FROM agent_learning_jobs WHERE user_id = ?',
@@ -40,6 +50,10 @@ async function deleteAgentPersonalData(user, _options = {}) {
             else if (name === 'channels') result[name] = await trx.execute(sql, [now, user.id]);
             else result[name] = await trx.execute(sql, [user.id]);
         }
+        result.memorySettings = await trx.execute(`
+            DELETE FROM user_settings
+            WHERE user_id = ? AND key IN ('long_term_memory_enabled', 'long_term_memory_revision', 'agent_memory_policy')
+        `, [user.id]);
     });
     return { deletedAt: now, ...result };
 }

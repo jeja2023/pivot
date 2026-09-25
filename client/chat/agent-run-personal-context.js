@@ -55,14 +55,44 @@
     }
 
     function memoryContextMarkup(run = {}, escape = value => String(value || '')) {
-        const reasons = Array.isArray(metadata(run).chatBridge?.memoryUsageReasons) ? metadata(run).chatBridge.memoryUsageReasons : [];
+        const value = metadata(run);
+        const reasons = Array.isArray(value.memoryUsage?.reasons)
+            ? value.memoryUsage.reasons
+            : Array.isArray(value.chatBridge?.memoryUsageReasons) ? value.chatBridge.memoryUsageReasons : [];
         if (!reasons.length) return '';
         const items = reasons.slice(0, 6).map(item => {
             const id = String(item?.memoryId || item?.id || '').trim();
             const reason = String(item?.reason || item?.usageReason || '与当前任务相关。').slice(0, 180);
-            return `<div class="agent-context-row"><span>${escape(id ? `记忆 #${id}` : '个人记忆')}</span><strong>${escape(reason)}</strong></div>`;
+            const actions = id ? `<span class="agent-context-actions"><button type="button" class="btn-secondary btn-xs" data-agent-memory-disable="${escape(id)}">不相关，暂停</button><button type="button" class="btn-danger-outline btn-xs" data-agent-memory-forget="${escape(id)}">忘记</button></span>` : '';
+            return `<div class="agent-context-row agent-memory-context-row"><span>${escape(id ? `记忆 #${id}` : '个人记忆')}</span><strong>${escape(reason)}</strong>${actions}</div>`;
         }).join('');
-        return `<div class="agent-context-card"><h5>已使用的个人记忆</h5>${items}<p class="agent-context-hint">可在聊天输入框的“记忆”菜单中查看、暂停或更正。</p></div>`;
+        return `<div class="agent-context-card"><h5>已使用的个人记忆</h5>${items}</div>`;
+    }
+
+    function bindMemoryActions(container, run = {}) {
+        const update = async (memoryId, mode) => {
+            const forget = mode === 'forget';
+            const confirmed = window.confirm(forget
+                ? '忘记后，这条记忆不会再自动重建。是否继续？'
+                : '暂停后，后续任务不会使用这条记忆。是否继续？');
+            if (!confirmed) return;
+            const response = await fetch(`${API_BASE}/memories/${encodeURIComponent(memoryId)}${forget ? '' : '/status'}`, {
+                method: forget ? 'DELETE' : 'PUT',
+                credentials: 'same-origin',
+                headers: forget ? undefined : { 'Content-Type': 'application/json' },
+                body: forget ? undefined : JSON.stringify({ status: 'disabled' })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || (forget ? '忘记记忆失败' : '暂停记忆失败'));
+            window.Pivot?.legacy?.showToast?.(forget ? '已忘记这条记忆。' : '已暂停这条记忆。', 'success');
+            await window.Pivot?.legacy?.openAgentRun?.(run.id, { silent: true });
+        };
+        container?.querySelectorAll('[data-agent-memory-disable]').forEach(button => {
+            button.addEventListener('click', () => update(button.dataset.agentMemoryDisable, 'disable').catch(error => window.Pivot?.legacy?.showToast?.(error.message, 'error')));
+        });
+        container?.querySelectorAll('[data-agent-memory-forget]').forEach(button => {
+            button.addEventListener('click', () => update(button.dataset.agentMemoryForget, 'forget').catch(error => window.Pivot?.legacy?.showToast?.(error.message, 'error')));
+        });
     }
 
     function appendCollaboratorGroup(container, run) {
@@ -104,5 +134,5 @@
         return createdData.version || null;
     }
 
-    window.Pivot?.exposeModule?.('agent.runPersonalContext', { appendCollaboratorGroup, bindSkillMatchPause, createSkillDraftFromRun, feedbackStatusText, memoryContextMarkup, personalContextMarkup, projectContextPack: projectContextMarkup, projectContextMarkup, skillContextMarkup, skillMatchText });
+    window.Pivot?.exposeModule?.('agent.runPersonalContext', { appendCollaboratorGroup, bindMemoryActions, bindSkillMatchPause, createSkillDraftFromRun, feedbackStatusText, memoryContextMarkup, personalContextMarkup, projectContextPack: projectContextMarkup, projectContextMarkup, skillContextMarkup, skillMatchText });
 })();

@@ -394,6 +394,69 @@ document.getElementById('long-term-memory-toggle')?.addEventListener('change', (
 
 document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMemoryMergeSuggestions?.());
 document.getElementById('memory-export-btn')?.addEventListener('click', () => window.Pivot.legacy.exportMemories?.());
+document.getElementById('memory-evaluation-refresh-btn')?.addEventListener('click', () => window.Pivot.moduleApi('settings.memory', {}).loadMemoryEvaluations?.());
+document.getElementById('memory-evaluation-run-btn')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        const result = await memory.runMemoryEvaluation();
+        const summary = result.run?.summary || {};
+        showToast(`记忆评测完成：${Number(summary.passed || 0)}/${Number(summary.cases || 0)} 通过`);
+        await window.Pivot.moduleApi('settings.memory', {}).loadMemoryEvaluations?.();
+    } catch (error) {
+        showToast(error.message || '记忆评测运行失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+document.getElementById('memory-evaluation-case-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+        const memoryApi = window.Pivot.moduleApi('settings.memory', {});
+        const payload = {
+            name: document.getElementById('memory-evaluation-name')?.value,
+            query: document.getElementById('memory-evaluation-query')?.value,
+            expectedMemoryIds: memoryApi.parseMemoryEvaluationIds(document.getElementById('memory-evaluation-expected')?.value),
+            forbiddenMemoryIds: memoryApi.parseMemoryEvaluationIds(document.getElementById('memory-evaluation-forbidden')?.value)
+        };
+        const id = document.getElementById('memory-evaluation-id')?.value;
+        if (id) await memoryApi.updateMemoryEvaluationCase(id, payload);
+        else await memoryApi.createMemoryEvaluationCase(payload);
+        memoryApi.resetMemoryEvaluationForm();
+        showToast(id ? '记忆评测用例已更新' : '记忆评测用例已添加');
+        await memoryApi.loadMemoryEvaluations?.();
+    } catch (error) {
+        showToast(error.message || '记忆评测用例创建失败', 'error');
+    } finally {
+        submit.disabled = false;
+    }
+});
+document.getElementById('memory-evaluation-cases')?.addEventListener('click', async event => {
+    const button = event.target?.closest?.('[data-memory-evaluation-action]');
+    if (!button) return;
+    const memoryApi = window.Pivot.moduleApi('settings.memory', {});
+    const id = button.dataset.memoryEvaluationId;
+    const action = button.dataset.memoryEvaluationAction;
+    if (action === 'edit') {
+        const item = memoryApi.getMemoryEvaluationCase(id);
+        if (item) memoryApi.fillMemoryEvaluationForm(item);
+        return;
+    }
+    button.disabled = true;
+    try {
+        await memoryApi.deleteMemoryEvaluationCase(id);
+        memoryApi.resetMemoryEvaluationForm();
+        showToast('记忆评测用例已删除');
+        await memoryApi.loadMemoryEvaluations?.();
+    } catch (error) {
+        showToast(error.message || '记忆评测用例删除失败', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
 document.getElementById('memory-search-input')?.addEventListener('input', () => {
     clearTimeout(window.Pivot.legacy.memorySearchTimer);
     window.Pivot.legacy.memorySearchTimer = setTimeout(() => window.Pivot.legacy.loadMemories?.(1), 250);
@@ -531,7 +594,13 @@ document.getElementById('memory-edit-form')?.addEventListener('submit', async (e
             type: document.getElementById('memory-edit-type')?.value,
             content: document.getElementById('memory-edit-content')?.value,
             salience: Number(document.getElementById('memory-edit-salience')?.value),
-            confidence: Number(document.getElementById('memory-edit-confidence')?.value)
+            confidence: Number(document.getElementById('memory-edit-confidence')?.value),
+            scope: document.getElementById('memory-edit-scope')?.value,
+            scopeReference: document.getElementById('memory-edit-scope-reference')?.value,
+            projectId: document.getElementById('memory-edit-scope')?.value === 'project'
+                ? document.getElementById('memory-edit-scope-reference')?.value : '',
+            validFrom: document.getElementById('memory-edit-valid-from')?.value || null,
+            expiresAt: document.getElementById('memory-edit-expires-at')?.value || null
         });
         showToast('长期记忆已保存');
         window.Pivot.legacy.closeMemoryEditModal?.();

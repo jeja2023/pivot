@@ -127,7 +127,8 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
 });
 
 test('轮次时间片耗尽会复用安全检查点续跑，而不是直接生成不完整终态', () => {
-    const source = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-execution.js'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-execution.js'), 'utf8')
+        + fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-runtime', 'run-continuation.js'), 'utf8');
     const streaming = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
     assert.match(source, /AGENT_AUTO_CONTINUE_ON_STEP_LIMIT/);
     assert.match(source, /reason: 'step_limit'/);
