@@ -103,6 +103,19 @@
     background: #ffffff;
     gap: 11px;
 }
+.presentation-inspector-panel.hidden,
+.presentation-inspector-panel[hidden],
+#presentation-properties-panel.hidden,
+#presentation-template-panel.hidden,
+#presentation-assets-panel.hidden,
+#presentation-ai-panel.hidden,
+#presentation-metrics-panel.hidden,
+#presentation-notes-panel.hidden,
+#presentation-comments-panel.hidden,
+#presentation-issues-panel.hidden,
+#presentation-versions-panel.hidden {
+    display: none !important;
+}
 .presentation-inspector-panel::-webkit-scrollbar {
     width: 5px;
 }
@@ -176,12 +189,15 @@
 /* ==========================================================================
    1. 模板面板（Template Panel）
    ========================================================================== */
-#presentation-template-panel {
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    padding: 13px 13px 0 13px !important;
-    gap: 8px !important;
+#presentation-template-panel:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 13px 13px 0 13px;
+    gap: 8px;
+}
+#presentation-template-panel.hidden {
+    display: none !important;
 }
 .presentation-template-panel-head {
     display: flex;
@@ -246,7 +262,7 @@
 }
 .presentation-template-list .presentation-template-card {
     min-height: auto;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid rgba(148, 163, 184, 0.18);
     border-top: 1px solid rgba(148, 163, 184, 0.18);
     border-left: 4px solid var(--presentation-template-color, #1769aa);
@@ -254,7 +270,11 @@
     background: #ffffff;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.025);
     display: grid;
-    gap: 4px;
+    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    column-gap: 10px;
+    row-gap: 2px;
+    align-items: center;
     cursor: pointer;
     text-align: left;
     transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
@@ -272,41 +292,91 @@
     background: linear-gradient(90deg, rgba(16, 163, 127, 0.035) 0%, #ffffff 100%);
     box-shadow: 0 0 0 1.5px rgba(16, 163, 127, 0.25), 0 2px 6px rgba(16, 163, 127, 0.06);
 }
+.presentation-template-list .presentation-template-thumbnail {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    width: 66px;
+    height: 37px;
+    aspect-ratio: 16 / 9;
+    border-radius: 5px;
+    border: 1px solid var(--border, rgba(148, 163, 184, 0.28));
+    box-shadow: 0 1px 3px var(--presentation-card-shadow, rgba(15, 23, 42, 0.06));
+    position: relative;
+    overflow: hidden;
+    align-self: center;
+    flex-shrink: 0;
+    pointer-events: none;
+}
 .presentation-template-list .presentation-template-card strong {
-    font-size: 0.8rem;
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0.78rem;
     font-weight: 800;
     color: #0f172a;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 4px;
+    line-height: 1.3;
 }
 .presentation-template-list .presentation-template-card.is-active strong::after {
     content: "当前使用";
-    font-size: 0.6rem;
+    font-size: 0.58rem;
     font-weight: 750;
     color: #10a37f;
     background: rgba(16, 163, 127, 0.1);
-    padding: 1px 6px;
-    border-radius: 4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
 }
 .presentation-template-list .presentation-template-card span {
-    font-size: 0.69rem;
-    line-height: 1.4;
+    grid-column: 2;
+    grid-row: 2;
+    font-size: 0.67rem;
+    line-height: 1.3;
     color: #64748b;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
+}
+.presentation-template-list .presentation-template-card-footer,
+.presentation-template-list .presentation-template-card > small {
+    grid-column: 2;
+    grid-row: 3;
+}
+.presentation-template-list .presentation-template-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 1px;
 }
 .presentation-template-list .presentation-template-card small {
-    font-size: 0.64rem;
+    font-size: 0.62rem;
     font-weight: 750;
     color: #059669;
     background: #f0fdf4;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 1px 5px;
+    border-radius: 3px;
     width: fit-content;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 105px;
+}
+.presentation-template-palette {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+}
+.presentation-template-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.15));
+    box-sizing: border-box;
+    display: inline-block;
 }
 
 /* ==========================================================================
@@ -368,12 +438,15 @@
     border-color: rgba(16, 163, 127, 0.35);
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
 }
-#presentation-assets-panel {
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    padding: 13px 13px 0 13px !important;
-    gap: 8px !important;
+#presentation-assets-panel:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 13px 13px 0 13px;
+    gap: 8px;
+}
+#presentation-assets-panel.hidden {
+    display: none !important;
 }
 #presentation-assets-panel .presentation-template-panel-head,
 #presentation-assets-panel .presentation-assets-quick-toolbar {

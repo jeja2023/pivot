@@ -623,6 +623,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
         return await presentations.showPresentationsApp(options);
     }
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-collab.js');
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-templates.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-presenter.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations.js');
     const loaded = window.Pivot?.moduleApi?.('apps.presentations');

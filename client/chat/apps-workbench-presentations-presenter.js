@@ -202,91 +202,6 @@
     // ==========================================
     // 3. 组织/部门模板管理、审核与导入导出
     // ==========================================
-    function renderTemplatePanel(state, { templateById, renderTemplates } = {}) {
-        renderTemplates?.(byId('presentation-template-list'));
-        const canManage = typeof isAdminUser === 'function' && isAdminUser();
-        byId('presentation-save-template-btn')?.classList.toggle('hidden', !canManage);
-        byId('presentation-save-department-template-btn')?.classList.toggle('hidden', !canManage);
-        const currentTemplate = templateById?.(state.active?.content?.template?.id || state.active?.template?.id);
-        byId('presentation-submit-template-review-btn')?.classList.toggle('hidden', !canManage || !currentTemplate || currentTemplate.ownerType === 'system' || !['draft', 'unpublished'].includes(currentTemplate.status));
-        byId('presentation-review-template-btn')?.classList.toggle('hidden', !canManage || currentTemplate?.status !== 'pending_review');
-        byId('presentation-import-template-btn')?.classList.toggle('hidden', !canManage);
-    }
-
-    async function saveAsTemplate(scope = 'organization', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast } = {}) {
-        if (!state.active?.content) return;
-        const scopeLabel = scope === 'department' ? '部门' : '组织';
-        const name = await window.Pivot.legacy.showInputPrompt?.({ title: '保存为' + scopeLabel + '模板', message: '模板名称', value: state.active.content.title + ' 模板', required: true, width: 480 });
-        if (!name) return;
-        let departmentName = '';
-        if (scope === 'department') {
-            departmentName = await window.Pivot.legacy.showInputPrompt?.({ title: '部门模板范围', message: '部门名称', value: '', required: true, width: 480 });
-            if (!departmentName) return;
-        }
-        const currentTemplate = templateById?.(state.active.template?.id);
-        const useBrandControls = await window.Pivot.legacy.showConfirm?.('品牌控制', '是否将当前选中的图片作为锁定 Logo，并为模板设置锁定页脚、页码和字体？') === true;
-        let brandControls = currentTemplate?.definition?.brandControls || {};
-        if (useBrandControls) {
-            const footerText = await window.Pivot.legacy.showInputPrompt?.({ title: '品牌页脚', message: '页脚文字（可留空）', value: brandControls.footerText || '', width: 520 }) || '';
-            const element = selectedElement?.();
-            const selectedLogo = element?.type === 'image' ? element.assetRef : '';
-            if (selectedLogo) await requestJson(API + '/assets/publish', jsonOptions({ ref: selectedLogo, scope, departmentName }));
-            brandControls = { footerText, logoAssetRef: selectedLogo || brandControls.logoAssetRef || '', lockBrandElements: true, lockFonts: true, showPageNumber: true };
-        }
-        const definition = { theme: state.active.content.theme, layouts: currentTemplate?.definition?.layouts || [], brandControls };
-        const data = await requestJson(API + '/templates', jsonOptions({ name, description: '由 ' + state.active.content.title + ' 保存的' + scopeLabel + '模板', definition, aspectRatio: state.active.content.aspectRatio, scope, departmentName, publish: true }));
-        state.templates.push(data.template);
-        renderTemplatePanel?.();
-        renderLibrary?.();
-        toast?.(scopeLabel + '模板已提交审核，审核通过后对授权用户可见。');
-    }
-
-    async function submitCurrentTemplateReview(state, { templateById, renderTemplatePanel, toast } = {}) {
-        const templateId = state.active?.content?.template?.id || state.active?.template?.id;
-        const template = templateById?.(templateId);
-        if (!template || template.ownerType === 'system') return;
-        const data = await requestJson(API + '/templates/' + encodeURIComponent(templateId) + '/submit-review', { method: 'POST' });
-        state.templates = state.templates.map(item => item.id === templateId ? data.template : item);
-        renderTemplatePanel?.();
-        toast?.('模板已提交审核。');
-    }
-
-    async function reviewCurrentTemplate(state, { templateById, renderTemplatePanel, toast } = {}) {
-        const templateId = state.active?.content?.template?.id || state.active?.template?.id;
-        const template = templateById?.(templateId);
-        if (!template || template.status !== 'pending_review') return;
-        const note = await window.Pivot.legacy.showInputPrompt?.({ title: '审核模板', message: '审核说明', value: '已完成素材、字体和布局检查', required: true, width: 520 });
-        if (!note) return;
-        const data = await requestJson(API + '/templates/' + encodeURIComponent(templateId) + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved: true, note }) });
-        state.templates = state.templates.map(item => item.id === templateId ? data.template : item);
-        renderTemplatePanel?.();
-        toast?.('模板已审核通过。');
-    }
-
-    async function exportCurrentTemplate(state, { templateById, toast } = {}) {
-        const templateId = state.active?.content?.template?.id || state.active?.template?.id;
-        if (!templateId) return;
-        const response = await apiFetch(`${API}/templates/${encodeURIComponent(templateId)}/package`);
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data?.error || '导出模板失败。');
-        }
-        downloadBlob(`${templateById?.(templateId)?.name || 'PPT模板'}.pivot-ppt-template.json`, await response.blob());
-        toast?.('模板包已开始下载。');
-    }
-
-    async function importTemplatePackage(file, state, { renderTemplatePanel, renderLibrary, toast } = {}) {
-        if (!file) return;
-        const form = new FormData();
-        form.append('file', file);
-        const data = await requestJson(`${API}/templates/import`, { method: 'POST', body: form });
-        state.templates.push(data.template);
-        renderTemplatePanel?.();
-        renderLibrary?.();
-        const warnings = Array.isArray(data.template?.importWarnings) ? data.template.importWarnings : [];
-        toast?.(warnings.length ? '模板已导入并提交审核；有 ' + warnings.length + ' 项兼容性提示。' : '模板已导入并提交审核，审核通过后对组织用户可见。', warnings.length ? 'warning' : 'success');
-    }
-
     // ==========================================
     // 4. 素材、字体与富媒体管理
     // ==========================================
@@ -672,6 +587,26 @@
     function applyLayoutToSlide(layoutId, state) {
         const slide = state.active?.content?.slides?.find(s => s.id === state.selectedSlideId) || state.active?.content?.slides?.[0];
         if (!slide) return;
+        const template = state.active?.templateDefinition
+            ? { ...state.active.template, definition: state.active.templateDefinition }
+            : state.templates?.find(item => item.id === state.active?.template?.id);
+        const importedLayout = template?.definition?.layouts?.find(layout => layout.id === layoutId);
+        if (importedLayout?.placeholders?.length) {
+            const editable = slide.elements.filter(element => !String(element.id || '').startsWith('pivotTemplate_'));
+            const texts = editable.filter(element => element.type === 'text').sort((left, right) => Number(right.style?.fontSize || 0) - Number(left.style?.fontSize || 0));
+            const used = new Set();
+            editable.forEach(element => {
+                const role = element.type === 'text' && (element.id === 'title' || Number(element.style?.fontSize || 0) >= 28) ? 'title' : element.type === 'image' ? 'image' : element.type === 'chart' ? 'chart' : element.type === 'table' ? 'table' : 'body';
+                const slot = importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === element.type && item.role === role)
+                    || (element.type === 'text' ? importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === 'text' && texts.includes(element)) : importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === element.type));
+                if (!slot) return;
+                used.add(slot.id); element.x = slot.x; element.y = slot.y; element.width = slot.width; element.height = slot.height; element.rotation = slot.rotation || 0;
+                if (element.type === 'text' && slot.style && Object.keys(slot.style).length) element.style = { ...element.style, ...slot.style };
+                if (slot.role && importedLayout.slotAnimations?.[slot.role]) element.animation = { ...importedLayout.slotAnimations[slot.role] };
+            });
+            slide.layoutId = layoutId;
+            return;
+        }
         const textElements = slide.elements.filter(element => element.type === 'text').sort((a, b) => (b.style?.fontSize || 0) - (a.style?.fontSize || 0));
         const title = textElements[0];
         const body = textElements.filter(element => element !== title);
@@ -734,12 +669,12 @@
         byId('presentation-artifact-modal')?.classList.remove('hidden');
     }
 
-    async function createFromArtifact(state, { loadDocuments, openPresentation, toast } = {}) {
+    async function createFromArtifact(state, { loadDocuments, openPresentation, templateById, toast } = {}) {
         const artifactId = byId('presentation-artifact-select')?.value;
         if (!artifactId) return;
         const title = byId('presentation-artifact-title-input')?.value.trim() || '';
         const templateId = byId('presentation-artifact-template')?.value || 'business-blue';
-        const data = await requestJson(API + '/from-artifact/' + encodeURIComponent(artifactId), jsonOptions({ title, templateId }));
+        const data = await requestJson(API + '/from-artifact/' + encodeURIComponent(artifactId), jsonOptions({ title, templateId, templateVersion: templateById?.(templateId)?.version }));
         byId('presentation-artifact-modal')?.classList.add('hidden');
         await loadDocuments?.();
         await openPresentation?.(data.presentation.id);
@@ -792,14 +727,16 @@
         if (!Array.isArray(value)) return [];
         return value.map(item => outlineText(item, '', maxLength)).filter(Boolean).slice(0, maxItems);
     }
-    function outlineLayout(value, pageIndex, pageCount, labels = {}) {
+    function outlineLayout(value, pageIndex, pageCount, labels = {}, template = null) {
         const layout = String(value || '').trim();
-        if (labels[layout]) return layout;
-        if (pageIndex === 0) return 'cover';
-        if (pageIndex === pageCount - 1) return 'summary';
-        return 'title-content';
+        const layouts = Array.isArray(template?.definition?.layouts) ? template.definition.layouts : [];
+        if (labels[layout] || layouts.some(item => item.id === layout)) return layout;
+        const preferred = role => layouts.find(item => item.id === role) || layouts.find(item => item.legacyLayoutId === role) || layouts.find(item => new RegExp(role === 'cover' ? 'cover|封面|title' : role === 'summary' ? 'summary|总结' : 'content|内容|正文', 'i').test(item.name || '')) || layouts[0];
+        if (pageIndex === 0) return preferred('cover')?.id || 'cover';
+        if (pageIndex === pageCount - 1) return preferred('summary')?.id || 'summary';
+        return preferred('title-content')?.id || 'title-content';
     }
-    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}) {
+    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}, template = null) {
         const source = input && typeof input === 'object' ? input : {};
         const rawSections = Array.isArray(source.outline) ? source.outline : (Array.isArray(source.slides) ? [{ section: '演示内容', slides: source.slides }] : []);
         const totalSlides = rawSections.reduce((total, section) => total + (Array.isArray(section?.slides) ? section.slides.length : 0), 0);
@@ -811,7 +748,7 @@
                 return {
                     title: outlineText(slide?.title, `第 ${currentIndex + 1} 页`, 160),
                     purpose: outlineText(slide?.purpose, '', 500),
-                    layoutHint: outlineLayout(slide?.layoutHint, currentIndex, totalSlides, labels),
+                    layoutHint: outlineLayout(slide?.layoutHint, currentIndex, totalSlides, labels, template),
                     keyPoints: outlineTextList(slide?.keyPoints, 12, 500),
                     sourceRefs: outlineTextList(slide?.sourceRefs, 50, 160),
                     order: slideIndex
@@ -867,15 +804,16 @@
             target.appendChild(sectionNode);
         });
     }
-    function renderOutlineReview(input, state, { labels = {} } = {}) {
-        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels);
+    function renderOutlineReview(input, state, { labels = {}, templateById } = {}) {
+        const template = templateById?.(state.pendingCreate?.templateId);
+        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels, template);
         state.pendingOutline = outline;
         const preview = byId('presentation-outline-markdown'); if (preview) renderOutlineDocument(preview, outline);
         const count = byId('presentation-outline-page-count'); if (count) count.textContent = '共 ' + outline.outline.length + ' 个章节 · ' + outline.outline.reduce((total, section) => total + section.slides.length, 0) + ' 个主题';
         renderOutlineWarnings(outline);
     }
-    function collectOutlineFromReview(state, { labels = {} } = {}) {
-        return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels);
+    function collectOutlineFromReview(state, { labels = {}, templateById } = {}) {
+        return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId));
     }
 
     window.Pivot?.exposeModule?.('apps.presentations.presenter', {
@@ -890,12 +828,6 @@
         closePresenterMode,
         movePresenterSlide,
         renderSpeakerNotes,
-        renderTemplatePanel,
-        saveAsTemplate,
-        submitCurrentTemplateReview,
-        reviewCurrentTemplate,
-        exportCurrentTemplate,
-        importTemplatePackage,
         loadAssets,
         renderAssetsPanel,
         applyFontAsset,

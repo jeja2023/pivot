@@ -67,10 +67,16 @@ test('PPT API 提供文稿、版本、素材、模板包、AI、检查与导出�
         'get:/apps/presentations',
         'post:/apps/presentations',
         'post:/apps/presentations/templates/import',
+        'post:/apps/presentations/templates/import/preview',
+        'get:/apps/presentations/templates/import/:taskId',
+        'delete:/apps/presentations/templates/import/:taskId',
         'post:/apps/presentations/templates/:id/submit-review',
         'post:/apps/presentations/templates/:id/review',
         'get:/apps/presentations/templates/statistics',
         'get:/apps/presentations/templates/:id/package',
+        'get:/apps/presentations/templates/:id/import-report',
+        'get:/apps/presentations/templates/:id/source',
+        'post:/apps/presentations/templates/:id/reparse',
         'post:/apps/presentations/assets/publish',
         'post:/apps/presentations/ai/outline',
         'post:/apps/presentations/ai/slides',
@@ -121,8 +127,10 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(presentationRoutes, /retryMalformedJson:\s*true/);
     assert.match(presentationRoutes, /PRESENTATION_AI_JSON_REPAIR_FAILED/);
     const service = source('server/services/presentations/presentation-service.js');
+    const templateService = source('server/services/presentations/presentation-template-service.js');
+    const assetService = source('server/services/presentations/presentation-asset-service.js');
     assert.match(service, /owner_user_id = ?/);
-    assert.match(service, /status IN \('draft', 'pending_review', 'unpublished'\)/);
+    assert.match(templateService, /status IN \('draft', 'pending_review', 'unpublished'\)/);
     assert.match(presentationRoutes, /ON CONFLICT \(tenant_id, user_id, idempotency_key\) DO NOTHING/);
     assert.match(presentationRoutes, /PRESENTATION_AI_REQUEST_IN_PROGRESS/);
     assert.match(editor, /beginAiRequest/);
@@ -136,8 +144,17 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(editor, /远端有更新/);
     const pptxImporter = source('server/services/presentations/presentation-pptx-template-import.js');
     assert.match(pptxImporter, /MAX_PPTX_TEMPLATE_UNCOMPRESSED_BYTES/);
-    assert.match(pptxImporter, /检测到动画或转场/);
-    assert.match(presentationRoutes, /importPresentationTemplateFile/);
+    assert.match(pptxImporter, /复杂或无法映射的动画/);
+    assert.match(pptxImporter, /MAX_PPTX_TEMPLATE_COMPRESSION_RATIO/);
+    assert.match(pptxImporter, /relationshipId/);
+    const templateVersionMigration = source('server/db/migrations/presentation-template-versions.js');
+    assert.match(templateVersionMigration, /presentation_template_versions/);
+    assert.match(templateVersionMigration, /source_object_id/);
+    assert.match(presentationRoutes, /createPresentationTemplateImportJob/);
+    assert.match(presentationRoutes, /runPresentationTemplateImportJob/);
+    const templateImportJobMigration = source('server/db/migrations/presentation-template-import-jobs.js');
+    assert.match(templateImportJobMigration, /presentation_template_import_jobs/);
+    assert.match(templateImportJobMigration, /source_object_id/);
     assert.match(presentationRoutes, /setPresentationFavorite/);
     assert.match(editor, /presentation-library-search/);
     assert.match(editor, /toggleFavoriteDocument/);
@@ -150,7 +167,7 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(presentationService, /presentation_versions.created_by/);
     assert.match(presentationService, /presentation_document_favorites/);
     assert.match(presentationService, /createPresentationRemoteSession/);
-    assert.match(presentationService, /PRESENTATION_ASSET_TYPE_MISMATCH/);
+    assert.match(assetService, /PRESENTATION_ASSET_TYPE_MISMATCH/);
     assert.match(editor, /startRemotePresentation/);
     assert.match(editor, /loadPresentationMetrics/);
     const richMedia = source('server/db/migrations/presentation-rich-media.js');
@@ -180,7 +197,8 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage', 'saveExportOptions'].forEach(name => assert.ok(editor.includes('function ' + name), name));
     assert.ok(presenter.includes('aspectRatio: options.aspectRatio'));
     assert.match(source('server/routes/apps/presentations.js'), /aspectRatio: req\.body\?\.aspectRatio/);
-    assert.ok(service.includes('pixel_width'));
+    const assetService = source('server/services/presentations/presentation-asset-service.js');
+    assert.ok(assetService.includes('pixel_width'));
     assert.ok(service.includes('owner.username ILIKE'));
     assert.ok(service.includes('updated_at >= ?::date'));
     ['SOURCE_ATTRIBUTION_MISSING', 'FONT_FALLBACK_RISK', 'IMAGE_LOW_RESOLUTION', 'DATA_SOURCE_MISSING'].forEach(code => assert.ok(validation.includes(code), code));

@@ -31,6 +31,8 @@ const {
     exportPresentationTemplate,
     getPresentation,
     getPresentationTemplateStatistics,
+    getPresentationTemplateSource,
+    reparsePresentationTemplateSource,
     getPresentationAsset,
     listPresentationAssets,
     publishPresentationAsset,
@@ -43,8 +45,14 @@ const {
     listPresentationTemplates,
     listPresentationVersions,
     listPresentations,
-    importPresentationTemplateFile,
+    createPresentationTemplateImportJob,
+    getPresentationTemplateImportJob,
+    runPresentationTemplateImportJob,
+    cancelPresentationTemplateImportJob,
+    previewPresentationTemplateFile,
     removePresentationCollaborator,
+    resolveTemplateForUser,
+    resolveTemplateVersionForUser,
     resolvePresentationComment,
     rollbackPresentation,
     savePresentationContent,
@@ -66,6 +74,7 @@ const { getPresentationMetricsSnapshot, recordPresentationOutcome } = require('.
 const { isAdmin } = require('../../permissions');
 
 const MAX_MATERIAL_TEXT = 120000;
+const SOURCE_FORMAT_PIVOT = 'pivot';
 
 function contentDisposition(filename) {
     const safe = String(filename || 'presentation').replace(/[\\/\r\n"]/g, '_').slice(0, 180);
@@ -92,6 +101,19 @@ function normalizeMaterials(body) {
         usedIds.add(id);
         return { ...item, id };
     });
+}
+
+async function withResolvedAiTemplate(user, body = {}) {
+    const requestedId = body.templateId || body.template_id || body.presentation?.template?.id || 'business-blue';
+    const requestedVersion = body.templateVersion || body.template_version || body.presentation?.template?.version;
+    const template = requestedVersion
+        ? await resolveTemplateVersionForUser(user, requestedId, requestedVersion)
+        : await resolveTemplateForUser(user, requestedId);
+    if (!template) {
+        const error = new Error('所选模板不存在、已无权访问或版本不可用，请重新选择模板。');
+        error.status = 404; error.code = 'PRESENTATION_TEMPLATE_NOT_FOUND'; throw error;
+    }
+    return { ...body, templateId: template.id, templateVersion: template.version, template };
 }
 
 async function callPresentationAi({ req, logAction, messages, source, auditAction, maxTokens, signal }) {
@@ -207,7 +229,7 @@ async function finishAiIdempotency(ctx, payload, errorCode = '') {
 
 function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, upload } = {}) {
     const router = express.Router();
-    const presentationUpload = createSafeUpload({ extensions: new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ttf', '.otf', '.woff', '.woff2', '.mp3', '.wav', '.ogg', '.aac', '.m4a', '.mp4', '.webm', '.mov', '.pdf', '.pptx', '.pptm', '.ppsm', '.bas', '.vba', '.docx', '.xlsx', '.txt', '.md']), fileSize: 100 * 1024 * 1024, maxFields: 12, errorMessage: 'PPT 素材仅支持图片、字体、音视频、PDF、DOCX、XLSX、TXT 或 Markdown' });
+    const presentationUpload = createSafeUpload({ extensions: new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ttf', '.otf', '.woff', '.woff2', '.mp3', '.wav', '.ogg', '.aac', '.m4a', '.mp4', '.webm', '.mov', '.pdf', '.pptx', '.pptm', '.ppsm', '.bas', '.vba', '.docx', '.xlsx', '.txt', '.md', '.json']), fileSize: 100 * 1024 * 1024, maxFields: 12, errorMessage: 'PPT 素材仅支持图片、字体、音视频、PDF、DOCX、XLSX、TXT、Markdown 或模板 JSON' });
     const presentationFile = field => [presentationUpload.single(field), uploadSecurityMiddleware];
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
 
@@ -259,9 +281,31 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/templates/import', authMiddleware, uploadLimiter, presentationFile('file'), asyncHandler(async (req, res) => {
         try {
             if (!req.file?.path) return res.status(400).json({ error: '请选择模板包文件。' });
-            const template = await importPresentationTemplateFile(req.user, await fs.readFile(req.file.path), { filename: req.file.originalname, mimeType: req.file.mimetype, scope: req.body?.scope, publish: req.body?.publish !== 'false' });
-            writeLog(req, '导入PPT模板', `模板: ${template.id}`);
-            return res.status(201).json({ success: true, template });
+            const task = await createPresentationTemplateImportJob(req.user, await fs.readFile(req.file.path), { filename: req.file.originalname, mimeType: req.file.mimetype, scope: req.body?.scope, departmentName: req.body?.departmentName || req.body?.department_name, importMode: req.body?.importMode || req.body?.import_mode, publish: req.body?.publish !== 'false' });
+            setImmediate(() => { runPresentationTemplateImportJob(req.user, task.id).catch(() => {}); });
+            writeLog(req, '提交PPT模板导入任务', `任务: ${task.id}，文件: ${task.filename}`);
+            return res.status(202).json({ success: true, task });
+        } finally {
+            await removeUpload(req.file);
+        }
+    }));
+    router.get('/apps/presentations/templates/import/:taskId', authMiddleware, asyncHandler(async (req, res) => {
+        const task = await getPresentationTemplateImportJob(req.user, req.params.taskId);
+        if (!task) return res.status(404).json({ error: '模板导入任务不存在或无权访问。', code: 'PRESENTATION_TEMPLATE_IMPORT_NOT_FOUND' });
+        if (task.status === 'queued') setImmediate(() => { runPresentationTemplateImportJob(req.user, task.id).catch(() => {}); });
+        return res.json({ task });
+    }));
+    router.delete('/apps/presentations/templates/import/:taskId', authMiddleware, asyncHandler(async (req, res) => {
+        const task = await cancelPresentationTemplateImportJob(req.user, req.params.taskId);
+        writeLog(req, '取消PPT模板导入任务', '任务: ' + task.id);
+        return res.json({ success: true, task });
+    }));
+    router.post('/apps/presentations/templates/import/preview', authMiddleware, uploadLimiter, presentationFile('file'), asyncHandler(async (req, res) => {
+        try {
+            if (!req.file?.path) return res.status(400).json({ error: '请选择模板包文件。', code: 'PRESENTATION_TEMPLATE_FILE_REQUIRED' });
+            const preview = await previewPresentationTemplateFile(req.user, await fs.readFile(req.file.path), { filename: req.file.originalname, mimeType: req.file.mimetype, importMode: req.body?.importMode || req.body?.import_mode });
+            writeLog(req, '预检PPT模板', `文件: ${String(req.file.originalname || '').slice(0, 120)}`);
+            return res.json({ success: true, preview });
         } finally {
             await removeUpload(req.file);
         }
@@ -273,6 +317,27 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         res.setHeader('Content-Disposition', contentDisposition(filename));
         res.setHeader('Cache-Control', 'no-store');
         return res.send(JSON.stringify(packageData, null, 2));
+    }));
+    router.get('/apps/presentations/templates/:id/import-report', authMiddleware, asyncHandler(async (req, res) => {
+        const template = req.query.version
+            ? await resolveTemplateVersionForUser(req.user, req.params.id, req.query.version)
+            : await resolveTemplateForUser(req.user, req.params.id);
+        if (!template) return res.status(404).json({ error: '模板不存在或无权访问。', code: 'PRESENTATION_TEMPLATE_NOT_FOUND' });
+        return res.json({ templateId: template.id, version: template.version, sourceFormat: template.sourceFormat || template.definition?.importMetadata?.sourceFormat || SOURCE_FORMAT_PIVOT, report: template.importReport || template.definition?.importMetadata?.report || [] });
+    }));
+    router.get('/apps/presentations/templates/:id/source', authMiddleware, asyncHandler(async (req, res) => {
+        const source = await getPresentationTemplateSource(req.user, req.params.id, req.query.version);
+        const extension = source.sourceFormat === 'pptx' ? '.pptx' : '.pivot-ppt-template.json';
+        const filename = `${source.name.replace(/[\\/\r\n]/g, '_').slice(0, 100)}-v${source.version}${extension}`;
+        res.setHeader('Content-Type', source.mimeType);
+        res.setHeader('Content-Disposition', contentDisposition(filename));
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.send(source.buffer);
+    }));
+    router.post('/apps/presentations/templates/:id/reparse', authMiddleware, asyncHandler(async (req, res) => {
+        const template = await reparsePresentationTemplateSource(req.user, req.params.id, { importMode: req.body?.importMode || req.body?.import_mode });
+        writeLog(req, '重新解析PPT模板源文件', `模板: ${template.id}，版本: ${template.version}`);
+        res.json({ success: true, template });
     }));
 
     router.get('/apps/presentations', authMiddleware, asyncHandler(async (req, res) => {
@@ -380,19 +445,19 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     }
 
     router.post('/apps/presentations/ai/outline', authMiddleware, asyncHandler(async (req, res) => {
-        const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
+        const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!String(body.topic || '').trim()) return res.status(400).json({ error: '请输入演示主题。', code: 'PRESENTATION_TOPIC_REQUIRED' });
         return runAiRequest(req, res, body, buildOutlineMessages(body), { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600, retryMalformedJson: true, parse: async result => {
-            let outline; try { outline = parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language }); } catch (error) { error.status = error.status || 422; throw error; }
+            let outline; try { outline = parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language }); } catch (error) { error.status = error.status || 422; throw error; }
             return { outline };
         }});
     }));
 
     router.post('/apps/presentations/ai/slides', authMiddleware, asyncHandler(async (req, res) => {
-        const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
+        const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!body.outline || typeof body.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
         return runAiRequest(req, res, body, buildSlidesMessages(body), { source: 'presentation_slides', auditAction: 'PPT AI生成页面', maxTokens: 6000, retryMalformedJson: true, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+            const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (proposal.presentation) {
                 const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                 proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
@@ -403,11 +468,11 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     }));
 
     router.post('/apps/presentations/ai/continue', authMiddleware, asyncHandler(async (req, res) => {
-        const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
+        const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!body.outline && !body.presentation) return res.status(400).json({ error: '请提供当前大纲或演示文稿。', code: 'PRESENTATION_CONTEXT_REQUIRED' });
         const requestedSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
         return runAiRequest(req, res, { ...body, additionalSlideCount: requestedSlides }, buildContinueMessages({ ...body, additionalSlideCount: requestedSlides }), { source: 'presentation_continue', auditAction: 'PPT AI继续生成', maxTokens: Math.min(6000, 1100 * requestedSlides), retryMalformedJson: true, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
             if (!Array.isArray(proposal.presentation?.slides) || proposal.presentation.slides.length !== requestedSlides) {
                 const error = new Error('AI 返回的新增页数与请求不一致，请重试。'); error.status = 422; error.code = 'PRESENTATION_AI_CONTINUE_COUNT_INVALID'; throw error;
             }
@@ -416,9 +481,9 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     }));
 
     router.post('/apps/presentations/ai/rewrite', authMiddleware, asyncHandler(async (req, res) => {
-        const body = { ...(req.body || {}), materials: normalizeMaterials(req.body) };
+        const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!body.slide || typeof body.slide !== 'object') return res.status(400).json({ error: '请提供要改写的页面。', code: 'PRESENTATION_SLIDE_REQUIRED' });
-        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
+        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
     }));
 
     router.post('/apps/presentations/ai/validate', authMiddleware, asyncHandler(async (req, res) => {

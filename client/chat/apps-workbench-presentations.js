@@ -7,7 +7,7 @@
         libraryPage: 1, libraryLimit: 10,
         active: null, selectedSlideId: '', selectedElementId: '', selectedElementIds: [], elementClipboard: null, panel: 'properties', zoom: 0.65,
         history: [], historyIndex: -1, saveTimer: null, savePromise: null, saving: false, dirty: false, editRevision: 0, syncing: false, remoteVersionAvailable: false, remoteSession: null, drag: null,
-        pendingOutline: null, pendingCreate: null, aiAbortController: null, aiRequestKey: '',
+        pendingOutline: null, pendingCreate: null, aiAbortController: null, aiRequestKey: '', templateImportReportExpanded: false, templateImportTaskId: '', pendingTemplateApplyMode: '',
         presenterIndex: 0, presenterStartedAt: 0, presenterTimer: null, syncTimer: null, realtimeSource: null,
         exportOptions: { aspectRatio: '', includeNotes: true, includePageNumbers: true, showSourceRefs: true, imageQuality: 'standard', fontStrategy: 'embed' }
     };
@@ -64,7 +64,7 @@
     function recordHistory() { if (!state.active?.content) return; const snapshot = deepClone(state.active.content); const current = state.history[state.historyIndex]; if (current && JSON.stringify(current) === JSON.stringify(snapshot)) return; state.history.splice(state.historyIndex + 1); state.history.push(snapshot); if (state.history.length > 80) state.history.shift(); state.historyIndex = state.history.length - 1; updateUndoRedo(); scheduleSave(); }
     function restoreHistory(index) { if (!state.active || !state.history[index]) return; state.historyIndex = index; state.active.content = deepClone(state.history[index]); state.active.title = state.active.content.title; renderEditor(); scheduleSave(); }
     function scheduleSave() { if (!state.active?.id || !canEditActivePresentation()) return; clearTimeout(state.saveTimer); state.editRevision += 1; state.dirty = true; setSaveState('待保存', 'dirty'); state.saveTimer = window.setTimeout(() => saveActive().catch(error => { setSaveState('保存失败', 'error'); toast(error.message || '保存失败，内容仍保留在当前页面。', 'error'); }), 1200); }
-    async function saveActive({ force = false } = {}) {
+    async function saveActive({ force = false, templateApplyMode = '' } = {}) {
         if (!state.active?.id || !canEditActivePresentation()) return false;
         if (state.saving) { await state.savePromise; return state.dirty ? saveActive({ force }) : true; }
         if (!state.dirty && !force) return true;
@@ -77,7 +77,7 @@
         setSaveState('保存中…', 'saving');
         const save = (async () => {
             const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/content`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseVersion: state.active.version, title: contentSnapshot.title, templateId: contentSnapshot.template?.id, content: contentSnapshot, note: force ? '用户主动保存' : '自动保存' })
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseVersion: state.active.version, title: contentSnapshot.title, templateId: contentSnapshot.template?.id, templateVersion: contentSnapshot.template?.version, templateApplyMode: templateApplyMode || state.pendingTemplateApplyMode || '', content: contentSnapshot, note: force ? '用户主动保存' : '自动保存' })
             });
             if (state.active?.id !== presentationId) return true;
             const changedWhileSaving = state.editRevision !== saveRevision;
@@ -85,6 +85,7 @@
             state.active = data.presentation;
             state.active.content = changedWhileSaving ? currentContent : (data.presentation.content || contentSnapshot);
             state.active.validation = data.presentation.validation || state.active.validation;
+            state.pendingTemplateApplyMode = '';
             state.documents = state.documents.map(item => item.id === state.active.id ? { ...item, ...state.active } : item);
             state.dirty = changedWhileSaving;
             state.remoteVersionAvailable = false;
@@ -165,7 +166,10 @@
         }
     }
     function templateById(id) {
-        return state.templates.find(template => template.id === id) || state.templates[0] || null;
+        const activeSnapshot = state.active?.templateDefinition && state.active?.template?.id === id
+            ? { ...state.active.template, id, name: state.templates.find(template => template.id === id)?.name || state.active.content?.theme?.name || '文稿模板快照', definition: state.active.templateDefinition, importReport: state.active.templateImportReport || [] }
+            : null;
+        return activeSnapshot || state.templates.find(template => template.id === id) || state.templates[0] || null;
     }
     function textElement(id, x, y, width, height, text, style = {}) {
         return { id, type: 'text', x, y, width, height, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text }, style: { fontFamily: 'Microsoft YaHei', fontSize: 20, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, italic: false, underline: false, bullet: false, padding: 0, ...style } };
@@ -194,16 +198,28 @@
     function emptySlide(index) {
         const template = templateById(state.active?.template?.id);
         const theme = template?.definition?.theme || state.active?.content?.theme || {};
+        const colors = theme?.colors || state.active?.content?.theme?.colors || {};
+        const layouts = template?.definition?.layouts || [];
+        const layout = layouts.find(item => item.id === 'title-content' || item.legacyLayoutId === 'title-content') || layouts[0] || null;
+        const masters = template?.definition?.masters || [];
+        const master = masters.find(item => item.id === layout?.masterId) || null;
+        const slideId = `slide_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const placeholders = layout?.placeholders || [];
+        const titleSlot = placeholders.find(item => item.kind === 'text' && item.role === 'title') || placeholders.find(item => item.kind === 'text');
+        const bodySlot = placeholders.find(item => item.kind === 'text' && item.id !== titleSlot?.id) || null;
+        const layers = [...(master?.decorations || []), ...(layout?.decorations || [])].map((item, itemIndex) => ({ ...deepClone(item), id: `pivotTemplate_${layout?.id || 'default'}_${index + 1}_${itemIndex + 1}`, locked: item.locked !== false, sourceRefs: [] }));
         return {
-            id: `slide_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: slideId,
             index,
             type: 'content',
-            layoutId: 'title-content',
+            layoutId: layout?.id || 'title-content',
             sectionId: '',
-            background: { fill: theme?.colors?.background || '#FFFFFF', imageAssetRef: '', opacity: 1 },
+            background: master?.background ? { fill: master.background.fill || colors.background || '', imageAssetRef: master.background.imageAssetRef || '', opacity: master.background.opacity ?? 1 } : { fill: colors.background || '', imageAssetRef: '', opacity: 1 },
+            transition: layout?.defaultTransition?.type && layout.defaultTransition.type !== 'none' ? deepClone(layout.defaultTransition) : { type: 'none', durationMs: 0, direction: '' },
             elements: [
-                textElement('title', 80, 58, 1120, 72, '新页面标题', { fontFamily: theme?.fonts?.heading || 'Microsoft YaHei', fontSize: 32, fontWeight: 700, color: theme?.colors?.text || '#1F2937' }),
-                textElement('body', 100, 180, 1040, 380, '在此输入页面内容', { fontFamily: theme?.fonts?.body || 'Microsoft YaHei', fontSize: 20, color: theme?.colors?.text || '#1F2937' })
+                ...layers,
+                { ...textElement('title', titleSlot?.x ?? 80, titleSlot?.y ?? 58, titleSlot?.width ?? 1120, titleSlot?.height ?? 72, '新页面标题', { fontFamily: theme?.fonts?.heading || 'Microsoft YaHei', fontSize: 32, fontWeight: 700, color: colors.text || '', ...(titleSlot?.style || {}) }), animation: deepClone(layout?.slotAnimations?.[titleSlot?.role] || { type: 'none', durationMs: 0, delayMs: 0, direction: '' }) },
+                { ...textElement('body', bodySlot?.x ?? 100, bodySlot?.y ?? 180, bodySlot?.width ?? 1040, bodySlot?.height ?? 380, '在此输入页面内容', { fontFamily: theme?.fonts?.body || 'Microsoft YaHei', fontSize: 20, color: colors.text || '', ...(bodySlot?.style || {}) }), animation: deepClone(layout?.slotAnimations?.[bodySlot?.role] || { type: 'none', durationMs: 0, delayMs: 0, direction: '' }) }
             ],
             speakerNotes: '', sourceRefs: []
         };
@@ -269,23 +285,7 @@
         await requestJson(API + '/' + encodeURIComponent(id) + '/favorite', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite: !favorite }) });
         await loadDocuments();
     }
-    function renderTemplates(host, { compact = false } = {}) {
-        if (!host) return;
-        host.replaceChildren();
-        state.templates.forEach(template => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `presentation-template-card${state.active?.template?.id === template.id ? ' is-active' : ''}${compact ? ' is-compact' : ''}`;
-            button.dataset.presentationTemplateId = template.id;
-            const color = template.definition?.theme?.colors?.primary || '#1769AA';
-            button.style.setProperty('--presentation-template-color', color);
-            const title = document.createElement('strong'); title.textContent = template.name;
-            const desc = document.createElement('span'); desc.textContent = template.description || '自定义主题模板';
-            const tags = document.createElement('small'); tags.textContent = (template.tags || []).slice(0, 3).join(' · ') || '主题模板';
-            button.append(title, desc, tags);
-            host.appendChild(button);
-        });
-    }
+    function renderTemplates(host, options = {}) { return templatePresenter()?.renderTemplates?.(state, host, options); }
     function renderLibrary() {
         if (!(state.coverUrls instanceof Map)) state.coverUrls = new Map();
         state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear();
@@ -362,6 +362,7 @@
     }
     const collab = () => window.Pivot?.moduleApi?.('apps.presentations.collab');
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
+    const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
     async function openPresentation(id) {
         await saveActive({ force: true });
         setStatus('正在打开演示文稿…');
@@ -531,13 +532,16 @@
     function insertAssetFromLibrary(asset) { return presenter()?.insertAssetFromLibrary?.(asset, state, { recordHistory, renderEditor }); }
     function assetByRef(ref) { return state.assets?.find(asset => asset.ref === ref) || null; }
     async function loadPresentationMetrics() { return presenter()?.loadPresentationMetrics?.(); }
-    function renderTemplatePanel() { return presenter()?.renderTemplatePanel?.(state, { templateById, renderTemplates }); }
-    async function saveAsOrganizationTemplate() { return presenter()?.saveAsTemplate?.('organization', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
-    async function saveAsDepartmentTemplate() { return presenter()?.saveAsTemplate?.('department', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
-    async function submitCurrentTemplateReview() { return presenter()?.submitCurrentTemplateReview?.(state, { templateById, renderTemplatePanel, toast }); }
-    async function reviewCurrentTemplate() { return presenter()?.reviewCurrentTemplate?.(state, { templateById, renderTemplatePanel, toast }); }
-    async function exportCurrentTemplate() { return presenter()?.exportCurrentTemplate?.(state, { templateById, toast }); }
-    async function importTemplatePackage(file) { return presenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
+    function renderTemplatePanel() { return templatePresenter()?.renderTemplatePanel?.(state, { templateById, renderTemplates }); }
+    async function saveAsOrganizationTemplate() { return templatePresenter()?.saveAsTemplate?.('organization', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
+    async function saveAsDepartmentTemplate() { return templatePresenter()?.saveAsTemplate?.('department', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
+    async function submitCurrentTemplateReview() { return templatePresenter()?.submitCurrentTemplateReview?.(state, { templateById, renderTemplatePanel, toast }); }
+    async function reviewCurrentTemplate() { return templatePresenter()?.reviewCurrentTemplate?.(state, { templateById, renderTemplatePanel, toast }); }
+    async function exportCurrentTemplate() { return templatePresenter()?.exportCurrentTemplate?.(state, { templateById, toast }); }
+    async function downloadCurrentTemplateSource() { return templatePresenter()?.downloadCurrentTemplateSource?.(state, { templateById, toast }); }
+    async function reparseCurrentTemplateSource() { return templatePresenter()?.reparseCurrentTemplateSource?.(state, { templateById, renderTemplatePanel, renderLibrary, toast }); }
+    async function importTemplatePackage(file) { return templatePresenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
+    async function cancelTemplateImport() { return templatePresenter()?.cancelTemplateImport?.(state, { renderTemplatePanel, toast }); }
     function renderSpeakerNotes() { return presenter()?.renderSpeakerNotes?.(state); }
     function renderPresenterMode() { return presenter()?.renderPresenterMode?.(state); }
     async function openPresenterMode() { return presenter()?.openPresenterMode?.(state, { saveActive, syncRemoteSlide }); }
@@ -621,13 +625,13 @@ function setSelectedImageAsCover() {
         return exportModule.exportPresentation(format, state, { saveActive, setSaveState, activeSlide, toast });
     }
     async function createBlank(templateId = '') {
-        const template = templateId || state.templates[0]?.id || 'business-blue';
+        const template = templateId || state.templates[0]?.id || 'business-blue'; const templateVersion = templateById(template)?.version;
         setStatus('正在创建演示文稿…');
-        try { const data = await requestJson(API, jsonOptions({ title: '未命名演示文稿', templateId: template })); await loadDocuments(); await openPresentation(data.presentation.id); }
+        try { const data = await requestJson(API, jsonOptions({ title: '未命名演示文稿', templateId: template, templateVersion })); await loadDocuments(); await openPresentation(data.presentation.id); }
         finally { setStatus(''); }
     }
     async function openArtifactCreateModal() { return presenter()?.openArtifactCreateModal?.(populateTemplateSelect, toast); }
-    async function createFromArtifact() { return presenter()?.createFromArtifact?.(state, { loadDocuments, openPresentation, toast }); }
+    async function createFromArtifact() { return presenter()?.createFromArtifact?.(state, { loadDocuments, openPresentation, templateById, toast }); }
     function getPresentationAiModelId() {
         return window.Pivot?.legacy?.PivotAppModels?.getSelectedModel?.('presentations', 'presentation-create-model')
             || byId('presentation-create-model')?.value
@@ -660,14 +664,14 @@ function setSelectedImageAsCover() {
         const topic = byId('presentation-create-topic')?.value.trim() || '';
         return {
             topic, title: topic, pageCount: byId('presentation-create-pages')?.value || 8, audience: byId('presentation-create-audience')?.value || '', purpose: byId('presentation-create-purpose')?.value || '',
-            duration: byId('presentation-create-duration')?.value ? byId('presentation-create-duration').value + ' 分钟' : '', language: byId('presentation-create-language')?.value || 'zh-CN', style: byId('presentation-create-style')?.value || '', templateId: byId('presentation-create-template')?.value || 'business-blue', model: getPresentationAiModelId(),
+            duration: byId('presentation-create-duration')?.value ? byId('presentation-create-duration').value + ' 分钟' : '', language: byId('presentation-create-language')?.value || 'zh-CN', style: byId('presentation-create-style')?.value || '', templateId: byId('presentation-create-template')?.value || 'business-blue', templateVersion: templateById(byId('presentation-create-template')?.value || 'business-blue')?.version, model: getPresentationAiModelId(),
             needsCharts: Boolean(byId('presentation-create-needs-charts')?.checked), retainSourceRefs: Boolean(byId('presentation-create-retain-sources')?.checked),
             mustInclude: byId('presentation-create-must-include')?.value.trim() || '', prohibitedContent: byId('presentation-create-prohibited-content')?.value.trim() || '',
             materials: byId('presentation-create-material')?.value.trim() ? [{ id: 'source_1', title: '用户提供的材料', text: byId('presentation-create-material').value.trim() }] : []
         };
     }
-    function renderOutlineReview(input) { return presenter()?.renderOutlineReview?.(input, state, { labels: PRESENTATION_LAYOUT_LABELS }); }
-    function collectOutlineFromReview() { return presenter()?.collectOutlineFromReview?.(state, { labels: PRESENTATION_LAYOUT_LABELS }); }
+    function renderOutlineReview(input) { return presenter()?.renderOutlineReview?.(input, state, { labels: PRESENTATION_LAYOUT_LABELS, templateById }); }
+    function collectOutlineFromReview() { return presenter()?.collectOutlineFromReview?.(state, { labels: PRESENTATION_LAYOUT_LABELS, templateById }); }
     async function generateOutline() {
         const request = createRequestFromForm(); if (!request.topic) { toast('请输入演示主题。', 'error'); return; }
         if (!request.model) { requirePresentationAiModel(); return; }
@@ -698,7 +702,7 @@ function setSelectedImageAsCover() {
         try {
             const request = { ...state.pendingCreate, outline, title: outline.title || state.pendingCreate.topic };
             const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
-            const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, content: data.proposal.presentation }));
+            const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, templateVersion: request.templateVersion, content: data.proposal.presentation }));
             byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id);
             const warnings = Array.isArray(data.proposal?.warnings) ? data.proposal.warnings.filter(Boolean) : [];
             toast(warnings.length ? 'AI 初稿已生成；' + warnings.length + ' 项数据或元素提示已安全处理，可在画布中补充。' : 'AI 初稿已生成，可继续在画布中编辑。', warnings.length ? 'warning' : 'success');
@@ -778,10 +782,10 @@ function setSelectedImageAsCover() {
     async function applyTemplate(templateId) {
         if (!state.active?.id || !templateId || templateId === state.active.template?.id) return;
         const template = templateById(templateId); if (!template) return;
-        const accepted = await window.Pivot.legacy.showConfirm?.('应用主题模板', '将更新页面的主题色和默认字体；现有元素位置与自定义内容会保留。'); if (!accepted) return;
+        const accepted = await window.Pivot.legacy.showConfirm?.('应用主题模板', '将更新页面的主题色和默认字体；现有元素位置与自定义内容会保留。'); if (!accepted) return; const reflow = await window.Pivot.legacy.showConfirm?.('重新套用布局', '确定后会按新模板的内容槽位重新排版；取消则只更换主题和品牌装饰。') === true;
         state.active.content.template = { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }; state.active.content.theme = deepClone(template.definition.theme);
         state.active.content.slides.forEach(slide => { slide.background.fill = template.definition.theme.colors.background || slide.background.fill; slide.elements.forEach(element => { if (element.type === 'text') { element.style.fontFamily = element.style.fontSize >= 24 ? template.definition.theme.fonts.heading : template.definition.theme.fonts.body; } }); });
-        recordHistory(); await saveActive({ force: true }); renderEditor(); toast('主题模板已应用。');
+        state.pendingTemplateApplyMode = reflow ? 'reflow' : 'theme'; recordHistory(); await saveActive({ force: true, templateApplyMode: state.pendingTemplateApplyMode }); renderEditor(); toast(reflow ? '模板已重新套版。' : '主题模板已应用。');
     }
     function startDrag(event, element) {
         if (event.button !== 0 || element.locked) return;
@@ -903,7 +907,11 @@ function setSelectedImageAsCover() {
         if (event.target.closest('#presentation-submit-template-review-btn')) { submitCurrentTemplateReview().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-review-template-btn')) { reviewCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-template-btn')) { exportCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-download-template-source-btn')) { downloadCurrentTemplateSource().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-reparse-template-source-btn')) { reparseCurrentTemplateSource().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-template-report-btn')) { state.templateImportReportExpanded = !state.templateImportReportExpanded; renderTemplatePanel(); return; }
             if (event.target.closest('#presentation-import-template-btn')) { byId('presentation-template-package-input')?.click(); return; }
+            if (event.target.closest('#presentation-cancel-template-import-btn')) { cancelTemplateImport().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-upload-image-btn')) { byId('presentation-image-input')?.click(); return; }
             if (event.target.closest('#presentation-add-diagram-btn')) { addDiagram(); return; }
             if (event.target.closest('#presentation-insert-media-btn')) { state.pendingAssetType = 'media'; byId('presentation-rich-asset-input')?.click(); return; }

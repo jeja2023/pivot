@@ -61,7 +61,10 @@ const migrationModules = [
     require('./presentation-rich-media'),
     require('./presentation-remote-presenting'),
     require('./presentation-cover-customization'),
-    require('./presentation-quality-metadata')
+    require('./presentation-quality-metadata'),
+    require('./presentation-template-versions'),
+    require('./presentation-template-source-metadata'),
+    require('./presentation-template-import-jobs')
 ];
 
 module.exports = migrationModules

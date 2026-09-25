@@ -6,6 +6,10 @@ const skipWithoutDatabase = { skip: !process.env.DATABASE_URL };
 const {
     createPresentation,
     createPresentationExport,
+    createPresentationTemplateImportJob,
+    getPresentationTemplateImportJob,
+    runPresentationTemplateImportJob,
+    cancelPresentationTemplateImportJob,
     deletePresentation,
     getPresentation,
     listPresentationExports,
@@ -77,6 +81,23 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         const deliveryEvent = await pool().query('SELECT decision_reason FROM agent_artifact_delivery_events WHERE rendition_id = $1 AND event_type = $2', [exported.rendition.id, 'presentation_render']);
         assert.match(String(deliveryEvent.rows[0].decision_reason || ''), /建议修复项/);
 
+        const packageBuffer = Buffer.from(JSON.stringify({
+            schemaVersion: '2.0', kind: 'pivot-presentation-template',
+            template: {
+                name: '集成测试导入模板', aspectRatio: '16:9',
+                definition: { schemaVersion: '2.0', theme: {}, masters: [{ id: 'master_1', background: { fill: '#FFFFFF' }, decorations: [] }], layouts: [{ id: 'layout_1', masterId: 'master_1', slots: ['title'], placeholders: [{ id: 'slot_title', role: 'title', kind: 'text', x: 80, y: 80, width: 1000, height: 100, style: { fontSize: 32, color: '#1F2937' }, required: true }] }] }
+            }
+        }));
+        const importJob = await createPresentationTemplateImportJob(user, packageBuffer, { filename: '集成测试模板.json', mimeType: 'application/json', scope: 'private' });
+        assert.equal(importJob.status, 'queued');
+        const completedJob = await runPresentationTemplateImportJob(user, importJob.id);
+        assert.equal(completedJob.status, 'completed');
+        assert.ok(completedJob.templateId);
+        assert.equal((await getPresentationTemplateImportJob(user, importJob.id)).template?.definition?.schemaVersion, '2.0');
+
+        const cancelledJob = await createPresentationTemplateImportJob(user, packageBuffer, { filename: '取消导入模板.json', mimeType: 'application/json', scope: 'private' });
+        assert.equal((await cancelPresentationTemplateImportJob(user, cancelledJob.id)).status, 'cancelled');
+
         const otherUser = { ...user, id: user.id + 999999 };
         assert.equal(await getPresentation(otherUser, presentation.id), null);
     } finally {
@@ -86,6 +107,8 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
             await deletePresentation(user, presentation.id).catch(() => {});
             await pool().query('DELETE FROM presentation_documents WHERE client_id = $1', [presentation.id]);
         }
+        await pool().query('DELETE FROM presentation_template_import_jobs WHERE tenant_id = $1', [tenantId]);
+        await pool().query('DELETE FROM presentation_templates WHERE tenant_id = $1', [tenantId]);
         await pool().query('DELETE FROM agent_artifacts WHERE user_id = $1', [user.id]);
         await pool().query('DELETE FROM agent_artifact_objects WHERE owner_user_id = $1', [user.id]);
         await pool().query('DELETE FROM users WHERE id = $1', [user.id]);

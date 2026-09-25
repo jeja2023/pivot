@@ -153,15 +153,55 @@ function transitionXml(transition) {
     return '<p:transition spd="' + speed + '" advClick="1">' + inner + '</p:transition>';
 }
 
-async function applyPptxTransitions(buffer, presentation) {
-    if (!presentation.slides.some(slide => slide.transition?.type && slide.transition.type !== 'none')) return buffer;
+function exportedAnimationName(element) {
+    return 'pivotAnim_' + String(element?.id || '').replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+function animationFilter(type) {
+    return ({ fade: 'fade', zoom: 'zoom', wipe: 'wipe', fly: 'fly' })[String(type || '')] || '';
+}
+
+function animationPresetId(type) {
+    return ({ fade: 10, zoom: 24, wipe: 23, fly: 12 })[String(type || '')] || 0;
+}
+
+function animationTimingXml(animations) {
+    if (!animations.length) return '';
+    let nextId = 3;
+    const items = animations.map((animation, index) => {
+        const outerId = nextId++; const innerId = nextId++; const effectId = nextId++; const setId = nextId++; const behaviorId = nextId++;
+        const delay = Math.max(0, Math.min(10000, Number(animation.delayMs) || 0));
+        const duration = Math.max(100, Math.min(10000, Number(animation.durationMs) || 500));
+        const filter = animationFilter(animation.type);
+        const presetId = animationPresetId(animation.type);
+        return '<p:par><p:cTn id="' + outerId + '" fill="hold"><p:stCondLst><p:cond delay="' + (index === 0 ? 'indefinite' : '0') + '"/></p:stCondLst><p:childTnLst><p:par><p:cTn id="' + innerId + '" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst><p:par><p:cTn id="' + effectId + '" presetID="' + presetId + '" presetClass="entr" presetSubtype="0" fill="hold" grpId="0" nodeType="clickEffect"><p:stCondLst><p:cond delay="' + delay + '"/></p:stCondLst><p:childTnLst><p:set><p:cBhvr><p:cTn id="' + setId + '" dur="1" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:tgtEl><p:spTgt spid="' + animation.shapeId + '"/></p:tgtEl><p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst></p:cBhvr><p:to><p:strVal val="visible"/></p:to></p:set><p:animEffect transition="in" filter="' + filter + '"><p:cBhvr><p:cTn id="' + behaviorId + '" dur="' + duration + '"/><p:tgtEl><p:spTgt spid="' + animation.shapeId + '"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>';
+    }).join('');
+    const builds = animations.map(animation => '<p:bldP spid="' + animation.shapeId + '" grpId="0"/>').join('');
+    return '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst>' + items + '</p:childTnLst></p:cTn><p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst><p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq></p:childTnLst></p:cTn></p:par></p:tnLst><p:bldLst>' + builds + '</p:bldLst></p:timing>';
+}
+
+function exportedAnimationTargets(xml, slide) {
+    const idsByName = new Map();
+    const matcher = /<p:cNvPr\s+id="(\d+)"\s+name="(pivotAnim_[A-Za-z0-9_-]+)"/g;
+    let match;
+    while ((match = matcher.exec(xml))) idsByName.set(match[2], match[1]);
+    return (slide.elements || []).filter(element => element.visible && element.animation?.type && element.animation.type !== 'none')
+        .map(element => ({ ...element.animation, shapeId: idsByName.get(exportedAnimationName(element)) }))
+        .filter(animation => animation.shapeId && animationFilter(animation.type));
+}
+
+async function applyPptxMotion(buffer, presentation) {
+    const needsMotion = presentation.slides.some(slide => (slide.transition?.type && slide.transition.type !== 'none') || (slide.elements || []).some(element => element.visible && element.animation?.type && element.animation.type !== 'none'));
+    if (!needsMotion) return buffer;
     const zip = await JSZip.loadAsync(buffer);
     for (let index = 0; index < presentation.slides.length; index += 1) {
-        const transition = transitionXml(presentation.slides[index].transition); if (!transition) continue;
         const name = 'ppt/slides/slide' + (index + 1) + '.xml'; const file = zip.file(name); if (!file) continue;
-        const xml = await file.async('string');
-        const clean = xml.replace(/<p:transition\b[\s\S]*?<\/p:transition>|<p:transition\b[^>]*\/>/g, '');
-        zip.file(name, clean.replace('</p:sld>', transition + '</p:sld>'));
+        const xml = await file.async('string'); const slide = presentation.slides[index];
+        const transition = transitionXml(slide.transition);
+        const timing = animationTimingXml(exportedAnimationTargets(xml, slide));
+        if (!transition && !timing) continue;
+        const clean = xml.replace(/<p:transition\b[\s\S]*?<\/p:transition>|<p:transition\b[^>]*\/>/g, '').replace(/<p:timing\b[\s\S]*?<\/p:timing>/g, '');
+        zip.file(name, clean.replace('</p:sld>', transition + timing + '</p:sld>'));
     }
     return await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
 }
@@ -422,7 +462,7 @@ async function renderPptx(presentation, options = {}) {
                     bold: element.style.fontWeight >= 600, italic: element.style.italic, underline: element.style.underline,
                     color: pptColor(element.style.color), align: element.style.align, valign: element.style.verticalAlign,
                     breakLine: false, fit: 'shrink', rotate: element.rotation, paraSpaceAfterPt: 0,
-                    bullet: element.style.bullet ? { type: 'ul' } : undefined
+                    bullet: element.style.bullet ? { type: 'ul' } : undefined, objectName: exportedAnimationName(element)
                 });
                 continue;
             }
@@ -430,7 +470,7 @@ async function renderPptx(presentation, options = {}) {
                 const shape = pptx.ShapeType[element.shapeType] || pptx.ShapeType.rect;
                 slide.addShape(shape, {
                     ...pos, rotate: element.rotation, fill: { color: pptColor(element.style.fill), transparency: Math.round((1 - element.style.opacity) * 100) },
-                    line: { color: pptColor(element.style.stroke), width: element.style.strokeWidth }
+                    line: { color: pptColor(element.style.stroke), width: element.style.strokeWidth }, objectName: exportedAnimationName(element)
                 });
                 continue;
             }
@@ -441,7 +481,7 @@ async function renderPptx(presentation, options = {}) {
                     color: pptColor(element.style.cellColor), fill: pptColor(element.style.cellFill),
                     bold: false, margin: 0.05,
                     rowH: pos.h / Math.max(1, element.rows.length + 1),
-                    autoFit: false
+                    autoFit: false, objectName: exportedAnimationName(element)
                 });
                 continue;
             }
@@ -449,7 +489,7 @@ async function renderPptx(presentation, options = {}) {
                 const asset = await options.assetResolver?.(element.assetRef);
                 if (!asset?.buffer || !asset?.mimeType) continue;
                 const data = await resolveDataUri(element.assetRef, async () => asset);
-                slide.addImage({ data, ...pos, transparency: Math.round((1 - element.opacity) * 100) });
+                slide.addImage({ data, ...pos, transparency: Math.round((1 - element.opacity) * 100), objectName: exportedAnimationName(element) });
                 continue;
             }
             if (element.type === 'media') {
@@ -486,7 +526,7 @@ async function renderPptx(presentation, options = {}) {
         if (options.includeNotes !== false && slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
     }
     const raw = await pptx.write({ outputType: 'nodebuffer' });
-    return await applyPptxTransitions(Buffer.from(raw), presentation);
+    return await applyPptxMotion(Buffer.from(raw), presentation);
 }
 
 async function renderPresentation(input, format, options = {}) {
