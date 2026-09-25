@@ -114,7 +114,19 @@
   "residualColumns": [
     "ALTER TABLE \"models\" ADD COLUMN IF NOT EXISTS \"disable_chat_thinking\" BIGINT DEFAULT 0",
     "ALTER TABLE \"analysis_datasets\" ADD COLUMN IF NOT EXISTS \"active_version\" BIGINT DEFAULT 1",
-    "ALTER TABLE \"users\" ADD COLUMN IF NOT EXISTS \"token_version\" BIGINT DEFAULT 0"
+    "ALTER TABLE \"users\" ADD COLUMN IF NOT EXISTS \"token_version\" BIGINT DEFAULT 0",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"scope_reference\" TEXT DEFAULT ''",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"project_id\" TEXT DEFAULT ''",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"origin\" VARCHAR(24) NOT NULL DEFAULT 'automatic'",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"asserted_by\" VARCHAR(24) NOT NULL DEFAULT 'user'",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"fact_key\" TEXT DEFAULT ''",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"supersedes_id\" BIGINT",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"embedding_status\" VARCHAR(24) NOT NULL DEFAULT 'lexical_ready'",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"revoked_at\" TIMESTAMPTZ",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"revocation_reason\" VARCHAR(80) DEFAULT ''",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"valid_from\" TIMESTAMPTZ",
+    "ALTER TABLE \"memories\" ADD COLUMN IF NOT EXISTS \"search_content\" TEXT DEFAULT ''",
+    "ALTER TABLE \"memory_extraction_jobs\" ADD COLUMN IF NOT EXISTS \"memory_revision\" BIGINT NOT NULL DEFAULT 0"
   ],
   "foreignKeys": [
     "\n        DO $$ BEGIN\n            IF NOT EXISTS (\n                SELECT 1 FROM pg_constraint WHERE conname = 'app_settings_updated_by_fkey'\n            ) THEN\n                BEGIN\n                    ALTER TABLE \"app_settings\"\n                        ADD CONSTRAINT \"app_settings_updated_by_fkey\"\n                        FOREIGN KEY (\"updated_by\") REFERENCES \"users\"(\"id\");\n                EXCEPTION WHEN foreign_key_violation OR others THEN\n                    -- 若历史存量数据存在孤儿关联，使用 NOT VALID 挂载约束，保障后续新增数据受控\n                    ALTER TABLE \"app_settings\"\n                        ADD CONSTRAINT \"app_settings_updated_by_fkey\"\n                        FOREIGN KEY (\"updated_by\") REFERENCES \"users\"(\"id\")\n                        NOT VALID;\n                END;\n            END IF;\n        END $$",

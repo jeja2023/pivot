@@ -209,6 +209,7 @@ async function initSchemaPg() {
             try { await client.query(sql); }
             catch (error) {
                 if (error.code === '42501' || error.code === '42710') logger.warn({ sql: sql.trim().slice(0, 200), err: error.message }, '[PG] 当前用户非表属主或外键已存在，跳过外键补建');
+                else if (error.code === '42703') logger.warn({ sql: sql.trim().slice(0, 200), err: error.message }, '[PG] 外键依赖字段尚不存在，跳过当前初始化阶段外键补建（由版本迁移补齐）');
                 else throw new Error(`[PG Schema] 外键补建失败: ${error.message}\nSQL: ${sql.trim().slice(0, 300)}`);
             }
         }
@@ -216,6 +217,7 @@ async function initSchemaPg() {
             try { await client.query(sql); }
             catch (error) {
                 if (error.code === '42501' || error.code === '42P07') logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 当前用户非属主或索引已存在，跳过索引补建');
+                else if (error.code === '42703') logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 索引依赖字段尚不存在，跳过当前初始化阶段索引建立（由版本迁移补齐）');
                 else throw new Error(`[PG Schema] 建索引失败: ${error.message}\nSQL: ${sql.slice(0, 300)}`);
             }
         }
