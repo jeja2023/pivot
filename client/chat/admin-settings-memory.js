@@ -431,22 +431,37 @@ function renderMemoryEvaluation(runs = []) {
     const latest = runs[0]?.summary || null;
     if (summary) {
         if (!latest) {
-            PivotSafeHtml.setHtml(summary, '<span>暂无评测记录</span>');
+            PivotSafeHtml.setHtml(summary, '<div class="memory-eval-empty-hint">暂无最新运行指标。点击右上角「运行评测」后即可在此查看召回与准确度分析。</div>');
         } else {
+            const passRateNum = Number(latest.passRate || 0);
+            const recallNum = Number(latest.recallAt8 || 0);
+            const forbiddenNum = Number(latest.forbiddenHitRate || 0);
+            const irrelevantNum = Number(latest.irrelevantRate || 0);
             const metrics = [
-                ['用例', Number(latest.cases || 0)],
-                ['通过率', latest.passRate == null ? '-' : `${Math.round(Number(latest.passRate) * 100)}%`],
-                ['Recall@8', latest.recallAt8 == null ? '-' : `${Math.round(Number(latest.recallAt8) * 100)}%`],
-                ['无关注入', latest.irrelevantRate == null ? '-' : `${Math.round(Number(latest.irrelevantRate) * 100)}%`],
-                ['禁止命中', latest.forbiddenHitRate == null ? '-' : `${Math.round(Number(latest.forbiddenHitRate) * 100)}%`]
+                ['评测用例', Number(latest.cases || 0), 'normal'],
+                ['用例通过率', latest.passRate == null ? '-' : `${Math.round(passRateNum * 100)}%`, passRateNum >= 0.8 ? 'good' : 'warn'],
+                ['Recall@8', latest.recallAt8 == null ? '-' : `${Math.round(recallNum * 100)}%`, recallNum >= 0.8 ? 'good' : 'warn'],
+                ['无关注入率', latest.irrelevantRate == null ? '-' : `${Math.round(irrelevantNum * 100)}%`, irrelevantNum <= 0.1 ? 'good' : 'warn'],
+                ['禁止命中率', latest.forbiddenHitRate == null ? '-' : `${Math.round(forbiddenNum * 100)}%`, forbiddenNum === 0 ? 'good' : 'danger']
             ];
-            PivotSafeHtml.setHtml(summary, metrics.map(([label, value]) => `<span>${escapeHtml(label)} ${escapeHtml(String(value))}</span>`).join(''));
+            PivotSafeHtml.setHtml(summary, metrics.map(([label, value, tone]) => `
+                <div class="memory-eval-metric-card ${tone}">
+                    <span class="metric-label">${escapeHtml(label)}</span>
+                    <strong class="metric-value">${escapeHtml(String(value))}</strong>
+                </div>
+            `).join(''));
         }
     }
     if (list) {
         PivotSafeHtml.setHtml(list, runs.length
-            ? runs.map(run => `<span class="memory-evaluation-run">#${escapeHtml(String(run.id))} ${escapeHtml(run.createdAt || '')} · ${escapeHtml(String(run.summary?.passed || 0))}/${escapeHtml(String(run.summary?.cases || 0))}</span>`).join('')
-            : '创建用例后即可运行当前账号的记忆检索评测。');
+            ? `<span class="memory-eval-runs-title">历次运行：</span>` + runs.map(run => `
+                <span class="memory-evaluation-run" title="创建时间: ${escapeHtml(run.createdAt || '')} | 耗时: ${escapeHtml(String(run.durationMs || '-'))}ms">
+                    <span class="run-badge">#${escapeHtml(String(run.id))}</span>
+                    <span class="run-time">${escapeHtml(run.createdAt ? run.createdAt.slice(5, 16) : '')}</span>
+                    <span class="run-score">${escapeHtml(String(run.summary?.passed || 0))}/${escapeHtml(String(run.summary?.cases || 0))} 通过</span>
+                </span>
+            `).join('')
+            : '<span class="memory-eval-runs-empty">暂无历史运行记录。创建用例后即可运行当前账号的记忆检索评测。</span>');
     }
 }
 
@@ -454,17 +469,33 @@ function renderMemoryEvaluationCases(cases = []) {
     const container = document.getElementById('memory-evaluation-cases');
     if (!container) return;
     if (!cases.length) {
-        PivotSafeHtml.setHtml(container, '<span class="muted">暂无评测用例。</span>');
+        PivotSafeHtml.setHtml(container, `
+            <div class="memory-eval-empty-card">
+                <div class="empty-icon">📋</div>
+                <strong class="empty-title">暂无评测用例</strong>
+                <span class="empty-desc">在上方表单中配置测试问题、期望召回的记忆 ID 与禁止命中的记忆 ID，建立当前账号的检索质量回归基线。</span>
+            </div>
+        `);
         return;
     }
     PivotSafeHtml.setHtml(container, cases.map(item => `
         <article class="memory-evaluation-case">
-            <span>${escapeHtml(item.name || '')}</span>
-            <span>${escapeHtml(item.query || '')}</span>
-            <span>期望 ${escapeHtml((item.expectedMemoryIds || []).join(',') || '-')} / 禁止 ${escapeHtml((item.forbiddenMemoryIds || []).join(',') || '-')}</span>
+            <div class="case-main">
+                <div class="case-header-row">
+                    <strong class="case-name">${escapeHtml(item.name || '')}</strong>
+                    <div class="case-tags">
+                        ${item.expectedMemoryIds && item.expectedMemoryIds.length ? `<span class="case-tag tag-expected">期望: ${escapeHtml(item.expectedMemoryIds.join(', '))}</span>` : ''}
+                        ${item.forbiddenMemoryIds && item.forbiddenMemoryIds.length ? `<span class="case-tag tag-forbidden">禁止: ${escapeHtml(item.forbiddenMemoryIds.join(', '))}</span>` : ''}
+                    </div>
+                </div>
+                <div class="case-query-wrap">
+                    <span class="query-prefix">问题：</span>
+                    <span class="case-query">${escapeHtml(item.query || '')}</span>
+                </div>
+            </div>
             <div class="memory-evaluation-case-actions">
-                <button class="btn-secondary" type="button" data-memory-evaluation-action="edit" data-memory-evaluation-id="${Number(item.id)}">编辑</button>
-                <button class="btn-danger" type="button" data-memory-evaluation-action="delete" data-memory-evaluation-id="${Number(item.id)}">删除</button>
+                <button class="btn-secondary case-btn" type="button" data-memory-evaluation-action="edit" data-memory-evaluation-id="${Number(item.id)}">编辑</button>
+                <button class="btn-danger case-btn" type="button" data-memory-evaluation-action="delete" data-memory-evaluation-id="${Number(item.id)}">删除</button>
             </div>
         </article>
     `).join(''));
@@ -520,7 +551,10 @@ function fillMemoryEvaluationForm(item) {
     document.getElementById('memory-evaluation-query').value = item.query || '';
     document.getElementById('memory-evaluation-expected').value = (item.expectedMemoryIds || []).join(',');
     document.getElementById('memory-evaluation-forbidden').value = (item.forbiddenMemoryIds || []).join(',');
-    form.querySelector('button[type="submit"]').textContent = '更新用例';
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = '更新用例';
+    const resetBtn = document.getElementById('memory-evaluation-reset-btn');
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
 }
 
 function resetMemoryEvaluationForm() {
@@ -528,7 +562,10 @@ function resetMemoryEvaluationForm() {
     form?.reset();
     const id = document.getElementById('memory-evaluation-id');
     if (id) id.value = '';
-    form?.querySelector('button[type="submit"]') && (form.querySelector('button[type="submit"]').textContent = '添加用例');
+    const submit = form?.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = '添加用例';
+    const resetBtn = document.getElementById('memory-evaluation-reset-btn');
+    if (resetBtn) resetBtn.style.display = 'none';
 }
 
 async function runMemoryEvaluation() {

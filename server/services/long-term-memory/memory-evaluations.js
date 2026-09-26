@@ -65,6 +65,13 @@ function average(values = []) {
     return usable.length ? Number((usable.reduce((sum, value) => sum + value, 0) / usable.length).toFixed(4)) : null;
 }
 
+function percentile(values = [], percentileValue = 0.5) {
+    const usable = values.filter(value => Number.isFinite(Number(value))).map(Number).sort((left, right) => left - right);
+    if (!usable.length) return null;
+    const index = Math.min(usable.length - 1, Math.max(0, Math.ceil(usable.length * percentileValue) - 1));
+    return usable[index];
+}
+
 function summarizeMemoryEvaluation(results = []) {
     const records = Array.isArray(results) ? results : [];
     const noMemory = records.filter(result => result.noMemoryCorrect !== null);
@@ -80,7 +87,13 @@ function summarizeMemoryEvaluation(results = []) {
         mrr: average(records.map(result => result.mrr)),
         irrelevantRate: average(records.map(result => result.irrelevantRate)),
         forbiddenHitRate: records.length ? Number((records.filter(result => result.forbiddenHits.length > 0).length / records.length).toFixed(4)) : null,
-        noMemoryAccuracy: noMemory.length ? Number((noMemory.filter(result => result.noMemoryCorrect).length / noMemory.length).toFixed(4)) : null
+        noMemoryAccuracy: noMemory.length ? Number((noMemory.filter(result => result.noMemoryCorrect).length / noMemory.length).toFixed(4)) : null,
+        retrievalLatencyMs: {
+            p50: percentile(records.map(result => result.retrievalLatencyMs)),
+            p95: percentile(records.map(result => result.retrievalLatencyMs), 0.95),
+            average: average(records.map(result => result.retrievalLatencyMs))
+        },
+        estimatedInjectedTokens: records.reduce((sum, result) => sum + Math.max(0, Number(result.estimatedInjectedTokens || 0)), 0)
     };
 }
 
@@ -101,5 +114,6 @@ function compareMemoryRetrievalShadow(rawCase, legacyRetrieved, candidateRetriev
 module.exports = {
     compareMemoryRetrievalShadow,
     evaluateMemoryRetrievalCase,
+    percentile,
     summarizeMemoryEvaluation
 };

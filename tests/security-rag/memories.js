@@ -495,6 +495,8 @@ test('长期记忆评测用例持久化并只在检索时计算结果', async ()
     const evaluated = await runMemoryEvaluation(user, { caseIds: [evaluationCase.id] });
     assert.equal(evaluated.run.summary.cases, 1);
     assert.equal(evaluated.results[0].passed, true);
+    assert.equal(Number.isFinite(evaluated.run.summary.retrievalLatencyMs.p50), true);
+    assert.equal(evaluated.results[0].estimatedInjectedTokens > 0, true);
 });
 
 test('个人数据擦除会移除记忆正文、证据、使用事件与评测数据', async () => {

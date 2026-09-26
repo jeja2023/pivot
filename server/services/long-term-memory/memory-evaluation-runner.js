@@ -3,6 +3,8 @@
 const { execute, query, queryOne, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { retrieveLongTermMemories } = require('./index');
+const { estimateTokens } = require('../../llm');
+const { buildLongTermMemoryContextMessage } = require('./memory-retrieval');
 const {
     evaluateMemoryRetrievalCase,
     summarizeMemoryEvaluation
@@ -141,13 +143,22 @@ async function runMemoryEvaluation(user, options = {}) {
     const results = [];
     for (const evaluationCase of cases) {
         try {
+            const startedAt = Date.now();
             const matches = await retrieveLongTermMemories(user.id, evaluationCase.query, {
                 user,
                 sessionId: evaluationCase.scope.sessionId,
                 projectId: evaluationCase.scope.projectId,
                 limit: 8
             });
-            results.push(evaluateMemoryRetrievalCase(evaluationCase, matches));
+            const contextMessage = buildLongTermMemoryContextMessage(matches, { maxTokens: 1200 });
+            const injectedIds = new Set(contextMessage?.metadata?.memoryIds || []);
+            const injected = matches.filter(memory => injectedIds.has(memory.id));
+            results.push({
+                ...evaluateMemoryRetrievalCase(evaluationCase, injected),
+                candidateIds: matches.map(memory => Number(memory.id)).filter(Number.isSafeInteger),
+                retrievalLatencyMs: Date.now() - startedAt,
+                estimatedInjectedTokens: estimateTokens(contextMessage?.content || '')
+            });
         } catch (error) {
             results.push({ id: evaluationCase.id, category: evaluationCase.category, error: String(error.message || error), passed: false });
         }

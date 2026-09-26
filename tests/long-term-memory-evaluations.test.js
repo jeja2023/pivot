@@ -25,11 +25,17 @@ test('长期记忆评测按召回、无关注入和禁止命中计算，并支�
     const evaluationCase = { id: 'ME-001', category: 'fact', expectedMemoryIds: [9], forbiddenMemoryIds: [8] };
     const legacy = evaluateMemoryRetrievalCase(evaluationCase, [8, 1]);
     const candidate = evaluateMemoryRetrievalCase(evaluationCase, [9, 1]);
-    const summary = summarizeMemoryEvaluation([legacy, candidate]);
+    const summary = summarizeMemoryEvaluation([
+        { ...legacy, retrievalLatencyMs: 12, estimatedInjectedTokens: 80 },
+        { ...candidate, retrievalLatencyMs: 28, estimatedInjectedTokens: 120 }
+    ]);
     const shadow = compareMemoryRetrievalShadow(evaluationCase, [8, 1], [9, 1]);
     assert.equal(legacy.passed, false);
     assert.equal(candidate.passed, true);
     assert.equal(summary.forbiddenHitRate, 0.5);
+    assert.equal(summary.retrievalLatencyMs.p50, 12);
+    assert.equal(summary.retrievalLatencyMs.p95, 28);
+    assert.equal(summary.estimatedInjectedTokens, 200);
     assert.equal(shadow.improved, true);
     assert.equal(shadow.forbiddenRegression, false);
 });

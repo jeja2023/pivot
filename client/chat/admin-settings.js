@@ -441,6 +441,7 @@ document.getElementById('memory-evaluation-case-form')?.addEventListener('submit
         submit.disabled = false;
     }
 });
+document.getElementById('memory-evaluation-reset-btn')?.addEventListener('click', () => window.Pivot.moduleApi('settings.memory', {}).resetMemoryEvaluationForm?.());
 document.getElementById('memory-evaluation-cases')?.addEventListener('click', async event => {
     const button = event.target?.closest?.('[data-memory-evaluation-action]');
     if (!button) return;

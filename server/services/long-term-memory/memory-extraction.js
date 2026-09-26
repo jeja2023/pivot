@@ -1,6 +1,7 @@
 const { forwardChatCompletion } = require('../model-forwarder');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('../model-adapter');
-const { buildThinkingControlPayload } = require('../models');
+const { buildThinkingControlPayload, recordModelTokenUsage } = require('../models');
+const { estimateTokens } = require('../../llm');
 const {
     MEMORY_TYPES,
     MIN_MEMORY_CONTENT_CHARS,
@@ -141,6 +142,26 @@ function extractModelMessageText(data) {
     return contentText(message);
 }
 
+function reportedTokenCount(usage, keys = []) {
+    for (const key of keys) {
+        const value = Number(usage?.[key]);
+        if (Number.isFinite(value) && value >= 0) return Math.floor(value);
+    }
+    return null;
+}
+
+function recordMemoryExtractionUsage(userId, modelCfg, messages, responseData) {
+    if (!Number.isSafeInteger(Number(userId)) || !Number.isSafeInteger(Number(modelCfg?.id))) return;
+    const usage = responseData?.usage || {};
+    const inputTokens = reportedTokenCount(usage, ['input_tokens', 'prompt_tokens', 'inputTokens'])
+        ?? estimateTokens(JSON.stringify(buildExtractorMessages(messages)));
+    const outputText = extractModelMessageText(responseData);
+    const outputTokens = reportedTokenCount(usage, ['output_tokens', 'completion_tokens', 'outputTokens'])
+        ?? estimateTokens(outputText);
+    const totalTokens = reportedTokenCount(usage, ['total_tokens', 'totalTokens']) ?? inputTokens + outputTokens;
+    recordModelTokenUsage(userId, modelCfg.id, totalTokens, 'memory_extraction', inputTokens, outputTokens);
+}
+
 function isModelExtractionTimeoutError(error) {
     const code = String(error?.code || '').toUpperCase();
     const message = String(error?.message || error || '').toLowerCase();
@@ -198,6 +219,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
         }
     });
     const parsed = parseExtractorJsonResult(extractModelMessageText(res.data));
+    recordMemoryExtractionUsage(context.user?.id, modelCfg, messages, res.data);
     return {
         candidates: normalizeExtractorCandidates(parsed.candidates, {
             sessionId: context.sessionId,

@@ -166,17 +166,69 @@
                                     </div>
                                 </div>
                                 <div class="memory-evaluations-modal-body">
+                                    <div class="memory-eval-highlights">
+                                        <div class="memory-eval-highlight-item">
+                                            <span class="highlight-icon">🔒</span>
+                                            <div class="highlight-content">
+                                                <strong class="highlight-title">离线隐私无外发</strong>
+                                                <span class="highlight-desc">仅在当前账号已授权记忆内检索比对，正文不发往第三方评判</span>
+                                            </div>
+                                        </div>
+                                        <div class="memory-eval-highlight-item">
+                                            <span class="highlight-icon">🎯</span>
+                                            <div class="highlight-content">
+                                                <strong class="highlight-title">全链路多维基准</strong>
+                                                <span class="highlight-desc">精准度量通过率、Recall@8、无关注入率及禁止召回违规率</span>
+                                            </div>
+                                        </div>
+                                        <div class="memory-eval-highlight-item">
+                                            <span class="highlight-icon">🛡️</span>
+                                            <div class="highlight-content">
+                                                <strong class="highlight-title">版本基线防退化</strong>
+                                                <span class="highlight-desc">持久化用例与历次运行快照，杜绝策略或模型调整带来的效果退化</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <form id="memory-evaluation-case-form" class="memory-evaluation-case-form">
+                                        <div class="memory-eval-form-head">
+                                            <strong class="form-section-title">添加 / 编辑评测用例</strong>
+                                            <span class="form-section-tip">设置检索问题与预期结果，建立当前账号的检索质量基准</span>
+                                        </div>
                                         <input id="memory-evaluation-id" type="hidden">
-                                        <label><span>名称</span><input id="memory-evaluation-name" class="form-input" maxlength="180" required></label>
-                                        <label><span>问题</span><input id="memory-evaluation-query" class="form-input" maxlength="4000" required></label>
-                                        <label><span>期望记忆 ID</span><input id="memory-evaluation-expected" class="form-input" inputmode="numeric" placeholder="1,2"></label>
-                                        <label><span>禁止记忆 ID</span><input id="memory-evaluation-forbidden" class="form-input" inputmode="numeric" placeholder="3,4"></label>
-                                        <button type="submit" class="btn-secondary">添加用例</button>
+                                        <div class="memory-eval-form-grid">
+                                            <label class="memory-eval-field field-name">
+                                                <span>用例名称</span>
+                                                <input id="memory-evaluation-name" class="form-input" maxlength="180" placeholder="例如：用户偏好语言检索" required>
+                                            </label>
+                                            <label class="memory-eval-field field-query">
+                                                <span>测试问题 / 检索 Query</span>
+                                                <input id="memory-evaluation-query" class="form-input" maxlength="4000" placeholder="例如：下次写代码用什么语言？" required>
+                                            </label>
+                                            <label class="memory-eval-field field-expected">
+                                                <span>期望记忆 ID <small>（逗号分隔，如 1, 2）</small></span>
+                                                <input id="memory-evaluation-expected" class="form-input" inputmode="numeric" placeholder="1, 2">
+                                            </label>
+                                            <label class="memory-eval-field field-forbidden">
+                                                <span>禁止记忆 ID <small>（逗号分隔，如 3, 4）</small></span>
+                                                <input id="memory-evaluation-forbidden" class="form-input" inputmode="numeric" placeholder="3, 4">
+                                            </label>
+                                        </div>
+                                        <div class="memory-eval-form-actions">
+                                            <button id="memory-evaluation-reset-btn" type="button" class="btn-secondary" style="display: none;">取消编辑</button>
+                                            <button type="submit" class="btn-primary">添加用例</button>
+                                        </div>
                                     </form>
-                                    <div id="memory-evaluation-summary" class="memory-evaluation-summary"></div>
-                                    <div id="memory-evaluation-runs" class="memory-evaluation-runs"></div>
-                                    <div id="memory-evaluation-cases" class="memory-evaluation-cases"></div>
+                                    <div class="memory-eval-stats-section">
+                                        <div class="memory-eval-section-title">最新运行指标</div>
+                                        <div id="memory-evaluation-summary" class="memory-evaluation-summary"></div>
+                                        <div id="memory-evaluation-runs" class="memory-evaluation-runs"></div>
+                                    </div>
+                                    <div class="memory-eval-cases-section">
+                                        <div class="memory-eval-cases-header">
+                                            <span class="memory-eval-section-title">已保存评测用例</span>
+                                        </div>
+                                        <div id="memory-evaluation-cases" class="memory-evaluation-cases"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
