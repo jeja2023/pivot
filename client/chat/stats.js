@@ -360,7 +360,7 @@ window.addEventListener('resize', () => {
     trendChartStates.forEach((_state, canvasId) => queueTrendChartRender(canvasId));
 });
 
-window.addEventListener('pivot:settings-workspace-scale-applied', () => {
+document.addEventListener('pivot:settings-workspace-scale-applied', () => {
     trendChartStates.forEach((_state, canvasId) => queueTrendChartRender(canvasId));
 });
 

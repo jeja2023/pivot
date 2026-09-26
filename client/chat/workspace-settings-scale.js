@@ -11,7 +11,7 @@ function notifySettingsWorkspaceScaleApplied(details) {
     const signature = [details.layoutWidth, details.scale, details.stageWidth, details.stageHeight || ''].join(':');
     if (signature === lastSettingsScaleSignature) return;
     lastSettingsScaleSignature = signature;
-    window.dispatchEvent(new window.CustomEvent('pivot:settings-workspace-scale-applied', { detail: details }));
+    document.dispatchEvent(new window.CustomEvent('pivot:settings-workspace-scale-applied', { bubbles: true, detail: details }));
 }
 
 function scheduleSettingsWorkspaceScale() {
