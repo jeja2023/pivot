@@ -168,21 +168,27 @@
                                 <div class="memory-evaluations-modal-body">
                                     <div class="memory-eval-highlights">
                                         <div class="memory-eval-highlight-item">
-                                            <span class="highlight-icon">🔒</span>
+                                            <span class="highlight-icon">
+                                                <svg class="highlight-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                                            </span>
                                             <div class="highlight-content">
                                                 <strong class="highlight-title">离线隐私无外发</strong>
                                                 <span class="highlight-desc">仅在当前账号已授权记忆内检索比对，正文不发往第三方评判</span>
                                             </div>
                                         </div>
                                         <div class="memory-eval-highlight-item">
-                                            <span class="highlight-icon">🎯</span>
+                                            <span class="highlight-icon">
+                                                <svg class="highlight-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                                            </span>
                                             <div class="highlight-content">
                                                 <strong class="highlight-title">全链路多维基准</strong>
                                                 <span class="highlight-desc">精准度量通过率、Recall@8、无关注入率及禁止召回违规率</span>
                                             </div>
                                         </div>
                                         <div class="memory-eval-highlight-item">
-                                            <span class="highlight-icon">🛡️</span>
+                                            <span class="highlight-icon">
+                                                <svg class="highlight-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                                            </span>
                                             <div class="highlight-content">
                                                 <strong class="highlight-title">版本基线防退化</strong>
                                                 <span class="highlight-desc">持久化用例与历次运行快照，杜绝策略或模型调整带来的效果退化</span>
@@ -195,27 +201,27 @@
                                             <span class="form-section-tip">设置检索问题与预期结果，建立当前账号的检索质量基准</span>
                                         </div>
                                         <input id="memory-evaluation-id" type="hidden">
-                                        <div class="memory-eval-form-grid">
+                                        <div class="memory-eval-form-row">
                                             <label class="memory-eval-field field-name">
-                                                <span>用例名称</span>
-                                                <input id="memory-evaluation-name" class="form-input" maxlength="180" placeholder="例如：用户偏好语言检索" required>
+                                                <span class="field-label">用例名称</span>
+                                                <input id="memory-evaluation-name" class="form-input" maxlength="180" placeholder="例如：用户偏好" required>
                                             </label>
                                             <label class="memory-eval-field field-query">
-                                                <span>测试问题 / 检索 Query</span>
+                                                <span class="field-label">测试问题 / 检索 Query</span>
                                                 <input id="memory-evaluation-query" class="form-input" maxlength="4000" placeholder="例如：下次写代码用什么语言？" required>
                                             </label>
                                             <label class="memory-eval-field field-expected">
-                                                <span>期望记忆 ID <small>（逗号分隔，如 1, 2）</small></span>
-                                                <input id="memory-evaluation-expected" class="form-input" inputmode="numeric" placeholder="1, 2">
+                                                <span class="field-label" title="期望召回记忆 ID，逗号分隔">期望记忆 ID</span>
+                                                <input id="memory-evaluation-expected" class="form-input" inputmode="numeric" placeholder="如 1, 2">
                                             </label>
                                             <label class="memory-eval-field field-forbidden">
-                                                <span>禁止记忆 ID <small>（逗号分隔，如 3, 4）</small></span>
-                                                <input id="memory-evaluation-forbidden" class="form-input" inputmode="numeric" placeholder="3, 4">
+                                                <span class="field-label" title="禁止召回记忆 ID，逗号分隔">禁止记忆 ID</span>
+                                                <input id="memory-evaluation-forbidden" class="form-input" inputmode="numeric" placeholder="如 3, 4">
                                             </label>
-                                        </div>
-                                        <div class="memory-eval-form-actions">
-                                            <button id="memory-evaluation-reset-btn" type="button" class="btn-secondary" style="display: none;">取消编辑</button>
-                                            <button type="submit" class="btn-primary">添加用例</button>
+                                            <div class="memory-eval-field field-actions">
+                                                <button id="memory-evaluation-reset-btn" type="button" class="btn-secondary" hidden>取消</button>
+                                                <button type="submit" class="btn-primary">添加用例</button>
+                                            </div>
                                         </div>
                                     </form>
                                     <div class="memory-eval-stats-section">

@@ -1019,10 +1019,21 @@
     min-width: 0;
 }
 #memory-evaluations-modal .highlight-icon {
-    font-size: 1.15rem;
-    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
     flex-shrink: 0;
     margin-top: 1px;
+}
+#memory-evaluations-modal .highlight-svg {
+    width: 15px;
+    height: 15px;
+    stroke: currentColor;
 }
 #memory-evaluations-modal .highlight-content {
     display: flex;
@@ -1053,7 +1064,7 @@
     text-align: left;
 }
 
-/* 评测用例表单 */
+/* 评测用例表单 - 单行平铺对齐 */
 #memory-evaluations-modal .memory-evaluation-case-form {
     background: #f8fafc;
     border: 1px solid var(--border, #e2e8f0);
@@ -1079,27 +1090,63 @@
     font-size: 0.72rem;
     color: var(--text-muted, #64748b);
 }
-#memory-evaluations-modal .memory-eval-form-grid {
-    display: grid;
-    grid-template-columns: minmax(160px, 1fr) minmax(260px, 1.8fr) minmax(130px, 0.9fr) minmax(130px, 0.9fr);
-    gap: 10px;
-    align-items: flex-start;
+#memory-evaluations-modal .memory-eval-form-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    width: 100%;
+}
+#memory-evaluations-modal .field-name {
+    flex: 1.2 1 140px;
+    min-width: 0;
+}
+#memory-evaluations-modal .field-query {
+    flex: 2.2 1 220px;
+    min-width: 0;
+}
+#memory-evaluations-modal .field-expected {
+    flex: 1 1 105px;
+    min-width: 0;
+}
+#memory-evaluations-modal .field-forbidden {
+    flex: 1 1 105px;
+    min-width: 0;
+}
+#memory-evaluations-modal .field-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+}
+#memory-evaluations-modal .field-actions button {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 6px;
+    white-space: nowrap;
+    cursor: pointer;
+    box-sizing: border-box;
 }
 #memory-evaluations-modal .memory-eval-field {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    justify-content: flex-end;
     min-width: 0;
 }
-#memory-evaluations-modal .memory-eval-field span {
-    font-size: 0.73rem;
+#memory-evaluations-modal .memory-eval-field span.field-label {
+    font-size: 0.74rem;
     font-weight: 600;
     color: var(--text-main, #334155);
-}
-#memory-evaluations-modal .memory-eval-field small {
-    font-size: 0.68rem;
-    font-weight: normal;
-    color: var(--text-muted, #94a3b8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+    display: block;
+    margin-bottom: 4px;
+    height: 16px;
 }
 #memory-evaluations-modal .memory-eval-field .form-input,
 #memory-evaluations-modal .memory-evaluation-case-form .form-input {
@@ -1121,22 +1168,6 @@
     border-color: var(--primary, #10b981) !important;
     box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15) !important;
     outline: none !important;
-}
-#memory-evaluations-modal .memory-eval-form-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 2px;
-}
-#memory-evaluations-modal .memory-eval-form-actions button {
-    height: 30px;
-    min-height: 30px;
-    padding: 0 14px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    border-radius: 6px;
-    cursor: pointer;
 }
 
 /* 运行指标卡片 */
@@ -1345,6 +1376,10 @@
 #memory-evaluations-modal .empty-icon {
     font-size: 1.6rem;
     line-height: 1;
+    color: var(--text-muted);
+}
+#memory-evaluations-modal .empty-svg {
+    display: block;
 }
 #memory-evaluations-modal .empty-title {
     font-size: 0.82rem;
@@ -1439,8 +1474,20 @@ body.dark-mode #memory-evaluations-modal .empty-title,
     #memory-evaluations-modal .memory-eval-highlights {
         grid-template-columns: 1fr;
     }
-    #memory-evaluations-modal .memory-eval-form-grid {
-        grid-template-columns: 1fr;
+    #memory-evaluations-modal .memory-eval-form-row {
+        flex-wrap: wrap;
+    }
+    #memory-evaluations-modal .field-name,
+    #memory-evaluations-modal .field-query {
+        flex: 1 1 100%;
+    }
+    #memory-evaluations-modal .field-expected,
+    #memory-evaluations-modal .field-forbidden {
+        flex: 1 1 45%;
+    }
+    #memory-evaluations-modal .field-actions {
+        width: 100%;
+        justify-content: flex-end;
     }
     #memory-evaluations-modal .memory-evaluation-case {
         flex-direction: column;
@@ -1450,6 +1497,11 @@ body.dark-mode #memory-evaluations-modal .empty-title,
         width: 100%;
         justify-content: flex-end;
     }
+}
+body.dark-mode #memory-evaluations-modal .highlight-icon,
+.dark-mode #memory-evaluations-modal .highlight-icon {
+    background: color-mix(in srgb, var(--primary) 20%, transparent);
+    color: var(--primary);
 }
 .memory-modal-header,
 .settings-workspace-view .memory-modal-header {

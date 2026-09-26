@@ -471,7 +471,9 @@ function renderMemoryEvaluationCases(cases = []) {
     if (!cases.length) {
         PivotSafeHtml.setHtml(container, `
             <div class="memory-eval-empty-card">
-                <div class="empty-icon">📋</div>
+                <div class="empty-icon">
+                    <svg class="empty-svg" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="9" y1="12" x2="15" y2="12"></line><line x1="9" y1="16" x2="13" y2="16"></line></svg>
+                </div>
                 <strong class="empty-title">暂无评测用例</strong>
                 <span class="empty-desc">在上方表单中配置测试问题、期望召回的记忆 ID 与禁止命中的记忆 ID，建立当前账号的检索质量回归基线。</span>
             </div>
@@ -554,7 +556,7 @@ function fillMemoryEvaluationForm(item) {
     const submit = form.querySelector('button[type="submit"]');
     if (submit) submit.textContent = '更新用例';
     const resetBtn = document.getElementById('memory-evaluation-reset-btn');
-    if (resetBtn) resetBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.hidden = false;
 }
 
 function resetMemoryEvaluationForm() {
@@ -565,7 +567,7 @@ function resetMemoryEvaluationForm() {
     const submit = form?.querySelector('button[type="submit"]');
     if (submit) submit.textContent = '添加用例';
     const resetBtn = document.getElementById('memory-evaluation-reset-btn');
-    if (resetBtn) resetBtn.style.display = 'none';
+    if (resetBtn) resetBtn.hidden = true;
 }
 
 async function runMemoryEvaluation() {
