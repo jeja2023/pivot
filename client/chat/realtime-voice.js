@@ -20,6 +20,29 @@
         stream?.getTracks?.().forEach(track => { try { track.stop(); } catch (_) {} });
     }
 
+    function realtimeVoiceErrorMessage(error) {
+        const details = [error?.error, error?.name, error?.code, error?.message, error]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+        if (/(not-allowed|notallowed|permission-denied|permissiondenied)/.test(details)) {
+            return '请在系统或浏览器设置中允许 Pivot 访问麦克风后重试。';
+        }
+        if (/(requested device not found|not-found|notfound|devicesnotfound)/.test(details)) {
+            return '未检测到可用的麦克风。请确认系统已启用输入设备，并允许当前浏览器或桌面客户端访问麦克风后重试。';
+        }
+        if (/(not-readable|notreadable|trackstarterror|audio-capture)/.test(details)) {
+            return '麦克风正在被其他应用占用，或系统无法打开该设备。请关闭占用程序后重试。';
+        }
+        if (/(overconstrained|constraint)/.test(details)) {
+            return '当前麦克风不支持所需音频能力。请在系统中切换默认输入设备后重试。';
+        }
+        if (/securityerror|secure context|https/.test(details)) {
+            return '当前页面不满足浏览器麦克风访问要求，请使用 HTTPS 或受信任的本地地址后重试。';
+        }
+        return '无法启动实时语音，请检查麦克风和权限后重试。';
+    }
+
     async function recordEvent(voiceSessionId, event, { keepalive = false } = {}) {
         if (!voiceSessionId) return null;
         const response = await apiFetch(`${API_BASE}/chat/voice-sessions/${encodeURIComponent(voiceSessionId)}/events`, {
@@ -196,6 +219,14 @@
                 window.Pivot.legacy.loadSessions?.();
             }
             const recognition = createDeviceLocalRecognition(Recognition);
+            // 先请求浏览器的默认音频输入。此前将降噪、回声消除和自动增益直接作为
+            // 首个约束，部分驱动会把它误判为不存在的设备，导致 “Requested device not found”。
+            // 实时语音本身不依赖这些增强项，基础音频采集的兼容性更高。
+            stream = await getUserMedia({ audio: true });
+            if (start.cancelled) {
+                stopTracks(stream);
+                return null;
+            }
             const localVoice = await waitForLocalVoice();
             if (!localVoice) throw new Error('当前浏览器没有可用的本地语音，实时语音已保持关闭。');
             const response = await apiFetch(`${API_BASE}/chat/voice-sessions`, {
@@ -206,11 +237,6 @@
             if (!response.ok) throw new Error(data.error || '无法启动实时语音会话。');
             start.id = String(data.voiceSession?.id || '');
             if (!start.id) throw new Error('语音会话未返回有效标识。');
-            if (start.cancelled) {
-                if (!start.terminalEventSent) void recordEvent(start.id, 'ended', { keepalive: true }).catch(() => {});
-                return null;
-            }
-            stream = await getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
             if (start.cancelled) {
                 stopTracks(stream);
                 if (!start.terminalEventSent) void recordEvent(start.id, 'ended', { keepalive: true }).catch(() => {});
@@ -244,7 +270,7 @@
         } catch (error) {
             stopTracks(stream);
             if (start.id && !start.terminalEventSent) void recordEvent(start.id, start.cancelled ? 'ended' : 'failed', { keepalive: true }).catch(() => {});
-            if (!start.cancelled) showToast(error.message || '无法启动实时语音会话。', 'error');
+            if (!start.cancelled) showToast(realtimeVoiceErrorMessage(error), 'error');
             return null;
         } finally {
             if (voiceStart === start) voiceStart = null;

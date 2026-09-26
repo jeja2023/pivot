@@ -129,8 +129,8 @@ function createDeliveryExecutor(options = {}) {
 
     let registeringPromise = null;
     /** 首次配对或进程重启后重新登记设备；服务端按设备标识幂等更新公钥与状态。 */
-    async function ensureRegistered(deviceId) {
-        if (state.registeredDeviceId === deviceId) return state.registeredDeviceId;
+    async function ensureRegistered(deviceId, { force = false } = {}) {
+        if (!force && state.registeredDeviceId === deviceId) return state.registeredDeviceId;
         if (registeringPromise) return registeringPromise;
         registeringPromise = (async () => {
             try {
@@ -436,6 +436,12 @@ function createDeliveryExecutor(options = {}) {
         const identityStatus = typeof identity.getIdentityStatus === 'function'
             ? identity.getIdentityStatus()
             : { available: false, reason: '设备身份模块不可用。' };
+        // 状态读取时一并清理已过期的本机目录映射，避免网页继续把过期授权
+        // 当作可用目录而在创建交付意图时才收到服务端拒绝。
+        const localGrants = safeCall(() => {
+            grants.pruneExpiredGrants?.();
+            return grants.listLocalGrants({ includeDirectory: options.includeDirectory === true });
+        }, []);
         return {
             available: identityStatus.available === true,
             reason: identityStatus.reason || '',
@@ -457,7 +463,7 @@ function createDeliveryExecutor(options = {}) {
                 attestIntervalMs: limits.attestIntervalMs
             },
             usedTodayBytes: safeCall(() => manifest.sumBytesWrittenSince(startOfDay(now())), 0),
-            grants: safeCall(() => grants.listLocalGrants({ includeDirectory: options.includeDirectory === true }), []),
+            grants: localGrants,
             recentWrites: safeCall(() => manifest.listWritten(10), [])
         };
     }

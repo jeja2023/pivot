@@ -10,6 +10,10 @@ const { createDeliveryExecutor } = require('./executor');
 const { openDeliveryStatusWindow, openDeliveryGrantWindow } = require('./status-window');
 
 function createDesktopDeliveryController(options = {}) {
+    const createExecutor = typeof options.createExecutor === 'function' ? options.createExecutor : createDeliveryExecutor;
+    const openDeliveryStatus = typeof options.openDeliveryStatusWindow === 'function'
+        ? options.openDeliveryStatusWindow
+        : openDeliveryStatusWindow;
     const openDeliveryGrant = typeof options.openDeliveryGrantWindow === 'function'
         ? options.openDeliveryGrantWindow
         : openDeliveryGrantWindow;
@@ -65,7 +69,7 @@ function createDesktopDeliveryController(options = {}) {
     function ensureExecutor() {
         if (executor) return executor;
         const api = createDeliveryApiClient({ request });
-        executor = createDeliveryExecutor({
+        executor = createExecutor({
             api,
             chooseDirectory: async () => {
                 const result = await showDirectoryPicker();
@@ -85,7 +89,7 @@ function createDesktopDeliveryController(options = {}) {
         const includeDirectory = options.includeDirectory === true;
         return {
             available: status.available === true,
-            reason: status.reason || '',
+            reason: status.reason || status.lastError || '',
             deviceId: status.deviceId || '',
             deviceName: status.deviceName || '',
             keyType: status.keyType || '',
@@ -102,6 +106,7 @@ function createDesktopDeliveryController(options = {}) {
                 pathHint: grant.pathHint || '',
                 allowedFormats: Array.isArray(grant.allowedFormats) ? grant.allowedFormats : [],
                 expiresAt: grant.expiresAt || '',
+                expired: grant.expired === true,
                 ...(includeDirectory && grant.directory ? { directory: grant.directory } : {})
             }))
         };
@@ -112,7 +117,8 @@ function createDesktopDeliveryController(options = {}) {
             return publicStatus(ensureExecutor().start());
         } catch (error) {
             logger.warn?.('[Pivot 交付] 受控交付未启动：', error?.message || error);
-            return { available: false, running: false, lastStatus: 'unavailable', lastError: error?.message || String(error) };
+            const reason = error?.message || String(error);
+            return { available: false, reason, running: false, lastStatus: 'unavailable', lastError: reason };
         }
     }
 
@@ -120,16 +126,46 @@ function createDesktopDeliveryController(options = {}) {
         return publicStatus(executor ? executor.stop() : { available: false, running: false, lastStatus: 'not-started' });
     }
 
+    /**
+     * 网页创建交付意图前的同步就绪检查。客户端启动轮询可能仍停留在登录前状态，
+     * 因此这里强制用当前 Web 会话重新登记设备，避免首个保存请求命中“设备未注册”。
+     */
+    async function prepare() {
+        try {
+            const currentExecutor = ensureExecutor();
+            const currentStatus = currentExecutor.getStatus();
+            if (currentStatus.available !== true || !currentStatus.deviceId) return publicStatus(currentStatus);
+            await currentExecutor.ensureRegistered(currentStatus.deviceId, { force: true });
+            currentExecutor.start();
+            return publicStatus(currentExecutor.getStatus());
+        } catch (error) {
+            const reason = error?.message || String(error);
+            logger.warn?.('[Pivot 交付] 准备本机交付失败：', reason);
+            return { available: false, reason, running: false, lastStatus: 'unavailable', lastError: reason, grants: [] };
+        }
+    }
+
     function status() {
-        return publicStatus(executor ? executor.getStatus() : { available: false, running: false, lastStatus: 'not-started' });
+        try {
+            // 状态查询也是网页端首次“保存到本机”的入口。必须在这里初始化执行器，
+            // 否则首个查询总会返回不可用，页面无法引导用户选择并授权目录。
+            return publicStatus(ensureExecutor().getStatus());
+        } catch (error) {
+            const reason = error?.message || String(error);
+            logger.warn?.('[Pivot 交付] 读取交付状态失败：', reason);
+            return { available: false, reason, running: false, lastStatus: 'unavailable', lastError: reason, grants: [] };
+        }
     }
 
     /** 完整路径只交给本地 file:// 状态窗口，远程 Web 渲染页始终只能拿到目录提示。 */
     function localStatus() {
-        return publicStatus(
-            executor ? executor.getStatus({ includeDirectory: true }) : { available: false, running: false, lastStatus: 'not-started' },
-            { includeDirectory: true }
-        );
+        try {
+            return publicStatus(ensureExecutor().getStatus({ includeDirectory: true }), { includeDirectory: true });
+        } catch (error) {
+            const reason = error?.message || String(error);
+            logger.warn?.('[Pivot 交付] 读取本地交付状态失败：', reason);
+            return { available: false, reason, running: false, lastStatus: 'unavailable', lastError: reason, grants: [] };
+        }
     }
 
     async function authorizeDirectory(input = {}) {
@@ -177,7 +213,7 @@ function createDesktopDeliveryController(options = {}) {
 
     async function showStatusFromMenu() {
         try {
-            openDeliveryStatusWindow({
+            openDeliveryStatus({
                 getStatus: () => localStatus(),
                 getParentWindow,
                 onConfigureDirectory: () => configureDirectoryFromMenu(),
@@ -202,7 +238,7 @@ function createDesktopDeliveryController(options = {}) {
         return await ensureExecutor().ensureRegistered(deviceId);
     }
 
-    return { authorizeDirectory, configureDirectoryFromMenu, ensureRegistered, request, revokeDirectory, showStatusFromMenu, start, status, stop };
+    return { authorizeDirectory, configureDirectoryFromMenu, ensureRegistered, prepare, request, revokeDirectory, showStatusFromMenu, start, status, stop };
 }
 
 module.exports = { createDesktopDeliveryController };

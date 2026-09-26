@@ -71,3 +71,83 @@ test('桌面端只在存在 CSRF Cookie 时发送 CSRF 请求头', async () => {
         global.fetch = originalFetch;
     }
 });
+
+test('首次读取本机交付状态会初始化执行器并返回目录授权', () => {
+    let created = 0;
+    const controller = createDesktopDeliveryController({
+        createExecutor: () => {
+            created += 1;
+            return {
+                getStatus: () => ({
+                    available: true,
+                    deviceId: 'desktop-status-test-1',
+                    grants: [{
+                        grantId: 'grant-active-1',
+                        pathHint: 'exports/docs',
+                        allowedFormats: ['docx'],
+                        expiresAt: '2026-12-31T00:00:00.000Z',
+                        expired: false
+                    }]
+                })
+            };
+        }
+    });
+
+    const status = controller.status();
+
+    assert.equal(created, 1);
+    assert.equal(status.available, true);
+    assert.equal(status.deviceId, 'desktop-status-test-1');
+    assert.deepEqual(status.grants, [{
+        grantId: 'grant-active-1',
+        pathHint: 'exports/docs',
+        allowedFormats: ['docx'],
+        expiresAt: '2026-12-31T00:00:00.000Z',
+        expired: false
+    }]);
+});
+
+test('状态窗口读取本地交付状态时也会初始化执行器并请求完整路径', async () => {
+    let created = 0;
+    let includeDirectory = false;
+    let suppliedStatus = null;
+    const controller = createDesktopDeliveryController({
+        createExecutor: () => {
+            created += 1;
+            return {
+                getStatus(options = {}) {
+                    includeDirectory = options.includeDirectory === true;
+                    return { available: true, grants: [] };
+                }
+            };
+        },
+        openDeliveryStatusWindow: options => {
+            suppliedStatus = options.getStatus();
+        }
+    });
+
+    await controller.showStatusFromMenu();
+
+    assert.equal(created, 1);
+    assert.equal(includeDirectory, true);
+    assert.equal(suppliedStatus.available, true);
+});
+
+test('创建交付任务前会强制以当前会话重新验证设备注册', async () => {
+    let force = false;
+    let started = 0;
+    const controller = createDesktopDeliveryController({
+        createExecutor: () => ({
+            getStatus: () => ({ available: true, deviceId: 'desktop-prepare-test-1', registered: true, grants: [] }),
+            ensureRegistered: async (_deviceId, options) => { force = options?.force === true; },
+            start: () => { started += 1; }
+        })
+    });
+
+    const status = await controller.prepare();
+
+    assert.equal(force, true);
+    assert.equal(started, 1);
+    assert.equal(status.available, true);
+    assert.equal(status.registered, true);
+});

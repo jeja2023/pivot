@@ -652,6 +652,11 @@ ipcMain.handle('pivot-delivery:start', async (event) => {
     return getDeliveryController().start();
 });
 
+ipcMain.handle('pivot-delivery:prepare', async (event) => {
+    assertTrustedIpcSender(event);
+    return await getDeliveryController().prepare();
+});
+
 ipcMain.handle('pivot-delivery:stop', async (event) => {
     assertTrustedIpcSender(event);
     return getDeliveryController().stop();

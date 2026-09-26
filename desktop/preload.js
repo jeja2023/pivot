@@ -58,6 +58,9 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     startDelivery() {
         return ipcRenderer.invoke('pivot-delivery:start');
     },
+    prepareDelivery() {
+        return ipcRenderer.invoke('pivot-delivery:prepare');
+    },
     stopDelivery() {
         return ipcRenderer.invoke('pivot-delivery:stop');
     },
