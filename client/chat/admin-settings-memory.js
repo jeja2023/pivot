@@ -334,14 +334,18 @@ function renderMemoryJobsPanel(jobsData = {}) {
 function renderProductMemoryRows(memories = []) {
     const body = document.getElementById('memory-list-body');
     if (!body) return;
-    const colspan = 8;
+    const colspan = 9;
     if (!memories.length) {
         PivotSafeHtml.setHtml(body, `<tr><td colspan="${colspan}" class="text-center muted">暂无长期记忆</td></tr>`);
         return;
     }
-    PivotSafeHtml.setHtml(body, memories.map(memory => `
+    const page = Math.max(1, Number.parseInt(pageState?.memories, 10) || 1);
+    const limit = Math.max(1, Number.parseInt(pageState?.limit, 10) || 15);
+    const startIndex = (page - 1) * limit;
+    PivotSafeHtml.setHtml(body, memories.map((memory, index) => `
         <tr>
             <td><input type="checkbox" data-memory-select value="${memory.id}"></td>
+            <td class="text-center memory-index-cell">${startIndex + index + 1}</td>
             <td><span class="memory-type-badge">${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[memory.type] || memory.type || '记忆')}</span></td>
             <td class="memory-content-cell" data-full-content="${escapeHtml(memory.content || '')}">${escapeHtml(memory.content || '')}</td>
             <td>${Number(memory.salience || 0).toFixed(2)}</td>

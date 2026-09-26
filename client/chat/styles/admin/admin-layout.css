@@ -772,6 +772,8 @@
 }
 .settings-workspace-view .memories-table {
     table-layout: fixed;
+    min-width: 860px;
+    width: 100%;
 }
 .settings-workspace-view .memories-table th {
     height: 28px;
@@ -788,12 +790,13 @@
     line-height: 1.2;
 }
 .settings-workspace-view .memories-table .memory-col-select { width: 36px; }
-.settings-workspace-view .memories-table .memory-col-type { width: 88px; }
+.settings-workspace-view .memories-table .memory-col-index { width: 48px; }
+.settings-workspace-view .memories-table .memory-col-type { width: 82px; }
 .settings-workspace-view .memories-table .memory-col-content { width: auto; }
-.settings-workspace-view .memories-table .memory-col-score { width: 72px; }
-.settings-workspace-view .memories-table .memory-col-status { width: 68px; }
-.settings-workspace-view .memories-table .memory-col-used { width: 140px; }
-.settings-workspace-view .memories-table .memory-col-actions { width: 196px; }
+.settings-workspace-view .memories-table .memory-col-score { width: 66px; }
+.settings-workspace-view .memories-table .memory-col-status { width: 64px; }
+.settings-workspace-view .memories-table .memory-col-used { width: 134px; }
+.settings-workspace-view .memories-table .memory-col-actions { width: 256px; }
 
 .settings-workspace-view .memories-table th,
 .settings-workspace-view .memories-table td {
@@ -801,13 +804,20 @@
 }
 .settings-workspace-view .memories-table th:first-child,
 .settings-workspace-view .memories-table td:first-child,
-.settings-workspace-view .memories-table th:nth-child(4),
-.settings-workspace-view .memories-table td:nth-child(4),
+.settings-workspace-view .memories-table th:nth-child(2),
+.settings-workspace-view .memories-table td:nth-child(2),
 .settings-workspace-view .memories-table th:nth-child(5),
 .settings-workspace-view .memories-table td:nth-child(5),
 .settings-workspace-view .memories-table th:nth-child(6),
-.settings-workspace-view .memories-table td:nth-child(6) {
+.settings-workspace-view .memories-table td:nth-child(6),
+.settings-workspace-view .memories-table th:nth-child(7),
+.settings-workspace-view .memories-table td:nth-child(7) {
     text-align: center;
+}
+.settings-workspace-view .memory-index-cell {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted, #64748b);
+    font-size: 0.74rem;
 }
 .settings-workspace-view .memory-type-badge {
     display: inline-flex;
@@ -830,6 +840,7 @@
 }
 .settings-workspace-view .memory-action-cell {
     text-align: center;
+    white-space: nowrap;
 }
 .settings-workspace-view .memory-action-buttons {
     display: inline-flex;
@@ -841,6 +852,7 @@
 }
 .settings-workspace-view .memories-table .memory-source-btn,
 .settings-workspace-view .memory-action-buttons .btn-secondary,
+.settings-workspace-view .memory-action-buttons .btn-primary,
 .settings-workspace-view .memory-action-buttons .btn-danger {
     height: 22px;
     min-height: 22px;
@@ -849,6 +861,7 @@
     font-size: 0.72rem;
     line-height: 1;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 .settings-workspace-view .memory-source-btn:disabled {
     opacity: 0.5;

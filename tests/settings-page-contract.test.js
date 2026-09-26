@@ -116,7 +116,9 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
 
     assert.doesNotMatch(html, /<th[^>]*>来源<\/th>/);
     assert.doesNotMatch(html, /<col class="memory-col-source">/);
-    assert.match(js, /const colspan = 8/);
+    assert.match(html, /<th[^>]*>序号<\/th>/);
+    assert.match(html, /<col class="memory-col-index">/);
+    assert.match(js, /const colspan = 9/);
     assert.match(js, /<div class="memory-action-buttons">[\s\S]*?data-memory-action="source"[\s\S]*?data-memory-action="edit"/);
     assert.match(html, /id="memory-evaluation-run-btn"/);
     assert.match(html, /id="memory-evaluation-case-form"/);
