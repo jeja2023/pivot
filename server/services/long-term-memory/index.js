@@ -58,7 +58,8 @@ const {
     isLongTermMemoryEnabled,
     setLongTermMemoryEnabled,
     lockMemoryGateState,
-    assertMemoryWriteGate
+    assertMemoryWriteGate,
+    bumpMemoryRevision
 } = require('./memory-gate');
 
 const {
@@ -102,6 +103,26 @@ async function getMemoryRow(userId, memoryId, options = {}) {
         FROM memories
         WHERE id = ? AND user_id = ?${includeDeleted ? '' : ' AND status != ?'}
     `, includeDeleted ? [id, userId] : [id, userId, MEMORY_STATUS.deleted]);
+}
+
+async function getMemoryById(userId, memoryId, options = {}) {
+    const row = await getMemoryRow(userId, memoryId, options);
+    return row ? serializeMemory(row) : null;
+}
+
+function createMemoryGateError(gate) {
+    const error = new Error(!gate.enabled ? '长期记忆已关闭。' : '长期记忆状态已变更，请重试。');
+    error.code = !gate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
+    error.statusCode = 409;
+    return error;
+}
+
+async function assertLockedMemoryWriteGate(trx, userId, expectedRevision) {
+    const gate = await lockMemoryGateState(userId, trx);
+    if (!gate.enabled || Number(gate.revision) !== Number(expectedRevision)) {
+        throw createMemoryGateError(gate);
+    }
+    return gate;
 }
 
 async function listMemories(userId, options = {}) {
@@ -169,11 +190,19 @@ async function upsertMemorySuppression(trx, userId, memory, reason = 'user_forge
 }
 
 async function softDeleteMemory(userId, memoryId, options = {}) {
-    const memory = await getMemoryRow(userId, memoryId, { includeDeleted: true });
-    if (!memory || memory.status === MEMORY_STATUS.deleted) return false;
+    const id = Number.parseInt(memoryId, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) return false;
     invalidateMemoryQualityCache(userId);
     const now = getBeijingTimestamp();
+    let deleted = false;
     await transaction(async trx => {
+        const memory = await trx.queryOne(`
+            SELECT * FROM memories
+            WHERE id = ? AND user_id = ? AND status != ?
+            FOR UPDATE
+        `, [id, Number(userId), MEMORY_STATUS.deleted]);
+        if (!memory) return;
+        await bumpMemoryRevision(userId, trx);
         if (options.suppress !== false) {
             await upsertMemorySuppression(trx, userId, memory, options.reason || 'user_forget');
         }
@@ -186,12 +215,13 @@ async function softDeleteMemory(userId, memoryId, options = {}) {
             now,
             String(options.reason || 'user_forget').slice(0, 80),
             now,
-            memory.id,
+            id,
             Number(userId),
             MEMORY_STATUS.deleted
         ]);
+        deleted = true;
     });
-    return true;
+    return deleted;
 }
 
 async function updateMemoryStatus(userId, memoryId, status) {
@@ -269,6 +299,8 @@ async function exportMemories(userId, options = {}) {
 
 async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     invalidateMemoryQualityCache(userId);
+    const writeGate = await assertMemoryWriteGate(userId);
+    if (!writeGate.allowed) throw createMemoryGateError(writeGate.gate);
     const existing = await getMemoryRow(userId, memoryId);
     if (!existing) return null;
     const hasContent = Object.prototype.hasOwnProperty.call(updates, 'content');
@@ -317,6 +349,7 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
         || factKey !== normalizeFactKey(existing.fact_key, existing.type, existing.content);
     if (revisionChanged) {
         const updated = await transaction(async trx => {
+            await assertLockedMemoryWriteGate(trx, userId, writeGate.gate.revision);
             const inserted = await trx.queryOne(`
                 INSERT INTO memories (
                     user_id, scope, scope_reference, project_id, type, governance_class, retention_mode,
@@ -335,9 +368,9 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
             ]);
             await trx.execute(`
                 INSERT INTO memory_source_evidence (
-                    memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
+                    memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
                 )
-                SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, ?
+                SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, ?
                 FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
                 ON CONFLICT(memory_id, message_id) DO NOTHING
             `, [inserted.id, now, existing.id, Number(userId)]);
@@ -350,46 +383,49 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
         });
         return serializeMemory(updated);
     }
-    await execute(`
-        UPDATE memories
-        SET scope = ?,
-            scope_reference = ?,
-            project_id = ?,
-            type = ?,
-            fact_key = ?,
-            content = ?,
-            embedding = ?,
-            embedding_status = ?,
-            embedding_dimensions = ?,
-            search_content = ?,
-            salience = ?,
-            confidence = ?,
-            status = ?,
-            valid_from = ?,
-            expires_at = ?,
-            updated_at = ?
-        WHERE id = ? AND user_id = ?
-    `, [
-        scope,
-        scopeReference,
-        projectId,
-        type,
-        factKey,
-        content,
-        embedding,
-        embedding ? 'ready' : 'lexical_ready',
-        embeddingDimensions(embedding),
-        content,
-        salience,
-        confidence,
-        status,
-        validFrom,
-        expiresAt,
-        now,
-        existing.id,
-        userId
-    ]);
-    const updated = await queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [existing.id, userId]);
+    const updated = await transaction(async trx => {
+        await assertLockedMemoryWriteGate(trx, userId, writeGate.gate.revision);
+        await trx.execute(`
+            UPDATE memories
+            SET scope = ?,
+                scope_reference = ?,
+                project_id = ?,
+                type = ?,
+                fact_key = ?,
+                content = ?,
+                embedding = ?,
+                embedding_status = ?,
+                embedding_dimensions = ?,
+                search_content = ?,
+                salience = ?,
+                confidence = ?,
+                status = ?,
+                valid_from = ?,
+                expires_at = ?,
+                updated_at = ?
+            WHERE id = ? AND user_id = ?
+        `, [
+            scope,
+            scopeReference,
+            projectId,
+            type,
+            factKey,
+            content,
+            embedding,
+            embedding ? 'ready' : 'lexical_ready',
+            embeddingDimensions(embedding),
+            content,
+            salience,
+            confidence,
+            status,
+            validFrom,
+            expiresAt,
+            now,
+            existing.id,
+            userId
+        ]);
+        return await trx.queryOne('SELECT * FROM memories WHERE id = ? AND user_id = ?', [existing.id, userId]);
+    });
     return serializeMemory(updated);
 }
 
@@ -405,6 +441,13 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     if (normalizeMemoryType(target.type) !== normalizeMemoryType(source.type)) {
         throw createMemoryValidationError('Only memories of the same type can be merged');
     }
+    if (normalizeMemoryScope(target.scope) !== normalizeMemoryScope(source.scope)
+        || normalizeScopeReference(target.scope_reference) !== normalizeScopeReference(source.scope_reference)
+        || normalizeScopeReference(target.project_id) !== normalizeScopeReference(source.project_id)) {
+        throw createMemoryValidationError('Only memories in the same scope can be merged', 'MEMORY_SCOPE_MISMATCH');
+    }
+    const writeGate = await assertMemoryWriteGate(userId);
+    if (!writeGate.allowed) throw createMemoryGateError(writeGate.gate);
     const now = getBeijingTimestamp();
     const content = mergeMemoryContent(target, source);
     if (hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content)) {
@@ -419,6 +462,7 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
         : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
 
     await transaction(async (trx) => {
+        await assertLockedMemoryWriteGate(trx, userId, writeGate.gate.revision);
         await trx.execute(`
             UPDATE memories
             SET content = ?,
@@ -445,10 +489,10 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
             userId
         ]);
         await trx.execute(`
-            INSERT INTO memory_source_evidence (
-                memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
+                INSERT INTO memory_source_evidence (
+                memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
             )
-            SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, ?
+            SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, ?
             FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
             ON CONFLICT(memory_id, message_id) DO NOTHING
         `, [target.id, now, source.id, Number(userId)]);
@@ -468,14 +512,20 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     };
 }
 
-async function findSimilarMemory(userId, type, content, factKey = '') {
+async function findSimilarMemory(userId, type, content, factKey = '', scope = {}) {
     const fingerprint = fingerprintMemory(type, content);
+    const normalizedScope = normalizeMemoryScope(scope.scope);
+    const scopeReference = normalizeScopeReference(scope.scopeReference || scope.scope_reference);
+    const projectId = normalizeScopeReference(scope.projectId || scope.project_id);
     const rows = await query(`
         SELECT *
         FROM memories
         WHERE user_id = ? AND type = ? AND status = ?
+          AND scope = ?
+          AND COALESCE(scope_reference, '') = ?
+          AND COALESCE(project_id, '') = ?
         ORDER BY updated_at DESC, id DESC
-    `, [userId, type, MEMORY_STATUS.active]);
+    `, [userId, type, MEMORY_STATUS.active, normalizedScope, scopeReference, projectId]);
     const exact = rows.find(row => fingerprintMemory(row.type, row.content) === fingerprint) || null;
     const sameFact = factKey
         ? rows.find(row => String(row.fact_key || '') === String(factKey) && !exact) || null
@@ -520,16 +570,23 @@ async function findActiveMemorySuppression(userId, fingerprint, candidate = {}) 
 async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin = MEMORY_ORIGINS.automatic, assertedBy = MEMORY_ASSERTED_BY.user) {
     const sourceMessageIds = normalizeSourceMessageIds(candidate.sourceMessageIds);
     const sessionId = String(candidate.sourceSessionId || '').trim() || null;
+    const excerpts = new Map((Array.isArray(candidate.sourceEvidence) ? candidate.sourceEvidence : [])
+        .map(item => [Number(item?.messageId ?? item?.message_id), normalizeMemoryContent(item?.excerpt || item?.evidenceExcerpt || '').slice(0, 400)])
+        .filter(([messageId, excerpt]) => Number.isSafeInteger(messageId) && messageId > 0 && excerpt));
     if (sourceMessageIds.length === 0) return;
     for (const messageId of sourceMessageIds) {
         await trx.execute(`
             INSERT INTO memory_source_evidence (
-                memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(memory_id, message_id) DO UPDATE SET
                 session_id = COALESCE(excluded.session_id, memory_source_evidence.session_id),
                 source_kind = excluded.source_kind,
-                asserted_by = excluded.asserted_by
+                asserted_by = excluded.asserted_by,
+                evidence_excerpt = CASE
+                    WHEN excluded.evidence_excerpt <> '' THEN excluded.evidence_excerpt
+                    ELSE memory_source_evidence.evidence_excerpt
+                END
         `, [
             Number(memoryId),
             Number(userId),
@@ -537,6 +594,7 @@ async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin
             messageId,
             normalizeMemoryOrigin(origin),
             normalizeMemoryAssertedBy(assertedBy),
+            excerpts.get(messageId) || '',
             getBeijingTimestamp()
         ]);
     }
@@ -640,7 +698,11 @@ async function upsertMemory(userId, candidate, options = {}) {
         return { skipped: true, reason: 'suppressed_by_user' };
     }
     const now = getBeijingTimestamp();
-    const similar = await findSimilarMemory(userId, type, content, factKey);
+    const similar = await findSimilarMemory(userId, type, content, factKey, {
+        scope,
+        scopeReference,
+        projectId
+    });
     const existing = similar.exact;
 
     if (existing) {
@@ -836,6 +898,7 @@ module.exports = {
     exportMemories,
     extractMemoryCandidatesFromMessages,
     getMemoryJobSummary,
+    getMemoryById,
     getMemoryMergeSuggestions,
     getMemoryQualitySummary,
     getMemorySummary,

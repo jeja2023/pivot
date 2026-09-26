@@ -594,26 +594,35 @@
     box-shadow: 0 1px 1px rgba(15, 23, 42, 0.02);
 }
 .settings-workspace-view .memory-metrics-strip {
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 5px;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
 }
 .settings-workspace-view .memory-summary-grid {
     display: contents;
 }
 .settings-workspace-view .memory-summary-card,
 .settings-workspace-view .memory-quality-card {
-    min-height: 34px;
-    height: 34px;
-    padding: 3px 8px;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 36px;
+    height: 36px;
+    padding: 3px 4px;
     border: 1px solid rgba(148, 163, 184, 0.14);
     border-radius: 6px;
     background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
+    text-align: center;
     gap: 1px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+    box-sizing: border-box;
 }
 .settings-workspace-view .memory-summary-card span,
 .settings-workspace-view .memory-quality-card span {
@@ -624,6 +633,8 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    width: 100%;
+    text-align: center;
 }
 .settings-workspace-view .memory-summary-card strong,
 .settings-workspace-view .memory-quality-card strong {
@@ -632,6 +643,7 @@
     font-weight: 800;
     line-height: 1.1;
     white-space: nowrap;
+    text-align: center;
 }
 .settings-workspace-view .memory-summary-card:first-child strong {
     color: var(--primary, #10b981);
@@ -958,6 +970,29 @@
     width: min(820px, calc(100vw - 32px));
     max-height: min(780px, calc(100vh - 40px));
 }
+.memory-evaluations-modal,
+.settings-workspace-view .memory-evaluations-modal {
+    width: min(920px, calc(100vw - 32px));
+    max-height: min(840px, calc(100vh - 40px));
+    display: flex;
+    flex-direction: column;
+}
+.memory-evaluations-overlay { z-index: 5260; }
+.settings-workspace-view .memory-evaluations-modal-body {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 6px;
+    padding-right: 2px;
+}
+.settings-workspace-view .memory-evaluation-subtitle {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    margin-top: 2px;
+}
 .memory-modal-header,
 .settings-workspace-view .memory-modal-header {
     display: flex;
@@ -1113,7 +1148,8 @@
         grid-template-columns: 1fr;
     }
     .settings-workspace-view .memory-metrics-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
     .settings-workspace-view .memory-edit-grid,
     .settings-workspace-view .memory-merge-row,
@@ -1246,4 +1282,3 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .dark-mode .settings-workspace-view .memories-table td {
     color: #cbd5e1;
 }
-

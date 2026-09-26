@@ -69,7 +69,8 @@ const migrationModules = [
     require('./long-term-memory-evaluations'),
     require('./long-term-memory-embedding-recovery'),
     require('./long-term-memory-search-index'),
-    require('./long-term-memory-validity-window')
+    require('./long-term-memory-validity-window'),
+    require('./long-term-memory-evidence-excerpts')
 ];
 
 module.exports = migrationModules

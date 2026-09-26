@@ -29,9 +29,18 @@ async function cancelMemoryExtractionJobs(userId, options = {}) {
     const where = ['user_id = ?', 'status = ?'];
     const params = [Number(userId), MEMORY_JOB_STATUS.queued];
     const sessionId = normalizeScopeReference(options.sessionId || options.session_id);
+    const messageIds = normalizeSourceMessageIds(options.messageIds || options.message_ids);
     if (sessionId) {
         where.push('session_id = ?');
         params.push(sessionId);
+    }
+    if (messageIds.length) {
+        where.push(`EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(COALESCE(message_ids, '[]'::jsonb)) AS source_message(message_id)
+            WHERE source_message.message_id IN (${messageIds.map(() => '?').join(',')})
+        )`);
+        params.push(...messageIds.map(String));
     }
     const changes = await execute(`
         UPDATE memory_extraction_jobs
@@ -212,7 +221,7 @@ async function finishMemoryExtractionJob(jobId, status, fields = {}) {
 
 async function processMemoryExtractionJob(row, options = {}) {
     const runExtraction = options.runMemoryExtraction || runMemoryExtractionHandler;
-    if (typeof runExtraction !== 'function') throw new Error('runMemoryExtraction handler not configured');
+    if (typeof runExtraction !== 'function') throw new Error('长期记忆抽取处理器尚未配置。');
     const user = await resolveMemoryJobUser(row);
     const modelCfg = await resolveMemoryJobModel(row, user);
     const result = await runExtraction({

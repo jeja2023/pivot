@@ -540,6 +540,21 @@ async function runMemoryEvaluation() {
     return data;
 }
 
+function openMemoryEvaluationsModal() {
+    window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
+    const modal = document.getElementById('memory-evaluations-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    loadMemoryEvaluations();
+}
+
+function closeMemoryEvaluationsModal() {
+    const modal = document.getElementById('memory-evaluations-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
+}
+
 async function archiveExpiredMemories() {
     const res = await apiFetch(`${API_BASE}/memories/maintenance/archive-expired`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'disabled' }) });
     const data = await res.json();
@@ -653,5 +668,7 @@ window.Pivot?.exposeModule?.('settings.memory', {
     selectedMemoryIds,
     updateMemoryStatus,
     runMemoryEvaluation,
-    loadMemoryEvaluations
+    loadMemoryEvaluations,
+    openMemoryEvaluationsModal,
+    closeMemoryEvaluationsModal
 });

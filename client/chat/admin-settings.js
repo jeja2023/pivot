@@ -394,6 +394,13 @@ document.getElementById('long-term-memory-toggle')?.addEventListener('change', (
 
 document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', () => window.Pivot.legacy.loadMemoryMergeSuggestions?.());
 document.getElementById('memory-export-btn')?.addEventListener('click', () => window.Pivot.legacy.exportMemories?.());
+document.getElementById('memory-evaluations-open-btn')?.addEventListener('click', () => window.Pivot.moduleApi('settings.memory', {}).openMemoryEvaluationsModal?.());
+document.getElementById('memory-evaluations-close-btn')?.addEventListener('click', () => window.Pivot.moduleApi('settings.memory', {}).closeMemoryEvaluationsModal?.());
+document.getElementById('memory-evaluations-modal')?.addEventListener('click', event => {
+    if (event.target === event.currentTarget) {
+        window.Pivot.moduleApi('settings.memory', {}).closeMemoryEvaluationsModal?.();
+    }
+});
 document.getElementById('memory-evaluation-refresh-btn')?.addEventListener('click', () => window.Pivot.moduleApi('settings.memory', {}).loadMemoryEvaluations?.());
 document.getElementById('memory-evaluation-run-btn')?.addEventListener('click', async event => {
     const button = event.currentTarget;

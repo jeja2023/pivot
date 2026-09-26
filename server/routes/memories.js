@@ -66,7 +66,7 @@ async function normalizeExplicitMemorySource(user, body = {}) {
     if (!ids.length) return { sourceSessionId: sourceSessionId || null, sourceMessageIds: [] };
     const { query } = require('../db/client');
     const rows = await query(`
-        SELECT id
+        SELECT id, session_id, content
         FROM messages
         WHERE user_id = ? AND deleted_at IS NULL AND id IN (${ids.map(() => '?').join(',')})
     `, [user.id, ...ids]);
@@ -76,7 +76,20 @@ async function normalizeExplicitMemorySource(user, body = {}) {
         error.code = 'MEMORY_SOURCE_MESSAGE_NOT_FOUND';
         throw error;
     }
-    return { sourceSessionId: sourceSessionId || null, sourceMessageIds: ids };
+    if (sourceSessionId && rows.some(row => String(row.session_id || '') !== sourceSessionId)) {
+        const error = new Error('记忆来源消息不属于指定会话。');
+        error.statusCode = 400;
+        error.code = 'MEMORY_SOURCE_SESSION_MISMATCH';
+        throw error;
+    }
+    return {
+        sourceSessionId: sourceSessionId || null,
+        sourceMessageIds: ids,
+        sourceEvidence: rows.map(row => ({
+            messageId: Number(row.id),
+            excerpt: String(row.content || '').replace(/\s+/g, ' ').trim().slice(0, 400)
+        }))
+    };
 }
 
 function createMemoriesRouter({ authMiddleware, logAction }) {

@@ -23,11 +23,15 @@
     function ensureMemoryModalsAttached() {
         const editModal = document.getElementById('memory-edit-modal');
         const sourceModal = document.getElementById('memory-source-modal');
+        const evaluationsModal = document.getElementById('memory-evaluations-modal');
         if (editModal && editModal.parentElement !== document.body) {
             document.body.appendChild(editModal);
         }
         if (sourceModal && sourceModal.parentElement !== document.body) {
             document.body.appendChild(sourceModal);
+        }
+        if (evaluationsModal && evaluationsModal.parentElement !== document.body) {
+            document.body.appendChild(evaluationsModal);
         }
     }
 

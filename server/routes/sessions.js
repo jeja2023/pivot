@@ -754,7 +754,10 @@ function createSessionsRouter({
             [getBeijingTimestamp(), id, req.user.id]
         );
         if (msgDeleted > 0 && source) {
-            await revokeMemoriesForSourceMessages(req.user.id, [source.id], { reason: 'source_message_deleted' });
+            await Promise.all([
+                revokeMemoriesForSourceMessages(req.user.id, [source.id], { reason: 'source_message_deleted' }),
+                cancelMemoryExtractionJobs(req.user.id, { messageIds: [source.id], reason: 'SOURCE_MESSAGE_DELETED' })
+            ]);
         }
         if (msgDeleted > 0) logAction(req, '删除消息', `消息ID: ${id}`);
         res.json({ success: msgDeleted > 0 });

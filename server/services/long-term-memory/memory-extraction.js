@@ -50,14 +50,41 @@ function clearModelExtractionCooldown(modelCfg = {}) {
     modelExtractionCooldowns.delete(modelExtractionKey(modelCfg));
 }
 
+function buildEvidenceExcerpt(sourceText, requestedExcerpt, candidateContent) {
+    const source = contentText(sourceText).replace(/\s+/g, ' ').trim();
+    const requested = String(requestedExcerpt || '').replace(/\s+/g, ' ').trim();
+    const candidate = String(candidateContent || '').replace(/\s+/g, ' ').trim();
+    if (requested && source.includes(requested)) return requested.slice(0, 400);
+    if (candidate) {
+        const position = source.indexOf(candidate);
+        if (position >= 0) return source.slice(position, position + 400);
+    }
+    return source.slice(0, 400);
+}
+
+function resolveCandidateEvidence(raw = {}, content = '', context = {}) {
+    const sourceMessages = Array.isArray(context.sourceMessages) ? context.sourceMessages : [];
+    const byId = new Map(sourceMessages.map(message => [Number(message?.id), message]));
+    const requested = normalizeSourceMessageIds(
+        raw.sourceMessageIds || raw.source_message_ids || raw.evidenceMessageIds || raw.evidence_message_ids
+            || raw.sourceMessageId || raw.source_message_id || raw.evidenceMessageId || raw.evidence_message_id
+    );
+    return requested.filter(id => byId.has(id)).map(messageId => ({
+        messageId,
+        excerpt: buildEvidenceExcerpt(byId.get(messageId)?.content, raw.evidenceSnippet || raw.evidence_snippet || raw.evidence, content)
+    })).filter(item => item.excerpt);
+}
+
 function normalizeExtractorCandidates(rawCandidates = [], context = {}) {
-    const sourceMessageIds = normalizeSourceMessageIds(context.sourceMessageIds);
     const sourceSessionId = context.sessionId || null;
     const byKey = new Map();
     (Array.isArray(rawCandidates) ? rawCandidates : []).forEach(raw => {
         if (!raw || typeof raw !== 'object') return;
         const content = normalizeMemoryContent(raw.content || raw.memory || raw.text || raw.value || '');
         if (content.length < MIN_MEMORY_CONTENT_CHARS || hasSensitiveContent(content) || hasUnsafeMemoryInstruction(content)) return;
+        const sourceEvidence = resolveCandidateEvidence(raw, content, context);
+        // 没有明确用户消息引用的模型事实只是断言，不具备可追溯来源，不能自动入库。
+        if (sourceEvidence.length === 0) return;
         const requestedType = normalizeMemoryType(raw.type || raw.category);
         const candidate = buildCandidate({
             type: requestedType,
@@ -66,7 +93,8 @@ function normalizeExtractorCandidates(rawCandidates = [], context = {}) {
             salience: clamp(raw.salience ?? raw.importance, 0, 1, 0.55),
             confidence: clamp(raw.confidence, 0, 1, 0.62),
             sourceSessionId: raw.sourceSessionId || sourceSessionId,
-            sourceMessageIds: normalizeSourceMessageIds(raw.sourceMessageIds || sourceMessageIds),
+            sourceMessageIds: sourceEvidence.map(item => item.messageId),
+            sourceEvidence,
             origin: MEMORY_ORIGINS.automatic,
             assertedBy: MEMORY_ASSERTED_BY.user,
             factKey: raw.factKey || raw.fact_key || ''
@@ -134,10 +162,10 @@ function buildExtractorMessages(messages = []) {
             role: 'system',
             content: [
                 'Extract durable long-term memory candidates from the conversation.',
-                'Return only JSON with this shape: {"memories":[{"type":"preference|fact|decision|episode","category":"preference|fact|temporary","factKey":"stable-subject:attribute","content":"...","salience":0.0,"confidence":0.0}]}',
+                'Return only JSON with this shape: {"memories":[{"type":"preference|fact|decision|episode","category":"preference|fact|temporary","factKey":"stable-subject:attribute","content":"...","sourceMessageIds":[123],"evidenceSnippet":"exact quote from that message","salience":0.0,"confidence":0.0}]}',
                 'Keep only stable user preferences, project/task facts, long-term decisions, or useful historical episodes.',
                 'Do not include secrets, tokens, passwords, private keys, payment card numbers, phone numbers, government IDs, or transient chit-chat.',
-                'Use concise standalone content. Return at most 8 memories.'
+                'Every candidate must cite one or more message_id values shown below and an exact supporting quote. Use concise standalone content. Return at most 8 memories.'
             ].join('\n')
         },
         {
@@ -172,15 +200,15 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
     const parsed = parseExtractorJsonResult(extractModelMessageText(res.data));
     return {
         candidates: normalizeExtractorCandidates(parsed.candidates, {
-        sessionId: context.sessionId,
-        sourceMessageIds: messages.filter(message => message?.role === 'user').map(message => message.id)
+            sessionId: context.sessionId,
+            sourceMessages: messages.filter(message => message?.role === 'user')
         }),
         completed: parsed.valid,
         reason: parsed.valid ? '' : 'invalid_response'
     };
 }
 
-function buildCandidate({ type, governanceClass = '', retentionMode = '', factKey = '', scope = 'user', scopeReference = '', projectId = '', expiresAt = null, content, salience, confidence, sourceSessionId, sourceMessageIds, origin = MEMORY_ORIGINS.automatic, assertedBy = MEMORY_ASSERTED_BY.user }) {
+function buildCandidate({ type, governanceClass = '', retentionMode = '', factKey = '', scope = 'user', scopeReference = '', projectId = '', expiresAt = null, content, salience, confidence, sourceSessionId, sourceMessageIds, sourceEvidence = [], origin = MEMORY_ORIGINS.automatic, assertedBy = MEMORY_ASSERTED_BY.user }) {
     const normalizedType = normalizeMemoryType(type);
     const temporary = normalizedType === MEMORY_TYPES.episode;
     return {
@@ -198,6 +226,7 @@ function buildCandidate({ type, governanceClass = '', retentionMode = '', factKe
         confidence,
         sourceSessionId,
         sourceMessageIds,
+        sourceEvidence,
         origin,
         assertedBy
     };
@@ -246,6 +275,7 @@ function extractMemoryCandidatesFromMessages(messages = [], context = {}) {
                     content: line,
                     sourceSessionId,
                     sourceMessageIds: [message.id],
+                    sourceEvidence: [{ messageId: message.id, excerpt: line }],
                     origin: MEMORY_ORIGINS.automatic,
                     assertedBy: MEMORY_ASSERTED_BY.user
                 }));

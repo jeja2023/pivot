@@ -11,6 +11,8 @@ const {
 const http = require('http');
 const { createMemoriesRouter } = require('../../server/routes/memories');
 const { deleteAgentPersonalData } = require('../../server/services/agent-data');
+const { applyMemoryIntent } = require('../../server/services/agent-memory-intents');
+const { normalizeExtractorCandidates } = require('../../server/services/long-term-memory/memory-extraction');
 const {
     createMemoryEvaluationCase,
     runMemoryEvaluation
@@ -189,6 +191,28 @@ function startMemoryExtractorServer(payload) {
     });
 }
 
+test('模型候选必须引用实际用户消息并保存原始证据摘录', () => {
+    const sourceMessages = [{
+        id: 7,
+        role: 'user',
+        content: '项目 Evidence 的发布说明固定使用中文摘要。'
+    }];
+    const missingEvidence = normalizeExtractorCandidates([{
+        type: 'fact',
+        content: '项目 Evidence 的发布说明固定使用中文摘要。'
+    }], { sessionId: 'evidence-session', sourceMessages });
+    assert.equal(missingEvidence.length, 0);
+
+    const candidates = normalizeExtractorCandidates([{
+        type: 'fact',
+        content: '项目 Evidence 的发布说明固定使用中文摘要。',
+        sourceMessageIds: [7],
+        evidenceSnippet: '项目 Evidence 的发布说明固定使用中文摘要。'
+    }], { sessionId: 'evidence-session', sourceMessages });
+    assert.deepEqual(candidates[0].sourceMessageIds, [7]);
+    assert.equal(candidates[0].sourceEvidence[0].excerpt, sourceMessages[0].content);
+});
+
 test('长期记忆抽取优先使用结构化模型输出并保留启发式兜底', async () => {
     const user = createMemoryTestUser('memory_llm_extract');
     user.role = 'admin';
@@ -201,6 +225,8 @@ test('长期记忆抽取优先使用结构化模型输出并保留启发式兜�
                     memories: [{
                         type: 'fact',
                         content: '项目 Beta 的发布说明固定使用中文摘要。',
+                        sourceMessageIds: [userMessageId],
+                        evidenceSnippet: '项目 Beta 的发布说明固定使用中文摘要。',
                         salience: 0.91,
                         confidence: 0.88
                     }]
@@ -226,6 +252,10 @@ test('长期记忆抽取优先使用结构化模型输出并保留启发式兜�
         assert.equal(result.extractor, 'model');
         assert.equal(result.inserted, 1);
         assert.ok(db.prepare('SELECT id FROM memories WHERE user_id = ? AND content LIKE ?').get(user.id, '%Beta%'));
+        assert.equal(
+            db.prepare('SELECT evidence_excerpt FROM memory_source_evidence WHERE user_id = ? AND message_id = ?').get(user.id, userMessageId).evidence_excerpt,
+            '项目 Beta 的发布说明固定使用中文摘要。'
+        );
     } finally {
         await new Promise(resolve => server.close(resolve));
     }
@@ -317,6 +347,46 @@ test('记忆关闭、来源撤回和用户遗忘都会阻止后续自动重建',
     void inserted;
 });
 
+test('自然语言忘记会软删除记忆、推进修订号并抑制同来源重建', async () => {
+    const user = createMemoryTestUser('memory_intent_forget');
+    const messageId = insertSourceMessage(user, 'user', '项目 Forget 的发布说明必须保留来源链接。');
+    const memory = await longTermMemory.upsertMemory(user.id, {
+        type: 'fact',
+        content: '项目 Forget 的发布说明必须保留来源链接。',
+        sourceSessionId: user.sessionId,
+        sourceMessageIds: [messageId]
+    }, { skipEmbedding: true });
+    const result = await applyMemoryIntent(user, { text: '忘记 项目 Forget 的发布说明必须保留来源链接。', memoryId: memory.id });
+    assert.equal(result.action, 'forget');
+    assert.equal(db.prepare('SELECT status FROM memories WHERE id = ?').get(memory.id).status, 'deleted');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM memory_suppressions WHERE user_id = ? AND released_at IS NULL').get(user.id).count, 1);
+    const rebuilt = await longTermMemory.upsertMemory(user.id, {
+        type: 'fact',
+        content: '项目 Forget 的发布说明必须保留来源链接。',
+        sourceSessionId: user.sessionId,
+        sourceMessageIds: [messageId]
+    }, { skipEmbedding: true });
+    assert.equal(rebuilt.reason, 'suppressed_by_user');
+});
+
+test('删除来源消息可立即取消只包含该消息的排队抽取任务', async () => {
+    const user = createMemoryTestUser('memory_message_cancel');
+    const deletedMessageId = insertSourceMessage(user, 'user', '项目 Queue 的旧发布口径应被删除。');
+    const retainedMessageId = insertSourceMessage(user, 'user', '项目 Queue 的当前发布口径保留。');
+    const deletedJob = await longTermMemory.scheduleMemoryExtraction({
+        userId: user.id, sessionId: user.sessionId, messageIds: [deletedMessageId], triggerWorker: false
+    });
+    const retainedJob = await longTermMemory.scheduleMemoryExtraction({
+        userId: user.id, sessionId: user.sessionId, messageIds: [retainedMessageId], triggerWorker: false
+    });
+    const cancelled = await longTermMemory.cancelMemoryExtractionJobs(user.id, {
+        messageIds: [deletedMessageId], reason: 'SOURCE_MESSAGE_DELETED'
+    });
+    assert.equal(cancelled.cancelled, 1);
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(deletedJob.jobId).status, 'skipped');
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(retainedJob.jobId).status, 'queued');
+});
+
 test('记忆召回不以重要度前 200 条截断，并且记录实际注入', async () => {
     const user = createMemoryTestUser('memory_rerank');
     for (let index = 0; index < 205; index += 1) {
@@ -352,6 +422,26 @@ test('长期记忆检索严格遵守项目和会话作用域', async () => {
     assert.equal(foreignSessionMatches.some(item => item.id === sessionOnly.id), false);
     const ownSessionMatches = await longTermMemory.retrieveLongTermMemories(user.id, 'Scope 汇报页数', { sessionId: user.sessionId });
     assert.equal(ownSessionMatches.some(item => item.id === sessionOnly.id), true);
+});
+
+test('同一事实键不会跨项目作用域合并或覆盖', async () => {
+    const user = createMemoryTestUser('memory_scope_write');
+    const projectA = await longTermMemory.upsertMemory(user.id, {
+        type: 'fact', factKey: 'release:label', scope: 'project', projectId: 'project-a',
+        content: '项目范围 A 的发布标签是绿色。'
+    }, { skipEmbedding: true });
+    const projectB = await longTermMemory.upsertMemory(user.id, {
+        type: 'fact', factKey: 'release:label', scope: 'project', projectId: 'project-b',
+        content: '项目范围 B 的发布标签是蓝色。'
+    }, { skipEmbedding: true });
+    assert.equal(projectA.inserted, true);
+    assert.equal(projectB.inserted, true);
+    assert.equal(db.prepare('SELECT status FROM memories WHERE id = ?').get(projectA.id).status, 'active');
+    assert.equal(db.prepare('SELECT status FROM memories WHERE id = ?').get(projectB.id).status, 'active');
+    await assert.rejects(
+        longTermMemory.mergeMemories(user.id, projectA.id, projectB.id, { skipEmbedding: true }),
+        error => error.code === 'MEMORY_SCOPE_MISMATCH'
+    );
 });
 
 test('长期记忆会在有效期开始前拒绝召回，并在有效期内正常命中', async () => {

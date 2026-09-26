@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1866,
+  "total": 1868,
   "entries": [
     {
       "file": "server/auth.js",
@@ -165,6 +165,10 @@
     },
     {
       "file": "server/db/migrations/long-term-memory-evaluations.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/long-term-memory-evidence-excerpts.js",
       "count": 1
     },
     {
@@ -793,7 +797,7 @@
     },
     {
       "file": "server/services/long-term-memory/index.js",
-      "count": 28
+      "count": 29
     },
     {
       "file": "server/services/long-term-memory/memory-evaluation-runner.js",

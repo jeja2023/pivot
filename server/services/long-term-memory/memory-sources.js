@@ -10,6 +10,7 @@ const {
 } = require('./memory-utils');
 const { serializeMemory } = require('./memory-serialization');
 const { invalidateMemoryQualityCache } = require('./memory-quality');
+const { bumpMemoryRevision } = require('./memory-gate');
 
 async function getMemoryRow(userId, memoryId, options = {}) {
     const id = Number.parseInt(memoryId, 10);
@@ -49,7 +50,7 @@ async function getMemorySource(userId, memoryId) {
         ? await queryOne('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ?', [row.source_session_id, userId])
         : null;
     const evidence = await query(`
-        SELECT session_id, message_id, source_kind, asserted_by, created_at
+        SELECT session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
         FROM memory_source_evidence
         WHERE memory_id = ? AND user_id = ?
         ORDER BY created_at ASC, id ASC
@@ -68,6 +69,7 @@ async function getMemorySource(userId, memoryId) {
             messageId: item.message_id ? Number(item.message_id) : null,
             sourceKind: item.source_kind || 'automatic',
             assertedBy: item.asserted_by || 'user',
+            evidenceExcerpt: item.evidence_excerpt || '',
             createdAt: item.created_at || null
         }))
     };
@@ -87,6 +89,10 @@ async function revokeMemoriesForSource(userId, options = {}) {
         where.push(`e.message_id IN (${messageIds.map(() => '?').join(',')})`);
         params.push(...messageIds);
     }
+    // 先推进写入栅栏，避免删除前已校验来源的抽取任务在本次查询之后提交。
+    await transaction(async trx => {
+        await bumpMemoryRevision(userId, trx);
+    });
     const related = await query(`
         SELECT DISTINCT m.*
         FROM memories m
