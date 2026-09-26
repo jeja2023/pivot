@@ -4,7 +4,15 @@ let settingsWorkspaceScaleObserver = null;
 let settingsWorkspaceScaleRaf = 0;
 let lastObservedSettingsWidth = 0;
 let lastObservedSettingsHeight = 0;
+let lastSettingsScaleSignature = '';
 const MONITOR_MIN_CANVAS_HEIGHT = 780;
+
+function notifySettingsWorkspaceScaleApplied(details) {
+    const signature = [details.layoutWidth, details.scale, details.stageWidth, details.stageHeight || ''].join(':');
+    if (signature === lastSettingsScaleSignature) return;
+    lastSettingsScaleSignature = signature;
+    window.dispatchEvent(new window.CustomEvent('pivot:settings-workspace-scale-applied', { detail: details }));
+}
 
 function scheduleSettingsWorkspaceScale() {
     if (settingsWorkspaceScaleRaf) window.cancelAnimationFrame(settingsWorkspaceScaleRaf);
@@ -67,6 +75,7 @@ function updateSettingsWorkspaceScale() {
         canvas.style.setProperty('--settings-canvas-height', `${canvasHeight}px`);
         stage.style.setProperty('--settings-stage-height', `${availableHeight}px`);
         if (content.scrollTop > 0) content.scrollTop = 0;
+        notifySettingsWorkspaceScaleApplied({ layoutWidth, scale, stageWidth, stageHeight: availableHeight });
         return;
     }
     canvas.style.removeProperty('--settings-canvas-height');
@@ -77,6 +86,7 @@ function updateSettingsWorkspaceScale() {
     if (scaledHeight <= availableHeight && content.scrollTop > 0) {
         content.scrollTop = 0;
     }
+    notifySettingsWorkspaceScaleApplied({ layoutWidth, scale, stageWidth, stageHeight: scaledHeight });
 
     // 若样式文件尚未完全就绪，设定短延迟兜底，确保样式挂载并生效后必定再次纠偏画布尺寸
     const isStyleLoaded = window.Pivot?.moduleApi?.('workspaces.styleLoader')?.isWorkspaceStyleLoaded?.('settings');

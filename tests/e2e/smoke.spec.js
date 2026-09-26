@@ -396,6 +396,43 @@ test.describe('Pivot browser smoke', () => {
         });
     });
 
+    test('数据概览首次进入后 Token 趋势按最终容器宽度绘制', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/stats/ops-summary', async route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ isPersonal: true, sessions: 1, messages: 2, attachments: 0, models: 1, tokens: 3000 })
+        }));
+        await page.route('**/api/stats/trend', async route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify(Array.from({ length: 30 }, (_item, index) => ({
+                day: `2026-09-${String(index + 1).padStart(2, '0')}`,
+                tokens: 1000 + index * 100
+            })))
+        }));
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#tab-content-ops')).toBeVisible({ timeout: 15_000 });
+        await expect.poll(() => page.evaluate(() => {
+            const canvas = document.getElementById('usage-trend-chart');
+            const parent = canvas?.parentElement;
+            return {
+                visible: canvas?.style.visibility,
+                width: canvas?.width,
+                expectedWidth: Math.round((parent?.clientWidth || 0) * window.devicePixelRatio),
+                pointCount: canvas ? Array.from(canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data)
+                    .some(channel => channel !== 0) : false
+            };
+        })).toMatchObject({
+            visible: 'visible',
+            pointCount: true
+        });
+        await expect.poll(() => page.evaluate(() => {
+            const canvas = document.getElementById('usage-trend-chart');
+            const parent = canvas?.parentElement;
+            return canvas?.width === Math.round((parent?.clientWidth || 0) * window.devicePixelRatio);
+        })).toBe(true);
+    });
+
     test('工作区样式资源短暂失败时，知识库仍会挂载并保持关闭控件可点击', async ({ page }) => {
         await ensureBrowserSession(page);
         await page.evaluate(() => {

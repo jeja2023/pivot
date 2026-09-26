@@ -172,42 +172,94 @@ window.Pivot.legacy.loadStats = async function(page = pageState.stats || 1) {
     }
 };
 
-const trendChartRetryFrames = {};
-const trendChartRetryCounts = {};
+const trendChartStates = new Map();
+const TREND_CHART_MAX_LAYOUT_RETRIES = 120;
 
-function renderTrendChart(canvasId, data) {
+function buildTrendChartLabelIndexes(pointCount, chartWidth, minimumGap) {
+    if (pointCount < 1) return new Set();
+    if (pointCount === 1) return new Set([0]);
+    const maxLabels = Math.max(2, Math.floor(Math.max(chartWidth, 1) / minimumGap));
+    const labelCount = Math.min(pointCount, maxLabels);
+    const indexes = new Set();
+    for (let i = 0; i < labelCount; i += 1) {
+        indexes.add(Math.round((pointCount - 1) * (i / (labelCount - 1))));
+    }
+    return indexes;
+}
+
+function getTrendChartState(canvasId) {
+    let state = trendChartStates.get(canvasId);
+    if (!state) {
+        state = {
+            data: [],
+            drawFrame: 0,
+            layoutRetries: 0,
+            parent: null,
+            resizeObserver: null,
+            observedWidth: 0
+        };
+        trendChartStates.set(canvasId, state);
+    }
+    return state;
+}
+
+function queueTrendChartRender(canvasId) {
+    const state = trendChartStates.get(canvasId);
+    if (!state) return;
+    if (state.drawFrame) window.cancelAnimationFrame(state.drawFrame);
+    // 设置页会在切换标签后更新缩放画布。连续等待两个绘制帧，确保图表取到
+    // CSS、画布宽度和 transform 都已稳定后的逻辑宽度，避免首帧按过窄容器绘制。
+    state.drawFrame = window.requestAnimationFrame(() => {
+        state.drawFrame = window.requestAnimationFrame(() => {
+            state.drawFrame = 0;
+            drawTrendChart(canvasId);
+        });
+    });
+}
+
+function observeTrendChartContainer(canvasId, canvas) {
+    if (typeof window.ResizeObserver !== 'function') return;
+    const state = getTrendChartState(canvasId);
+    const parent = canvas.parentElement;
+    if (!parent || state.parent === parent) return;
+    state.resizeObserver?.disconnect();
+    state.parent = parent;
+    state.observedWidth = 0;
+    state.resizeObserver = new window.ResizeObserver(entries => {
+        const width = entries[0]?.contentRect?.width || parent.clientWidth || 0;
+        if (Math.abs(width - state.observedWidth) < 1) return;
+        state.observedWidth = width;
+        queueTrendChartRender(canvasId);
+    });
+    state.resizeObserver.observe(parent);
+}
+
+function drawTrendChart(canvasId) {
+    const state = trendChartStates.get(canvasId);
     const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const parentWidth = canvas.parentElement?.clientWidth || 0;
-    // 容器尚未完成布局时（所在标签页处于 hidden、缩放容器宽度变量未就绪等），
-    // parentElement.clientWidth 会读到 0。此处等待容器获得真实未缩放宽度后再绘制。
+    if (!state || !canvas) return;
+    const parentWidth = Math.round(canvas.parentElement?.clientWidth || 0);
+    // 容器在 hidden 状态、样式尚未应用或缩放画布尚未完成时会读到 0。
+    // 数据保存在 state 中，待布局就绪后重试，而不是用错误的最小宽度落盘。
     if (parentWidth < 1) {
-        if (trendChartRetryFrames[canvasId]) window.cancelAnimationFrame(trendChartRetryFrames[canvasId]);
-        trendChartRetryCounts[canvasId] = (trendChartRetryCounts[canvasId] || 0) + 1;
-        if (trendChartRetryCounts[canvasId] <= 60) {
-            trendChartRetryFrames[canvasId] = window.requestAnimationFrame(() => {
-                trendChartRetryFrames[canvasId] = 0;
-                renderTrendChart(canvasId, data);
-            });
-        } else {
-            trendChartRetryCounts[canvasId] = 0;
-        }
+        state.layoutRetries += 1;
+        if (state.layoutRetries <= TREND_CHART_MAX_LAYOUT_RETRIES) queueTrendChartRender(canvasId);
         return;
     }
-    trendChartRetryCounts[canvasId] = 0;
+    state.layoutRetries = 0;
 
     const ctx = canvas.getContext('2d');
-    const width = Math.max(parentWidth, 320);
+    const width = parentWidth;
     const height = Number(canvas.getAttribute('height')) || 150;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.max(1, Math.round(height * ratio));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    ctx.scale(ratio, ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    const chartData = Array.isArray(data) ? data : [];
+    const chartData = state.data;
     const values = chartData.map(d => Number(d?.tokens) || 0);
     const labels = chartData.map(d => String(d?.day || '').slice(5));
     const max = Math.max(...values, 1);
@@ -232,6 +284,7 @@ function renderTrendChart(canvasId, data) {
         ctx.fillStyle = '#6b7280';
         ctx.font = '13px sans-serif';
         ctx.fillText('暂无趋势数据', padLeft, height / 2);
+        canvas.style.visibility = 'visible';
         return;
     }
 
@@ -260,10 +313,14 @@ function renderTrendChart(canvasId, data) {
         ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
         ctx.fill();
     });
+    // 30 个日期的数值在窄窗口中无法同时保持可读。只保留均匀抽样的浮层，
+    // 其余点仍通过折线和标记完整呈现，避免数值标签相互堆叠。
+    const valueLabelIndexes = buildTrendChartLabelIndexes(values.length, chartW, 76);
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    points.forEach(p => {
+    points.forEach((p, index) => {
+        if (!valueLabelIndexes.has(index)) return;
         const text = formatTokenCount(p.value);
         const y = Math.max(14, p.y - 7);
         const textWidth = ctx.measureText(text).width;
@@ -272,13 +329,7 @@ function renderTrendChart(canvasId, data) {
         ctx.fillStyle = '#047857';
         ctx.fillText(text, p.x, y);
     });
-    const labelCount = Math.min(values.length, Math.max(4, Math.floor(width / 140)));
-    const labelIndexes = new Set([0, values.length - 1]);
-    if (labelCount > 2) {
-        for (let i = 1; i < labelCount - 1; i += 1) {
-            labelIndexes.add(Math.round((values.length - 1) * (i / (labelCount - 1))));
-        }
-    }
+    const labelIndexes = buildTrendChartLabelIndexes(values.length, chartW, 110);
     ctx.fillStyle = '#6b7280';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
@@ -291,7 +342,27 @@ function renderTrendChart(canvasId, data) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(formatTokenCount(max), padLeft, 14);
+    canvas.style.visibility = 'visible';
 }
+
+function renderTrendChart(canvasId, data) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const state = getTrendChartState(canvasId);
+    state.data = Array.isArray(data) ? data : [];
+    // 尚未得到稳定尺寸前保持空白，不能让用户看到以错误宽度绘制的压缩图表。
+    canvas.style.visibility = 'hidden';
+    observeTrendChartContainer(canvasId, canvas);
+    queueTrendChartRender(canvasId);
+}
+
+window.addEventListener('resize', () => {
+    trendChartStates.forEach((_state, canvasId) => queueTrendChartRender(canvasId));
+});
+
+window.addEventListener('pivot:settings-workspace-scale-applied', () => {
+    trendChartStates.forEach((_state, canvasId) => queueTrendChartRender(canvasId));
+});
 
 window.Pivot.legacy.exportDetails = () => {
     const { user, model, role, startDate, endDate } = getDetailsFilterParams();
