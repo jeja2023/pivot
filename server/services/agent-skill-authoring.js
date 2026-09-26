@@ -102,7 +102,7 @@ async function createSkillDraftFromRun(user, runId) {
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [String(runId || ''), user.id]);
     if (!run) return null;
-    if (!['completed', 'completed_with_errors'].includes(String(run.status))) {
+    if (!['completed', 'completed_with_errors', 'partial'].includes(String(run.status))) {
         throw authoringError('只能从已完成的任务创建 Skill 草稿。', 'AGENT_SKILL_DRAFT_RUN_NOT_COMPLETED', 409);
     }
     const steps = await query(`

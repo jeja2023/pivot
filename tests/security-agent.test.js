@@ -1879,15 +1879,16 @@ test('normalizeStrategy 接受合法值并将未知值回退到 fixed', () => {
     assert.equal(modelRouter.normalizeStrategy(null), 'fixed');
 });
 
-test('listStrategies 返回完整 6 项策略（含 auto-escalate）', () => {
+test('listStrategies 返回完整 7 项策略（含质量优先与 auto-escalate）', () => {
     const list = modelRouter.listStrategies();
     const codes = list.map(item => item.code).sort();
-    assert.deepEqual(codes, ['auto-context', 'auto-cost', 'auto-escalate', 'auto-load', 'auto-vision', 'fixed']);
+    assert.deepEqual(codes, ['auto-context', 'auto-cost', 'auto-escalate', 'auto-load', 'auto-quality', 'auto-vision', 'fixed']);
     assert.ok(list.every(item => item.label && item.description));
 });
 
 test('normalizeStrategy 接受 auto-escalate', () => {
     assert.equal(modelRouter.normalizeStrategy('auto-escalate'), 'auto-escalate');
+    assert.equal(modelRouter.normalizeStrategy('auto-quality'), 'auto-quality');
 });
 
 test('assessConfidence 在低置信场景下返回 confident=false 与具体 reason', () => {

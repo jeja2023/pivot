@@ -3,7 +3,9 @@ const test = require('node:test');
 const { execute, queryOne } = require('../server/db/client');
 const {
     acknowledgeAgentControlMessage,
+    applyAgentControlMessages,
     claimAgentControlMessages,
+    listAppliedAgentControlMessages,
     listAgentControlMessages,
     sendAgentControlMessage
 } = require('../server/services/agent-control');
@@ -41,12 +43,31 @@ test('AgentControl delivers parent-child messages with user isolation and acknow
 
         const claimed = await claimAgentControlMessages(childId, user);
         assert.equal(claimed.length, 1);
-        assert.equal(claimed[0].status, 'delivered');
+        assert.equal(claimed[0].status, 'claimed');
         assert.equal((await claimAgentControlMessages(childId, user)).length, 0);
 
-        const acknowledged = await acknowledgeAgentControlMessage(created.message_id, user, childId);
-        assert.equal(acknowledged.status, 'acknowledged');
+        const applied = await applyAgentControlMessages(childId, user, claimed);
+        assert.equal(applied.length, 1);
+        assert.equal(applied[0].status, 'acknowledged');
         assert.equal((await listAgentControlMessages(childId, user, { status: 'acknowledged' })).length, 1);
+        assert.equal((await listAppliedAgentControlMessages(childId, user)).length, 1);
+
+        const run = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [childId]);
+        const metadata = typeof run.metadata === 'string' ? JSON.parse(run.metadata) : run.metadata;
+        assert.deepEqual(metadata.controlApplications.messageIds, [created.message_id]);
+        assert.equal(metadata.taskContract.revision, 2);
+        assert.ok(metadata.taskContract.constraints.includes('优先核对证据'));
+        assert.equal(metadata.workingState.constraints.at(-1).text, '优先核对证据');
+
+        const manual = await sendAgentControlMessage({
+            user,
+            fromRunId: parentId,
+            toRunId: childId,
+            type: 'request',
+            payload: { instruction: '手动确认' }
+        });
+        const acknowledged = await acknowledgeAgentControlMessage(manual.message_id, user, childId);
+        assert.equal(acknowledged.status, 'acknowledged');
 
         await assert.rejects(
             () => sendAgentControlMessage({ user: otherUser, fromRunId: otherRunId, toRunId: childId, payload: { text: 'no' } }),
@@ -55,6 +76,72 @@ test('AgentControl delivers parent-child messages with user isolation and acknow
     } finally {
         await execute('DELETE FROM agent_control_messages WHERE from_run_id IN (?, ?) OR to_run_id IN (?, ?)', [parentId, childId, parentId, childId]);
         await execute('DELETE FROM agent_runs WHERE id IN (?, ?, ?)', [parentId, childId, otherRunId]);
+    }
+});
+
+test('AgentControl reclaims an expired claimed command instead of losing it', async () => {
+    const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
+    assert.ok(user?.id);
+    const suffix = `${process.pid}-${Date.now()}-lease`;
+    const parentId = `control-lease-parent-${suffix}`;
+    const childId = `control-lease-child-${suffix}`;
+    const now = '2026-08-22 12:00:00';
+    const insert = async (id, parentRunId = null) => execute(`
+        INSERT INTO agent_runs (id, user_id, title, goal, status, parent_run_id, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'queued', ?, '{}', ?, ?)
+    `, [id, user.id, id, id, parentRunId, now, now]);
+    await insert(parentId);
+    await insert(childId, parentId);
+    try {
+        await sendAgentControlMessage({ user, fromRunId: parentId, toRunId: childId, payload: { instruction: '不能丢失' } });
+        const first = await claimAgentControlMessages(childId, user);
+        assert.equal(first.length, 1);
+        await execute(`
+            UPDATE agent_control_messages
+            SET claim_expires_at = NOW() - INTERVAL '1 second'
+            WHERE message_id = ?
+        `, [first[0].message_id]);
+        const second = await claimAgentControlMessages(childId, user);
+        assert.equal(second.length, 1);
+        assert.notEqual(second[0].claim_token, first[0].claim_token);
+        const applied = await applyAgentControlMessages(childId, user, second);
+        assert.equal(applied.length, 1);
+    } finally {
+        await execute('DELETE FROM agent_control_messages WHERE from_run_id IN (?, ?) OR to_run_id IN (?, ?)', [parentId, childId, parentId, childId]);
+        await execute('DELETE FROM agent_runs WHERE id IN (?, ?)', [parentId, childId]);
+    }
+});
+
+test('AgentControl retains non-secret long instructions and rejects oversized payloads', async () => {
+    const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
+    assert.ok(user?.id);
+    const suffix = `${process.pid}-${Date.now()}-payload`;
+    const parentId = `control-payload-parent-${suffix}`;
+    const childId = `control-payload-child-${suffix}`;
+    const now = '2026-08-22 12:00:00';
+    const insert = async (id, parentRunId = null) => execute(`
+        INSERT INTO agent_runs (id, user_id, title, goal, status, parent_run_id, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'queued', ?, '{}', ?, ?)
+    `, [id, user.id, id, id, parentRunId, now, now]);
+    await insert(parentId);
+    await insert(childId, parentId);
+    try {
+        const instruction = '长指令'.repeat(1500);
+        const message = await sendAgentControlMessage({
+            user,
+            fromRunId: parentId,
+            toRunId: childId,
+            payload: { instruction, token: 'must-redact' }
+        });
+        assert.equal(message.payload.instruction, instruction);
+        assert.equal(message.payload.token, '[已脱敏]');
+        await assert.rejects(
+            () => sendAgentControlMessage({ user, fromRunId: parentId, toRunId: childId, payload: { instruction: 'x'.repeat(120001) } }),
+            error => error.code === 'AGENT_CONTROL_PAYLOAD_TOO_LARGE'
+        );
+    } finally {
+        await execute('DELETE FROM agent_control_messages WHERE from_run_id IN (?, ?) OR to_run_id IN (?, ?)', [parentId, childId, parentId, childId]);
+        await execute('DELETE FROM agent_runs WHERE id IN (?, ?)', [parentId, childId]);
     }
 });
 

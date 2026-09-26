@@ -182,6 +182,32 @@ test('智能体规则评分同时覆盖内容、JSON 结构、耗时与 Token', 
     assert.equal(graded.rules.every(rule => rule.passed), true);
 });
 
+test('评测硬门禁不会被其他规则的平均分抵消', () => {
+    const graded = gradeAgentOutput({
+        run: { status: 'completed', final_answer: 'A B C D FORBIDDEN' },
+        evalCase: {
+            assertions: {
+                requiredPhrases: ['A', 'B', 'C', 'D'],
+                forbiddenPhrases: ['FORBIDDEN']
+            }
+        },
+        passThreshold: 80
+    });
+    assert.equal(graded.score, 83);
+    assert.equal(graded.passed, false);
+    assert.deepEqual(graded.hardFailures, ['forbidden_phrase']);
+});
+
+test('无业务断言的评测只作为冒烟检查，不计入质量通过', () => {
+    const graded = gradeAgentOutput({
+        run: { status: 'completed', final_answer: '任意非空文本' },
+        evalCase: {}
+    });
+    assert.equal(graded.smokeOnly, true);
+    assert.equal(graded.qualityEligible, false);
+    assert.equal(graded.passed, false);
+});
+
 test('评测集按用户隔离，真实批次可回收评分且编辑不破坏历史结果', async () => {
     const suffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const userInfo = db.prepare(`

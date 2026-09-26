@@ -8,7 +8,14 @@ const DAG_PERSISTED_OUTPUT_MAX_CHARS = Math.max(
     Math.min(Number.parseInt(process.env.AGENT_DAG_OUTPUT_MAX_CHARS || '8000000', 10) || 8000000, 20000000)
 );
 
-function preparePersistedDagOutput(value) {
+function outputLimit(options = {}) {
+    const requested = Number.parseInt(options.maxChars ?? options.max_chars, 10);
+    if (!Number.isSafeInteger(requested) || requested <= 0) return DAG_PERSISTED_OUTPUT_MAX_CHARS;
+    return Math.min(Math.max(requested, 120000), DAG_PERSISTED_OUTPUT_MAX_CHARS);
+}
+
+function preparePersistedDagOutput(value, options = {}) {
+    const maxChars = outputLimit(options);
     let text = '';
     let serialized = '';
     try {
@@ -16,10 +23,10 @@ function preparePersistedDagOutput(value) {
         if (serialized === undefined) serialized = 'null';
         text = typeof value === 'string' ? value : serialized;
     } catch (error) {
-        const fallback = clampText(value, DAG_PERSISTED_OUTPUT_MAX_CHARS);
+        const fallback = clampText(value, maxChars);
         return { value: fallback, serialized: JSON.stringify(fallback) };
     }
-    if (text.length <= DAG_PERSISTED_OUTPUT_MAX_CHARS) return { value, serialized };
+    if (text.length <= maxChars) return { value, serialized };
     const payload = value?.structuredContent && typeof value.structuredContent === 'object'
         ? value.structuredContent
         : value;
@@ -28,7 +35,7 @@ function preparePersistedDagOutput(value) {
         const truncated = {
             __partial: true,
             originalChars: text.length,
-            text: `${text.slice(0, DAG_PERSISTED_OUTPUT_MAX_CHARS)}\n...[truncated]`,
+            text: `${text.slice(0, maxChars)}\n...[truncated]`,
             warning: '节点完整输出超过持久化上限，恢复运行时只能使用截断预览。'
         };
         return { value: truncated, serialized: JSON.stringify(truncated), fullSerialized: serialized };
@@ -38,11 +45,11 @@ function preparePersistedDagOutput(value) {
     let oversizedRowCount = 0;
     for (const row of rows) {
         const rowText = JSON.stringify(row);
-        if (rowText.length > DAG_PERSISTED_OUTPUT_MAX_CHARS - 2000) {
+        if (rowText.length > maxChars - 2000) {
             oversizedRowCount += 1;
             continue;
         }
-        if (used + rowText.length > DAG_PERSISTED_OUTPUT_MAX_CHARS - 2000) break;
+        if (used + rowText.length > maxChars - 2000) break;
         keptRows.push(row);
         used += rowText.length;
     }
@@ -84,8 +91,8 @@ function attachDagOutputReference(preview, object) {
     };
 }
 
-async function persistDagOutput(value, { user = {}, retentionDays = 30 } = {}) {
-    const prepared = preparePersistedDagOutput(value);
+async function persistDagOutput(value, { user = {}, retentionDays = 30, maxChars } = {}) {
+    const prepared = preparePersistedDagOutput(value, { maxChars });
     if (!isPersistedDagOutputPartial(prepared.value)) {
         return { ...prepared, complete: true, outputRef: null };
     }
@@ -143,8 +150,8 @@ async function resolvePersistedDagOutput(value, { user = {} } = {}) {
     }
 }
 
-function persistedDagOutput(value) {
-    return preparePersistedDagOutput(value).value;
+function persistedDagOutput(value, options = {}) {
+    return preparePersistedDagOutput(value, options).value;
 }
 
 function compactPreparedDagOutput(value, serialized, max = 12000) {

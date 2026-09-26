@@ -62,5 +62,5 @@ test('运行时仅在兜底值符合输出契约时继续下游，并保留错�
     assert.equal(persisted.get('unstable').errorInfo.category, 'timeout');
     assert.equal(persisted.get('unstable').errorInfo.fallbackApplied, true);
     assert.equal(persisted.get('delivery').status, 'completed');
-    assert.equal(updates.at(-1).status, 'completed_with_errors');
+    assert.equal(updates.at(-1).status, 'partial');
 });

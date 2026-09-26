@@ -197,7 +197,7 @@ async function runPgWriteQuery(pool, sql, params) {
     let released = false;
     let timer = null;
     let timedOut = false;
-    const release = (err) => {
+    const releaseClient = (err) => {
         if (released) return;
         released = true;
         try { client.release(err); } catch (_) {}
@@ -209,9 +209,9 @@ async function runPgWriteQuery(pool, sql, params) {
             timedOut = true;
             const error = new Error(`数据库写入超时（已等待 ${WRITE_QUERY_TIMEOUT_MS} 毫秒）`);
             error.code = 'PG_WRITE_QUEUE_QUERY_TIMEOUT';
-            // release(error) 会让 pg-pool 移除连接；主动断开 socket 可避免半开连接继续占池。
+            // releaseClient(error) 会让 pg-pool 移除连接；主动断开 socket 可避免半开连接继续占池。
             try { client.connection?.stream?.destroy(); } catch (_) {}
-            release(error);
+            releaseClient(error);
             reject(error);
         }, WRITE_QUERY_TIMEOUT_MS);
         timer.unref?.();
@@ -220,11 +220,11 @@ async function runPgWriteQuery(pool, sql, params) {
     try {
         return await Promise.race([queryPromise, timeoutPromise]);
     } catch (err) {
-        if (!timedOut) release();
+        if (!timedOut) releaseClient();
         throw err;
     } finally {
         if (timer) clearTimeout(timer);
-        if (!released) release();
+        if (!released) releaseClient();
     }
 }
 

@@ -7,19 +7,23 @@ const { BUILTIN_TOOL_CAPABILITIES } = require('../server/services/agent-tool-cap
 const { buildPlatformImPayload, deliverIm } = require('../server/services/agent-channel-adapters');
 const { normalizeBindingInput } = require('../server/services/agent-channels');
 
+process.env.NODE_ENV = 'test';
+process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST = 'true';
+
 test('workflow.foreach executes items in a separate controlled worker with bounded output', async () => {
     const result = await executeBuiltInTool('workflow.foreach', {
         items: [1, 2, 3],
         code: 'return item * 2;',
         concurrency: 2,
         retryLimit: 0
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-worker-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-worker-test' });
     assert.deepEqual(result.items, [2, 4, 6]);
     assert.equal(result.count, 3);
     assert.equal(result.errors.length, 0);
     assert.equal(result.worker.code, 0);
-    const expectedNetworkIsolation = process.platform === 'linux' ? 'network-namespace-requested' : 'policy-enforced';
+    const expectedNetworkIsolation = process.platform === 'linux' ? 'namespace_requested' : 'not_enforced';
     assert.equal(result.worker.isolation.networkIsolation, expectedNetworkIsolation);
+    assert.equal(result.worker.isolation.enforcement, 'best_effort');
     assert.equal(result.audit.requestedConcurrency, 2);
     assert.equal(result.audit.maxConcurrency, 2);
     assert.equal(result.audit.completedCount, 3);
@@ -33,7 +37,7 @@ test('workflow.foreach isolates item errors and retries within the worker', asyn
         concurrency: 1,
         stopOnError: false,
         retryLimit: 1
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-error-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-error-test' });
     assert.deepEqual(result.items, [1]);
     assert.equal(result.errors.length, 1);
     assert.equal(result.errors[0].attempts, 2);
@@ -47,14 +51,14 @@ test('workflow.foreach enforces item timeout and per-item output limits', async 
         code: 'while (true) {}',
         itemTimeoutMs: 50,
         stopOnError: false
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-timeout-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-timeout-test' });
     assert.equal(timeoutResult.errors[0].code, 'AGENT_FOREACH_ITEM_TIMEOUT');
 
     const outputResult = await executeBuiltInTool('workflow.foreach', {
         items: [1],
         code: 'return "x".repeat(200001);',
         stopOnError: false
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-output-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-output-test' });
     assert.equal(outputResult.errors[0].code, 'AGENT_FOREACH_ITEM_OUTPUT_LIMIT');
 
     const totalOutputResult = await executeBuiltInTool('workflow.foreach', {
@@ -63,7 +67,7 @@ test('workflow.foreach enforces item timeout and per-item output limits', async 
         concurrency: 4,
         stopOnError: false,
         itemTimeoutMs: 5000
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-total-output-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-total-output-test' });
     assert.ok(totalOutputResult.errors.some(error => error.code === 'AGENT_FOREACH_TOTAL_OUTPUT_LIMIT'));
 });
 
@@ -71,7 +75,7 @@ test('workflow.foreach worker does not expose the host process or require chain'
     const result = await executeBuiltInTool('workflow.foreach', {
         items: [1],
         code: 'return typeof process + ":" + typeof require + ":" + this.constructor.constructor("return typeof process")();'
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-isolation-test' });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-isolation-test' });
     assert.deepEqual(result.items, ['undefined:undefined:undefined']);
 });
 
@@ -92,7 +96,7 @@ test('workflow.foreach worker responds to cancellation', async () => {
         items: [1],
         code: 'while (true) {}',
         itemTimeoutMs: 5000
-    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, runId: 'foreach-cancel-test', signal: controller.signal });
+    }, { id: 1 }, { sandboxExecution: true, approvalGranted: true, allowUnsafeLocal: true, runId: 'foreach-cancel-test', signal: controller.signal });
     setTimeout(() => controller.abort(), 50);
     await assert.rejects(pending, error => ['AGENT_SANDBOX_CANCELLED', 'AGENT_RUN_CANCELLED', 'ABORT_ERR'].includes(error.code) || error.name === 'AbortError');
 });

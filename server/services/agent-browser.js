@@ -218,6 +218,127 @@ async function clickBrowserTarget(page, target, options = {}) {
     return { method: found.method };
 }
 
+async function requireDomBrowserTarget(page, target, options = {}) {
+    const found = await locateBrowserTarget(page, target, { ...options, visionLocator: null });
+    if (found.method !== 'dom') {
+        const error = new Error('填写、选择和等待只能使用可验证的 DOM 目标，不能使用视觉坐标。');
+        error.code = 'AGENT_BROWSER_DOM_TARGET_REQUIRED';
+        error.category = 'policy';
+        throw error;
+    }
+    return found.locator;
+}
+
+async function assertWritableBrowserField(locator) {
+    const details = await locator.evaluate(element => ({
+        tagName: String(element.tagName || '').toLowerCase(),
+        type: String(element.getAttribute('type') || '').toLowerCase(),
+        autocomplete: String(element.getAttribute('autocomplete') || '').toLowerCase(),
+        disabled: Boolean(element.disabled),
+        readOnly: Boolean(element.readOnly)
+    }));
+    if (details.tagName !== 'input' && details.tagName !== 'textarea') {
+        const error = new Error('当前目标不是可填写的输入框。');
+        error.code = 'AGENT_BROWSER_FIELD_INVALID';
+        error.category = 'schema';
+        throw error;
+    }
+    if (details.type === 'password' || /(?:password|current-password|new-password)/.test(details.autocomplete)) {
+        const error = new Error('浏览器 Agent 不会读取或填写密码及凭证字段，请由用户接管登录。');
+        error.code = 'AGENT_BROWSER_CREDENTIAL_ACCESS_DENIED';
+        error.category = 'policy';
+        throw error;
+    }
+    if (details.disabled || details.readOnly) {
+        const error = new Error('当前输入框不可编辑。');
+        error.code = 'AGENT_BROWSER_FIELD_READONLY';
+        error.category = 'schema';
+        throw error;
+    }
+    return details;
+}
+
+async function fillBrowserTarget(page, target, value, options = {}) {
+    if (value === undefined || value === null) {
+        const error = new Error('浏览器填写操作需要明确提供 value。');
+        error.code = 'AGENT_BROWSER_FILL_VALUE_REQUIRED';
+        error.category = 'schema';
+        throw error;
+    }
+    const locator = await requireDomBrowserTarget(page, target, options);
+    await assertWritableBrowserField(locator);
+    const text = String(value ?? '');
+    if (text.length > 16000) {
+        const error = new Error('浏览器表单填写内容超过 16000 字符上限。');
+        error.code = 'AGENT_BROWSER_FILL_TOO_LARGE';
+        error.category = 'resource';
+        throw error;
+    }
+    await locator.fill(text);
+    return { method: 'dom', chars: text.length };
+}
+
+async function selectBrowserTarget(page, target, value, options = {}) {
+    const locator = await requireDomBrowserTarget(page, target, options);
+    const tagName = await locator.evaluate(element => String(element.tagName || '').toLowerCase());
+    if (tagName !== 'select') {
+        const error = new Error('当前目标不是选择框。');
+        error.code = 'AGENT_BROWSER_SELECT_INVALID';
+        error.category = 'schema';
+        throw error;
+    }
+    const option = value && typeof value === 'object' && !Array.isArray(value)
+        ? {
+            ...(value.value !== undefined ? { value: String(value.value) } : {}),
+            ...(value.label !== undefined ? { label: String(value.label) } : {}),
+            ...(Number.isSafeInteger(Number(value.index)) ? { index: Number(value.index) } : {})
+        }
+        : { value: String(value ?? '') };
+    if (!Object.keys(option).length || (!option.value && !option.label && option.index === undefined)) {
+        const error = new Error('请选择有效的选项值、名称或序号。');
+        error.code = 'AGENT_BROWSER_SELECT_VALUE_REQUIRED';
+        error.category = 'schema';
+        throw error;
+    }
+    const selected = await locator.selectOption(option);
+    return { method: 'dom', selected: selected.slice(0, 20) };
+}
+
+async function waitForBrowserTarget(page, target, options = {}) {
+    const timeoutMs = Math.min(Math.max(Number(options.timeoutMs) || 5000, 100), 30000);
+    if (!target || typeof target !== 'object' || !Object.keys(target).length) {
+        await page.waitForTimeout(timeoutMs);
+        return { method: 'timer', timeoutMs };
+    }
+    const locator = await requireDomBrowserTarget(page, target, options);
+    await locator.waitFor({ state: options.state || 'visible', timeout: timeoutMs });
+    return { method: 'dom', timeoutMs };
+}
+
+async function snapshotBrowserPage(page, { limit = 80 } = {}) {
+    const controls = await page.locator('a, button, input, select, textarea, [role="button"], [role="link"]').evaluateAll((elements, max) => elements
+        .slice(0, max)
+        .map((element, index) => {
+            const tag = String(element.tagName || '').toLowerCase();
+            const text = String(element.innerText || element.getAttribute('aria-label') || element.getAttribute('name') || element.getAttribute('placeholder') || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+            return {
+                index,
+                tag,
+                role: String(element.getAttribute('role') || '').slice(0, 80),
+                text,
+                type: tag === 'input' ? String(element.getAttribute('type') || 'text').toLowerCase() : '',
+                disabled: Boolean(element.disabled),
+                readOnly: Boolean(element.readOnly)
+            };
+        })
+        .filter(item => item.type !== 'password'), Math.max(1, Math.min(Number(limit) || 80, 160)));
+    return {
+        url: page.url(),
+        title: await page.title(),
+        controls
+    };
+}
+
 async function evaluateSafe(page, expression, arg) {
     assertSafeBrowserEvaluation(expression);
     return page.evaluate(expression, arg);
@@ -237,10 +358,14 @@ module.exports = {
     createControlledLoginFlow,
     createAgentBrowserContext,
     createIsolatedProfile,
+    fillBrowserTarget,
     attachBrowserNetworkGuards,
     evaluateSafe,
     isHeadlessEnvironment,
     locateBrowserTarget,
     resolveChromiumExecutable,
+    selectBrowserTarget,
+    snapshotBrowserPage,
+    waitForBrowserTarget,
     isAgentBrowserRuntimeAvailable
 };

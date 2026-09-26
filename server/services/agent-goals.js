@@ -17,6 +17,7 @@ const {
 
 const GOAL_STATUSES = Object.freeze(['active', 'paused', 'suspended', 'completed', 'failed', 'deleted']);
 const GOAL_TRIGGER_TYPES = Object.freeze(['manual', 'timer', 'webhook', 'file', 'database']);
+const GOAL_KINDS = Object.freeze(['scheduled_job', 'monitor', 'goal']);
 const MAX_GOALS_PER_USER = 100;
 const MAX_FAILURES = 10;
 const GOAL_CLAIM_LEASE_MS = Math.max(
@@ -130,6 +131,9 @@ function normalizeGoalInput(body = {}, current = null) {
     return {
         title,
         goal,
+        kind: GOAL_KINDS.includes(String(source.kind || source.goalKind || source.goal_kind || ''))
+            ? String(source.kind || source.goalKind || source.goal_kind)
+            : 'scheduled_job',
         priority: Math.max(-100, Math.min(100, Number.parseInt(source.priority, 10) || 0)),
         status: source.status === 'paused' ? 'paused' : 'active',
         triggerSpec,
@@ -176,6 +180,7 @@ function parseRow(row) {
         tenantId: row.tenant_id ? Number(row.tenant_id) : null,
         title: row.title,
         goal: row.goal,
+        kind: GOAL_KINDS.includes(String(row.goal_kind || '')) ? row.goal_kind : 'scheduled_job',
         priority: Number(row.priority || 0),
         status: row.status,
         triggerSpec: parseJson(row.trigger_spec, {}),
@@ -254,9 +259,9 @@ async function createAgentGoal(user, body = {}, options = {}) {
     const id = `goal_${crypto.randomUUID()}`;
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
     await execute(`
-        INSERT INTO agent_goals (id, user_id, tenant_id, title, goal, priority, status, trigger_spec, authorization_spec, budget_spec, cooldown_seconds, max_failures, next_run_at, version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, 1, ?::timestamptz, ?::timestamptz)
-    `, [id, user.id, tenantId, data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, now, now]);
+        INSERT INTO agent_goals (id, user_id, tenant_id, title, goal, goal_kind, priority, status, trigger_spec, authorization_spec, budget_spec, cooldown_seconds, max_failures, next_run_at, version, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, 1, ?::timestamptz, ?::timestamptz)
+    `, [id, user.id, tenantId, data.title, data.goal, data.kind, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, now, now]);
     return { goal: parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [id])), token };
 }
 
@@ -273,7 +278,7 @@ async function updateAgentGoal(id, user, body = {}) {
     await assertGoalDeliveryBindings(user, data.authorizationSpec.deliveryBindingIds);
     const now = getBeijingTimestamp();
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
-    await execute(`UPDATE agent_goals SET title = ?, goal = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?::timestamptz, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ?::timestamptz ELSE NULL END, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
+    await execute(`UPDATE agent_goals SET title = ?, goal = ?, goal_kind = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?::timestamptz, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ?::timestamptz ELSE NULL END, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.kind, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
     return parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [current.id]));
 }
 
@@ -375,6 +380,7 @@ async function runAgentGoalNow(goal, user, options = {}) {
         metadata: {
             source: 'goal',
             goalId: goal.id,
+            goalKind: GOAL_KINDS.includes(String(goal.goal_kind || goal.goalKind || '')) ? (goal.goal_kind || goal.goalKind) : 'scheduled_job',
             goalVersion: goal.version,
             goalSnapshot: {
                 modelId: auth.modelId || null,
@@ -400,7 +406,9 @@ async function runAgentGoalNow(goal, user, options = {}) {
     const claimToken = String(options.claimToken || '').trim();
     const claimClause = claimToken ? ' AND claim_token = ?' : '';
     await execute(`UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?${claimClause}`, [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id, ...(claimToken ? [claimToken] : [])]);
-    try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
+    if (String(goal.goal_kind || goal.goalKind || 'scheduled_job') !== 'monitor') {
+        try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
+    }
     return created;
 }
 
@@ -408,11 +416,24 @@ async function deliverGoalRunResult(runId, status = '') {
     const run = await queryOne('SELECT id, user_id, tenant_id, title, final_answer, error_message, metadata FROM agent_runs WHERE id = ?', [String(runId || '')]);
     const metadata = parseJson(run?.metadata, {});
     if (!run || metadata.source !== 'goal') return [];
-    const bindingIds = normalizeStringList(metadata.goalDelivery?.bindingIds, 10, 128);
-    if (!bindingIds.length) return [];
+    const goal = await queryOne('SELECT id, goal_kind, last_result_digest FROM agent_goals WHERE id = ? AND user_id = ?', [metadata.goalId, run.user_id]);
+    const goalKind = GOAL_KINDS.includes(String(goal?.goal_kind || metadata.goalKind || ''))
+        ? String(goal?.goal_kind || metadata.goalKind)
+        : 'scheduled_job';
     const body = String(run.final_answer || '').trim() || (String(status) === 'cancelled'
         ? '持续目标本次运行已停止。'
         : `持续目标运行失败：${String(run.error_message || '未生成可用结果。').slice(0, 1600)}`);
+    if (goalKind === 'monitor' && goal?.id) {
+        const digest = crypto.createHash('sha256').update(`${String(status || '')}\n${body}`).digest('hex');
+        const changed = await execute(`
+            UPDATE agent_goals
+            SET last_result_digest = ?, updated_at = ?
+            WHERE id = ? AND COALESCE(last_result_digest, '') <> ?
+        `, [digest, getBeijingTimestamp(), goal.id, digest]);
+        if (!changed) return [];
+    }
+    const bindingIds = normalizeStringList(metadata.goalDelivery?.bindingIds, 10, 128);
+    if (!bindingIds.length) return [];
     const user = { id: run.user_id, tenant_id: run.tenant_id || null };
     return await Promise.all(bindingIds.map(bindingId => enqueueChannelDelivery(user, {
         bindingId,
@@ -596,7 +617,8 @@ async function recordAgentGoalRunOutcome(runId, outcome) {
     const success = String(outcome || '') === 'success';
     const failures = success ? 0 : Number(goal.failure_count || 0) + 1;
     const paused = !success && failures >= Number(goal.max_failures || 5);
-    await execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? THEN NULL ELSE next_run_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ?::timestamptz WHERE id = ?", [failures, paused, paused, success, getBeijingTimestamp(), goal.id]);
+    const completedGoal = success && String(goal.goal_kind || '') === 'goal';
+    await execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'completed' WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? OR ? THEN NULL ELSE next_run_at END, ended_at = CASE WHEN ? THEN ?::timestamptz ELSE ended_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ?::timestamptz WHERE id = ?", [failures, completedGoal, paused, completedGoal, paused, completedGoal, getBeijingTimestamp(), success, getBeijingTimestamp(), goal.id]);
     return { goalId: goal.id, failureCount: failures, paused };
 }
 

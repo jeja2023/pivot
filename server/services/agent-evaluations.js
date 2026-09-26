@@ -8,7 +8,7 @@ const {
     validateValueAgainstSchema
 } = require('./agent-dag-contracts');
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'cancelled']);
 const MAX_CASES_PER_SUITE = 50;
 
 function parseJson(value, fallback) {
@@ -43,7 +43,9 @@ function normalizeAssertions(value = {}) {
         maxDurationMs: clampInt(source.maxDurationMs || source.max_duration_ms, 0, 0, 24 * 60 * 60 * 1000),
         maxTokens: clampInt(source.maxTokens || source.max_tokens, 0, 0, 10000000),
         requireJson: source.requireJson === true || source.require_json === true,
-        outputSchema: schemaHasRules(outputSchema) ? outputSchema : {}
+        outputSchema: schemaHasRules(outputSchema) ? outputSchema : {},
+        // 保持 false 缺省以维持历史冻结评测快照的逐字节兼容性；打分器在该标志缺省时仍将空断言视为仅冒烟。
+        ...((source.smokeOnly === true || source.smoke_only === true) ? { smokeOnly: true } : {})
     };
 }
 
@@ -304,8 +306,27 @@ function parseOutputForSchema(output) {
     }
 }
 
-function addRule(rules, key, label, passed, actual = '') {
-    rules.push({ key, label, passed: Boolean(passed), actual: String(actual || '').slice(0, 500) });
+function addRule(rules, key, label, passed, actual = '', options = {}) {
+    rules.push({
+        key,
+        label,
+        passed: Boolean(passed),
+        actual: String(actual || '').slice(0, 500),
+        hard: options.hard === true
+    });
+}
+
+function hasQualityAssertion(assertions = {}, evalCase = {}) {
+    return Boolean(
+        String(evalCase.expected_output || evalCase.expectedOutput || '').trim()
+        || assertions.requiredPhrases?.length
+        || assertions.forbiddenPhrases?.length
+        || assertions.minLength > 0
+        || assertions.maxDurationMs > 0
+        || assertions.maxTokens > 0
+        || assertions.requireJson
+        || schemaHasRules(assertions.outputSchema)
+    );
 }
 
 function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) {
@@ -313,12 +334,14 @@ function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) 
     const output = String(run.final_answer || '');
     const rules = [];
     const completed = run.status === 'completed';
-    addRule(rules, 'execution', '任务成功完成', completed, run.status || 'unknown');
+    const qualityEligible = hasQualityAssertion(assertions, evalCase);
+    const smokeOnly = assertions.smokeOnly === true || !qualityEligible;
+    addRule(rules, 'execution', '任务成功完成', completed, run.status || 'unknown', { hard: true });
     assertions.requiredPhrases.forEach(phrase => {
         addRule(rules, 'required_phrase', `包含“${phrase}”`, output.includes(phrase), phrase);
     });
     assertions.forbiddenPhrases.forEach(phrase => {
-        addRule(rules, 'forbidden_phrase', `不包含“${phrase}”`, !output.includes(phrase), phrase);
+        addRule(rules, 'forbidden_phrase', `不包含“${phrase}”`, !output.includes(phrase), phrase, { hard: true });
     });
     if (evalCase.expected_output) {
         addRule(rules, 'expected_output', '包含参考答案要点', output.includes(String(evalCase.expected_output).trim()), evalCase.expected_output);
@@ -336,19 +359,23 @@ function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) 
     }
     const parsedOutput = parseOutputForSchema(output);
     if (assertions.requireJson) {
-        addRule(rules, 'valid_json', '结果是有效结构化数据', typeof parsedOutput !== 'string', typeof parsedOutput);
+        addRule(rules, 'valid_json', '结果是有效结构化数据', typeof parsedOutput !== 'string', typeof parsedOutput, { hard: true });
     }
     if (schemaHasRules(assertions.outputSchema)) {
         const schemaErrors = [];
         validateValueAgainstSchema(parsedOutput, assertions.outputSchema, { allowTemplates: false }, '结果', schemaErrors);
-        addRule(rules, 'output_schema', '结果符合输出结构', schemaErrors.length === 0, schemaErrors[0] || '符合');
+        addRule(rules, 'output_schema', '结果符合输出结构', schemaErrors.length === 0, schemaErrors[0] || '符合', { hard: true });
     }
     if (rules.length === 1 && completed) addRule(rules, 'non_empty', '生成了非空结果', Boolean(output.trim()), output.length);
     const passedCount = rules.filter(rule => rule.passed).length;
     const score = completed ? Math.round((passedCount / Math.max(rules.length, 1)) * 100) : 0;
+    const hardFailures = rules.filter(rule => rule.hard && !rule.passed);
     return {
         score,
-        passed: completed && score >= clampInt(passThreshold, 80, 1, 100),
+        passed: !smokeOnly && completed && hardFailures.length === 0 && score >= clampInt(passThreshold, 80, 1, 100),
+        qualityEligible,
+        smokeOnly,
+        hardFailures: hardFailures.map(rule => rule.key),
         rules,
         passedCount,
         ruleCount: rules.length

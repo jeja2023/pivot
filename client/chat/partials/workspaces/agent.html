@@ -55,6 +55,7 @@
                             placeholder="清晰描述该持续目标每次被触发时需要执行的操作" required></textarea>
                     </label>
                     <div class="modal-form-grid modal-form-grid--2">
+                        <label class="modal-form-field"><span>目标类型</span><select id="agent-goal-kind" class="form-input"><option value="scheduled_job">定时任务</option><option value="monitor">变化监控</option><option value="goal">完成即停止</option></select></label>
                         <label class="modal-form-field">
                             <span>触发方式</span>
                             <select id="agent-goal-trigger" class="form-input">
@@ -75,7 +76,7 @@
                         <label class="modal-form-field"><span>结果投递渠道（可选）</span><select id="agent-goal-delivery-channel" class="form-input"><option value="">仅在 Pivot 待办中心查看</option></select></label>
                     </div>
                     <div class="modal-form-grid modal-form-grid--2">
-                        <label class="modal-form-field"><span>模型策略</span><select id="agent-goal-model-router" class="form-input"><option value="fixed">固定（默认）</option><option value="auto-context">上下文匹配</option><option value="auto-cost">成本优先</option><option value="auto-load">负载均衡</option></select></label>
+                        <label class="modal-form-field"><span>模型策略</span><select id="agent-goal-model-router" class="form-input"><option value="fixed">固定（默认）</option><option value="auto-context">上下文匹配</option><option value="auto-cost">成本优先</option><option value="auto-load">负载均衡</option><option value="auto-quality">质量优先</option></select></label>
                         <label class="modal-form-field"><span>结果保留天数</span><input id="agent-goal-retention-days" class="form-input" type="number" min="1" max="3650" value="30"></label>
                     </div>
                     <label id="agent-goal-directory-field" class="modal-form-field hidden">
@@ -201,6 +202,7 @@
                                         <option value="auto-context">上下文匹配</option>
                                         <option value="auto-cost">成本优先</option>
                                         <option value="auto-load">负载均衡</option>
+                                        <option value="auto-quality">质量优先</option>
                                         <option value="auto-escalate">成本升级（置信不足时升级）</option>
                                     </select>
                                 </label>

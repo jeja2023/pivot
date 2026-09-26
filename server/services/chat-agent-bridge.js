@@ -24,7 +24,7 @@ const CHAT_AGENT_ACTIVE_STATUSES = new Set([
     'running', 'approval_required', 'waiting_approval', 'awaiting_approval', 'resuming'
 ]);
 const CHAT_AGENT_TERMINAL_STATUSES = new Set([
-    'completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted'
+    'completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted'
 ]);
 
 function clampText(value, max = CHAT_AGENT_HISTORY_ITEM_CHARS) {
@@ -323,7 +323,7 @@ async function recoverChatAgentResults({ limit = 200 } = {}) {
         SELECT id, status
         FROM agent_runs
         WHERE session_id IS NOT NULL AND deleted_at IS NULL
-          AND status IN ('completed', 'completed_with_errors', 'error', 'failed', 'cancelled')
+          AND status IN ('completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled')
           AND metadata::text LIKE '%"chatBridge"%'
           AND metadata::text NOT LIKE '%"messageId":%'
         ORDER BY updated_at ASC

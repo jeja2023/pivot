@@ -80,7 +80,7 @@ function normalizeToolContract(definition = {}) {
     const timeout = definition.timeout && typeof definition.timeout === 'object' ? definition.timeout : {};
     const toolName = String(definition.name || '');
     const sideEffect = Boolean((definition.side_effect ?? definition.sideEffect) || /(?:write|upload|delete|export|send|message|http|insert|update|upsert|replace|publish)/i.test(toolName));
-    const approvalRequired = Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.alwaysRequiresApproval) || riskLevel >= 5);
+    const approvalRequired = Boolean((definition.approval_required ?? definition.approvalRequired ?? definition.requiresApproval ?? definition.alwaysRequiresApproval) || riskLevel >= 5);
     // Read-only tools are safe to replay after a worker crash unless a tool
     // explicitly declares otherwise. Mutating tools remain non-idempotent by default.
     const inferredIdempotent = !sideEffect && /(?:read|list|search|query|describe|inspect|metadata|fetch|get|lookup|count|analy[sz]e)/i.test(toolName);
@@ -106,6 +106,8 @@ function normalizeToolContract(definition = {}) {
             : Boolean(definition.network || /(?:http|web|browser|network)/i.test(String(definition.name || '')) || source === 'mcp'),
         approval_required: approvalRequired,
         localBrowserConnector: definition.localBrowserConnector === true,
+        localWorkspaceConnector: definition.localWorkspaceConnector === true,
+        localDesktopControl: definition.localDesktopControl === true,
         timeout: {
             default_seconds: Math.max(Number(timeout.default_seconds ?? timeout.defaultSeconds ?? definition.timeoutSeconds ?? 30) || 30, 1),
             max_seconds: Math.max(Number(timeout.max_seconds ?? timeout.maxSeconds ?? 120) || 120, 1)

@@ -44,6 +44,8 @@ const AGENT_CAPABILITY_DEFINITIONS = Object.freeze([
     { id: 'code.execute', title: '代码执行', parent: null, risk: 'high' },
     { id: 'code.python_execute', title: 'Python 代码执行', parent: 'code.execute', risk: 'high' },
     { id: 'code.sandbox_eval', title: '沙箱表达式求值', parent: 'code.execute', risk: 'medium' },
+    { id: 'code.git_delivery', title: 'Git 代码交付', parent: null, risk: 'critical' },
+    { id: 'desktop.control', title: '原生桌面应用控制', parent: null, risk: 'critical' },
 
     // ── 数据查询域：与代码执行域彻底分离。SQL / DuckDB 查询不再归入 code.execute ──
     { id: 'data.query', title: '数据查询', parent: null, risk: 'medium' },

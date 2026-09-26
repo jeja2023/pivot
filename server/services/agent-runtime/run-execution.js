@@ -3,6 +3,9 @@ const { requeueAgentRunAfterLeaseLoss } = require('./lease-loss');
 const { buildToolTraceContext } = require('../tool-trace-context');
 const { resolveRunLongTermMemory } = require('./run-memory');
 const { continueRunFromCheckpoint: continueRunFromCheckpointHelper } = require('./run-continuation');
+const { verifyTaskOutcome } = require('../agent-verification');
+const { inferTaskType } = require('../agent-model-quality');
+const { recordWorkingObservation } = require('../agent-working-state');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -57,6 +60,7 @@ const {
     createAgentNotification,
     createPersistedAgentStepContext,
     recordAgentEvent,
+    verifyAgentOutcome = options => verifyTaskOutcome(options),
     buildAgentAuditFields,
     buildPlannerMessages,
     synthesizeFinalAnswer,
@@ -65,7 +69,9 @@ const {
     limitVisionImages,
     diagnoseError,
     buildAgentResumeContext,
+    applyAgentControlMessages,
     claimAgentControlMessages,
+    listAppliedAgentControlMessages = async () => [],
     approvalInputHash,
     maybePauseForApproval,
     isApprovalGranted,
@@ -157,7 +163,8 @@ const {
                     strategy: routerStrategy,
                     hintModelId: run.model_id,
                     messages: [{ role: 'user', content: run.goal || '' }],
-                    endpointStatusGetter: getModelEndpointRuntimeStatus
+                    endpointStatusGetter: getModelEndpointRuntimeStatus,
+                    taskType: inferTaskType(run)
                 });
                 if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
                     modelCfg = routed.model;
@@ -230,6 +237,17 @@ const {
             ...(Array.isArray(resumeContext.observations) ? resumeContext.observations : []),
             ...(Array.isArray(resumeContext.recentFailures) ? resumeContext.recentFailures : [])
         ].slice(-25);
+        const appliedControlMessages = await listAppliedAgentControlMessages(runId, user, { limit: 20 }) || [];
+        const observedControlMessageIds = new Set(appliedControlMessages.map(message => String(message.message_id || '')));
+        observations.push(...appliedControlMessages.map(message => ({
+            type: 'agent_control',
+            messageId: message.message_id,
+            messageType: message.message_type,
+            fromRunId: message.from_run_id || '',
+            payload: message.payload,
+            restored: true
+        })));
+        observations = observations.slice(-45);
         if (resumeContext.latestCheckpointId) {
             await insertStep(runId, (await listSteps(runId)).length + 1, {
                 type: 'control',
@@ -250,9 +268,21 @@ const {
             logger.warn({ runId, err: reliabilityError.message }, '工具可靠性信号加载失败，继续固定排序');
         }
         const chatBridge = runtimeMetadata.chatBridge;
+        let taskContract = runtimeMetadata.taskContract || runtimeMetadata.task_contract || null;
+        let taskWorkingState = runtimeMetadata.workingState || null;
         const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }, longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null }
-            : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null };
+            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }, longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState }
+            : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState };
+        const verifyOutcome = async (answer, partial = false, reason = '') => await verifyAgentOutcome({
+            runId,
+            run,
+            user,
+            taskContract,
+            answer,
+            observations,
+            partial,
+            reason
+        });
         if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
             const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
             toolList = toolList.map(tool => {
@@ -347,9 +377,16 @@ const {
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            const controlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
+            const claimedControlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
+            const controlMessages = claimedControlMessages.length && typeof applyAgentControlMessages === 'function'
+                ? await applyAgentControlMessages(runId, user, claimedControlMessages)
+                : [];
             if (controlMessages.length) {
-                observations.push(...controlMessages.map(message => ({
+                const freshMessages = controlMessages.filter(message => !observedControlMessageIds.has(String(message.message_id || '')));
+                freshMessages.forEach(message => observedControlMessageIds.add(String(message.message_id || '')));
+                taskWorkingState = freshMessages.at(-1)?.workingState || taskWorkingState;
+                taskContract = freshMessages.at(-1)?.taskContract || taskContract;
+                observations.push(...freshMessages.map(message => ({
                     type: 'agent_control',
                     messageId: message.message_id,
                     messageType: message.message_type,
@@ -368,7 +405,7 @@ const {
                 // JSON planner 每轮重新构造独立消息，必须携带完整 WorldState，不能依赖上一次 Provider 请求的上下文。
                 forceWorldStateFull: true,
                 fullRefreshReason: 'provider_independent',
-                contextConfig: parseJsonObject(run.context_config) || {},
+                contextConfig: { ...(parseJsonObject(run.context_config) || {}), taskWorkingState },
                 resumeContext,
                 policy: {
                     toolPolicy: run.tool_policy,
@@ -403,6 +440,7 @@ const {
                 skillTitle: getRunMetadata(run).skillTitle || '',
                 skillInstructions: getRunMetadata(run).skillInstructions || '',
                 longTermMemoryContext,
+                taskWorkingState,
                 chatHistory: plannerChatHistory,
                 chatAgent: runtimeMetadata.chatBridge
                     ? { ...runtimeMetadata.chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }
@@ -533,14 +571,24 @@ const {
                     budget: taskBudget,
                     ...plannerChatContext
                 });
+                await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
+                const verification = await verifyOutcome(answer);
+                const finalStatus = verification.outcomeStatus === 'verified'
+                    ? 'completed'
+                    : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
+                const verified = finalStatus === 'completed';
+                const verificationError = verified
+                    ? ''
+                    : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
                 await updateRun(runId, {
-                    status: 'completed',
+                    status: finalStatus,
                     final_answer: answer,
-                    completed_at: getBeijingTimestamp(),
+                    error_message: verificationError,
+                    ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await createAgentNotification(user.id, runId, 'completed', '任务运行完成', getAgentRunTitle(run));
+                await createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行完成' : '任务需要补充或修复', getAgentRunTitle(run));
                 return;
             }
 
@@ -618,6 +666,8 @@ const {
                     input: effectivePlanInput,
                     output: compactOutput
                 });
+                taskWorkingState = recordWorkingObservation(taskWorkingState, { tool: plan.tool, output: compactOutput }, taskContract, run.goal);
+                await setRunMetadata(runId, { taskContract, workingState: taskWorkingState });
                 await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行完成：${plan.tool}`,

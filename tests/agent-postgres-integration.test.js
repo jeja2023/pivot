@@ -15,7 +15,7 @@ const { createAgentWorkflow } = require('../server/services/agent-workflows');
 const { publishWorkflowRelease } = require('../server/services/agent-releases');
 const { archiveStalePersonalExperiences, learnAgentRun, getAgentLearningOverview } = require('../server/services/agent-learning');
 const { findBestPersonalSkill } = require('../server/services/agent-skills');
-const { createEvolutionShareRequest, decideEvolutionProposal, publishEvolutionProposal, restoreEvolutionProposal, revokePersonalEvolutionProposal, validateEvolutionProposal } = require('../server/services/agent-evolution');
+const { activatePersonalEvolutionProposal, createEvolutionShareRequest, decideEvolutionProposal, publishEvolutionProposal, restoreEvolutionProposal, revokePersonalEvolutionProposal, validateEvolutionProposal } = require('../server/services/agent-evolution');
 const { generateManagedOrganizationSigningKey, disableManagedOrganizationSigning } = require('../server/services/agent-skill-signing-configuration');
 const { createWorkflowCredential } = require('../server/services/workflow-credentials');
 const {
@@ -276,10 +276,14 @@ test('personal learning creates a real validated Skill release and makes it matc
         proposalId = learned.job.proposalId;
         assert.ok(proposalId, JSON.stringify(learned.job));
         const proposal = (await pool.query('SELECT * FROM agent_evolution_proposals WHERE id = $1', [proposalId])).rows[0];
-        assert.equal(proposal.status, 'personal_active');
+        assert.equal(proposal.status, 'waiting_user_review');
         assert.ok(proposal.artifact_version_id);
-        assert.ok(proposal.release_id);
-        const release = (await pool.query('SELECT * FROM agent_skill_releases WHERE id = $1', [proposal.release_id])).rows[0];
+        assert.ok(!proposal.release_id);
+        const activated = await activatePersonalEvolutionProposal(user, proposalId);
+        assert.equal(activated.proposal.status, 'personal_active');
+        const activeProposal = (await pool.query('SELECT * FROM agent_evolution_proposals WHERE id = $1', [proposalId])).rows[0];
+        assert.ok(activeProposal.release_id);
+        const release = (await pool.query('SELECT * FROM agent_skill_releases WHERE id = $1', [activeProposal.release_id])).rows[0];
         assert.equal(release.status, 'published');
         skillName = release.name;
         const selected = await findBestPersonalSkill(user, '请检索知识资料并生成风险摘要');

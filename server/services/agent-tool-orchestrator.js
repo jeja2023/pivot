@@ -107,7 +107,8 @@ function createToolOrchestrator(overrides = {}) {
                     input: effectiveInput,
                     inputHash: checkpointInputHash(effectiveInput),
                     idempotent: tool.idempotent,
-                    approvalGranted: context.approvalGranted === true
+                    approvalGranted: context.approvalGranted === true,
+                    user
                 });
             }
         } catch (error) {
@@ -132,7 +133,13 @@ function createToolOrchestrator(overrides = {}) {
                 input: effectiveInput,
                 policy
             });
-            if (operationKey) await completeCheckpoint(operationKey, output);
+            if (operationKey) await completeCheckpoint(operationKey, output, { user });
+            try {
+                const { recordEvidenceFromToolOutput } = require('./agent-evidence-items');
+                await recordEvidenceFromToolOutput({ run, user, toolName: tool.name, output });
+            } catch (_) {
+                // 证据持久化用于丰富审查与验收，不能使已检查点确认的成功工具结果失效。
+            }
             try { await onComplete?.({ output, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event('tool.completed', requestWithKey, { output: output && typeof output === 'object' ? { completed: true } : undefined });
             return output;

@@ -98,6 +98,8 @@ async function resolveInvocationTool({ safeName, suppliedTool = null, toolList =
                     risk: cached.governance?.riskLevel || cached.risk || (managedReadSource ? 'medium' : 'high'),
                     approvalRequired: cached.governance?.approvalRequired || cached.requiresApproval,
                     localBrowserConnector: cached.localBrowserConnector === true,
+                    localWorkspaceConnector: cached.localWorkspaceConnector === true,
+                    localDesktopControl: cached.localDesktopControl === true,
                     network: cached.network
                 }),
                 serverId,

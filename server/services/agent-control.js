@@ -1,15 +1,32 @@
 const crypto = require('crypto');
 const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { redactTraceValue } = require('./agent-traces');
 const { recordAgentEvent } = require('./agent-event-log');
 
 const MESSAGE_TYPES = new Set(['steer', 'request', 'reply', 'system']);
-const MESSAGE_STATUSES = new Set(['pending', 'delivered', 'acknowledged', 'expired']);
+const MESSAGE_STATUSES = new Set(['pending', 'claimed', 'delivered', 'acknowledged', 'expired']);
 const MAX_PAYLOAD_CHARS = 120000;
+const CONTROL_CLAIM_LEASE_MS = Math.max(30_000, Number.parseInt(process.env.AGENT_CONTROL_CLAIM_LEASE_MS || '60000', 10) || 60_000);
+const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
 
 function payloadHash(payload) {
     return crypto.createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex');
+}
+
+function parseJson(value, fallback = {}) {
+    if (value && typeof value === 'object') return value;
+    try { return JSON.parse(String(value || '')); } catch (_) { return fallback; }
+}
+
+function redactControlPayload(value, depth = 0, seen = new WeakSet()) {
+    if (value === null || value === undefined || typeof value !== 'object') return value;
+    if (depth >= 8 || seen.has(value)) return '[已省略嵌套对象]';
+    seen.add(value);
+    if (Array.isArray(value)) return value.slice(0, 200).map(item => redactControlPayload(item, depth + 1, seen));
+    return Object.fromEntries(Object.entries(value).slice(0, 200).map(([key, item]) => [
+        key,
+        SECRET_KEY_RE.test(key) ? '[已脱敏]' : redactControlPayload(item, depth + 1, seen)
+    ]));
 }
 
 function normalizeMessageType(value) {
@@ -18,15 +35,34 @@ function normalizeMessageType(value) {
 }
 
 function serializePayload(payload) {
-    const safe = redactTraceValue(payload ?? {});
+    const safe = redactControlPayload(payload ?? {});
     let text = JSON.stringify(safe);
     if (text.length <= MAX_PAYLOAD_CHARS) return { safe, text };
-    const compact = {
-        truncated: true,
-        originalLength: text.length,
-        text: text.slice(0, MAX_PAYLOAD_CHARS - 200)
-    };
-    return { safe: compact, text: JSON.stringify(compact) };
+    const error = new Error(`控制指令超过 ${MAX_PAYLOAD_CHARS} 字符上限，未写入可能被截断的内容。`);
+    error.code = 'AGENT_CONTROL_PAYLOAD_TOO_LARGE';
+    error.status = 413;
+    throw error;
+}
+
+function applyMessagesToTaskContract(value, messages = {}, goal = '') {
+    const { normalizeTaskContract } = require('./agent-verification');
+    const contract = normalizeTaskContract(value, goal);
+    const existing = new Set(contract.constraints.map(item => String(item || '').trim()).filter(Boolean));
+    let changed = 0;
+    for (const message of Array.isArray(messages) ? messages : []) {
+        const payload = message?.payload && typeof message.payload === 'object' ? message.payload : {};
+        const instruction = String(payload.instruction || payload.message || payload.text || '').trim().slice(0, 4000);
+        if (!instruction || existing.has(instruction)) continue;
+        existing.add(instruction);
+        contract.constraints.push(instruction);
+        changed += 1;
+    }
+    contract.constraints = contract.constraints.slice(-32);
+    if (changed) {
+        contract.revision = Math.max(1, Number(contract.revision || 1)) + changed;
+        contract.source = 'control_message';
+    }
+    return { contract, changed };
 }
 
 async function getControlRun(runId, userId) {
@@ -148,11 +184,19 @@ async function claimAgentControlMessages(runId, user, { limit = 20 } = {}) {
     if (!run) return [];
     const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
     const now = getBeijingTimestamp();
+    const claimExpiresAt = getBeijingTimestamp(new Date(Date.now() + CONTROL_CLAIM_LEASE_MS));
     return transaction(async trx => {
         await trx.execute(`
             UPDATE agent_control_messages
-            SET status = 'expired'
-            WHERE user_id = ? AND to_run_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+            SET status = 'expired', claim_token = NULL, claim_expires_at = NULL
+            WHERE user_id = ? AND to_run_id = ? AND status IN ('pending', 'claimed')
+              AND expires_at IS NOT NULL AND expires_at <= ?
+        `, [userId, runId, now]);
+        await trx.execute(`
+            UPDATE agent_control_messages
+            SET status = 'pending', claim_token = NULL, claim_expires_at = NULL
+            WHERE user_id = ? AND to_run_id = ? AND status = 'claimed'
+              AND claim_expires_at IS NOT NULL AND claim_expires_at <= ?
         `, [userId, runId, now]);
         const rows = await trx.query(`
             SELECT id, message_id, user_id, from_run_id, to_run_id, message_type, status,
@@ -164,11 +208,95 @@ async function claimAgentControlMessages(runId, user, { limit = 20 } = {}) {
             LIMIT ?
             FOR UPDATE SKIP LOCKED
         `, [userId, runId, now, safeLimit]);
+        const claimed = [];
         for (const row of rows) {
-            await trx.execute(`UPDATE agent_control_messages SET status = 'delivered', delivered_at = ? WHERE id = ?`, [now, row.id]);
+            const claimToken = `acm_claim_${crypto.randomUUID()}`;
+            await trx.execute(`
+                UPDATE agent_control_messages
+                SET status = 'claimed', delivered_at = COALESCE(delivered_at, ?), claim_token = ?, claim_expires_at = ?
+                WHERE id = ? AND status = 'pending'
+            `, [now, claimToken, claimExpiresAt, row.id]);
+            claimed.push(parseMessage({ ...row, status: 'claimed', delivered_at: row.delivered_at || now, claim_token: claimToken, claim_expires_at: claimExpiresAt }));
         }
-        return rows.map(row => parseMessage({ ...row, status: 'delivered', delivered_at: now }));
+        return claimed;
     });
+}
+
+async function applyAgentControlMessages(runId, user, messages = []) {
+    const userId = Number(user?.id || 0);
+    const requested = (Array.isArray(messages) ? messages : []).map(message => ({
+        messageId: String(message?.message_id || message?.messageId || '').trim(),
+        claimToken: String(message?.claim_token || message?.claimToken || '').trim()
+    })).filter(item => item.messageId && item.claimToken);
+    if (!userId || !runId || !requested.length) return [];
+    const now = getBeijingTimestamp();
+    return transaction(async trx => {
+        const run = await trx.queryOne(`
+            SELECT metadata FROM agent_runs
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+            FOR UPDATE
+        `, [runId, userId]);
+        if (!run) return [];
+        const applied = [];
+        for (const item of requested) {
+            const row = await trx.queryOne(`
+                SELECT id, message_id, user_id, from_run_id, to_run_id, message_type, status,
+                       payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at
+                FROM agent_control_messages
+                WHERE message_id = ? AND user_id = ? AND to_run_id = ?
+                  AND status = 'claimed' AND claim_token = ?
+                  AND (claim_expires_at IS NULL OR claim_expires_at > ?)
+                FOR UPDATE
+            `, [item.messageId, userId, runId, item.claimToken, now]);
+            if (!row) continue;
+            const changed = await trx.execute(`
+                UPDATE agent_control_messages
+                SET status = 'acknowledged', applied_at = ?, acknowledged_at = ?, claim_token = NULL, claim_expires_at = NULL
+                WHERE id = ? AND status = 'claimed' AND claim_token = ?
+            `, [now, now, row.id, item.claimToken]);
+            if (changed > 0) applied.push(parseMessage({ ...row, status: 'acknowledged', applied_at: now, acknowledged_at: now }));
+        }
+        if (!applied.length) return [];
+        const metadata = parseJson(run.metadata, {});
+        const { applyControlMessagesToWorkingState } = require('./agent-working-state');
+        const currentContract = metadata.taskContract || metadata.task_contract || {};
+        const { contract: taskContract } = applyMessagesToTaskContract(currentContract, applied, currentContract.goal || '');
+        const workingState = applyControlMessagesToWorkingState(metadata.workingState, applied, taskContract, taskContract.goal || '');
+        const existing = Array.isArray(metadata.controlApplications?.messageIds)
+            ? metadata.controlApplications.messageIds.map(String) : [];
+        const messageIds = [...new Set([...existing, ...applied.map(message => message.message_id)])].slice(-100);
+        await trx.execute(`
+            UPDATE agent_runs
+            SET metadata = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        `, [JSON.stringify({
+            ...metadata,
+            controlApplications: {
+                revision: Number(taskContract.revision || metadata.controlApplications?.revision || 0),
+                messageIds,
+                appliedAt: now
+            },
+            taskContract,
+            workingState
+        }), now, runId, userId]);
+        return applied.map(message => ({ ...message, taskContract, workingState }));
+    });
+}
+
+async function listAppliedAgentControlMessages(runId, user, { limit = 20 } = {}) {
+    const userId = Number(user?.id || 0);
+    const run = await getControlRun(runId, userId);
+    if (!run) return null;
+    const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const rows = await query(`
+        SELECT id, message_id, user_id, from_run_id, to_run_id, message_type, status,
+               payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at, applied_at
+        FROM agent_control_messages
+        WHERE user_id = ? AND to_run_id = ? AND status = 'acknowledged' AND applied_at IS NOT NULL
+        ORDER BY applied_at ASC, id ASC
+        LIMIT ?
+    `, [userId, runId, safeLimit]);
+    return rows.map(parseMessage);
 }
 
 async function acknowledgeAgentControlMessage(messageId, user, runId = '') {
@@ -178,7 +306,7 @@ async function acknowledgeAgentControlMessage(messageId, user, runId = '') {
         UPDATE agent_control_messages
         SET status = 'acknowledged', acknowledged_at = ?
         WHERE message_id = ? AND user_id = ? AND to_run_id = ?
-          AND status IN ('pending', 'delivered')
+          AND status IN ('pending', 'claimed', 'delivered')
         RETURNING message_id, user_id, from_run_id, to_run_id, message_type, status,
                   payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at
     `, [getBeijingTimestamp(), messageId, userId, runId]);
@@ -191,8 +319,10 @@ module.exports = {
     MESSAGE_STATUSES,
     MESSAGE_TYPES,
     acknowledgeAgentControlMessage,
+    applyAgentControlMessages,
     assertRelatedRuns,
     claimAgentControlMessages,
+    listAppliedAgentControlMessages,
     listAgentControlMessages,
     normalizeMessageType,
     sendAgentControlMessage

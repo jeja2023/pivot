@@ -286,8 +286,8 @@ function attachChatAgentControls(messageContent, runId, status = '') {
         actions.insertAdjacentElement('beforebegin', controls);
     }
     const normalizedStatus = String(status || '').toLowerCase();
-    const isTerminal = ['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted'].includes(normalizedStatus);
-    const canResume = ['error', 'failed', 'cancelled'].includes(normalizedStatus);
+    const isTerminal = ['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted'].includes(normalizedStatus);
+    const canResume = ['partial', 'needs_input', 'error', 'failed', 'cancelled'].includes(normalizedStatus);
     if (isTerminal && !canResume) {
         controls.remove();
         return;
@@ -388,6 +388,8 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
         : { regenerate: options === true };
     const shouldRegenerate = sendOptions.regenerate === true;
     const regenerateMessageId = Number.parseInt(sendOptions.regenerateMessageId, 10) || null;
+    const ephemeralVoice = sendOptions.ephemeralVoice === true;
+    const voiceSessionId = ephemeralVoice ? String(sendOptions.voiceSessionId || '').trim() : '';
     const resumeRouteOverrides = sendOptions.routeOverrides && typeof sendOptions.routeOverrides === 'object'
         ? sendOptions.routeOverrides
         : null;
@@ -407,7 +409,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
     if (sendEpoch !== latestSendEpoch) return;
 
-    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides);
+    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId });
     activeSendTask = task;
     try {
         await task;
@@ -416,7 +418,13 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     }
 };
 
-async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null) {
+async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null, options = {}) {
+    const ephemeralVoice = options.ephemeralVoice === true;
+    const voiceSessionId = ephemeralVoice ? String(options.voiceSessionId || '').trim() : '';
+    if (ephemeralVoice && (!voiceSessionId || shouldRegenerate)) {
+        showToast('临时语音会话参数无效，已拒绝发送。', 'error');
+        return;
+    }
     const userVisibleContent = document.getElementById('user-input').value.trim();
     let content = userVisibleContent;
     let displayContent = userVisibleContent;
@@ -441,9 +449,9 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     }
 
     if (!currentSessionId) {
-        const draftTitle = userVisibleContent
+        const draftTitle = ephemeralVoice ? '临时语音会话' : (userVisibleContent
             ? `${userVisibleContent.slice(0, 15)}...`
-            : (window.Pivot.legacy.pendingAttachments.find(item => item?.file)?.name || '新对话');
+            : (window.Pivot.legacy.pendingAttachments.find(item => item?.file)?.name || '新对话'));
         const data = await createSession(draftTitle);
         if (data && data.id) {
             currentSessionId = data.id;
@@ -479,11 +487,11 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const ragPreference = chatInputMenu?.getRagPreference?.() || 'auto';
     const manualRagEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     const ragEnabled = ragPreference === 'disabled' ? false : (ragPreference === 'enabled' || autoRouteEnabled || manualRagEnabled);
-    const routeOverrides = resumeRouteOverrides || chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {};
-    const chatMode = chatInputMenu?.getChatMode?.() || 'normal';
+    const routeOverrides = ephemeralVoice ? {} : (resumeRouteOverrides || chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {});
+    const chatMode = ephemeralVoice ? 'normal' : (chatInputMenu?.getChatMode?.() || 'normal');
     // 旧版本保存的工具启用状态不应绕过本会话的明确授权。
     // 只有用户在路由提示中完成授权后，才将 MCP 候选交给执行链路。
-    let mcpEnabled = window.Pivot.legacy.hasChatMcpConsent?.() === true
+    let mcpEnabled = !ephemeralVoice && window.Pivot.legacy.hasChatMcpConsent?.() === true
         && isChatToolEnabled('chat-mcp-enabled', 'pivot_chat_mcp_enabled');
     let mcpConfirmed = false;
     let localMcpBridge = null;
@@ -554,12 +562,14 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 displayContent: stripInternalReferenceText(displayContent || content),
                 modelId,
                 chatMode,
+                ephemeralVoice,
+                voiceSessionId: ephemeralVoice ? voiceSessionId : undefined,
                 regenerate: shouldRegenerate,
                 regenerateMessageId,
-                autoRouteEnabled,
-                ragPreference,
+                autoRouteEnabled: ephemeralVoice ? false : autoRouteEnabled,
+                ragPreference: ephemeralVoice ? 'disabled' : ragPreference,
                 routeOverrides,
-                ragEnabled,
+                ragEnabled: ephemeralVoice ? false : ragEnabled,
                 ragScope: window.Pivot.legacy.getRagScopeSelection?.('chat') || {},
                 mcpEnabled,
                 mcpConfirmed,
@@ -624,6 +634,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         const appendStreamContent = (content) => {
             if (!content) return;
             fullAiContent += content;
+            window.Pivot?.moduleApi?.('chat.realtimeVoice')?.handleAssistantDelta?.(content);
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
@@ -683,6 +694,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             fullAiContent = content;
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             hasRenderedPersistedAssistantContent = true;
+            window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(content);
             if (textBody && isRequestMessageVisible()) {
                 // 替换 DOM 前释放节点下的 ECharts 实例和监听器。
                 window.Pivot.legacy.teardownPivotCharts?.(textBody);
@@ -691,7 +703,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             }
         };
         const trackChatAgentRun = async (runId) => {
-            const terminalStatuses = new Set(['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted']);
+            const terminalStatuses = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
             for (let attempt = 0; attempt < 43200; attempt += 1) {
                 try {
                     const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
@@ -889,20 +901,21 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         }
         if (awaitingMcpConsent) return;
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
+        window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(fullAiContent);
         if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
 
         const finalElapsed = getElapsedSeconds();
         const finalTps = getAverageTps();
         // 成功后的收尾记录失败时不应显示为聊天错误。
         try {
-            if (!hasServerFinalStats) {
+            if (!ephemeralVoice && !hasServerFinalStats) {
                 await apiFetch(API_BASE + '/chat/stats', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ sessionId: requestSessionId, costTime: finalElapsed, tps: finalTps })
                 });
             }
-            await window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
+            if (!ephemeralVoice) await window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
         } catch (statsError) {
             console.warn('更新会话统计失败', statsError);
         }
@@ -914,9 +927,11 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         }
         
         // 延迟刷新侧边栏，等待后台标题生成完成
-        setTimeout(() => {
-            if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
-        }, 1500);
+        if (!ephemeralVoice) {
+            setTimeout(() => {
+                if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
+            }, 1500);
+        }
     } catch (e) {
         if (localReplayTimer) clearTimeout(localReplayTimer);
         if (renderTimer) clearTimeout(renderTimer);

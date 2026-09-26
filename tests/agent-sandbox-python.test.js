@@ -7,6 +7,9 @@ const { buildRecoveryPlan } = require('../server/services/agent-diagnosis');
 const { createWorkspaceJail, runSandboxedProcess } = require('../server/services/agent-sandbox');
 const { runPythonScript } = require('../server/services/agent-python');
 
+process.env.NODE_ENV = 'test';
+process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST = 'true';
+
 test('diagnosis creates bounded category-specific recovery plan', () => {
     const plan = buildRecoveryPlan({ category: 'network', retryable: true }, 2);
     assert.equal(plan.delayMs, 1000);
@@ -32,6 +35,7 @@ test('python worker executes only inside task workspace', async () => {
             workspaceRoot: root,
             taskId: 'python-test',
             strictIsolation: false,
+            allowUnsafeLocal: true,
             script: "import json, sys\nfrom pathlib import Path\np = Path(sys.argv[sys.argv.index('--pivot-input') + 1])\ndata = json.loads(p.read_text())\nprint(data['value'] * 2)\n",
             input: { value: 21 }
         });
@@ -39,6 +43,16 @@ test('python worker executes only inside task workspace', async () => {
         assert.match(result.stdout, /42/);
         assert.match(result.scriptPath, /python-test/);
         assert.match(result.stdout, /42/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('dynamic code requires an enforced worker when unsafe local execution is not explicit', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-python-enforcement-'));
+    try {
+        await assert.rejects(
+            runPythonScript({ workspaceRoot: root, taskId: 'enforcement', script: 'print("blocked")' }),
+            error => error.code === 'AGENT_SANDBOX_ENFORCEMENT_UNAVAILABLE'
+        );
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

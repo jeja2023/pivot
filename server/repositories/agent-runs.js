@@ -5,6 +5,7 @@
 const { query, queryOne, execute } = require('../db/client');
 const { likeOperator } = require('../db/dialect');
 const { parseJsonObject } = require('../services/agent-validators');
+const { normalizeTaskContract } = require('../services/agent-verification');
 
 function normalizeBooleanOption(value) {
     if (value === true) return true;
@@ -295,11 +296,18 @@ async function updateAgentRunTitleAndGoal(runId, userId, { title, goal } = {}) {
     const now = new Date().toISOString();
     const newTitle = title !== undefined ? String(title || '').trim().slice(0, 200) : run.title;
     const newGoal = goal !== undefined ? String(goal || '').trim().slice(0, 12000) : run.goal;
+    const metadata = parseJsonObject(run.metadata) || {};
+    const taskContract = normalizeTaskContract(metadata.taskContract || metadata.task_contract || {}, newGoal);
+    if (goal !== undefined && newGoal !== String(run.goal || '')) {
+        taskContract.goal = newGoal;
+        taskContract.revision = Math.max(1, Number(taskContract.revision || 1)) + 1;
+        taskContract.source = 'user_edit';
+    }
     await execute(`
         UPDATE agent_runs
-        SET title = ?, goal = ?, updated_at = ?
+        SET title = ?, goal = ?, metadata = ?, updated_at = ?
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [newTitle, newGoal, now, runId, userId]);
+    `, [newTitle, newGoal, JSON.stringify({ ...metadata, taskContract }), now, runId, userId]);
     return getRunForUser(runId, userId);
 }
 

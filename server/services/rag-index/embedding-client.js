@@ -85,11 +85,11 @@ async function acquireEmbeddingRequestSlot() {
 }
 
 async function withEmbeddingRequestSlot(operation) {
-    const release = await acquireEmbeddingRequestSlot();
+    const releaseSlot = await acquireEmbeddingRequestSlot();
     try {
         return await operation();
     } finally {
-        release();
+        releaseSlot();
     }
 }
 

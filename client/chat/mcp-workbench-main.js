@@ -229,7 +229,9 @@ async function loadMcpServers() {
     const localDatabaseGrant = localAuthorizationStatus?.grants?.local_database?.authorized;
     const localDirectoryGrant = localAuthorizationStatus?.grants?.local_report_dir?.authorized;
     const localBrowserGrant = localAuthorizationStatus?.grants?.local_browser?.authorized;
-    const isAnyAuthorized = localDatabaseGrant || localDirectoryGrant || localBrowserGrant;
+    const localWorkspaceGrant = localAuthorizationStatus?.grants?.local_workspace?.authorized;
+    const localDesktopControlGrant = localAuthorizationStatus?.grants?.local_desktop_control?.authorized;
+    const isAnyAuthorized = localDatabaseGrant || localDirectoryGrant || localBrowserGrant || localWorkspaceGrant || localDesktopControlGrant;
     const localFallbackTools = mcpLocalAuthorizedFallbackTools(localAuthorizationStatus);
     const localTools = mcpToolsForServer(0, localFallbackTools);
     const localToolCount = localTools.length;
@@ -239,7 +241,7 @@ async function loadMcpServers() {
         title: '管理本机资源授权',
         description: localToolCount
             ? `已接入 ${localToolCount} 个本机只读工具，可查看 mcp.0.* 工具。`
-            : '通过桌面客户端接入本机 SQLite、文件目录或受控浏览器自动化。',
+            : '通过桌面客户端接入本机 SQLite、文件目录、受控浏览器、代码工作区或原生桌面应用。',
         badge: isAnyAuthorized ? '已授权' : '待授权',
         actionLabel: isAnyAuthorized ? '管理授权' : '授权',
         statusText: localToolCount

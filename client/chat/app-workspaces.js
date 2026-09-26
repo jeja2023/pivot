@@ -689,7 +689,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-report-assist.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-readiness.js', '/chat/dag-empty-canvas.js', '/chat/dag-inspector-special-fields.js', '/chat/dag-inspector-testing.js', '/chat/dag-inspector.js',
         '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
         '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
-        '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-harness.js',
+        '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-status-views.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-harness.js',
         '/chat/agent-skill-management.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
         '/chat/agent-workflow-editor.js', '/chat/agent-workflow-core.js', '/chat/agent-workflow-runners.js', '/chat/agent-workflows.js',

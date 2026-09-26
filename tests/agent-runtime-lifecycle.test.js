@@ -8,7 +8,8 @@ const {
 } = require('../server/services/agent-runtime');
 const {
     canTransitionAgentRunStatus,
-    transitionAgentRunStatus
+    transitionAgentRunStatus,
+    TERMINAL_STATUSES
 } = require('../server/services/agent-runtime/state-machine');
 
 function waitFor(promise, message, timeoutMs = 1000) {
@@ -28,6 +29,16 @@ test('awaiting approval is a legal non-terminal run status transition', () => {
     assert.equal(paused.terminal, false);
     assert.equal(canTransitionAgentRunStatus('awaiting_approval', 'queued'), true);
     assert.equal(canTransitionAgentRunStatus('awaiting_approval', 'running'), true);
+});
+
+test('verification states distinguish completed, partial, and needs-input outcomes', () => {
+    assert.equal(canTransitionAgentRunStatus('planning', 'verifying'), true);
+    assert.equal(canTransitionAgentRunStatus('verifying', 'completed'), true);
+    assert.equal(canTransitionAgentRunStatus('verifying', 'partial'), true);
+    assert.equal(canTransitionAgentRunStatus('verifying', 'needs_input'), true);
+    assert.equal(canTransitionAgentRunStatus('needs_input', 'queued'), true);
+    assert.equal(TERMINAL_STATUSES.has('partial'), true);
+    assert.equal(TERMINAL_STATUSES.has('needs_input'), false);
 });
 
 test('runtime recovery leaves stale awaiting approval runs suspended', async () => {

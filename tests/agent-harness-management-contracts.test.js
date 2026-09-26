@@ -53,6 +53,15 @@ test('Agent 控制台提供档案、记忆、经验和技能日常入口，默�
     assert.match(route, /isSuperAdmin\(req\.user\) && isRuntimePackConsoleEnabled\(\)/);
 });
 
+test('质量面板区分验收通过率和执行终态率，空样本不展示为 100%', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const source = fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-harness.js'), 'utf8');
+    assert.match(source, /验收通过率/);
+    assert.match(source, /executionCompletionRate/);
+    assert.match(source, /value === null \|\| value === undefined \? '—'/);
+});
+
 test('任务详情提供 Harness 运行诊断的四类面板', () => {
     const script = read('client/chat/agent-harness.js');
     const detail = read('client/chat/agent-run-detail.js');

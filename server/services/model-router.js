@@ -19,7 +19,7 @@
 
 const { getUserRunnableModelsAsync, getRunnableModelForUserAsync, messagesContainVisionInput, modelSupportsVision } = require('./models');
 
-const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load', 'auto-escalate']);
+const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load', 'auto-quality', 'auto-escalate']);
 const DEFAULT_STRATEGY = 'fixed';
 
 function normalizeStrategy(value) {
@@ -34,6 +34,7 @@ function listStrategies() {
         { code: 'auto-context', label: '上下文匹配', description: '挑选能容纳输入但窗口最小的模型，节约大窗口配额。' },
         { code: 'auto-cost', label: '成本优先', description: '挑选输入+输出单价最低的可用模型。' },
         { code: 'auto-load', label: '负载均衡', description: '挑选当前活跃占比最低的端点，降低排队等待。' },
+        { code: 'auto-quality', label: '质量优先', description: '优先选择在同类已验收任务中通过率更高、且样本量足够的模型。' },
         { code: 'auto-escalate', label: '成本升级', description: '先用最便宜的模型出结果，置信不足时再升级到更强模型。' }
     ];
 }
@@ -111,6 +112,24 @@ function pickAutoLoad(candidates, estimatedInputTokens, endpointStatusGetter) {
     return fit.slice().sort((a, b) => loadFor(a) - loadFor(b))[0];
 }
 
+function pickAutoQuality(candidates, profiles = [], estimatedInputTokens) {
+    const eligible = candidates.filter(model => hasUsableInputWindow(model, estimatedInputTokens));
+    const profileByModel = new Map((profiles || []).filter(profile => profile?.eligible).map(profile => [Number(profile.modelId), profile]));
+    const qualified = eligible.filter(model => profileByModel.has(Number(model.id)));
+    if (!qualified.length) return null;
+    return qualified.slice().sort((left, right) => {
+        const leftProfile = profileByModel.get(Number(left.id));
+        const rightProfile = profileByModel.get(Number(right.id));
+        const quality = Number(rightProfile.verifiedRate) - Number(leftProfile.verifiedRate);
+        if (quality !== 0) return quality;
+        const incompleteness = Number(leftProfile.incompleteRate) - Number(rightProfile.incompleteRate);
+        if (incompleteness !== 0) return incompleteness;
+        const samples = Number(rightProfile.samples) - Number(leftProfile.samples);
+        if (samples !== 0) return samples;
+        return modelTotalPrice(left) - modelTotalPrice(right);
+    })[0];
+}
+
 /**
  * 选择模型主入口。
  * @param {object} params
@@ -121,7 +140,7 @@ function pickAutoLoad(candidates, estimatedInputTokens, endpointStatusGetter) {
  * @param {function} [params.endpointStatusGetter] - 注入式：返回 getModelEndpointRuntimeStatus()，便于测试
  * @returns {{ model: object, strategy: string, reason: string, candidatesCount: number }|null}
  */
-async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter }) {
+async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter, qualityProfiles = null, taskType = 'general' }) {
     if (!user) return null;
     const normalized = normalizeStrategy(strategy);
 
@@ -161,6 +180,22 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
     } else if (normalized === 'auto-load') {
         chosen = pickAutoLoad(candidates, estimatedTokens, endpointStatusGetter);
         reason = chosen ? '按端点负载最低' : '';
+    } else if (normalized === 'auto-quality') {
+        let profiles = Array.isArray(qualityProfiles) ? qualityProfiles : [];
+        if (!profiles.length) {
+            try {
+                const { getModelQualityProfiles } = require('./agent-model-quality');
+                profiles = await getModelQualityProfiles(user, taskType);
+            } catch (_) {
+                profiles = [];
+            }
+        }
+        chosen = pickAutoQuality(candidates, profiles, estimatedTokens);
+        reason = chosen ? '按同类已验收任务质量优先' : '';
+        if (!chosen) {
+            chosen = pickAutoContext(candidates, estimatedTokens);
+            reason = '质量样本不足，按上下文匹配回退';
+        }
     } else if (normalized === 'auto-escalate') {
         // 第一轮：与 auto-cost 等同，挑最便宜的能用模型；调用方负责后续判断置信度并调用 pickEscalationModel
         chosen = pickAutoCost(candidates, estimatedTokens);
@@ -234,6 +269,7 @@ module.exports = {
     estimateMessageTokens,
     hasUsableInputWindow,
     modelTotalPrice,
+    pickAutoQuality,
     chooseModel,
     assessConfidence,
     pickEscalationModel

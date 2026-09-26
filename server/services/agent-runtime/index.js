@@ -128,7 +128,11 @@ const { createAgentInboxEvent } = require('../agent-inbox');
 const { createPersistedAgentStepContext } = require('../agent-world-state-store');
 const { buildAgentAuditFields } = require('../agent-step-context');
 const { recordAgentEvent } = require('../agent-event-log');
-const { claimAgentControlMessages } = require('../agent-control');
+const {
+    applyAgentControlMessages,
+    claimAgentControlMessages,
+    listAppliedAgentControlMessages
+} = require('../agent-control');
 const {
     releaseChildRunReservation
 } = require('../agent-run-resources');
@@ -157,6 +161,7 @@ const {
     updateAgentGoal
 } = require('../agent-goals');
 const { maybeArchiveStalePersonalExperiences, processAgentLearningJobs } = require('../agent-learning');
+const { verifyAndRecordTaskOutcome } = require('../agent-verification');
 
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { createAgentNotificationFactory } = require('./notifications');
@@ -394,7 +399,11 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         taskBudget: effectiveTaskBudget,
         captureStepContext: options => createPersistedAgentStepContext(options),
         recordAgentEvent,
-        pollAgentControlMessages: (runId, user, options) => claimAgentControlMessages(runId, user, options)
+        verifyAgentOutcome: options => verifyAndRecordTaskOutcome({ ...options, setRunMetadata }),
+        pollAgentControlMessages: async (runId, user, options) => {
+            const claimed = await claimAgentControlMessages(runId, user, options);
+            return claimed.length ? await applyAgentControlMessages(runId, user, claimed) : [];
+        }
     };
 }
 
@@ -468,7 +477,9 @@ const { runAgent } = createAgentRunner({
     limitVisionImages,
     diagnoseError,
     buildAgentResumeContext,
+    applyAgentControlMessages,
     claimAgentControlMessages,
+    listAppliedAgentControlMessages,
     approvalInputHash,
     maybePauseForApproval,
     isApprovalGranted,
@@ -542,15 +553,29 @@ async function recoverAgentRuns() {
 
     const recoveredQueued = await getAgentQueue().recoverQueued(100, { deferSchedule: true });
     let recoveredChatResults = null;
+    let expiredBrowserSessions = 0;
+    let expiredVoiceSessions = 0;
     try {
         recoveredChatResults = await recoverChatAgentResults({ limit: 200 });
     } catch (error) {
         logger.error({ err: error.message }, '普通聊天 Agent 结果恢复扫描失败');
     }
+    try {
+        const { sweepExpiredAgentBrowserSessions } = require('../agent-browser-sessions');
+        expiredBrowserSessions = await sweepExpiredAgentBrowserSessions();
+    } catch (error) {
+        logger.warn({ err: error.message }, '浏览器会话过期回收失败');
+    }
+    try {
+        const { sweepExpiredAgentVoiceSessions } = require('../agent-voice-sessions');
+        expiredVoiceSessions = await sweepExpiredAgentVoiceSessions();
+    } catch (error) {
+        logger.warn({ err: error.message }, '实时语音会话过期回收失败');
+    }
     if (recoveredQueued > 0 || staleRunning.length > 0) {
-        logger.info({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults }, '智能体运行时异常任务恢复完成');
+        logger.info({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults, expiredBrowserSessions, expiredVoiceSessions }, '智能体运行时异常任务恢复完成');
     } else {
-        logger.debug({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults }, '智能体运行时周期巡检完成');
+        logger.debug({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults, expiredBrowserSessions, expiredVoiceSessions }, '智能体运行时周期巡检完成');
     }
 }
 

@@ -9,8 +9,10 @@ const { assertTenantContext } = require('./agent-tenant-context');
 const { loadActiveDevice, normalizeDeviceId } = require('./agent-local-devices');
 const { getLocalDeviceMcpServerTypeForTool } = require('./local-device-mcp');
 const { isLocalBrowserConnectorTool, normalizeLocalBrowserGrant, normalizeLocalBrowserTask } = require('./local-browser-connector-tools');
+const { isLocalWorkspaceConnectorTool, normalizeWorkspaceGrant, normalizeWorkspaceTask } = require('./local-workspace-connector-tools');
+const { isLocalDesktopControlTool, normalizeDesktopControlGrant, normalizeDesktopControlTask } = require('./local-desktop-control-tools');
 
-const GRANT_TYPES = Object.freeze(['local_database', 'local_report_dir', 'local_browser']);
+const GRANT_TYPES = Object.freeze(['local_database', 'local_report_dir', 'local_browser', 'local_workspace', 'local_desktop_control']);
 const CONNECTOR_LEASE_SECONDS = 60;
 const CONNECTOR_TASK_TTL_SECONDS = 120;
 const LOCAL_BROWSER_TASK_TTL_SECONDS = 10 * 60;
@@ -29,6 +31,8 @@ function hash(value) { return crypto.createHash('sha256').update(String(value)).
 function parseJson(value, fallback = {}) { try { return typeof value === 'object' ? value : JSON.parse(String(value || '')); } catch (_) { return fallback; } }
 function grantTypeForTool(toolName) {
     if (isLocalBrowserConnectorTool(toolName)) return 'local_browser';
+    if (isLocalWorkspaceConnectorTool(toolName)) return 'local_workspace';
+    if (isLocalDesktopControlTool(toolName)) return 'local_desktop_control';
     const serverType = getLocalDeviceMcpServerTypeForTool(toolName);
     return serverType === 'database' ? 'local_database' : serverType === 'reports' ? 'local_report_dir' : '';
 }
@@ -37,12 +41,14 @@ function normalizeConnectorGrants(value = {}) {
     return GRANT_TYPES.map(grantType => {
         const item = source[grantType] && typeof source[grantType] === 'object' ? source[grantType] : {};
         const browser = grantType === 'local_browser' ? normalizeLocalBrowserGrant(item) : null;
+        const workspace = grantType === 'local_workspace' ? normalizeWorkspaceGrant(item) : null;
+        const desktopControl = grantType === 'local_desktop_control' ? normalizeDesktopControlGrant(item) : null;
         return {
             grantType,
             authorized: item.authorized === true && (grantType !== 'local_browser' || browser.browsers.length > 0),
             pathHint: String(item.pathHint || '').slice(0, 255),
             label: String(item.label || '').slice(0, 255),
-            metadata: browser || {}
+            metadata: browser || workspace || desktopControl || {}
         };
     });
 }
@@ -88,6 +94,8 @@ async function listConnectorDevices(user) {
         if (!grouped.has(row.device_id)) grouped.set(row.device_id, { deviceId: row.device_id, deviceName: row.device_name, provider: row.provider, lastSeenAt: row.last_seen_at, grants: {} });
         const grant = { authorized: true, pathHint: row.path_hint, label: row.label };
         if (row.grant_type === 'local_browser') Object.assign(grant, normalizeLocalBrowserGrant(parseJson(row.metadata_json, {})));
+        if (row.grant_type === 'local_workspace') Object.assign(grant, normalizeWorkspaceGrant(parseJson(row.metadata_json, {})));
+        if (row.grant_type === 'local_desktop_control') Object.assign(grant, normalizeDesktopControlGrant(parseJson(row.metadata_json, {})));
         grouped.get(row.device_id).grants[row.grant_type] = grant;
     });
     return [...grouped.values()];
@@ -140,13 +148,17 @@ async function createConnectorTask(toolName, input = {}, user) {
     const tenant = await assertTenantContext(user);
     const safeInput = grantType === 'local_browser'
         ? await normalizeLocalBrowserTask(toolName, input, parseJson(grant.metadata_json, {}))
-        : { ...(input || {}) };
+        : grantType === 'local_workspace'
+            ? normalizeWorkspaceTask(toolName, input, parseJson(grant.metadata_json, {}))
+            : grantType === 'local_desktop_control'
+                ? normalizeDesktopControlTask(toolName, input, parseJson(grant.metadata_json, {}))
+            : { ...(input || {}) };
     delete safeInput.deviceId;
     delete safeInput.device_id;
     const inputJson = JSON.stringify(safeInput);
     const id = crypto.randomUUID();
     const now = getBeijingTimestamp();
-    const ttlSeconds = grantType === 'local_browser' ? LOCAL_BROWSER_TASK_TTL_SECONDS : CONNECTOR_TASK_TTL_SECONDS;
+    const ttlSeconds = ['local_browser', 'local_workspace'].includes(grantType) ? LOCAL_BROWSER_TASK_TTL_SECONDS : CONNECTOR_TASK_TTL_SECONDS;
     const expiresAt = getBeijingTimestamp(new Date(Date.now() + ttlSeconds * 1000));
     await execute(`
         INSERT INTO agent_local_connector_tasks (id, tenant_id, user_id, device_id, grant_type, tool_name, input_json, input_digest, state, expires_at, created_at, updated_at)
@@ -176,7 +188,7 @@ async function claimConnectorTask(user, input = {}) {
     const token = crypto.randomBytes(32).toString('hex');
     // 本机浏览器可能需要用户在可见窗口完成登录；使用与任务同级的长租约，
     // 避免登录尚未完成时被 60 秒通用租约错误回收。
-    const leaseSeconds = candidate.grant_type === 'local_browser' ? LOCAL_BROWSER_TASK_TTL_SECONDS : CONNECTOR_LEASE_SECONDS;
+    const leaseSeconds = ['local_browser', 'local_workspace'].includes(candidate.grant_type) ? LOCAL_BROWSER_TASK_TTL_SECONDS : CONNECTOR_LEASE_SECONDS;
     const lease = getBeijingTimestamp(new Date(Date.now() + leaseSeconds * 1000));
     const rows = await query(`
         UPDATE agent_local_connector_tasks

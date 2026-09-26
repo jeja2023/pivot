@@ -2,7 +2,7 @@
 let sessionSelectionSequence = 0;
 const reattachedChatAgents = new Map();
 
-const CHAT_AGENT_TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted']);
+const CHAT_AGENT_TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
 
 function chatAgentStatusText(status) {
     const value = String(status || '').toLowerCase();

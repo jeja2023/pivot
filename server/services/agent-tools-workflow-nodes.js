@@ -273,6 +273,9 @@ async function executeWorkflowForeach(input = {}, context = {}) {
     const items = Array.isArray(input.items) ? input.items : [];
     if (items.length > 1000) throw new Error('循环节点最多处理 1000 项。');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-foreach-'));
+    const allowUnsafeLocalTest = context.allowUnsafeLocal === true
+        && process.env.NODE_ENV === 'test'
+        && process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST === 'true';
     const taskId = String(context.run?.id || context.runId || context.node?.id || 'foreach').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'foreach';
     const jail = createWorkspaceJail(root, taskId);
     const workerScript = jail.resolve('foreach-worker.js');
@@ -296,6 +299,7 @@ async function executeWorkflowForeach(input = {}, context = {}) {
             env: { PIVOT_AGENT_FOREACH_WORKER: '1', PIVOT_AGENT_WORKSPACE: jail.workspace },
             inheritEnv: false,
             networkDisabled: true,
+            requireEnforcedIsolation: !allowUnsafeLocalTest,
             signal: context.signal || null
         });
         let message;

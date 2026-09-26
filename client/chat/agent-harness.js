@@ -350,7 +350,9 @@
         }
         if (qualityPanel) {
             const q = state.quality || {};
-            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>任务成功率</span><strong>${Math.round(Number(q.runs?.successRate ?? 1) * 100)}%</strong><small>近 30 天完成率</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${Math.round(Number(q.approvals?.medianSeconds || 0) / 60)} 分钟</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${Math.round(Number(q.tools?.errorRate || 0) * 100)}%</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>`);
+            const rate = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) * 100)}%`;
+            const minutes = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) / 60)} 分钟`;
+            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>验收通过率</span><strong>${rate(q.verification?.verifiedRate)}</strong><small>${Number(q.verification?.total || 0)} 个已验收任务</small></div><div class="agent-metric-tile"><span>执行终态率</span><strong>${rate(q.runs?.executionCompletionRate)}</strong><small>近 30 天任务运行</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${minutes(q.approvals?.medianSeconds)}</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${rate(q.tools?.errorRate)}</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>`);
         }
     }
 

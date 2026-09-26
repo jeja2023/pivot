@@ -7,7 +7,7 @@ const path = require('path');
 const { chooseLocalBrowserAuthorization, sanitizeLocalBrowserGrant } = require('./local-browser-authorization');
 const { writeJsonAtomic } = require('./atomic-json');
 
-const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir', 'local_browser']);
+const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir', 'local_browser', 'local_workspace', 'local_desktop_control']);
 
 function randomSecret() {
     return crypto.randomBytes(48).toString('hex');
@@ -38,6 +38,23 @@ function sanitizeLocalGrant(type, grant) {
     if (!grant || typeof grant !== 'object') return { type, authorized: false };
     if (type === 'local_browser') {
         return sanitizeLocalBrowserGrant(grant, os.hostname());
+    }
+    if (type === 'local_workspace') {
+        return {
+            type, authorized: true, resourceKind: 'git_workspace',
+            label: grant.label || localPathHint(grant.path) || '已授权 Git 工作区', pathHint: localPathHint(grant.path),
+            provider: grant.provider || 'desktop', deviceName: grant.deviceName || os.hostname(),
+            gitProvider: grant.gitProvider === 'github_cli' ? 'github_cli' : 'none',
+            grantedAt: grant.grantedAt || '', updatedAt: grant.updatedAt || grant.grantedAt || ''
+        };
+    }
+    if (type === 'local_desktop_control') {
+        return {
+            type, authorized: true, resourceKind: 'desktop_application', label: grant.label || '已授权桌面应用',
+            windowTitle: String(grant.windowTitle || '').slice(0, 240), processName: String(grant.processName || '').slice(0, 160),
+            provider: grant.provider || 'desktop', deviceName: grant.deviceName || os.hostname(),
+            grantedAt: grant.grantedAt || '', updatedAt: grant.updatedAt || grant.grantedAt || ''
+        };
     }
     return {
         type,
@@ -117,7 +134,9 @@ function createLocalAuthorizationManager(options = {}) {
             grants: {
                 local_database: sanitizeLocalGrant('local_database', store.grants.local_database),
                 local_report_dir: sanitizeLocalGrant('local_report_dir', store.grants.local_report_dir),
-                local_browser: sanitizeLocalGrant('local_browser', store.grants.local_browser)
+                local_browser: sanitizeLocalGrant('local_browser', store.grants.local_browser),
+                local_workspace: sanitizeLocalGrant('local_workspace', store.grants.local_workspace),
+                local_desktop_control: sanitizeLocalGrant('local_desktop_control', store.grants.local_desktop_control)
             },
             message: '桌面客户端已就绪，本机授权信息仅保存在当前设备。'
         };
@@ -140,6 +159,26 @@ function createLocalAuthorizationManager(options = {}) {
                 platform: process.platform,
                 deviceName: os.hostname()
             });
+        }
+        if (type === 'local_workspace') {
+            const result = await showLocalAuthorizationDialog({ title: '选择本机 Git 代码工作区', properties: ['openDirectory'] });
+            if (result.canceled || !result.filePaths?.[0]) return null;
+            const selectedPath = path.resolve(result.filePaths[0]);
+            if (!fs.existsSync(path.join(selectedPath, '.git'))) throw new Error('所选目录不是 Git 工作区。');
+            const previous = readLocalAuthorizations().grants.local_workspace;
+            const sameWorkspace = previous?.path && path.resolve(previous.path) === selectedPath;
+            return {
+                resourceKind: 'git_workspace', label: path.basename(selectedPath) || '本机 Git 工作区', path: selectedPath,
+                provider: 'desktop', deviceName: os.hostname(), gitProvider: chooseOptions.gitProvider === 'github_cli' ? 'github_cli' : 'none',
+                managedWorktrees: sameWorkspace && previous?.managedWorktrees && typeof previous.managedWorktrees === 'object' ? previous.managedWorktrees : {},
+                grantedAt: sameWorkspace ? previous.grantedAt || now : now, updatedAt: now
+            };
+        }
+        if (type === 'local_desktop_control') {
+            const windowTitle = String(chooseOptions.windowTitle || '').trim().slice(0, 240);
+            const processName = String(chooseOptions.processName || '').trim().slice(0, 160);
+            if (!windowTitle || !processName) throw new Error('桌面控制授权需要指定当前应用窗口标题和进程名。');
+            return { resourceKind: 'desktop_application', label: String(chooseOptions.label || processName).slice(0, 160), windowTitle, processName, provider: 'desktop', deviceName: os.hostname(), grantedAt: now, updatedAt: now };
         }
         if (type === 'local_database') {
             const result = await showLocalAuthorizationDialog({
@@ -215,6 +254,68 @@ function createLocalAuthorizationManager(options = {}) {
                         defaultId: 1,
                         cancelId: 1,
                         noLink: true
+                    });
+                    return response.response === 0;
+                }
+            });
+        }
+        if (/^workspace\./.test(toolName)) {
+            const { runLocalWorkspaceTask } = require('./local-workspace-automation');
+            const grant = readLocalAuthorizations().grants.local_workspace;
+            const mainWindow = getMainWindow();
+            return await runLocalWorkspaceTask({
+                toolName,
+                input: payload.input && typeof payload.input === 'object' ? payload.input : {},
+                grant,
+                workerDefinition: payload.workerDefinition || null,
+                env: process.env,
+                onManagedWorktreeCreated: async record => {
+                    const store = readLocalAuthorizations();
+                    const current = store.grants.local_workspace;
+                    if (!current?.path || path.resolve(current.path) !== path.resolve(grant?.path || '')) throw new Error('代码工作区授权已变化，拒绝登记工作树。');
+                    const managedWorktrees = current.managedWorktrees && typeof current.managedWorktrees === 'object' ? current.managedWorktrees : {};
+                    managedWorktrees[record.name] = { branch: record.branch, pathHint: record.pathHint, createdAt: new Date().toISOString() };
+                    current.managedWorktrees = managedWorktrees;
+                    current.updatedAt = new Date().toISOString();
+                    store.grants.local_workspace = current;
+                    writeLocalAuthorizations(store);
+                },
+                onManagedWorktreeRemoved: async record => {
+                    const store = readLocalAuthorizations();
+                    const current = store.grants.local_workspace;
+                    if (!current?.path || path.resolve(current.path) !== path.resolve(grant?.path || '')) throw new Error('代码工作区授权已变化，拒绝移除工作树登记。');
+                    const managedWorktrees = current.managedWorktrees && typeof current.managedWorktrees === 'object' ? current.managedWorktrees : {};
+                    delete managedWorktrees[record.name];
+                    current.managedWorktrees = managedWorktrees;
+                    current.updatedAt = new Date().toISOString();
+                    store.grants.local_workspace = current;
+                    writeLocalAuthorizations(store);
+                },
+                confirmAction: async details => {
+                    const response = await dialog.showMessageBox(mainWindow || undefined, {
+                        type: 'warning', title: String(details.title || '确认本机代码工作区操作'),
+                        message: String(details.message || '确认继续？'),
+                        detail: `${details.workspace || '代码工作区'}\n${Array.isArray(details.files) ? details.files.join('\n') : ''}`.slice(0, 4000),
+                        buttons: ['继续', '取消'], defaultId: 1, cancelId: 1, noLink: true
+                    });
+                    return response.response === 0;
+                }
+            });
+        }
+        if (/^desktop\./.test(toolName)) {
+            const { runLocalDesktopControlTask } = require('./local-desktop-control');
+            const grant = readLocalAuthorizations().grants.local_desktop_control;
+            const mainWindow = getMainWindow();
+            return await runLocalDesktopControlTask({
+                toolName,
+                input: payload.input && typeof payload.input === 'object' ? payload.input : {},
+                grant,
+                confirmAction: async details => {
+                    const response = await dialog.showMessageBox(mainWindow || undefined, {
+                        type: 'warning', title: String(details.title || '确认原生桌面应用操作'),
+                        message: String(details.message || '确认继续？'),
+                        detail: `${details.application || ''}\n${details.target?.name || details.target?.automationId || ''}`.slice(0, 1000),
+                        buttons: ['继续', '取消'], defaultId: 1, cancelId: 1, noLink: true
                     });
                     return response.response === 0;
                 }

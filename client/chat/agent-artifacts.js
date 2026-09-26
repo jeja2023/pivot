@@ -49,6 +49,15 @@ function ensureAgentArtifactModal() {
                 <strong>已渲染文档</strong>
                 <div id="agent-artifact-rendition-list" class="agent-artifact-version-list"></div>
             </div>
+            <div class="agent-artifact-annotations">
+                <strong>修改批注</strong>
+                <div class="agent-artifact-annotation-form">
+                    <input id="agent-artifact-annotation-target" class="form-input" maxlength="500" placeholder="位置，例如：第 2 页 / 风险表 / 第 3 行">
+                    <textarea id="agent-artifact-annotation-note" class="form-input" rows="2" maxlength="4000" placeholder="说明要修改或核对的内容"></textarea>
+                    <button type="button" id="agent-artifact-annotation-add" class="btn-secondary">添加批注</button>
+                </div>
+                <div id="agent-artifact-annotation-list" class="agent-artifact-version-list"></div>
+            </div>
             <div id="agent-artifact-diff" class="agent-artifact-diff"></div>
             <div id="agent-artifact-version-list" class="agent-artifact-version-list"></div>
         </div>
@@ -60,6 +69,34 @@ function ensureAgentArtifactModal() {
         }
     });
     return modal;
+}
+
+async function loadAgentArtifactAnnotations(modal, artifactId) {
+    const list = modal.querySelector('#agent-artifact-annotation-list');
+    if (!list) return;
+    const response = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/annotations`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        PivotSafeHtml.setHtml(list, '<div class="empty-state compact">批注加载失败</div>');
+        return;
+    }
+    const annotations = Array.isArray(data.annotations) ? data.annotations : [];
+    PivotSafeHtml.setHtml(list, annotations.map(item => `
+        <div class="agent-artifact-version ${item.status === 'resolved' ? 'resolved' : ''}">
+            <div><strong>${agentEscape(item.target?.location || item.target?.sheet || item.target?.selector || '指定位置')}</strong><span>${agentEscape(item.note || '')}</span><small>${agentEscape(item.status === 'resolved' ? '已处理' : '待处理')}</small></div>
+            <div class="agent-artifact-version-actions">${item.status === 'open' ? `<button type="button" class="btn-secondary" data-artifact-annotation-resolve="${agentEscape(item.id)}">标记已处理</button>` : ''}</div>
+        </div>
+    `).join('') || '<div class="empty-state compact">暂无修改批注。</div>');
+    list.querySelectorAll('[data-artifact-annotation-resolve]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const response = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/annotations/${encodeURIComponent(button.dataset.artifactAnnotationResolve)}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'resolved' })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) return showToast(data.error || '更新批注失败', 'error');
+            await loadAgentArtifactAnnotations(modal, artifactId);
+        });
+    });
 }
 
 function downloadAgentArtifactBlob(filename, blob) {
@@ -137,6 +174,22 @@ async function loadAgentArtifactModal(artifactId) {
     modal.querySelector('#agent-artifact-note').value = '';
     PivotSafeHtml.setHtml(modal.querySelector('#agent-artifact-diff'), '');
     void loadAgentArtifactRenditions(modal, artifactId);
+    void loadAgentArtifactAnnotations(modal, artifactId);
+    modal.querySelector('#agent-artifact-annotation-target').value = '';
+    modal.querySelector('#agent-artifact-annotation-note').value = '';
+    modal.querySelector('#agent-artifact-annotation-add').onclick = async () => {
+        const location = modal.querySelector('#agent-artifact-annotation-target').value;
+        const note = modal.querySelector('#agent-artifact-annotation-note').value;
+        const response = await apiFetch(`${API_BASE}/agents/artifacts/${encodeURIComponent(artifactId)}/annotations`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location, note })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) return showToast(data.error || '添加批注失败', 'error');
+        modal.querySelector('#agent-artifact-annotation-target').value = '';
+        modal.querySelector('#agent-artifact-annotation-note').value = '';
+        await loadAgentArtifactAnnotations(modal, artifactId);
+        showToast('批注已添加', 'success');
+    };
     modal.querySelector('#agent-artifact-save-version').onclick = async () => {
         const content = modal.querySelector('#agent-artifact-content').value;
         const note = modal.querySelector('#agent-artifact-note').value;

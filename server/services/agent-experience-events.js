@@ -48,7 +48,7 @@ async function recordFirstTaskTerminal(runId, status) {
     if (!run) return null;
     const created = await queryOne("SELECT id FROM agent_experience_events WHERE user_id = ? AND event_type = 'first_task_created' AND run_id = ?", [run.user_id, run.id]);
     if (!created) return null;
-    const type = ['completed', 'completed_with_errors'].includes(String(status)) ? 'first_task_succeeded' : 'first_task_failed';
+    const type = ['completed', 'completed_with_errors', 'partial'].includes(String(status)) ? 'first_task_succeeded' : 'first_task_failed';
     return recordAgentExperienceEvent({ id: run.user_id, tenant_id: run.tenant_id }, type, {
         runId: run.id, sessionId: run.session_id || '', metadata: { runMode: run.run_mode || 'standard' }
     });

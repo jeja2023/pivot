@@ -89,8 +89,8 @@ async function formatToolList(user, options = {}) {
                 input_schema: tool.input_schema,
                 ...(tool.output_schema ? { output_schema: tool.output_schema } : {}),
                 source: 'mcp',
-                risk: tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high'),
-                requiresApproval: Boolean(tool.localBrowserConnector === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
+                risk: tool.risk || (tool.localBrowserConnector === true ? 'high' : (tool.governance?.riskLevel || 'high')),
+                approvalRequired: Boolean(tool.requiresApproval || tool.localBrowserConnector === true || tool.localWorkspaceConnector === true || tool.localDesktopControl === true || tool.governance?.approvalRequired || tool.governance?.riskLevel === 'high' || !tool.governance),
                 governance: tool.governance || {},
                 serverName: tool.serverName,
                 owner: tool.owner || null,
@@ -101,6 +101,11 @@ async function formatToolList(user, options = {}) {
                 ...(tool.examples ? { examples: tool.examples } : {}),
                 localDevice: tool.localDevice || null,
                 localBrowserConnector: tool.localBrowserConnector === true,
+                localWorkspaceConnector: tool.localWorkspaceConnector === true,
+                localDesktopControl: tool.localDesktopControl === true,
+                ...(tool.side_effect !== undefined ? { side_effect: Boolean(tool.side_effect) } : {}),
+                ...(tool.idempotent !== undefined ? { idempotent: Boolean(tool.idempotent) } : {}),
+                ...(tool.concurrency ? { concurrency: tool.concurrency } : {}),
                 ...(tool.localBrowserConnector === true ? { network: false } : {})
             };
         })

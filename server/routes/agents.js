@@ -17,6 +17,13 @@ const {
     listWorkflowInvocationsForUser,
     updateAgentRunTitleAndGoalForUser
 } = require('../services/agent-runs');
+const { getTaskVerificationForUser } = require('../services/agent-verification');
+const { listAgentEvidenceForUser } = require('../services/agent-evidence-items');
+const {
+    createAgentArtifactAnnotation,
+    listAgentArtifactAnnotations,
+    updateAgentArtifactAnnotation
+} = require('../services/agent-artifact-annotations');
 const { preflightAgentRun } = require('../services/agent-preflight');
 const { getAgentWorkflowForUser, resolveAgentWorkflowVersion } = require('../services/agent-workflows');
 const {
@@ -630,6 +637,26 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         res.json({ success: true, artifact });
     }));
 
+    router.get('/agents/artifacts/:id/annotations', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await listAgentArtifactAnnotations(req.params.id, req.user, { status: req.query.status, limit: req.query.limit });
+        if (!result) return res.status(404).json({ error: '智能体结果不存在。' });
+        res.json(result);
+    }));
+
+    router.post('/agents/artifacts/:id/annotations', authMiddleware, asyncHandler(async (req, res) => {
+        const annotation = await createAgentArtifactAnnotation(req.params.id, req.user, req.body || {});
+        if (!annotation) return res.status(404).json({ error: '智能体结果不存在。' });
+        logAction(req, '新增产物修改批注', `结果ID: ${req.params.id}，批注ID: ${annotation.id}`);
+        res.status(201).json({ success: true, annotation });
+    }));
+
+    router.patch('/agents/artifacts/:id/annotations/:annotationId', authMiddleware, asyncHandler(async (req, res) => {
+        const annotation = await updateAgentArtifactAnnotation(req.params.id, req.params.annotationId, req.user, req.body || {});
+        if (!annotation) return res.status(404).json({ error: '批注不存在或无权操作。' });
+        logAction(req, '更新产物修改批注', `结果ID: ${req.params.id}，批注ID: ${annotation.id}，状态: ${annotation.status}`);
+        res.json({ success: true, annotation });
+    }));
+
     router.get('/agents/runs', authMiddleware, asyncHandler(async (req, res) => {
         const result = await listRuns(req.user, {
             page: req.query.page,
@@ -686,6 +713,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             scheduleId: null,
             dedupeKey: req.get('Idempotency-Key') ? `manual:${String(req.get('Idempotency-Key')).trim().slice(0, 180)}` : null,
             contextConfig: req.body?.contextConfig,
+            taskContract: req.body?.taskContract || req.body?.task_contract,
             metadata: req.body?.metadata,
             dagSpec: req.body?.dagSpec,
             dagInputs: req.body?.dagInputs || req.body?.dag_inputs,
@@ -704,6 +732,18 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         const detail = await getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
+    }));
+
+    router.get('/agents/runs/:id/verification', authMiddleware, asyncHandler(async (req, res) => {
+        const verification = await getTaskVerificationForUser(req.params.id, req.user);
+        if (!verification) return res.status(404).json({ error: '任务验收报告不存在或无权访问。' });
+        res.json({ success: true, verification });
+    }));
+
+    router.get('/agents/runs/:id/evidence', authMiddleware, asyncHandler(async (req, res) => {
+        const evidence = await listAgentEvidenceForUser(req.params.id, req.user, { limit: req.query.limit });
+        if (evidence === null) return res.status(404).json({ error: '任务不存在或无权访问。' });
+        res.json({ success: true, evidence });
     }));
 
     router.get('/agents/runs/:id/dag/nodes/:nodeId/output', authMiddleware, asyncHandler(async (req, res) => {

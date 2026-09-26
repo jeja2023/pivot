@@ -112,7 +112,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                             ? 'run.paused'
                             : ['resuming'].includes(targetStatus)
                                 ? 'run.resumed'
-                                : ['completed', 'completed_with_errors', 'error', 'failed', 'cancelled'].includes(targetStatus)
+                                : ['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled'].includes(targetStatus)
                                     ? 'run.completed'
                                     : 'run.status_changed',
                         payload: { from: currentStatus, to: targetStatus },

@@ -2,7 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
-const { isolationMetadata, prepareProcessIsolation } = require('./agent-os-isolation');
+const {
+    assertHostProcessIsolationAvailable,
+    getHostProcessIsolationCapabilities,
+    isolationMetadata,
+    prepareProcessIsolation
+} = require('./agent-os-isolation');
 
 const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = Math.max(
@@ -103,9 +108,8 @@ function createWorkspaceJail(root, taskId) {
             return target;
         },
         metadata: {
-            platform: process.platform,
-            osIsolation: process.platform === 'win32' ? 'windows-job-object' : process.platform === 'linux' ? 'linux-cgroup' : 'process-tree',
-            networkIsolation: process.platform === 'linux' ? 'network-namespace-requested' : 'policy-enforced'
+            ...getHostProcessIsolationCapabilities({ networkDisabled: true }),
+            osIsolation: process.platform === 'win32' ? 'windows-job-object' : process.platform === 'linux' ? 'linux-cgroup' : 'process-tree'
         }
     };
 }
@@ -118,6 +122,7 @@ function runSandboxedProcess(command, args = [], options = {}) {
         1024,
         Number.parseInt(options.maxBufferBytes ?? MAX_OUTPUT_BYTES, 10) || MAX_OUTPUT_BYTES
     );
+    assertHostProcessIsolationAvailable(options);
     const isolation = options.isolation || prepareProcessIsolation({
         strictIsolation: options.strictIsolation === true,
         networkDisabled: options.networkDisabled === true,
@@ -244,8 +249,22 @@ function runSandboxedProcess(command, args = [], options = {}) {
             timedOut: false,
             isolation: isolationMetadata(isolation)
         }));
-        if (options.input !== undefined) child.stdin.end(String(options.input));
-        else child.stdin.end();
+        child.stdin.on('error', error => {
+            if (settled) return;
+            terminateChild();
+            error.code = error.code || 'AGENT_SANDBOX_STDIN_FAILED';
+            error.category = error.category || 'resource';
+            finish(error);
+        });
+        try {
+            if (options.input !== undefined) child.stdin.end(String(options.input));
+            else child.stdin.end();
+        } catch (error) {
+            terminateChild();
+            error.code = error.code || 'AGENT_SANDBOX_STDIN_FAILED';
+            error.category = error.category || 'resource';
+            finish(error);
+        }
     });
 }
 

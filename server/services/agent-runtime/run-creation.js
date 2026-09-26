@@ -62,6 +62,8 @@ const { inferDagRunGoal } = require('./dag-run-config');
 const { buildAgentProfileContext, getAgentProfile } = require('../agent-profile');
 const { getAgentFeedbackSignals } = require('../agent-feedback');
 const { resolveAgentContextPack } = require('../agent-context-packs');
+const { normalizeTaskContract } = require('../agent-verification');
+const { createTaskWorkingState } = require('../agent-working-state');
 
 function createAgentRunFactory(deps = {}) {
     const {
@@ -103,6 +105,7 @@ function createAgentRunFactory(deps = {}) {
         skillId = null,
         skillName = null,
         forkHistory = 'none',
+        taskContract = null,
         chatAgent = false
     }) {
         if (typeof assertRunUserActive === 'function') {
@@ -195,6 +198,8 @@ function createAgentRunFactory(deps = {}) {
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
             ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
             : goal, goalMaxLength ? { maxLength: goalMaxLength } : undefined);
+        runMetadata.taskContract = normalizeTaskContract(taskContract || runMetadata.taskContract || {}, cleanGoal);
+        runMetadata.workingState = createTaskWorkingState(runMetadata.taskContract, cleanGoal);
         const runId = createRunId();
         const now = getBeijingTimestamp();
         const normalizedDagInputs = normalizeDagInputsPayload(dagInputs || runMetadata.dagInputs || runMetadata.inputs || {});

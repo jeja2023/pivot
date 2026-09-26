@@ -34,6 +34,8 @@ function buildChatRequestState(req) {
             ? Number(body.regenerateMessageId)
             : null,
         chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
+        ephemeralVoice: body.ephemeralVoice === true,
+        voiceSessionId: String(body.voiceSessionId || body.voice_session_id || '').trim().slice(0, 128),
         autoRouteEnabled,
         routeOverrides: normalizeRouteOverrides(body.routeOverrides),
         ragPreference,

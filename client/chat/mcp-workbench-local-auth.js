@@ -23,6 +23,22 @@ const MCP_LOCAL_AUTH_TYPES = [
         grantLabel: '选择浏览器并授权',
         revokeTitle: '撤销本机浏览器自动化授权',
         revokeMessage: '确定撤销当前设备上的本机浏览器授权吗？隔离 Profile 会保留在本机，但后续任务不能再使用它。'
+    },
+    {
+        type: 'local_workspace',
+        title: '授权本机代码工作区',
+        description: '选择一个 Git 工作区。文件读写、提交、推送和 Pull Request 都会在本机再次确认；测试只允许在认证隔离 Worker 中运行。',
+        grantLabel: '选择 Git 工作区',
+        revokeTitle: '撤销本机代码工作区授权',
+        revokeMessage: '确定撤销当前设备上的代码工作区授权吗？后续任务不能继续读取、修改或交付该工作区。'
+    },
+    {
+        type: 'local_desktop_control',
+        title: '授权原生桌面应用控制',
+        description: '仅控制当前前台、标题和进程名都匹配的应用。操作只使用可访问性树，不使用屏幕坐标或任意键盘注入。',
+        grantLabel: '授权当前应用',
+        revokeTitle: '撤销原生桌面应用控制授权',
+        revokeMessage: '确定撤销当前设备上的原生桌面应用控制授权吗？后续任务不能操作该应用。'
     }
 ];
 
@@ -195,7 +211,9 @@ function mcpLocalAuthFallbackStatus(message = '') {
         grants: {
             local_database: { type: 'local_database', authorized: false },
             local_report_dir: { type: 'local_report_dir', authorized: false },
-            local_browser: { type: 'local_browser', authorized: false, browsers: [], allowedOrigins: [] }
+            local_browser: { type: 'local_browser', authorized: false, browsers: [], allowedOrigins: [] },
+            local_workspace: { type: 'local_workspace', authorized: false },
+            local_desktop_control: { type: 'local_desktop_control', authorized: false }
         },
         message: message || '当前网页未检测到桌面客户端或本地助手，本机资源不会被服务器直接读取。'
     };
@@ -210,7 +228,9 @@ function mcpLocalAuthNormalizeStatus(status) {
         grants: {
             local_database: grants.local_database || fallback.grants.local_database,
             local_report_dir: grants.local_report_dir || fallback.grants.local_report_dir,
-            local_browser: grants.local_browser || fallback.grants.local_browser
+            local_browser: grants.local_browser || fallback.grants.local_browser,
+            local_workspace: grants.local_workspace || fallback.grants.local_workspace,
+            local_desktop_control: grants.local_desktop_control || fallback.grants.local_desktop_control
         }
     };
 }
@@ -249,6 +269,8 @@ function mcpLocalAuthCardStatusText(status, type) {
     if (grant.authorized) return `${grant.label || '已授权资源'} · ${status.deviceName || grant.deviceName || '当前设备'}`;
     if (type === 'local_database') return '打开授权中心选择本机 SQLite 文件';
     if (type === 'local_browser') return '选择浏览器并填写允许访问的站点';
+    if (type === 'local_workspace') return '打开授权中心选择本机 Git 工作区';
+    if (type === 'local_desktop_control') return '填写当前前台应用的窗口标题和进程名后授权';
     return '打开授权中心选择本机文件目录';
 }
 
@@ -297,6 +319,10 @@ function renderMcpLocalAuthGrant(type, status) {
             <small>仅允许精确站点，例如 https://oa.example.internal。可再次选择浏览器来增加 Edge、Firefox、Brave 等。</small>
             ${authorized && Array.isArray(grant.browsers) ? `<div class="mcp-local-browser-list">${grant.browsers.map(browser => `<span>${mcpEscape(`${browser.label || browser.id} · ${browser.engine || ''}`)}</span>`).join('')}</div>` : ''}
         </div>` : '';
+    const workspaceDetails = type === 'local_workspace' ? `
+        <div class="mcp-local-browser-grant"><label><span>GitHub Pull Request 交付</span><select class="form-input" data-mcp-local-workspace-provider><option value="none"${grant.gitProvider === 'github_cli' ? '' : ' selected'}>不授权</option><option value="github_cli"${grant.gitProvider === 'github_cli' ? ' selected' : ''}>授权本机 GitHub CLI</option></select></label><small>选择 GitHub CLI 后，创建 Pull Request 仍会在当前设备确认。</small></div>` : '';
+    const desktopDetails = type === 'local_desktop_control' ? `
+        <div class="mcp-local-browser-grant"><label><span>当前窗口标题</span><input class="form-input" data-mcp-local-desktop-window-title maxlength="240" value="${mcpEscape(grant.windowTitle || '')}" placeholder="例如：企业管理系统"></label><label><span>当前进程名</span><input class="form-input" data-mcp-local-desktop-process-name maxlength="160" value="${mcpEscape(grant.processName || '')}" placeholder="例如：erp-client.exe"></label><small>运行时会再次校验当前前台窗口标题与进程名；密码字段不会读写。</small></div>` : '';
     return `
         <article class="mcp-local-auth-item ${stateClass}" data-mcp-local-auth-item="${mcpEscape(type)}">
             <header>
@@ -317,6 +343,8 @@ function renderMcpLocalAuthGrant(type, status) {
                 <span>${timeText ? `授权时间：${mcpEscape(timeText)}` : '本机路径只保存在桌面客户端或本地助手，不上传到服务器。'}</span>
             </div>
             ${browserDetails}
+            ${workspaceDetails}
+            ${desktopDetails}
             <footer>
                 <button class="btn-primary" type="button" data-mcp-local-grant="${mcpEscape(type)}" ${available ? '' : 'disabled'}>${mcpEscape(authorized ? '重新授权' : config.grantLabel)}</button>
                 <button class="btn-secondary" type="button" data-mcp-local-revoke="${mcpEscape(type)}" ${available && authorized ? '' : 'disabled'}>撤销</button>
@@ -367,7 +395,10 @@ function bindMcpLocalAuthorizationCenter(status) {
         button.addEventListener('click', () => {
             const type = button.dataset.mcpLocalGrant;
             const origins = body.querySelector('[data-mcp-local-browser-origins]')?.value || '';
-            requestMcpLocalAuthorization(type, type === 'local_browser' ? { allowedOrigins: origins } : {});
+            const gitProvider = body.querySelector('[data-mcp-local-workspace-provider]')?.value || 'none';
+            const windowTitle = body.querySelector('[data-mcp-local-desktop-window-title]')?.value || '';
+            const processName = body.querySelector('[data-mcp-local-desktop-process-name]')?.value || '';
+            requestMcpLocalAuthorization(type, type === 'local_browser' ? { allowedOrigins: origins } : type === 'local_workspace' ? { gitProvider } : type === 'local_desktop_control' ? { windowTitle, processName } : {});
         });
     });
     body.querySelectorAll('[data-mcp-local-revoke]').forEach(button => {

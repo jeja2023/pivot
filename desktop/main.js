@@ -25,7 +25,7 @@ const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
 const { isTrustedExternalNavigation } = require('./external-navigation-policy');
 const { setupAutoUpdater } = require('./updater');
-const { runDesktopWorker } = require('./agent-runtime/broker');
+const { isDesktopWorkerRuntimeAvailable, runDesktopWorker } = require('./agent-runtime/broker');
 const { createDesktopDeliveryController } = require('./delivery/controller');
 const { createLazyLocalMcpController } = require('./local-mcp-controller');
 const { createLocalAuthorizationManager } = require('./local-authorizations');
@@ -668,6 +668,11 @@ ipcMain.handle('pivot-delivery:revoke-directory', async (event, grantId) => {
 });
 ipcMain.handle('pivot-agent:request-approval', async (event, payload = {}) => {
     assertSecureWorkerIpcSender(event);
+    if (!isDesktopWorkerRuntimeAvailable()) {
+        const error = new Error('当前桌面端未配置可强制隔离的脚本执行 Worker。');
+        error.code = 'AGENT_DESKTOP_WORKER_UNAVAILABLE';
+        throw error;
+    }
     localAuthManager.configureLocalAuthorizationEnvironment();
     const request = normalizeWorkerRequest(payload, { workspaceRoot: desktopWorkerRoot() });
     const result = await dialog.showMessageBox(mainWindow || undefined, {
@@ -687,6 +692,11 @@ ipcMain.handle('pivot-agent:request-approval', async (event, payload = {}) => {
 
 ipcMain.handle('pivot-agent:run-worker', async (event, payload = {}, approvalToken = '') => {
     assertSecureWorkerIpcSender(event);
+    if (!isDesktopWorkerRuntimeAvailable()) {
+        const error = new Error('当前桌面端未配置可强制隔离的脚本执行 Worker。');
+        error.code = 'AGENT_DESKTOP_WORKER_UNAVAILABLE';
+        throw error;
+    }
     localAuthManager.configureLocalAuthorizationEnvironment();
     const request = normalizeWorkerRequest(payload, { workspaceRoot: desktopWorkerRoot() });
     workerApprovals.consume(approvalToken, request);

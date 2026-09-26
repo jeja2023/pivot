@@ -15,6 +15,7 @@ const {
     recordNativeToolCallCapability,
     shouldUseNativeToolCalls
 } = require('./model-tool-call-capabilities');
+const { verifyTaskOutcome } = require('./agent-verification');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -108,6 +109,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const recordUsage = deps.recordAgentModelUsage || recordAgentModelUsage;
         const recordToolCallCapability = deps.recordNativeToolCallCapability || recordNativeToolCallCapability;
         const taskBudget = deps.taskBudget || null;
+        const verifyOutcome = async (answer, partial = false, reason = '') => {
+            const verify = deps.verifyAgentOutcome || (options => verifyTaskOutcome(options));
+            return await verify({ runId, run, user, answer, observations, partial, reason });
+        };
         const tools = buildAgentToolSchemas(plannerToolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
 
@@ -128,6 +133,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             ? `${systemPrompt}\n\n当前会话系统提示词：${String(chatAgent.systemPrompt).slice(0, 12000)}`
             : systemPrompt;
         const contextMessages = [
+            chatContext?.taskWorkingState ? { role: 'user', content: require('./agent-working-state').buildWorkingStatePrompt(chatContext.taskWorkingState) } : null,
             chatContext?.longTermMemoryContext ? { role: 'user', content: typeof chatContext.longTermMemoryContext === 'object' ? String(chatContext.longTermMemoryContext.content || '') : String(chatContext.longTermMemoryContext) } : null,
             !chatContext?.longTermMemoryContext && chatAgent?.memoryContext ? { role: 'user', content: typeof chatAgent.memoryContext === 'object' ? String(chatAgent.memoryContext.content || '') : String(chatAgent.memoryContext) } : null,
             chatAgent?.ragContext ? { role: 'user', content: typeof chatAgent.ragContext === 'object' ? String(chatAgent.ragContext.content || '') : String(chatAgent.ragContext) } : null
@@ -480,15 +486,24 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     allowBudgetExceeded: true
                 });
                 const budgetWarning = usageResult?.budgetExceeded ? '已达到总 Token 预算，以下为当前已生成结果。' : '';
+                await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
+                const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning);
+                const finalStatus = verification.outcomeStatus === 'verified'
+                    ? 'completed'
+                    : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
+                const verified = finalStatus === 'completed';
+                const verificationError = verified
+                    ? ''
+                    : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
                 await deps.updateRun(runId, {
-                    status: budgetWarning ? 'completed_with_errors' : 'completed',
+                    status: finalStatus,
                     final_answer: budgetWarning ? `注意：${budgetWarning}\n\n${answer}` : answer,
-                    error_message: budgetWarning,
-                    completed_at: getBeijingTimestamp(),
+                    error_message: budgetWarning || verificationError,
+                    ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await deps.createAgentNotification(user.id, runId, budgetWarning ? 'warning' : 'completed', budgetWarning ? '任务已生成部分结果' : '任务运行已完成', deps.getAgentRunTitle(run));
+                await deps.createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行已完成' : '任务需要补充或修复', deps.getAgentRunTitle(run));
                 return { completed: true, roundsUsed };
             }
 

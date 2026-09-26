@@ -291,7 +291,7 @@ function createAgentQueue({
                 }
                 if (!user) {
                     const row = await dbRunner.queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
-                    if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors'].includes(row?.status)) {
+                    if (!['cancelled', 'deleted', 'error', 'completed', 'completed_with_errors', 'partial'].includes(row?.status)) {
                         await markRunError(runId, 'Agent run user no longer exists.');
                     }
                     await releaseRun(runId);

@@ -22,7 +22,7 @@ function normalizePythonInput(value) {
     return value;
 }
 
-async function runPythonScript({ script, input = {}, workspaceRoot, taskId = 'python', timeoutMs = 30000, pythonExecutable, strictIsolation = (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'), networkDisabled = true, memoryLimitBytes } = {}) {
+async function runPythonScript({ script, input = {}, workspaceRoot, taskId = 'python', timeoutMs = 30000, pythonExecutable, strictIsolation = (process.env.PIVOT_AGENT_STRICT_ISOLATION === '1' || process.env.PIVOT_AGENT_STRICT_ISOLATION === 'true'), networkDisabled = true, memoryLimitBytes, allowUnsafeLocal = false } = {}) {
     const source = String(script || '').trim();
     if (!source) throw new Error('Python Worker 脚本不能为空。');
     if (source.length > 256 * 1024) throw new Error('Python Worker 脚本超过 256KB 限制。');
@@ -33,11 +33,15 @@ async function runPythonScript({ script, input = {}, workspaceRoot, taskId = 'py
     fs.writeFileSync(scriptPath, source, { encoding: 'utf8', mode: 0o600 });
     fs.writeFileSync(inputPath, JSON.stringify(normalizePythonInput(input)), { encoding: 'utf8', mode: 0o600 });
     const executable = resolvePythonExecutable(pythonExecutable);
+    const allowUnsafeLocalTest = allowUnsafeLocal === true
+        && process.env.NODE_ENV === 'test'
+        && process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST === 'true';
     const result = await runSandboxedProcess(executable, ['-I', scriptPath, '--pivot-input', inputPath], {
         jail,
         timeoutMs: Math.min(Math.max(Number(timeoutMs) || 30000, 100), 120000),
         strictIsolation,
         networkDisabled,
+        requireEnforcedIsolation: !allowUnsafeLocalTest,
         memoryLimitBytes,
         env: { PIVOT_AGENT_WORKER: '1', PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' }
     });

@@ -6,6 +6,8 @@ const { isSuperAdmin } = require('../permissions');
 const { getAgentTraceForUser } = require('./agent-traces');
 const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
 const { resolvePersistedDagOutput } = require('./agent-dag-output');
+const { getTaskVerificationForUser } = require('./agent-verification');
+const { listAgentEvidenceForUser } = require('./agent-evidence-items');
 const runRepository = require('../repositories/agent-runs');
 
 async function getRunForUser(runId, user, options = {}) {
@@ -371,20 +373,22 @@ function getRunProgress(run, steps = []) {
         stepCount: steps.length,
         totalDurationMs,
         isLimitReached: !isDag && progressCount >= maxSteps,
-        percent: active ? Math.min(Math.round((progressCount / maxSteps) * 100), 95) : (['completed', 'completed_with_errors'].includes(run?.status) ? 100 : 0)
+        percent: active ? Math.min(Math.round((progressCount / maxSteps) * 100), 95) : (['completed', 'completed_with_errors', 'partial', 'needs_input'].includes(run?.status) ? 100 : 0)
     };
 }
 
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints] = await Promise.all([
+    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence] = await Promise.all([
         listSteps(run.id),
         listDagNodes(run.id),
         listWorkflowInvocationsForUser(run.id, user),
         listWorkflowIterationItemsForUser(run.id, user),
         getAgentTraceForUser(run.id, user),
-        summarizeAgentCheckpoints(run.id)
+        summarizeAgentCheckpoints(run.id),
+        getTaskVerificationForUser(run.id, user),
+        listAgentEvidenceForUser(run.id, user)
     ]);
     let effectiveDagNodes = dagNodes || [];
     if (String(run.run_mode || '').toLowerCase() === 'dag' && effectiveDagNodes.length === 0) {
@@ -408,6 +412,10 @@ async function getRunDetailForUser(runId, user) {
             }));
         }
     }
+    let metadata = run.metadata;
+    if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; }
+    }
     return {
         run,
         steps: steps || [],
@@ -416,7 +424,10 @@ async function getRunDetailForUser(runId, user) {
         iterationItems: iterationItems || [],
         progress: getRunProgress(run, steps || []),
         trace,
-        checkpoints
+        checkpoints,
+        taskContract: metadata?.taskContract || null,
+        verification: verification || metadata?.taskVerification || null,
+        evidence: evidence || []
     };
 }
 

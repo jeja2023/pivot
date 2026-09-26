@@ -690,6 +690,56 @@ test('本机浏览器连接器要求设备、授权浏览器和精确站点白�
     }
 });
 
+test('本机代码工作区与原生桌面控制通过签名连接器发现、领取和回执', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-w18-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_w18_${suffix}`)), tenant_id: tenantId };
+    const deviceId = `device-${suffix}-w18`;
+    const taskIds = [];
+    try {
+        await registerTestDevice(user, deviceId);
+        await heartbeatConnector(user, {
+            deviceId,
+            grants: {
+                local_workspace: { authorized: true, label: '项目仓库', pathHint: 'workspace/project', gitProvider: 'github_cli' },
+                local_desktop_control: { authorized: true, label: 'ERP', windowTitle: 'ERP 工作台', processName: 'erp-client.exe' }
+            }
+        });
+        const tools = await listCachedMcpTools(0, user);
+        const workspaceTool = tools.find(tool => tool.fullName === 'mcp.0.workspace.git_pr');
+        const desktopTool = tools.find(tool => tool.fullName === 'mcp.0.desktop.click');
+        assert.ok(workspaceTool);
+        assert.ok(desktopTool);
+        assert.equal(workspaceTool.localWorkspaceConnector, true);
+        assert.equal(desktopTool.localDesktopControl, true);
+        assert.equal(workspaceTool.requiresApproval, true);
+        assert.equal(desktopTool.requiresApproval, true);
+        assert.equal(workspaceTool.input_schema.properties.deviceId.default, deviceId);
+        const workspaceTask = await createConnectorTask('workspace.git_pr', { deviceId, title: '受控 PR', base: 'main' }, user);
+        const desktopTask = await createConnectorTask('desktop.inspect', { deviceId }, user);
+        taskIds.push(workspaceTask.id, desktopTask.id);
+        const claimedNames = new Set();
+        for (let index = 0; index < 2; index += 1) {
+            const claimed = await claimConnectorTask(user, { deviceId });
+            claimedNames.add(claimed.task.toolName);
+            assert.equal(claimed.task.input.deviceId, undefined);
+            if (claimed.task.toolName === 'workspace.git_pr') {
+                assert.equal(claimed.task.input.action, 'workspace.git_pr');
+                await completeConnectorTask(user, claimed.task.id, { deviceId, claimToken: claimed.claimToken, success: true, result: { url: 'https://example.invalid/pr/1' } });
+            } else {
+                assert.equal(claimed.task.toolName, 'desktop.inspect');
+                assert.equal(claimed.task.input.grant.processName, 'erp-client.exe');
+                await completeConnectorTask(user, claimed.task.id, { deviceId, claimToken: claimed.claimToken, success: true, result: { controls: [] } });
+            }
+        }
+        assert.deepEqual(claimedNames, new Set(['workspace.git_pr', 'desktop.inspect']));
+    } finally {
+        if (taskIds.length) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = ANY($1)', [taskIds]);
+        await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+    }
+});
+
 test('本机交付四条件缺一即拒，领取回执与摘要不一致处置符合状态机', skipWithoutDatabase, async () => {
     const tenantId = await ensureTenant(`pivot-tenant-a-${suffix}`);
     const user = { ...(await ensureUser(`pivot_delivery_${suffix}`)), tenant_id: tenantId };

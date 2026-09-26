@@ -9,6 +9,7 @@ const {
     isSecureWorkerRendererUrl,
     normalizeWorkerRequest
 } = require('../desktop/worker-security');
+const { isDesktopWorkerRuntimeAvailable, runDesktopWorker } = require('../desktop/agent-runtime/broker');
 
 function makeWorkerFixture() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-worker-security-'));
@@ -68,4 +69,17 @@ test('desktop worker rejects non-loopback HTTP renderer origins', () => {
     assert.equal(isSecureWorkerRendererUrl('http://127.0.0.1:3000/chat'), true);
     assert.equal(isSecureWorkerRendererUrl('http://localhost:3000/chat'), true);
     assert.equal(isSecureWorkerRendererUrl('http://192.168.10.20:3000/chat'), false);
+});
+
+test('desktop worker refuses arbitrary scripts without an enforced runtime', async () => {
+    const fixture = makeWorkerFixture();
+    try {
+        assert.equal(isDesktopWorkerRuntimeAvailable(), false);
+        await assert.rejects(
+            runDesktopWorker({ approvedByMainProcess: true, workspaceRoot: fixture.root, taskId: 'task-1', command: 'node', args: ['run.js'] }),
+            error => error.code === 'AGENT_DESKTOP_WORKER_UNAVAILABLE'
+        );
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
 });

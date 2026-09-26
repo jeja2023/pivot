@@ -5,6 +5,7 @@ const RUN_STATUSES = new Set([
     'observing',
     'diagnosing',
     'replanning',
+    'verifying',
     'running',
     'approval_required',
     'awaiting_approval',
@@ -12,28 +13,33 @@ const RUN_STATUSES = new Set([
     'resuming',
     'completed',
     'completed_with_errors',
+    'partial',
+    'needs_input',
     'error',
     'failed',
     'cancelled',
     'deleted'
 ]);
 
-const TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'deleted']);
+const TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
 
 const TRANSITIONS = {
     queued: new Set(['planning', 'running', 'cancelled', 'error', 'failed', 'deleted']),
-    planning: new Set(['queued', 'executing', 'running', 'observing', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'cancelled', 'error', 'failed', 'deleted']),
-    executing: new Set(['queued', 'observing', 'diagnosing', 'planning', 'approval_required', 'waiting_approval', 'running', 'completed', 'completed_with_errors', 'cancelled', 'error', 'failed', 'deleted']),
-    observing: new Set(['queued', 'diagnosing', 'replanning', 'planning', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'running', 'cancelled', 'error', 'failed', 'deleted']),
-    diagnosing: new Set(['queued', 'replanning', 'planning', 'waiting_approval', 'approval_required', 'completed_with_errors', 'completed', 'error', 'failed', 'cancelled', 'deleted']),
-    replanning: new Set(['queued', 'planning', 'executing', 'running', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'cancelled', 'error', 'failed', 'deleted']),
-    running: new Set(['planning', 'executing', 'observing', 'diagnosing', 'replanning', 'approval_required', 'awaiting_approval', 'waiting_approval', 'completed', 'completed_with_errors', 'error', 'failed', 'cancelled', 'queued', 'deleted']),
+    planning: new Set(['queued', 'executing', 'running', 'observing', 'verifying', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'cancelled', 'error', 'failed', 'deleted']),
+    executing: new Set(['queued', 'observing', 'diagnosing', 'planning', 'verifying', 'approval_required', 'waiting_approval', 'running', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'cancelled', 'error', 'failed', 'deleted']),
+    observing: new Set(['queued', 'diagnosing', 'replanning', 'planning', 'verifying', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'running', 'cancelled', 'error', 'failed', 'deleted']),
+    diagnosing: new Set(['queued', 'replanning', 'planning', 'verifying', 'waiting_approval', 'approval_required', 'completed_with_errors', 'completed', 'partial', 'needs_input', 'error', 'failed', 'cancelled', 'deleted']),
+    replanning: new Set(['queued', 'planning', 'executing', 'running', 'verifying', 'waiting_approval', 'approval_required', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'cancelled', 'error', 'failed', 'deleted']),
+    running: new Set(['planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'approval_required', 'awaiting_approval', 'waiting_approval', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'error', 'failed', 'cancelled', 'queued', 'deleted']),
+    verifying: new Set(['planning', 'completed', 'completed_with_errors', 'partial', 'needs_input', 'error', 'failed', 'cancelled', 'deleted']),
     approval_required: new Set(['queued', 'resuming', 'cancelled', 'error', 'deleted']),
     awaiting_approval: new Set(['queued', 'resuming', 'running', 'cancelled', 'error', 'deleted']),
     waiting_approval: new Set(['queued', 'resuming', 'cancelled', 'error', 'deleted']),
     resuming: new Set(['queued', 'planning', 'executing', 'running', 'waiting_approval', 'approval_required', 'cancelled', 'error', 'failed', 'deleted']),
     completed: new Set(['deleted']),
     completed_with_errors: new Set(['deleted']),
+    partial: new Set(['queued', 'deleted']),
+    needs_input: new Set(['queued', 'resuming', 'cancelled', 'error', 'deleted']),
     error: new Set(['queued', 'deleted']),
     failed: new Set(['queued', 'deleted']),
     cancelled: new Set(['queued', 'deleted']),

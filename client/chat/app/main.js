@@ -199,6 +199,7 @@ bind('chat-remember-input', () => window.Pivot?.moduleApi?.('chat.memoryActions'
 bind('chat-memory-intent', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.openMemoryIntentModal?.());
 bind('chat-open-memories', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.openChatMemoryManagement?.().catch(error => showToast(error.message || '打开记忆管理失败', 'error')));
 bind('chat-voice-input', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.startChatVoiceInput?.());
+bind('chat-realtime-voice', () => window.Pivot?.moduleApi?.('chat.realtimeVoice')?.startRealtimeVoice?.());
 bind('stop-btn', () => window.Pivot.legacy.cancelCurrentChatAgent?.() || currentAbortController?.abort());
 function canSelectChatAttachment() {
     const modelId = document.getElementById('model-selector')?.value;

@@ -218,6 +218,8 @@ function getLocalDeviceMcpServerTypeForTool(toolName) {
     if (name.startsWith('db.')) return 'database';
     if (name.startsWith('reports.')) return 'reports';
     if (name.startsWith('browser.')) return 'browser';
+    if (name.startsWith('workspace.')) return 'workspace';
+    if (name.startsWith('desktop.')) return 'desktop_control';
     return '';
 }
 

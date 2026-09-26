@@ -1,6 +1,6 @@
 'use strict';
 
-const { assertDescribed } = require('./agent-tool-progressive-discovery');
+const { assertDescribed, getRememberedDescription } = require('./agent-tool-progressive-discovery');
 const { describeToolForUser } = require('./tool-discovery');
 
 function progressiveExecutionError(message, code = 'TOOL_DISCOVERY_EXECUTION_INVALID') {
@@ -22,7 +22,7 @@ async function resolveProgressiveExecution({ toolName, input = {}, user, toolLis
     if (name !== 'tools.execute') return { selectedTool, approvalTool: selectedTool, approvalToolName: name, approvalInput: input };
     const reference = input?.toolRef || input?.tool_ref || {};
     assertDescribed(state, reference);
-    const described = await describeToolForUser(user, reference, {}, {
+    const described = getRememberedDescription(state, reference) || await describeToolForUser(user, reference, {}, {
         toolPolicy: run?.tool_policy || run?.toolPolicy || 'all',
         toolAllowlist: run?.tool_allowlist || run?.toolAllowlist || null
     });

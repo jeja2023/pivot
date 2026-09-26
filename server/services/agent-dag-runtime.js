@@ -28,8 +28,7 @@ const {
 const {
     persistDagOutput,
     persistedDagOutput,
-    compactPreparedDagOutput,
-    extractReadableDagOutput
+    compactPreparedDagOutput
 } = require('./agent-dag-output');
 const {
     computeDagNodeCacheKey,
@@ -37,28 +36,8 @@ const {
     setCachedNodeOutput,
     isCacheableDagTool
 } = require('./agent-dag-cache');
-function buildDagFallbackFinalAnswer(dagSpec, states) {
-    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const completedNodes = nodes.filter(node => ['completed', 'continued_error'].includes(states.get(node.id)?.status));
-    const dependencyIds = new Set(nodes.flatMap(node => Array.isArray(node.dependsOn) ? node.dependsOn : []));
-    const terminalOutputs = completedNodes
-        .filter(node => !dependencyIds.has(node.id))
-        .map(node => ({ node, text: extractReadableDagOutput(states.get(node.id)?.output) }))
-        .filter(item => item.text);
-    if (terminalOutputs.length === 1) return terminalOutputs[0].text;
-    if (terminalOutputs.length > 1) {
-        return terminalOutputs
-            .map(({ node, text }) => `## ${node.title || node.id}\n\n${text}`)
-            .join('\n\n');
-    }
-    const reversedCompleted = completedNodes.slice().reverse();
-    for (const node of reversedCompleted) {
-        const text = extractReadableDagOutput(states.get(node.id)?.output);
-        if (text) return text;
-    }
-    if (completedNodes.length) return `工作流执行完成，共 ${completedNodes.length} 个节点完成。`;
-    return '';
-}
+const { verifyTaskOutcome } = require('./agent-verification');
+const { buildDagFallbackFinalAnswer, buildIncompleteDagAnswer, extractReadableDagOutput } = require('./agent-dag-results');
 
 async function upsertDagNode(runId, node, patch = {}) {
     const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
@@ -336,28 +315,6 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
         startedAtText,
         durationMs: Date.now() - startedAt
     };
-}
-
-function buildIncompleteDagAnswer(dagSpec, states) {
-    const nodes = Array.isArray(dagSpec?.nodes) ? dagSpec.nodes : [];
-    const outputNodes = nodes.filter(node => String(node.tool || '') === 'workflow.output');
-    const dependencyIds = new Set(nodes.flatMap(node => Array.isArray(node.dependsOn) ? node.dependsOn : []));
-    const expected = outputNodes.length
-        ? outputNodes
-        : nodes.filter(node => ['agent.llm', 'agent.content_review'].includes(String(node.tool || '')) && !dependencyIds.has(node.id));
-    if (expected.length && expected.every(node => states.get(node.id)?.status === 'completed')) return '';
-    const unfinished = expected.filter(node => !['completed', 'continued_error'].includes(states.get(node.id)?.status));
-    if (!unfinished.length) return '';
-    const failed = nodes.filter(node => ['error', 'continued_error'].includes(states.get(node.id)?.status));
-    const lines = [
-        '## 工作流交付未完成',
-        '',
-        '查询或前置处理可能已经成功，但预期的分析/输出节点没有完成，因此不能把行数摘要视为校对结果。',
-        ''
-    ];
-    failed.forEach(node => lines.push('- 失败节点：' + (node.title || node.id) + '；原因：' + (states.get(node.id)?.error || '未知错误')));
-    unfinished.filter(node => !failed.includes(node)).forEach(node => lines.push('- 未完成节点：' + (node.title || node.id) + '；状态：' + (states.get(node.id)?.status || 'pending')));
-    return lines.join('\n');
 }
 
 const { executeSubworkflowDag, executeWorkflowIteration } = createSubworkflowRuntime({
@@ -965,21 +922,40 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const answer = buildIncompleteDagAnswer(dagSpec, states)
         || buildDagFallbackFinalAnswer(dagSpec, states)
         || `工作流执行完成，共 ${dagSpec.nodes.length} 个节点。`;
+    // 路由未命中跳过属于预期控制流，不能将成功路由的工作流判定为部分完成结果。
+    const partial = failedNodes.length > 0 || incompleteResultNodes.length > 0;
+    await deps.updateRun(run.id, { status: 'verifying', updated_at: getBeijingTimestamp() });
+    const verification = await (deps.verifyAgentOutcome || (options => verifyTaskOutcome(options)))({
+        runId: run.id,
+        run,
+        user,
+        answer,
+        observations,
+        partial,
+        reason: partial ? '工作流存在失败、未完整或跳过节点。' : ''
+    });
+    const finalStatus = verification.outcomeStatus === 'verified'
+        ? 'completed'
+        : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
+    const verified = finalStatus === 'completed';
+    const verificationError = verified
+        ? ''
+        : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
     await deps.updateRun(run.id, {
-        status: failedNodes.length || incompleteResultNodes.length ? 'completed_with_errors' : 'completed',
+        status: finalStatus,
         final_answer: answer,
         error_message: failedNodes.length
             ? `DAG 失败节点数：${failedNodes.length}`
-            : (incompleteResultNodes.length ? `DAG 未完整处理节点数：${incompleteResultNodes.length}` : ''),
-        completed_at: getBeijingTimestamp(),
+            : (incompleteResultNodes.length ? `DAG 未完整处理节点数：${incompleteResultNodes.length}` : verificationError),
+        ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
     });
     await deps.createAgentNotification(
         user.id,
         run.id,
-        failedNodes.length || incompleteResultNodes.length ? 'warning' : 'completed',
-        failedNodes.length || incompleteResultNodes.length ? 'DAG 运行已完成，但存在未完成结果' : 'DAG 运行已完成',
+        verified ? 'completed' : 'warning',
+        verified ? 'DAG 运行已完成' : 'DAG 运行需要补充或修复',
         deps.getAgentRunTitle(run)
     );
 }

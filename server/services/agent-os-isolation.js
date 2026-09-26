@@ -57,6 +57,28 @@ function buildIsolationSpec(options = {}) {
     };
 }
 
+function getHostProcessIsolationCapabilities(options = {}) {
+    const networkDisabled = options.networkDisabled === true;
+    const platform = process.platform;
+    // Job Objects 与 cgroups 仅限制资源，但不限制任意文件访问。直接宿主进程绝不能被表述为完整的工作区或网络沙箱。
+    return {
+        platform,
+        filesystem: 'best_effort',
+        process: platform === 'win32' ? 'resource_limited' : 'process_tree',
+        network: networkDisabled && platform === 'linux' ? 'namespace_requested' : 'not_enforced',
+        enforced: false
+    };
+}
+
+function assertHostProcessIsolationAvailable(options = {}) {
+    if (options.requireEnforcedIsolation !== true) return;
+    const error = new Error('当前宿主进程执行器无法强制隔离工作区和网络；请配置受控 Capability Worker。');
+    error.code = 'AGENT_SANDBOX_ENFORCEMENT_UNAVAILABLE';
+    error.category = 'policy';
+    error.status = 503;
+    throw error;
+}
+
 function createLinuxCgroup(spec) {
     if (process.platform !== 'linux') return null;
     const root = path.resolve(spec.cgroupRoot);
@@ -109,13 +131,22 @@ function prepareProcessIsolation(options = {}) {
 
 function isolationMetadata(isolation) {
     const spec = isolation?.spec || {};
+    const capabilities = getHostProcessIsolationCapabilities(spec);
     return {
         platform: process.platform,
         strict: spec.strict === true,
         memoryLimitBytes: spec.memoryLimitBytes || 0,
         osIsolation: process.platform === 'win32' ? 'windows-job-object' : process.platform === 'linux' ? (isolation?.cgroup ? 'linux-cgroup' : 'process-group') : 'process-tree',
-        networkIsolation: spec.networkDisabled ? (process.platform === 'linux' ? 'network-namespace-requested' : 'policy-enforced') : 'policy-enforced'
+        filesystemIsolation: capabilities.filesystem,
+        networkIsolation: capabilities.network,
+        enforcement: capabilities.enforced ? 'enforced' : 'best_effort'
     };
 }
 
-module.exports = { buildIsolationSpec, isolationMetadata, prepareProcessIsolation };
+module.exports = {
+    assertHostProcessIsolationAvailable,
+    buildIsolationSpec,
+    getHostProcessIsolationCapabilities,
+    isolationMetadata,
+    prepareProcessIsolation
+};

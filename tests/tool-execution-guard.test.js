@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createToolExecutionGuard, executeWithRetry, retryDelayMs } = require('../server/services/tool-execution-guard');
+const fs = require('node:fs');
+const path = require('node:path');
 
 test('工具执行守卫隔离并发、限流和熔断恢复探测', () => {
     let clock = 1_000;
@@ -31,4 +33,10 @@ test('只对临时失败执行指数退避重试，非临时失败立即返回',
     assert.equal(attempts, 3);
     assert.deepEqual(delays, [retryDelayMs(1, () => 0.5), retryDelayMs(2, () => 0.5)]);
     await assert.rejects(() => executeWithRetry(async () => { throw Object.assign(new Error('invalid'), { code: 'TOOL_OUTPUT_INVALID' }); }, { retryable: true, maxAttempts: 3, sleep: async () => {} }), /invalid/);
+});
+
+test('cross-instance guard acquisition is released if the shared lease cannot be acquired', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../server/services/agent-tool-runtime.js'), 'utf8');
+    assert.match(source, /guardLease\.release\(\{ error \}\);/);
+    assert.match(source, /try \{\s*sharedLease = await acquireSharedToolLease/s);
 });

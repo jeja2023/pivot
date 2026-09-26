@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1868,
+  "total": 1922,
   "entries": [
     {
       "file": "server/auth.js",
@@ -16,12 +16,20 @@
       "count": 3
     },
     {
+      "file": "server/db/migrations/agent-artifact-annotations.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/agent-artifact-cas-refcounts.js",
       "count": 2
     },
     {
       "file": "server/db/migrations/agent-artifact-delivery.js",
       "count": 6
+    },
+    {
+      "file": "server/db/migrations/agent-browser-sessions.js",
+      "count": 1
     },
     {
       "file": "server/db/migrations/agent-channel-delivery-claims.js",
@@ -36,7 +44,15 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-checkpoint-output-references.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/agent-context-audit-contract.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-control-application-leases.js",
       "count": 1
     },
     {
@@ -56,11 +72,19 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-evidence-items.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/agent-experience-events.js",
       "count": 1
     },
     {
       "file": "server/db/migrations/agent-goal-dispatch-lease.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-goal-kinds.js",
       "count": 1
     },
     {
@@ -70,6 +94,10 @@
     {
       "file": "server/db/migrations/agent-local-connector.js",
       "count": 4
+    },
+    {
+      "file": "server/db/migrations/agent-model-quality-profiles.js",
+      "count": 1
     },
     {
       "file": "server/db/migrations/agent-production-control-plane.js",
@@ -88,6 +116,10 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-shared-tool-guard.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/agent-skill-governance.js",
       "count": 16
     },
@@ -97,6 +129,14 @@
     },
     {
       "file": "server/db/migrations/agent-step-unique-index.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-task-verifications.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-voice-sessions.js",
       "count": 1
     },
     {
@@ -432,6 +472,10 @@
       "count": 23
     },
     {
+      "file": "server/services/agent-artifact-annotations.js",
+      "count": 4
+    },
+    {
       "file": "server/services/agent-artifact-cas.js",
       "count": 11
     },
@@ -446,6 +490,10 @@
     {
       "file": "server/services/agent-artifacts.js",
       "count": 25
+    },
+    {
+      "file": "server/services/agent-browser-sessions.js",
+      "count": 6
     },
     {
       "file": "server/services/agent-channel-adapters.js",
@@ -469,7 +517,7 @@
     },
     {
       "file": "server/services/agent-checkpoints.js",
-      "count": 11
+      "count": 13
     },
     {
       "file": "server/services/agent-code-renditions.js",
@@ -481,7 +529,7 @@
     },
     {
       "file": "server/services/agent-control.js",
-      "count": 8
+      "count": 14
     },
     {
       "file": "server/services/agent-dag-runtime.js",
@@ -508,6 +556,10 @@
       "count": 5
     },
     {
+      "file": "server/services/agent-evidence-items.js",
+      "count": 3
+    },
+    {
       "file": "server/services/agent-evolution.js",
       "count": 40
     },
@@ -521,7 +573,7 @@
     },
     {
       "file": "server/services/agent-goals.js",
-      "count": 31
+      "count": 33
     },
     {
       "file": "server/services/agent-improvement-suggestions.js",
@@ -544,6 +596,10 @@
       "count": 23
     },
     {
+      "file": "server/services/agent-model-quality.js",
+      "count": 2
+    },
+    {
       "file": "server/services/agent-model.js",
       "count": 2
     },
@@ -561,7 +617,7 @@
     },
     {
       "file": "server/services/agent-quality.js",
-      "count": 5
+      "count": 6
     },
     {
       "file": "server/services/agent-queue.js",
@@ -632,6 +688,10 @@
       "count": 1
     },
     {
+      "file": "server/services/agent-shared-tool-guard.js",
+      "count": 5
+    },
+    {
       "file": "server/services/agent-skill-access.js",
       "count": 6
     },
@@ -664,6 +724,10 @@
       "count": 4
     },
     {
+      "file": "server/services/agent-tools-collaboration.js",
+      "count": 2
+    },
+    {
       "file": "server/services/agent-tools.js",
       "count": 2
     },
@@ -674,6 +738,14 @@
     {
       "file": "server/services/agent-triggers.js",
       "count": 28
+    },
+    {
+      "file": "server/services/agent-verification.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/agent-voice-sessions.js",
+      "count": 8
     },
     {
       "file": "server/services/agent-workflow-dependencies.js",

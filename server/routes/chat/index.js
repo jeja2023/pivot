@@ -72,6 +72,13 @@ const {
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
 const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
+const {
+    assertActiveAgentVoiceSession,
+    getAgentVoiceSession,
+    listAgentVoiceSessions,
+    recordAgentVoiceEvent,
+    startAgentVoiceSession
+} = require('../../services/agent-voice-sessions');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
@@ -157,6 +164,27 @@ function createChatRouter({
         res.json({ success: true });
     }));
 
+    router.get('/chat/voice-sessions', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, sessions: await listAgentVoiceSessions(req.user, { limit: req.query.limit }) });
+    }));
+
+    router.post('/chat/voice-sessions', authMiddleware, asyncHandler(async (req, res) => {
+        const voiceSession = await startAgentVoiceSession(req.user, req.body || {});
+        logAction(req, '启动实时语音会话', `语音会话: ${voiceSession.id}，传输: ${voiceSession.transport}`);
+        res.status(201).json({ success: true, voiceSession });
+    }));
+
+    router.get('/chat/voice-sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const voiceSession = await getAgentVoiceSession(req.user, req.params.id);
+        if (!voiceSession) return res.status(404).json({ error: '语音会话不存在或无权访问。' });
+        res.json({ success: true, voiceSession });
+    }));
+
+    router.post('/chat/voice-sessions/:id/events', authMiddleware, asyncHandler(async (req, res) => {
+        const voiceSession = await recordAgentVoiceEvent(req.user, req.params.id, req.body || {});
+        res.json({ success: true, voiceSession });
+    }));
+
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
         const chatState = buildChatRequestState(req);
         let {
@@ -171,7 +199,9 @@ function createChatRouter({
             mcpToolAllowlist,
             ragScope,
             chatMode,
-            regenerateMessageId
+            regenerateMessageId,
+            ephemeralVoice,
+            voiceSessionId
         } = chatState;
         const agentExecutionAllowed = readAgentExecutionEnabled();
         let regenerationMessages = null;
@@ -193,6 +223,10 @@ function createChatRouter({
                 message: status === 'error' ? 'Chat generation failed' : 'Chat generation completed',
                 details
             });
+        };
+        const persistAssistantResponse = async options => {
+            if (ephemeralVoice) return { assistantMessageResult: null, assistantMessageId: null };
+            return await persistAssistantTurn(options);
         };
         const abortController = new AbortController();
         const onClientDisconnect = () => {
@@ -278,6 +312,19 @@ function createChatRouter({
             return res.end();
         }
 
+        if (ephemeralVoice) {
+            if (regenerate || chatMode !== 'normal' || mcpEnabled || ragEnabled || !voiceSessionId) {
+                writeSse(JSON.stringify({ error: '临时语音仅支持活动语音会话中的普通无工具对话。', code: 'EPHEMERAL_VOICE_INVALID' }));
+                return res.end();
+            }
+            try {
+                await assertActiveAgentVoiceSession(req.user, voiceSessionId, sessionId);
+            } catch (error) {
+                writeSse(JSON.stringify({ error: error.message || '临时语音会话不可用。', code: error.code || 'EPHEMERAL_VOICE_UNAVAILABLE' }));
+                return res.end();
+            }
+        }
+
         // --- 业务逻辑检查 ---
         const preflight = await validateChatPreflight({
             state: chatState,
@@ -313,7 +360,7 @@ function createChatRouter({
         }
 
         let userMessageId = regenerationUserMessageId;
-        if (!regenerate) {
+        if (!regenerate && !ephemeralVoice) {
             try {
                 const userMessageResult = await saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
                 userMessagePersisted = true;
@@ -338,7 +385,7 @@ function createChatRouter({
         if (contentContainsVisionInput(modelContent) && !modelSupportsVision(modelCfg)) {
             const assistantContent = buildVisionUnsupportedMessage(modelCfg);
             const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
+            const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
                 sessionId,
                 userId,
                 userMessageId,
@@ -367,7 +414,7 @@ function createChatRouter({
         if (unsupportedCapability && !deferRealtimeCapabilityGuard) {
             const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
             const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
+            const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
                 sessionId,
                 userId,
                 userMessageId,
@@ -771,7 +818,7 @@ function createChatRouter({
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
                     if (routePlan) routePlan.providerUsage = apiUsage || providerSnapshot.usage?.raw || null;
-                    const { assistantMessageResult, assistantMessageId } = await persistAssistantTurn({
+                    const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
                         sessionId,
                         userId,
                         userMessageId,
@@ -804,6 +851,7 @@ function createChatRouter({
                     writeSse(JSON.stringify({
                         type: 'message_saved',
                         role: 'assistant',
+                        ephemeral: ephemeralVoice,
                         messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid,
                         modelName: modelCfg.name || modelCfg.model_name || '',
                         tokenCount: assistantTokens,

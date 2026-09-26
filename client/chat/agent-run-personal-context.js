@@ -105,7 +105,7 @@
                 const group = document.createElement('section'); group.className = 'agent-collaborator-group'; group.dataset.agentCollaboratorGroup = run.id;
                 const heading = document.createElement('div'); heading.className = 'agent-tool-section-head compact';
                 const title = document.createElement('strong'); title.textContent = '并行协作任务组';
-                const completed = rows.filter(item => ['completed', 'completed_with_errors'].includes(String(item.status))).length;
+                const completed = rows.filter(item => ['completed', 'completed_with_errors', 'partial'].includes(String(item.status))).length;
                 const failed = rows.filter(item => ['error', 'failed', 'cancelled'].includes(String(item.status))).length;
                 const summary = document.createElement('span'); summary.textContent = `${completed}/${rows.length} 已完成${failed ? ` · ${failed} 异常` : ''}`;
                 heading.append(title, summary); group.appendChild(heading);

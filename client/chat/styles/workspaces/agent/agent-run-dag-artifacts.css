@@ -406,6 +406,29 @@ body.dark-mode .agent-dag-node-agent,
     gap: 10px;
 }
 
+.agent-artifact-annotations {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border, rgba(148, 163, 184, 0.24));
+}
+
+.agent-artifact-annotation-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+}
+
+.agent-artifact-annotation-form textarea {
+    grid-column: 1 / -1;
+    resize: vertical;
+}
+
+.agent-artifact-version.resolved {
+    opacity: 0.72;
+}
+
 .agent-artifact-version {
     border: 1px solid var(--border);
     border-radius: 8px;

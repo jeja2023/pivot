@@ -17,6 +17,8 @@ const SETTINGS_KEY = 'agent_learning_settings';
 const MAX_DAILY_JOBS = 3;
 const MAX_JOB_ATTEMPTS = 3;
 const ARCHIVE_AFTER_DAYS = Math.max(30, Math.min(Number.parseInt(process.env.AGENT_LEARNING_ARCHIVE_AFTER_DAYS, 10) || 90, 3650));
+const MIN_SKILL_AUTO_PROMOTION_CASES = 5;
+const MIN_SKILL_AUTO_PROMOTION_PASS_RATE = 85;
 const JOB_STATUSES = Object.freeze(['queued', 'analyzing', 'candidate_created', 'validating', 'completed', 'failed', 'validation_failed']);
 const TRIGGERS = Object.freeze(['success', 'recovery', 'correction', 'explicit']);
 const UNSAFE_INSTRUCTION_RE = /(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|reveal\s+(?:the\s+)?(?:secret|token|password)|泄露(?:密钥|令牌|密码)|忽略(?:之前|前文|系统)|系统提示词|开发者消息)/i;
@@ -59,6 +61,30 @@ function normalizeTrigger(value) {
     return TRIGGERS.includes(trigger) ? trigger : 'success';
 }
 
+async function getSkillAutoPromotionEvaluation(user, evaluationRunId = '') {
+    const id = String(evaluationRunId || '').trim();
+    if (!id) return { eligible: false, reason: 'missing_evaluation' };
+    try {
+        const { getAgentEvalRun } = require('./agent-evaluations');
+        const evaluation = await getAgentEvalRun(id, user);
+        const summary = evaluation?.run?.summary || {};
+        const completed = Number(summary.completed || 0);
+        const passRate = Number(summary.passRate || 0);
+        const eligible = evaluation?.run?.status === 'completed'
+            && completed >= MIN_SKILL_AUTO_PROMOTION_CASES
+            && passRate >= MIN_SKILL_AUTO_PROMOTION_PASS_RATE;
+        return {
+            eligible,
+            evaluationRunId: id,
+            completed,
+            passRate,
+            reason: eligible ? '' : 'evaluation_threshold_not_met'
+        };
+    } catch (_) {
+        return { eligible: false, evaluationRunId: id, reason: 'evaluation_unavailable' };
+    }
+}
+
 function jobId() { return `learn_${crypto.randomUUID()}`; }
 
 async function enqueueAgentLearningJob(user, sourceRunId, triggerType = 'success', options = {}) {
@@ -86,7 +112,12 @@ async function enqueueAgentLearningJob(user, sourceRunId, triggerType = 'success
     if (existing) return { scheduled: true, deduped: true, job: serializeLearningJob(existing) };
     const id = jobId();
     const modelId = Number(run.chosen_model_id || run.model_id || 0) || null;
-    const resultSummary = { requestedKind: options.kind || '', requestedTitle: String(options.title || '').slice(0, 120), requestedVariables: options.variables || {} };
+    const resultSummary = {
+        requestedKind: options.kind || '',
+        requestedTitle: String(options.title || '').slice(0, 120),
+        requestedVariables: options.variables || {},
+        evaluationRunId: String(options.evaluationRunId || options.evaluation_run_id || '').trim().slice(0, 128)
+    };
     await execute(`INSERT INTO agent_learning_jobs (id, user_id, tenant_id, source_run_id, trigger_type, status, attempts, max_attempts, next_run_at, model_id, budget_snapshot, result_summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, ?, ?)`, [id, userId, user.tenant_id || run.tenant_id || null, runId, trigger, MAX_JOB_ATTEMPTS, now, modelId, JSON.stringify({ maxTokens: 3000, timeoutMs: 120000 }), JSON.stringify(resultSummary), now, now]);
     return { scheduled: true, deduped: false, job: serializeLearningJob(await queryOne('SELECT * FROM agent_learning_jobs WHERE id = ?', [id])) };
 }
@@ -295,8 +326,20 @@ async function processAgentLearningJob(row, options = {}) {
     }
     const settings = await getAgentLearningSettings(row.user_id);
     if (candidate.tools.length < 2 || candidate.permissionDiff?.added?.length) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'insufficient_safe_steps', tools: candidate.tools } });
-    const allowAutoActivate = settings.autoLearning && settings.autoActivate && candidate.confidence >= settings.minConfidence;
-    const proposal = await createEvolutionProposal(user, { _internal: true, kind: 'skill', title: candidate.title, description: candidate.summary, proposedChange: { manifest: candidate.manifest, instructions: candidate.instructions, applicability: candidate.applicability, permissionDiff: { added: [], removed: [] } }, sourceRunId: run.id, sourceType: 'learning', evidenceSummary: { sourceRunId: run.id, tools: candidate.tools, successfulSteps: candidate.tools.length }, scope: 'personal', activationMode: allowAutoActivate ? 'auto' : 'user_confirmed', confidence: candidate.confidence, status: 'candidate_created', reviewReason: allowAutoActivate ? '' : '自动学习已关闭、置信度不足或需用户确认。', idempotencyKey: `learning:${row.id}` });
+    const request = parseJson(row.result_summary, {});
+    const evaluation = await getSkillAutoPromotionEvaluation(user, request.evaluationRunId);
+    const allowAutoActivate = settings.autoLearning
+        && settings.autoActivate
+        && candidate.confidence >= settings.minConfidence
+        && evaluation.eligible;
+    const reviewReason = allowAutoActivate
+        ? ''
+        : evaluation.reason === 'missing_evaluation'
+            ? '缺少冻结评测证据，Skill 已保留为草稿等待审阅。'
+            : evaluation.reason
+                ? '冻结评测未达到自动推广门槛，Skill 已保留为草稿等待审阅。'
+                : '自动学习已关闭、置信度不足或需用户确认。';
+    const proposal = await createEvolutionProposal(user, { _internal: true, kind: 'skill', title: candidate.title, description: candidate.summary, proposedChange: { manifest: candidate.manifest, instructions: candidate.instructions, applicability: candidate.applicability, permissionDiff: { added: [], removed: [] } }, sourceRunId: run.id, sourceType: 'learning', evidenceSummary: { sourceRunId: run.id, tools: candidate.tools, successfulSteps: candidate.tools.length, evaluation: { evaluationRunId: evaluation.evaluationRunId || '', completed: evaluation.completed || 0, passRate: evaluation.passRate || 0, eligible: evaluation.eligible === true } }, scope: 'personal', activationMode: allowAutoActivate ? 'auto' : 'user_confirmed', confidence: candidate.confidence, status: 'candidate_created', reviewReason, idempotencyKey: `learning:${row.id}` });
     await setJobResult(row.id, { status: 'candidate_created', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, confidence: candidate.confidence, tools: candidate.tools } });
     const { createSkillVersion, validateSkillVersion, publishSkillVersion } = require('./agent-releases');
     let version = proposal.artifactVersionId
@@ -304,7 +347,11 @@ async function processAgentLearningJob(row, options = {}) {
         : null;
     if (!version) version = await queryOne('SELECT * FROM agent_skill_versions WHERE created_by = ? AND source_run_id = ? AND owner_key = ? AND name = ? ORDER BY id DESC LIMIT 1', [user.id, run.id, `user:${user.id}`, candidate.manifest.name]);
     if (!version) version = await createSkillVersion(user, { manifest: candidate.manifest, instructions: candidate.instructions, sourceRunId: run.id, strictSpec: true });
-    const validation = await validateSkillVersion(version.id, user, { strictSpec: true, requireSignature: false });
+    const validation = await validateSkillVersion(version.id, user, {
+        strictSpec: true,
+        requireSignature: false,
+        ...(evaluation.eligible ? { evaluationRunId: evaluation.evaluationRunId, minPassRate: MIN_SKILL_AUTO_PROMOTION_PASS_RATE } : {})
+    });
     await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id) });
     if (!validation?.passed) return setJobResult(row.id, { status: 'validation_failed', proposalId: proposal.id, errorCode: 'SKILL_VALIDATION_FAILED', errorMessage: validation?.manifest?.errors?.[0] || validation?.sandbox?.result?.stderr || 'Skill 验证未通过。', resultSummary: { kind: 'skill', proposalId: proposal.id, validation: validation?.passed === true } });
     if (allowAutoActivate) {
@@ -314,10 +361,10 @@ async function processAgentLearningJob(row, options = {}) {
         if (!release) release = await queryOne("SELECT * FROM agent_skill_releases WHERE skill_version_id = ? AND owner_key = ? AND rollout_scope = 'personal' AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1", [version.id, `user:${user.id}`]);
         if (!release) release = await publishSkillVersion(version.id, user, { scope: 'personal', rolloutScope: 'personal', rolloutPercent: 100 });
         await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id), releaseId: String(release.id), status: 'personal_active', activationMode: 'auto' });
-        return setJobResult(row.id, { status: 'completed', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, releaseId: release.id, autoActivated: true, confidence: candidate.confidence } });
+        return setJobResult(row.id, { status: 'completed', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, releaseId: release.id, autoActivated: true, confidence: candidate.confidence, evaluation } });
     }
     await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id), status: 'waiting_user_review', activationMode: 'user_confirmed' });
-    return setJobResult(row.id, { status: 'completed', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, validated: true, autoActivated: false, confidence: candidate.confidence } });
+    return setJobResult(row.id, { status: 'completed', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, validated: true, autoActivated: false, confidence: candidate.confidence, evaluation } });
 }
 
 async function processAgentLearningJobs(options = {}) {

@@ -44,7 +44,27 @@ const MCP_TOOL_PRESENTATIONS = Object.freeze({
     'code.python_execute': { title: '执行 Python 脚本', description: '在隔离沙箱中执行 Python 数据处理脚本。' },
     'code.duckdb_query': { title: '执行 DuckDB 查询', description: '使用 DuckDB 对多格式数据执行快速查询。' },
     'filesystem.read_workspace': { title: '读取工作区文件', description: '读取受控工作区中的文件内容。' },
-    'filesystem.write_workspace': { title: '写入工作区文件', description: '在受控工作区中保存生成的文件。' }
+    'filesystem.write_workspace': { title: '写入工作区文件', description: '在受控工作区中保存生成的文件。' },
+    'workspace.inspect': { title: '查看代码工作区', description: '读取已授权 Git 工作区的分支和状态摘要。' },
+    'workspace.read': { title: '读取代码文件', description: '读取已授权代码工作区中的文本文件。' },
+    'workspace.search': { title: '搜索代码', description: '在已授权代码工作区内搜索文本。' },
+    'workspace.patch': { title: '修改代码', description: '按内容摘要校验修改已授权工作区文件。' },
+    'workspace.install': { title: '安装隔离依赖', description: '在认证隔离 Worker 中安装工作区依赖。' },
+    'workspace.test': { title: '运行隔离代码测试', description: '在认证隔离 Worker 中运行已登记的测试命令。' },
+    'workspace.git_status': { title: '查看 Git 状态', description: '查看已授权工作区的分支和改动。' },
+    'workspace.git_diff': { title: '查看 Git 差异', description: '读取已授权工作区的 Git 差异。' },
+    'workspace.git_worktree': { title: '创建 Git 工作树', description: '创建隔离分支工作树。' },
+    'workspace.git_worktree_remove': { title: '移除 Git 工作树', description: '移除 Pivot 创建的隔离工作树。' },
+    'workspace.git_merge': { title: '合并 Git 分支', description: '合并分支并在冲突时报告文件。' },
+    'workspace.git_abort_merge': { title: '中止 Git 合并', description: '撤销尚未提交的 Git 合并状态。' },
+    'workspace.git_commit': { title: '提交 Git 变更', description: '提交本机确认的代码变更。' },
+    'workspace.git_push': { title: '推送 Git 分支', description: '推送本机确认的当前分支。' },
+    'workspace.git_pr': { title: '创建 Pull Request', description: '通过授权 GitHub CLI 创建 Pull Request。' },
+    'desktop.inspect': { title: '查看桌面应用控件', description: '读取当前授权前台应用的可访问性控件摘要。' },
+    'desktop.screenshot': { title: '截取桌面应用', description: '截取当前授权前台应用的压缩截图。' },
+    'desktop.click': { title: '点击桌面应用控件', description: '通过可访问性树调用授权应用控件。' },
+    'desktop.type': { title: '填写桌面应用字段', description: '向授权应用中的非密码可访问性字段写入文本。' },
+    'desktop.wait': { title: '等待桌面应用控件', description: '等待授权应用中出现指定可访问性控件。' }
 });
 
 const IDENTIFIER_TOKENS = Object.freeze({

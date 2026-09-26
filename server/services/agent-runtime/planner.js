@@ -19,6 +19,7 @@ function fitAgentMessages(messages, modelCfg, options = {}) {
     }).messages;
 }
 const { buildWorldStatePrompt } = require('../agent-step-context');
+const { buildWorkingStatePrompt } = require('../agent-working-state');
 
 function observationMessages(observations = []) {
     return observations.map((observation, index) => ({
@@ -106,6 +107,9 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     }
     if (String(contextConfig?.skillInstructions || '').trim()) {
         contextLines.push(`个人经验（已验证 Skill）：${String(contextConfig.skillTitle || '个人经验')}\n${String(contextConfig.skillInstructions).slice(0, 12000)}`);
+    }
+    if (contextConfig?.taskWorkingState && typeof contextConfig.taskWorkingState === 'object') {
+        contextLines.push(buildWorkingStatePrompt(contextConfig.taskWorkingState));
     }
     const projectCollections = Array.isArray(contextConfig?.projectContextPack?.collections)
         ? contextConfig.projectContextPack.collections : [];

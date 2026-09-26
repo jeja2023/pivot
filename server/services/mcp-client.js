@@ -36,6 +36,8 @@ const {
     listConnectorDevices
 } = require('./agent-local-connector');
 const { localBrowserToolDefinitions } = require('./local-browser-connector-tools');
+const { localWorkspaceToolDefinitions } = require('./local-workspace-connector-tools');
+const { localDesktopControlToolDefinitions } = require('./local-desktop-control-tools');
 const { isSuperAdmin } = require('../permissions');
 const {
     canAccessSharedResource,
@@ -117,6 +119,8 @@ async function listPersistentLocalConnectorTools(user) {
     const devices = await listConnectorDevices(user);
     const tools = [];
     const browserDevices = devices.filter(device => device.grants.local_browser?.authorized === true);
+    const workspaceDevices = devices.filter(device => device.grants.local_workspace?.authorized === true);
+    const desktopControlDevices = devices.filter(device => device.grants.local_desktop_control?.authorized === true);
     devices.forEach(device => {
         const owner = { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' };
         if (device.grants.local_database) {
@@ -152,6 +156,53 @@ async function listPersistentLocalConnectorTools(user) {
             localDevice: { online: true, devices: browserDevices.map(device => ({ deviceId: device.deviceId, deviceName: device.deviceName, grants: { local_browser: device.grants.local_browser } })) }
         }));
     });
+    localWorkspaceToolDefinitions().forEach(tool => {
+        if (!workspaceDevices.length) return;
+        const mutating = ['workspace.patch', 'workspace.install', 'workspace.test', 'workspace.git_worktree', 'workspace.git_worktree_remove', 'workspace.git_merge', 'workspace.git_abort_merge', 'workspace.git_commit', 'workspace.git_push', 'workspace.git_pr'].includes(tool.name);
+        const catalog = workspaceDevices.map(device => `${device.deviceName} [${device.deviceId}]：${device.grants.local_workspace?.label || 'Git 工作区'}`).join('；');
+        tools.push(presentMcpTool({
+            serverId: LOCAL_MCP_SERVER_ID,
+            serverName: '我的电脑：代码工作区',
+            serverType: 'workspace',
+            databaseType: '',
+            owner: { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' },
+            name: tool.name,
+            fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`,
+            title: tool.title || '',
+            description: `${tool.description || ''} 可用设备与工作区：${catalog}`.slice(0, 3000),
+            input_schema: localConnectorInputSchema(tool, null, { devices: workspaceDevices }),
+            risk: mutating ? 'high' : 'medium',
+            requiresApproval: mutating,
+            side_effect: mutating,
+            idempotent: !mutating,
+            concurrency: mutating ? 'exclusive' : 'read',
+            localWorkspaceConnector: true,
+            localDevice: { online: true, devices: workspaceDevices.map(device => ({ deviceId: device.deviceId, deviceName: device.deviceName, grants: { local_workspace: device.grants.local_workspace } })) }
+        }));
+    });
+    localDesktopControlToolDefinitions().forEach(tool => {
+        if (!desktopControlDevices.length) return;
+        const catalog = desktopControlDevices.map(device => `${device.deviceName} [${device.deviceId}]：${device.grants.local_desktop_control?.label || '桌面应用'}`).join('；');
+        tools.push(presentMcpTool({
+            serverId: LOCAL_MCP_SERVER_ID,
+            serverName: '我的电脑：原生桌面应用',
+            serverType: 'desktop_control',
+            databaseType: '',
+            owner: { id: user?.id || null, username: user?.username || '', nickname: user?.nickname || '', unit: user?.unit || '', role: user?.role || '', displayName: user?.nickname || user?.username || '' },
+            name: tool.name,
+            fullName: `mcp.${LOCAL_MCP_SERVER_ID}.${tool.name}`,
+            title: tool.title || '',
+            description: `${tool.description || ''} 可用设备与应用：${catalog}`.slice(0, 3000),
+            input_schema: localConnectorInputSchema(tool, null, { devices: desktopControlDevices }),
+            risk: 'high',
+            requiresApproval: true,
+            side_effect: true,
+            idempotent: false,
+            concurrency: 'exclusive',
+            localDesktopControl: true,
+            localDevice: { online: true, devices: desktopControlDevices.map(device => ({ deviceId: device.deviceId, deviceName: device.deviceName, grants: { local_desktop_control: device.grants.local_desktop_control } })) }
+        }));
+    });
     return tools;
 }
 
@@ -160,7 +211,7 @@ function mergeLocalMcpTools(directTools = [], connectorTools = []) {
     const persistent = Array.isArray(connectorTools) ? connectorTools : [];
     if (!direct.length) return persistent;
     const directNames = new Set(direct.map(tool => String(tool.name || '')));
-    return [...direct, ...persistent.filter(tool => tool.serverType === 'browser' || !directNames.has(String(tool.name || '')))];
+    return [...direct, ...persistent.filter(tool => ['browser', 'workspace', 'desktop_control'].includes(tool.serverType) || !directNames.has(String(tool.name || '')))];
 }
 
 function isUnitSharedMcpServer(server) {

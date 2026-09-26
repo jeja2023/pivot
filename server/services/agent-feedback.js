@@ -130,7 +130,7 @@ async function recordAgentRunOutcome(runId, status, options = {}) {
         successfulToolCalls = Number(successful?.count || 0);
     } catch (_) {}
     const result = await recordAgentFeedback({ id: run.user_id }, run.id, {
-        outcome: ['completed'].includes(String(status)) ? 'success' : ['completed_with_errors'].includes(String(status)) ? 'partial' : 'failure',
+        outcome: ['completed'].includes(String(status)) ? 'success' : ['completed_with_errors', 'partial'].includes(String(status)) ? 'partial' : 'failure',
         toolFailures: failures,
         metadata: {
             status,

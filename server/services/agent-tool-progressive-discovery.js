@@ -1,8 +1,8 @@
 'use strict';
 
-/* 规划器仅接收三个渐进式发现元工具。经过权限过滤的完整工具目录在 tools.execute
+/* 规划器仅接收渐进式发现元工具。经过权限过滤的完整工具目录在 tools.execute
  * 成功解析此前已检视契约的 toolRef 后，继续向底层执行运行时开放。 */
-const META_TOOL_NAMES = Object.freeze(new Set(['tools.search', 'tools.describe', 'tools.execute']));
+const META_TOOL_NAMES = Object.freeze(new Set(['tools.search', 'tools.describe', 'tools.execute', 'tools.batch_read']));
 
 function buildProgressivePlannerToolList(toolList = []) {
     return (toolList || [])
@@ -18,7 +18,7 @@ function plannerToolNames(toolList = []) {
 }
 
 function createToolDiscoveryState() {
-    return { searched: new Set(), described: new Set() };
+    return { searched: new Set(), described: new Set(), descriptions: new Map() };
 }
 
 function referenceKey(reference = {}) {
@@ -44,10 +44,18 @@ function rememberSearch(state, result = {}) {
     });
 }
 
-function rememberDescription(state, reference = {}) {
+function rememberDescription(state, reference = {}, description = null) {
     if (!state?.described) return;
     const key = referenceKey(reference);
-    if (key !== '||') state.described.add(key);
+    if (key === '||') return;
+    state.described.add(key);
+    if (description && state.descriptions?.set) state.descriptions.set(key, description);
+}
+
+function getRememberedDescription(state, reference = {}) {
+    const key = referenceKey(reference);
+    if (key === '||' || !state?.descriptions?.get) return null;
+    return state.descriptions.get(key) || null;
 }
 
 function assertSearched(state, reference = {}) {
@@ -69,6 +77,7 @@ module.exports = {
     assertSearched,
     buildProgressivePlannerToolList,
     createToolDiscoveryState,
+    getRememberedDescription,
     plannerToolNames,
     referenceKey,
     rememberDescription,

@@ -11,7 +11,6 @@ const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
 const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
-const { normalizeNetworkPolicy } = require('./agent-network-policy');
 const { normalizeContextConfig } = require('./agent-validators');
 const { executeAgentHttp } = require('./agent-http-tool');
 const { executeAgentWebSearch, isAgentWebSearchAvailable } = require('./agent-web-search');
@@ -21,13 +20,7 @@ const {
     isAgentImageGenerationAvailable,
     isAgentTextToSpeechAvailable
 } = require('./agent-media-generation');
-const {
-    clickBrowserTarget,
-    closeAgentBrowserContext,
-    createAgentBrowserContext,
-    locateBrowserTarget,
-    isAgentBrowserRuntimeAvailable
-} = require('./agent-browser');
+const { isAgentBrowserRuntimeAvailable } = require('./agent-browser');
 const {
     normalizeJsonSchema,
     schemaHasRules,
@@ -57,6 +50,15 @@ const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } =
 const { createAgentDelegateExecutor } = require('./agent-tools-delegation');
 const { executeToolDiscoveryMeta, getToolDiscoveryDefinitions } = require('./agent-tools-discovery');
 const { executeTerminalRuntime, isTerminalRuntimeAvailable, terminalToolDefinition } = require('./agent-tools-terminal');
+const { executeAgentBrowserSessionAction } = require('./agent-browser-sessions');
+const {
+    executeAgentCancel,
+    executeAgentJoin,
+    executeAgentMessage,
+    executeAgentSpawn,
+    executeAgentWait,
+    getAgentCollaborationToolDefinitions
+} = require('./agent-tools-collaboration');
 
 const MAX_TEXT = 12000;
 // 动态代码只能在独立的桌面 Worker / 受控执行平面中运行。
@@ -181,6 +183,7 @@ function getBuiltInToolDefinitions(user) {
                 confidence: { type: 'number', minimum: 0, maximum: 1, default: 0.7 }
             }, ['fromAgent', 'summary'])
         },
+        ...getAgentCollaborationToolDefinitions(asJsonSchema),
         {
             name: 'agent.code',
             title: '代码执行',
@@ -273,12 +276,20 @@ function getBuiltInToolDefinitions(user) {
             alwaysRequiresApproval: true,
             network: true,
             input_schema: asJsonSchema({
-                url: { type: 'string', description: '必须位于任务网络白名单中的 HTTP/HTTPS 地址。' },
-                action: { type: 'string', enum: ['inspect', 'click'], default: 'inspect' },
+                url: { type: 'string', description: '新建或导航浏览器会话时必须位于任务网络白名单中的 HTTP/HTTPS 地址。' },
+                sessionId: { type: 'string', maxLength: 128, description: '可选的已授权浏览器会话标识，用于连续浏览任务。' },
+                action: { type: 'string', enum: ['open', 'new_tab', 'switch_tab', 'navigate', 'inspect', 'snapshot', 'click', 'fill', 'select', 'scroll', 'wait', 'screenshot', 'close_tab', 'close'], default: 'inspect' },
                 target: { type: 'object', description: 'DOM/视觉目标，支持 selector、role/name 或 text。' },
+                tabId: { type: 'string', maxLength: 80, description: '可选的浏览器标签标识；省略时使用当前标签。' },
+                newTab: { type: 'boolean', default: false, description: '导航时是否新建标签页；不适用于写入操作。' },
+                value: { description: 'fill 的文本值，或 select 的值、标签或序号对象。' },
+                deltaX: { type: 'number', minimum: -5000, maximum: 5000, description: 'scroll 的水平像素位移。' },
+                deltaY: { type: 'number', minimum: -5000, maximum: 5000, description: 'scroll 的垂直像素位移。' },
+                timeoutMs: { type: 'integer', minimum: 100, maximum: 30000, description: 'wait 的最长等待时间。' },
+                waitState: { type: 'string', enum: ['attached', 'detached', 'visible', 'hidden'], description: 'wait 目标状态。' },
                 taskId: { type: 'string', maxLength: 80 },
                 screenshot: { type: 'boolean', default: false }
-            }, ['url'])
+            })
         },
         {
             name: 'agent.merge',
@@ -850,34 +861,14 @@ function executeAgentHandoff(input = {}) {
     };
 }
 
-async function executeAgentBrowser(input = {}, context = {}) {
-    const url = String(input.url || '').trim();
-    if (!url) throw new Error('浏览器节点需要填写 URL。');
-    const networkPolicy = normalizeNetworkPolicy(context.run?.network_policy || context.run?.networkPolicy || input.networkPolicy || input.network_policy || {});
-    const browserContext = await createAgentBrowserContext({
-        taskId: input.taskId || context.run?.id || 'agent-browser',
-        profileRoot: context.browserProfileRoot,
-        networkPolicy,
-        executablePath: context.browserExecutablePath
+async function executeAgentBrowser(input = {}, user = null, context = {}) {
+    return await executeAgentBrowserSessionAction({
+        sessionId: input.sessionId || input.session_id || '',
+        user,
+        run: context.run,
+        input,
+        context
     });
-    try {
-        const page = await browserContext.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(Number(input.timeoutMs) || 60000, 180000) });
-        let action = 'inspect';
-        let targetResult = null;
-        if (String(input.action || 'inspect') === 'click') {
-            targetResult = await clickBrowserTarget(page, input.target || {}, { visionLocator: context.visionLocator });
-            action = 'click';
-        } else if (input.target) {
-            targetResult = await locateBrowserTarget(page, input.target, { visionLocator: context.visionLocator });
-            targetResult = { method: targetResult.method };
-        }
-        const output = { action, url: page.url(), title: await page.title(), text: String(await page.locator('body').innerText()).slice(0, 12000), target: targetResult };
-        if (input.screenshot === true) output.screenshot = (await page.screenshot({ type: 'png', fullPage: false })).toString('base64');
-        return output;
-    } finally {
-        await closeAgentBrowserContext(browserContext);
-    }
 }
 
 // ——————————————————————————————————————————
@@ -917,6 +908,11 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'agent.delegate') {
         return executeAgentDelegate(input, user, context);
     }
+    if (name === 'agent.spawn') return await executeAgentSpawn(input, user, context);
+    if (name === 'agent.wait') return await executeAgentWait(input, user, context);
+    if (name === 'agent.message') return await executeAgentMessage(input, user, context);
+    if (name === 'agent.cancel') return await executeAgentCancel(input, user, context);
+    if (name === 'agent.join') return await executeAgentJoin(input, user, context);
     if (name === 'agent.handoff') {
         return executeAgentHandoff(input);
     }
@@ -1041,7 +1037,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     }
 
     if (name === 'agent.browser') {
-        return executeAgentBrowser(input, context);
+        return executeAgentBrowser(input, user, context);
     }
 
     if (name === 'terminal.runtime') {

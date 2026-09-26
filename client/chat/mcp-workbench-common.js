@@ -169,6 +169,24 @@ const mcpSourceActionCards = [
         statusText: '不读取日常浏览器 Cookie 或密码',
         actionLabel: '授权',
         action: 'local-auth'
+    },
+    {
+        type: 'local_workspace',
+        title: '授权本机代码工作区',
+        badge: '待授权',
+        description: '在当前设备的已授权 Git 工作区中读取、修改、测试并受控交付。',
+        statusText: '测试仅在认证隔离 Worker 中运行',
+        actionLabel: '授权',
+        action: 'local-auth'
+    },
+    {
+        type: 'local_desktop_control',
+        title: '授权原生桌面应用控制',
+        badge: '待授权',
+        description: '仅通过可访问性树操作当前前台且明确授权的桌面应用。',
+        statusText: '每次操作均在本机确认',
+        actionLabel: '授权',
+        action: 'local-auth'
     }
 ];
 
@@ -180,6 +198,8 @@ const MCP_CARD_METADATA = {
     local_database: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
     local_report_dir: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '中风险', workflowAvailability: '仅当前设备在线' },
     local_browser: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '高风险', workflowAvailability: '仅当前设备在线且需本机确认' },
+    local_workspace: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '高风险', workflowAvailability: '仅当前设备在线且需本机确认' },
+    local_desktop_control: { executionLocation: '我的电脑', ownerScope: '个人', riskLevel: '高风险', workflowAvailability: '仅当前设备在线且需本机确认' },
     external: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '按服务策略' },
     im: { executionLocation: '外部服务', ownerScope: '个人/全局', riskLevel: '中风险', workflowAvailability: '可用于工作流' },
     visualization: { executionLocation: '服务器', ownerScope: '个人/全局', riskLevel: '低风险', workflowAvailability: '可用于工作流' },
@@ -644,6 +664,12 @@ function mcpLocalAuthorizedFallbackTools(status = null) {
     }
     if (grants.local_browser?.authorized) {
         tools.push('browser.open', 'browser.inspect', 'browser.click', 'browser.screenshot');
+    }
+    if (grants.local_workspace?.authorized) {
+        tools.push('workspace.inspect', 'workspace.read', 'workspace.search', 'workspace.patch', 'workspace.install', 'workspace.test', 'workspace.git_status', 'workspace.git_diff', 'workspace.git_worktree', 'workspace.git_worktree_remove', 'workspace.git_merge', 'workspace.git_abort_merge', 'workspace.git_commit', 'workspace.git_push', 'workspace.git_pr');
+    }
+    if (grants.local_desktop_control?.authorized) {
+        tools.push('desktop.inspect', 'desktop.screenshot', 'desktop.click', 'desktop.type', 'desktop.wait');
     }
     return tools;
 }

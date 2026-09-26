@@ -8,6 +8,7 @@ const { executeWorkflowApiOperation } = require('./workflow-api-operations');
 const { evaluateToolInvocation, validateToolOutput } = require('./tool-policy-engine');
 const { recordToolInvocationEvent } = require('./tool-invocation-events');
 const { acquire: acquireToolExecutionGuard } = require('./tool-execution-guard');
+const { acquireSharedToolLease } = require('./agent-shared-tool-guard');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -155,7 +156,27 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         serverId: policyEvaluation.serverId,
         env: context.env || process.env
     });
-    return defaultToolOrchestrator.execute({
+    let sharedLease;
+    try {
+        sharedLease = await acquireSharedToolLease({
+            toolName: safeName,
+            connectionAccountId: policyEvaluation.connection?.id || null,
+            serverId: policyEvaluation.serverId,
+            env: context.env || process.env
+        });
+    } catch (error) {
+        guardLease.release({ error });
+        throw error;
+    }
+    let released = false;
+    const releaseGuards = async ({ error = null } = {}) => {
+        if (released) return;
+        released = true;
+        guardLease.release({ error });
+        await sharedLease.release();
+    };
+    try {
+    const output = await defaultToolOrchestrator.execute({
         run: policyRun,
         tool,
         input: policyEvaluation.input,
@@ -163,7 +184,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         context,
         executionPlan,
         onComplete: async ({ output, effectiveInput }) => {
-            guardLease.release();
+            await releaseGuards();
             await recordToolInvocationEvent({
                 actorId: user?.id,
                 runId: policyRun.id || null,
@@ -179,7 +200,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             });
         },
         onFailure: async ({ error, effectiveInput }) => {
-            guardLease.release({ error });
+            await releaseGuards({ error });
             await recordToolInvocationEvent({
                 actorId: user?.id,
                 runId: policyRun.id || null,
@@ -244,6 +265,12 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             return output;
         }
     });
+    await releaseGuards();
+    return output;
+    } catch (error) {
+        await releaseGuards({ error });
+        throw error;
+    }
 }
 
 module.exports = {

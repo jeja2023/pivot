@@ -18,6 +18,7 @@ const {
     startFakeUpstream
 } = require('./chat-route-harness');
 const { execute, queryOne } = require('../../server/db/client');
+const { startAgentVoiceSession } = require('../../server/services/agent-voice-sessions');
 const {
     buildChatAgentMetadata,
     listChatAgentRunsForSession,
@@ -31,6 +32,39 @@ const { resolveUploadUrlPath, toProjectRelativePath } = require('../../server/se
 const NARROW_CONTEXT_WINDOW_TOKENS = 4000;
 // 中文按 2 tokens/字估算，200 字约 400 tokens，多条历史即可超出上述输入预算。
 const LONG_HISTORY_TEXT = '这是一段用于占满模型上下文窗口的历史会话内容'.repeat(9);
+
+test('临时语音只将设备端识别文本用于当前模型请求，不写入聊天或长期记忆', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['这是临时语音回答。'] });
+    const fixture = createChatFixture({ prefix: 'chat_ephemeral_voice', upstreamUrl: upstream.url });
+    const voiceSession = await startAgentVoiceSession(fixture.user, { sessionId: fixture.sessionId, transport: 'browser_native' });
+    const routeServer = await startChatRouteServer({ fixture });
+    try {
+        const result = await postChat(routeServer.port, {
+            sessionId: fixture.sessionId,
+            content: '这段识别文本不得被保存',
+            modelId: fixture.modelId,
+            ephemeralVoice: true,
+            voiceSessionId: voiceSession.id,
+            chatMode: 'normal',
+            mcpEnabled: false,
+            ragPreference: 'disabled',
+            ragEnabled: false
+        });
+        const completion = result.findEvent(event => event.type === 'message_saved' && event.role === 'assistant');
+        assert.equal(result.streamedContent, '这是临时语音回答。');
+        assert.ok(completion);
+        assert.equal(completion.ephemeral, true);
+        assert.equal(completion.messageId, undefined);
+        assert.deepEqual(readSessionMessages(fixture), []);
+        const memories = await queryOne('SELECT COUNT(*) AS count FROM memories WHERE user_id = ?', [fixture.userId]);
+        assert.equal(Number(memories.count || 0), 0);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        await execute('DELETE FROM agent_voice_sessions WHERE id = ?', [voiceSession.id]);
+        fixture.cleanup();
+    }
+});
 
 test('聊天路由在模型今日额度用尽时拦截请求且不落库用户消息', async () => {
     const fixture = createChatFixture({

@@ -3,7 +3,7 @@ const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getRequestId } = require('./request-context');
 
-const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'error', 'cancelled', 'deleted']);
+const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'cancelled', 'deleted']);
 const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
 const MAX_SUMMARY_LENGTH = 6000;
 

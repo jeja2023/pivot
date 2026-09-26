@@ -70,7 +70,17 @@ const migrationModules = [
     require('./long-term-memory-embedding-recovery'),
     require('./long-term-memory-search-index'),
     require('./long-term-memory-validity-window'),
-    require('./long-term-memory-evidence-excerpts')
+    require('./long-term-memory-evidence-excerpts'),
+    require('./agent-checkpoint-output-references'),
+    require('./agent-control-application-leases'),
+    require('./agent-task-verifications'),
+    require('./agent-browser-sessions'),
+    require('./agent-model-quality-profiles'),
+    require('./agent-shared-tool-guard'),
+    require('./agent-goal-kinds'),
+    require('./agent-evidence-items'),
+    require('./agent-artifact-annotations'),
+    require('./agent-voice-sessions')
 ];
 
 module.exports = migrationModules

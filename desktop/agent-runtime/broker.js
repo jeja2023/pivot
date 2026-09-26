@@ -1,6 +1,18 @@
 const path = require('path');
 const { createWorkspaceJail, runSandboxedProcess } = require('../../server/services/agent-sandbox');
 
+function desktopWorkerUnavailableError() {
+    const error = new Error('当前桌面端未配置可强制隔离工作区和网络的执行 Worker，已拒绝运行任意脚本。');
+    error.code = 'AGENT_DESKTOP_WORKER_UNAVAILABLE';
+    error.category = 'policy';
+    error.status = 503;
+    return error;
+}
+
+function isDesktopWorkerRuntimeAvailable() {
+    return false;
+}
+
 function assertWorkerConfiguration(request = {}) {
     if (request.approvedByMainProcess !== true) {
         const error = new Error('桌面 Worker 执行必须持有主进程审批。');
@@ -16,6 +28,7 @@ function assertWorkerConfiguration(request = {}) {
 
 async function runDesktopWorker(request = {}) {
     assertWorkerConfiguration(request);
+    if (!isDesktopWorkerRuntimeAvailable()) throw desktopWorkerUnavailableError();
     const workspaceRoot = String(request.workspaceRoot || '').trim();
     if (!workspaceRoot) throw new Error('桌面 Worker 必须绑定工作区根目录。');
     const jail = createWorkspaceJail(workspaceRoot, request.taskId || 'agent-worker');
@@ -39,4 +52,9 @@ async function runDesktopWorker(request = {}) {
     return { ...message.result, worker: result, jail: jail.metadata };
 }
 
-module.exports = { runDesktopWorker, assertWorkerConfiguration };
+module.exports = {
+    assertWorkerConfiguration,
+    desktopWorkerUnavailableError,
+    isDesktopWorkerRuntimeAvailable,
+    runDesktopWorker
+};

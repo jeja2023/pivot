@@ -264,7 +264,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
 async function resumeAgentRun(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    if (ACTIVE_STATUSES.has(run.status) || run.status === 'approval_required') {
+    if ((ACTIVE_STATUSES.has(run.status) && run.status !== 'needs_input') || run.status === 'approval_required') {
         const err = new Error('当前任务仍在执行中，无需断点续跑。');
         err.status = 400;
         throw err;

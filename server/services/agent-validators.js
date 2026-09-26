@@ -23,7 +23,7 @@ const MAX_STEPS_BY_RUN_MODE = Object.freeze({
 });
 const ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
-    'running', 'approval_required', 'awaiting_approval', 'waiting_approval', 'resuming'
+    'running', 'verifying', 'approval_required', 'awaiting_approval', 'waiting_approval', 'resuming', 'needs_input'
 ]);
 // 统一智能体与工作流任务状态中文映射字典
 const AGENT_STATUS_LABELS = Object.freeze({
@@ -36,11 +36,14 @@ const AGENT_STATUS_LABELS = Object.freeze({
     observing: '观察中',
     diagnosing: '诊断中',
     replanning: '重规划中',
+    verifying: '验证结果中',
     resuming: '恢复中',
     pending: '待执行',
     running: '运行中',
     completed: '已完成',
     completed_with_errors: '完成（含部分异常）',
+    partial: '部分完成',
+    needs_input: '需要补充信息',
     continued_error: '失败后继续',
     issues_found: '存在问题',
     passed: '未发现问题',

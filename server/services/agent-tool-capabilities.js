@@ -20,6 +20,11 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'agent.llm': ['model.invoke'],
     'agent.content_review': ['model.invoke', 'agent.review'],
     'agent.delegate': ['agent.delegate', 'model.invoke'],
+    'agent.spawn': ['agent.delegate'],
+    'agent.wait': ['agent.delegate'],
+    'agent.message': ['agent.delegate'],
+    'agent.cancel': ['agent.delegate'],
+    'agent.join': ['agent.delegate'],
     'agent.handoff': ['agent.execute'],
     'agent.code': ['code.sandbox_eval'],
     'agent.http': ['network.http_request'],
@@ -62,6 +67,26 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'presentation.create_from_artifact': ['document.render'],
     'artifact.render': ['document.render'],
     'artifact.list_renditions': ['artifact.read']
+    ,'workspace.inspect': ['filesystem.read_workspace']
+    ,'workspace.read': ['filesystem.read_workspace']
+    ,'workspace.search': ['filesystem.read_workspace']
+    ,'workspace.git_status': ['filesystem.read_workspace']
+    ,'workspace.git_diff': ['filesystem.read_workspace']
+    ,'workspace.patch': ['filesystem.write_workspace']
+    ,'workspace.install': ['code.execute']
+    ,'workspace.test': ['code.execute']
+    ,'workspace.git_worktree': ['code.git_delivery']
+    ,'workspace.git_worktree_remove': ['code.git_delivery']
+    ,'workspace.git_merge': ['code.git_delivery']
+    ,'workspace.git_abort_merge': ['code.git_delivery']
+    ,'workspace.git_commit': ['code.git_delivery']
+    ,'workspace.git_push': ['code.git_delivery']
+    ,'workspace.git_pr': ['code.git_delivery']
+    ,'desktop.inspect': ['desktop.control']
+    ,'desktop.screenshot': ['desktop.control']
+    ,'desktop.click': ['desktop.control']
+    ,'desktop.type': ['desktop.control']
+    ,'desktop.wait': ['desktop.control']
 });
 
 /** 受控前缀登记：用于运行期动态发现、无法逐一枚举的工具族。 */
