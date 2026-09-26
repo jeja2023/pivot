@@ -653,17 +653,42 @@
                         <div class="agent-profile-card agent-profile-card--work">
                             <div class="agent-harness-subhead">
                                 <strong>工作习惯与工具偏好</strong>
-                                <span>按行输入长期积累的执行习惯、常用工具与常见任务</span>
+                                <span>选择常用做法和任务类型；工具偏好只影响建议，不会增加任何工具权限。</span>
                             </div>
-                            <div class="agent-harness-form-grid agent-harness-form-grid-3col">
-                                <label><span>工作习惯（每行一项）</span><textarea id="agent-profile-work-habits"
-                                        class="form-input" rows="5"
-                                        placeholder="优先使用标准库&#10;输出需附带关键理由"></textarea></label>
-                                <label><span>常用工具（每行一项）</span><textarea id="agent-profile-tools" class="form-input"
-                                        rows="5"
-                                        placeholder="db.run_readonly_query&#10;format.to_markdown_table"></textarea></label>
-                                <label><span>常见任务（每行一项）</span><textarea id="agent-profile-tasks" class="form-input"
-                                        rows="5" placeholder="数据库表结构分析&#10;业务指标分组统计"></textarea></label>
+                            <div id="agent-profile-preferences-editor" class="agent-profile-preference-grid">
+                                <section class="agent-profile-preference-field" aria-labelledby="agent-profile-work-habits-title">
+                                    <div class="agent-profile-preference-head">
+                                        <div><strong id="agent-profile-work-habits-title">工作习惯</strong><span>希望我在执行和交付时优先遵循的做法</span></div>
+                                        <output id="agent-profile-work-habits-count" class="agent-profile-preference-count">0 项</output>
+                                    </div>
+                                    <div class="agent-profile-token-box">
+                                        <div id="agent-profile-work-habits" class="agent-profile-token-list" data-agent-profile-token-list="workHabits" aria-live="polite"></div>
+                                        <div class="agent-profile-token-entry"><input id="agent-profile-work-habits-input" class="form-input" data-agent-profile-input="workHabits" maxlength="120" placeholder="输入后按 Enter 添加"><button class="btn-secondary agent-profile-token-add" type="button" data-agent-profile-add="workHabits" aria-label="添加工作习惯" title="添加工作习惯">+</button></div>
+                                    </div>
+                                    <div class="agent-profile-suggestion-row"><span>常用建议</span><div id="agent-profile-work-habits-suggestions" class="agent-profile-suggestions"></div></div>
+                                </section>
+                                <section class="agent-profile-preference-field" aria-labelledby="agent-profile-tasks-title">
+                                    <div class="agent-profile-preference-head">
+                                        <div><strong id="agent-profile-tasks-title">常见任务</strong><span>适合优先理解你工作目标的任务类型</span></div>
+                                        <output id="agent-profile-tasks-count" class="agent-profile-preference-count">0 项</output>
+                                    </div>
+                                    <div class="agent-profile-token-box">
+                                        <div id="agent-profile-tasks" class="agent-profile-token-list" data-agent-profile-token-list="commonTasks" aria-live="polite"></div>
+                                        <div class="agent-profile-token-entry"><input id="agent-profile-tasks-input" class="form-input" data-agent-profile-input="commonTasks" maxlength="120" placeholder="输入后按 Enter 添加"><button class="btn-secondary agent-profile-token-add" type="button" data-agent-profile-add="commonTasks" aria-label="添加常见任务" title="添加常见任务">+</button></div>
+                                    </div>
+                                    <div class="agent-profile-suggestion-row"><span>常用建议</span><div id="agent-profile-tasks-suggestions" class="agent-profile-suggestions"></div></div>
+                                </section>
+                                <section class="agent-profile-preference-field agent-profile-preference-field--tools" aria-labelledby="agent-profile-tools-title">
+                                    <div class="agent-profile-preference-head">
+                                        <div><strong id="agent-profile-tools-title">常用工具</strong><span>从当前账号可用工具中选择，也可保留自定义工具标识</span></div>
+                                        <output id="agent-profile-tools-count" class="agent-profile-preference-count">0 项</output>
+                                    </div>
+                                    <div class="agent-profile-token-box">
+                                        <div id="agent-profile-tools" class="agent-profile-token-list" data-agent-profile-token-list="frequentTools" aria-live="polite"></div>
+                                        <div class="agent-profile-token-entry"><input id="agent-profile-tools-input" class="form-input" data-agent-profile-input="frequentTools" list="agent-profile-tool-options" maxlength="120" placeholder="搜索当前可用工具或输入工具标识"><datalist id="agent-profile-tool-options"></datalist><button class="btn-secondary agent-profile-token-add" type="button" data-agent-profile-add="frequentTools" aria-label="添加常用工具" title="添加常用工具">+</button></div>
+                                    </div>
+                                    <div class="agent-profile-suggestion-row"><span>可用工具</span><div id="agent-profile-tools-suggestions" class="agent-profile-suggestions"></div></div>
+                                </section>
                             </div>
                         </div>
                         <details class="agent-profile-card agent-profile-card--advanced">

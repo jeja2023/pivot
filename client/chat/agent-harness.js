@@ -613,16 +613,12 @@
         } catch (error) { setNotice(error.message || '常驻实例清理失败。', 'error'); }
     }
 
-    const splitLines = value => String(value || '').split(/[\n,]/).map(item => item.trim()).filter(Boolean);
-
     function fillProfile(profile = {}) {
         const setValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value || ''; };
         setValue('agent-profile-display-name', profile.displayName);
         setValue('agent-profile-role', profile.role);
         setValue('agent-profile-preferences', jsonText(profile.preferences || {}));
-        setValue('agent-profile-work-habits', (profile.workHabits || []).join('\n'));
-        setValue('agent-profile-tools', (profile.frequentTools || []).join('\n'));
-        setValue('agent-profile-tasks', (profile.commonTasks || []).join('\n'));
+        window.Pivot?.moduleApi?.('agent.profilePreferences')?.fill?.(profile);
         setValue('agent-profile-tone', profile.communicationStyle?.tone || 'professional');
         setValue('agent-profile-verbosity', profile.communicationStyle?.verbosity || 'balanced');
     }
@@ -641,9 +637,7 @@
             displayName: document.getElementById('agent-profile-display-name')?.value || '',
             role: document.getElementById('agent-profile-role')?.value || '',
             preferences,
-            workHabits: splitLines(document.getElementById('agent-profile-work-habits')?.value),
-            frequentTools: splitLines(document.getElementById('agent-profile-tools')?.value),
-            commonTasks: splitLines(document.getElementById('agent-profile-tasks')?.value),
+            ...window.Pivot?.moduleApi?.('agent.profilePreferences')?.getValues?.(),
             communicationStyle: {
                 ...(state.profile?.communicationStyle || {}),
                 tone: document.getElementById('agent-profile-tone')?.value || 'professional',
@@ -1098,6 +1092,9 @@
             const button = event.target.closest('[data-agent-harness-evict-resident]');
             if (button) evictResident(button.dataset.agentHarnessEvictResident);
         });
+        const profilePreferences = window.Pivot?.moduleApi?.('agent.profilePreferences');
+        profilePreferences?.bind?.();
+        profilePreferences?.loadTools?.().catch(() => {});
         document.getElementById('agent-profile-refresh')?.addEventListener('click', () => loadProfile().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-profile-save')?.addEventListener('click', saveProfile);
         document.getElementById('agent-profile-wizard')?.addEventListener('click', openProfileWizard);

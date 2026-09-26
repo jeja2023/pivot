@@ -9,6 +9,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 test('Agent 控制台提供档案、记忆、经验和技能日常入口，默认隐藏运维面板', () => {
     const partial = read('client/chat/partials/workspaces/agent.html');
     const script = read('client/chat/agent-harness.js');
+    const profilePreferences = read('client/chat/agent-profile-preferences.js');
     const learning = read('client/chat/agent-learning.js');
     const runtimePacks = read('client/chat/agent-runtime-packs-console.js');
     assert.match(partial, /data-agent-cp-subview="governance"/);
@@ -35,7 +36,17 @@ test('Agent 控制台提供档案、记忆、经验和技能日常入口，默�
     assert.match(partial, /data-agent-harness-section="packs"[^>]*hidden/);
     assert.match(partial, /agent-harness-pack-sync/);
     assert.match(partial, /agent-harness-residency-list/);
+    assert.match(partial, /agent-profile-preferences-editor/);
+    assert.match(partial, /data-agent-profile-token-list="workHabits"/);
+    assert.match(partial, /data-agent-profile-token-list="frequentTools"/);
+    assert.match(partial, /data-agent-profile-token-list="commonTasks"/);
+    assert.doesNotMatch(partial, /textarea id="agent-profile-work-habits"/);
     assert.match(script, /\/agents\/skills/);
+    assert.match(script, /agent\.profilePreferences/);
+    assert.match(profilePreferences, /\/api\/agents\/tools/);
+    assert.match(profilePreferences, /LIST_LIMIT/);
+    assert.match(profilePreferences, /data-agent-profile-remove/);
+    assert.match(profilePreferences, /add\(field, rawValue\)/);
     assert.match(script, /agent\.runtimePacks/);
     assert.match(script, /target === 'memory'/);
     assert.match(script, /loadMemories/);
@@ -51,6 +62,15 @@ test('Agent 控制台提供档案、记忆、经验和技能日常入口，默�
     const route = read('server/routes/agents.js');
     assert.match(route, /isRuntimePackConsoleEnabled/);
     assert.match(route, /isSuperAdmin\(req\.user\) && isRuntimePackConsoleEnabled\(\)/);
+});
+
+test('个人档案偏好编辑器使用标签和主题变量，窄屏时收敛为单列', () => {
+    const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
+    assert.match(css, /\.agent-profile-preference-grid/);
+    assert.match(css, /\.agent-profile-token-list/);
+    assert.match(css, /\.agent-profile-suggestions/);
+    assert.match(css, /\.agent-profile-preference-grid[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+    assert.match(css, /@media \(max-width: 1100px\)[\s\S]*?\.agent-profile-preference-grid[\s\S]*?grid-template-columns: 1fr/);
 });
 
 test('质量面板区分验收通过率和执行终态率，空样本不展示为 100%', () => {

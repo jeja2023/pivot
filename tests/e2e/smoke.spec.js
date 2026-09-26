@@ -1,4 +1,5 @@
 /* global document, Event, sessionStorage, window -- Playwright 浏览器端执行上下文全局变量 */
+const path = require('node:path');
 const { expect, test } = require('@playwright/test');
 
 if (process.env.PIVOT_E2E_DEBUG === 'true') {
@@ -138,6 +139,29 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#agent-workbench-modal [data-automation-section="workflows"]').click();
         await expect(page.locator('#agent-dag-workbench-modal')).toBeVisible({ timeout: 15_000 });
         await expect(page.locator('#agent-workbench-modal')).toBeHidden();
+    });
+
+    test('个人档案偏好编辑器以标签管理工作习惯、任务和工具，并适配窄屏', async ({ page }) => {
+        await page.setViewportSize({ width: 1920, height: 800 });
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.());
+        await expect(page.locator('#agent-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#agent-workbench-modal [data-automation-section="workbench"]').click();
+        await page.locator('[data-agent-cp-subview="governance"]').click();
+        await expect(page.locator('#agent-profile-preferences-editor')).toBeVisible();
+        await expect.poll(() => page.locator('.agent-profile-preference-grid').evaluate(element => window.getComputedStyle(element).gridTemplateColumns)).toMatch(/^[\d.]+px [\d.]+px [\d.]+px$/);
+
+        const habitInput = page.locator('#agent-profile-work-habits-input');
+        await habitInput.fill('先给出可执行结论');
+        await habitInput.press('Enter');
+        await expect(page.locator('#agent-profile-work-habits')).toContainText('先给出可执行结论');
+        await expect(page.locator('#agent-profile-tools-suggestions')).toBeVisible();
+        await expect.poll(() => page.locator('#agent-control-plane').evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
+        await page.screenshot({ path: path.join(process.cwd(), 'test-results', 'agent-profile-preferences-desktop.png'), fullPage: true });
+
+        await page.setViewportSize({ width: 640, height: 900 });
+        await expect.poll(() => page.locator('.agent-profile-preference-grid').evaluate(element => window.getComputedStyle(element).gridTemplateColumns)).toMatch(/^[\d.]+px$/);
+        await page.screenshot({ path: path.join(process.cwd(), 'test-results', 'agent-profile-preferences-mobile.png'), fullPage: true });
     });
 
     test('自动化任务与工作流在样式延迟时显示稳定加载页，样式就绪后再展示内容', async ({ page }) => {
