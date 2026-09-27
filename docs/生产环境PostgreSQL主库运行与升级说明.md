@@ -209,8 +209,8 @@ PostgreSQL 版本迁移不提供自动 down migration。若升级后必须回退
 
 - [v0.1.155 发布记录](releases/v0.1.155-知识库产品化与PostgreSQL主库收敛.md)
 - [v0.1.157 工具库产品化控制面与受控连接发布记录](releases/v0.1.157-工具库产品化控制面与受控连接.md)
-- [工具库产品级差距分析与升级方案](../工具库产品级差距分析与升级方案.md)
+- [工具库产品级差距分析与升级方案](design/工具库产品级差距分析与升级方案.md)
 - [工具包发布与签名规范](工具包发布与签名规范.md)
-- [知识库产品化改造方案](../Pivot知识库产品化改造方案.md)
+- [知识库产品化改造方案](design/Pivot知识库产品化改造方案.md)
 - [生产环境离线部署](生产环境离线部署.md)
-- [历史 SQLite→PostgreSQL 一次性迁移方案（归档）](../Pivot生产环境迁移PostgreSQL实施方案.md)
+- [历史 SQLite→PostgreSQL 一次性迁移方案（归档）](design/Pivot生产环境迁移PostgreSQL实施方案.md)

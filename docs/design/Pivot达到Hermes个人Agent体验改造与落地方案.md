@@ -5,13 +5,13 @@
 > 编制日期：2026-09-19  
 > 目标：在不削弱 Pivot 企业安全、内网部署和审计能力的前提下，让个人用户获得接近 Hermes 的持续、主动、会学习、随时可用的 Agent 体验。
 
-> 实现证据：核心代码、PostgreSQL migration、定向测试和全量 `npm run test:all` 已闭环。30 条评测与外部 Provider/渠道实测见 [评测集](docs/agent-experience/personal-agent-beta-evaluation-set.md) 和 [发布证据](docs/agent-experience/personal-agent-beta-release-evidence.md)；它们需要部署负责人使用真实账号完成，不能被本地自动测试替代。
+> 实现证据：核心代码、PostgreSQL migration、定向测试和全量 `npm run test:all` 已闭环。30 条评测与外部 Provider/渠道实测见 [评测集](../agent-experience/personal-agent-beta-evaluation-set.md) 和 [发布证据](../agent-experience/personal-agent-beta-release-evidence.md)；它们需要部署负责人使用真实账号完成，不能被本地自动测试替代。
 
 ## 开发完成口径（2026-09-20）
 
 本方案中的**本地开发任务已完成**：首次引导和隐私事件、对话记忆操作与来源解释、受 ACL 约束的历史会话检索、自动学习/个人 Skill 闭环、目标草案/测试运行/授权快照/独立投递、双向 Channel Gateway（配对、签名、幂等、附件安全引用、审批身份绑定、死信重投）、并行协作、受控 Web/媒体、项目资料包、多端会话接续和从 Run 创建 Skill 草稿均已实现并纳入自动化回归。
 
-以下不是代码尾项，而是必须在目标生产环境完成的外部验收：真实模型和消息平台账号联调、真实用户评测集执行、50 条渠道消息演练、生产影子迁移/回滚演练与上线值守。它们的步骤和证据位置见 [发布证据](docs/agent-experience/personal-agent-beta-release-evidence.md)。
+以下不是代码尾项，而是必须在目标生产环境完成的外部验收：真实模型和消息平台账号联调、真实用户评测集执行、50 条渠道消息演练、生产影子迁移/回滚演练与上线值守。它们的步骤和证据位置见 [发布证据](../agent-experience/personal-agent-beta-release-evidence.md)。
 
 ## 1. 结论与实施策略
 
@@ -405,7 +405,7 @@ Hermes Skills 的体验优势是按需加载、渐进披露、可创建/安装�
 - **受控代码/终端边界**：新增 `terminal.runtime`，只允许任务 Jail 中的 Node/Python、只读 Git/ripgrep 及受限文件操作。生产执行要求已审计的固定摘要 Capability Worker；未配置时 fail-closed，不提供宿主机 Shell 或默认本地后备。
 - **工具发现与上下文控制**：标准与流式 Agent 均先暴露 `tools.search`、`tools.describe`、`tools.execute`。只有完成本轮搜索和契约读取的 `toolRef` 才能进入业务执行，且仍二次经过 Release、ACL、连接、Schema、审批和网络策略校验。精确业务工具白名单保留这三个只读控制面工具，不扩大业务授权。
 
-这次增强缩小了 Pivot 与 Hermes 在“可执行个人 Agent”和大工具集上下文控制上的体验差距，但没有改变本方案的安全原则：不执行任意社区代码、不授予任意 Shell、不让学习或工具搜索绕过审批和能力治理。部署启用要求、回滚方式与验证证据见 [v0.1.158 发布记录](docs/releases/v0.1.158-个人Agent交互终端与渐进式工具发现.md)。
+这次增强缩小了 Pivot 与 Hermes 在“可执行个人 Agent”和大工具集上下文控制上的体验差距，但没有改变本方案的安全原则：不执行任意社区代码、不授予任意 Shell、不让学习或工具搜索绕过审批和能力治理。部署启用要求、回滚方式与验证证据见 [v0.1.158 发布记录](../releases/v0.1.158-个人Agent交互终端与渐进式工具发现.md)。
 
 ---
 

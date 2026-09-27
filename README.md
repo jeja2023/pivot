@@ -536,7 +536,7 @@ npm run check:external:live
 
 - **当前运行与升级手册**：[《Pivot 生产环境 PostgreSQL 主库运行与升级说明》](docs/生产环境PostgreSQL主库运行与升级说明.md)。
 - **离线部署手册**：[《生产环境离线部署》](docs/生产环境离线部署.md)。
-- **历史一次性迁移资料（归档，不可直接执行）**：[《Pivot 历史 SQLite→PostgreSQL 一次性迁移实施方案》](Pivot生产环境迁移PostgreSQL实施方案.md)。
+- **历史一次性迁移资料（归档，不可直接执行）**：[《Pivot 历史 SQLite→PostgreSQL 一次性迁移实施方案》](docs/design/Pivot生产环境迁移PostgreSQL实施方案.md)。
 
 系统启动时会从原生 PostgreSQL schema 快照补齐结构、执行未应用的 `upPg` 迁移并注入元数据注释。升级前必须备份 PostgreSQL 和同一恢复点的上传文件；部署后执行 `npm run verify:knowledge-migration -- --strict` 完成知识资产、引用、权限与向量投影的只读对账。
 

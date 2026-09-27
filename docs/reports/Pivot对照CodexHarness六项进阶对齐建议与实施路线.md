@@ -43,7 +43,7 @@ Codex 在应对几十万行代码和成百上千文件时，坚决反对粗暴�
 * 用户若勾选过多知识库或启用海量 MCP 工具，Prompt Token 会迅速膨胀到数千甚至数万，引发模型注意力分散（Lost in the middle）或同类工具相互干扰。
 
 #### 1.3 对齐实施方案
-直接落地《[Pivot对话自适应感知与动态路由改造综合方案.md](../../Pivot对话自适应感知与动态路由改造综合方案.md)》：
+直接落地《[Pivot对话自适应感知与动态路由改造综合方案.md](../design/Pivot对话自适应感知与动态路由改造综合方案.md)》：
 1. **构建 Knowledge Catalog Map**：借鉴 Repo Map 理念，为系统全部 Collection 自动生成轻量级语义骨架，常驻内存向量表；
 2. **置信度门禁（Confidence Gating）**：非信息性输入（如闲聊或纯文本润色）跳过 RAG 检索；
 3. **两阶段定向 Chunk 召回**：先元路由锁定 Top 1~2 个 Collection，再做精准向量召回；

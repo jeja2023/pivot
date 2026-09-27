@@ -579,8 +579,8 @@ tool_score = 0.40 * success_rate
 
 ## 17. 参考文档与代码入口
 
-- `Pivot全自主Agent改造方案设计.md`
-- `docs/reports/Pivot对照CodexHarness策略研究.md`
+- `design/Pivot全自主Agent改造方案设计.md`
+- `reports/Pivot对照CodexHarness策略研究.md`
 - `server/services/agent-runtime/`
 - `server/services/agent-policy.js`
 - `server/services/agent-workflows.js`

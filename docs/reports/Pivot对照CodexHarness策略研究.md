@@ -1,7 +1,7 @@
 # Pivot 对照《Codex Harness 策略研究报告》
 
 > 审计时间：2026-08-22  
-> 对照对象：[`codex-harness-strategy-report.md`](../../codex-harness-strategy-report.md)  
+> 对照对象：[《Codex Harness 策略研究报告》](./Codex%20Harness%20策略研究报告.md)
 > 审计范围：`server/`、`desktop/agent-runtime/`、`client/`、PostgreSQL schema/migrations、`tests/`、项目设计与验收文档。  
 > 判定原则：以当前仓库代码、路由、数据库结构和测试证据为准；仅在 README 或设计文档中声明、但没有可验证实现的能力，不判为“已实现”。
 >

@@ -1,6 +1,6 @@
 # Pivot Agent Experience Delivery Ledger
 
-> 2026-09-20 更新：本台账以根目录《Pivot达到Hermes个人Agent体验改造与落地方案.md》与 [Personal Agent Beta 发布证据](personal-agent-beta-release-evidence.md) 为状态源。`Implemented` 表示代码、迁移和自动测试已经闭环；真实渠道、试点样本和运营指标仍须按发布证据执行，不能仅凭代码改为“已发布”。
+> 2026-09-20 更新：本台账以《[Pivot达到Hermes个人Agent体验改造与落地方案](../design/Pivot达到Hermes个人Agent体验改造与落地方案.md)》与 [Personal Agent Beta 发布证据](personal-agent-beta-release-evidence.md) 为状态源。`Implemented` 表示代码、迁移和自动测试已经闭环；真实渠道、试点样本和运营指标仍须按发布证据执行，不能仅凭代码改为“已发布”。
 
 This ledger is the executable scope record for the Hermes/OpenClaw-style Agent plan. Every item links to a code contract, data contract, verification command, owner role, and dependency.
 
