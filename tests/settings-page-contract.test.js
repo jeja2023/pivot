@@ -134,6 +134,7 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.match(js, /id="memory-jobs-retry-btn" class="btn-secondary" type="button">重试失败<\/button>/);
     assert.doesNotMatch(js, /memory-jobs-retry-btn[^`]*failed \? '' : 'disabled'/);
     assert.match(settings, /function callSettingsMemoryAction\(name, \.\.\.args\)/);
+    assert.match(settings, /const legacyAction = window\.Pivot\.legacy\?\.\[name\];/);
     assert.match(settings, /async function reloadSettingsMemories\(page = 1\)/);
     assert.match(settings, /window\.Pivot\.getModule\?\.\('settings\.memory'\)/);
     assert.match(settings, /callSettingsMemoryAction\('openMemoryUsageModal', memoryId\)/);

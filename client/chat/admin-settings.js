@@ -385,6 +385,8 @@ function getEmbeddingModelValue() {
 }
 window.Pivot.moduleApi('settings.events').registerAdminSettingsEvents(() => {
 function callSettingsMemoryAction(name, ...args) {
+    const legacyAction = window.Pivot.legacy?.[name];
+    if (typeof legacyAction === 'function') return legacyAction(...args);
     const api = window.Pivot.getModule?.('settings.memory');
     const action = api?.[name];
     if (typeof action !== 'function') {
