@@ -1,4 +1,14 @@
 
+## [v0.1.184] - 2026-09-27
+
+### PostgreSQL 长期记忆迁移兼容性修复
+
+- **启动阻断修复**：修复 `202609260001_long_term_memory_productization` 在早期生产库中遇到 `memories.source_message_ids` 为 `TEXT` 时，将其与 JSONB 默认值混用而导致 `COALESCE types text and jsonb cannot be matched` 的启动失败。
+- **历史数据兼容**：来源消息列表回填统一按文本安全解析为 JSONB 数组，兼容旧版 `TEXT` 与新版 `JSONB` 字段；空值、非数组和非法历史文本安全降级为空数组，不会阻断整个迁移。
+- **事务与回归**：迁移仍在版本化事务中执行，失败不会留下部分结构或回填结果；新增真实 PostgreSQL 回归，将现有列降为 `TEXT` 后验证来源证据可正确回填。
+
+详细升级步骤与验证证据见 [v0.1.184 发布记录](docs/releases/v0.1.184-PostgreSQL长期记忆迁移兼容性修复.md)。
+
 ## [v0.1.183] - 2026-09-26
 
 ### 实时语音麦克风兼容与本机文件交付完善

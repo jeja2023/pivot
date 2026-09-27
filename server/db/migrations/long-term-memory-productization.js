@@ -72,12 +72,39 @@ module.exports = [{
                 created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
             );
 
+            -- 早期生产库的 source_message_ids 是 TEXT，新安装快照则为 JSONB。
+            -- 统一按文本读取后安全解析，既避免 TEXT/JSONB 混用 COALESCE 失败，
+            -- 也不让单条非法历史值阻断整个版本化迁移。
+            CREATE OR REPLACE FUNCTION pg_temp.pivot_memory_source_ids_to_jsonb(input TEXT)
+            RETURNS JSONB
+            LANGUAGE plpgsql
+            AS $function$
+            DECLARE
+                parsed JSONB;
+            BEGIN
+                IF input IS NULL OR BTRIM(input) = '' THEN
+                    RETURN '[]'::jsonb;
+                END IF;
+                parsed := input::jsonb;
+                IF jsonb_typeof(parsed) <> 'array' THEN
+                    RETURN '[]'::jsonb;
+                END IF;
+                RETURN parsed;
+            EXCEPTION WHEN others THEN
+                RETURN '[]'::jsonb;
+            END;
+            $function$;
+
             INSERT INTO memory_source_evidence (memory_id, user_id, session_id, message_id, source_kind, asserted_by, created_at)
             SELECT m.id, m.user_id, m.source_session_id, source_value.message_id_text::BIGINT, m.origin, m.asserted_by, m.created_at
             FROM memories m
-            CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(m.source_message_ids, '[]'::jsonb)) AS source_value(message_id_text)
+            CROSS JOIN LATERAL jsonb_array_elements_text(
+                pg_temp.pivot_memory_source_ids_to_jsonb(m.source_message_ids::text)
+            ) AS source_value(message_id_text)
             WHERE source_value.message_id_text ~ '^[0-9]+$'
             ON CONFLICT(memory_id, message_id) DO NOTHING;
+
+            DROP FUNCTION IF EXISTS pg_temp.pivot_memory_source_ids_to_jsonb(TEXT);
 
             CREATE INDEX IF NOT EXISTS idx_memories_retrieval_scope
                 ON memories(user_id, status, scope, scope_reference, project_id, updated_at DESC);
