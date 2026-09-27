@@ -131,11 +131,15 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.match(js, /fetchMemoryEvaluationRuns/);
     assert.match(js, /runMemoryEvaluation/);
     assert.match(js, /openMemoryUsageModal/);
+    assert.match(js, /id="memory-jobs-retry-btn" class="btn-secondary" type="button">重试失败<\/button>/);
+    assert.doesNotMatch(js, /memory-jobs-retry-btn[^`]*failed \? '' : 'disabled'/);
     assert.match(settings, /function callSettingsMemoryAction\(name, \.\.\.args\)/);
     assert.match(settings, /async function reloadSettingsMemories\(page = 1\)/);
     assert.match(settings, /window\.Pivot\.getModule\?\.\('settings\.memory'\)/);
     assert.match(settings, /callSettingsMemoryAction\('openMemoryUsageModal', memoryId\)/);
     assert.match(settings, /callSettingsMemoryAction\('openMemoryMergeSuggestionsModal'\)/);
+    assert.match(settings, /const queued = Number\(result\.queued \|\| 0\)/);
+    assert.match(settings, /已将 \$\{queued\} 个失败任务重新入队/);
     assert.match(settings, /id === 'memory-merge-modal'/);
     assert.doesNotMatch(settings, /const memory = window\.Pivot\.moduleApi\('settings\.memory'/);
     assert.doesNotMatch(settings, /window\.Pivot\.legacy\.loadMemories\?\.\(1\)/);
@@ -202,4 +206,17 @@ test('API 接入与全局权限选择器严格隔离，杜绝跨面板解冻非�
     // openAdmin 的 admin-only 与 super-admin-only 必须排除 .admin-tab-content 面板
     assert.match(adminJs, /\.admin-only:not\(\.admin-tab-content\)/);
     assert.match(adminJs, /\.super-admin-only:not\(\.admin-tab-content\)/);
+});
+
+test('长期记忆与审计日志数据表格默认按每页 20 条分页', () => {
+    const adminJs = read('client/chat/admin.js');
+    const memoryJs = read('client/chat/admin-settings-memory.js');
+    const statsJs = read('client/chat/stats.js');
+    const settingsJs = read('client/chat/admin-settings.js');
+
+    assert.match(adminJs, /memoriesLimit:\s*20/);
+    assert.match(adminJs, /logsLimit:\s*20/);
+    assert.match(memoryJs, /pageState\.memoriesLimit\s*\|\|\s*20/);
+    assert.match(statsJs, /pageState\.logsLimit\s*\|\|\s*20/);
+    assert.match(settingsJs, /tab === 'logs'/);
 });

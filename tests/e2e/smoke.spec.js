@@ -989,6 +989,21 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#memory-evaluation-case-form button[type="submit"]')).toHaveText('添加用例');
     });
 
+    test('长期记忆没有失败任务时重试按钮仍提供明确反馈', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-memories').click();
+        const retryButton = page.locator('#memory-jobs-retry-btn');
+        await expect(retryButton).toBeVisible({ timeout: 15_000 });
+        await expect(retryButton).toBeEnabled();
+        const retryResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/memories/jobs/retry');
+        await retryButton.click();
+        await expect((await retryResponse).ok()).toBeTruthy();
+        await expect(page.locator('#toast-container')).toContainText('没有可重试的失败任务');
+        await expect(page.locator('#memory-jobs-panel')).toContainText('0 失败');
+    });
+
     test('system monitor renders RAG diagnostics and embedding latency state', async ({ page }) => {
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));

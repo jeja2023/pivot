@@ -416,7 +416,7 @@ window.Pivot.legacy.loadLogs = async function(page = 1) {
         const end = document.getElementById('log-filter-end')?.value || '';
         
         pageState.logs = page;
-        const limit = pageState.limit || 15;
+        const limit = pageState.logsLimit || 20;
         const params = new URLSearchParams({
             page,
             limit,

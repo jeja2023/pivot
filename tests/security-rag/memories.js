@@ -715,3 +715,45 @@ test('长期记忆维护接口支持归档过期记忆和清理历史抽取任�
     assert.equal(cleanupRes.body.deleted, 1);
     assert.equal(db.prepare('SELECT id FROM memory_extraction_jobs WHERE id = ?').get(jobInfo.lastInsertRowid), undefined);
 });
+
+test('失败长期记忆任务重试会重置执行周期且严格隔离用户', async () => {
+    const user = createMemoryTestUser('memory_retry_failed');
+    const otherUser = createMemoryTestUser('memory_retry_other');
+    const insertJob = db.prepare(`
+        INSERT INTO memory_extraction_jobs (
+            user_id, session_id, message_ids, status, attempts, max_attempts,
+            locked_at, last_error, result, next_run_at, completed_at, created_at, updated_at
+        ) VALUES (?, ?, '[]', ?, ?, ?, datetime('now', '+8 hours'), ?, ?,
+            datetime('now', '+8 hours', '-1 day'), datetime('now', '+8 hours', '-1 day'),
+            datetime('now', '+8 hours', '-1 day'), datetime('now', '+8 hours', '-1 day'))
+    `);
+    const ownFailed = insertJob.run(user.id, user.sessionId, 'failed', 3, 3, '抽取失败', '{"legacy":true}');
+    const ownSucceeded = insertJob.run(user.id, user.sessionId, 'succeeded', 1, 3, null, '{"ok":true}');
+    const otherFailed = insertJob.run(otherUser.id, otherUser.sessionId, 'failed', 3, 3, '其他用户失败', '{"legacy":true}');
+
+    const retried = await longTermMemory.retryFailedMemoryExtractionJobs(user.id, [ownFailed.lastInsertRowid, otherFailed.lastInsertRowid], { triggerWorker: false });
+    assert.equal(retried.queued, 1);
+
+    const own = db.prepare('SELECT status, attempts, locked_at, last_error, result, next_run_at, completed_at FROM memory_extraction_jobs WHERE id = ?').get(ownFailed.lastInsertRowid);
+    assert.equal(own.status, 'queued');
+    assert.equal(own.attempts, 0);
+    assert.equal(own.locked_at, null);
+    assert.equal(own.last_error, null);
+    assert.equal(own.result, null);
+    assert.ok(own.next_run_at);
+    assert.equal(own.completed_at, null);
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(ownSucceeded.lastInsertRowid).status, 'succeeded');
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(otherFailed.lastInsertRowid).status, 'failed');
+
+    const processed = await longTermMemory.processMemoryExtractionJobs({
+        limit: 1,
+        runMemoryExtraction: async () => ({ skipped: false, extracted: 0 })
+    });
+    assert.equal(processed.claimed, 1);
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(ownFailed.lastInsertRowid).status, 'succeeded');
+
+    const secondOwnFailed = insertJob.run(user.id, user.sessionId, 'failed', 3, 3, '第二个失败', '{"legacy":true}');
+    const allRetried = await longTermMemory.retryFailedMemoryExtractionJobs(user.id, [], { triggerWorker: false });
+    assert.equal(allRetried.queued, 1);
+    assert.equal(db.prepare('SELECT status FROM memory_extraction_jobs WHERE id = ?').get(secondOwnFailed.lastInsertRowid).status, 'queued');
+});

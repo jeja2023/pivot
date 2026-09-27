@@ -402,11 +402,7 @@ async function reloadSettingsMemories(page = 1) {
 document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.Pivot.legacy.saveRuntimeSettings?.(event));
 document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.Pivot.legacy.loadSettings?.());
 document.getElementById('memory-refresh-btn')?.addEventListener('click', async () => {
-    try {
-        await callSettingsMemoryAction('loadMemories');
-    } catch (error) {
-        showToast(error.message || '长期记忆刷新失败', 'error');
-    }
+    try { await callSettingsMemoryAction('loadMemories'); } catch (error) { showToast(error.message || '长期记忆刷新失败', 'error'); }
 });
 document.getElementById('long-term-memory-toggle')?.addEventListener('change', async (event) => {
     try {
@@ -418,40 +414,22 @@ document.getElementById('long-term-memory-toggle')?.addEventListener('change', a
 });
 
 document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', async () => {
-    try {
-        await callSettingsMemoryAction('openMemoryMergeSuggestionsModal');
-    } catch (error) {
-        showToast(error.message || '合并建议加载失败', 'error');
-    }
+    try { await callSettingsMemoryAction('openMemoryMergeSuggestionsModal'); } catch (error) { showToast(error.message || '合并建议加载失败', 'error'); }
 });
 document.getElementById('memory-export-btn')?.addEventListener('click', async () => {
-    try {
-        await callSettingsMemoryAction('exportMemories');
-    } catch (error) {
-        showToast(error.message || '长期记忆导出失败', 'error');
-    }
+    try { await callSettingsMemoryAction('exportMemories'); } catch (error) { showToast(error.message || '长期记忆导出失败', 'error'); }
 });
 document.getElementById('memory-evaluations-open-btn')?.addEventListener('click', () => {
-    try {
-        callSettingsMemoryAction('openMemoryEvaluationsModal');
-    } catch (error) {
-        showToast(error.message || '检索评测窗口加载失败', 'error');
-    }
+    try { callSettingsMemoryAction('openMemoryEvaluationsModal'); } catch (error) { showToast(error.message || '检索评测窗口加载失败', 'error'); }
 });
 document.getElementById('memory-evaluations-close-btn')?.addEventListener('click', () => {
     try { callSettingsMemoryAction('closeMemoryEvaluationsModal'); } catch (_) {}
 });
 document.getElementById('memory-evaluations-modal')?.addEventListener('click', event => {
-    if (event.target === event.currentTarget) {
-        try { callSettingsMemoryAction('closeMemoryEvaluationsModal'); } catch (_) {}
-    }
+    if (event.target === event.currentTarget) { try { callSettingsMemoryAction('closeMemoryEvaluationsModal'); } catch (_) {} }
 });
 document.getElementById('memory-evaluation-refresh-btn')?.addEventListener('click', async () => {
-    try {
-        await callSettingsMemoryAction('loadMemoryEvaluations');
-    } catch (error) {
-        showToast(error.message || '记忆评测记录加载失败', 'error');
-    }
+    try { await callSettingsMemoryAction('loadMemoryEvaluations'); } catch (error) { showToast(error.message || '记忆评测记录加载失败', 'error'); }
 });
 document.getElementById('memory-evaluation-run-btn')?.addEventListener('click', async event => {
     const button = event.currentTarget;
@@ -544,50 +522,26 @@ document.getElementById('memory-select-all')?.addEventListener('change', (event)
         input.checked = event.target.checked === true;
     });
 });
-document.getElementById('memory-bulk-enable-btn')?.addEventListener('click', async (event) => {
-    const ids = callSettingsMemoryAction('selectedMemoryIds');
-    if (!ids.length) return showToast('请先选择记忆', 'warning');
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, 'active');
-        showToast('选中记忆已恢复');
-        await callSettingsMemoryAction('loadMemories');
-    } catch (error) {
-        showToast(error.message || '批量恢复失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-bulk-disable-btn')?.addEventListener('click', async (event) => {
-    const ids = callSettingsMemoryAction('selectedMemoryIds');
-    if (!ids.length) return showToast('请先选择记忆', 'warning');
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, 'disabled');
-        showToast('选中记忆已禁用');
-        await callSettingsMemoryAction('loadMemories');
-    } catch (error) {
-        showToast(error.message || '批量禁用失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-bulk-delete-btn')?.addEventListener('click', async (event) => {
-    const ids = callSettingsMemoryAction('selectedMemoryIds');
-    if (!ids.length) return showToast('请先选择记忆', 'warning');
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, 'deleted');
-        showToast('选中记忆已删除');
-        await callSettingsMemoryAction('loadMemories');
-    } catch (error) {
-        showToast(error.message || '批量删除失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
+[
+    { id: 'memory-bulk-enable-btn', status: 'active', success: '选中记忆已恢复', err: '批量恢复失败' },
+    { id: 'memory-bulk-disable-btn', status: 'disabled', success: '选中记忆已禁用', err: '批量禁用失败' },
+    { id: 'memory-bulk-delete-btn', status: 'deleted', success: '选中记忆已删除', err: '批量删除失败' }
+].forEach(({ id, status, success, err }) => {
+    document.getElementById(id)?.addEventListener('click', async (event) => {
+        const ids = callSettingsMemoryAction('selectedMemoryIds');
+        if (!ids.length) return showToast('请先选择记忆', 'warning');
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, status);
+            showToast(success);
+            await callSettingsMemoryAction('loadMemories');
+        } catch (error) {
+            showToast(error.message || err, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
 });
 document.getElementById('memory-jobs-panel')?.addEventListener('click', async (event) => {
     const retryButton = event.target?.closest?.('#memory-jobs-retry-btn');
@@ -597,8 +551,9 @@ document.getElementById('memory-jobs-panel')?.addEventListener('click', async (e
     button.disabled = true;
     try {
         if (retryButton) {
-            await callSettingsMemoryAction('retryMemoryJobs');
-            showToast('失败任务已重新入队');
+            const result = await callSettingsMemoryAction('retryMemoryJobs');
+            const queued = Number(result.queued || 0);
+            showToast(queued ? `已将 ${queued} 个失败任务重新入队` : '没有可重试的失败任务', queued ? 'success' : 'info');
         } else {
             const data = await callSettingsMemoryAction('cleanupMemoryJobs');
             showToast(`已清理 ${Number(data.deleted || 0)} 个旧任务`);
@@ -627,13 +582,10 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
             await callSettingsMemoryAction('openMemorySourceModal', memoryId);
         } else if (action === 'usage') {
             await callSettingsMemoryAction('openMemoryUsageModal', memoryId);
-        } else if (action === 'disable') {
-            await callSettingsMemoryAction('updateMemoryStatus', memoryId, 'disabled');
-            showToast('长期记忆已禁用');
-            await callSettingsMemoryAction('loadMemories');
-        } else if (action === 'restore') {
-            await callSettingsMemoryAction('updateMemoryStatus', memoryId, 'active');
-            showToast('长期记忆已恢复');
+        } else if (action === 'disable' || action === 'restore') {
+            const isDisable = action === 'disable';
+            await callSettingsMemoryAction('updateMemoryStatus', memoryId, isDisable ? 'disabled' : 'active');
+            showToast(isDisable ? '长期记忆已禁用' : '长期记忆已恢复');
             await callSettingsMemoryAction('loadMemories');
         } else if (action === 'delete') {
             await callSettingsMemoryAction('deleteMemory', memoryId);
@@ -697,20 +649,14 @@ document.getElementById('memory-merge-body')?.addEventListener('click', async (e
         button.disabled = false;
     }
 });
-document.getElementById('memory-edit-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'memory-edit-modal') {
-        try { callSettingsMemoryAction('closeMemoryEditModal'); } catch (_) {}
-    }
-});
-document.getElementById('memory-source-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'memory-source-modal') {
-        try { callSettingsMemoryAction('closeMemorySourceModal'); } catch (_) {}
-    }
-});
-document.getElementById('memory-merge-modal')?.addEventListener('click', (event) => {
-    if (event.target?.id === 'memory-merge-modal') {
-        try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {}
-    }
+['memory-edit-modal', 'memory-source-modal', 'memory-merge-modal'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', (event) => {
+        if (event.target?.id === id) {
+            if (id === 'memory-edit-modal') { try { callSettingsMemoryAction('closeMemoryEditModal'); } catch (_) {} }
+            else if (id === 'memory-source-modal') { try { callSettingsMemoryAction('closeMemorySourceModal'); } catch (_) {} }
+            else if (id === 'memory-merge-modal') { try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {} }
+        }
+    });
 });
 });
 window.Pivot.legacy.fetchEmbeddingModels = async () => {
@@ -1007,10 +953,13 @@ window.Pivot.legacy.bindRagDebugModalEvents = function() {
 function renderPagination(tab, total, currentPage) {
     const container = document.getElementById(`pagination-${tab}`);
     if (!container) return;
+    const tabLimit = tab === 'logs'
+        ? Number(pageState.logsLimit || 20)
+        : (tab === 'memories' ? Number(pageState.memoriesLimit || 20) : Number(pageState.limit || 15));
     const renderWorkspacePagination = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination;
     renderWorkspacePagination?.(container, {
         total,
-        limit: pageState.limit,
+        limit: tabLimit,
         page: currentPage,
         onPageChange: targetPage => window.Pivot.legacy.loadTabData?.(tab, targetPage)
     });

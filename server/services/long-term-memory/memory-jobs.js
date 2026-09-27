@@ -291,8 +291,11 @@ async function listMemoryExtractionJobs(userId, options = {}) {
     };
 }
 
-async function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
-    const ids = (Array.isArray(jobIds) ? jobIds : []).map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0);
+async function retryFailedMemoryExtractionJobs(userId, jobIds = [], options = {}) {
+    const ids = [...new Set((Array.isArray(jobIds) ? jobIds : [])
+        .map(id => Number.parseInt(id, 10))
+        .filter(id => Number.isSafeInteger(id) && id > 0))]
+        .slice(0, 100);
     const now = getBeijingTimestamp();
     const where = ['user_id = ?', 'status = ?'];
     const params = [userId, MEMORY_JOB_STATUS.failed];
@@ -303,13 +306,17 @@ async function retryFailedMemoryExtractionJobs(userId, jobIds = []) {
     const changes = await execute(`
         UPDATE memory_extraction_jobs
         SET status = ?,
+            -- 人工重试应开始新的执行周期，不能继承已耗尽的自动重试次数。
+            attempts = 0,
             locked_at = NULL,
             last_error = NULL,
+            result = NULL,
             next_run_at = ?,
+            completed_at = NULL,
             updated_at = ?
         WHERE ${where.join(' AND ')}
     `, [MEMORY_JOB_STATUS.queued, now, now, ...params]);
-    if (changes > 0) triggerMemoryExtractionWorker();
+    if (changes > 0 && options.triggerWorker !== false) triggerMemoryExtractionWorker();
     return { queued: changes };
 }
 

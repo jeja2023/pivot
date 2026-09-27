@@ -293,7 +293,7 @@ window.Pivot.legacy.loadMemoryMergeSuggestions = openMemoryMergeSuggestionsModal
 
 function memoryQueryParams(page = pageState.memories || 1) {
     const params = new URLSearchParams();
-    const limit = Number(pageState.limit || 15);
+    const limit = Number(pageState.memoriesLimit || 20);
     const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
     params.set('status', document.getElementById('memory-status-filter')?.value || 'active');
     params.set('limit', String(limit));
@@ -344,7 +344,7 @@ function renderMemoryJobsPanel(jobsData = {}) {
         <div class="memory-jobs-line">
             <span>抽取任务</span>
             <strong>${queued} 排队 / ${running} 执行 / ${failed} 失败</strong>
-            <button id="memory-jobs-retry-btn" class="btn-secondary" type="button" ${failed ? '' : 'disabled'}>重试失败</button>
+            <button id="memory-jobs-retry-btn" class="btn-secondary" type="button">重试失败</button>
             <button id="memory-jobs-cleanup-btn" class="btn-secondary" type="button">清理旧任务</button>
         </div>
     `);
@@ -359,7 +359,7 @@ function renderProductMemoryRows(memories = []) {
         return;
     }
     const page = Math.max(1, Number.parseInt(pageState?.memories, 10) || 1);
-    const limit = Math.max(1, Number.parseInt(pageState?.limit, 10) || 15);
+    const limit = Math.max(1, Number.parseInt(pageState?.memoriesLimit || 20, 10));
     const startIndex = (page - 1) * limit;
     PivotSafeHtml.setHtml(body, memories.map((memory, index) => `
         <tr>
@@ -631,7 +631,7 @@ function renderMemoryPagination(tab, total, currentPage) {
     const renderWorkspacePagination = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination;
     renderWorkspacePagination?.(container, {
         total,
-        limit: pageState.limit,
+        limit: pageState.memoriesLimit || 20,
         page: currentPage,
         onPageChange: targetPage => window.Pivot.legacy.loadMemories?.(targetPage)
     });
@@ -653,7 +653,7 @@ window.Pivot.legacy.loadMemories = async function(page = pageState.memories || 1
         if (!memoriesRes.ok) throw new Error(data.error || '长期记忆加载失败');
         if (toggle) toggle.checked = data.enabled !== false;
         const total = Number(data.total || 0);
-        const totalPages = Math.max(1, Math.ceil(total / Number(pageState.limit || 15)));
+        const totalPages = Math.max(1, Math.ceil(total / Number(pageState.memoriesLimit || 20)));
         if (total > 0 && requestedPage > totalPages) {
             await window.Pivot.legacy.loadMemories(totalPages);
             return;
