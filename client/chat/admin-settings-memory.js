@@ -202,7 +202,9 @@ function renderMemorySource(data = {}) {
 window.Pivot.legacy.openMemorySourceModal = async function(memoryId) {
     window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-source-modal');
+    const title = document.getElementById('memory-source-title');
     if (!modal) return;
+    if (title) title.textContent = '来源';
     const body = document.getElementById('memory-source-body');
     if (body) PivotSafeHtml.setHtml(body, '<p class="muted">正在加载...</p>');
     modal.classList.remove('hidden');
@@ -219,8 +221,10 @@ window.Pivot.legacy.openMemorySourceModal = async function(memoryId) {
 async function openMemoryUsageModal(memoryId) {
     window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-source-modal');
+    const title = document.getElementById('memory-source-title');
     const body = document.getElementById('memory-source-body');
     if (!modal || !body) return;
+    if (title) title.textContent = '使用记录';
     PivotSafeHtml.setHtml(body, '<p class="muted">正在加载使用说明...</p>');
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
@@ -240,14 +244,13 @@ window.Pivot.legacy.closeMemorySourceModal = function() {
 };
 
 function renderMemoryMergeSuggestions(suggestions = []) {
-    const panel = document.getElementById('memory-merge-panel');
-    if (!panel) return;
-    panel.classList.remove('hidden');
+    const body = document.getElementById('memory-merge-body');
+    if (!body) return;
     if (!suggestions.length) {
-        PivotSafeHtml.setHtml(panel, '<div class="memory-merge-empty">暂无合并建议</div>');
+        PivotSafeHtml.setHtml(body, '<div class="memory-merge-empty">暂无需要合并的相似记忆。</div>');
         return;
     }
-    PivotSafeHtml.setHtml(panel, suggestions.map(item => `
+    PivotSafeHtml.setHtml(body, suggestions.map(item => `
         <div class="memory-merge-row">
             <div class="memory-merge-copy">
                 <span>${escapeHtml(ENHANCED_MEMORY_TYPE_LABELS[item.primary?.type] || item.primary?.type || '记忆')}</span>
@@ -260,17 +263,33 @@ function renderMemoryMergeSuggestions(suggestions = []) {
     `).join(''));
 }
 
-window.Pivot.legacy.loadMemoryMergeSuggestions = async function() {
+function closeMemoryMergeModal() {
+    const modal = document.getElementById('memory-merge-modal');
+    modal?.classList.add('hidden');
+    modal?.setAttribute('aria-hidden', 'true');
+}
+
+async function openMemoryMergeSuggestionsModal() {
+    window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const button = document.getElementById('memory-merge-suggestions-btn');
+    const modal = document.getElementById('memory-merge-modal');
+    const body = document.getElementById('memory-merge-body');
+    if (!modal || !body) throw new Error('合并建议窗口加载异常，请刷新后重试。');
     if (button) button.disabled = true;
+    PivotSafeHtml.setHtml(body, '<p class="muted">正在检查相似记忆...</p>');
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
     try {
         renderMemoryMergeSuggestions(await fetchMemoryMergeSuggestions());
     } catch (e) {
+        PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(e.message || '合并建议加载失败')}</p>`);
         showToast(e.message || '合并建议加载失败', 'error');
     } finally {
         if (button) button.disabled = false;
     }
-};
+}
+
+window.Pivot.legacy.loadMemoryMergeSuggestions = openMemoryMergeSuggestionsModal;
 
 function memoryQueryParams(page = pageState.memories || 1) {
     const params = new URLSearchParams();
@@ -596,6 +615,7 @@ function closeMemoryEvaluationsModal() {
     const modal = document.getElementById('memory-evaluations-modal');
     modal?.classList.add('hidden');
     modal?.setAttribute('aria-hidden', 'true');
+    resetMemoryEvaluationForm();
 }
 
 async function archiveExpiredMemories() {
@@ -698,6 +718,14 @@ window.Pivot?.exposeModule?.('settings.memory', {
     deleteMemory,
     getCurrentMemory,
     mergeMemoryPair,
+    openMemoryMergeSuggestionsModal,
+    closeMemoryMergeModal,
+    openMemoryEditModal: window.Pivot.legacy.openMemoryEditModal,
+    closeMemoryEditModal: window.Pivot.legacy.closeMemoryEditModal,
+    openMemorySourceModal: window.Pivot.legacy.openMemorySourceModal,
+    closeMemorySourceModal: window.Pivot.legacy.closeMemorySourceModal,
+    exportMemories: window.Pivot.legacy.exportMemories,
+    loadMemories: window.Pivot.legacy.loadMemories,
     openMemoryUsageModal,
     parseMemoryEvaluationIds,
     getMemoryEvaluationCase,
@@ -713,5 +741,6 @@ window.Pivot?.exposeModule?.('settings.memory', {
     runMemoryEvaluation,
     loadMemoryEvaluations,
     openMemoryEvaluationsModal,
-    closeMemoryEvaluationsModal
+    closeMemoryEvaluationsModal,
+    updateLongTermMemoryEnabled: window.Pivot.legacy.updateLongTermMemoryEnabled
 });

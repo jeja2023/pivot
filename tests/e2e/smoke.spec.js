@@ -908,6 +908,87 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => page.evaluate(() => window.__runtimeSettingsRefreshCalls)).toBe(1);
     });
 
+    test('长期记忆使用记录在设置页首次加载后可打开', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const created = await page.request.post('/api/memories/remember', {
+            headers: csrf ? { 'x-csrf-token': csrf } : {},
+            data: { content: '使用记录按钮的首次加载回归验证内容。', type: 'fact', scope: 'user' }
+        });
+        expect(created.ok()).toBeTruthy();
+        const memory = await created.json();
+        expect(memory?.id).toBeTruthy();
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-memories').click();
+        const usageButton = page.locator(`[data-memory-action="usage"][data-memory-id="${memory.id}"]`);
+        await expect(usageButton).toBeVisible({ timeout: 15_000 });
+        const usageResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/memories/${memory.id}/usage`);
+        await usageButton.click();
+        await expect((await usageResponse).ok()).toBeTruthy();
+        await expect(page.locator('#memory-source-modal')).toBeVisible();
+        await expect(page.locator('#memory-source-body')).toContainText('实际使用记录');
+        await expect.poll(() => page.evaluate(() => {
+            const modal = document.querySelector('#memory-source-modal .memory-source-modal');
+            return modal
+                ? Math.round(modal.getBoundingClientRect().width) === Math.round(Math.min(960, window.innerWidth - 32))
+                : false;
+        })).toBe(true);
+    });
+
+    test('长期记忆合并建议使用独立弹窗，评测取消编辑不占用字段操作行', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/memories/merge-suggestions?limit=20', async route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+                success: true,
+                suggestions: [{
+                    score: 0.92,
+                    primary: { id: 101, type: 'fact', content: '项目交付采用受控目录。' },
+                    duplicate: { id: 102, type: 'fact', content: '项目文件通过授权目录交付。' }
+                }]
+            })
+        }));
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const evaluation = await page.request.post('/api/memories/evaluations/cases', {
+            headers: csrf ? { 'x-csrf-token': csrf } : {},
+            data: { name: '评测编辑布局', query: '验证评测取消编辑按钮布局' }
+        });
+        expect(evaluation.ok()).toBeTruthy();
+        const evaluationCase = (await evaluation.json()).case;
+        expect(evaluationCase?.id).toBeTruthy();
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-memories').click();
+
+        await page.locator('#memory-merge-suggestions-btn').click();
+        await expect(page.locator('#memory-merge-modal')).toBeVisible();
+        await expect(page.locator('#memory-merge-body')).toContainText('项目交付采用受控目录。');
+        await expect(page.locator('#memory-merge-panel')).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => {
+            const modal = document.querySelector('#memory-merge-modal .memory-merge-modal');
+            return modal
+                ? Math.round(modal.getBoundingClientRect().width) === Math.round(Math.min(900, window.innerWidth - 32))
+                : false;
+        })).toBe(true);
+        await page.locator('#memory-merge-close').click();
+        await expect(page.locator('#memory-merge-modal')).toBeHidden();
+
+        await page.locator('#memory-evaluations-open-btn').click();
+        const editButton = page.locator(`[data-memory-evaluation-action="edit"][data-memory-evaluation-id="${evaluationCase.id}"]`);
+        await expect(editButton).toBeVisible({ timeout: 15_000 });
+        await editButton.click();
+        const resetButton = page.locator('#memory-evaluation-reset-btn');
+        await expect(resetButton).toBeVisible();
+        await expect.poll(() => resetButton.evaluate(button => button.closest('.memory-eval-form-head-actions') !== null)).toBe(true);
+        await expect.poll(() => page.locator('.field-actions').evaluate(actions => !actions.contains(document.getElementById('memory-evaluation-reset-btn')))).toBe(true);
+        await resetButton.click();
+        await expect(resetButton).toBeHidden();
+        await expect(page.locator('#memory-evaluation-case-form button[type="submit"]')).toHaveText('添加用例');
+    });
+
     test('system monitor renders RAG diagnostics and embedding latency state', async ({ page }) => {
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));

@@ -721,13 +721,6 @@
     font-weight: 500;
     border-radius: 5px;
 }
-.settings-workspace-view .memory-merge-panel {
-    margin: 0;
-    border: 1px solid rgba(148, 163, 184, 0.14);
-    border-radius: 6px;
-    background: #fff;
-    overflow: hidden;
-}
 .settings-workspace-view .memory-jobs-panel {
     margin: 0;
     min-width: 0;
@@ -882,12 +875,12 @@
 .settings-workspace-view .memories-tab .pagination span {
     font-size: 0.74rem;
 }
-.settings-workspace-view .memory-merge-empty {
+#memory-merge-modal .memory-merge-empty {
     padding: 12px 14px;
     color: #64748b;
     font-size: 0.84rem;
 }
-.settings-workspace-view .memory-merge-row {
+#memory-merge-modal .memory-merge-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
@@ -895,22 +888,22 @@
     padding: 12px 14px;
     border-top: 1px solid #edf2f7;
 }
-.settings-workspace-view .memory-merge-row:first-child {
+#memory-merge-modal .memory-merge-row:first-child {
     border-top: 0;
 }
-.settings-workspace-view .memory-merge-copy {
+#memory-merge-modal .memory-merge-copy {
     display: grid;
     grid-template-columns: auto auto minmax(0, 1fr);
     gap: 8px;
     align-items: start;
 }
-.settings-workspace-view .memory-merge-copy span,
-.settings-workspace-view .memory-merge-copy strong {
+#memory-merge-modal .memory-merge-copy span,
+#memory-merge-modal .memory-merge-copy strong {
     font-size: 0.72rem;
     color: #047857;
     white-space: nowrap;
 }
-.settings-workspace-view .memory-merge-copy p {
+#memory-merge-modal .memory-merge-copy p {
     grid-column: 1 / -1;
     margin: 0;
     color: #334155;
@@ -922,10 +915,53 @@
     width: min(680px, calc(100vw - 32px));
     max-height: min(760px, calc(100vh - 40px));
 }
+#memory-source-modal .memory-source-modal,
 .memory-source-modal,
 .settings-workspace-view .memory-source-modal {
-    width: min(820px, calc(100vw - 32px));
+    width: min(960px, calc(100vw - 32px));
     max-height: min(780px, calc(100vh - 40px));
+}
+#memory-merge-modal .memory-merge-modal {
+    width: min(900px, calc(100vw - 32px));
+    max-height: min(780px, calc(100vh - 40px));
+    padding: 0;
+    overflow: hidden;
+}
+#memory-merge-modal {
+    z-index: 5260;
+}
+#memory-merge-modal .memory-modal-header p {
+    margin: 3px 0 0;
+    color: var(--text-muted, #64748b);
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+#memory-merge-modal .memory-merge-close {
+    margin-left: auto;
+}
+#memory-merge-modal .memory-merge-form {
+    min-height: 0;
+    max-height: min(620px, calc(100vh - 180px));
+    padding: 0;
+    overflow: auto;
+}
+#memory-merge-modal .memory-merge-body {
+    display: grid;
+    min-height: 0;
+}
+body.dark-mode #memory-merge-modal .memory-merge-modal,
+.dark-mode #memory-merge-modal .memory-merge-modal {
+    background: var(--surface);
+    border-color: var(--border);
+}
+body.dark-mode #memory-merge-modal .memory-merge-row,
+.dark-mode #memory-merge-modal .memory-merge-row {
+    border-color: var(--border);
+}
+body.dark-mode #memory-merge-modal .memory-merge-copy p,
+.dark-mode #memory-merge-modal .memory-merge-copy p {
+    color: var(--text-secondary);
 }
 /* 长期记忆检索评测弹窗 */
 .memory-evaluations-overlay,
@@ -1093,6 +1129,24 @@
     justify-content: space-between;
     gap: 8px;
     flex-wrap: wrap;
+}
+#memory-evaluations-modal .memory-eval-form-head-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+}
+#memory-evaluations-modal #memory-evaluation-reset-btn {
+    flex: 0 0 auto;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+#memory-evaluations-modal #memory-evaluation-reset-btn[hidden] {
+    display: none !important;
 }
 #memory-evaluations-modal .form-section-title {
     font-size: 0.82rem;
@@ -1675,8 +1729,6 @@ body.dark-mode #memory-evaluations-modal .highlight-icon,
         -webkit-overflow-scrolling: touch;
     }
     .settings-workspace-view .memory-edit-grid,
-    .settings-workspace-view .memory-merge-row,
-    .settings-workspace-view .memory-merge-copy,
     .settings-workspace-view .memory-filter-bar {
         grid-template-columns: 1fr;
     }
@@ -1697,6 +1749,20 @@ body.dark-mode #memory-evaluations-modal .highlight-icon,
         align-items: flex-start;
         justify-content: flex-start;
         white-space: normal;
+    }
+}
+
+@media (max-width: 760px) {
+    #memory-merge-modal .memory-merge-row,
+    #memory-merge-modal .memory-merge-copy {
+        grid-template-columns: 1fr;
+    }
+    #memory-merge-modal .memory-merge-row .btn-primary {
+        width: 100%;
+    }
+    #memory-evaluations-modal .memory-eval-form-head-actions {
+        width: 100%;
+        justify-content: space-between;
     }
 }
 

@@ -49,7 +49,6 @@
                                 </div>
                                 <div id="memory-jobs-panel" class="memory-jobs-panel"></div>
                             </div>
-                            <div id="memory-merge-panel" class="memory-merge-panel hidden"></div>
                             <div class="table-container memories-table-wrap">
                                 <table class="data-table compact-table memories-table">
                                     <colgroup>
@@ -146,11 +145,25 @@
                         <div id="memory-source-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-label="来源" style="z-index: 5260;">
                             <div class="modal model-modal memory-modal memory-source-modal">
                                 <div class="model-modal-header memory-modal-header">
-                                    <h3>来源</h3>
+                                    <h3 id="memory-source-title">来源</h3>
                                     <button id="memory-source-close" type="button" class="btn-secondary settings-close-btn memory-source-close">关闭</button>
                                 </div>
                                 <div class="model-form memory-source-form">
                                     <div id="memory-source-body" class="memory-source-body"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="memory-merge-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="memory-merge-title">
+                            <div class="modal model-modal memory-modal memory-merge-modal">
+                                <div class="model-modal-header memory-modal-header">
+                                    <div>
+                                        <h3 id="memory-merge-title">合并建议</h3>
+                                        <p>仅展示相似度较高的候选；合并后会保留目标记忆并停用重复项。</p>
+                                    </div>
+                                    <button id="memory-merge-close" type="button" class="btn-secondary settings-close-btn memory-merge-close">关闭</button>
+                                </div>
+                                <div class="model-form memory-merge-form">
+                                    <div id="memory-merge-body" class="memory-merge-body"></div>
                                 </div>
                             </div>
                         </div>
@@ -200,7 +213,10 @@
                                     <form id="memory-evaluation-case-form" class="memory-evaluation-case-form">
                                         <div class="memory-eval-form-head">
                                             <strong class="form-section-title">添加 / 编辑评测用例</strong>
-                                            <span class="form-section-tip">设置检索问题与预期结果，建立当前账号的检索质量基准</span>
+                                            <div class="memory-eval-form-head-actions">
+                                                <span class="form-section-tip">设置检索问题与预期结果，建立当前账号的检索质量基准</span>
+                                                <button id="memory-evaluation-reset-btn" type="button" class="btn-secondary" hidden>取消编辑</button>
+                                            </div>
                                         </div>
                                         <input id="memory-evaluation-id" type="hidden">
                                         <div class="memory-eval-form-row">
@@ -221,7 +237,6 @@
                                                 <input id="memory-evaluation-forbidden" class="form-input" inputmode="numeric" placeholder="如 3, 4">
                                             </label>
                                             <div class="memory-eval-field field-actions">
-                                                <button id="memory-evaluation-reset-btn" type="button" class="btn-secondary" hidden>取消</button>
                                                 <button type="submit" class="btn-primary">添加用例</button>
                                             </div>
                                         </div>

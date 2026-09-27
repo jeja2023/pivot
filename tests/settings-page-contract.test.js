@@ -111,6 +111,7 @@ test('工具策略卡片具备工具名称与简介全量中文化映射', () =>
 
 test('长期记忆表格移除独立来源列并将来源按钮移入操作列，来源弹窗关闭按钮靠右', () => {
     const html = read('client/chat/partials/settings/memories.html');
+    const settings = read('client/chat/admin-settings.js');
     const js = read('client/chat/admin-settings-memory.js');
     const css = read('client/chat/styles/admin/admin-layout.css');
 
@@ -122,14 +123,31 @@ test('长期记忆表格移除独立来源列并将来源按钮移入操作列�
     assert.match(js, /<div class="memory-action-buttons">[\s\S]*?data-memory-action="source"[\s\S]*?data-memory-action="edit"/);
     assert.match(html, /id="memory-evaluation-run-btn"/);
     assert.match(html, /id="memory-evaluation-case-form"/);
+    assert.match(html, /id="memory-merge-modal"/);
+    assert.doesNotMatch(html, /id="memory-merge-panel"/);
+    const evaluationForm = html.match(/<form id="memory-evaluation-case-form"[\s\S]*?<\/form>/)?.[0] || '';
+    assert.match(evaluationForm, /memory-eval-form-head-actions[\s\S]*?id="memory-evaluation-reset-btn"[^>]*>取消编辑/);
+    assert.doesNotMatch(evaluationForm, /field-actions[\s\S]*?memory-evaluation-reset-btn/);
     assert.match(js, /fetchMemoryEvaluationRuns/);
     assert.match(js, /runMemoryEvaluation/);
+    assert.match(js, /openMemoryUsageModal/);
+    assert.match(settings, /function callSettingsMemoryAction\(name, \.\.\.args\)/);
+    assert.match(settings, /async function reloadSettingsMemories\(page = 1\)/);
+    assert.match(settings, /window\.Pivot\.getModule\?\.\('settings\.memory'\)/);
+    assert.match(settings, /callSettingsMemoryAction\('openMemoryUsageModal', memoryId\)/);
+    assert.match(settings, /callSettingsMemoryAction\('openMemoryMergeSuggestionsModal'\)/);
+    assert.match(settings, /id === 'memory-merge-modal'/);
+    assert.doesNotMatch(settings, /const memory = window\.Pivot\.moduleApi\('settings\.memory'/);
+    assert.doesNotMatch(settings, /window\.Pivot\.legacy\.loadMemories\?\.\(1\)/);
     assert.match(html, /id="memory-edit-scope"/);
     assert.match(html, /id="memory-edit-valid-from"/);
     assert.match(html, /id="memory-edit-expires-at"/);
     assert.match(js, /function toDateTimeLocal/);
     assert.match(css, /\.memory-modal-header[\s\S]*?display:\s*flex;/);
     assert.match(css, /\.memory-source-close[\s\S]*?margin-left:\s*auto;/);
+    assert.match(css, /#memory-source-modal \.memory-source-modal[\s\S]*?width:\s*min\(960px,\s*calc\(100vw - 32px\)\)/);
+    assert.match(css, /#memory-merge-modal \.memory-merge-modal[\s\S]*?width:\s*min\(900px,\s*calc\(100vw - 32px\)\)/);
+    assert.match(css, /#memory-evaluations-modal #memory-evaluation-reset-btn\[hidden\][\s\S]*?display:\s*none !important/);
 });
 
 test('分页控件统一使用直接绑定的工作区组件，避免依赖全局点击委托', () => {
