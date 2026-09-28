@@ -213,17 +213,20 @@ function buildRouteMetadata(plan = {}) {
             confidence: Number(plan.nextStep?.confidence || 0),
             reasonCode: String(plan.nextStep?.reasonCode || '')
         },
-        decisions: Object.values(plan.decisions || {}).filter(Boolean).slice(0, 4).map(decision => ({
-            decisionId: String(decision.decisionId || ''),
-            scenario: String(decision.context?.scenario || ''),
-            selectedActionId: String(decision.selectedActionId || ''),
-            suggestedActionId: String(decision.policy?.suggestedActionId || ''),
-            confidence: Number(decision.policy?.confidence || 0),
-            threshold: Number(decision.policy?.threshold || 0),
-            policyVersion: String(decision.policy?.policyVersion || ''),
-            mode: String(decision.policy?.mode || ''),
-            reasonCode: String(decision.policy?.reasonCode || '')
-        })),
+        decisions: Object.values(plan.decisions || {}).filter(Boolean).slice(0, 4).map(decision => {
+            const item = {
+                decisionId: String(decision.decisionId || ''),
+                scenario: String(decision.context?.scenario || ''),
+                selectedActionId: String(decision.selectedActionId || '')
+            };
+            if (decision.policy?.suggestedActionId && decision.policy.suggestedActionId !== decision.selectedActionId) {
+                item.suggestedActionId = String(decision.policy.suggestedActionId);
+            }
+            if (Number.isFinite(decision.policy?.confidence)) {
+                item.confidence = Number(decision.policy.confidence);
+            }
+            return item;
+        }),
         timing: {
             routeDurationMs: Math.max(0, Math.round(Number(plan.timing?.routeDurationMs || 0))),
             embeddingDurationMs: Math.max(0, Math.round(Number(plan.timing?.embeddingDurationMs || 0)))
