@@ -15,6 +15,8 @@ const {
     listChatContextSnapshotsForUser,
     listChatContextWindowsForUser
 } = require('../services/chat-context-state-store');
+const { recordUserDecisionFeedback } = require('../services/decision-observability');
+const { listDecisionPreferences, saveDecisionPreference } = require('../services/decision-preferences');
 
 const normalizeTags = (value) => String(value || '')
     .split(',')
@@ -219,6 +221,37 @@ function createSessionsRouter({
         });
         logAction(req, '创建对话', `创建对话: ${title}`);
         res.json({ id, title });
+    }));
+
+    router.get('/decision-preferences', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listDecisionPreferences({ scope: 'user', userId: req.user.id }) });
+    }));
+
+    router.put('/decision-preferences/:scenario', authMiddleware, asyncHandler(async (req, res) => {
+        const preference = await saveDecisionPreference({
+            scope: 'user',
+            userId: req.user.id,
+            scenario: req.params.scenario,
+            actionId: req.body?.actionId,
+            enabled: req.body?.enabled !== false,
+            actorId: req.user.id
+        });
+        logAction(req, '更新个人路由偏好', '场景: ' + preference.scenario + '，动作: ' + preference.actionId + '，启用: ' + preference.enabled);
+        res.json({ success: true, preference });
+    }));
+
+    router.post('/sessions/:id/decision-feedback', authMiddleware, asyncHandler(async (req, res) => {
+        const outcome = await recordUserDecisionFeedback({
+            decisionId: req.body?.decisionId,
+            correctedActionId: req.body?.correctedActionId,
+            selectedActionId: req.body?.selectedActionId,
+            status: req.body?.status,
+            userId: req.user.id,
+            sessionId: req.params.id
+        });
+        if (!outcome) return res.status(400).json({ error: '决策不存在、无权访问，或修正动作不在当时允许的候选中。' });
+        logAction(req, '提交路由修正反馈', '会话: ' + req.params.id + '，决策: ' + outcome.decisionId);
+        res.status(202).json({ success: true, outcome: { id: outcome.id, decisionId: outcome.decisionId, correctedActionId: outcome.verifiedActionId } });
     }));
 
     router.get('/sessions/tags/list', authMiddleware, asyncHandler(async (req, res) => {

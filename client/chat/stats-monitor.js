@@ -500,6 +500,22 @@ const loadMonitorSummary = async function(options = {}) {
                 ragCandidates: summary.ragCandidates + Number(row.total_rag_candidates || 0),
                 toolCandidates: summary.toolCandidates + Number(row.total_tool_candidates || 0)
             }), { requests: 0, errors: 0, durationMs: 0, embeddingMs: 0, ragCandidates: 0, toolCandidates: 0 });
+            const decisionRouting = data.decisionRouting || {};
+            const decisionProviders = Array.isArray(decisionRouting.providers) ? decisionRouting.providers : [];
+            const decisionSummary = decisionProviders.reduce((summary, provider) => ({
+                calls: summary.calls + Number(provider.calls || 0),
+                errors: summary.errors + Number(provider.errors || 0),
+                p95DurationMs: Math.max(summary.p95DurationMs, Number(provider.p95_duration_ms || 0))
+            }), { calls: 0, errors: 0, p95DurationMs: 0 });
+            const decisionTitle = decisionRouting.unavailable
+                ? '迁移未应用或指标暂不可用'
+                : `调用 ${formatMetricNumber(decisionSummary.calls)} 次，错误 ${formatMetricNumber(decisionSummary.errors)} 次`;
+            const decisionStatusText = decisionRouting.unavailable
+                ? '待迁移'
+                : `${formatMetricNumber(decisionSummary.calls)} 次 / ${formatMetricNumber(decisionSummary.errors)} 错误`;
+            const decisionP95Text = decisionRouting.unavailable
+                ? '—'
+                : `${formatMetricNumber(decisionSummary.p95DurationMs, 1)} 毫秒`;
             const storageData = data.storage || {};
             const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
             PivotSafeHtml.setHtml(ragStorageEl, [
@@ -526,6 +542,10 @@ const loadMonitorSummary = async function(options = {}) {
                 `<div class="monitor-row monitor-split-row">
                     <div><span>智能路由（24h）</span><strong title="请求 ${formatMetricNumber(routing.requests)} 次，错误 ${formatMetricNumber(routing.errors)} 次">${formatMetricNumber(routing.requests)} 次 / ${routing.requests ? formatMetricNumber(routing.durationMs / routing.requests, 1) : '0.0'} ms</strong></div>
                     <div><span>平均候选</span><strong title="知识库 ${formatMetricNumber(routing.ragCandidates)}，工具 ${formatMetricNumber(routing.toolCandidates)}">知识 ${routing.requests ? formatMetricNumber(routing.ragCandidates / routing.requests, 1) : '0'} / 工具 ${routing.requests ? formatMetricNumber(routing.toolCandidates / routing.requests, 1) : '0'}</strong></div>
+                </div>`,
+                `<div class="monitor-row monitor-split-row">
+                    <div><span>决策器（24h）</span><strong title="${decisionTitle}">${decisionStatusText}</strong></div>
+                    <div><span>决策器 P95</span><strong>${decisionP95Text}</strong></div>
                 </div>`
             ].join(''));
             renderRagEmbeddingLatencyTrend(document.getElementById('monitor-rag-latency-trend'), embedding);

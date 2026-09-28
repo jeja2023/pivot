@@ -12,6 +12,9 @@ const {
     detectStrongDataQueryIntent
 } = require('./chat-mcp-context');
 const { logger } = require('../logger');
+const { resolveBusinessDecision } = require('./decision-runtime');
+const { buildDecisionActionCandidate } = require('./decision-action-catalog');
+const { getPrimaryTenantId } = require('./enterprise-access');
 
 const MAX_ROUTE_OVERRIDE_COLLECTIONS = 50;
 const MAX_ROUTE_OVERRIDE_TOOLS = 100;
@@ -205,6 +208,22 @@ function buildRouteMetadata(plan = {}) {
                 confidence: Number(item.confidence || 0)
             }))
         },
+        nextStep: {
+            action: String(plan.nextStep?.action || 'direct_answer'),
+            confidence: Number(plan.nextStep?.confidence || 0),
+            reasonCode: String(plan.nextStep?.reasonCode || '')
+        },
+        decisions: Object.values(plan.decisions || {}).filter(Boolean).slice(0, 4).map(decision => ({
+            decisionId: String(decision.decisionId || ''),
+            scenario: String(decision.context?.scenario || ''),
+            selectedActionId: String(decision.selectedActionId || ''),
+            suggestedActionId: String(decision.policy?.suggestedActionId || ''),
+            confidence: Number(decision.policy?.confidence || 0),
+            threshold: Number(decision.policy?.threshold || 0),
+            policyVersion: String(decision.policy?.policyVersion || ''),
+            mode: String(decision.policy?.mode || ''),
+            reasonCode: String(decision.policy?.reasonCode || '')
+        })),
         timing: {
             routeDurationMs: Math.max(0, Math.round(Number(plan.timing?.routeDurationMs || 0))),
             embeddingDurationMs: Math.max(0, Math.round(Number(plan.timing?.embeddingDurationMs || 0)))
@@ -225,6 +244,43 @@ function buildRouteSseEvent(plan = {}) {
 }
 
 function createSemanticRouter(deps = {}) {
+    const resolveDecision = deps.resolveBusinessDecision || resolveBusinessDecision;
+
+    async function resolveRouteDecisions({ taskState, user, modelCfg = null, state, rag, tools, routeEnabled, shadow, hasExplicitScope, overrides, env, signal }) {
+        const ragFallback = rag.action === 'retrieve' ? 'retrieve' : 'skip';
+        // 影子模式只禁止改变执行路径，不能缩窄可比较候选；否则学习型提供器
+        // 永远只能复述现有路由，无法产生可用于评估的替代建议。
+        const ragFixed = !routeEnabled || hasExplicitScope || overrides.excludeRag || !state.ragEnabled;
+        const ragCandidates = [
+            buildDecisionActionCandidate('chat.rag', 'retrieve', { allowed: ragFixed ? ragFallback === 'retrieve' : true }),
+            buildDecisionActionCandidate('chat.rag', 'skip', { allowed: ragFixed ? ragFallback === 'skip' : true })
+        ];
+        const toolFallback = tools.action === 'propose' ? 'propose' : tools.action === 'candidate_only' ? 'candidate_only' : 'skip';
+        const toolFixed = !routeEnabled || overrides.excludeTools;
+        const toolCandidates = [
+            buildDecisionActionCandidate('chat.tools', 'propose', { allowed: toolFixed ? toolFallback === 'propose' : Boolean(state.mcpEnabled && tools.candidateTools.length) }),
+            buildDecisionActionCandidate('chat.tools', 'candidate_only', { allowed: toolFixed ? toolFallback === 'candidate_only' : Boolean(!state.mcpEnabled && tools.candidates.length) }),
+            buildDecisionActionCandidate('chat.tools', 'skip', { allowed: toolFixed ? toolFallback === 'skip' : true })
+        ];
+        const nextStepFixed = !routeEnabled;
+        const nextStepCandidates = [
+            buildDecisionActionCandidate('chat.next_step', 'direct_answer', { allowed: true }),
+            buildDecisionActionCandidate('chat.next_step', 'clarify', { allowed: !nextStepFixed })
+        ];
+        const scoreMap = (items, selected) => Object.fromEntries(items.map(item => [item.id, item.id === selected ? 0.98 : 0.02]));
+        let resolvedTenantId = user?.tenant_id ?? null;
+        if (!resolvedTenantId && user?.id) {
+            try { resolvedTenantId = await getPrimaryTenantId(user.id); } catch (_) {}
+        }
+        const shared = { taskState, tenantId: resolvedTenantId, userId: user?.id ?? null, user, modelCfg, sessionId: state.sessionId || '', env, signal };
+        const [ragDecision, toolDecision, nextStepDecision] = await Promise.all([
+            resolveDecision({ ...shared, scenario: 'chat.rag', candidates: ragCandidates, fallbackActionId: ragFallback, actionScores: scoreMap(ragCandidates, ragFallback) }),
+            resolveDecision({ ...shared, scenario: 'chat.tools', candidates: toolCandidates, fallbackActionId: toolFallback, actionScores: scoreMap(toolCandidates, toolFallback) }),
+            resolveDecision({ ...shared, scenario: 'chat.next_step', candidates: nextStepCandidates, fallbackActionId: 'direct_answer', actionScores: scoreMap(nextStepCandidates, 'direct_answer') })
+        ]);
+        return { rag: ragDecision, tools: toolDecision, nextStep: nextStepDecision };
+    }
+
     const getConfig = deps.getChatAutoRouteConfig || getChatAutoRouteConfig;
     const getEmbedding = deps.getEmbeddingConfig || getEmbeddingConfig;
     const generateQueryEmbedding = deps.generateEmbedding || generateEmbedding;
@@ -232,10 +288,12 @@ function createSemanticRouter(deps = {}) {
     const toolIndex = deps.mcpToolCatalogIndex || mcpToolCatalogIndex;
     const recordMetric = deps.recordChatRouteMetric || recordChatRouteMetric;
 
-    async function resolveRoutePlan({ prompt, user, state = {}, availableMcpTools = [], signal = null, env = process.env } = {}) {
+    async function resolveRoutePlan({ prompt, taskState = null, user, modelCfg = null, state = {}, availableMcpTools = [], signal = null, env = process.env } = {}) {
         const startedAt = Date.now();
         const config = getConfig(env);
-        const structuredTaskState = state.taskState && typeof state.taskState === 'object' ? state.taskState : null;
+        const structuredTaskState = taskState && typeof taskState === 'object'
+            ? taskState
+            : state.taskState && typeof state.taskState === 'object' ? state.taskState : null;
         const cleanPrompt = normalizeRoutePrompt(structuredTaskState?.retrievalQuery || structuredTaskState?.currentQuestion || prompt);
         const overrides = normalizeRouteOverrides(state.routeOverrides);
         const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
@@ -417,6 +475,50 @@ function createSemanticRouter(deps = {}) {
             }));
         }
 
+        const nextStep = {
+            action: 'direct_answer',
+            confidence: 0,
+            reasonCode: 'existing_chat_generation'
+        };
+        let routeDecisions = null;
+        try {
+            routeDecisions = await resolveRouteDecisions({
+                taskState: structuredTaskState || { hash: '', evidenceNeeds: [], toolIntent: {} },
+                user,
+                modelCfg,
+                state,
+                rag,
+                tools,
+                routeEnabled,
+                shadow,
+                hasExplicitScope,
+                overrides,
+                env,
+                signal
+            });
+            const selectedRagAction = routeDecisions?.rag?.selectedActionId;
+            const selectedToolAction = routeDecisions?.tools?.selectedActionId;
+            const selectedNextStepAction = routeDecisions?.nextStep?.selectedActionId;
+            if (!shadow && routeDecisions?.rag?.policy?.applied && ['retrieve', 'skip'].includes(selectedRagAction) && selectedRagAction !== rag.action) {
+                rag.action = selectedRagAction;
+                rag.confidence = routeDecisions.rag.policy.confidence;
+                rag.reasonCode = 'decision_policy_' + routeDecisions.rag.policy.reasonCode;
+            }
+            if (!shadow && routeDecisions?.tools?.policy?.applied && ['propose', 'candidate_only', 'skip'].includes(selectedToolAction) && selectedToolAction !== tools.action) {
+                tools.action = selectedToolAction;
+                tools.confidence = routeDecisions.tools.policy.confidence;
+                tools.reasonCode = 'decision_policy_' + routeDecisions.tools.policy.reasonCode;
+                if (selectedToolAction === 'skip') tools.candidateTools = [];
+            }
+            if (!shadow && routeDecisions?.nextStep?.policy?.applied && ['direct_answer', 'clarify'].includes(selectedNextStepAction) && selectedNextStepAction !== nextStep.action) {
+                nextStep.action = selectedNextStepAction;
+                nextStep.confidence = routeDecisions.nextStep.policy.confidence;
+                nextStep.reasonCode = 'decision_policy_' + routeDecisions.nextStep.policy.reasonCode;
+            }
+        } catch (error) {
+            logger.warn({ err: error.message, userId: user?.id }, '统一业务决策器不可用，已保持现有路由结果');
+        }
+
         const plan = {
             version: 1,
             mode,
@@ -429,17 +531,20 @@ function createSemanticRouter(deps = {}) {
             } : null,
             rag,
             tools,
+            nextStep,
             overrides,
-            execution: shadow ? legacyExecution : {
+            decisions: routeDecisions,
+            execution: shadow ? { ...legacyExecution, nextStep: { action: 'direct_answer' } } : {
                 rag: {
-                    shouldRetrieve: rag.action === 'retrieve',
+                    shouldRetrieve: nextStep.action !== 'clarify' && rag.action === 'retrieve',
                     scope: rag.scope,
                     queryVector: rag.queryVector
                 },
                 tools: {
-                    shouldPlan: state.mcpEnabled && tools.action === 'propose',
+                    shouldPlan: nextStep.action !== 'clarify' && state.mcpEnabled && tools.action === 'propose',
                     candidates: tools.candidateTools
-                }
+                },
+                nextStep: { action: nextStep.action }
             },
             timing: {
                 routeDurationMs: Date.now() - startedAt,

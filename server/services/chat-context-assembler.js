@@ -19,6 +19,7 @@ const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
 const { maybeBuildMcpChatContext } = require('./chat-mcp-context');
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent } = require('./semantic-router');
+const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
 const {
@@ -154,6 +155,7 @@ async function assembleChatContext({
             prompt: retrievalQuery,
             taskState,
             user: req.user,
+            modelCfg,
             state,
             availableMcpTools: accessibleMcpTools,
             signal
@@ -186,11 +188,29 @@ async function assembleChatContext({
     // 工具库首次使用需要用户在前端确认。此处在完成路由后立即暂停，
     // 既不会调用模型生成一份无工具的重复回答，也不会执行任何工具。
     // 前端确认后以 regenerate 复用已保存的同一条用户消息继续本轮请求。
-    if (requiresMcpConsentForRoute(routePlan, mcpEnabled)) {
+    if (routePlan.execution?.nextStep?.action !== 'clarify' && requiresMcpConsentForRoute(routePlan, mcpEnabled)) {
+        try {
+            const decisions = routePlan.decisions || {};
+            if (decisions.rag?.decisionId) recordDecisionOutcome({ decisionId: decisions.rag.decisionId, eventType: 'execution', source: 'runtime', status: 'skipped', selectedActionId: decisions.rag.selectedActionId, reasonCode: 'mcp_consent_required', resultReference: sessionId });
+            if (decisions.tools?.decisionId) recordDecisionOutcome({ decisionId: decisions.tools.decisionId, eventType: 'execution', source: 'runtime', status: 'skipped', selectedActionId: decisions.tools.selectedActionId, reasonCode: 'mcp_consent_required', resultReference: sessionId });
+        } catch (_) {}
         return {
             routePlan,
             mcpConsentRequired: true
         };
+    }
+
+    const shouldClarify = routePlan.execution?.nextStep?.action === 'clarify';
+    if (shouldClarify) {
+        try {
+            const nextStepDecision = routePlan.decisions?.nextStep;
+            if (nextStepDecision?.decisionId) recordDecisionOutcome({
+                decisionId: nextStepDecision.decisionId, eventType: 'execution', source: 'runtime', status: 'partial',
+                selectedActionId: nextStepDecision.selectedActionId, reasonCode: 'clarification_request_selected', resultReference: sessionId,
+                metadata: { phase: 'next_step' }
+            });
+        } catch (_) {}
+        writeSse(JSON.stringify({ type: 'route', status: 'clarify', message: '本轮先补充关键信息，再继续执行任务。' }));
     }
 
     const effectiveRagScope = routePlan.execution?.rag?.scope || ragScope || {};
@@ -204,7 +224,7 @@ async function assembleChatContext({
         && isRagEnabled()
         && Boolean(retrievalQuery);
     const [memoryResult, ragResult] = await Promise.allSettled([
-        memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
+        !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
         shouldRetrieveRag ? retrieveContext(userId, retrievalQuery, null, {
             user: req.user,
             scope: effectiveRagScope,
@@ -212,7 +232,25 @@ async function assembleChatContext({
         }) : Promise.resolve(null)
     ]);
 
-    if (!shouldRetrieveRag && taskState.evidenceNeeds.includes('knowledge_base')) {
+    try {
+        const ragDecision = routePlan.decisions?.rag;
+        if (ragDecision?.decisionId) {
+            const status = !shouldRetrieveRag ? 'skipped' : ragResult.status === 'rejected' ? 'failure' : ragResult.value ? 'success' : 'partial';
+            const reasonCode = !shouldRetrieveRag ? 'route_not_selected' : ragResult.status === 'rejected' ? 'retrieval_failed' : ragResult.value ? 'context_found' : 'no_reliable_match';
+            recordDecisionOutcome({
+                decisionId: ragDecision.decisionId,
+                eventType: 'execution',
+                source: 'runtime',
+                status,
+                selectedActionId: ragDecision.selectedActionId,
+                durationMs: routePlan.timing?.routeDurationMs,
+                reasonCode,
+                resultReference: sessionId
+            });
+        }
+    } catch (_) {}
+
+    if (!shouldClarify && !shouldRetrieveRag && taskState.evidenceNeeds.includes('knowledge_base')) {
         history = injectRagContextBeforeLatestUser(history, buildRagInsufficientContextMessage(ragEnabled ? 'rag_not_selected' : 'rag_disabled'));
         writeSse(JSON.stringify({
             type: 'rag',
@@ -302,6 +340,9 @@ async function assembleChatContext({
 
     let visionHistory = limitVisionImages(await buildVisionHistory(history, getRequestOrigin(req, publicUrl), userId, sessionId));
     visionHistory = applyChatLanguageInstruction(visionHistory);
+    if (shouldClarify) {
+        visionHistory.unshift({ role: 'system', content: '本轮策略要求先澄清一个决定后续处理路径的关键信息。只提出一个简短、具体的澄清问题；不要给出假设性答案，不要调用或声称已调用工具、知识库或工作流，也不要解释内部路由。' });
+    }
 
     if (visionHistory.length === 0) {
         req.log.warn({ sessionId, userId }, '检测到空的消息历史，尝试补救');
@@ -331,12 +372,14 @@ async function assembleChatContext({
     }
 
     let chatMcpTools = [];
-    if (mcpEnabled) {
+    let mcpContext = null;
+    const toolDecisionStartedAt = Date.now();
+    if (mcpEnabled && routePlan.execution?.tools?.shouldPlan === true) {
         const mcpTools = Array.isArray(routePlan.execution?.tools?.candidates)
             ? routePlan.execution.tools.candidates
             : accessibleMcpTools;
         chatMcpTools = mcpTools;
-        const mcpContext = await maybeBuildMcpChatContext({
+        mcpContext = await maybeBuildMcpChatContext({
             modelCfg,
             history: visionHistory,
             userPrompt: taskState.currentQuestion || retrievalQuery,
@@ -352,6 +395,22 @@ async function assembleChatContext({
             visionHistory = appendMcpContextForFinalAnswer(visionHistory, mcpContext);
         }
     }
+    try {
+        const toolDecision = routePlan.decisions?.tools;
+        if (toolDecision?.decisionId) {
+            const planningSelected = routePlan.execution?.tools?.shouldPlan === true;
+            recordDecisionOutcome({
+                decisionId: toolDecision.decisionId,
+                eventType: 'execution',
+                source: 'runtime',
+                status: planningSelected ? (mcpContext ? 'success' : 'partial') : 'skipped',
+                selectedActionId: toolDecision.selectedActionId,
+                durationMs: Date.now() - toolDecisionStartedAt,
+                reasonCode: planningSelected ? (mcpContext ? 'planner_context_built' : 'planner_no_context') : 'route_not_selected',
+                resultReference: sessionId
+            });
+        }
+    } catch (_) {}
 
     let chatStepContext = null;
     try {

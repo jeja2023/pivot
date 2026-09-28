@@ -61,6 +61,7 @@ const { createObservabilityTrace, withObservabilitySpan } = require('../../servi
 const { buildChatRequestState, validateChatPreflight } = require('../../services/chat-preflight');
 const { assembleChatContext } = require('../../services/chat-context-assembler');
 const { buildRouteMetadata } = require('../../services/semantic-router');
+const { persistFinalChatResponse } = require('../../services/chat-decision-outcomes');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
@@ -817,19 +818,10 @@ function createChatRouter({
                     const assistantTokens = stats.assistantTokens;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
-                    if (routePlan) routePlan.providerUsage = apiUsage || providerSnapshot.usage?.raw || null;
-                    const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
-                        sessionId,
-                        userId,
-                        userMessageId,
-                        user: req.user,
-                        modelCfg,
-                        visibleContent,
-                        assistantContent,
-                        assistantTokens,
-                        costTime,
-                        tps: tokensPerSec,
-                        routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
+                    const { assistantMessageResult, assistantMessageId } = await persistFinalChatResponse({
+                        persistAssistantResponse, sessionId, userId, userMessageId, user: req.user, modelCfg,
+                        visibleContent, assistantContent, assistantTokens, costTime, tokensPerSec, routePlan,
+                        providerUsage: apiUsage || providerSnapshot.usage?.raw || null
                     });
 
                     req.log.info({ length: assistantContent.length }, '生成结束');

@@ -1,0 +1,29 @@
+# 可选：在隔离内网运行已审核导入的 Laya 业务决策服务。
+# 启动前必须设置 PIVOT_LAYA_IMAGE、PIVOT_LAYA_MODEL_DIR 和 PIVOT_LAYA_COMMAND。
+services:
+  laya-decision:
+    image: "${PIVOT_LAYA_IMAGE:?请指定已审核导入的 Laya 镜像}"
+    container_name: pivot-laya-decision
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      LAYA_MODEL_PATH: /models/${PIVOT_LAYA_MODEL_FILE:?请指定已审核的模型文件名}
+      LAYA_DECISION_PORT: "${PIVOT_LAYA_DECISION_PORT:-8080}"
+    volumes:
+      - ${PIVOT_LAYA_MODEL_DIR:?请指定只读模型目录}:/models:ro
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        test -r "$$LAYA_MODEL_PATH";
+        exec ${PIVOT_LAYA_COMMAND:?请指定镜像内已安装的 Laya 服务启动命令}
+    networks:
+      - ai-bridge
+
+networks:
+  ai-bridge:
+    external: true

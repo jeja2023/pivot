@@ -49,6 +49,8 @@ const migrationModules = [
     require('./agent-workflow-release-review'),
     require('./tool-library-product-control-plane'),
     require('./chat-adaptive-routing'),
+    require('./decision-learning-foundations'),
+    require('./decision-evaluation-governance'),
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
     require('./knowledge-database-query-templates'),

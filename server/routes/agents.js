@@ -6,6 +6,7 @@ const { createAgentDeliveryRouter } = require('./agent-delivery');
 const { isSuperAdmin } = require('../permissions');
 const { parseJsonObject } = require('../services/agent-validators');
 const { listStrategies: listModelRouterStrategies } = require('../services/model-router');
+const { registerAgentRoutingRoutes } = require('./agent-routing-routes');
 const {
     createWorkflowDraftFromRun,
     getDagNodeCompleteOutputForUser,
@@ -59,7 +60,6 @@ const {
     startAgentEvaluation,
     updateAgentEvalSuite
 } = require('../services/agent-evaluations');
-const { formatToolList } = require('../services/agent-tool-catalog');
 const { registerAgentApiOperationRoutes } = require('./agent-api-operations');
 const { registerAgentToolTestRoute } = require('./agent-tool-test');
 const { recordAgentFeedback } = require('../services/agent-feedback');
@@ -145,9 +145,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
     router.use(createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter }));
     router.use(createAgentDeliveryRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter }));
 
-    router.get('/agents/tools', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ tools: await formatToolList(req.user) });
-    }));
+    registerAgentRoutingRoutes(router, { authMiddleware, automationGuard, logAction });
 
     registerAgentApiOperationRoutes(router, { authMiddleware, automationGuard, logAction });
     registerAgentToolTestRoute({ router, authMiddleware, logAction });

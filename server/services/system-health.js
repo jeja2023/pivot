@@ -174,6 +174,30 @@ function checkDeployment() {
     }
 }
 
+async function checkDecisionProviders() {
+    try {
+        const { checkLayaDecisionHealth } = require('./decision-provider-health');
+        return await checkLayaDecisionHealth();
+    } catch (error) {
+        return { status: 'error', message: error.message };
+    }
+}
+
+async function checkDecisionDeploymentReadiness() {
+    try {
+        const { getDecisionDeploymentReadiness } = require('./decision-deployment-readiness');
+        const readiness = await getDecisionDeploymentReadiness();
+        return {
+            status: readiness.status,
+            activeRollout: readiness.activeRollout,
+            checks: readiness.checks,
+            message: readiness.status === 'ok' ? '智能决策部署就绪' : readiness.status === 'degraded' ? '智能决策仍处于准备或影子阶段' : '智能决策部署条件未满足'
+        };
+    } catch (error) {
+        return { status: 'error', message: error.message };
+    }
+}
+
 function checkAgentBrowser() {
     try {
         const { isAgentBrowserRuntimeAvailable } = require('./agent-browser');
@@ -236,6 +260,8 @@ async function getDetailedSystemHealthSnapshot(options = {}) {
             { name: 'disk', ...diskCheck },
             { name: 'writeQueue', ...checkWriteQueue() },
             { name: 'deployment', ...checkDeployment() },
+            { name: 'decisionProviders', ...(await checkDecisionProviders()) },
+            { name: 'decisionDeployment', ...(await checkDecisionDeploymentReadiness()) },
             { name: 'agentBrowser', ...checkAgentBrowser() }
         ];
         const snapshot = {

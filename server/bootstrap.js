@@ -18,6 +18,8 @@ const { createAgentEventOutboxDispatcher } = require('./services/agent-event-out
 const { createSkillReleaseBreakerRunner } = require('./services/agent-skill-breaker');
 const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 const { startLongTermMemoryMaintenanceRunner } = require('./services/long-term-memory');
+const { startDecisionLearningMaintenanceRunner } = require('./services/decision-maintenance');
+const { createDecisionArtifactBreakerRunner } = require('./services/decision-artifact-breaker');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -102,6 +104,8 @@ function startBackgroundServices({
         startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
         startSkillReleaseBreakerRunner: () => createSkillReleaseBreakerRunner().start(),
         startLongTermMemoryMaintenanceRunner,
+        startDecisionLearningMaintenanceRunner,
+        startDecisionArtifactBreakerRunner: () => createDecisionArtifactBreakerRunner().start(),
         startRuntimeDiagnostics
     }
 }) {
@@ -135,6 +139,8 @@ function startBackgroundServices({
             runBackgroundTask(dependencies.startSkillReleaseBreakerRunner, logger, '技能发布熔断巡检器启动失败');
         }
         runBackgroundTask(dependencies.startLongTermMemoryMaintenanceRunner, logger, '长期记忆生命周期巡检器启动失败');
+        runBackgroundTask(dependencies.startDecisionLearningMaintenanceRunner, logger, '智能决策学习维护巡检器启动失败');
+        runBackgroundTask(dependencies.startDecisionArtifactBreakerRunner, logger, '智能决策模型制品熔断巡检器启动失败');
     });
 }
 

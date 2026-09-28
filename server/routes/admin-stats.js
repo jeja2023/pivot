@@ -11,6 +11,15 @@ const { getMaintenanceStatus } = require('../services/maintenance');
 const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getRagOperationsOverview } = require('../services/rag-operations-observability');
 const { getChatRouteMetricBuckets } = require('../services/chat-route-observability');
+const { getDecisionOperationalMetrics, recordVerifiedDecisionOutcome } = require('../services/decision-observability');
+const { buildVerifiedDecisionDatasetFromStore, evaluateDecisionSamples } = require('../services/decision-learning');
+const { activateDecisionModelArtifact, listDecisionModelArtifacts, rollbackDecisionModelArtifact } = require('../services/decision-model-registry');
+const { listDecisionPreferences, saveDecisionPreference } = require('../services/decision-preferences');
+const { registerDecisionPolicyArtifact } = require('../services/decision-policy-registry');
+const { getDecisionDeploymentReadiness } = require('../services/decision-deployment-readiness');
+const { getDecisionMaintenanceReport } = require('../services/decision-maintenance');
+const { registerDecisionObservabilityRoutes } = require('./decision-observability-routes');
+const { importFrozenDecisionEvaluationSet, listDecisionEvaluationCases, reviewDecisionEvaluationCase } = require('../services/decision-evaluation-reviews');
 const {
     getObservabilitySettings,
     listObservabilityEvents,
@@ -103,6 +112,7 @@ function createAdminStatsRouter({
         };
         const ragOperations = await getRagOperationsOverview();
         const chatRouting = await getChatRouteMetricBuckets({ minutes: 24 * 60 });
+        const decisionRouting = await getDecisionOperationalMetrics({ minutes: 24 * 60 });
         const observabilityEvents = await listObservabilityEvents({ limit: 12 });
 
         const observabilityOpen = await query(`
@@ -230,6 +240,7 @@ function createAdminStatsRouter({
             rag: ragMetrics,
             ragOperations,
             chatRouting,
+            decisionRouting,
             observability: {
                 events: observabilityEvents,
                 openByType: observabilityOpen,
@@ -269,6 +280,16 @@ function createAdminStatsRouter({
     router.get('/observability/chat-routing', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         res.json(await getChatRouteMetricBuckets({ minutes: req.query?.minutes }));
     }));
+
+    registerDecisionObservabilityRoutes(router, {
+        authMiddleware, adminMiddleware, logAction,
+        getDecisionOperationalMetrics, recordVerifiedDecisionOutcome,
+        buildVerifiedDecisionDatasetFromStore, evaluateDecisionSamples,
+        activateDecisionModelArtifact, listDecisionModelArtifacts, rollbackDecisionModelArtifact,
+        listDecisionPreferences, saveDecisionPreference, registerDecisionPolicyArtifact,
+        getDecisionDeploymentReadiness, getDecisionMaintenanceReport,
+        importFrozenDecisionEvaluationSet, listDecisionEvaluationCases, reviewDecisionEvaluationCase
+    });
 
     router.put('/observability/events/:id/status', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const event = await updateObservabilityEventStatus(req.params.id, req.body?.status);

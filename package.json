@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.190",
+  "version": "0.1.191",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -43,7 +43,7 @@
     "preflight:deployment": "node scripts/preflight_deployment.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
-    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=75 --test-coverage-functions=75 --test-coverage-branches=60",
     "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js",
@@ -76,10 +76,22 @@
     "prestart": "node scripts/build_chat_css.js",
     "predev": "node scripts/build_chat_css.js",
     "check:config-registry": "node scripts/generate_config_registry_docs.js --check",
+    "check:decision-evaluation-set": "node scripts/verify_decision_evaluation_set.js",
+    "import:decision-evaluation-set": "node scripts/import_decision_evaluation_set.js",
+    "review:decision-evaluation-case": "node scripts/review_decision_evaluation_case.js",
+    "list:decision-evaluation-review-queue": "node scripts/list_decision_evaluation_review_queue.js",
     "generate:config-docs": "node scripts/generate_config_registry_docs.js",
     "precheck": "node scripts/build_chat_css.js",
     "benchmark:presentation": "node scripts/benchmark_presentation_rendering.js",
-    "verify:presentation:office": "node scripts/verify_presentation_office_matrix.js"
+    "verify:presentation:office": "node scripts/verify_presentation_office_matrix.js",
+    "verify:decision-evaluation-set": "node scripts/verify_decision_evaluation_set.js",
+    "verify:decision-development": "node scripts/verify_decision_development.js",
+    "train:decision-light-model": "node scripts/train_decision_light_model.js",
+    "export:laya-decision-dataset": "node scripts/export_laya_decision_dataset.js",
+    "benchmark:decision-providers": "node scripts/benchmark_decision_providers.js",
+    "benchmark:decision-resources": "node scripts/benchmark_decision_resource_impact.js",
+    "preflight:decision-release": "node scripts/preflight_decision_release.js",
+    "report:decision-release-evidence": "node scripts/collect_decision_release_evidence.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",

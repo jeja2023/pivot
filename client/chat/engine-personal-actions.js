@@ -115,7 +115,11 @@
     function closeMemoryIntentModal() {
         document.getElementById('chat-memory-intent-modal')?.classList.add('hidden');
         memoryIntentPreview = null;
-        document.getElementById('chat-memory-intent-preview')?.classList.add('hidden');
+        const box = document.getElementById('chat-memory-intent-preview');
+        if (box) {
+            box.classList.add('hidden');
+            box.classList.remove('preview-action-remember', 'preview-action-forget', 'preview-action-correct', 'preview-action-warning');
+        }
         const apply = document.getElementById('chat-memory-intent-apply');
         if (apply) apply.disabled = true;
     }
@@ -135,13 +139,35 @@
         const apply = document.getElementById('chat-memory-intent-apply');
         if (!box) return;
         box.replaceChildren();
+        box.classList.remove('preview-action-remember', 'preview-action-forget', 'preview-action-correct', 'preview-action-warning');
+
+        const isWarning = preview.canConfirm !== true;
+        const actionType = isWarning ? 'warning' : (preview.action || 'remember');
+        box.classList.add(`preview-action-${actionType}`);
+
+        const head = document.createElement('div');
+        head.className = 'chat-memory-intent-preview-head';
+
+        const badge = document.createElement('span');
+        badge.className = 'chat-memory-intent-preview-badge';
+        const actionLabels = { remember: '记住偏好', forget: '忘记记忆', correct: '更正偏好' };
+        badge.textContent = isWarning ? '无法执行' : (actionLabels[preview.action] || '记忆操作');
+
         const title = document.createElement('strong');
         title.textContent = preview.actionLabel || '记忆操作预览';
+        head.append(badge, title);
+
         const summary = document.createElement('p');
         summary.textContent = preview.summary || '请确认操作。';
-        box.append(title, summary);
+        box.append(head, summary);
+
         const candidates = Array.isArray(preview.candidates) ? preview.candidates : [];
         if (candidates.length) {
+            const field = document.createElement('div');
+            field.className = 'chat-memory-intent-candidate-field';
+            const label = document.createElement('label');
+            label.htmlFor = 'chat-memory-intent-candidate';
+            label.textContent = '选择目标记忆条目：';
             const select = document.createElement('select');
             select.id = 'chat-memory-intent-candidate';
             select.className = 'form-input';
@@ -151,7 +177,8 @@
                 option.textContent = `${candidate.content}（${candidate.type || '记忆'}）`;
                 select.appendChild(option);
             });
-            box.appendChild(select);
+            field.append(label, select);
+            box.appendChild(field);
         }
         box.classList.remove('hidden');
         if (apply) apply.disabled = preview.canConfirm !== true;
@@ -266,7 +293,36 @@
     document.getElementById('chat-memory-intent-close')?.addEventListener('click', closeMemoryIntentModal);
     document.getElementById('chat-memory-intent-preview-btn')?.addEventListener('click', () => previewMemoryIntent().catch(error => showToast(error.message || '无法预览记忆操作', 'error')));
     document.getElementById('chat-memory-intent-apply')?.addEventListener('click', () => applyMemoryIntent().catch(error => showToast(error.message || '记忆操作失败', 'error')));
-    document.getElementById('chat-memory-intent-modal')?.addEventListener('click', event => { if (event.target.id === 'chat-memory-intent-modal') closeMemoryIntentModal(); });
+    document.getElementById('chat-memory-intent-modal')?.addEventListener('click', event => {
+        if (event.target.id === 'chat-memory-intent-modal') closeMemoryIntentModal();
+        const chip = event.target.closest?.('.chat-memory-intent-chip');
+        if (chip?.dataset?.intent) {
+            const text = document.getElementById('chat-memory-intent-text');
+            if (text) {
+                text.value = chip.dataset.intent;
+                text.focus();
+            }
+        }
+    });
+    document.getElementById('chat-memory-intent-text')?.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            const apply = document.getElementById('chat-memory-intent-apply');
+            if (apply && !apply.disabled) {
+                apply.click();
+            } else {
+                document.getElementById('chat-memory-intent-preview-btn')?.click();
+            }
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            const modal = document.getElementById('chat-memory-intent-modal');
+            if (modal && !modal.classList.contains('hidden')) {
+                closeMemoryIntentModal();
+            }
+        }
+    });
     globalThis.addEventListener('pagehide', stopChatVoiceInput, { capture: true });
     globalThis.addEventListener('beforeunload', stopChatVoiceInput, { capture: true });
 

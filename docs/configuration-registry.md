@@ -68,6 +68,52 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 智能决策与持续学习
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_DECISION_PROVIDER_MODE` | enum | `shadow` | disabled、shadow、active | 统一业务决策器的运行方式；默认影子模式仅记录建议，active 通过策略阈值后才可改变可执行动作。 |
+| `PIVOT_DECISION_POLICY_VERSION` | string | `decision-policy-v1` | 逗号分隔的语言标记 | 当前决策策略和校准参数的版本标识，所有决策记录均携带该值以支持回溯和回滚。 |
+| `PIVOT_DECISION_EVALUATION_SET_VERSION` | string | `v2` | 逗号分隔的语言标记 | active 灰度与正式比较所需的已导入、已审核冻结评测集版本。 |
+| `PIVOT_DECISION_AUTO_THRESHOLD` | number | `0.58` | 0–1 | 低风险业务动作允许由决策策略自动采用的最低校准置信度。 |
+| `PIVOT_DECISION_HIGH_RISK_THRESHOLD` | number | `0.85` | 0–1 | 中高风险或需审批动作的决策阈值；需审批动作仍不会被自动执行。 |
+| `PIVOT_DECISION_CALIBRATION_SCALE` | number | `1` | 0.1–10 | 决策器分数校准的 logit 缩放参数；只能在离线评测通过后版本化更新。 |
+| `PIVOT_DECISION_CALIBRATION_INTERCEPT` | number | `0` | -10–10 | 决策器分数校准的 logit 截距；只能在离线评测通过后版本化更新。 |
+| `PIVOT_DECISION_ROLLOUT_PERCENT` | integer | `0` | 0–100 | active 模式中允许策略实际改路由的稳定灰度比例；0 可立即全量回退到影子模式。 |
+| `PIVOT_DECISION_ROLLOUT_TENANTS` | csv | `` | 逗号分隔的语言标记 | 允许进入 active 灰度的租户 ID 白名单；留空时不限制租户。 |
+| `PIVOT_DECISION_ROLLOUT_SCENARIOS` | csv | `` | 逗号分隔的语言标记 | 允许进入 active 灰度的业务场景白名单；留空时不限制场景。 |
+| `PIVOT_DECISION_REQUIRE_ACTIVE_ARTIFACT` | boolean | `true` | true / false | active 灰度是否只允许已通过评测并在模型注册表激活的学习型决策器参与；建议生产保持 true。 |
+| `PIVOT_DECISION_USE_ACTIVE_POLICY_ARTIFACT` | boolean | `true` | true / false | 是否在 active 灰度使用已激活、通过评测的策略参数制品；找不到制品时安全降回影子。 |
+| `PIVOT_DECISION_ARTIFACT_TIMEOUT_MS` | integer | `100` | 25–5000 | active 灰度读取模型制品激活状态的最大等待时间；超时后学习型提供器安全不参与本轮决策。 |
+| `PIVOT_DECISION_PREFERENCES_ENABLED` | boolean | `true` | true / false | 是否启用用户和租户级的显式默认路径偏好；偏好仍受当前允许候选与审批规则约束。 |
+| `PIVOT_DECISION_INCLUDE_REDACTED_ROUTING_TEXT` | boolean | `false` | true / false | 是否向 Laya/Qwen 决策器发送有限长度、规则脱敏后的路由文本；该文本不写入决策日志或训练导出，启用前需完成数据治理审批。 |
+| `PIVOT_DECISION_PREFERENCE_TIMEOUT_MS` | integer | `100` | 25–5000 | 读取可选用户或租户路由偏好的最大等待时间；超时后安全回退到无偏好策略。 |
+| `PIVOT_DECISION_MAINTENANCE_ENABLED` | boolean | `true` | true / false | 是否启用决策学习维护巡检；巡检汇总样本与错误、清理超过保留期的决策记录，但不会自动训练或发布。 |
+| `PIVOT_DECISION_BREAKER_ENABLED` | boolean | `true` | true / false | 是否启用决策模型制品熔断巡检；只有评测报告冻结了熔断阈值的 active 制品才会被自动退役。 |
+| `PIVOT_DECISION_BREAKER_INTERVAL_MS` | integer | `300000` | 60000–86400000 | 决策模型制品熔断巡检间隔。 |
+| `PIVOT_DECISION_BREAKER_WINDOW_MINUTES` | integer | `30` | 1–1440 | 决策模型制品熔断统计窗口。 |
+| `PIVOT_DECISION_MAINTENANCE_INTERVAL_MS` | integer | `21600000` | 60000–86400000 | 决策学习维护巡检的运行间隔。 |
+| `PIVOT_DECISION_MAINTENANCE_LOOKBACK_DAYS` | integer | `30` | 1–3650 | 决策学习维护报告统计的最近天数。 |
+| `PIVOT_DECISION_MIN_VERIFIED_SAMPLES` | integer | `30` | 1–100000 | 场景和租户达到可训练状态所需的最少已核验样本数。 |
+| `PIVOT_DECISION_RECORD_RETENTION_DAYS` | integer | `180` | 1–3650 | 决策记录与其结果的保留天数；到期记录在维护巡检中级联删除，模型制品和冻结评测审计不受影响。 |
+| `PIVOT_DECISION_ALLOW_GLOBAL_TRAINING` | boolean | `false` | true / false | 是否已取得跨租户脱敏训练的数据治理批准；默认 false，即使 CLI 传入 --allow-global 也会拒绝全局训练。 |
+| `PIVOT_LIGHT_DECISION_ENABLED` | boolean | `false` | true / false | 是否启用本地线性轻量决策器；仅加载已通过评测并登记的本地 JSON 模型。 |
+| `PIVOT_LIGHT_DECISION_MODEL_ROOT` | string | `data/decision-models` | 逗号分隔的语言标记 | 本地轻量决策模型目录；生产应使用审核导入的只读制品路径。 |
+| `PIVOT_LIGHT_DECISION_MODEL_FILE` | string | `` | 逗号分隔的语言标记 | 当前启用的轻量决策模型 JSON 文件名；留空时该提供器安全降级。 |
+| `PIVOT_LIGHT_DECISION_WEIGHT` | number | `1` | 0–10 | 本地轻量决策器输出参与策略融合的相对权重。 |
+| `PIVOT_QWEN_DECISION_ENABLED` | boolean | `false` | true / false | 是否让当前已选的 Qwen 模型以结构化、无思考模式提供业务决策建议。 |
+| `PIVOT_QWEN_DECISION_VERSION` | string | `` | 逗号分隔的语言标记 | 审核通过的 Qwen 决策模型版本或权重哈希；active 灰度时必须与已激活制品一致。 |
+| `PIVOT_QWEN_DECISION_MAX_TOKENS` | integer | `256` | 64–1024 | Qwen 结构化业务决策的最大输出 Token，避免与最终生成任务争用过多资源。 |
+| `PIVOT_QWEN_DECISION_WEIGHT` | number | `1` | 0–10 | Qwen 结构化决策输出参与策略融合的相对权重。 |
+| `PIVOT_LAYA_DECISION_ENABLED` | boolean | `false` | true / false | 是否调用内网 Laya 业务决策服务；首次上线应配合 shadow 模式。 |
+| `PIVOT_LAYA_DECISION_URL` | string | `` | 逗号分隔的语言标记 | 内网 Laya 决策服务的 HTTP 地址。服务只接收脱敏后的任务状态和允许动作。 |
+| `PIVOT_LAYA_DECISION_VERSION` | string | `` | 逗号分隔的语言标记 | 已审核的 Laya 权重和校准版本（或权重哈希）标识。 |
+| `PIVOT_LAYA_DECISION_TIMEOUT_MS` | integer | `1200` | 100–30000 | 调用内网 Laya 决策服务的单次超时；超时不会中断原有聊天链路。 |
+| `PIVOT_LAYA_DECISION_HEALTH_URL` | string | `` | 逗号分隔的语言标记 | 内网 Laya 决策服务健康检查地址；留空时仅检查决策服务是否被配置。 |
+| `PIVOT_LAYA_DECISION_HEALTH_TIMEOUT_MS` | integer | `800` | 100–30000 | 内网 Laya 健康检查超时；健康检查失败不影响原有聊天回退。 |
+| `PIVOT_LAYA_DECISION_MAX_CONCURRENT` | integer | `4` | 1–100 | 单进程内 Laya 决策服务的最大并发调用数；达到上限时自动保持既有路由。 |
+| `PIVOT_LAYA_DECISION_WEIGHT` | number | `1` | 0–10 | Laya 输出参与策略融合的相对权重；应依据固定评测集调整。 |
+
 ## 长期记忆
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

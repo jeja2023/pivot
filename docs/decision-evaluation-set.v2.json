@@ -1,0 +1,530 @@
+{
+  "schemaVersion": 1,
+  "kind": "pivot_decision_evaluation_set",
+  "version": "v2",
+  "purpose": "Frozen human-review evaluation contract covering RAG, tools, direct-answer versus clarification, and published-workflow selection. Pending cases are never eligible for training or release promotion.",
+  "cases": [
+    {
+      "id": "rag-zh-short-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [
+          "knowledge_base"
+        ],
+        "constraintCount": 0,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "中文短指令",
+        "知识库"
+      ],
+      "providerInput": {
+        "routingText": "请根据公司的差旅报销制度说明发票报销流程。"
+      }
+    },
+    {
+      "id": "rag-zh-negative-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [],
+        "constraintCount": 1,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "否定表达",
+        "知识库"
+      ],
+      "providerInput": {
+        "routingText": "不要检索知识库，帮我把这句话改得更正式。"
+      }
+    },
+    {
+      "id": "rag-long-context-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [
+          "knowledge_base"
+        ],
+        "constraintCount": 3,
+        "entityCount": 3
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "长上下文",
+        "知识库"
+      ],
+      "providerInput": {
+        "routingText": "请综合现有制度、审批流程和最新执行口径，说明跨部门差旅费用如何报销，并列出需要的材料。"
+      }
+    },
+    {
+      "id": "tools-data-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "data.query"
+        ],
+        "constraintCount": 0,
+        "entityCount": 1
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "交给已授权工具规划",
+          "allowed": true
+        },
+        {
+          "id": "candidate_only",
+          "description": "请求授权",
+          "allowed": false
+        },
+        {
+          "id": "skip",
+          "description": "不使用工具",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "数据库",
+        "工具"
+      ],
+      "providerInput": {
+        "routingText": "查询本月订单数量，并按状态汇总。"
+      }
+    },
+    {
+      "id": "tools-consent-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "data.query"
+        ],
+        "constraintCount": 0,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "交给已授权工具规划",
+          "allowed": false
+        },
+        {
+          "id": "candidate_only",
+          "description": "请求授权",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "不使用工具",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "授权边界",
+        "工具"
+      ],
+      "providerInput": {
+        "routingText": "请查询订单数量，但我尚未授权数据库工具。"
+      }
+    },
+    {
+      "id": "tools-browser-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "browser.inspect"
+        ],
+        "constraintCount": 0,
+        "entityCount": 1
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "交给已授权工具规划",
+          "allowed": true
+        },
+        {
+          "id": "candidate_only",
+          "description": "请求授权",
+          "allowed": false
+        },
+        {
+          "id": "skip",
+          "description": "不使用工具",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "浏览器",
+        "工具"
+      ],
+      "providerInput": {
+        "routingText": "打开已授权的内部网页，查看当前发布公告。"
+      }
+    },
+    {
+      "id": "tools-report-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "filesystem.read_workspace"
+        ],
+        "constraintCount": 1,
+        "entityCount": 1
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "交给已授权工具规划",
+          "allowed": true
+        },
+        {
+          "id": "candidate_only",
+          "description": "请求授权",
+          "allowed": false
+        },
+        {
+          "id": "skip",
+          "description": "不使用工具",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "本地文件",
+        "工具"
+      ],
+      "providerInput": {
+        "routingText": "读取已授权的本机报表目录，列出今天生成的报表文件。"
+      }
+    },
+    {
+      "id": "rag-cross-unit-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [
+          "knowledge_base"
+        ],
+        "constraintCount": 2,
+        "entityCount": 2
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索已授权知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "跨部门",
+        "权限边界"
+      ],
+      "providerInput": {
+        "routingText": "请依据我有权访问的制度资料回答跨部门费用归属规则。"
+      }
+    },
+    {
+      "id": "tools-high-risk-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "side_effect"
+        ],
+        "constraintCount": 1,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "交给审批后的工具规划",
+          "allowed": true,
+          "risk": "high",
+          "requiresApproval": true
+        },
+        {
+          "id": "skip",
+          "description": "不使用工具",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "高风险",
+        "审批边界"
+      ],
+      "providerInput": {
+        "routingText": "请发送一条通知给相关人员，告知审批结果。"
+      }
+    },
+    {
+      "id": "rag-rare-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [
+          "knowledge_base"
+        ],
+        "constraintCount": 2,
+        "entityCount": 3
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "少见任务",
+        "知识库"
+      ],
+      "providerInput": {
+        "routingText": "请依据归档资料说明少见的海外临时差旅例外流程。"
+      }
+    },
+    {
+      "id": "tools-en-001",
+      "scenario": "chat.tools",
+      "language": "en",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "data.query"
+        ],
+        "constraintCount": 0,
+        "entityCount": 1
+      },
+      "candidates": [
+        {
+          "id": "propose",
+          "description": "Use authorized tool planning",
+          "allowed": true
+        },
+        {
+          "id": "candidate_only",
+          "description": "Ask for authorization",
+          "allowed": false
+        },
+        {
+          "id": "skip",
+          "description": "Do not use a tool",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "英文",
+        "工具"
+      ],
+      "providerInput": {
+        "routingText": "Query the authorized sales database and summarize orders by status."
+      }
+    },
+    {
+      "id": "rag-conversation-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "evidenceNeeds": [],
+        "constraintCount": 0,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "retrieve",
+          "description": "检索知识库",
+          "allowed": true
+        },
+        {
+          "id": "skip",
+          "description": "普通回答",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "闲聊",
+        "无检索"
+      ],
+      "providerInput": {
+        "routingText": "你好，今天过得怎么样？"
+      }
+    },
+    {
+      "id": "next-step-direct-zh-001",
+      "scenario": "chat.next_step",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "constraintCount": 1,
+        "entityCount": 1
+      },
+      "candidates": [
+        {
+          "id": "direct_answer",
+          "description": "直接生成受控回答",
+          "allowed": true
+        },
+        {
+          "id": "clarify",
+          "description": "先提出一个关键澄清问题",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "直接回答",
+        "中文",
+        "下一步选择"
+      ],
+      "providerInput": {
+        "routingText": "请把下面这段通知改写得正式、简洁：明天下午三点开会。"
+      }
+    },
+    {
+      "id": "next-step-clarify-zh-001",
+      "scenario": "chat.next_step",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "constraintCount": 0,
+        "entityCount": 0
+      },
+      "candidates": [
+        {
+          "id": "direct_answer",
+          "description": "直接生成受控回答",
+          "allowed": true
+        },
+        {
+          "id": "clarify",
+          "description": "先提出一个关键澄清问题",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "澄清提问",
+        "中文",
+        "模糊意图",
+        "下一步选择"
+      ],
+      "providerInput": {
+        "routingText": "帮我把那个事情处理一下。"
+      }
+    },
+    {
+      "id": "workflow-published-zh-001",
+      "scenario": "agent.workflow",
+      "language": "zh",
+      "taskState": {
+        "status": "active",
+        "requestedCapabilities": [
+          "data.query"
+        ],
+        "constraintCount": 2,
+        "entityCount": 2
+      },
+      "candidates": [
+        {
+          "id": "direct_answer",
+          "description": "由 Qwen 直接回答",
+          "allowed": true
+        },
+        {
+          "id": "clarify",
+          "description": "先提出一个关键澄清问题",
+          "allowed": true
+        },
+        {
+          "id": "workflow:101",
+          "description": "已发布工作流：月度订单汇总与报表生成",
+          "allowed": true
+        }
+      ],
+      "reviewStatus": "pending_human_review",
+      "coverage": [
+        "业务工作流",
+        "发布与权限边界",
+        "中文",
+        "下一步选择"
+      ],
+      "providerInput": {
+        "routingText": "汇总本月订单，按状态和地区生成报表，并提交给部门负责人复核。"
+      }
+    }
+  ]
+}

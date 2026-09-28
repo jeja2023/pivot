@@ -219,3 +219,32 @@ test('聊天路由指标按桶聚合后批量持久化，且不携带提问原�
     assert.equal(calls[0].params[8], 3);
     assert.equal(calls[0].params.includes('不应保存的用户提问'), false);
 });
+
+test('影子期保留所有受许可候选以比较替代动作，但不改变执行路径', async () => {
+    const calls = [];
+    const router = createSemanticRouter({
+        getChatAutoRouteConfig: () => ({ enabled: true, autoRagEnabled: true, autoToolDiscoveryEnabled: true, shadowMode: true, maxToolCandidates: 2, maxCollections: 2, ragThreshold: 0.34, ragGrayThreshold: 0.16, toolThreshold: 0.2, embeddingTimeoutMs: 100 }),
+        getEmbeddingConfig: () => ({ http: { url: '' } }),
+        generateEmbedding: async () => [],
+        getPrimaryTenantId: async () => 4,
+        knowledgeCatalogIndex: { getVisibleEntries: async () => [], scheduleRefresh() {} },
+        mcpToolCatalogIndex: { getEntries: values => values.map(tool => ({ tool, semanticSignature: tool.description, vector: [] })), scheduleRefresh() {} },
+        recordChatRouteMetric() {},
+        resolveBusinessDecision: async input => {
+            calls.push({ scenario: input.scenario, candidates: input.candidates.map(candidate => [candidate.id, candidate.allowed]) });
+            return { decisionId: 'shadow-' + input.scenario, context: { scenario: input.scenario }, selectedActionId: input.fallbackActionId, policy: { mode: 'shadow', suggestedActionId: 'skip', confidence: 0.9, threshold: 0.58, reasonCode: 'shadow_mode', applied: false } };
+        }
+    });
+    const tool = { fullName: 'mcp.3.db.query', name: 'db.query', description: '查询数据库' };
+    const plan = await router.resolveRoutePlan({
+        prompt: '查询订单数量',
+        taskState: { hash: 'shadow-candidates', currentQuestion: '查询订单数量', toolIntent: { requestedCapabilities: ['data.query'] } },
+        user: { id: 7 }, availableMcpTools: [tool],
+        state: { ragEnabled: true, mcpEnabled: true, autoRouteEnabled: true }
+    });
+    assert.equal(plan.execution.rag.shouldRetrieve, true);
+    assert.equal(plan.execution.tools.shouldPlan, true);
+    assert.deepEqual(calls.find(call => call.scenario === 'chat.rag').candidates, [['retrieve', true], ['skip', true]]);
+    assert.deepEqual(calls.find(call => call.scenario === 'chat.tools').candidates, [['propose', true], ['candidate_only', false], ['skip', true]]);
+    assert.deepEqual(calls.find(call => call.scenario === 'chat.next_step').candidates, [['direct_answer', true], ['clarify', true]]);
+});

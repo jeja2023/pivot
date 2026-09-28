@@ -1,0 +1,4 @@
+# 与 docker-compose.laya.yml 叠加：仅在已完成 Qwen 共卡压测后启用。
+services:
+  laya-decision:
+    gpus: all
