@@ -315,7 +315,7 @@
             }
         }
     });
-    document.addEventListener('keydown', event => {
+    document?.addEventListener?.('keydown', event => {
         if (event.key === 'Escape') {
             const modal = document.getElementById('chat-memory-intent-modal');
             if (modal && !modal.classList.contains('hidden')) {

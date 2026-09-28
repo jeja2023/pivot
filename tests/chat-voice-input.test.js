@@ -43,7 +43,10 @@ function loadVoiceActions({ Recognition, getUserMedia }) {
         SpeechRecognition: Recognition,
         apiFetch: async () => ({ json: async () => ({}) }),
         currentSessionId: null,
-        document: { getElementById: id => elements[id] || null },
+        document: {
+            getElementById: id => elements[id] || null,
+            addEventListener: (type, listener) => globalListeners.set(`document:${type}`, listener)
+        },
         navigator: {
             language: 'zh-CN',
             mediaDevices: getUserMedia ? { getUserMedia } : undefined
