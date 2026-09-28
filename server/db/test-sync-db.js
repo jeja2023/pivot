@@ -20,8 +20,16 @@ function transportError(message) {
 }
 
 function wait(control, expected, timeoutMs, label) {
-    if (Atomics.wait(control, 0, expected, timeoutMs) === 'timed-out') {
-        throw transportError(`等待 ${label} 超时。`);
+    const deadline = Date.now() + timeoutMs;
+    while (Atomics.load(control, 0) === expected) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            throw transportError(`等待 ${label} 超时。`);
+        }
+        const result = Atomics.wait(control, 0, expected, remaining);
+        if (result === 'timed-out') {
+            throw transportError(`等待 ${label} 超时。`);
+        }
     }
 }
 
@@ -71,7 +79,8 @@ function request(worker, value) {
     Atomics.store(worker.control, 0, IDLE);
     Atomics.notify(worker.control, 0, 1);
     if (state !== RESPONSE || !response?.ok) {
-        const error = new Error(response?.error || 'PostgreSQL 测试查询失败');
+        const detail = response?.error || (state !== RESPONSE ? `Worker 状态异常 (${state})` : '未知错误');
+        const error = new Error(`PostgreSQL 测试查询失败: ${detail}`);
         if (response?.code) error.code = response.code;
         throw error;
     }

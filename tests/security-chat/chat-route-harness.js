@@ -125,11 +125,22 @@ function createChatFixture({
         modelId,
         user: { id: userId, username, role, unit: 'QA' },
         cleanup() {
-            db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-            db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId);
-            db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
-            db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
-            db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+            if (!db) return;
+            const safeRun = (sql, ...params) => {
+                try {
+                    db.prepare(sql).run(...params);
+                } catch (_) {}
+            };
+            safeRun('DELETE FROM agent_runs WHERE session_id = ? OR user_id = ?', sessionId, userId);
+            safeRun('DELETE FROM memory_extraction_jobs WHERE session_id = ? OR user_id = ?', sessionId, userId);
+            safeRun('DELETE FROM memory_source_evidence WHERE session_id = ? OR user_id = ?', sessionId, userId);
+            safeRun('DELETE FROM memories WHERE source_session_id = ? OR user_id = ?', sessionId, userId);
+            safeRun('DELETE FROM messages WHERE session_id = ?', sessionId);
+            safeRun('DELETE FROM attachments WHERE session_id = ?', sessionId);
+            safeRun('DELETE FROM sessions WHERE parent_session_id = ?', sessionId);
+            safeRun('DELETE FROM sessions WHERE id = ?', sessionId);
+            safeRun('DELETE FROM models WHERE id = ?', modelId);
+            safeRun('DELETE FROM users WHERE id = ?', userId);
         }
     };
 }

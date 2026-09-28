@@ -65,7 +65,7 @@ async function execute(client, request) {
         const result = await client.query(sql, Array.isArray(request.params) ? request.params : []);
         return { ok: true, rows: result.rows, rowCount: result.rowCount, lastInsertRowid: result.rows?.[0]?.id ?? 0 };
     } catch (error) {
-        return { ok: false, error: error.message, code: error.code };
+        return { ok: false, error: error?.message || String(error), code: error?.code };
     }
 }
 
@@ -73,6 +73,9 @@ async function main() {
     const schema = String(process.env.PG_TEST_SCHEMA || '').trim();
     if (!/^[a-z_][a-z0-9_]{0,62}$/i.test(schema)) throw new Error('PG_TEST_SCHEMA 格式无效');
     const client = new Client({ connectionString: process.env.DATABASE_URL });
+    client.on('error', err => {
+        write({ ok: false, error: `PG 客户端连接错误: ${err?.message || err}`, code: err?.code || 'PG_CLIENT_ERROR' }, ERROR);
+    });
     await client.connect();
     await client.query(`SET search_path TO "${schema}", public`);
     await client.query("SET timezone = 'Asia/Shanghai'");
@@ -85,10 +88,10 @@ async function main() {
             continue;
         }
         let response;
-        try { response = await execute(client, read()); } catch (error) { response = { ok: false, error: error.message, code: error.code }; }
+        try { response = await execute(client, read()); } catch (error) { response = { ok: false, error: error?.message || String(error), code: error?.code }; }
         write(response, RESPONSE);
     }
-    await client.end();
+    await client.end().catch(() => {});
 }
 
-main().catch(error => write({ ok: false, error: error.message, code: error.code }, ERROR));
+main().catch(error => write({ ok: false, error: error?.message || String(error), code: error?.code }, ERROR));
