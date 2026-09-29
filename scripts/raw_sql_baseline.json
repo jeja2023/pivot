@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1922,
+  "total": 1928,
   "entries": [
     {
       "file": "server/auth.js",
@@ -222,6 +222,10 @@
     {
       "file": "server/db/migrations/long-term-memory-validity-window.js",
       "count": 1
+    },
+    {
+      "file": "server/db/migrations/memory-jobs-message-ids-jsonb-compatibility.js",
+      "count": 6
     },
     {
       "file": "server/db/migrations/message-context-token-count.js",
