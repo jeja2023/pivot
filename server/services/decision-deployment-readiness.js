@@ -4,11 +4,13 @@ const { queryOne } = require('../db/client');
 const { getDecisionRuntimeConfig } = require('./decision-runtime');
 const { getDecisionEvaluationReviewStatus } = require('./decision-evaluation-reviews');
 const { getActiveDecisionPolicyArtifact } = require('./decision-policy-registry');
+const { getActiveDecisionModelArtifact, hasApprovedFrozenEvaluation } = require('./decision-model-registry');
 const { checkLayaDecisionHealth } = require('./decision-provider-health');
 
 const DECISION_MIGRATION_IDS = [
     '202609280001_decision_learning_foundations',
-    '202609280002_decision_evaluation_governance'
+    '202609280002_decision_evaluation_governance',
+    '202609290002_decision_artifact_governance'
 ];
 const MIGRATION_STATUS_SQL = 'SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id = ?) AS applied';
 
@@ -17,6 +19,45 @@ function overallReadiness(checks = []) {
     if (statuses.includes('error')) return 'error';
     if (statuses.includes('degraded')) return 'degraded';
     return 'ok';
+}
+
+function rolloutTenantScopes(config = {}) {
+    const values = Array.isArray(config.rolloutTenants) ? config.rolloutTenants : [];
+    const tenants = [...new Set(values.map(value => Number.parseInt(value, 10)).filter(value => Number.isSafeInteger(value) && value > 0))];
+    // 未限制租户时，只有全局训练制品可以证明对所有租户安全；不能把某一个
+    // 租户制品误报成全局可用。
+    return tenants.length ? tenants : [null];
+}
+
+async function buildActiveProviderChecks(config = {}, deps = {}) {
+    const providers = [
+        { id: 'light-linear', enabled: config.light?.enabled === true, version: '' },
+        { id: 'qwen', enabled: config.qwen?.enabled === true, version: String(config.qwen?.version || '').trim() },
+        { id: 'laya', enabled: config.laya?.enabled === true, version: String(config.laya?.version || '').trim() }
+    ].filter(provider => provider.enabled);
+    const tenants = rolloutTenantScopes(config);
+    const checks = [];
+    for (const provider of providers) {
+        for (const tenantId of tenants) {
+            try {
+                const artifact = await (deps.getActiveDecisionModelArtifact || getActiveDecisionModelArtifact)(provider.id, { tenantId, fresh: true });
+                const versionMatches = artifact && (!provider.version || String(artifact.model_version || '') === provider.version);
+                const frozenEvaluationApproved = versionMatches
+                    && await (deps.hasApprovedFrozenEvaluation || hasApprovedFrozenEvaluation)(artifact, deps);
+                checks.push({
+                    name: 'activeModelArtifact:' + provider.id + ':' + (tenantId || 'global'),
+                    status: frozenEvaluationApproved ? 'ok' : 'error',
+                    providerId: provider.id,
+                    tenantId,
+                    modelVersion: artifact?.model_version || '',
+                    message: frozenEvaluationApproved ? '模型制品已激活且冻结评测证据有效' : '缺少匹配训练范围、版本或冻结评测证据的 active 模型制品'
+                });
+            } catch (error) {
+                checks.push({ name: 'activeModelArtifact:' + provider.id + ':' + (tenantId || 'global'), status: 'error', providerId: provider.id, tenantId, message: String(error?.message || '模型制品不可用').slice(0, 240) });
+            }
+        }
+    }
+    return checks;
 }
 
 async function getDecisionDeploymentReadiness({ env = process.env } = {}, deps = {}) {
@@ -66,6 +107,7 @@ async function getDecisionDeploymentReadiness({ env = process.env } = {}, deps =
         } catch (error) {
             checks.push({ name: 'activePolicyArtifact', status: 'error', message: String(error?.message || '策略制品不可用').slice(0, 240) });
         }
+        checks.push(...await buildActiveProviderChecks(config, deps));
     }
 
     if (config.laya?.enabled) {

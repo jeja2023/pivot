@@ -135,14 +135,16 @@ function applyAgentThinkingControls(data, modelCfg, options = {}) {
     return Object.assign(data, buildThinkingControlPayload(modelCfg));
 }
 
-async function withAgentModelConcurrency(modelCfg, operation) {
+async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
     let globalAcquired = false;
     let endpointRelease = null;
     const startedAt = Date.now();
     try {
-        await aiSemaphore.acquire();
+        // 决策器等短时调用会用 signal 取消排队；必须把信号继续传给全局和
+        // 端点两层信号量，否则超时请求仍可能在队列中占住后续模型吞吐。
+        await aiSemaphore.acquire({ signal: options.signal || null });
         globalAcquired = true;
-        endpointRelease = await acquireModelSlot(modelCfg);
+        endpointRelease = await acquireModelSlot(modelCfg, { signal: options.signal || null });
         const result = await operation();
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return result;
@@ -196,7 +198,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
             try { options.onUsage(usage); } catch (_) {}
         }
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
-    });
+    }, options);
 }
 
 async function callModelText(modelCfg, messages, options = {}) {
@@ -349,7 +351,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             if (error && typeof error === 'object') error.agentModelTiming = snapshotTiming();
             throw error;
         }
-    });
+    }, options);
 }
 
 async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '', options = {}) {

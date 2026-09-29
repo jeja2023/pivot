@@ -59,12 +59,14 @@ test('工具授权续跑指定原始消息，并继续使用经过清理的路�
             content: '',
             regenerate: true,
             regenerateMessageId: '42',
+            continuationKind: 'mcp_authorized',
             routeOverrides: { tools: ['mcp.7.db.run_readonly_query', 'invalid.tool'] }
         },
         user: { id: 7 }
     });
     assert.equal(state.regenerate, true);
     assert.equal(state.regenerateMessageId, 42);
+    assert.equal(state.continuationKind, 'mcp_authorized');
     assert.deepEqual(state.routeOverrides.tools, ['mcp.7.db.run_readonly_query']);
 });
 
@@ -98,6 +100,8 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.match(main, /function canSelectChatAttachment\(\)/);
     assert.equal(workspace.includes("if (getChatMcpToolMode() === 'auto') return null;"), true);
     assert.match(workspace, /window\.Pivot\.exposeModule\('chat\.inputMenu'/);
+    const engine = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine.js'), 'utf8');
+    assert.match(engine, /data\.type === 'mcp_consent_required'[\s\S]*textBody\.classList\.add\('hidden'\)/);
 });
 
 test('聊天输入框支持拖放和粘贴文件并复用附件队列', () => {

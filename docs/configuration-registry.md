@@ -56,8 +56,8 @@
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
 | --- | --- | --- | --- | --- |
 | `PIVOT_CHAT_AUTO_ROUTE_ENABLED` | boolean | `true` | true / false | 是否启用对话的统一自适应路由总开关。关闭后保留原有 RAG 与 MCP 流程。 |
-| `PIVOT_CHAT_AUTO_RAG_ENABLED` | boolean | `true` | true / false | 是否允许路由器自动缩小知识库 Collection 范围。 |
-| `PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED` | boolean | `true` | true / false | 是否允许路由器自动缩小已授权 MCP 工具候选集合。 |
+| `PIVOT_CHAT_AUTO_RAG_ENABLED` | boolean | `true` | true / false | 是否在问题明确要求或确实依赖受控资料时，自动检索并缩小知识库 Collection 范围；普通问答不会触发检索。 |
+| `PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED` | boolean | `true` | true / false | 是否在用户明确需要实时数据、本机文件、指定网页或外部操作时，自动发现受治理的 MCP 工具；普通回答不会触发授权。 |
 | `PIVOT_CHAT_ROUTE_SHADOW_MODE` | boolean | `false` | true / false | 是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。 |
 | `PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES` | integer | `4` | 1–12 | 自动工具发现传给 MCP Planner 的最大候选工具数。 |
 | `PIVOT_CHAT_ROUTE_MAX_COLLECTIONS` | integer | `2` | 1–8 | 自动知识库路由选取的最大 Collection 数。 |
@@ -104,6 +104,8 @@
 | `PIVOT_QWEN_DECISION_ENABLED` | boolean | `false` | true / false | 是否让当前已选的 Qwen 模型以结构化、无思考模式提供业务决策建议。 |
 | `PIVOT_QWEN_DECISION_VERSION` | string | `` | 逗号分隔的语言标记 | 审核通过的 Qwen 决策模型版本或权重哈希；active 灰度时必须与已激活制品一致。 |
 | `PIVOT_QWEN_DECISION_MAX_TOKENS` | integer | `256` | 64–1024 | Qwen 结构化业务决策的最大输出 Token，避免与最终生成任务争用过多资源。 |
+| `PIVOT_QWEN_DECISION_TIMEOUT_MS` | integer | `1200` | 100–30000 | Qwen 结构化决策的硬超时，包含模型排队；超时后仅保留既有路由。 |
+| `PIVOT_QWEN_DECISION_MAX_CONCURRENT` | integer | `1` | 1–100 | 单进程内 Qwen 决策调用最大并发数；默认保留生成容量，达到上限时直接保持既有路由。 |
 | `PIVOT_QWEN_DECISION_WEIGHT` | number | `1` | 0–10 | Qwen 结构化决策输出参与策略融合的相对权重。 |
 | `PIVOT_LAYA_DECISION_ENABLED` | boolean | `false` | true / false | 是否调用内网 Laya 业务决策服务；首次上线应配合 shadow 模式。 |
 | `PIVOT_LAYA_DECISION_URL` | string | `` | 逗号分隔的语言标记 | 内网 Laya 决策服务的 HTTP 地址。服务只接收脱敏后的任务状态和允许动作。 |

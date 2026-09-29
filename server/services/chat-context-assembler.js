@@ -17,8 +17,8 @@ const { saveUserMessage } = require('./chat-messages');
 const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
-const { maybeBuildMcpChatContext } = require('./chat-mcp-context');
-const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent } = require('./semantic-router');
+const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
+const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
 const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
@@ -139,8 +139,18 @@ async function assembleChatContext({
 
     // 工具目录的可见性、治理与白名单在路由前完成；路由器只能缩小该集合，
     // 永远不能重新引入无权或用户未允许的工具。
+    const requestedToolOverrides = Array.isArray(state.routeOverrides?.tools) && state.routeOverrides.tools.length > 0;
+    const toolRoutingRequested = requestedToolOverrides || detectExplicitMcpCapabilityIntent(retrievalQuery);
+    const explicitRagScope = Boolean(
+        state.ragScope?.collectionId
+        || (Array.isArray(state.ragScope?.collectionIds) && state.ragScope.collectionIds.length)
+        || state.ragScope?.tagName
+        || (Array.isArray(state.ragScope?.tagNames) && state.ragScope.tagNames.length)
+        || (Array.isArray(state.routeOverrides?.collections) && state.routeOverrides.collections.length)
+    );
+    const ragRoutingRequested = explicitRagScope || requiresKnowledgeRetrieval(retrievalQuery);
     let accessibleMcpTools = [];
-    if (mcpEnabled || state.autoRouteEnabled === true) {
+    if (toolRoutingRequested) {
         try {
             const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
             accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist);
@@ -164,20 +174,20 @@ async function assembleChatContext({
     } catch (error) {
         // 路由是增强层，任何初始化或外部 Embedding 异常均不可中断原有聊天。
         req.log.warn({ sessionId, userId, err: error.message }, '自适应路由不可用，已回退原有聊天链路');
-        const fallbackToolCandidates = pruneChatToolCandidates(accessibleMcpTools, taskState);
+        const fallbackToolCandidates = toolRoutingRequested ? pruneChatToolCandidates(accessibleMcpTools, taskState) : [];
         routePlan = {
             mode: 'legacy',
             shadow: false,
-            rag: { action: ragEnabled ? 'retrieve' : 'skip', scope: ragScope || {}, collections: [], confidence: 0, reasonCode: 'router_fallback' },
+            rag: { action: ragEnabled && ragRoutingRequested ? 'retrieve' : 'skip', scope: ragScope || {}, collections: [], confidence: 0, reasonCode: ragRoutingRequested ? 'router_fallback' : 'rag_not_requested' },
             tools: {
-                action: mcpEnabled ? 'propose' : (fallbackToolCandidates.length ? 'candidate_only' : 'skip'),
+                action: toolRoutingRequested ? (mcpEnabled ? 'propose' : (fallbackToolCandidates.length ? 'candidate_only' : 'skip')) : 'skip',
                 candidates: fallbackToolCandidates,
                 candidateTools: fallbackToolCandidates,
                 confidence: 0,
                 reasonCode: 'router_fallback'
             },
             execution: {
-                rag: { shouldRetrieve: Boolean(ragEnabled), scope: ragScope || {}, queryVector: null },
+                rag: { shouldRetrieve: Boolean(ragEnabled && ragRoutingRequested), scope: ragScope || {}, queryVector: null },
                 tools: { shouldPlan: Boolean(mcpEnabled && fallbackToolCandidates.length), candidates: fallbackToolCandidates }
             },
             timing: { routeDurationMs: 0, embeddingDurationMs: 0 }

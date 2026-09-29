@@ -388,6 +388,9 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
         : { regenerate: options === true };
     const shouldRegenerate = sendOptions.regenerate === true;
     const regenerateMessageId = Number.parseInt(sendOptions.regenerateMessageId, 10) || null;
+    const continuationKind = ['mcp_authorized', 'mcp_skipped'].includes(String(sendOptions.continuationKind || ''))
+        ? String(sendOptions.continuationKind)
+        : '';
     const ephemeralVoice = sendOptions.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(sendOptions.voiceSessionId || '').trim() : '';
     const resumeRouteOverrides = sendOptions.routeOverrides && typeof sendOptions.routeOverrides === 'object'
@@ -409,7 +412,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
     if (sendEpoch !== latestSendEpoch) return;
 
-    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId });
+    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId, continuationKind });
     activeSendTask = task;
     try {
         await task;
@@ -421,6 +424,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
 async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null, options = {}) {
     const ephemeralVoice = options.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(options.voiceSessionId || '').trim() : '';
+    const continuationKind = String(options.continuationKind || '');
     if (ephemeralVoice && (!voiceSessionId || shouldRegenerate)) {
         showToast('临时语音会话参数无效，已拒绝发送。', 'error');
         return;
@@ -566,6 +570,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 voiceSessionId: ephemeralVoice ? voiceSessionId : undefined,
                 regenerate: shouldRegenerate,
                 regenerateMessageId,
+                continuationKind: continuationKind || undefined,
                 autoRouteEnabled: ephemeralVoice ? false : autoRouteEnabled,
                 ragPreference: ephemeralVoice ? 'disabled' : ragPreference,
                 routeOverrides,
@@ -794,7 +799,12 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 if (data.type === 'mcp_consent_required') {
                     awaitingMcpConsent = true;
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    updateAssistantStatus(data.message || '需要允许工具库后继续处理当前消息。');
+                    // 授权卡本身已经包含状态与两个动作。不要再把同一段文案写入
+                    // 助手正文，避免出现截图中的重复提示。
+                    if (textBody) {
+                        PivotSafeHtml.setHtml(textBody, '');
+                        textBody.classList.add('hidden');
+                    }
                     return;
                 }
                 if (data.type === 'mcp') {
@@ -973,12 +983,12 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     }
 }
 
-async function continueMcpRouteMessage(messageId, routeOverrides = null) {
+async function continueMcpRouteMessage(messageId, routeOverrides = null, continuationKind = 'mcp_authorized') {
     const regenerateMessageId = Number.parseInt(messageId, 10);
     if (!Number.isSafeInteger(regenerateMessageId) || regenerateMessageId <= 0) {
         throw new Error('未找到可继续处理的原始消息。');
     }
-    return window.Pivot.legacy.sendMessage({ regenerate: true, regenerateMessageId, routeOverrides });
+    return window.Pivot.legacy.sendMessage({ regenerate: true, regenerateMessageId, routeOverrides, continuationKind });
 }
 
 window.Pivot.exposeModule('chat.execution', {

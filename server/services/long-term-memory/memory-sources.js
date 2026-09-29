@@ -75,7 +75,7 @@ async function getMemorySource(userId, memoryId) {
     };
 }
 
-async function revokeMemoriesForSource(userId, options = {}) {
+async function revokeMemoriesForSource(userId, options = {}, deps = {}) {
     const sessionId = normalizeScopeReference(options.sessionId || options.session_id);
     const messageIds = normalizeSourceMessageIds(options.messageIds || options.message_ids);
     if (!sessionId && messageIds.length === 0) return { revoked: 0, evidenceRemoved: 0 };
@@ -89,21 +89,26 @@ async function revokeMemoriesForSource(userId, options = {}) {
         where.push(`e.message_id IN (${messageIds.map(() => '?').join(',')})`);
         params.push(...messageIds);
     }
-    // 先推进写入栅栏，避免删除前已校验来源的抽取任务在本次查询之后提交。
-    await transaction(async trx => {
+    // 删除消息、撤销来源证据和取消待处理任务必须由调用方放在同一事务中。
+    // 否则后处理抛错会出现“消息已删但 API 返回失败”的假象，或留下仍可被
+    // 注入的失效记忆。独立调用仍保留自己的事务边界。
+    const run = async trx => {
+        // 先推进写入栅栏，避免删除前已校验来源的抽取任务在本次查询之后提交。
         await bumpMemoryRevision(userId, trx);
-    });
-    const related = await query(`
-        SELECT DISTINCT m.*
-        FROM memories m
-        JOIN memory_source_evidence e ON e.memory_id = m.id
-        WHERE ${where.join(' AND ')} AND m.user_id = ? AND m.status != ?
-    `, [...params, Number(userId), MEMORY_STATUS.deleted]);
-    if (related.length === 0) return { revoked: 0, evidenceRemoved: 0 };
-    const now = getBeijingTimestamp();
-    let revoked = 0;
-    let evidenceRemoved = 0;
-    await transaction(async trx => {
+        const related = await trx.query(`
+            SELECT m.*
+            FROM memories m
+            WHERE m.id IN (
+                SELECT e.memory_id FROM memory_source_evidence e
+                WHERE ${where.join(' AND ')}
+            )
+              AND m.user_id = ? AND m.status != ?
+            FOR UPDATE
+        `, [...params, Number(userId), MEMORY_STATUS.deleted]);
+        if (related.length === 0) return { revoked: 0, evidenceRemoved: 0 };
+        const now = getBeijingTimestamp();
+        let revoked = 0;
+        let evidenceRemoved = 0;
         for (const memory of related) {
             const before = await trx.query(`
                 SELECT id FROM memory_source_evidence
@@ -131,9 +136,11 @@ async function revokeMemoriesForSource(userId, options = {}) {
                 await trx.execute(`
                     UPDATE memories
                     SET status = ?, revoked_at = ?, revocation_reason = ?, source_session_id = NULL,
-                        source_message_ids = '[]'::jsonb, updated_at = ?
+                        -- 参数赋值依赖目标列的类型解析：迁移尚未完成的旧 TEXT
+                        -- 列会保留 JSON 文本，规范化后的 JSONB 列会解析为数组。
+                        source_message_ids = ?, updated_at = ?
                     WHERE id = ? AND user_id = ?
-                `, [MEMORY_STATUS.deleted, now, String(options.reason || 'source_deleted').slice(0, 80), now, memory.id, Number(userId)]);
+                `, [MEMORY_STATUS.deleted, now, String(options.reason || 'source_deleted').slice(0, 80), JSON.stringify([]), now, memory.id, Number(userId)]);
                 revoked += 1;
             } else {
                 await trx.execute(`
@@ -143,17 +150,21 @@ async function revokeMemoriesForSource(userId, options = {}) {
                 `, [remainingSession, JSON.stringify(remainingIds), now, memory.id, Number(userId)]);
             }
         }
-    });
-    if (revoked || evidenceRemoved) invalidateMemoryQualityCache(userId);
-    return { revoked, evidenceRemoved };
+        return { revoked, evidenceRemoved };
+    };
+    const result = deps.executor
+        ? await run(deps.executor)
+        : await transaction(run);
+    if (result.revoked || result.evidenceRemoved) invalidateMemoryQualityCache(userId);
+    return result;
 }
 
-async function revokeMemoriesForSourceSession(userId, sessionId, options = {}) {
-    return revokeMemoriesForSource(userId, { ...options, sessionId, reason: options.reason || 'source_session_deleted' });
+async function revokeMemoriesForSourceSession(userId, sessionId, options = {}, deps = {}) {
+    return revokeMemoriesForSource(userId, { ...options, sessionId, reason: options.reason || 'source_session_deleted' }, deps);
 }
 
-async function revokeMemoriesForSourceMessages(userId, messageIds, options = {}) {
-    return revokeMemoriesForSource(userId, { ...options, messageIds, reason: options.reason || 'source_message_deleted' });
+async function revokeMemoriesForSourceMessages(userId, messageIds, options = {}, deps = {}) {
+    return revokeMemoriesForSource(userId, { ...options, messageIds, reason: options.reason || 'source_message_deleted' }, deps);
 }
 
 module.exports = {

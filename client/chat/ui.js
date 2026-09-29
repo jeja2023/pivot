@@ -80,10 +80,11 @@ function updateContextUsage(meta = null) {
     const ring = document.getElementById('context-usage-ring');
     if (!pill || !ring) return;
 
-    pill.classList.remove('is-warn', 'is-critical');
+    pill.classList.remove('is-warn', 'is-critical', 'is-empty');
 
     if (!meta) {
         ring.style.setProperty('--progress', '0');
+        pill.classList.add('is-empty');
         pill.dataset.tooltip = '上下文用量: -';
         pill.removeAttribute('title');
         pill.setAttribute('aria-label', '当前会话上下文用量，点击手动压缩');

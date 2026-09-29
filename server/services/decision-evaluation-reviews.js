@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { query, transaction } = require('../db/client');
+const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { normalizeActionId, sanitizeDecisionContext } = require('./decision-provider');
 
@@ -139,6 +139,21 @@ async function getDecisionEvaluationReviewStatus(version, deps = {}) {
     return { version: row.set_version, total: Number(row.total || 0), verified: Number(row.verified || 0), pending: Number(row.pending || 0), updatedAt: row.updated_at || null };
 }
 
+async function getDecisionEvaluationSetGovernance(version, deps = {}) {
+    const setVersion = String(version || '').trim().slice(0, 128);
+    if (!setVersion) return null;
+    const [status, evaluationSet] = await Promise.all([
+        getDecisionEvaluationReviewStatus(setVersion, deps),
+        (deps.queryOne || queryOne)(SET_SQL, [setVersion])
+    ]);
+    if (!status || !evaluationSet) return null;
+    return {
+        ...status,
+        sourceDigest: String(evaluationSet.source_digest || ''),
+        importedAt: evaluationSet.imported_at || null
+    };
+}
+
 async function loadReviewedDecisionEvaluationCases(version, deps = {}) {
     const setVersion = String(version || '').trim().slice(0, 128);
     const status = await getDecisionEvaluationReviewStatus(setVersion, deps);
@@ -195,6 +210,7 @@ async function reviewDecisionEvaluationCase({ version = '', caseId = '', expecte
 
 module.exports = {
     getDecisionEvaluationReviewStatus,
+    getDecisionEvaluationSetGovernance,
     importFrozenDecisionEvaluationSet,
     listDecisionEvaluationCases,
     loadReviewedDecisionEvaluationCases,

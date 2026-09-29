@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { buildDecisionProviderContext, createLinearDecisionProvider, createStructuredModelDecisionProvider, decisionFeatureMap, linearScores, sanitizeDecisionContext } = require('../server/services/decision-provider');
 const { trainAndEvaluateLinearDecisionModel, trainLinearDecisionModel } = require('../server/services/decision-training');
-const { activateDecisionModelArtifact } = require('../server/services/decision-model-registry');
+const { activateDecisionModelArtifact, getActiveDecisionModelArtifact } = require('../server/services/decision-model-registry');
 const { checkLayaDecisionHealth } = require('../server/services/decision-provider-health');
 const { benchmarkDecisionProviders } = require('../server/services/decision-benchmark');
 const { createScoreDecisionProvider } = require('../server/services/decision-provider');
@@ -55,6 +55,17 @@ test('Qwen 结构化决策器固定 JSON、关闭思考且不会采纳未知动�
     assert.equal(options.temperature, 0);
 });
 
+test('Qwen 决策器在独立硬超时后安全降级，不等待默认 Agent 超时', async () => {
+    const provider = createStructuredModelDecisionProvider({
+        id: 'qwen', version: 'qwen-test', modelCfg: { name: 'Qwen test' }, timeoutMs: 25,
+        invoke: async () => await new Promise(() => {})
+    });
+    const [result] = await require('../server/services/decision-provider').evaluateDecisionProviders({
+        providers: [provider], context: { candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] }
+    });
+    assert.equal(result.error, 'provider_timeout');
+});
+
 test('训练严格按时间切分，输出候选模型、校准结果和发布门槛', () => {
     const rows = [
         row('d1', '2026-01-01T00:00:00Z', 'retrieve'), row('d2', '2026-01-02T00:00:00Z', 'retrieve'),
@@ -71,18 +82,65 @@ test('训练严格按时间切分，输出候选模型、校准结果和发布�
     assert.ok(Object.keys(trainLinearDecisionModel([{ context: { candidates: [{ id: 'retrieve', allowed: true }] }, label: 'retrieve' }]).actionWeights).includes('retrieve'));
 });
 
-test('模型注册表只激活已通过发布门槛的候选制品', async () => {
+test('模型注册表只激活已通过发布门槛、冻结评测和训练范围门禁的候选制品', async () => {
     const calls = [];
-    const artifact = { id: 'artifact-1', provider_id: 'light-linear', status: 'candidate', evaluation_report: { releaseGate: { passed: true } } };
+    const artifact = { id: 'artifact-1', provider_id: 'light-linear', status: 'candidate', training_tenant_id: 7, evaluation_report: { releaseGate: { passed: true } } };
     const result = await activateDecisionModelArtifact('artifact-1', {
-        transaction: async fn => await fn({ queryOne: async () => artifact, execute: async (sql, params) => calls.push({ sql, params }) })
+        transaction: async fn => await fn({ queryOne: async () => artifact, execute: async (sql, params) => calls.push({ sql, params }) }),
+        hasApprovedFrozenEvaluation: async () => true
     });
     assert.equal(result.id, 'artifact-1');
     assert.equal(calls.length, 2);
+    assert.equal(calls[0].params[1], 'light-linear');
+    assert.equal(calls[0].params[3], 7);
     const blocked = await activateDecisionModelArtifact('artifact-2', {
-        transaction: async fn => await fn({ queryOne: async () => ({ ...artifact, evaluation_report: { releaseGate: { passed: false } } }), execute: async () => 0 })
+        transaction: async fn => await fn({ queryOne: async () => ({ ...artifact, evaluation_report: { releaseGate: { passed: false } } }), execute: async () => 0 }),
+        hasApprovedFrozenEvaluation: async () => true
     });
     assert.equal(blocked, null);
+});
+
+test('运行时按租户优先读取本租户制品，其次才可使用已批准的全局制品', async () => {
+    const tenantCalls = [];
+    await getActiveDecisionModelArtifact('light-linear', {
+        tenantId: 7, fresh: true,
+        queryOne: async (sql, params) => {
+            tenantCalls.push({ sql, params });
+            return { id: 'tenant-model', training_tenant_id: 7, global_training_approved: false };
+        }
+    });
+    assert.deepEqual(tenantCalls[0].params, ['light-linear', 7, 7]);
+    assert.match(tenantCalls[0].sql, /CASE WHEN training_tenant_id = \? THEN 0 ELSE 1 END/);
+    const globalCalls = [];
+    await getActiveDecisionModelArtifact('light-linear', {
+        fresh: true,
+        queryOne: async (sql, params) => {
+            globalCalls.push({ sql, params });
+            return { id: 'global-model', training_tenant_id: null, global_training_approved: true };
+        }
+    });
+    assert.deepEqual(globalCalls[0].params, ['light-linear']);
+    assert.match(globalCalls[0].sql, /global_training_approved = TRUE/);
+});
+
+test('模型制品必须绑定单租户或经批准的全局训练范围，并在运行时拒绝其他租户', async () => {
+    const { artifactScopeAllowsTenant, hasApprovedFrozenEvaluation } = require('../server/services/decision-model-registry');
+    assert.equal(artifactScopeAllowsTenant({ training_tenant_id: 7 }, 7), true);
+    assert.equal(artifactScopeAllowsTenant({ training_tenant_id: 7 }, 8), false);
+    assert.equal(artifactScopeAllowsTenant({ global_training_approved: true }, 8), true);
+    assert.equal(artifactScopeAllowsTenant({}, 7), false);
+    const valid = await hasApprovedFrozenEvaluation({
+        evaluation_report: { frozenEvaluation: { version: 'v2', sourceDigest: 'sha256:' + 'a'.repeat(64), caseCount: 2 } }
+    }, {
+        getDecisionEvaluationSetGovernance: async () => ({ total: 2, verified: 2, pending: 0, sourceDigest: 'sha256:' + 'a'.repeat(64) })
+    });
+    assert.equal(valid, true);
+    const pending = await hasApprovedFrozenEvaluation({
+        evaluation_report: { frozenEvaluation: { version: 'v2', sourceDigest: 'sha256:' + 'a'.repeat(64), caseCount: 2 } }
+    }, {
+        getDecisionEvaluationSetGovernance: async () => ({ total: 2, verified: 1, pending: 1, sourceDigest: 'sha256:' + 'a'.repeat(64) })
+    });
+    assert.equal(pending, false);
 });
 
 test('Laya 健康检查在禁用和版本不一致时保持明确状态', async () => {
@@ -166,12 +224,12 @@ test('可选路由文本只以规则脱敏形式提供给决策器，审计上�
 test('active 轻量模型必须与激活制品的版本和权重哈希一致', async () => {
     const model = { modelVersion: 'light-v1', actionWeights: { retrieve: { bias: 1, features: {} } } };
     const config = { mode: 'active', requireActiveArtifact: true, artifactTimeoutMs: 50 };
-    const eligible = await isLocalLightArtifactEligible(model, config, {
-        getActiveDecisionModelArtifact: async () => ({ model_version: 'light-v1', weights_hash: computeDecisionModelHash(model) })
+    const eligible = await isLocalLightArtifactEligible(model, config, 7, {
+        getActiveDecisionModelArtifact: async () => ({ model_version: 'light-v1', weights_hash: computeDecisionModelHash(model), training_tenant_id: 7 })
     });
     assert.equal(eligible, true);
-    const rejected = await isLocalLightArtifactEligible(model, config, {
-        getActiveDecisionModelArtifact: async () => ({ model_version: 'light-v1', weights_hash: 'sha256:mismatch' })
+    const rejected = await isLocalLightArtifactEligible(model, config, 7, {
+        getActiveDecisionModelArtifact: async () => ({ model_version: 'light-v1', weights_hash: 'sha256:mismatch', training_tenant_id: 7 })
     });
     assert.equal(rejected, false);
 });
@@ -300,6 +358,22 @@ test('部署就绪度统一暴露迁移、审核、策略制品与灰度阻塞�
     assert.equal(ready.status, 'ok');
 });
 
+test('active 灰度就绪度按租户范围拒绝缺失冻结评测证据的学习型制品', async () => {
+    const report = await getDecisionDeploymentReadiness({}, {
+        getDecisionRuntimeConfig: () => ({
+            mode: 'active', rolloutPercent: 10, version: 'policy-v1', evaluationSetVersion: 'v1', rolloutTenants: ['7'],
+            laya: { enabled: false }, light: { enabled: false }, qwen: { enabled: true, version: 'qwen-v1' }
+        }),
+        queryOne: async () => ({ applied: true }),
+        getDecisionEvaluationReviewStatus: async () => ({ total: 2, verified: 2, pending: 0 }),
+        getActiveDecisionPolicyArtifact: async () => ({ model_version: 'policy-v1' }),
+        getActiveDecisionModelArtifact: async () => ({ model_version: 'qwen-v1', training_tenant_id: 7 }),
+        hasApprovedFrozenEvaluation: async () => false
+    });
+    assert.equal(report.status, 'error');
+    assert.equal(report.checks.find(item => item.name === 'activeModelArtifact:qwen:7').status, 'error');
+});
+
 test('冻结 v2 评测集覆盖已有路由、下一步动作与受控工作流选择', () => {
     const source = require('../docs/decision-evaluation-set.v2.json');
     const cases = Array.isArray(source.cases) ? source.cases : [];
@@ -357,7 +431,7 @@ test('决策审计保留期清理只删除到期记录并保留模型与评测�
 });
 
 test('Laya 制品只有登记完整部署证据后才能激活', async () => {
-    const base = { id: 'laya-artifact', provider_id: 'laya', status: 'candidate', evaluation_report: { releaseGate: { passed: true } } };
+    const base = { id: 'laya-artifact', provider_id: 'laya', status: 'candidate', training_tenant_id: 7, evaluation_report: { releaseGate: { passed: true } } };
     const denied = await activateDecisionModelArtifact('laya-artifact', {
         transaction: async fn => await fn({ queryOne: async () => base, execute: async () => 0 })
     });
@@ -366,7 +440,8 @@ test('Laya 制品只有登记完整部署证据后才能激活', async () => {
     const complete = { ...base, evaluation_report: { releaseGate: { passed: true }, deploymentEvidence: { imageDigest: digest, modelSha256: digest, dependencyLockSha256: digest, launchCommandDigest: digest } } };
     const calls = [];
     const activated = await activateDecisionModelArtifact('laya-artifact', {
-        transaction: async fn => await fn({ queryOne: async () => complete, execute: async (sql, params) => calls.push({ sql, params }) })
+        transaction: async fn => await fn({ queryOne: async () => complete, execute: async (sql, params) => calls.push({ sql, params }) }),
+        hasApprovedFrozenEvaluation: async () => true
     });
     assert.equal(activated.id, 'laya-artifact');
     assert.equal(calls.length, 2);

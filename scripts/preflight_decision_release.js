@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const { getDecisionRuntimeConfig } = require('../server/services/decision-runtime');
-const { getActiveDecisionModelArtifact } = require('../server/services/decision-model-registry');
+const { getActiveDecisionModelArtifact, hasApprovedFrozenEvaluation } = require('../server/services/decision-model-registry');
 const { getActiveDecisionPolicyArtifact } = require('../server/services/decision-policy-registry');
 const { getDecisionEvaluationReviewStatus } = require('../server/services/decision-evaluation-reviews');
 const { computeDecisionModelHash, loadLocalLinearDecisionModel } = require('../server/services/decision-light-model');
@@ -75,6 +75,10 @@ async function main() {
             }
         }
         const providers = [];
+        const rolloutTenants = [...new Set((Array.isArray(config.rolloutTenants) ? config.rolloutTenants : [])
+            .map(value => Number.parseInt(value, 10))
+            .filter(value => Number.isSafeInteger(value) && value > 0))];
+        const artifactScopes = rolloutTenants.length ? rolloutTenants : [null];
         if (config.light.enabled) {
             try {
                 const model = await loadLocalLinearDecisionModel({ rootDir: config.light.modelRoot, modelFile: config.light.modelFile });
@@ -92,13 +96,22 @@ async function main() {
             else providers.push({ providerId: 'laya', modelVersion: config.laya.version, weightsHash: '' });
         }
         for (const provider of providers) {
-            try {
-                const artifact = await withTimeout(getActiveDecisionModelArtifact(provider.providerId), dbTimeoutMs);
-                const versionMatches = artifact && String(artifact.model_version) === String(provider.modelVersion);
-                const hashMatches = !provider.weightsHash || String(artifact?.weights_hash || '') === String(provider.weightsHash);
-                checks.push({ name: 'activeArtifact:' + provider.providerId, status: versionMatches && hashMatches ? 'ok' : 'error', modelVersion: artifact?.model_version || '', message: versionMatches ? (hashMatches ? '' : '激活制品权重哈希与本地模型不一致') : '没有匹配版本的已激活且通过评测的模型制品' });
-            } catch (error) {
-                checks.push({ name: 'activeArtifact:' + provider.providerId, status: 'error', message: String(error.message || '模型注册表检查失败').slice(0, 240) });
+            for (const tenantId of artifactScopes) {
+                try {
+                    const artifact = await withTimeout(getActiveDecisionModelArtifact(provider.providerId, { tenantId, fresh: true }), dbTimeoutMs);
+                    const versionMatches = artifact && String(artifact.model_version) === String(provider.modelVersion);
+                    const hashMatches = !provider.weightsHash || String(artifact?.weights_hash || '') === String(provider.weightsHash);
+                    const frozenEvaluationApproved = versionMatches && hashMatches && await hasApprovedFrozenEvaluation(artifact);
+                    checks.push({
+                        name: 'activeArtifact:' + provider.providerId + ':' + (tenantId || 'global'),
+                        status: frozenEvaluationApproved ? 'ok' : 'error',
+                        tenantId,
+                        modelVersion: artifact?.model_version || '',
+                        message: versionMatches ? (hashMatches ? (frozenEvaluationApproved ? '' : '冻结评测证据缺失、未审核完成或已变化') : '激活制品权重哈希与本地模型不一致') : '没有匹配版本和训练范围的已激活模型制品'
+                    });
+                } catch (error) {
+                    checks.push({ name: 'activeArtifact:' + provider.providerId + ':' + (tenantId || 'global'), status: 'error', tenantId, message: String(error.message || '模型注册表检查失败').slice(0, 240) });
+                }
             }
         }
     }

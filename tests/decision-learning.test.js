@@ -62,6 +62,21 @@ test('策略层默认影子模式且高风险、需审批动作不会自动采�
     assert.equal(active.reasonCode, 'approval_required');
 });
 
+test('active 模式中经评测的学习型提供器可覆盖既有路由基线，基线仅作为无学习输出时的安全回退', () => {
+    const policy = applyDecisionPolicy({
+        candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }],
+        fallbackActionId: 'retrieve',
+        providerOutputs: [
+            { providerId: 'existing-router', isBaseline: true, weight: 1, selectedActionId: 'retrieve', scores: { retrieve: 0.98, skip: 0.02 } },
+            { providerId: 'light-linear', weight: 1, selectedActionId: 'skip', scores: { retrieve: 0, skip: 1 } }
+        ],
+        config: { mode: 'active', autoThreshold: 0.58, highRiskThreshold: 0.85 }
+    });
+    assert.equal(policy.selectedActionId, 'skip');
+    assert.equal(policy.applied, true);
+    assert.equal(policy.confidence > 0.99, true);
+});
+
 test('内网 Laya 超时不会影响已有决策基线', async () => {
     const provider = createHttpDecisionProvider({
         url: 'http://laya.intranet/decision',

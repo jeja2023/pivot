@@ -781,17 +781,17 @@ function createSessionsRouter({
 
     router.delete('/messages/:id', authMiddleware, asyncHandler(async (req, res) => {
         const { id } = req.params;
-        const source = await queryOne('SELECT id, session_id FROM messages WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [id, req.user.id]);
-        const msgDeleted = await execute(
-            'UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-            [getBeijingTimestamp(), id, req.user.id]
-        );
-        if (msgDeleted > 0 && source) {
-            await Promise.all([
-                revokeMemoriesForSourceMessages(req.user.id, [source.id], { reason: 'source_message_deleted' }),
-                cancelMemoryExtractionJobs(req.user.id, { messageIds: [source.id], reason: 'SOURCE_MESSAGE_DELETED' })
-            ]);
-        }
+        let msgDeleted = 0;
+        await transaction(async trx => {
+            const source = await trx.queryOne('SELECT id FROM messages WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [id, req.user.id]);
+            if (!source) return;
+            await revokeMemoriesForSourceMessages(req.user.id, [source.id], { reason: 'source_message_deleted' }, { executor: trx });
+            await cancelMemoryExtractionJobs(req.user.id, { messageIds: [source.id], reason: 'SOURCE_MESSAGE_DELETED' }, { execute: trx.execute });
+            msgDeleted = await trx.execute(
+                'UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+                [getBeijingTimestamp(), id, req.user.id]
+            );
+        });
         if (msgDeleted > 0) logAction(req, '删除消息', `消息ID: ${id}`);
         res.json({ success: msgDeleted > 0 });
     }));
@@ -805,16 +805,14 @@ function createSessionsRouter({
         const now = getBeijingTimestamp();
         let sessionDeleted = 0;
         await transaction(async trx => {
+            const lockedSession = await trx.queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [sessionId, userId]);
+            if (!lockedSession) return;
+            await revokeMemoriesForSourceSession(userId, sessionId, { reason: 'source_session_deleted' }, { executor: trx });
+            await cancelMemoryExtractionJobs(userId, { sessionId, reason: 'SOURCE_SESSION_DELETED' }, { execute: trx.execute });
             await trx.execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL', [now, sessionId, userId]);
             await trx.execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 1 WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL', [now, sessionId, userId]);
             sessionDeleted = await trx.execute('UPDATE sessions SET deleted_at = ?, deleted_by_user = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [now, now, sessionId, userId]);
         });
-        if (sessionDeleted > 0) {
-            await Promise.all([
-                revokeMemoriesForSourceSession(userId, sessionId, { reason: 'source_session_deleted' }),
-                cancelMemoryExtractionJobs(userId, { sessionId, reason: 'SOURCE_SESSION_DELETED' })
-            ]);
-        }
         logAction(req, '删除对话', `删除会话ID: ${sessionId}`);
         res.json({ success: sessionDeleted > 0 });
     }));

@@ -7,6 +7,7 @@ const { registerDecisionModelArtifact } = require('../server/services/decision-l
 const { computeDecisionModelHash, writeLocalLinearDecisionModel } = require('../server/services/decision-light-model');
 const { trainAndEvaluateLinearDecisionModel } = require('../server/services/decision-training');
 const { readTypedEnv } = require('../server/config/env-registry');
+const { getDecisionEvaluationSetGovernance } = require('../server/services/decision-evaluation-reviews');
 
 function arg(name, fallback = '') {
     const index = process.argv.indexOf(name);
@@ -15,6 +16,35 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
     return process.argv.includes(name);
+}
+
+async function loadFrozenEvaluationEvidence(modelVersion) {
+    const reportPath = arg('--frozen-evaluation-report', '');
+    if (!reportPath) throw new Error('--register 必须指定 --frozen-evaluation-report，并以已审核冻结集完成独立基准。');
+    const benchmark = JSON.parse(await require('node:fs').promises.readFile(path.resolve(reportPath), 'utf8'));
+    const version = String(arg('--frozen-evaluation-version', benchmark.evaluationSetVersion || process.env.PIVOT_DECISION_EVALUATION_SET_VERSION || '')).trim();
+    const governance = await getDecisionEvaluationSetGovernance(version);
+    const provider = (Array.isArray(benchmark.providers) ? benchmark.providers : []).find(item => (
+        String(item?.providerId || '') === 'light-linear'
+            && String(item?.providerVersion || '') === String(modelVersion || '')
+    ));
+    if (!governance
+        || Number(governance.total || 0) === 0
+        || Number(governance.pending || 0) !== 0
+        || Number(governance.verified || 0) !== Number(governance.total || 0)
+        || !provider) {
+        throw new Error('冻结评测证据无效：需匹配已完成管理员审核的评测集及当前轻量模型版本。');
+    }
+    return {
+        version: governance.version,
+        sourceDigest: governance.sourceDigest,
+        caseCount: governance.total,
+        providerId: provider.providerId,
+        providerVersion: provider.providerVersion,
+        metrics: provider.metrics || {},
+        timeoutOrErrorRate: provider.timeoutOrErrorRate ?? null,
+        p95DurationMs: provider.p95DurationMs ?? null
+    };
 }
 
 async function gitRevision() {
@@ -55,6 +85,9 @@ async function main() {
         weightsHash,
         ...result
     };
+    if (hasFlag('--register')) {
+        report.frozenEvaluation = await loadFrozenEvaluationEvidence(result.model.modelVersion);
+    }
     const reportPath = arg('--report', '');
     if (reportPath) await require('node:fs').promises.writeFile(path.resolve(reportPath), JSON.stringify(report, null, 2) + '\n', 'utf8');
     if (hasFlag('--write-candidate')) {
@@ -73,7 +106,9 @@ async function main() {
             codeVersion,
             weightsHash,
             calibration: result.calibration,
-            evaluationReport: report
+            evaluationReport: report,
+            trainingTenantId: hasTenantScope ? tenantId : null,
+            globalTrainingApproved: globalTrainingRequested
         });
     }
     process.stdout.write(JSON.stringify({

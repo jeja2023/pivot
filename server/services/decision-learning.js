@@ -231,16 +231,28 @@ async function buildVerifiedDecisionDatasetFromStore(options = {}, deps = {}) {
     return buildVerifiedDecisionDataset(rows);
 }
 
-async function registerDecisionModelArtifact({ id, providerId, modelVersion, dataVersion, codeVersion = '', weightsHash = '', calibration = {}, evaluationReport = {}, createdBy = null } = {}, deps = {}) {
+function normalizeTenantId(value) {
+    const tenantId = Number.parseInt(value, 10);
+    return Number.isSafeInteger(tenantId) && tenantId > 0 ? tenantId : null;
+}
+
+async function registerDecisionModelArtifact({ id, providerId, modelVersion, dataVersion, codeVersion = '', weightsHash = '', calibration = {}, evaluationReport = {}, trainingTenantId = null, globalTrainingApproved = false, createdBy = null } = {}, deps = {}) {
     const artifactId = String(id || 'decision_model_' + crypto.randomUUID()).slice(0, 128);
+    const safeProviderId = String(providerId || '').slice(0, 80);
     const report = evaluationReport && typeof evaluationReport === 'object' ? evaluationReport : {};
+    const tenantId = normalizeTenantId(trainingTenantId);
+    const globalApproved = globalTrainingApproved === true;
+    if (safeProviderId !== 'decision-policy' && !tenantId && !globalApproved) {
+        throw new Error('decision_artifact_training_scope_required');
+    }
+    if (tenantId && globalApproved) throw new Error('decision_artifact_training_scope_conflict');
     const now = getBeijingTimestamp();
     await (deps.execute || execute)([
-        'INSERT INTO decision_model_artifacts (id, provider_id, model_version, data_version, code_version, weights_hash, calibration, evaluation_report, status, created_by, created_at)',
-        "VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, 'candidate', ?, ?)",
+        'INSERT INTO decision_model_artifacts (id, provider_id, model_version, data_version, code_version, weights_hash, calibration, evaluation_report, training_tenant_id, global_training_approved, status, created_by, created_at)',
+        "VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, 'candidate', ?, ?)",
         'ON CONFLICT (provider_id, model_version) DO NOTHING'
-    ].join(' '), [artifactId, String(providerId || '').slice(0, 80), String(modelVersion || '').slice(0, 128), String(dataVersion || '').slice(0, 128), String(codeVersion || '').slice(0, 128), String(weightsHash || '').slice(0, 160), JSON.stringify(calibration || {}), JSON.stringify(report), Number.isSafeInteger(Number(createdBy)) ? Number(createdBy) : null, now]);
-    return { id: artifactId, status: 'candidate', createdAt: now };
+    ].join(' '), [artifactId, safeProviderId, String(modelVersion || '').slice(0, 128), String(dataVersion || '').slice(0, 128), String(codeVersion || '').slice(0, 128), String(weightsHash || '').slice(0, 160), JSON.stringify(calibration || {}), JSON.stringify(report), tenantId, globalApproved, Number.isSafeInteger(Number(createdBy)) ? Number(createdBy) : null, now]);
+    return { id: artifactId, status: 'candidate', trainingTenantId: tenantId, globalTrainingApproved: globalApproved, createdAt: now };
 }
 
 module.exports = {

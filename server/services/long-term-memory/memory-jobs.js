@@ -24,7 +24,7 @@ function setRunMemoryExtractionHandler(handler) {
     runMemoryExtractionHandler = handler;
 }
 
-async function cancelMemoryExtractionJobs(userId, options = {}) {
+async function cancelMemoryExtractionJobs(userId, options = {}, deps = {}) {
     const now = getBeijingTimestamp();
     const where = ['user_id = ?', 'status = ?'];
     const params = [Number(userId), MEMORY_JOB_STATUS.queued];
@@ -48,7 +48,7 @@ async function cancelMemoryExtractionJobs(userId, options = {}) {
         )`);
         params.push(...messageIds.map(String));
     }
-    const changes = await execute(`
+    const changes = await (deps.execute || execute)(`
         UPDATE memory_extraction_jobs
         SET status = ?, locked_at = NULL, last_error = ?, completed_at = ?, updated_at = ?
         WHERE ${where.join(' AND ')}

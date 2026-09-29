@@ -142,6 +142,38 @@ test('聊天消息服务会保存消息并更新会话统计', async () => {
     }
 });
 
+test('删除消息将来源撤销、任务取消与软删除作为同一事务提交', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, 'hash', 'Delete Atomic Test', 'QA', 'user', 'active', datetime('now', '+8 hours'))
+    `).run(`delete_atomic_${suffix}`);
+    const userId = Number(userInfo.lastInsertRowid);
+    const sessionId = `delete-atomic-${suffix}`;
+    db.prepare(`INSERT INTO sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, 'Delete Atomic Test', datetime('now', '+8 hours'), datetime('now', '+8 hours'))`)
+        .run(sessionId, userId);
+    const messageId = Number(db.prepare(`INSERT INTO messages (session_id, user_id, role, content, created_at) VALUES (?, ?, 'user', '需要撤销的来源消息', datetime('now', '+8 hours'))`)
+        .run(sessionId, userId).lastInsertRowid);
+    const router = createSessionsRouter({
+        authMiddleware: (req, _res, next) => { req.user = { id: userId, username: `delete_atomic_${suffix}`, role: 'user', status: 'active' }; next(); },
+        normalizePage: value => Math.max(parseInt(value, 10) || 1, 1),
+        normalizeLimit: value => Math.min(Math.max(parseInt(value, 10) || 20, 1), 100),
+        logAction() {}
+    });
+    const route = router.stack.find(layer => layer.route?.path === '/messages/:id' && layer.route?.methods?.delete);
+    const req = { params: { id: String(messageId) }, user: { id: userId } };
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    try {
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), req, res);
+        assert.equal(res.body.success, true);
+        assert.ok(db.prepare('SELECT deleted_at FROM messages WHERE id = ?').get(messageId).deleted_at);
+    } finally {
+        db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
 test('会话消息包含助手模型显示元数据', () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

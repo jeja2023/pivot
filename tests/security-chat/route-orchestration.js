@@ -192,9 +192,12 @@ test('工具授权续跑可指定原始消息，且不会重复保存用户消�
             content: '',
             modelId: fixture.modelId,
             regenerate: true,
-            regenerateMessageId: Number(original.lastInsertRowid)
+            regenerateMessageId: Number(original.lastInsertRowid),
+            continuationKind: 'mcp_authorized'
         });
         assert.match(result.streamedContent, /已续跑指定的原始请求/);
+        assert.equal(routeServer.auditRecords.some(item => item.action === '重新生成回答'), false);
+        assert.equal(routeServer.auditRecords.some(item => item.action === '工具授权后继续处理'), true);
         const messages = readSessionMessages(fixture);
         assert.equal(messages.filter(row => row.role === 'user').length, 2);
         assert.equal(messages.filter(row => row.role === 'assistant').length, 1);

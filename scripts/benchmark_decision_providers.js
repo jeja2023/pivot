@@ -93,7 +93,7 @@ async function main() {
     if (requested.has('qwen')) providers.push(await createQwenProvider(arg('--qwen-model'), arg('--qwen-user-id'), config.qwen.weight));
     if (!providers.length) throw new Error('没有可执行的基准提供器。');
     const report = await benchmarkDecisionProviders({ cases, providers });
-    const output = { generatedAt: new Date().toISOString(), evaluationSetVersion: evaluationSet.version || '', providers: [...requested], ...report };
+    const output = { generatedAt: new Date().toISOString(), evaluationSetVersion: reviewedSetVersion || evaluationSet.version || '', providers: [...requested], ...report };
     const reportFile = arg('--report');
     if (reportFile) await fs.promises.writeFile(path.resolve(reportFile), JSON.stringify(output, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
     process.stdout.write(JSON.stringify(output, null, 2) + '\n');

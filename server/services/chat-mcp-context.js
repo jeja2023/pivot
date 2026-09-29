@@ -416,19 +416,6 @@ async function callChatMcpPlanner(modelCfg, messages, user = null, options = {})
     return extractModelText(response.data);
 }
 
-function buildMcpToolsHint(tools, reason = '') {
-    const toolNames = tools.slice(0, 6).map(t => t.name || t.fullName || '').filter(Boolean);
-    if (!toolNames.length) return '';
-    const list = toolNames.join('、');
-    const note = reason ? `未调用的原因：${reason}。` : '本轮未调用。';
-    return [
-        '以下是本轮可用的工具库工具（仅供了解，本轮未实际调用）：',
-        `可用工具：${list}。`,
-        note,
-        '如果用户的问题涉及数据查询、统计分析或图表展示，请不要自行生成 Python/JavaScript 图表代码。你可以建议用户重新提问以触发工具调用，或在回答中说明需要开启哪些工具库服务。'
-    ].join('\n');
-}
-
 function buildMcpMissingToolHint(tools, reason = '') {
     const toolNames = tools.slice(0, 8).map(t => t.name || t.fullName || '').filter(Boolean);
     const availability = toolNames.length

@@ -50,6 +50,5 @@ test('生产就绪度缺少评测治理迁移时拒绝继续', async () => {
     });
     assert.equal(report.status, 'error');
     const migrations = report.checks.find(item => item.name === 'decisionMigrations');
-    assert.deepEqual(migrations.missing, ['202609280002_decision_evaluation_governance']);
+    assert.deepEqual(migrations.missing, ['202609280002_decision_evaluation_governance', '202609290002_decision_artifact_governance']);
 });
-

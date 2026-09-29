@@ -76,6 +76,25 @@ function getAssistantTraceEventCopy(event = {}) {
         };
     }
 
+    if (type === 'decision_feedback') {
+        const decisions = Array.isArray(event?.decisions) ? event.decisions.filter(decision => (
+            decision && String(decision.decisionId || '').trim()
+                && Array.isArray(decision.allowedActionIds)
+                && decision.allowedActionIds.filter(Boolean).length > 1
+        )).slice(0, 4) : [];
+        if (!decisions.length) return null;
+        return {
+            tool: 'decision-feedback',
+            placement: 'footer',
+            label: '路由反馈',
+            tone: 'quiet',
+            text: '若本轮检索、工具或处理方式不合适，可提交修正供后续人工核验。',
+            action: 'decision-feedback',
+            actionLabel: '修正本轮路由',
+            decisions
+        };
+    }
+
     if (type === 'rag') {
         if (status === 'hit') {
             return {
@@ -221,6 +240,7 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
         button.dataset.chatTraceAction = copy.action;
         if (copy.userMessageId) button.dataset.chatTraceUserMessageId = String(copy.userMessageId);
         if (copy.routeOverrides) button.dataset.chatTraceRouteOverrides = JSON.stringify(copy.routeOverrides);
+        if (copy.decisions) button.dataset.chatTraceRouteDecisions = JSON.stringify(copy.decisions);
         button.textContent = copy.actionLabel;
         item.appendChild(button);
     }
@@ -231,6 +251,7 @@ function renderAssistantTraceEvent(messageContent, event = {}) {
         button.dataset.chatTraceAction = copy.secondaryAction;
         if (copy.userMessageId) button.dataset.chatTraceUserMessageId = String(copy.userMessageId);
         if (copy.routeOverrides) button.dataset.chatTraceRouteOverrides = JSON.stringify(copy.routeOverrides);
+        if (copy.decisions) button.dataset.chatTraceRouteDecisions = JSON.stringify(copy.decisions);
         button.textContent = copy.secondaryActionLabel;
         item.appendChild(button);
     }
@@ -248,6 +269,10 @@ function renderAssistantRouteMetadata(messageContent, routeMetadata = null) {
         type: 'route',
         status: metadata.shadow ? 'shadow' : 'resolved',
         ...metadata
+    });
+    renderAssistantTraceEvent(messageContent, {
+        type: 'decision_feedback',
+        decisions: metadata.decisions
     });
 }
 
@@ -293,7 +318,7 @@ async function handleAssistantTraceAction(event) {
             }
             action.textContent = '正在继续…';
             action.closest('.message')?.remove();
-            await window.Pivot.moduleApi('chat.execution')?.continueMcpRouteMessage?.(messageId, routeOverrides);
+            await window.Pivot.moduleApi('chat.execution')?.continueMcpRouteMessage?.(messageId, routeOverrides, 'mcp_authorized');
         } catch (error) {
             action.disabled = false;
             action.textContent = '允许并继续';
@@ -315,11 +340,60 @@ async function handleAssistantTraceAction(event) {
             await window.Pivot.moduleApi('chat.execution')?.continueMcpRouteMessage?.(messageId, {
                 ...routeOverrides,
                 excludeTools: true
-            });
+            }, 'mcp_skipped');
         } catch (error) {
             action.disabled = false;
             action.textContent = '直接回答';
             showToast(error.message || '继续普通回答失败', 'error');
+        }
+    }
+    if (target === 'decision-feedback') {
+        let decisions = [];
+        try { decisions = JSON.parse(action.dataset.chatTraceRouteDecisions || '[]'); } catch (_) {}
+        decisions = Array.isArray(decisions) ? decisions.filter(decision => (
+            decision && String(decision.decisionId || '').trim()
+                && Array.isArray(decision.allowedActionIds)
+        )) : [];
+        if (!decisions.length || !currentSessionId) {
+            showToast('当前没有可修正的路由决策。', 'error');
+            return;
+        }
+        const choices = decisions.map((decision, index) => {
+            const alternatives = decision.allowedActionIds.filter(id => id && id !== decision.selectedActionId);
+            return alternatives.length ? `${index + 1}. ${decision.scenario || 'unknown'}：${alternatives.join(' / ')}` : '';
+        }).filter(Boolean);
+        if (!choices.length) return;
+        const selection = window.prompt(`请输入“序号:动作ID”提交路由修正：\n${choices.join('\n')}`, '');
+        if (!selection) return;
+        const match = String(selection).trim().match(/^(\d+)\s*[:：]\s*([a-z][a-z0-9._:-]{0,95})$/i);
+        const decision = match ? decisions[Number.parseInt(match[1], 10) - 1] : null;
+        const correctedActionId = match ? String(match[2]).toLowerCase() : '';
+        if (!decision || !decision.allowedActionIds.includes(correctedActionId) || correctedActionId === decision.selectedActionId) {
+            showToast('请输入列出的序号和与原动作不同的允许动作。', 'warning');
+            return;
+        }
+        action.disabled = true;
+        const originalText = action.textContent;
+        action.textContent = '正在提交…';
+        try {
+            const response = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(currentSessionId)}/decision-feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    decisionId: decision.decisionId,
+                    selectedActionId: decision.selectedActionId,
+                    correctedActionId,
+                    status: 'partial'
+                })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload.error) throw new Error(payload.error || '路由反馈提交失败');
+            action.textContent = '已提交修正';
+            showToast('路由修正已提交，需结合实际结果或人工核验后才会用于训练。', 'success');
+        } catch (error) {
+            action.disabled = false;
+            action.textContent = originalText;
+            showToast(error.message || '路由反馈提交失败', 'error');
         }
     }
     if (target === 'memory') window.Pivot.moduleApi('chat.memoryActions').openChatMemoryManagement?.();

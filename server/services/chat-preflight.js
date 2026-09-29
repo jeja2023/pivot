@@ -13,6 +13,11 @@ function normalizeCapabilityPreference(value) {
     return ['auto', 'enabled', 'disabled'].includes(normalized) ? normalized : '';
 }
 
+function normalizeChatContinuationKind(value) {
+    const kind = String(value || '').trim().toLowerCase();
+    return ['mcp_authorized', 'mcp_skipped'].includes(kind) ? kind : '';
+}
+
 function buildChatRequestState(req) {
     const body = req.body || {};
     const content = body.content;
@@ -33,6 +38,9 @@ function buildChatRequestState(req) {
         regenerateMessageId: Number.isSafeInteger(Number(body.regenerateMessageId)) && Number(body.regenerateMessageId) > 0
             ? Number(body.regenerateMessageId)
             : null,
+        // 授权后继续同一条消息会复用 regenerate 的消息读取机制，但它不是用户
+        // 点击“重新生成”。保留明确来源，避免审计日志误导用户和管理员。
+        continuationKind: normalizeChatContinuationKind(body.continuationKind || body.continuation_kind),
         chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
         ephemeralVoice: body.ephemeralVoice === true,
         voiceSessionId: String(body.voiceSessionId || body.voice_session_id || '').trim().slice(0, 128),

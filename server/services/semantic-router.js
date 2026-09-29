@@ -93,6 +93,23 @@ function isConversationOnlyPrompt(prompt = '') {
         && !/(?:制度|流程|规定|政策|手册|资料库|知识库|数据库|数据表|文件|报表|工具|mcp)/iu.test(text);
 }
 
+function requiresKnowledgeRetrieval(prompt = '') {
+    const text = normalizeRoutePrompt(prompt);
+    if (!text || isConversationOnlyPrompt(text)) return false;
+    const explicitKnowledgeRequest = /(?:知识库|资料库|文档库|内部资料|公司资料).{0,24}(?:检索|查询|查找|查阅|搜索|依据|引用|回答)|(?:检索|查询|查找|查阅|搜索|依据|引用).{0,24}(?:知识库|资料库|文档库|内部资料|公司资料|制度|规定|政策|手册)/iu.test(text);
+    const explicitEnglishKnowledgeRequest = /\b(?:search|look\s*up|retrieve|use|cite|answer\s+from)\b.{0,48}\b(?:knowledge\s*base|internal\s+(?:docs?|polic(?:y|ies)|handbook)|documentation)\b|\b(?:knowledge\s*base|internal\s+(?:docs?|polic(?:y|ies)|handbook))\b.{0,48}\b(?:search|look\s*up|retrieve|use|cite)\b/iu.test(text);
+    // “写一份制度/总结文档”是在创作文本，不应因为含“制度、文档”就检索；
+    // 明确要求“根据知识库写”时则仍由上面的显式意图放行。
+    if (!explicitKnowledgeRequest && !explicitEnglishKnowledgeRequest && /(?:写|撰写|起草|生成|润色|改写|翻译|总结|制定|设计).{0,48}(?:制度|规定|政策|流程|手册|文档|材料|方案|申请|邮件|通知)/iu.test(text)) return false;
+    const controlledKnowledgeQuestion = /(?:公司|本公司|本单位|本部门|内部|现行|现有|组织).{0,18}(?:制度|规定|政策|流程|手册|审批口径|报销规则|预算标准|预算|标准|福利|补贴)/iu.test(text)
+        || /(?:制度|规定|政策|手册|审批流程|报销规则).{0,18}(?:如何|怎样|什么|哪些|要求|规则|审批|报销|适用)/iu.test(text)
+        || /(?:解释|说明|介绍|了解|查询|查阅|依据).{0,24}(?:制度|规定|政策|手册|审批流程|报销规则)/iu.test(text)
+        // 差旅报销、发票合规、审批等是典型的组织受控流程；它们是实际需要
+        // 内部依据的业务问答，但不把一般性“写报告/分析数据”纳入其中。
+        || /(?:差旅|出差|报销|发票|审批|采购|合同|请假|考勤).{0,24}(?:如何|怎样|怎么|哪些|需要|流程|规定|政策|审批|报销|办理)/iu.test(text);
+    return explicitKnowledgeRequest || explicitEnglishKnowledgeRequest || controlledKnowledgeQuestion;
+}
+
 function toolText(tool = {}) {
     return [tool.fullName, tool.name, tool.serverName, tool.serverType, tool.description]
         .map(value => String(value || '').toLowerCase())
@@ -219,7 +236,12 @@ function buildRouteMetadata(plan = {}) {
             const item = {
                 decisionId: String(decision.decisionId || ''),
                 scenario: String(decision.context?.scenario || ''),
-                selectedActionId: String(decision.selectedActionId || '')
+                selectedActionId: String(decision.selectedActionId || ''),
+                allowedActionIds: (decision.context?.candidates || [])
+                    .filter(candidate => candidate?.allowed !== false)
+                    .map(candidate => String(candidate?.id || ''))
+                    .filter(Boolean)
+                    .slice(0, 16)
             };
             if (decision.policy?.suggestedActionId && decision.policy.suggestedActionId !== decision.selectedActionId) {
                 item.suggestedActionId = String(decision.policy.suggestedActionId);
@@ -251,7 +273,7 @@ function buildRouteSseEvent(plan = {}) {
 function createSemanticRouter(deps = {}) {
     const resolveDecision = deps.resolveBusinessDecision || resolveBusinessDecision;
 
-    async function resolveRouteDecisions({ taskState, user, modelCfg = null, state, rag, tools, routeEnabled, shadow, hasExplicitScope, overrides, env, signal }) {
+    async function resolveRouteDecisions({ taskState, user, modelCfg = null, state, rag, tools, routeEnabled, hasExplicitScope, overrides, evaluateRag = false, evaluateTools = false, env, signal }) {
         const ragFallback = rag.action === 'retrieve' ? 'retrieve' : 'skip';
         // 影子模式只禁止改变执行路径，不能缩窄可比较候选；否则学习型提供器
         // 永远只能复述现有路由，无法产生可用于评估的替代建议。
@@ -261,7 +283,9 @@ function createSemanticRouter(deps = {}) {
             buildDecisionActionCandidate('chat.rag', 'skip', { allowed: ragFixed ? ragFallback === 'skip' : true })
         ];
         const toolFallback = tools.action === 'propose' ? 'propose' : tools.action === 'candidate_only' ? 'candidate_only' : 'skip';
-        const toolFixed = !routeEnabled || overrides.excludeTools;
+        // `@工具` 是用户给出的明确范围：智能路由只能在该范围内规划，不能
+        // 改判为 skip。权限、白名单、授权与审批仍在此前的候选治理链路生效。
+        const toolFixed = !routeEnabled || overrides.excludeTools || overrides.tools.length > 0;
         const toolCandidates = [
             buildDecisionActionCandidate('chat.tools', 'propose', { allowed: toolFixed ? toolFallback === 'propose' : Boolean(state.mcpEnabled && tools.candidateTools.length) }),
             buildDecisionActionCandidate('chat.tools', 'candidate_only', { allowed: toolFixed ? toolFallback === 'candidate_only' : Boolean(!state.mcpEnabled && tools.candidates.length) }),
@@ -279,8 +303,8 @@ function createSemanticRouter(deps = {}) {
         }
         const shared = { taskState, tenantId: resolvedTenantId, userId: user?.id ?? null, user, modelCfg, sessionId: state.sessionId || '', env, signal };
         const [ragDecision, toolDecision, nextStepDecision] = await Promise.all([
-            resolveDecision({ ...shared, scenario: 'chat.rag', candidates: ragCandidates, fallbackActionId: ragFallback, actionScores: scoreMap(ragCandidates, ragFallback) }),
-            resolveDecision({ ...shared, scenario: 'chat.tools', candidates: toolCandidates, fallbackActionId: toolFallback, actionScores: scoreMap(toolCandidates, toolFallback) }),
+            evaluateRag ? resolveDecision({ ...shared, scenario: 'chat.rag', candidates: ragCandidates, fallbackActionId: ragFallback, actionScores: scoreMap(ragCandidates, ragFallback) }) : Promise.resolve(null),
+            evaluateTools ? resolveDecision({ ...shared, scenario: 'chat.tools', candidates: toolCandidates, fallbackActionId: toolFallback, actionScores: scoreMap(toolCandidates, toolFallback) }) : Promise.resolve(null),
             resolveDecision({ ...shared, scenario: 'chat.next_step', candidates: nextStepCandidates, fallbackActionId: 'direct_answer', actionScores: scoreMap(nextStepCandidates, 'direct_answer') })
         ]);
         return { rag: ragDecision, tools: toolDecision, nextStep: nextStepDecision };
@@ -315,8 +339,13 @@ function createSemanticRouter(deps = {}) {
         let queryVector = null;
         let embeddingDurationMs = 0;
         let embeddingError = '';
-        const needAutoRag = routeEnabled && config.autoRagEnabled && state.ragEnabled && !hasExplicitScope && !overrides.excludeRag && !isConversationOnlyPrompt(cleanPrompt);
-        const needAutoTools = routeEnabled && config.autoToolDiscoveryEnabled && !overrides.excludeTools && !isConversationOnlyPrompt(cleanPrompt);
+        const knowledgeRequested = requiresKnowledgeRetrieval(cleanPrompt);
+        const explicitToolIntent = cleanPrompt ? detectExplicitMcpCapabilityIntent(cleanPrompt) : false;
+        const toolRequested = explicitToolIntent || overrides.tools.length > 0;
+        // 路由本身是按需增强，不是每一轮对话的前置成本。普通问答不读取
+        // 目录、不计算 embedding，也不把“可能有工具”转换为授权弹窗。
+        const needAutoRag = routeEnabled && config.autoRagEnabled && state.ragEnabled && !hasExplicitScope && !overrides.excludeRag && knowledgeRequested;
+        const needAutoTools = routeEnabled && config.autoToolDiscoveryEnabled && !overrides.excludeTools && toolRequested;
 
         if ((needAutoRag || needAutoTools) && cleanPrompt) {
             const embeddingConfig = getEmbedding(user?.id || null);
@@ -358,8 +387,8 @@ function createSemanticRouter(deps = {}) {
             rag.action = 'retrieve';
             rag.reasonCode = 'legacy_rag_scope';
             rag.scope = normalizeRetrievalScope(state.ragScope || {});
-        } else if (isConversationOnlyPrompt(cleanPrompt)) {
-            rag.reasonCode = 'conversation_only';
+        } else if (!needAutoRag) {
+            rag.reasonCode = isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'rag_not_requested';
         } else {
             try {
                 const embeddingConfig = getEmbedding(user?.id || null);
@@ -402,8 +431,15 @@ function createSemanticRouter(deps = {}) {
                     catalogIndex.scheduleRefresh(entries, { user, embeddingConfig });
                 }
             } catch (error) {
-                rag.reasonCode = 'rag_router_error';
-                logger.warn({ err: error.message, userId: user?.id }, '知识库自适应路由失败，已跳过自动范围缩小');
+                // 目录索引只是用来缩小检索范围的增强层。读取失败（例如迁移、
+                // 数据库瞬断或后台刷新）绝不能让原本已经启用的 RAG 整体消失。
+                // 这里退回旧的全范围检索；底层检索仍会执行访问控制。
+                rag.action = 'retrieve';
+                rag.scope = normalizeRetrievalScope(state.ragScope || {});
+                rag.reasonCode = 'rag_router_fallback_legacy';
+                rag.routeError = true;
+                rag.fallback = 'legacy_on_router_error';
+                logger.warn({ err: error.message, userId: user?.id }, '知识库自适应路由失败，已回退原有全范围检索');
             }
         }
 
@@ -414,7 +450,6 @@ function createSemanticRouter(deps = {}) {
             candidates: [],
             candidateTools: []
         };
-        const explicitToolIntent = cleanPrompt ? detectExplicitMcpCapabilityIntent(cleanPrompt) : false;
         if (overrides.excludeTools) {
             tools.reasonCode = 'explicit_tool_excluded';
         } else if (!state.mcpEnabled && (!routeEnabled || !config.autoToolDiscoveryEnabled)) {
@@ -424,6 +459,8 @@ function createSemanticRouter(deps = {}) {
             tools.action = 'propose';
             tools.reasonCode = 'legacy_tool_candidates';
             tools.candidateTools = legacyTools;
+        } else if (!needAutoTools) {
+            tools.reasonCode = isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'tool_not_requested';
         } else {
             const excluded = new Set(overrides.excludedTools);
             let permitted = legacyTools.filter(tool => !excluded.has(String(tool?.fullName || '')));
@@ -444,7 +481,13 @@ function createSemanticRouter(deps = {}) {
                         .slice(0, config.maxToolCandidates);
                     const best = scored[0];
                     const forced = overrides.tools.length > 0 || (explicitToolIntent && (best?.score >= 0.2 || best?.rule > 0));
-                    if (best && (forced || best.score >= config.toolThreshold)) {
+                    // 未授权时，只有可操作的外部能力请求才值得中断对话要求确认。
+                    // 泛泛提及“数据库表”“工具库”可能只是概念问答；若先弹授权、
+                    // 授权后规划器又返回 none，会形成误导性的两阶段矛盾。
+                    const needsMcpConsent = !state.mcpEnabled;
+                    const qualified = forced || best.score >= config.toolThreshold;
+                    const consentWarranted = !needsMcpConsent || explicitToolIntent || overrides.tools.length > 0;
+                    if (best && qualified && consentWarranted) {
                         tools.action = state.mcpEnabled ? 'propose' : 'candidate_only';
                         tools.confidence = best.score;
                         tools.reasonCode = tools.reasonCode || (best.rule > 0 ? 'tool_rule_match' : best.semantic > 0 ? 'tool_semantic_match' : 'tool_lexical_match');
@@ -465,7 +508,9 @@ function createSemanticRouter(deps = {}) {
                 } catch (error) {
                     tools.reasonCode = 'tool_router_error';
                     logger.warn({ err: error.message, userId: user?.id }, '工具自适应路由失败，已回退现有工具候选链路');
-                    tools.action = state.mcpEnabled ? 'propose' : 'candidate_only';
+                    // 目录异常不等于用户需要工具。只有本轮已明确提出外部能力
+                    // 请求，才保留授权/执行入口；其余情况直接回答。
+                    tools.action = state.mcpEnabled ? 'propose' : explicitToolIntent ? 'candidate_only' : 'skip';
                     tools.candidateTools = state.mcpEnabled ? legacyTools : [];
                 }
             }
@@ -498,6 +543,8 @@ function createSemanticRouter(deps = {}) {
                 shadow,
                 hasExplicitScope,
                 overrides,
+                evaluateRag: needAutoRag,
+                evaluateTools: needAutoTools && (tools.action === 'propose' || tools.action === 'candidate_only'),
                 env,
                 signal
             });
@@ -509,7 +556,9 @@ function createSemanticRouter(deps = {}) {
                 rag.confidence = routeDecisions.rag.policy.confidence;
                 rag.reasonCode = 'decision_policy_' + routeDecisions.rag.policy.reasonCode;
             }
-            if (!shadow && routeDecisions?.tools?.policy?.applied && ['propose', 'candidate_only', 'skip'].includes(selectedToolAction) && selectedToolAction !== tools.action) {
+            // 即便上游决策提供器异常返回了未允许的动作，也不能推翻用户用
+            // `@工具` 指定的受治理候选。显式排除同样由既有 fallback 固定。
+            if (!shadow && !overrides.tools.length && routeDecisions?.tools?.policy?.applied && ['propose', 'candidate_only', 'skip'].includes(selectedToolAction) && selectedToolAction !== tools.action) {
                 tools.action = selectedToolAction;
                 tools.confidence = routeDecisions.tools.policy.confidence;
                 tools.reasonCode = 'decision_policy_' + routeDecisions.tools.policy.reasonCode;
@@ -564,7 +613,7 @@ function createSemanticRouter(deps = {}) {
             embeddingDurationMs,
             ragCandidates: rag.collections.length,
             toolCandidates: tools.candidates.length,
-            error: ['rag_router_error', 'tool_router_error'].includes(rag.reasonCode) || ['rag_router_error', 'tool_router_error'].includes(tools.reasonCode)
+            error: rag.routeError === true || ['tool_router_error'].includes(tools.reasonCode)
         });
         return plan;
     }
@@ -580,6 +629,7 @@ module.exports = {
     buildRouteSseEvent,
     createSemanticRouter,
     isConversationOnlyPrompt,
+    requiresKnowledgeRetrieval,
     normalizeRouteOverrides,
     scoreTool
 };

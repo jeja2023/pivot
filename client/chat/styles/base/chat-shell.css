@@ -96,37 +96,42 @@ body.is-main-workspace-full .chat-container {
 .context-usage-btn {
     position: relative;
     width: 30px;
+    min-width: 30px;
     height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 0;
     border: none;
     background: transparent;
+    color: var(--text-muted, #64748b);
     cursor: pointer;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: background 0.2s, box-shadow 0.2s, color 0.2s;
     border-radius: 50%;
 }
 .context-usage-btn:hover {
-    background: rgba(15, 23, 42, 0.05);
+    background: rgba(236, 253, 245, 0.92);
+    color: var(--primary, #059669);
+    box-shadow: 0 2px 7px rgba(15, 23, 42, 0.08);
 }
 
 .context-mini-ring {
     --progress: 0;
     --ring-color: var(--primary);
-    width: 17px;
-    height: 17px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    display: grid;
-    place-items: center;
+    border: 2px solid rgba(100, 116, 139, 0.68);
     background: 
-        radial-gradient(closest-side, white 72%, transparent 75%),
+        radial-gradient(closest-side, var(--surface, #fff) 66%, transparent 70%),
         conic-gradient(var(--ring-color) calc(var(--progress) * 1%), rgba(148, 163, 184, 0.25) 0);
     transition: --progress 0.3s ease;
 }
 
 .context-usage-btn.is-warn .context-mini-ring { --ring-color: #f59e0b; }
 .context-usage-btn.is-critical .context-mini-ring { --ring-color: #ef4444; }
+.context-usage-btn.is-empty .context-mini-ring { opacity: 0.78; }
 .context-usage-btn.is-busy {
     pointer-events: none;
     opacity: 0.78;
@@ -521,7 +526,7 @@ body.is-main-workspace-full .chat-container {
     .input-wrapper textarea { min-height: 56px; height: 56px; padding: 10px 12px; }
     .input-actions { gap: 2px; padding: 4px 4px 10px; }
     .chat-tool-toggle,
-    .context-usage-btn { width: 28px; height: 28px; }
+    .context-usage-btn { min-width: 28px; width: 28px; height: 28px; padding: 0; border-radius: 50%; }
     .input-model-selector { max-width: 96px; }
     .input-model-selector .model-selector-trigger {
         width: auto;

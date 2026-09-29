@@ -154,11 +154,12 @@ function normalizeProviderResult(value, { providerId, providerVersion = '', cand
     };
 }
 
-function createScoreDecisionProvider({ id = 'existing-router', version = 'heuristic-v1', scores = {}, selectedActionId = '', weight = 1 } = {}) {
+function createScoreDecisionProvider({ id = 'existing-router', version = 'heuristic-v1', scores = {}, selectedActionId = '', weight = 1, isBaseline = false } = {}) {
     return {
         id: safeText(id, 80) || 'existing-router',
         version: safeText(version, 128),
         weight: Math.max(0, Number(weight) || 0),
+        isBaseline: isBaseline === true,
         async decide(context) {
             return {
                 selectedActionId,
@@ -257,30 +258,57 @@ function parseStructuredDecisionJson(value) {
     return {};
 }
 
-function createStructuredModelDecisionProvider({ id = 'qwen', version = '', modelCfg = null, user = null, invoke = null, maxTokens = 256, weight = 1 } = {}) {
+function createStructuredModelDecisionProvider({ id = 'qwen', version = '', modelCfg = null, user = null, invoke = null, maxTokens = 256, timeoutMs = 1200, weight = 1 } = {}) {
     return {
         id: safeText(id, 80) || 'qwen',
         version: safeText(version || modelCfg?.model_name || modelCfg?.name, 128),
         weight: Math.max(0, Number(weight) || 0),
         async decide(context, { signal } = {}) {
             if (!modelCfg || typeof invoke !== 'function') throw new Error('provider_not_configured');
+            const controller = new AbortController();
+            let timedOut = false;
+            const abortFromCaller = () => controller.abort(signal?.reason || new Error('provider_aborted'));
+            if (signal?.aborted) abortFromCaller();
+            else signal?.addEventListener?.('abort', abortFromCaller, { once: true });
+            let timer = null;
+            const timeout = new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    timedOut = true;
+                    controller.abort(new Error('provider_timeout'));
+                    const timeoutError = new Error('provider_timeout');
+                    timeoutError.code = 'DECISION_PROVIDER_TIMEOUT';
+                    reject(timeoutError);
+                }, Math.max(100, Number(timeoutMs) || 1200));
+            });
             const safe = buildDecisionProviderContext(context, { includeRoutingText: context?.requestState?.routingText !== undefined });
             const messages = [
                 { role: 'system', content: '你是 Pivot 的受控业务动作决策器。仅输出 JSON 对象：{"selectedActionId":"候选动作ID","scores":{"候选动作ID":0到1}}。只能从 candidates 中选；不得解释、不得调用工具、不得输出请求原文。' },
                 { role: 'user', content: JSON.stringify(safe) }
             ];
-            const output = await invoke(modelCfg, messages, {
-                user,
-                maxTokens: Math.max(64, Math.min(Number(maxTokens) || 256, 1024)),
-                temperature: 0,
-                enableThinking: false,
-                responseFormat: { type: 'json_object' },
-                signal
-            });
-            return {
-                ...parseStructuredDecisionJson(output),
-                metadata: { model: modelCfg.model_name || modelCfg.name || 'qwen', configurationVersion: version }
-            };
+            try {
+                const output = await Promise.race([invoke(modelCfg, messages, {
+                    user,
+                    maxTokens: Math.max(64, Math.min(Number(maxTokens) || 256, 1024)),
+                    temperature: 0,
+                    enableThinking: false,
+                    responseFormat: { type: 'json_object' },
+                    signal: controller.signal
+                }), timeout]);
+                return {
+                    ...parseStructuredDecisionJson(output),
+                    metadata: { model: modelCfg.model_name || modelCfg.name || 'qwen', configurationVersion: version }
+                };
+            } catch (error) {
+                if (timedOut) {
+                    const timeoutError = new Error('provider_timeout');
+                    timeoutError.code = 'DECISION_PROVIDER_TIMEOUT';
+                    throw timeoutError;
+                }
+                throw error;
+            } finally {
+                clearTimeout(timer);
+                signal?.removeEventListener?.('abort', abortFromCaller);
+            }
         }
     };
 }
@@ -338,7 +366,8 @@ async function evaluateDecisionProviders({ providers = [], context = {}, signal 
                     candidates,
                     durationMs: Date.now() - startedAt
                 }),
-                weight: Math.max(0, Number(provider.weight) || 0)
+                weight: Math.max(0, Number(provider.weight) || 0),
+                isBaseline: provider.isBaseline === true
             };
         } catch (error) {
             return {
@@ -347,9 +376,10 @@ async function evaluateDecisionProviders({ providers = [], context = {}, signal 
                     providerVersion: provider.version,
                     candidates,
                     durationMs: Date.now() - startedAt,
-                    error: error?.name === 'AbortError' ? 'provider_timeout' : error?.message || 'provider_error'
+                    error: error?.name === 'AbortError' || error?.code === 'DECISION_PROVIDER_TIMEOUT' ? 'provider_timeout' : error?.message || 'provider_error'
                 }),
-                weight: Math.max(0, Number(provider.weight) || 0)
+                weight: Math.max(0, Number(provider.weight) || 0),
+                isBaseline: provider.isBaseline === true
             };
         }
     }));

@@ -24,6 +24,18 @@ test('聊天首屏不再内嵌大型隐藏工作区 DOM', () => {
     });
 });
 
+test('输入框模型选择器左侧保留单一圆形上下文窗口用量按钮', () => {
+    const root = path.resolve(__dirname, '..');
+    const shell = fs.readFileSync(path.join(root, 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
+    const ui = fs.readFileSync(path.join(root, 'client', 'chat', 'ui.js'), 'utf8');
+    const styles = fs.readFileSync(path.join(root, 'client', 'chat', 'styles', 'base', 'chat-shell.css'), 'utf8');
+    assert.match(shell, /id="context-usage-pill"[\s\S]*id="context-usage-ring"[\s\S]*id="model-selector-container"/);
+    assert.doesNotMatch(shell, /context-usage-value/);
+    assert.doesNotMatch(ui, /context-usage-value/);
+    assert.match(styles, /\.context-usage-btn\s*\{[\s\S]*width:\s*30px/);
+    assert.match(styles, /\.context-mini-ring\s*\{[\s\S]*width:\s*18px/);
+});
+
 test('按需工作区模板只能从固定白名单读取并递归展开片段', () => {
     assert.deepEqual(Object.keys(lazyWorkspaceTemplates), ['apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'settings']);
     assert.match(loadChatWorkspaceTemplate('apps'), /id="apps-workbench-modal"/);

@@ -33,9 +33,17 @@ function calibrateScore(score, calibration = {}) {
 
 function aggregateProviderScores(candidates = [], providerOutputs = [], calibration = {}) {
     const aggregate = Object.fromEntries(candidates.map(candidate => [candidate.id, { score: 0, weight: 0, support: 0 }]));
-    providerOutputs.forEach(output => {
+    const usable = (Array.isArray(providerOutputs) ? providerOutputs : []).filter(output => {
         const weight = Math.max(0, Number(output?.weight) || 0);
-        if (!weight || output?.error) return;
+        return weight > 0 && !output?.error;
+    });
+    // 既有路由是回退基线，不应和通过独立评测的学习型提供器做等权投票。
+    // 否则两者意见相反时，即使学习模型给出 1.0 分，默认阈值下也永远无法
+    // 改变路径。没有可用学习型输出时才使用基线，保证影子观察仍有可读建议。
+    const learned = usable.filter(output => output?.isBaseline !== true);
+    const contributing = learned.length ? learned : usable;
+    contributing.forEach(output => {
+        const weight = Math.max(0, Number(output?.weight) || 0);
         candidates.forEach(candidate => {
             const raw = Number(output?.scores?.[candidate.id] || 0);
             const score = calibrateScore(raw, calibration);

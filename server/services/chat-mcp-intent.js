@@ -14,6 +14,48 @@ function createMcpIntentHelpers(deps = {}) {
         return { wantsChart, wantsReport };
     }
 
+    // 聊天中的“工具”既可能是实际执行意图，也可能只是让模型讲解、写示例或
+    // 生成普通文本。只有前者才应该中断本轮回答来请求 MCP 授权；否则用户会被
+    // 迫使在“允许并继续/直接回答”间作一次没有意义的选择。
+    function isInstructionalOrCodeRequest(userPrompt = '') {
+        const prompt = String(userPrompt || '').toLowerCase().trim();
+        if (!prompt) return false;
+        const capabilityTopic = /(?:\bsql\b|代码|语句|脚本|\bapi\b|接口|webhook|\bmcp\b|工具库|能力库|工具调用|数据库表?|数据表)/i;
+        if (!capabilityTopic.test(prompt)) return false;
+        const instructional = /(?:什么是|是什么|介绍|说明|帮助|如何|怎么|为什么|区别|原理|教程|示例|样例|演示|语法|模板|优化|调试|学习|设计)/i;
+        const asksForCode = /(?:写|编写|生成|提供|给我).{0,36}(?:代码|语句|脚本|demo|javascript|typescript|python|java|\bsql\b)/i;
+        // “生成柱状图”“生成报告”也会含“生成”，但它们不一定是代码示例。
+        // 将创作类动词限制为明确的代码载体，避免压制真实数据查询和图表请求。
+        if (!instructional.test(prompt) && !asksForCode.test(prompt)) return false;
+        // “请执行/调用 API 并返回结果”仍是可执行操作；但“如何调用 API”
+        // 这类问法只是教学，不能因为含有“调用”二字就弹出授权。
+        const explicitExecution = /(?:请|帮我|现在|直接|给我).{0,12}(?:执行|运行|调用|访问|读取|查询|发送|提交).{0,36}(?:数据库|数据表|\bapi\b|接口|webhook|工具|\bmcp\b|网址|网页)/i;
+        const requestsExample = /(?:示例|样例|演示|教程|语法|原理|代码片段|code\s*sample)/i.test(prompt);
+        return !explicitExecution.test(prompt) || requestsExample;
+    }
+
+    function requiresDocumentArtifact(userPrompt = '') {
+        const prompt = String(userPrompt || '').toLowerCase();
+        return /(?:导出|下载|保存|创建|生成|输出|制作).{0,24}(?:\.docx\b|\.pdf\b|\.xlsx?\b|文件|附件|文档)/i.test(prompt)
+            || /(?:使用|套用).{0,24}(?:报告|文档)?模板/i.test(prompt);
+    }
+
+    function requiresExternalChartRendering(userPrompt = '') {
+        const prompt = String(userPrompt || '').toLowerCase();
+        const wantsChart = /图表|画图|绘图|可视化|趋势图|折线图|柱状图|饼图|面积图|chart|visuali[sz]e|plot|graph|echarts?/i.test(prompt);
+        if (!wantsChart) return false;
+        const requestsArtifact = /(?:交互式|可下载|导出|渲染|嵌入|发布|仪表盘|echarts?)/i.test(prompt);
+        const externalSource = /(?:数据库|数据表|查询结果|接口|\bapi\b|本机文件|报表目录|上传文件|实时数据)/i.test(prompt);
+        return requestsArtifact || externalSource;
+    }
+
+    function requiresExternalOperation(userPrompt = '') {
+        const prompt = String(userPrompt || '').toLowerCase();
+        // 侧效操作必须具备外部目标，避免把“写一封通知”“创建一个方案”之类
+        // 纯文本创作误送进工具授权。
+        return /(?:发送|通知|提交|发布|更新|写入|删除|创建|修改|审批).{0,48}(?:给|至|到|系统|平台|接口|webhook|邮箱|邮件|短信|群(?:聊)?|人员|客户|订单|记录|数据库)/i.test(prompt);
+    }
+
     function detectTableInventoryIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
         const mentionsTable = /数据表|数据库表|表清单|表列表|所有表|全部表|表数量|表的数量|多少张表|几张表|几(\s*)个表|list\s+tables|show\s+tables|\btables?\b/.test(prompt);
@@ -73,6 +115,7 @@ function createMcpIntentHelpers(deps = {}) {
     // 检测用户是否明确要求查询数据库（即使规划器返回 none 也应强行走数据工具）
     function detectStrongDataQueryIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
+        if (isInstructionalOrCodeRequest(prompt)) return false;
         // 排除常见写作生成 SQL 语句或教学示例请求
         if (/^(?:请(?:帮我)?)?(?:写|编写|生成|起草|提供|润色|解释|优化).*(?:sql|代码|语句|脚本|demo)[片段示例演示]*$/i.test(prompt.trim())) {
             return false;
@@ -84,13 +127,24 @@ function createMcpIntentHelpers(deps = {}) {
         const hasQueryTable = /(?:查询|查找|统计|从)\s*[`"']?([a-zA-Z0-9_]{2,})[`"']?\s*表(?:\s*(?:中|里|数据))?/i.test(prompt);
         const hasTableRef = hasSqlKeywords || hasDbTableRef || (hasQueryTable && !nonDbTableExclude.test(prompt));
 
+        const hasDataOperation = /(?:查询|查找|统计|分组|计数|汇总|列出|读取|获取|筛选|导出|下载|查看|\bquery\b|\bfind\b|\blist\b|\bread\b|\bfetch\b|\bfilter\b|\bexport\b|\bdownload\b)/i.test(prompt);
         const hasAggregation = /(?:统计|分组|数量|计数|汇总|count|group|sum|avg)/i.test(prompt);
         const hasColumn = /(?:表字段|数据字段|字段|column)\s*[:：`"']?[\w]+|按照\s*[`"']?[\w]+[`"']?\s*(?:字段|列)\s*(?:分组|统计)|根据\s*[`"']?[\w]+[`"']?\s*(?:字段|列)\s*(?:分组|统计)/i.test(prompt);
-        return detectTableInventoryIntent(userPrompt) || hasTableRef || (hasAggregation && hasColumn && /数据库|数据表|表\b/i.test(prompt));
+        // 未提及“数据库/表”的自然语言查询也可能是在要实时业务数据；但必须
+        // 有足够具体的业务对象，避免把“统计一下有哪些问题”之类的写作请求
+        // 误认为数据工具调用。
+        const hasConcreteBusinessDataTarget = /(?:订单|客户|用户|销售(?:额|量)?|库存|余额|账单|账款|发票|员工|考勤|工单|交易|日志|记录|明细|指标|数据|\borders?\b|\bcustomers?\b|\bsales\b|\binventory\b|\bbalance\b|\binvoices?\b|\bemployees?\b|\battendance\b|\btickets?\b|\btransactions?\b|\brecords?\b|\bmetrics?\b|\bdata\b)/i.test(prompt);
+        // 单纯解释“数据库表是什么”、编写 SQL 示例等不需要真实数据访问；只有
+        // 明确要求读、查、列、统计实际数据或结构时才触发授权与工具执行。
+        return detectTableInventoryIntent(userPrompt)
+            || (hasTableRef && (hasDataOperation || hasAggregation || hasColumn))
+            || (hasDataOperation && hasConcreteBusinessDataTarget)
+            || (hasAggregation && hasColumn && /数据库|数据表|表\b/i.test(prompt));
     }
 
     function detectExplicitMcpCapabilityIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
+        if (isInstructionalOrCodeRequest(prompt)) return false;
         if (/^(?:请(?:帮我)?)?(?:写|编写|生成|起草|提供|润色|解释|优化).*(?:sql|代码|语句|脚本|demo)[片段示例演示]*$/i.test(prompt.trim())) {
             return false;
         }
@@ -98,18 +152,17 @@ function createMcpIntentHelpers(deps = {}) {
             && !/数据库|数据表|sql\b|mcp|工具|本地文件|报表目录|本机|折线图|柱状图|饼图|图表/i.test(prompt)) {
             return false;
         }
-        const intent = getMcpToolIntent(prompt);
-        const wantsChartOutput = intent.wantsChart && /生成|画|绘|可视化|展示|呈现|创建|输出|做|build|create|make|plot|visuali[sz]e/i.test(prompt);
-        const wantsReportOutput = intent.wantsReport;
-        const wantsDataOperation = /查询|查找|统计|计数|列出|读取|筛选|分析|汇总|调用|请求|select\s|show\s|describe\s|count\s/i.test(prompt)
+        const wantsDataOperation = /查询|查找|统计|计数|列出|读取|筛选|调用|请求|执行|运行|获取|发送|提交|访问|select\s|show\s|describe\s|count\s|\bquery\b|\bfind\b|\blist\b|\bread\b|\bfetch\b|\bcall\b|\bexecute\b|\brun\b|\bvisit\b/i.test(prompt)
             && /数据库|数据表|数据库表|sql\b|集合|collections?|api|接口|webhook/i.test(prompt);
+        const explicitToolExecution = /(?:调用|执行|运行|使用).{0,18}(?:工具|工具库|能力库|\bmcp\b)|\b(?:use|call|execute|run)\b.{0,24}\b(?:tool|tools|mcp)\b/i.test(prompt);
         return detectStrongDataQueryIntent(userPrompt)
             || detectReportFileInventoryIntent(userPrompt)
-            || wantsChartOutput
-            || wantsReportOutput
+            || requiresExternalChartRendering(userPrompt)
+            || requiresDocumentArtifact(userPrompt)
+            || requiresExternalOperation(userPrompt)
             || wantsDataOperation
             || detectBrowserVisitIntent(userPrompt)
-            || /工具库|能力库|mcp|工具调用|调用工具/i.test(prompt);
+            || explicitToolExecution;
     }
 
     // 从用户自然语言中尝试提取表名
@@ -364,6 +417,7 @@ function createMcpIntentHelpers(deps = {}) {
         buildFallbackListTablesInput,
         detectCollectionInventoryIntent,
         detectExplicitMcpCapabilityIntent,
+        isInstructionalOrCodeRequest,
         detectLocalReportFileInventoryIntent,
         detectReportFileInventoryIntent,
         detectStrongDataQueryIntent,

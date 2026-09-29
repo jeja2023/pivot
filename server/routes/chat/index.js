@@ -201,6 +201,7 @@ function createChatRouter({
             ragScope,
             chatMode,
             regenerateMessageId,
+            continuationKind,
             ephemeralVoice,
             voiceSessionId
         } = chatState;
@@ -242,7 +243,7 @@ function createChatRouter({
             );
         });
 
-        req.log.info({ sessionId, userId, modelId, regenerate, contentLength: modelContent.length }, '处理对话请求');
+        req.log.info({ sessionId, userId, modelId, regenerate, continuationKind, contentLength: modelContent.length }, '处理对话请求');
 
         // --- 立即建立 SSE 连接 ---
         const sse = createSseResponseWriter(res);
@@ -379,7 +380,12 @@ function createChatRouter({
         }
 
         await touchSession(sessionId);
-        logAction(req, regenerate ? '重新生成回答' : '发送消息', `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}`);
+        const audit = continuationKind === 'mcp_authorized'
+            ? { action: '工具授权后继续处理', detail: `用户授权工具库后继续处理会话: ${sessionId}` }
+            : continuationKind === 'mcp_skipped'
+                ? { action: '跳过工具后继续回答', detail: `用户选择直接回答后继续处理会话: ${sessionId}` }
+                : { action: regenerate ? '重新生成回答' : '发送消息', detail: `${regenerate ? '重新生成' : '发送消息到'}会话: ${sessionId}` };
+        logAction(req, audit.action, audit.detail);
 
         chatTrace.addSpan('preflight', { modelId: modelCfg.id });
 

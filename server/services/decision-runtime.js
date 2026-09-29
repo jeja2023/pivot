@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { readTypedEnv } = require('../config/env-registry');
 const { createDecisionId, createHttpDecisionProvider, createLinearDecisionProvider, createScoreDecisionProvider, createStructuredModelDecisionProvider, evaluateDecisionProviders, sanitizeDecisionContext } = require('./decision-provider');
 const { computeDecisionModelHash, loadLocalLinearDecisionModel } = require('./decision-light-model');
-const { getActiveDecisionModelArtifact, isDecisionModelArtifactActive } = require('./decision-model-registry');
+const { artifactScopeAllowsTenant, getActiveDecisionModelArtifact, isDecisionModelArtifactActive } = require('./decision-model-registry');
 const { getDecisionPreference } = require('./decision-preferences');
 const { getActiveDecisionPolicyArtifact } = require('./decision-policy-registry');
 const { callModelText } = require('./agent-model');
@@ -12,6 +12,7 @@ const { applyDecisionPolicy } = require('./decision-policy');
 const { recordDecision } = require('./decision-observability');
 
 const layaConcurrency = new Map();
+const qwenConcurrency = new Map();
 
 function stableRolloutBucket(value) {
     return crypto.createHash('sha256').update(String(value || '')).digest()[0] % 100;
@@ -26,37 +27,65 @@ function isDecisionActiveForScope({ config, scenario, tenantId, sessionId, userI
     return stableRolloutBucket(tenantId + ':' + sessionId + ':' + userId) < Math.max(0, Number(config.rolloutPercent) || 0);
 }
 
-function acquireLayaSlot(limit) {
-    const key = String(limit || 1);
-    const current = layaConcurrency.get(key) || 0;
-    if (current >= limit) return false;
-    layaConcurrency.set(key, current + 1);
+function acquireProviderSlot(slots, limit) {
+    const safeLimit = Math.max(1, Number.parseInt(limit, 10) || 1);
+    const key = String(safeLimit);
+    const current = slots.get(key) || 0;
+    if (current >= safeLimit) return false;
+    slots.set(key, current + 1);
     return true;
 }
 
-function releaseLayaSlot(limit) {
-    const key = String(limit || 1);
-    const current = layaConcurrency.get(key) || 0;
-    if (current <= 1) layaConcurrency.delete(key);
-    else layaConcurrency.set(key, current - 1);
+function releaseProviderSlot(slots, limit) {
+    const key = String(Math.max(1, Number.parseInt(limit, 10) || 1));
+    const current = slots.get(key) || 0;
+    if (current <= 1) slots.delete(key);
+    else slots.set(key, current - 1);
 }
 
-async function isLocalLightArtifactEligible(model, config, deps = {}) {
+function acquireLayaSlot(limit) {
+    return acquireProviderSlot(layaConcurrency, limit);
+}
+
+function releaseLayaSlot(limit) {
+    releaseProviderSlot(layaConcurrency, limit);
+}
+
+function acquireQwenSlot(limit) {
+    return acquireProviderSlot(qwenConcurrency, limit);
+}
+
+function releaseQwenSlot(limit) {
+    releaseProviderSlot(qwenConcurrency, limit);
+}
+
+function resolveTenantScopeArgs(tenantIdOrDeps = null, deps = {}) {
+    if (tenantIdOrDeps && typeof tenantIdOrDeps === 'object' && !Array.isArray(tenantIdOrDeps)) {
+        return { tenantId: null, deps: tenantIdOrDeps };
+    }
+    const tenantId = Number.parseInt(tenantIdOrDeps, 10);
+    return { tenantId: Number.isSafeInteger(tenantId) && tenantId > 0 ? tenantId : null, deps: deps || {} };
+}
+
+async function isLocalLightArtifactEligible(model, config, tenantIdOrDeps = null, injectedDeps = {}) {
+    const { tenantId, deps } = resolveTenantScopeArgs(tenantIdOrDeps, injectedDeps);
     if (config.mode !== 'active' || config.requireActiveArtifact !== true) return true;
     try {
-        const artifact = await withDecisionTimeout((deps.getActiveDecisionModelArtifact || getActiveDecisionModelArtifact)('light-linear'), config.artifactTimeoutMs);
+        const artifact = await withDecisionTimeout((deps.getActiveDecisionModelArtifact || getActiveDecisionModelArtifact)('light-linear', { tenantId, fresh: true }), config.artifactTimeoutMs);
         return Boolean(artifact
             && String(artifact.model_version || '') === String(model?.modelVersion || '')
-            && String(artifact.weights_hash || '') === computeDecisionModelHash(model));
+            && String(artifact.weights_hash || '') === computeDecisionModelHash(model)
+            && (deps.artifactScopeAllowsTenant || artifactScopeAllowsTenant)(artifact, tenantId));
     } catch (_) {
         return false;
     }
 }
 
-async function isLearningProviderEligible(providerId, modelVersion, config, deps = {}) {
+async function isLearningProviderEligible(providerId, modelVersion, config, tenantIdOrDeps = null, injectedDeps = {}) {
+    const { tenantId, deps } = resolveTenantScopeArgs(tenantIdOrDeps, injectedDeps);
     if (config.mode !== 'active' || config.requireActiveArtifact !== true) return true;
     try {
-        return await withDecisionTimeout((deps.isDecisionModelArtifactActive || isDecisionModelArtifactActive)(providerId, modelVersion), config.artifactTimeoutMs);
+        return await withDecisionTimeout((deps.isDecisionModelArtifactActive || isDecisionModelArtifactActive)(providerId, modelVersion, { tenantId, fresh: true }), config.artifactTimeoutMs);
     } catch (_) {
         return false;
     }
@@ -86,7 +115,9 @@ async function resolvePolicyArtifactConfiguration(config = {}, deps = {}) {
     };
     if (config.useActivePolicyArtifact !== true) return { ...fallback, artifactId: '', artifactStatus: 'env_only', activeEligible: config.mode !== 'active' };
     try {
-        const artifact = await withDecisionTimeout((deps.getActiveDecisionPolicyArtifact || getActiveDecisionPolicyArtifact)(deps), config.artifactTimeoutMs);
+        // active 灰度不接受进程内缓存的过期策略制品：另一实例的回滚必须在
+        // 下一轮决策就生效，而不是等 30 秒 TTL。
+        const artifact = await withDecisionTimeout((deps.getActiveDecisionPolicyArtifact || getActiveDecisionPolicyArtifact)({ ...deps, fresh: config.mode === 'active' }), config.artifactTimeoutMs);
         if (!artifact?.policyConfig) return { ...fallback, artifactId: '', artifactStatus: 'unavailable', activeEligible: false };
         return {
             ...fallback,
@@ -139,6 +170,8 @@ function getDecisionRuntimeConfig(env = process.env) {
             enabled: readTypedEnv('PIVOT_QWEN_DECISION_ENABLED', env),
             version: readTypedEnv('PIVOT_QWEN_DECISION_VERSION', env),
             maxTokens: readTypedEnv('PIVOT_QWEN_DECISION_MAX_TOKENS', env),
+            timeoutMs: readTypedEnv('PIVOT_QWEN_DECISION_TIMEOUT_MS', env),
+            maxConcurrent: readTypedEnv('PIVOT_QWEN_DECISION_MAX_CONCURRENT', env),
             weight: readTypedEnv('PIVOT_QWEN_DECISION_WEIGHT', env)
         },
         laya: {
@@ -178,7 +211,8 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
         version: baselineVersion,
         scores: actionScores,
         selectedActionId: fallbackActionId,
-        weight: 1
+        weight: 1,
+        isBaseline: true
     })];
     const preparationOutputs = [];
     if (config.mode !== 'disabled' && config.light?.enabled) {
@@ -187,7 +221,7 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
                 rootDir: config.light.modelRoot,
                 modelFile: config.light.modelFile
             });
-            if (await isLocalLightArtifactEligible(lightModel, config, deps)) {
+            if (await isLocalLightArtifactEligible(lightModel, config, tenantId, deps)) {
                 providers.push(createLinearDecisionProvider({
                     id: 'light-linear',
                     version: lightModel.modelVersion,
@@ -210,10 +244,17 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
             });
         }
     }
+    let qwenSlotAcquired = false;
+    let qwenConcurrencyLimited = false;
     if (config.mode !== 'disabled' && config.qwen?.enabled) {
         if (isQwenDecisionModel(modelCfg)) {
-            const modelVersion = config.qwen.version || modelCfg.model_name || modelCfg.name;
-            if (await isLearningProviderEligible('qwen', modelVersion, config, deps)) {
+            const modelVersion = String(config.qwen.version || '').trim();
+            if (!modelVersion) {
+                preparationOutputs.push({ providerId: 'qwen', providerVersion: '', selectedActionId: '', scores: {}, durationMs: 0, error: 'provider_version_not_configured', metadata: {}, weight: config.qwen.weight });
+            } else if (!await isLearningProviderEligible('qwen', modelVersion, config, tenantId, deps)) {
+                preparationOutputs.push({ providerId: 'qwen', providerVersion: modelVersion, selectedActionId: '', scores: {}, durationMs: 0, error: 'artifact_not_active', metadata: {}, weight: config.qwen.weight });
+            } else if (acquireQwenSlot(config.qwen.maxConcurrent)) {
+                qwenSlotAcquired = true;
                 providers.push(createStructuredModelDecisionProvider({
                     id: 'qwen',
                     version: modelVersion,
@@ -221,10 +262,11 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
                     user,
                     invoke: deps.callModelText || callModelText,
                     maxTokens: config.qwen.maxTokens,
+                    timeoutMs: config.qwen.timeoutMs,
                     weight: config.qwen.weight
                 }));
             } else {
-                preparationOutputs.push({ providerId: 'qwen', providerVersion: modelVersion, selectedActionId: '', scores: {}, durationMs: 0, error: 'artifact_not_active', metadata: {}, weight: config.qwen.weight });
+                qwenConcurrencyLimited = true;
             }
         } else {
             preparationOutputs.push({
@@ -245,7 +287,7 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
     if (config.mode !== 'disabled' && config.laya?.enabled && config.laya.url) {
         if (!String(config.laya.version || '').trim()) {
             preparationOutputs.push({ providerId: 'laya', providerVersion: '', selectedActionId: '', scores: {}, durationMs: 0, error: 'provider_version_not_configured', metadata: {}, weight: config.laya.weight });
-        } else if (!await isLearningProviderEligible('laya', config.laya.version, config, deps)) {
+        } else if (!await isLearningProviderEligible('laya', config.laya.version, config, tenantId, deps)) {
             preparationOutputs.push({ providerId: 'laya', providerVersion: config.laya.version, selectedActionId: '', scores: {}, durationMs: 0, error: 'artifact_not_active', metadata: {}, weight: config.laya.weight });
         } else if (acquireLayaSlot(config.laya.maxConcurrent)) {
             layaSlotAcquired = true;
@@ -266,6 +308,19 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
         providerOutputs = [...preparationOutputs, ...await evaluateDecisionProviders({ providers, context, signal })];
     } finally {
         if (layaSlotAcquired) releaseLayaSlot(config.laya.maxConcurrent);
+        if (qwenSlotAcquired) releaseQwenSlot(config.qwen.maxConcurrent);
+    }
+    if (qwenConcurrencyLimited) {
+        providerOutputs.push({
+            providerId: 'qwen',
+            providerVersion: config.qwen.version,
+            selectedActionId: '',
+            scores: {},
+            durationMs: 0,
+            error: 'provider_concurrency_limited',
+            metadata: { model: 'qwen', configurationVersion: config.qwen.version },
+            weight: config.qwen.weight
+        });
     }
     if (layaConcurrencyLimited) {
         providerOutputs.push({

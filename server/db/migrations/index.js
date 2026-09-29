@@ -51,6 +51,7 @@ const migrationModules = [
     require('./chat-adaptive-routing'),
     require('./decision-learning-foundations'),
     require('./decision-evaluation-governance'),
+    require('./decision-artifact-governance'),
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
     require('./knowledge-database-query-templates'),
@@ -83,7 +84,8 @@ const migrationModules = [
     require('./agent-evidence-items'),
     require('./agent-artifact-annotations'),
     require('./agent-voice-sessions'),
-    require('./memory-jobs-message-ids-jsonb-compatibility')
+    require('./memory-jobs-message-ids-jsonb-compatibility'),
+    require('./memory-source-ids-jsonb-compatibility')
 ];
 
 module.exports = migrationModules
