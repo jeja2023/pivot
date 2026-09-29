@@ -9,8 +9,9 @@ function createMcpIntentHelpers(deps = {}) {
 
     function getMcpToolIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
-        const wantsChart = /图表|画图|绘图|可视化|趋势图|折线图|柱状图|饼图|面积图|chart|visuali[sz]e|plot|graph|统计分析|数据对比|数据汇总|数据概览|分布情况|数据分布|占比|排名|排行|展示.*数据|数据.*展示|呈现.*数据|查询.*统计|洞察/.test(prompt);
-        const wantsReport = /报告|报表|周报|月报|日报|汇总成文档|分析报告|report/.test(prompt);
+        const wantsChart = /图表|画图|绘图|可视化|趋势图|折线图|柱状图|饼图|面积图|chart|visuali[sz]e|plot|graph|数据分布|数据可视化|echarts?/i.test(prompt);
+        // 只有明确要求导出/保存报表文件，或者操作报表工具，才算报表工具意图；普通写报告/写周报是 LLM 文本写作
+        const wantsReport = /导出(?:为|成|到)?(?:报表|excel|csv|word|pdf|文件)|保存为(?:报表|excel|csv|文件)|生成(?:报表|excel|csv)文件|报表工具/i.test(prompt);
         return { wantsChart, wantsReport };
     }
 
@@ -34,10 +35,18 @@ function createMcpIntentHelpers(deps = {}) {
 
     function detectReportFileInventoryIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
+        // 如果是 Markdown 表格生成、排版、对比、填写或写作请求，直接排除
+        if (/对比|优缺点|填写|怎么填|格式|样式|排版|markdown|制作表格|画表|制表|生成表格|以表格形式|表格形式|表格展示|总结.*表格/i.test(prompt)) {
+            return false;
+        }
         const asksInventory = /查询|查找|列出|读取|扫描|看看|查看|有哪些|所有|全部|清单|列表|list|show/.test(prompt);
-        const mentionsFiles = /文件|目录|文件夹|报表|表格|台账|清单|资料|材料|csv|xlsx?|xls|json|txt|md|folder|directory|files?/.test(prompt);
-        const mentionsLocal = /本机|我的电脑|本地|授权目录|报表目录|当前目录|目录下|文件夹下|local/.test(prompt);
-        return asksInventory && mentionsFiles && (mentionsLocal || /报表|表格|台账|csv|xlsx?|xls/.test(prompt));
+        const mentionsLocal = /本机|我的电脑|本地|授权目录|报表目录|当前目录|目录下|文件夹下|磁盘|local/.test(prompt);
+        const mentionsFileTypes = /\.xlsx?|\.xls|\.csv|\.json|\.pdf|excel文件|报表文件|表格文件|数据文件/i.test(prompt);
+        const mentionsFiles = /文件|目录|文件夹|folder|directory|files?/i.test(prompt);
+        return asksInventory && (
+            (mentionsLocal && (mentionsFiles || /报表|台账/.test(prompt))) ||
+            mentionsFileTypes
+        );
     }
 
     function detectLocalReportFileInventoryIntent(userPrompt = '') {
@@ -65,29 +74,43 @@ function createMcpIntentHelpers(deps = {}) {
     // 检测用户是否明确要求查询数据库（即使规划器返回 none 也应强行走数据工具）
     function detectStrongDataQueryIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
-        // 明确提到了表名/数据库+表 或 SQL 关键词
-        const hasTableRef = /[\w.]+\s*表|表\s*[\w.]+|table[_\s.]*[\w.]+|数据库\s*[\w.]+|查询.*表|从.*表|select\s|from\s+[\w.]+|group\s+by|order\s+by/i.test(prompt);
-        // 明确要求统计/分组/数量
-        const hasAggregation = /统计|分组|数量|计数|汇总|count|group|sum|avg/i.test(prompt);
-        // 指定了具体的列/字段
-        const hasColumn = /字段|列|column|按照|根据.*分组|根据.*统计/i.test(prompt);
-        return detectTableInventoryIntent(userPrompt) || hasTableRef || (hasAggregation && hasColumn);
+        // 排除常见写作生成 SQL 语句或教学示例请求
+        if (/^(?:请(?:帮我)?)?(?:写|编写|生成|起草|提供|润色|解释|优化).*(?:sql|代码|语句|脚本|demo)[片段示例演示]*$/i.test(prompt.trim())) {
+            return false;
+        }
+        // 排除中文里包含“表”的常见非数据库表词汇（如代表、表现、表达、外表、一览表、课程表、时间表等）
+        const nonDbTableExclude = /(?:代表|表现|表达|外表|列表|图表|发表|表格|课程表|时间表|时刻表|作息表|周期表|一览表|对比表)/;
+        const hasSqlKeywords = /\b(?:select\s+[\w.*,\s]+\s+from|from\s+[`"']?[a-zA-Z0-9_]{2,}[`"']?|group\s+by|order\s+by|show\s+tables|describe\s+[`"']?\w+[`"']?)\b/i.test(prompt);
+        const hasDbTableRef = /(?:数据表|数据库表|系统表|业务表|库表)\s*[`"']?[\w.]*|数据库\s*[`"']?[\w.]*[`"']?\s*(?:中|里|的)?\s*(?:数据|表|查询)|\b[a-zA-Z0-9_]{2,}\s*表\b/i.test(prompt);
+        const hasQueryTable = /(?:查询|查找|统计|从)\s*[`"']?([a-zA-Z0-9_]{2,})[`"']?\s*表(?:\s*(?:中|里|数据))?/i.test(prompt);
+        const hasTableRef = hasSqlKeywords || hasDbTableRef || (hasQueryTable && !nonDbTableExclude.test(prompt));
+
+        const hasAggregation = /(?:统计|分组|数量|计数|汇总|count|group|sum|avg)/i.test(prompt);
+        const hasColumn = /(?:表字段|数据字段|字段|column)\s*[:：`"']?[\w]+|按照\s*[`"']?[\w]+[`"']?\s*(?:字段|列)\s*(?:分组|统计)|根据\s*[`"']?[\w]+[`"']?\s*(?:字段|列)\s*(?:分组|统计)/i.test(prompt);
+        return detectTableInventoryIntent(userPrompt) || hasTableRef || (hasAggregation && hasColumn && /数据库|数据表|表\b/i.test(prompt));
     }
 
     function detectExplicitMcpCapabilityIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
+        if (/^(?:请(?:帮我)?)?(?:写|编写|生成|起草|提供|润色|解释|优化).*(?:sql|代码|语句|脚本|demo)[片段示例演示]*$/i.test(prompt.trim())) {
+            return false;
+        }
+        if (/^(?:请(?:帮我)?)?(?:写|撰写|起草|润色|修改|翻译|总结|列出|对比)(?:一篇|一份|一个|下|一下)?(?:关于|有关)?[^，。；\n]{0,25}(?:报告|周报|月报|总结|方案|文档|文章|表格|材料|提纲|要点|建议)/i.test(prompt)
+            && !/数据库|数据表|sql\b|mcp|工具|本地文件|报表目录|本机|折线图|柱状图|饼图|图表/i.test(prompt)) {
+            return false;
+        }
         const intent = getMcpToolIntent(prompt);
-        const wantsChartOutput = intent.wantsChart && /生成|画|绘|可视化|展示|呈现|创建|输出|做|build|create|make|plot|visuali[sz]e/.test(prompt);
-        const wantsReportOutput = intent.wantsReport && /生成|写|出|汇总|导出|创建|输出|compose|build|create|make/.test(prompt);
+        const wantsChartOutput = intent.wantsChart && /生成|画|绘|可视化|展示|呈现|创建|输出|做|build|create|make|plot|visuali[sz]e/i.test(prompt);
+        const wantsReportOutput = intent.wantsReport;
         const wantsDataOperation = /查询|查找|统计|计数|列出|读取|筛选|分析|汇总|调用|请求|select\s|show\s|describe\s|count\s/i.test(prompt)
-            && /数据库|数据表|数据库表|sql\b|集合|collections?|api|接口|webhook/.test(prompt);
+            && /数据库|数据表|数据库表|sql\b|集合|collections?|api|接口|webhook/i.test(prompt);
         return detectStrongDataQueryIntent(userPrompt)
             || detectReportFileInventoryIntent(userPrompt)
             || wantsChartOutput
             || wantsReportOutput
             || wantsDataOperation
             || detectBrowserVisitIntent(userPrompt)
-            || /工具库|能力库|mcp|工具调用|调用工具/.test(prompt);
+            || /工具库|能力库|mcp|工具调用|调用工具/i.test(prompt);
     }
 
     // 从用户自然语言中尝试提取表名

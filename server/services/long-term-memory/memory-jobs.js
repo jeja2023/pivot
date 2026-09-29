@@ -37,7 +37,13 @@ async function cancelMemoryExtractionJobs(userId, options = {}) {
     if (messageIds.length) {
         where.push(`EXISTS (
             SELECT 1
-            FROM jsonb_array_elements_text(COALESCE(message_ids, '[]'::jsonb)) AS source_message(message_id)
+            FROM jsonb_array_elements_text(
+                CASE
+                    WHEN message_ids IS NULL THEN '[]'::jsonb
+                    WHEN message_ids::text = '' THEN '[]'::jsonb
+                    ELSE message_ids::jsonb
+                END
+            ) AS source_message(message_id)
             WHERE source_message.message_id IN (${messageIds.map(() => '?').join(',')})
         )`);
         params.push(...messageIds.map(String));

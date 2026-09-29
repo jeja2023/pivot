@@ -80,7 +80,9 @@ function lexicalSimilarity(left = '', right = '') {
     for (const token of leftTokens) {
         if (rightTokens.has(token)) shared += 1;
     }
-    return shared / Math.max(1, Math.min(leftTokens.size, rightTokens.size));
+    const promptCoverage = shared / leftTokens.size;
+    const dice = (2 * shared) / (leftTokens.size + rightTokens.size);
+    return Math.min(promptCoverage, dice * 4);
 }
 
 function isConversationOnlyPrompt(prompt = '') {
@@ -124,7 +126,7 @@ function toolRuleScore(tool, prompt, overrides = {}) {
     if (report && isReportTool(tool)) return 1;
     if (browser && isBrowserTool(tool)) return 1;
     if (chart && isChartTool(tool)) return 0.9;
-    if (detectExplicitMcpCapabilityIntent(prompt)) return 0.35;
+    if (/工具库|能力库|mcp|工具调用|调用工具/iu.test(prompt)) return 0.35;
     const serverName = String(tool?.serverName || '').trim().toLowerCase();
     return serverName.length >= 2 && String(prompt || '').toLowerCase().includes(serverName) ? 0.5 : 0;
 }
@@ -441,7 +443,7 @@ function createSemanticRouter(deps = {}) {
                         .sort((left, right) => right.score - left.score || right.rule - left.rule)
                         .slice(0, config.maxToolCandidates);
                     const best = scored[0];
-                    const forced = overrides.tools.length > 0 || explicitToolIntent;
+                    const forced = overrides.tools.length > 0 || (explicitToolIntent && (best?.score >= 0.2 || best?.rule > 0));
                     if (best && (forced || best.score >= config.toolThreshold)) {
                         tools.action = state.mcpEnabled ? 'propose' : 'candidate_only';
                         tools.confidence = best.score;

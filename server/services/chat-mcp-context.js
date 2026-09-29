@@ -556,11 +556,6 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
         if (explicitToolIntent) {
             return buildMcpMissingToolHint(tools, reason || '没有匹配用户请求的工具库工具');
         }
-        // 注入可用工具提示，防止主模型自行生成代码
-        const dataTools = tools.filter(isDataResultMcpTool);
-        if (dataTools.length) {
-            return buildMcpToolsHint(dataTools, '用户未明确要求图表或报告');
-        }
         return '';
     }
     let mcpStage = 'planning';
@@ -581,7 +576,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             }));
             return explicitToolIntent
                 ? buildMcpMissingToolHint(intentTools, reason || '工具过滤后没有适合本轮请求的工具')
-                : buildMcpToolsHint(intentTools, '工具过滤后无匹配');
+                : '';
         }
         mcpStage = 'planning';
         const earlyBrowserFallback = buildDeterministicBrowserFallback(userPrompt, plannerTools);
@@ -656,8 +651,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 return buildMcpMissingToolHint(plannerTools, plan?.reason || '规划器未选择工具，且没有可确定执行的匹配工具');
             }
             writeSse(JSON.stringify({ type: 'mcp', status: 'skipped', message: '本轮不需要调用工具库工具' }));
-            // 注入可用工具提示，防止主模型自行生成代码
-            return buildMcpToolsHint(plannerTools, plan?.reason || '规划器判断不需要调用');
+            return '';
         }
         const selected = plannedTool;
         const trace = buildMcpTracePayload(selected);

@@ -1,4 +1,16 @@
 
+## [v0.1.192] - 2026-09-29
+
+### 智能路由误判治理与数据库兼容性加固
+
+- **工具意图词法匹配算法修正**：修复 `semantic-router.js` 中 `lexicalSimilarity` 采用较小长度除数导致短词（如“报告”）误匹配率虚高为 1.0 的问题，引入基于提示词覆盖率与 Dice 系数的双重惩罚约束，彻底杜绝短词高分膨胀。
+- **常规办公写作与代码任务降噪**：重构 `chat-mcp-intent.js` 中的意图过滤模型，排查常规办公写作（如“述职报告”、“工作周报”、“方案提纲”）、代码生成（如“写一个查询用户表的SQL”）以及 Markdown 表格对比提问，防止常规问答被误判为工具调用候选（`candidate_only`）。
+- **工具规则加分精确收口**：收窄 `toolRuleScore` 规则加分边界，仅在用户显式提出“工具库/能力库/mcp/调用工具”时赋予基线权重；并优化 `chat-mcp-context.js`，在无工具调用时杜绝向大模型注入 MCP 上下文诱导多余调用。
+- **PostgreSQL 42804 类型不匹配彻底根治**：修复 `cancelMemoryExtractionJobs` 中 `message_ids` 字段在 Postgres 下因 `COALESCE(message_ids, '[]'::jsonb)` 造成的 `COALESCE types text and jsonb cannot be matched` 异常，新增 `memory-jobs-message-ids-jsonb-compatibility.js` 数据库自适应迁移，彻底消除删除消息与撤销记忆任务时的崩溃报错。
+- **自适应路由离线与内网健壮性加固**：全面保障在无公网、无外部 Embedding 或外部 API 异常情况下的平滑降级，确保核心问答与模型会话始终可用。
+
+详细设计方案、数据迁移与验收证据见 [v0.1.192 发布记录](docs/releases/v0.1.192-智能路由误判治理与数据库兼容性加固.md)。
+
 ## [v0.1.191] - 2026-09-28
 
 ### 智能路由持续学习与决策治理系统上线

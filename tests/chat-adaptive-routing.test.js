@@ -248,3 +248,45 @@ test('影子期保留所有受许可候选以比较替代动作，但不改变�
     assert.deepEqual(calls.find(call => call.scenario === 'chat.tools').candidates, [['propose', true], ['candidate_only', false], ['skip', true]]);
     assert.deepEqual(calls.find(call => call.scenario === 'chat.next_step').candidates, [['direct_answer', true], ['clarify', true]]);
 });
+
+test('常规公文写作、总结提纲、Markdown 表格对比与代码编写不误判为工具调用候选', async () => {
+    const dbTool = {
+        fullName: 'mcp.0.db.list_tables',
+        name: 'db.list_tables',
+        serverName: '数据库服务',
+        serverType: 'database',
+        description: '列出当前数据库中可查询的数据表和视图'
+    };
+    const reportTool = {
+        fullName: 'mcp.0.reports.list_files',
+        name: 'reports.list_files',
+        serverName: '报表服务',
+        serverType: 'reports',
+        description: '扫描本地报表目录下的文件列表'
+    };
+    const { router } = routerForTests({ tools: [dbTool, reportTool] });
+
+    const nonToolPrompts = [
+        '帮我写一篇述职报告',
+        '写一份本周工作周报',
+        '请列出两者的优缺点，用表格对比',
+        '生成一份市场调研报告框架',
+        '帮我看看这个表格怎么填写',
+        '请列出一个对比表格',
+        '统计一下有哪些问题，请列出建议',
+        '查询并列出几个代表性的例子',
+        '请写一个查询用户表的SQL'
+    ];
+
+    for (const prompt of nonToolPrompts) {
+        const plan = await router.resolveRoutePlan({
+            prompt,
+            user: { id: 7 },
+            availableMcpTools: [dbTool, reportTool],
+            state: { ragEnabled: false, mcpEnabled: false, autoRouteEnabled: true }
+        });
+        assert.equal(plan.tools.action, 'skip', `Prompt "${prompt}" should not trigger tool candidate (was ${plan.tools.action})`);
+        assert.equal(requiresMcpConsentForRoute(plan, false), false);
+    }
+});
+

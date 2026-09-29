@@ -82,7 +82,8 @@ const migrationModules = [
     require('./agent-goal-kinds'),
     require('./agent-evidence-items'),
     require('./agent-artifact-annotations'),
-    require('./agent-voice-sessions')
+    require('./agent-voice-sessions'),
+    require('./memory-jobs-message-ids-jsonb-compatibility')
 ];
 
 module.exports = migrationModules
