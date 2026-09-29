@@ -86,7 +86,7 @@ npm run export:laya-decision-dataset -- --tenant-id 12 --output-dir artifacts/la
 npm run benchmark:decision-resources -- --require-gpu --reviewed-set-version v2 --providers laya,qwen --laya-url http://laya-decision:8080/decision --qwen-user-id 12 --qwen-model Qwen3.6-35B --report artifacts/laya-qwen-resource-impact.json
 ~~~
 
-报告包含每张 GPU 的采样峰值、每个提供器的准确率、P50/P95 和错误率。它是共卡/独立 GPU/CPU 选择的实测证据之一；仍需同时记录 Qwen 正常生成吞吐与业务服务等级结果。
+报告包含每张 GPU 的采样峰值、每个提供器的准确率、P50/P95 和错误率。单次 `nvidia-smi` 调用受 `PIVOT_DECISION_GPU_SAMPLE_TIMEOUT_MS`（默认 3000ms）限制；采样超时会明确记录而不会使基准脚本无限等待。它是共卡/独立 GPU/CPU 选择的实测证据之一；仍需同时记录 Qwen 正常生成吞吐与业务服务等级结果。
 
 ## 灰度与回滚
 

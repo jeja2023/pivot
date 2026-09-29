@@ -159,6 +159,7 @@ function getDecisionRuntimeConfig(env = process.env) {
         preferencesEnabled: readTypedEnv('PIVOT_DECISION_PREFERENCES_ENABLED', env),
         includeRedactedRoutingText: readTypedEnv('PIVOT_DECISION_INCLUDE_REDACTED_ROUTING_TEXT', env),
         artifactTimeoutMs: readTypedEnv('PIVOT_DECISION_ARTIFACT_TIMEOUT_MS', env),
+        gpuSampleTimeoutMs: readTypedEnv('PIVOT_DECISION_GPU_SAMPLE_TIMEOUT_MS', env),
         preferenceTimeoutMs: readTypedEnv('PIVOT_DECISION_PREFERENCE_TIMEOUT_MS', env),
         light: {
             enabled: readTypedEnv('PIVOT_LIGHT_DECISION_ENABLED', env),

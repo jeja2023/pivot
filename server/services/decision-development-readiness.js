@@ -2,7 +2,12 @@
 
 const { getDecisionRuntimeConfig } = require('./decision-runtime');
 const { getDecisionDeploymentReadiness } = require('./decision-deployment-readiness');
-const { getDecisionEvaluationReviewStatus } = require('./decision-evaluation-reviews');
+const {
+    getDecisionEvaluationReviewStatus,
+    getDecisionEvaluationSetGovernance,
+    loadFrozenDecisionEvaluationSet,
+    sourceDigest
+} = require('./decision-evaluation-reviews');
 
 function overallStatus(checks = []) {
     return checks.some(check => check.status === 'error') ? 'error' : 'ok';
@@ -11,11 +16,29 @@ function overallStatus(checks = []) {
 async function getDecisionDevelopmentReadiness({ env = process.env } = {}, deps = {}) {
     const config = (deps.getDecisionRuntimeConfig || getDecisionRuntimeConfig)(env);
     const production = await (deps.getDecisionDeploymentReadiness || getDecisionDeploymentReadiness)({ env }, deps);
-    const reviewStatus = await (deps.getDecisionEvaluationReviewStatus || getDecisionEvaluationReviewStatus)(config.evaluationSetVersion || 'v2');
+    let reviewStatus = null;
+    let evaluationGovernance = null;
+    let source = {};
+    let expectedDigest = '';
+    let evaluationError = '';
+    try {
+        source = (deps.loadFrozenDecisionEvaluationSet || loadFrozenDecisionEvaluationSet)();
+        expectedDigest = (deps.sourceDigest || sourceDigest)(source);
+        [reviewStatus, evaluationGovernance] = await Promise.all([
+            (deps.getDecisionEvaluationReviewStatus || getDecisionEvaluationReviewStatus)(config.evaluationSetVersion || 'v2'),
+            (deps.getDecisionEvaluationSetGovernance || getDecisionEvaluationSetGovernance)(config.evaluationSetVersion || 'v2', deps)
+        ]);
+    } catch (error) {
+        evaluationError = String(error?.message || '冻结评测集状态不可用').slice(0, 240);
+    }
     const migration = (production.checks || []).find(check => check.name === 'decisionMigrations');
     const providersEnabled = Boolean(config.laya?.enabled || config.qwen?.enabled || config.light?.enabled);
     const safeMode = config.mode !== 'active' && Number(config.rolloutPercent || 0) === 0;
     const evaluationSetImported = Number(reviewStatus?.total || 0) > 0;
+    const evaluationSourceMatches = evaluationSetImported
+        && String(evaluationGovernance?.version || '') === String(source.version || '')
+        && String(evaluationGovernance?.sourceDigest || '') === expectedDigest
+        && Number(evaluationGovernance?.total || 0) === Number(reviewStatus?.total || 0);
     const checks = [
         {
             name: 'decisionMigrations',
@@ -27,7 +50,15 @@ async function getDecisionDevelopmentReadiness({ env = process.env } = {}, deps 
             status: evaluationSetImported ? 'ok' : 'error',
             version: config.evaluationSetVersion || '',
             total: Number(reviewStatus?.total || 0),
-            message: evaluationSetImported ? '冻结评测集已导入开发数据库' : '冻结评测集尚未导入开发数据库'
+            message: evaluationSetImported ? '冻结评测集已导入开发数据库' : (evaluationError || '冻结评测集尚未导入开发数据库')
+        },
+        {
+            name: 'evaluationSetSourceIntegrity',
+            status: evaluationSourceMatches ? 'ok' : 'error',
+            version: String(source.version || ''),
+            expectedDigest,
+            importedDigest: String(evaluationGovernance?.sourceDigest || ''),
+            message: evaluationSourceMatches ? '开发数据库中的冻结集与当前源码摘要一致' : (evaluationError || '开发数据库中的冻结集版本、案例数或源码摘要不一致，请重新导入后再继续开发验收')
         },
         {
             name: 'safeNonProductionMode',
@@ -57,4 +88,3 @@ async function getDecisionDevelopmentReadiness({ env = process.env } = {}, deps 
 }
 
 module.exports = { getDecisionDevelopmentReadiness };
-

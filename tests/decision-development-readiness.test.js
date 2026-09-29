@@ -17,12 +17,16 @@ test('开发环境验收允许待人工审核但要求迁移、导入冻结集�
             status: 'degraded',
             checks: [{ name: 'decisionMigrations', status: 'ok', message: 'migrations ready' }]
         }),
-        getDecisionEvaluationReviewStatus: async () => ({ version: 'v2', total: 15, verified: 0, pending: 15 })
+        getDecisionEvaluationReviewStatus: async () => ({ version: 'v2', total: 15, verified: 0, pending: 15 }),
+        getDecisionEvaluationSetGovernance: async () => ({ version: 'v2', total: 15, sourceDigest: 'sha256:current' }),
+        loadFrozenDecisionEvaluationSet: () => ({ version: 'v2' }),
+        sourceDigest: () => 'sha256:current'
     });
     assert.equal(report.status, 'ok');
     assert.equal(report.environment, 'development');
     assert.equal(report.productionReadiness, 'degraded');
     assert.equal(report.checks.find(item => item.name === 'evaluationSetImported').status, 'ok');
+    assert.equal(report.checks.find(item => item.name === 'evaluationSetSourceIntegrity').status, 'ok');
     assert.equal(report.checks.find(item => item.name === 'productionEvidenceDeferred').status, 'info');
 });
 
@@ -33,12 +37,30 @@ test('开发验收拒绝 active 灰度、真实学习型提供器或缺失迁移
             status: 'error',
             checks: [{ name: 'decisionMigrations', status: 'error', message: 'missing governance migration' }]
         }),
-        getDecisionEvaluationReviewStatus: async () => null
+        getDecisionEvaluationReviewStatus: async () => null,
+        getDecisionEvaluationSetGovernance: async () => null,
+        loadFrozenDecisionEvaluationSet: () => ({ version: 'v2' }),
+        sourceDigest: () => 'sha256:current'
     });
     assert.equal(report.status, 'error');
     assert.equal(report.checks.find(item => item.name === 'decisionMigrations').status, 'error');
     assert.equal(report.checks.find(item => item.name === 'safeNonProductionMode').status, 'error');
     assert.equal(report.checks.find(item => item.name === 'externalDecisionProvidersDisabled').status, 'error');
+    assert.equal(report.checks.find(item => item.name === 'evaluationSetSourceIntegrity').status, 'error');
+});
+
+test('开发验收将冻结集加载或数据库读取失败明确报告为阻塞项', async () => {
+    const report = await getDecisionDevelopmentReadiness({}, {
+        getDecisionRuntimeConfig: safeConfig,
+        getDecisionDeploymentReadiness: async () => ({
+            status: 'degraded',
+            checks: [{ name: 'decisionMigrations', status: 'ok', message: 'migrations ready' }]
+        }),
+        loadFrozenDecisionEvaluationSet: () => { throw new Error('evaluation_source_unavailable'); }
+    });
+    assert.equal(report.status, 'error');
+    assert.match(report.checks.find(item => item.name === 'evaluationSetImported').message, /evaluation_source_unavailable/);
+    assert.match(report.checks.find(item => item.name === 'evaluationSetSourceIntegrity').message, /evaluation_source_unavailable/);
 });
 
 test('生产就绪度缺少评测治理迁移时拒绝继续', async () => {

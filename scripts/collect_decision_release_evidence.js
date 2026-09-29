@@ -2,9 +2,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
-const execFileAsync = promisify(execFile);
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -14,32 +11,11 @@ const { getDecisionMaintenanceReport } = require('../server/services/decision-ma
 const { getDecisionEvaluationReviewStatus } = require('../server/services/decision-evaluation-reviews');
 const { listDecisionModelArtifacts } = require('../server/services/decision-model-registry');
 const { checkLayaDecisionHealth } = require('../server/services/decision-provider-health');
+const { sampleDecisionGpu } = require('../server/services/decision-gpu-sampling');
 
 function arg(name, fallback = '') {
     const index = process.argv.indexOf(name);
     return index >= 0 ? String(process.argv[index + 1] || fallback) : fallback;
-}
-
-function parseGpuRows(output = '') {
-    return String(output || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
-        const [index, name, memoryUsedMiB, memoryTotalMiB, utilizationGpu] = line.split(',').map(item => item.trim());
-        return {
-            index: Number.parseInt(index, 10), name, memoryUsedMiB: Number.parseFloat(memoryUsedMiB),
-            memoryTotalMiB: Number.parseFloat(memoryTotalMiB), utilizationGpu: Number.parseFloat(utilizationGpu)
-        };
-    }).filter(row => Number.isFinite(row.index));
-}
-
-async function sampleGpu() {
-    try {
-        const { stdout } = await execFileAsync('nvidia-smi', [
-            '--query-gpu=index,name,memory.used,memory.total,utilization.gpu',
-            '--format=csv,noheader,nounits'
-        ], { windowsHide: true, maxBuffer: 1024 * 1024 });
-        return { available: true, sampledAt: new Date().toISOString(), gpus: parseGpuRows(stdout) };
-    } catch (error) {
-        return { available: false, sampledAt: new Date().toISOString(), gpus: [], errorCode: error.code || 'nvidia_smi_unavailable' };
-    }
 }
 
 function summarizeArtifact(value = {}) {
@@ -60,6 +36,7 @@ function summarizeArtifact(value = {}) {
 
 async function main() {
     const config = getDecisionRuntimeConfig(process.env);
+    const gpuSampleTimeoutMs = config.gpuSampleTimeoutMs;
     const evaluationSetVersion = String(config.evaluationSetVersion || '');
     const [deployment, maintenance, evaluationReviews, layaHealth, artifacts, gpu] = await Promise.all([
         getDecisionDeploymentReadiness(),
@@ -67,13 +44,14 @@ async function main() {
         getDecisionEvaluationReviewStatus(evaluationSetVersion),
         checkLayaDecisionHealth(),
         listDecisionModelArtifacts({ limit: 100 }),
-        sampleGpu()
+        sampleDecisionGpu({ timeoutMs: gpuSampleTimeoutMs })
     ]);
     const report = {
         generatedAt: new Date().toISOString(),
         kind: 'pivot_decision_release_evidence_snapshot',
         runtime: {
             mode: config.mode, policyVersion: config.version, evaluationSetVersion, rolloutPercent: config.rolloutPercent,
+            gpuSampleTimeoutMs,
             providers: {
                 laya: { enabled: config.laya.enabled, version: config.laya.version },
                 qwen: { enabled: config.qwen.enabled, version: config.qwen.version },
@@ -99,4 +77,3 @@ main().then(() => process.exit(0)).catch(error => {
     console.error(error.stack || error.message);
     process.exit(1);
 });
-

@@ -213,6 +213,8 @@ module.exports = {
     getDecisionEvaluationSetGovernance,
     importFrozenDecisionEvaluationSet,
     listDecisionEvaluationCases,
+    loadFrozenDecisionEvaluationSet,
     loadReviewedDecisionEvaluationCases,
-    reviewDecisionEvaluationCase
+    reviewDecisionEvaluationCase,
+    sourceDigest
 };

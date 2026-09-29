@@ -85,6 +85,7 @@
 | `PIVOT_DECISION_REQUIRE_ACTIVE_ARTIFACT` | boolean | `true` | true / false | active 灰度是否只允许已通过评测并在模型注册表激活的学习型决策器参与；建议生产保持 true。 |
 | `PIVOT_DECISION_USE_ACTIVE_POLICY_ARTIFACT` | boolean | `true` | true / false | 是否在 active 灰度使用已激活、通过评测的策略参数制品；找不到制品时安全降回影子。 |
 | `PIVOT_DECISION_ARTIFACT_TIMEOUT_MS` | integer | `100` | 25–5000 | active 灰度读取模型制品激活状态的最大等待时间；超时后学习型提供器安全不参与本轮决策。 |
+| `PIVOT_DECISION_GPU_SAMPLE_TIMEOUT_MS` | integer | `3000` | 100–30000 | 决策基准和发布证据采集等待单次 GPU 采样的最大时长；采样超时只记录不可用，不阻塞发布检查。 |
 | `PIVOT_DECISION_PREFERENCES_ENABLED` | boolean | `true` | true / false | 是否启用用户和租户级的显式默认路径偏好；偏好仍受当前允许候选与审批规则约束。 |
 | `PIVOT_DECISION_INCLUDE_REDACTED_ROUTING_TEXT` | boolean | `false` | true / false | 是否向 Laya/Qwen 决策器发送有限长度、规则脱敏后的路由文本；该文本不写入决策日志或训练导出，启用前需完成数据治理审批。 |
 | `PIVOT_DECISION_PREFERENCE_TIMEOUT_MS` | integer | `100` | 25–5000 | 读取可选用户或租户路由偏好的最大等待时间；超时后安全回退到无偏好策略。 |
