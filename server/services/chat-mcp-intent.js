@@ -10,8 +10,7 @@ function createMcpIntentHelpers(deps = {}) {
     function getMcpToolIntent(userPrompt = '') {
         const prompt = String(userPrompt || '').toLowerCase();
         const wantsChart = /图表|画图|绘图|可视化|趋势图|折线图|柱状图|饼图|面积图|chart|visuali[sz]e|plot|graph|数据分布|数据可视化|echarts?/i.test(prompt);
-        // 只有明确要求导出/保存报表文件，或者操作报表工具，才算报表工具意图；普通写报告/写周报是 LLM 文本写作
-        const wantsReport = /导出(?:为|成|到)?(?:报表|excel|csv|word|pdf|文件)|保存为(?:报表|excel|csv|文件)|生成(?:报表|excel|csv)文件|报表工具/i.test(prompt);
+        const wantsReport = /报告|报表|周报|月报|日报|汇总成文档|分析报告|report/i.test(prompt);
         return { wantsChart, wantsReport };
     }
 
