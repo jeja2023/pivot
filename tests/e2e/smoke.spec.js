@@ -802,7 +802,7 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#user-input')).toHaveValue('@读取报表 ');
         await expect.poll(() => page.evaluate(() => (
             window.Pivot.moduleApi('chat.inputMenu').getRouteOverrides(document.getElementById('user-input').value)
-        ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'] });
+        ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'], wikiSpaces: [] });
    });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
