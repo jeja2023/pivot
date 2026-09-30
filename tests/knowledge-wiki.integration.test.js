@@ -47,13 +47,16 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
         await publishDocumentVersion({ versionId: article.version.id, actor: owner });
 
         space = await createWikiSpace({ user: owner, collectionId, name: `差旅 Wiki ${suffix}` });
-        const created = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' });
+        const compilerModel = { id: 1, name: 'fake-wiki-model', model_name: 'fake-wiki-model' };
+        const created = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' }, {
+            getAccessibleModelAsync: async () => compilerModel
+        });
         assert.ok(created?.run?.id);
         const compiled = await runWikiCompile({
             runId: created.run.id, user: owner,
             modelRef: 'fake-wiki-model'
         }, {
-            modelCfg: { id: 1, name: 'fake-wiki-model', model_name: 'fake-wiki-model' },
+            modelCfg: compilerModel,
             callModelTextWithBudget: async () => ({ content: JSON.stringify({
                 pages: [{
                     pageType: 'topic', slug: 'travel-expense', title: '差旅报销', summary: '差旅报销概要',
@@ -76,11 +79,13 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
         assert.match(retrieved.context, /原始依据/);
 
         // 生成失败只能结束本次运行，不能把已审核发布的版本覆盖为失败输出。
-        const invalidRun = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' });
+        const invalidRun = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' }, {
+            getAccessibleModelAsync: async () => compilerModel
+        });
         await assert.rejects(() => runWikiCompile({
             runId: invalidRun.run.id, user: owner, modelRef: 'fake-wiki-model'
         }, {
-            modelCfg: { id: 1, name: 'fake-wiki-model', model_name: 'fake-wiki-model' },
+            modelCfg: compilerModel,
             callModelTextWithBudget: async () => ({ content: JSON.stringify({
                 pages: [{ title: '伪造来源', markdown: '无效来源不能发布。', claims: [{
                     statement: '无效来源不能发布。',

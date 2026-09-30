@@ -109,26 +109,37 @@
                 list.appendChild(button);
                 const configure = document.createElement('button');
                 configure.type = 'button'; configure.className = 'btn-secondary'; configure.textContent = space.compilePolicy?.autoCompile ? '自动编译已启用' : '配置自动编译';
-                configure.addEventListener('click', event => { event.stopPropagation(); void configureAutoCompile(space); });
+                configure.addEventListener('click', event => { event.stopPropagation(); void openAutoCompileForm(space); });
                 list.appendChild(configure);
             });
             const detail = document.createElement('div');
             detail.className = 'knowledge-wiki-pages';
-            const [pagesResult, metricsResult, runsResult] = await Promise.all([
+            const selectedSpace = spaces.find(space => Number(space.id) === selectedSpaceId) || null;
+            const readinessQuery = selectedSpace?.compilePolicy?.autoCompile ? '?requireModel=true' : '';
+            const [pagesResult, metricsResult, runsResult, readinessResult] = await Promise.all([
                 request(`/knowledge/wiki/spaces/${selectedSpaceId}/pages?limit=100`),
                 request(`/knowledge/wiki/spaces/${selectedSpaceId}/metrics?lookbackDays=30`),
-                request(`/knowledge/wiki/spaces/${selectedSpaceId}/runs?limit=8`)
+                request(`/knowledge/wiki/spaces/${selectedSpaceId}/runs?limit=8`),
+                request(`/knowledge/wiki/spaces/${selectedSpaceId}/compile-readiness${readinessQuery}`)
             ]);
             const pages = Array.isArray(pagesResult.data) ? pagesResult.data : [];
             appendText(detail, 'h4', '页面与审核');
             const metrics = metricsResult.metrics || {};
             appendText(detail, 'p', `已发布 ${Number(metrics.pages?.published || 0)} · 待审核 ${Number(metrics.pages?.review || 0)} · 已失效 ${Number(metrics.pages?.stale || 0)} · 近 30 天编译完成 ${Number(metrics.compileRuns?.completed || 0)} · 评测 ${Number(metrics.evaluation?.totalResults || 0)} 条`, 'muted-text');
+            const readiness = readinessResult.readiness || {};
+            const readinessText = readiness.ready
+                ? `编译前检查通过：可用原始资料区块 ${Number(readiness.sourceBlocks || 0)}${readiness.model?.name ? ` · 自动模型 ${readiness.model.name}` : ''}`
+                : `编译前检查未通过：${(readiness.messages || []).join('；') || '请检查原始资料和模型设置。'}`;
+            appendText(detail, 'p', readinessText, readiness.ready ? 'knowledge-wiki-diagnostic is-ready' : 'knowledge-wiki-diagnostic is-error');
             const runs = Array.isArray(runsResult.data) ? runsResult.data : [];
             if (runs.length) {
                 appendText(detail, 'h4', '最近编译任务');
                 runs.forEach(run => {
-                    const runItem = document.createElement('div'); runItem.className = 'knowledge-wiki-page';
-                    appendText(runItem, 'span', `${run.status} · ${run.stage} · ${run.createdAt || ''}`, 'muted-text');
+                    const runItem = document.createElement('div'); runItem.className = `knowledge-wiki-page status-${text(run.status)}`;
+                    appendText(runItem, 'span', `${run.status} · ${run.stage} · ${run.completedAt || run.createdAt || ''}`, 'muted-text');
+                    if (run.status === 'failed') {
+                        appendText(runItem, 'p', `失败原因：${run.errorMessage || '编译任务失败，请检查模型服务、原始资料和运行日志后重试。'}`, 'knowledge-wiki-run-error');
+                    }
                     if (['queued', 'running'].includes(run.status)) {
                         const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn-secondary'; cancel.textContent = '取消';
                         cancel.addEventListener('click', () => void cancelRun(run.id)); runItem.appendChild(cancel);
@@ -312,28 +323,100 @@
         } catch (error) { showToast(error.message || '启动 Wiki 编译失败', 'error'); }
     }
 
-    async function configureAutoCompile(space) {
-        const prompt = window.Pivot.legacy.showInputPrompt;
-        if (typeof prompt !== 'function') {
-            showToast('输入窗口尚未加载，请刷新页面后重试。', 'error');
+    function wikiCompilerModelLabel(model = {}) {
+        const name = text(model.name || model.model_name || `模型 ${model.id}`);
+        const modelName = text(model.model_name);
+        return modelName && modelName !== name ? `${name}（${modelName}）` : name;
+    }
+
+    async function getAvailableWikiCompilerModels() {
+        const data = await request('/models/available');
+        const items = Array.isArray(data) ? data : (Array.isArray(data.data) ? data.data : []);
+        return items.filter(model => model?.type === 'chat'
+            && Number.isSafeInteger(Number(model.id)) && Number(model.id) > 0);
+    }
+
+    async function openAutoCompileForm(space) {
+        const body = byId('knowledge-wiki-body');
+        if (!body || !space?.id) return;
+        clear(body);
+        appendText(body, 'p', '正在加载当前账号可用于编译的模型…', 'muted-text');
+        let models = [];
+        try {
+            models = await getAvailableWikiCompilerModels();
+        } catch (error) {
+            clear(body); appendText(body, 'p', error.message || '加载可用模型失败。', 'text-danger');
             return;
         }
-        const modelRef = await prompt({
-            title: '配置自动编译',
-            message: '填写可访问的模型标识以启用自动编译；留空则关闭。资料变更不会使用未明确指定的聊天默认模型。',
-            placeholder: '例如：本地 Qwen 编译模型标识',
-            value: space.compilePolicy?.modelRef || '',
-            required: false
+        clear(body);
+        appendText(body, 'h4', '配置自动编译');
+        appendText(body, 'p', '仅可选择当前账号已获授权、可运行的对话模型。启用后，资料变更会创建后台编译任务；不会使用未明确指定的聊天默认模型。', 'muted-text');
+        const form = document.createElement('form');
+        form.className = 'knowledge-wiki-setup-form';
+        const modelSelect = document.createElement('select');
+        modelSelect.className = 'form-input';
+        modelSelect.setAttribute('aria-label', '自动编译模型');
+        const disabledOption = document.createElement('option');
+        disabledOption.value = '';
+        disabledOption.textContent = '关闭自动编译（仅标记过期，不自动创建任务）';
+        modelSelect.appendChild(disabledOption);
+        models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = String(model.id);
+            option.textContent = wikiCompilerModelLabel(model);
+            modelSelect.appendChild(option);
         });
-        if (modelRef === null) return;
-        try {
-            const compilePolicy = { ...(space.compilePolicy || {}), modelRef: modelRef.trim(), autoCompile: Boolean(modelRef.trim()) };
-            await request(`/knowledge/wiki/spaces/${space.id}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ compilePolicy })
-            });
-            showToast(compilePolicy.autoCompile ? '资料变更后将按已配置模型创建增量 Wiki 编译任务。' : '已关闭该 Space 的自动编译。');
-            await render();
-        } catch (error) { showToast(error.message || '更新自动编译配置失败', 'error'); }
+        const currentModelRef = text(space.compilePolicy?.modelRef).trim();
+        const selectedModel = models.find(model => String(model.id) === currentModelRef || text(model.model_name) === currentModelRef);
+        if (selectedModel) modelSelect.value = String(selectedModel.id);
+        else if (currentModelRef) {
+            const unavailable = document.createElement('option');
+            unavailable.value = '__unavailable__';
+            unavailable.disabled = true;
+            unavailable.selected = true;
+            unavailable.textContent = '当前配置的模型已不可访问，请重新选择';
+            modelSelect.appendChild(unavailable);
+        }
+        form.appendChild(createSetupField('自动编译模型', modelSelect));
+        if (!models.length) appendText(form, 'p', '当前没有可用于编译的模型。请先在模型管理中配置并授权一个对话模型。', 'text-danger');
+        const status = appendText(form, 'p', '', 'knowledge-wiki-setup-status');
+        status.hidden = true;
+        const actions = document.createElement('div');
+        actions.className = 'rag-actions';
+        const submit = document.createElement('button');
+        submit.type = 'submit'; submit.className = 'btn-primary'; submit.textContent = '保存设置';
+        const cancel = document.createElement('button');
+        cancel.type = 'button'; cancel.className = 'btn-secondary'; cancel.textContent = '取消';
+        cancel.addEventListener('click', () => void render());
+        actions.append(submit, cancel); form.appendChild(actions); body.appendChild(form);
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            const modelRef = text(modelSelect.value).trim();
+            if (modelRef === '__unavailable__') {
+                status.hidden = false;
+                status.textContent = '当前配置的模型不可访问，请从下拉列表重新选择或关闭自动编译。';
+                return;
+            }
+            if (modelRef && !models.some(model => String(model.id) === modelRef)) {
+                status.hidden = false;
+                status.textContent = '请选择下拉列表中的可用模型。';
+                return;
+            }
+            [modelSelect, submit, cancel].forEach(control => { control.disabled = true; });
+            status.hidden = false; status.textContent = '正在保存自动编译设置…';
+            try {
+                const compilePolicy = { ...(space.compilePolicy || {}), modelRef, autoCompile: Boolean(modelRef) };
+                await request(`/knowledge/wiki/spaces/${space.id}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ compilePolicy })
+                });
+                showToast(compilePolicy.autoCompile ? '资料变更后将按所选模型创建增量 Wiki 编译任务。' : '已关闭该 Space 的自动编译。');
+                await render();
+            } catch (error) {
+                [modelSelect, submit, cancel].forEach(control => { control.disabled = false; });
+                status.textContent = error.message || '更新自动编译配置失败';
+            }
+        });
+        modelSelect.focus();
     }
 
     async function publishPage(pageId) {

@@ -552,6 +552,11 @@ body.is-main-workspace-full .chat-container {
 .knowledge-wiki-page p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.45; }
 .knowledge-wiki-page.status-stale { border-left: 3px solid var(--warning); }
 .knowledge-wiki-page.status-review { border-left: 3px solid var(--primary); }
+.knowledge-wiki-page.status-failed { border-left: 3px solid var(--danger); }
+.knowledge-wiki-diagnostic { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-side); color: var(--text-muted); font-size: .76rem; line-height: 1.45; }
+.knowledge-wiki-diagnostic.is-ready { border-color: color-mix(in srgb, var(--success) 30%, var(--border)); color: var(--success); }
+.knowledge-wiki-diagnostic.is-error, .knowledge-wiki-run-error { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
+.knowledge-wiki-run-error { margin: 0; font-size: .76rem; line-height: 1.45; }
 .knowledge-wiki-markdown { max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-side); color: var(--text-main); font: inherit; line-height: 1.55; }
 .knowledge-wiki-setup-form {
     display: flex;

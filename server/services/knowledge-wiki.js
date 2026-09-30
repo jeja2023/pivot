@@ -19,6 +19,15 @@ const SUPPORT_TYPES = new Set(['supports', 'defines', 'contradicts', 'supersedes
 const MAX_SOURCE_BLOCKS = 12;
 const MAX_PAGES_PER_RUN = 10;
 const activeCompileControllers = new Map();
+const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
+    wiki_compile_cancelled: 'Wiki 编译任务已取消。',
+    wiki_compile_model_required: '请先选择当前账号可访问的编译模型。',
+    wiki_compile_model_not_found: '所选编译模型当前不可访问、已删除或不再可用。',
+    wiki_compile_model_unavailable: '所选编译模型的凭据或运行状态异常，请在模型管理中修复后重试。',
+    wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。',
+    wiki_compile_no_valid_candidates: '模型输出未通过来源与结构校验，未创建任何候选页面。',
+    wiki_compile_requester_unavailable: 'Wiki Space 所有者已不可用，无法以其权限执行自动编译。'
+});
 
 function normalizeId(value) {
     const id = Number.parseInt(value, 10);
@@ -139,11 +148,16 @@ function publicPage(row = {}) {
 }
 
 function publicRun(row = {}) {
+    const errorCode = row.error_code || '';
     return {
         id: String(row.id || ''), spaceId: Number(row.space_id), triggerType: row.trigger_type,
         inputManifestHash: row.input_manifest_hash || '', status: row.status, stage: row.stage,
-        summary: parseJson(row.summary_json, {}), errorCode: row.error_code || '',
-        errorMessage: row.error_message || '', startedAt: row.started_at || null,
+        summary: parseJson(row.summary_json, {}), errorCode,
+        // 模型上游的原始报错可能包含内部地址或实现细节；界面只接收可行动的
+        // 受控说明。完整错误仍保留在服务端日志和运行记录中供运维排查。
+        errorMessage: WIKI_COMPILE_ERROR_MESSAGES[errorCode]
+            || (errorCode ? '编译任务失败，请检查模型服务、原始资料和运行日志后重试。' : ''),
+        startedAt: row.started_at || null,
         completedAt: row.completed_at || null, createdAt: row.created_at, updatedAt: row.updated_at
     };
 }
@@ -237,6 +251,14 @@ async function updateWikiSpace({ spaceId, user, name, description, status, compi
     if (!canManageSpace(space, user)) return null;
     const nextStatus = status === undefined ? space.status : normalizeStatus(status, SPACE_STATUSES, space.status);
     const nextPolicy = compilePolicy === undefined ? defaultCompilePolicy(parseJson(space.compile_policy_json, {})) : defaultCompilePolicy(compilePolicy);
+    // 自动编译只能保留当前操作者可访问且凭据有效的显式模型。前端下拉只是
+    // 体验层，API 同样必须拒绝伪造或已失效的模型标识。
+    if (nextPolicy.autoCompile) {
+        if (!nextPolicy.modelRef) return { error: 'wiki_compile_model_required' };
+        const model = await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(nextPolicy.modelRef, user);
+        if (!model) return { error: 'wiki_compile_model_not_found' };
+        if (model.secret_error) return { error: 'wiki_compile_model_unavailable' };
+    }
     const now = getBeijingTimestamp();
     const row = await (deps.queryOne || queryOne)(`
         UPDATE knowledge_wiki_spaces
@@ -378,6 +400,32 @@ async function buildWikiCompileManifest({ spaceId, user, maxSourceBlocks = MAX_S
     return { space, sources, hash: contentHash(JSON.stringify(manifest)), manifest };
 }
 
+async function getWikiCompileReadiness({ spaceId, user, modelRef = null, requireModel = false } = {}, deps = {}) {
+    const space = await getWikiSpaceForUser(spaceId, user, deps);
+    if (!space) return null;
+    const policy = defaultCompilePolicy(parseJson(space.compile_policy_json, {}), deps.env);
+    const manifest = await buildWikiCompileManifest({ spaceId: space.id, user, maxSourceBlocks: policy.maxSourceBlocks }, deps);
+    const effectiveModelRef = normalizeText(modelRef, 180) || policy.modelRef;
+    let model = null;
+    if (effectiveModelRef) {
+        model = await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(effectiveModelRef, user).catch(() => null);
+    }
+    const sourceBlocks = Number(manifest?.sources?.length || 0);
+    const problems = [];
+    if (!sourceBlocks) problems.push('wiki_compile_no_published_sources');
+    if (requireModel && !effectiveModelRef) problems.push('wiki_compile_model_required');
+    if (effectiveModelRef && !model) problems.push('wiki_compile_model_not_found');
+    if (model?.secret_error) problems.push('wiki_compile_model_unavailable');
+    return {
+        space: publicSpace(space), sourceBlocks,
+        configuredModelRef: effectiveModelRef || '',
+        model: model ? { id: Number(model.id), name: model.name || model.model_name || '', modelName: model.model_name || '' } : null,
+        ready: problems.length === 0,
+        problems,
+        messages: problems.map(code => WIKI_COMPILE_ERROR_MESSAGES[code] || '编译前检查未通过。')
+    };
+}
+
 function buildWikiCompilerMessages({ space, sources, policy }) {
     const sourceText = sources.map((source, index) => [
         `【S${index + 1}】documentId=${source.documentId};versionId=${source.versionId};blockId=${source.blockId};chunkId=${source.chunkId || ''}`,
@@ -456,9 +504,14 @@ async function createWikiCompileRun({ spaceId, user, triggerType = 'manual', mod
     const manifest = await buildWikiCompileManifest({ spaceId, user, maxSourceBlocks: policy.maxSourceBlocks }, deps);
     if (!manifest) return null;
     if (manifest.space.status === 'paused') return { error: 'wiki_space_paused' };
+    if (!manifest.sources.length) return { error: 'wiki_compile_no_published_sources', manifest };
+    const effectiveModelRef = normalizeText(modelRef, 180) || policy.modelRef;
+    if (!effectiveModelRef) return { error: 'wiki_compile_model_required', manifest };
+    const model = deps.modelCfg || await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(effectiveModelRef, user);
+    if (!model) return { error: 'wiki_compile_model_not_found', manifest };
+    if (model.secret_error) return { error: 'wiki_compile_model_unavailable', manifest };
     const now = getBeijingTimestamp();
     const runId = crypto.randomUUID();
-    const effectiveModelRef = normalizeText(modelRef, 180) || policy.modelRef;
     const row = await (deps.queryOne || queryOne)(`
         INSERT INTO knowledge_wiki_compile_runs (
             id, space_id, requested_by, trigger_type, input_manifest_hash, status, stage, summary_json, created_at, updated_at
@@ -669,6 +722,19 @@ function scheduleWikiCompile(options = {}, deps = {}) {
     setImmediate(() => { void runWikiCompile({ ...options, workerId: options.workerId || `wiki-inline-${process.pid}` }, deps).catch(() => {}); });
 }
 
+async function markWikiCompileRunFailed(runId, errorCode, deps = {}) {
+    const safeRunId = String(runId || '').trim();
+    if (!safeRunId) return;
+    const code = normalizeText(errorCode, 120) || 'wiki_compile_failed';
+    const now = getBeijingTimestamp();
+    await (deps.execute || execute)(`
+        UPDATE knowledge_wiki_compile_runs
+        SET status = 'failed', stage = 'failed', error_code = ?, error_message = ?,
+            completed_at = ?, updated_at = ?
+        WHERE id = ? AND status IN ('queued', 'running')
+    `, [code, WIKI_COMPILE_ERROR_MESSAGES[code] || 'Wiki 编译任务失败。', now, now, safeRunId]);
+}
+
 function createKnowledgeWikiCompileWorker({
     workerId = `knowledge-wiki-worker-${process.pid}`,
     pollIntervalMs = null,
@@ -692,7 +758,10 @@ function createKnowledgeWikiCompileWorker({
             const job = await claimWikiCompileRun({ workerId: safeWorkerId, leaseSeconds }, deps);
             if (!job) return null;
             const actor = await (deps.queryOne || queryOne)(`SELECT id, username, role, unit FROM users WHERE id = ? AND deleted_at IS NULL`, [job.requested_by]);
-            if (!actor) throw new Error('wiki_compile_requester_unavailable');
+            if (!actor) {
+                await markWikiCompileRunFailed(job.id, 'wiki_compile_requester_unavailable', deps);
+                return null;
+            }
             const summary = parseJson(job.summary_json, {});
             return await runWikiCompile({ runId: job.id, user: actor, modelRef: summary.modelRef, workerId: safeWorkerId, claimedRun: job }, deps);
         } catch (error) {
@@ -757,16 +826,27 @@ async function markWikiPagesStaleForDocument({ documentId = null, legacyDocId = 
         for (const candidate of spaces) {
             const policy = defaultCompilePolicy(parseJson(candidate.compile_policy_json, {}), deps.env);
             if (!policy.autoCompile || !policy.modelRef) continue;
+            // 事件线程此前只构造 { id, unit: '' } 作为执行者。若共享模型按部门
+            // 限制访问，这会让已在界面中可选的模型在自动任务里变为“不可访问”。
+            // 必须读取完整的所有者身份，并在入队前验证模型，避免产生必然失败的 run。
+            const actor = await (deps.queryOne || queryOne)(`
+                SELECT id, username, role, unit FROM users WHERE id = ? AND deleted_at IS NULL
+            `, [candidate.owner_user_id]).catch(() => null);
+            if (!actor) continue;
+            const model = await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(policy.modelRef, actor).catch(() => null);
+            if (!model || model.secret_error) continue;
             const queued = await (deps.queryOne || queryOne)(`
                 SELECT id FROM knowledge_wiki_compile_runs
                 WHERE space_id = ? AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1
             `, [candidate.id]).catch(() => null);
             if (queued) continue;
-            const actor = { id: Number(candidate.owner_user_id), role: 'user', unit: '' };
-            const created = await createWikiCompileRun({ spaceId: candidate.id, user: actor, triggerType: reason, modelRef: policy.modelRef }, deps).catch(() => null);
+            const modelRef = String(model.id || policy.modelRef);
+            const createRun = deps.createWikiCompileRun || createWikiCompileRun;
+            const created = await createRun({ spaceId: candidate.id, user: actor, triggerType: reason, modelRef }, deps).catch(() => null);
             if (!created?.run) continue;
             queuedRuns += 1;
-            scheduleWikiCompile({ runId: created.run.id, user: actor, modelRef: policy.modelRef }, deps);
+            const schedule = deps.scheduleWikiCompile || scheduleWikiCompile;
+            schedule({ runId: created.run.id, user: actor, modelRef }, deps);
         }
     }
     return { documentId: safeDocumentId, stalePages, queuedRuns, reason };
@@ -893,6 +973,7 @@ module.exports = {
     claimWikiCompileRun,
     cancelWikiCompileRun,
     getKnowledgeWikiConfig,
+    getWikiCompileReadiness,
     getWikiPageDiff,
     getWikiMetrics,
     listWikiPageVersions,

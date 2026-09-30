@@ -61,6 +61,7 @@ const {
     createWikiCompileRun,
     cancelWikiCompileRun,
     createWikiSpace,
+    getWikiCompileReadiness,
     getWikiPage,
     getWikiPageDiff,
     getWikiMetrics,
@@ -77,6 +78,18 @@ const {
 
 const SOURCE_KINDS = new Set(['upload', 'local_dir', 'wiki_markdown', 'lan_http', 'database', 'internal_api', 'manual']);
 const SOURCE_SYNC_MODES = new Set(['manual', 'scheduled', 'watch']);
+const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
+    wiki_disabled: '知识 Wiki 当前已关闭。',
+    wiki_space_paused: 'Wiki Space 已暂停，无法编译。',
+    wiki_compile_model_required: '请先选择当前账号可访问的编译模型。',
+    wiki_compile_model_not_found: '所选编译模型当前不可访问、已删除或不再可用。',
+    wiki_compile_model_unavailable: '所选编译模型的凭据或运行状态异常，请在模型管理中修复后重试。',
+    wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。'
+});
+
+function wikiCompileErrorMessage(code) {
+    return WIKI_COMPILE_ERROR_MESSAGES[String(code || '')] || '无法创建 Wiki 编译任务，请检查专题库权限、原始资料和模型设置。';
+}
 
 function normalizeId(value) {
     const id = Number.parseInt(value, 10);
@@ -690,6 +703,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
             spaceId: req.params.id, user: req.user, name: req.body?.name, description: req.body?.description,
             status: req.body?.status, compilePolicy: req.body?.compilePolicy, promptVersion: req.body?.promptVersion
         });
+        if (space?.error) return res.status(400).json({ error: wikiCompileErrorMessage(space.error) });
         if (!space) return res.status(404).json({ error: 'Wiki Space 不存在或无权管理。' });
         logAction?.(req, '更新知识 Wiki Space', { spaceId: space.id, status: space.status });
         return res.json({ success: true, space });
@@ -723,7 +737,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         const created = await createWikiCompileRun({
             spaceId: req.params.id, user: req.user, triggerType: req.body?.triggerType || 'manual', modelRef: req.body?.model
         });
-        if (!created || created.error) return res.status(400).json({ error: created?.error === 'wiki_space_paused' ? 'Wiki Space 已暂停，无法编译。' : '无法创建 Wiki 编译任务，请检查专题库权限和已发布来源。' });
+        if (!created || created.error) return res.status(400).json({ error: wikiCompileErrorMessage(created?.error) });
         scheduleWikiCompile({ runId: created.run.id, user: req.user, modelRef: req.body?.model });
         logAction?.(req, '启动知识 Wiki 编译', { spaceId: req.params.id, runId: created.run.id, sourceCount: created.manifest.sources.length });
         return res.status(202).json({ success: true, run: created.run });
@@ -733,6 +747,14 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         const runs = await listWikiCompileRuns({ spaceId: req.params.id, user: req.user, limit: req.query.limit });
         if (!runs) return res.status(404).json({ error: 'Wiki Space 不存在或无权访问。' });
         return res.json({ success: true, data: runs });
+    }));
+
+    router.get('/knowledge/wiki/spaces/:id/compile-readiness', authMiddleware, asyncHandler(async (req, res) => {
+        const readiness = await getWikiCompileReadiness({
+            spaceId: req.params.id, user: req.user, modelRef: req.query.model, requireModel: req.query.requireModel === 'true'
+        });
+        if (!readiness) return res.status(404).json({ error: 'Wiki Space 不存在或无权访问。' });
+        return res.json({ success: true, readiness });
     }));
 
     router.post('/knowledge/wiki/runs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {

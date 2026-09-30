@@ -7,6 +7,7 @@ const {
     buildWikiCompileManifest,
     claimWikiCompileRun,
     cancelWikiCompileRun,
+    createWikiCompileRun,
     createKnowledgeWikiCompileWorker,
     defaultCompilePolicy,
     getKnowledgeWikiConfig,
@@ -110,6 +111,32 @@ test('Wiki 编译预算从类型化配置收敛且默认要求审核', () => {
     assert.equal(policy.requireReview, true);
 });
 
+test('没有已发布来源或可访问模型时，不创建必然失败的 Wiki 编译任务', async () => {
+    const noSources = await createWikiCompileRun({ spaceId: 1, user: { id: 9, role: 'user' } }, {
+        getKnowledgeWikiConfig: () => ({ enabled: true }),
+        queryOne: async sql => sql.includes('FROM knowledge_wiki_spaces') ? {
+            id: 1, owner_user_id: 9, collection_id: 3, status: 'active', scope: 'personal',
+            compile_policy_json: '{}', prompt_version: 'v1', collection_owner_user_id: 9,
+            collection_scope: 'personal', collection_allowed_units: '', collection_allowed_user_ids: ''
+        } : null,
+        query: async () => []
+    });
+    assert.equal(noSources.error, 'wiki_compile_no_published_sources');
+
+    const noModel = await createWikiCompileRun({ spaceId: 1, user: { id: 9, role: 'user' }, modelRef: '99' }, {
+        getKnowledgeWikiConfig: () => ({ enabled: true }),
+        queryOne: async sql => sql.includes('FROM knowledge_wiki_spaces') ? {
+            id: 1, owner_user_id: 9, collection_id: 3, status: 'active', scope: 'personal',
+            compile_policy_json: '{}', prompt_version: 'v1', collection_owner_user_id: 9,
+            collection_scope: 'personal', collection_allowed_units: '', collection_allowed_user_ids: ''
+        } : null,
+        query: async () => [{ document_id: 4, document_title: '资料', version_id: 5, version_no: 1, block_id: 6, heading_path: '', content: '内容', source_locator_json: '{}', legacy_chunk_id: null }],
+        getProductDocumentForUser: async () => ({ id: 4 }),
+        getAccessibleModelAsync: async () => null
+    });
+    assert.equal(noModel.error, 'wiki_compile_model_not_found');
+});
+
 test('Wiki 编译 Worker 通过可恢复租约领取任务，且禁用配置时不会启动', async () => {
     const calls = [];
     const claimed = await claimWikiCompileRun({ runId: 'run-1', workerId: 'worker-1', leaseSeconds: 90 }, {
@@ -184,4 +211,34 @@ test('专题库权限收紧或文档级 ACL 拒绝时，Wiki 不保留旧共享�
         getProductDocumentForUser: async () => null
     });
     assert.equal(manifest.sources.length, 0);
+});
+
+test('资料变更触发自动编译时保留 Space 所有者的完整单位身份并先验证模型', async () => {
+    const captured = { actor: null, scheduled: null, modelActor: null };
+    const result = await markWikiPagesStaleForDocument({ documentId: 81, reason: 'manual_version_published' }, {
+        getKnowledgeWikiConfig: () => ({ enabled: true, autoCompile: true }),
+        execute: async () => 1,
+        query: async sql => sql.includes('SELECT DISTINCT space.id') ? [{
+            id: 5, owner_user_id: 9, compile_policy_json: JSON.stringify({ autoCompile: true, modelRef: '42' })
+        }] : [],
+        queryOne: async sql => {
+            if (sql.includes('FROM users')) return { id: 9, username: 'owner', role: 'user', unit: '法务部' };
+            if (sql.includes("status IN ('queued', 'running')")) return null;
+            return null;
+        },
+        getAccessibleModelAsync: async (_modelRef, actor) => {
+            captured.modelActor = actor;
+            return { id: 42, name: '法务编译模型' };
+        },
+        createWikiCompileRun: async ({ user, modelRef }) => {
+            captured.actor = user;
+            assert.equal(modelRef, '42');
+            return { run: { id: 'run-auto-1' } };
+        },
+        scheduleWikiCompile: ({ user, modelRef }) => { captured.scheduled = { user, modelRef }; }
+    });
+    assert.equal(result.queuedRuns, 1);
+    assert.equal(captured.modelActor.unit, '法务部');
+    assert.equal(captured.actor.unit, '法务部');
+    assert.equal(captured.scheduled.modelRef, '42');
 });
