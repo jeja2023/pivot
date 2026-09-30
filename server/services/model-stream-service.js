@@ -10,6 +10,7 @@ const {
 } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
 const { isChatThinkingEnabled, buildThinkingControlPayload } = require('./models');
+const { coalesceSystemMessages, requiresSingleLeadingSystemMessage } = require('./model-response');
 const { getChatAutoRouteConfig } = require('./chat-route-config');
 const { readStreamErrorDetail } = require('./chat-errors');
 
@@ -68,7 +69,12 @@ function buildChatRequestData(modelCfg, modelName) {
     return requestData;
 }
 
+function normalizeChatStreamMessages(messages = [], modelCfg = {}) {
+    return requiresSingleLeadingSystemMessage(modelCfg) ? coalesceSystemMessages(messages) : messages;
+}
+
 async function openChatModelStream({ modelCfg, user, visionHistory, log, sessionId, userId, signal = null }) {
+    const orderedVisionHistory = normalizeChatStreamMessages(visionHistory, modelCfg);
     const baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
     const modelName = modelCfg.model_name || 'default';
     const isResponsesApi = shouldUseResponsesApi(modelName);
@@ -90,12 +96,12 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
         sessionId,
         userId,
         modelId: modelCfg.id,
-        estimatedInputTokens: estimateMessagesTokens(visionHistory)
+        estimatedInputTokens: estimateMessagesTokens(orderedVisionHistory)
     }, '准备发送模型请求');
 
     if (isResponsesApi) {
         log.info('正在建立连接 (Responses API, 流式)');
-        const responsesHistory = convertChatMessagesToResponsesInput(visionHistory);
+        const responsesHistory = convertChatMessagesToResponsesInput(orderedVisionHistory);
         const inputSummary = responsesHistory.map(m => ({
             role: m.role,
             contentType: Array.isArray(m.content) ? m.content.map(p => p.type).join('+') : 'text'
@@ -136,7 +142,7 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             delete requestData.input;
             delete requestData.prompt_cache_key;
             delete requestData.prompt_cache_options;
-            requestData.messages = visionHistory;
+            requestData.messages = orderedVisionHistory;
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
                 data: requestData, stream: true, timeout: 300000,
@@ -148,7 +154,7 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
     }
 
     log.info('正在建立连接 (Chat Completions API, 流式)');
-    requestData.messages = visionHistory;
+    requestData.messages = orderedVisionHistory;
     const response = await forwardChatCompletion({
         modelCfg, user, url: targetUrl, headers,
         data: requestData, stream: true, timeout: 300000,
@@ -162,5 +168,6 @@ module.exports = {
     buildChatPromptCache,
     buildChatRequestData,
     isPromptCacheUnsupported,
+    normalizeChatStreamMessages,
     openChatModelStream
 };

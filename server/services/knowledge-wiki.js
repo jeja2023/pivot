@@ -20,13 +20,13 @@ const MAX_SOURCE_BLOCKS = 12;
 const MAX_PAGES_PER_RUN = 10;
 const activeCompileControllers = new Map();
 const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
-    wiki_compile_cancelled: 'Wiki 编译任务已取消。',
+    wiki_compile_cancelled: '知识空间编译任务已取消。',
     wiki_compile_model_required: '请先选择当前账号可访问的编译模型。',
     wiki_compile_model_not_found: '所选编译模型当前不可访问、已删除或不再可用。',
     wiki_compile_model_unavailable: '所选编译模型的凭据或运行状态异常，请在模型管理中修复后重试。',
     wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。',
     wiki_compile_no_valid_candidates: '模型输出未通过来源与结构校验，未创建任何候选页面。',
-    wiki_compile_requester_unavailable: 'Wiki Space 所有者已不可用，无法以其权限执行自动编译。'
+    wiki_compile_requester_unavailable: '知识空间所有者已不可用，无法以其权限执行自动编译。'
 });
 
 function normalizeId(value) {
@@ -51,6 +51,69 @@ function parseJson(value, fallback = {}) {
 function normalizeStatus(value, allowed, fallback) {
     const status = String(value || '').trim().toLowerCase();
     return allowed.has(status) ? status : fallback;
+}
+
+function normalizeObjectKey(value = '') {
+    return String(value || '').trim().toLowerCase().replace(/[\s_\-.:/]+/gu, '');
+}
+
+function pickObjectValue(value, aliases = []) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    for (const alias of aliases) {
+        if (Object.prototype.hasOwnProperty.call(value, alias) && value[alias] !== undefined) return value[alias];
+    }
+    const keys = new Set(aliases.map(normalizeObjectKey));
+    for (const [key, item] of Object.entries(value)) {
+        if (keys.has(normalizeObjectKey(key)) && item !== undefined) return item;
+    }
+    return undefined;
+}
+
+function asObjectList(value) {
+    if (Array.isArray(value)) return value.filter(item => item !== null && item !== undefined);
+    if (value === null || value === undefined || value === '') return [];
+    return [value];
+}
+
+function parseLooseJson(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    const direct = parseJson(text, null);
+    if (direct) return direct;
+    const fenced = [...text.matchAll(/```(?:json|jsonc)?\s*([\s\S]*?)```/giu)];
+    for (const match of fenced) {
+        const parsed = parseJson(match[1], null);
+        if (parsed) return parsed;
+    }
+    // 本地模型有时在 JSON 前后添加解释。只抽取第一个完整 JSON 对象/数组，
+    // 不尝试修补字段值或闭合括号，避免把任意文本误当作受控结构。
+    for (let start = 0; start < text.length; start += 1) {
+        if (text[start] !== '{' && text[start] !== '[') continue;
+        const stack = [];
+        let inString = false;
+        let escaped = false;
+        for (let cursor = start; cursor < text.length; cursor += 1) {
+            const char = text[cursor];
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (char === '\\') escaped = true;
+                else if (char === '"') inString = false;
+                continue;
+            }
+            if (char === '"') { inString = true; continue; }
+            if (char === '{' || char === '[') stack.push(char);
+            else if (char === '}' || char === ']') {
+                const opening = stack.pop();
+                if (!opening || (opening === '{' && char !== '}') || (opening === '[' && char !== ']')) break;
+                if (!stack.length) {
+                    const parsed = parseJson(text.slice(start, cursor + 1), null);
+                    if (parsed) return parsed;
+                    break;
+                }
+            }
+        }
+    }
+    return null;
 }
 
 function normalizeSlug(value = '') {
@@ -147,6 +210,21 @@ function publicPage(row = {}) {
     };
 }
 
+function getWikiCompileRunErrorMessage(row = {}) {
+    const errorCode = row.error_code || '';
+    if (errorCode !== 'wiki_compile_no_valid_candidates') {
+        return WIKI_COMPILE_ERROR_MESSAGES[errorCode]
+            || (errorCode ? '编译任务失败，请检查模型服务、原始资料和运行日志后重试。' : '');
+    }
+    const validation = parseJson(row.summary_json, {})?.validation || {};
+    const rejected = validation.rejected && typeof validation.rejected === 'object' ? validation.rejected : {};
+    if (!Number(validation.receivedCandidates || 0)) return '模型未返回可解析的 JSON 页面结构。请检查模型服务输出格式后重试。';
+    if (Number(rejected.missing_valid_source_refs || 0)) return '模型页面没有引用本轮原始资料编号或来源定位，已被安全拒绝。';
+    if (Number(rejected.invalid_markdown || 0)) return '模型页面正文为空、过长或包含不允许的 HTML/外部链接，已被安全拒绝。';
+    if (Number(rejected.missing_title || 0)) return '模型页面缺少标题或稳定标识，无法创建候选页面。';
+    return WIKI_COMPILE_ERROR_MESSAGES[errorCode];
+}
+
 function publicRun(row = {}) {
     const errorCode = row.error_code || '';
     return {
@@ -155,8 +233,7 @@ function publicRun(row = {}) {
         summary: parseJson(row.summary_json, {}), errorCode,
         // 模型上游的原始报错可能包含内部地址或实现细节；界面只接收可行动的
         // 受控说明。完整错误仍保留在服务端日志和运行记录中供运维排查。
-        errorMessage: WIKI_COMPILE_ERROR_MESSAGES[errorCode]
-            || (errorCode ? '编译任务失败，请检查模型服务、原始资料和运行日志后重试。' : ''),
+        errorMessage: getWikiCompileRunErrorMessage(row),
         startedAt: row.started_at || null,
         completedAt: row.completed_at || null, createdAt: row.created_at, updatedAt: row.updated_at
     };
@@ -428,7 +505,7 @@ async function getWikiCompileReadiness({ spaceId, user, modelRef = null, require
 
 function buildWikiCompilerMessages({ space, sources, policy }) {
     const sourceText = sources.map((source, index) => [
-        `【S${index + 1}】documentId=${source.documentId};versionId=${source.versionId};blockId=${source.blockId};chunkId=${source.chunkId || ''}`,
+        `【S${index + 1}】sourceId=S${index + 1};documentId=${source.documentId};versionId=${source.versionId};blockId=${source.blockId};chunkId=${source.chunkId || ''}`,
         `标题：${source.documentTitle}`,
         `章节：${source.headingPath || '未标注'}`,
         source.content
@@ -442,8 +519,9 @@ function buildWikiCompilerMessages({ space, sources, policy }) {
                 '你只能综合所给来源；每个事实性段落必须在 claims 中引用至少一个来源。',
                 '无法证实或来源冲突时使用 conflicts，不能自行裁决；不得称内容已批准、现行或权威。',
                 'pageType 只能为 overview/topic/entity/concept/conflict/change_digest；slug 使用小写短横线或中文。',
-                'sourceRefs 只能引用输入中的 documentId/versionId/blockId/chunkId 组合。',
-                '输出结构：{"pages":[{"pageType","slug","title","summary","markdown","claims":[{"sectionAnchor","statement","sourceRefs":[{"documentId","versionId","blockId","chunkId","supportType"}]}],"links":[{"slug","relationType"}],"conflicts":[]}]}。'
+                'sourceRefs 只能引用输入来源。最简写法是 {"sourceId":"S1","supportType":"supports"}；也可使用完整 documentId/versionId/blockId/chunkId。',
+                '每个 page 必须同时包含 title、markdown、claims；claims 至少含一个 sectionAnchor、statement 和 sourceRefs。links/conflicts 可为空数组。',
+                '严格使用以下英文 JSON 字段名：{"pages":[{"pageType":"topic","slug":"主题标识","title":"主题标题","summary":"摘要","markdown":"## 小节\\n正文","claims":[{"sectionAnchor":"小节","statement":"可被来源支持的事实","sourceRefs":[{"sourceId":"S1","supportType":"supports"}]}],"links":[],"conflicts":[]}]}。'
             ].join('\n')
         },
         {
@@ -454,45 +532,155 @@ function buildWikiCompilerMessages({ space, sources, policy }) {
 }
 
 function parseWikiCompilerOutput(value = '') {
-    const text = String(value || '').trim().replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '');
-    const parsed = parseJson(text, null);
-    const pages = Array.isArray(parsed?.pages) ? parsed.pages : (parsed && typeof parsed === 'object' ? [parsed] : []);
+    const parsed = parseLooseJson(value);
+    const namedPages = pickObjectValue(parsed, ['pages', 'wikiPages', 'items', 'results', '页面', '页面列表', '综合页']);
+    const pages = Array.isArray(parsed)
+        ? parsed
+        : namedPages !== undefined ? asObjectList(namedPages) : (parsed && typeof parsed === 'object' ? [parsed] : []);
     return pages.filter(page => page && typeof page === 'object');
 }
 
-function normalizeSourceRef(value = {}) {
+function normalizeSupportType(value) {
+    const raw = normalizeText(value, 80).toLowerCase();
+    const aliases = {
+        支持: 'supports', 支撑: 'supports', 依据: 'supports', 引用: 'supports', support: 'supports', supports: 'supports',
+        定义: 'defines', 说明: 'defines', define: 'defines', defines: 'defines',
+        冲突: 'contradicts', 矛盾: 'contradicts', contradict: 'contradicts', contradicts: 'contradicts',
+        更新: 'supersedes', 替代: 'supersedes', supersede: 'supersedes', supersedes: 'supersedes',
+        背景: 'background', background: 'background'
+    };
+    return SUPPORT_TYPES.has(raw) ? raw : (aliases[raw] || 'supports');
+}
+
+function parseSourceRefList(value) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return [value];
+    const text = String(value || '').trim();
+    if (!text) return [];
+    const parsed = parseLooseJson(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return [parsed];
+    return text.split(/[，,；;\s]+/u).map(item => item.trim()).filter(Boolean);
+}
+
+function canonicalizeWikiCandidate(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const pageSourceRefs = parseSourceRefList(pickObjectValue(source, ['sourceRefs', 'source_refs', 'sources', 'citations', 'evidence', '来源', '原始来源', '引用', '依据', '证据']));
+    const rawClaims = asObjectList(pickObjectValue(source, ['claims', 'facts', 'statements', 'assertions', '事实', '事实声明', '陈述', '结论', '要点']));
+    const claims = rawClaims.map(claim => {
+        const item = claim && typeof claim === 'object' ? claim : { statement: claim };
+        return {
+            sectionAnchor: pickObjectValue(item, ['sectionAnchor', 'section_anchor', 'heading', 'section', 'anchor', '段落', '章节', '小节', '标题']),
+            statement: pickObjectValue(item, ['statement', 'claim', 'text', 'content', '事实', '陈述', '结论', '要点']) ?? (typeof claim === 'string' ? claim : ''),
+            sourceRefs: parseSourceRefList(pickObjectValue(item, ['sourceRefs', 'source_refs', 'sources', 'citations', 'evidence', '来源', '原始来源', '引用', '依据', '证据']))
+        };
+    });
+    // 某些本地模型把来源放在页面层。仅当它们仍属于本轮受控来源时，服务端才把
+    // 其收敛为“综合页正文”声明；不会根据模型文本自行补造任何来源。
+    if (!claims.length && pageSourceRefs.length) {
+        claims.push({
+            sectionAnchor: '综合页正文',
+            statement: pickObjectValue(source, ['summary', '摘要', '概述', '简介'])
+                || pickObjectValue(source, ['title', '标题', '页面标题', 'name', '名称'])
+                || '综合页正文',
+            sourceRefs: pageSourceRefs
+        });
+    }
     return {
-        documentId: normalizeId(value.documentId ?? value.document_id),
-        versionId: normalizeId(value.versionId ?? value.version_id),
-        blockId: normalizeId(value.blockId ?? value.block_id),
-        chunkId: normalizeId(value.chunkId ?? value.chunk_id),
-        supportType: normalizeStatus(value.supportType ?? value.support_type, SUPPORT_TYPES, 'supports')
+        pageType: pickObjectValue(source, ['pageType', 'page_type', 'type', '页面类型', '类型']),
+        slug: pickObjectValue(source, ['slug', '页面标识', '标识', '页面路径']),
+        title: pickObjectValue(source, ['title', '标题', '页面标题', 'name', '名称']),
+        summary: pickObjectValue(source, ['summary', '摘要', '概述', '简介']),
+        markdown: pickObjectValue(source, ['markdown', 'content_markdown', 'content', 'body', '正文', '页面内容', '内容']),
+        confidence: pickObjectValue(source, ['confidence', '置信度']),
+        claims,
+        links: asObjectList(pickObjectValue(source, ['links', 'wikiLinks', '关联页面', '链接', '关联'])),
+        conflicts: asObjectList(pickObjectValue(source, ['conflicts', '冲突', '矛盾', '待确认事项']))
     };
 }
 
-function normalizeWikiCandidate(value = {}, allowedSources = new Map()) {
-    const pageType = normalizeStatus(value.pageType ?? value.page_type, PAGE_TYPES, 'topic');
-    const slug = normalizeSlug(value.slug || value.title);
-    const title = normalizeText(value.title, 255);
-    const markdown = safeMarkdown(value.markdown ?? value.content_markdown);
-    if (!slug || !title || !markdown) return null;
-    const claims = (Array.isArray(value.claims) ? value.claims : []).map(claim => {
-        const refs = (Array.isArray(claim?.sourceRefs) ? claim.sourceRefs : []).map(normalizeSourceRef)
-            .filter(ref => allowedSources.has(`${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}`));
+function resolveWikiSourceRef(value, allowedSources = new Map()) {
+    const ref = normalizeSourceRef(value);
+    const fromHandle = allowedSources.sourceByHandle?.get(ref.sourceId);
+    if (fromHandle) {
+        return {
+            documentId: fromHandle.documentId, versionId: fromHandle.versionId, blockId: fromHandle.blockId,
+            chunkId: fromHandle.chunkId || null, supportType: ref.supportType
+        };
+    }
+    const key = `${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}`;
+    if (allowedSources.has(key)) return { ...ref, sourceId: '' };
+    // 兼容模型省略 chunkId 的常见写法，但要求 document/version/block 三元组精确
+    // 命中本轮清单，不能据此扩大任意文档范围。
+    if (ref.documentId && ref.versionId && ref.blockId) {
+        const matched = [...allowedSources.values()].filter(source => Number(source.documentId) === ref.documentId
+            && Number(source.versionId) === ref.versionId && Number(source.blockId) === ref.blockId);
+        if (matched.length === 1) return {
+            documentId: matched[0].documentId, versionId: matched[0].versionId, blockId: matched[0].blockId,
+            chunkId: matched[0].chunkId || null, supportType: ref.supportType
+        };
+    }
+    return null;
+}
+
+function recordCandidateRejection(diagnostics, reason) {
+    if (!diagnostics) return;
+    diagnostics.rejected = diagnostics.rejected || {};
+    diagnostics.rejected[reason] = Number(diagnostics.rejected[reason] || 0) + 1;
+}
+
+function normalizeSourceRef(value = {}) {
+    const source = typeof value === 'string' || typeof value === 'number' ? { sourceId: value } : value;
+    return {
+        sourceId: normalizeText(pickObjectValue(source, ['sourceId', 'source_id', 'source', 'ref', 'reference', '编号', '来源编号', '来源']), 40).toUpperCase(),
+        documentId: normalizeId(pickObjectValue(source, ['documentId', 'document_id', 'docId', 'doc_id', '文档ID', '文档编号'])),
+        versionId: normalizeId(pickObjectValue(source, ['versionId', 'version_id', '文档版本ID', '版本ID'])),
+        blockId: normalizeId(pickObjectValue(source, ['blockId', 'block_id', '区块ID', '段落ID'])),
+        chunkId: normalizeId(pickObjectValue(source, ['chunkId', 'chunk_id', '片段ID', '块ID'])),
+        supportType: normalizeSupportType(pickObjectValue(source, ['supportType', 'support_type', 'type', '关系', '支持类型']))
+    };
+}
+
+function normalizeWikiCandidate(value = {}, allowedSources = new Map(), diagnostics = null) {
+    const candidate = canonicalizeWikiCandidate(value);
+    const pageType = normalizeStatus(candidate.pageType, PAGE_TYPES, 'topic');
+    const slug = normalizeSlug(candidate.slug || candidate.title);
+    const title = normalizeText(candidate.title, 255);
+    const markdown = safeMarkdown(candidate.markdown);
+    if (!slug || !title) {
+        recordCandidateRejection(diagnostics, 'missing_title');
+        return null;
+    }
+    if (!markdown) {
+        recordCandidateRejection(diagnostics, 'invalid_markdown');
+        return null;
+    }
+    const claims = candidate.claims.map(claim => {
+        const refs = parseSourceRefList(claim?.sourceRefs).map(ref => resolveWikiSourceRef(ref, allowedSources)).filter(Boolean);
         return { sectionAnchor: normalizeText(claim?.sectionAnchor, 160), statement: normalizeText(claim?.statement, 2000), refs };
     }).filter(claim => claim.statement && claim.refs.length);
     // 页面正文包含事实时必须至少能给出受控来源；没有来源的候选只作为失败处理。
-    if (!claims.length) return null;
-    const links = (Array.isArray(value.links) ? value.links : []).map(link => ({
-        slug: normalizeSlug(link?.slug), relationType: normalizeText(link?.relationType || 'related_to', 80) || 'related_to', anchor: normalizeText(link?.anchor, 160)
-    })).filter(link => link.slug).slice(0, 20);
-    const conflicts = Array.isArray(value.conflicts) ? value.conflicts.slice(0, 20).map(item => normalizeText(item, 1000)).filter(Boolean) : [];
+    if (!claims.length) {
+        recordCandidateRejection(diagnostics, 'missing_valid_source_refs');
+        return null;
+    }
+    const links = candidate.links.map(link => {
+        const item = link && typeof link === 'object' ? link : { slug: link };
+        return {
+            slug: normalizeSlug(pickObjectValue(item, ['slug', '页面标识', '目标', '目标页面', '链接']) || item.slug),
+            relationType: normalizeText(pickObjectValue(item, ['relationType', 'relation_type', 'type', '关系']) || 'related_to', 80) || 'related_to',
+            anchor: normalizeText(pickObjectValue(item, ['anchor', '锚点', '位置']), 160)
+        };
+    }).filter(link => link.slug).slice(0, 20);
+    const conflicts = candidate.conflicts.slice(0, 20).map(item => normalizeText(
+        item && typeof item === 'object' ? pickObjectValue(item, ['text', 'content', '说明', '冲突']) : item, 1000
+    )).filter(Boolean);
     const sourceRefs = claims.flatMap(claim => claim.refs.map(ref => ({ ...ref, sectionAnchor: claim.sectionAnchor })));
     const uniqueRefs = [...new Map(sourceRefs.map(ref => [`${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}:${ref.sectionAnchor}:${ref.supportType}`, ref])).values()];
     return {
-        pageType, slug, title, summary: normalizeText(value.summary, 1200), markdown, claims,
+        pageType, slug, title, summary: normalizeText(candidate.summary, 1200), markdown, claims,
         links, conflicts, sourceRefs: uniqueRefs,
-        confidence: Math.min(1, Math.max(0, Number(value.confidence) || (conflicts.length ? 0.45 : 0.7)))
+        confidence: Math.min(1, Math.max(0, Number(pickObjectValue(candidate, ['confidence', '置信度'])) || (conflicts.length ? 0.45 : 0.7)))
     };
 }
 
@@ -544,14 +732,15 @@ async function claimWikiCompileRun({ runId = '', workerId = '', leaseSeconds = 1
     });
 }
 
-async function storeWikiCandidatePages({ space, user, candidates, allowedSources, policy, modelVersion = '' } = {}, deps = {}) {
+async function storeWikiCandidatePages({ space, user, candidates, allowedSources, policy, modelVersion = '', validation = null } = {}, deps = {}) {
     const now = getBeijingTimestamp();
     const transactionFn = deps.transaction || transaction;
     return await transactionFn(async trx => {
         const stored = [];
         for (const candidate of candidates.slice(0, policy.maxPagesPerRun)) {
-            const normalized = normalizeWikiCandidate(candidate, allowedSources);
+            const normalized = normalizeWikiCandidate(candidate, allowedSources, validation);
             if (!normalized) continue;
+            if (validation) validation.acceptedCandidates = Number(validation.acceptedCandidates || 0) + 1;
             const previous = await trx.queryOne(`
                 SELECT * FROM knowledge_wiki_pages
                 WHERE space_id = ? AND slug = ? AND deleted_at IS NULL
@@ -651,13 +840,16 @@ async function runWikiCompile({ runId, user, modelRef = null, signal = null, wor
     if (signal?.aborted) abortFromCaller();
     else signal?.addEventListener?.('abort', abortFromCaller, { once: true });
     activeCompileControllers.set(safeRunId, controller);
+    let latestSummary = {};
     const update = async (stage, status = 'running', extra = {}) => {
+        const summary = extra.summary === undefined ? latestSummary : extra.summary;
+        latestSummary = summary;
         await (deps.execute || execute)(`
             UPDATE knowledge_wiki_compile_runs
             SET stage = ?, status = ?, summary_json = ?::jsonb, error_code = ?, error_message = ?,
                 started_at = COALESCE(started_at, ?), completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END,
                 updated_at = ? WHERE id = ?
-        `, [stage, status, JSON.stringify(extra.summary || {}), extra.errorCode || '', extra.errorMessage || '',
+        `, [stage, status, JSON.stringify(summary || {}), extra.errorCode || '', extra.errorMessage || '',
             getBeijingTimestamp(), status, getBeijingTimestamp(), getBeijingTimestamp(), safeRunId]);
     };
     try {
@@ -666,6 +858,7 @@ async function runWikiCompile({ runId, user, modelRef = null, signal = null, wor
         if (!manifest?.sources.length) throw Object.assign(new Error('wiki_compile_no_published_sources'), { code: 'wiki_compile_no_published_sources' });
         const allowedSources = new Map(manifest.sources.map(source => [`${source.documentId}:${source.versionId}:${source.blockId}:${source.chunkId || ''}`, source]));
         allowedSources.manifestHash = manifest.hash;
+        allowedSources.sourceByHandle = new Map(manifest.sources.map((source, index) => [`S${index + 1}`, source]));
         await update('generating_candidate', 'running', { summary: { sourceCount: manifest.sources.length, inputManifestHash: manifest.hash } });
         const runSummary = parseJson(row.summary_json, {});
         const model = deps.modelCfg || await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(modelRef || runSummary.modelRef || policy.modelRef, user);
@@ -676,20 +869,23 @@ async function runWikiCompile({ runId, user, modelRef = null, signal = null, wor
             source: 'knowledge_wiki_compile', maxTokens: policy.maxOutputTokens, temperature: 0, timeout: policy.timeoutMs, signal: controller.signal
         });
         const candidates = parseWikiCompilerOutput(completion?.content || completion);
-        await update('validating_sources');
+        const validation = { receivedCandidates: candidates.length, acceptedCandidates: 0, rejected: {} };
+        if (!candidates.length) validation.rejected.invalid_json_structure = 1;
+        await update('validating_sources', 'running', { summary: { ...latestSummary, validation } });
         const pages = await storeWikiCandidatePages({
             space, user, candidates, allowedSources, policy,
-            modelVersion: model.model_name || model.name || ''
+            modelVersion: model.model_name || model.name || '', validation
         }, deps);
-        if (!pages.length) throw Object.assign(new Error('wiki_compile_no_valid_candidates'), { code: 'wiki_compile_no_valid_candidates' });
+        if (!pages.length) throw Object.assign(new Error('wiki_compile_no_valid_candidates'), { code: 'wiki_compile_no_valid_candidates', validation });
         await (deps.execute || execute)(`UPDATE knowledge_wiki_spaces SET last_compiled_at = ?, updated_at = ? WHERE id = ?`, [getBeijingTimestamp(), getBeijingTimestamp(), space.id]);
-        await update('awaiting_review', 'completed', { summary: { sourceCount: manifest.sources.length, pagesCreated: pages.length, pageIds: pages.map(page => page.id), inputManifestHash: manifest.hash } });
+        await update('awaiting_review', 'completed', { summary: { ...latestSummary, sourceCount: manifest.sources.length, pagesCreated: pages.length, pageIds: pages.map(page => page.id), inputManifestHash: manifest.hash, validation } });
         return { runId: safeRunId, status: 'completed', pages };
     } catch (error) {
         const cancelled = controller.signal.aborted === true;
         await update(cancelled ? 'cancelled' : 'failed', cancelled ? 'cancelled' : 'failed', {
+            summary: error?.validation ? { ...latestSummary, validation: error.validation } : latestSummary,
             errorCode: cancelled ? 'wiki_compile_cancelled' : String(error?.code || 'wiki_compile_failed').slice(0, 120),
-            errorMessage: cancelled ? 'Wiki 编译任务已取消。' : String(error?.message || error).slice(0, 1000)
+            errorMessage: cancelled ? '知识空间编译任务已取消。' : String(error?.message || error).slice(0, 1000)
         }).catch(() => {});
         throw error;
     } finally {
@@ -710,7 +906,7 @@ async function cancelWikiCompileRun({ runId, user } = {}, deps = {}) {
     const changed = await (deps.execute || execute)(`
         UPDATE knowledge_wiki_compile_runs
         SET status = 'cancelled', stage = 'cancelled', error_code = 'wiki_compile_cancelled',
-            error_message = 'Wiki 编译任务已取消。', completed_at = ?, updated_at = ?
+            error_message = '知识空间编译任务已取消。', completed_at = ?, updated_at = ?
         WHERE id = ? AND status IN ('queued', 'running')
     `, [now, now, safeRunId]);
     if (Number(changed || 0) <= 0) return null;
@@ -732,7 +928,7 @@ async function markWikiCompileRunFailed(runId, errorCode, deps = {}) {
         SET status = 'failed', stage = 'failed', error_code = ?, error_message = ?,
             completed_at = ?, updated_at = ?
         WHERE id = ? AND status IN ('queued', 'running')
-    `, [code, WIKI_COMPILE_ERROR_MESSAGES[code] || 'Wiki 编译任务失败。', now, now, safeRunId]);
+    `, [code, WIKI_COMPILE_ERROR_MESSAGES[code] || '知识空间编译任务失败。', now, now, safeRunId]);
 }
 
 function createKnowledgeWikiCompileWorker({

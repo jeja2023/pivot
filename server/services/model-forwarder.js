@@ -5,6 +5,7 @@ const {
     createSafeModelHttpAgents
 } = require('./model-adapter');
 const { normalizeProviderRequestData } = require('./agent-provider-envelope');
+const { coalesceSystemMessages, requiresSingleLeadingSystemMessage } = require('./model-response');
 
 // 模型补全转发的默认超时（毫秒）。聊天链路对常规补全使用更长超时，按需在调用处覆盖。
 const DEFAULT_FORWARD_TIMEOUT_MS = 180000;
@@ -27,6 +28,10 @@ async function forwardChatCompletion({
     if (!url) throw new Error('模型转发失败：缺少必需的 url 地址');
     await assertSafeModelRuntimeUrl(modelCfg, url, user);
     const providerData = normalizeProviderRequestData(data);
+    // 最终转发兜底仅对 Qwen3.8 生效；Responses API 使用 input，不受该字段改写影响。
+    if (requiresSingleLeadingSystemMessage(modelCfg) && Array.isArray(providerData?.messages)) {
+        providerData.messages = coalesceSystemMessages(providerData.messages);
+    }
     assertJsonOnlyPayload(providerData);
     const agents = createSafeModelHttpAgents(modelCfg, user);
     return axios.post(url, providerData, {

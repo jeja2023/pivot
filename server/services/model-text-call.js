@@ -8,7 +8,7 @@ const {
 } = require('./model-runtime');
 const { buildChatCompletionsUrl, buildModelHeaders } = require('./model-adapter');
 const { forwardChatCompletion } = require('./model-forwarder');
-const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch, buildThinkingControlPayload } = require('./model-response');
+const { extractCompletionContent, shouldDisableThinking, applyNoThinkSoftSwitch, buildThinkingControlPayload, coalesceSystemMessages, requiresSingleLeadingSystemMessage } = require('./model-response');
 const { fitMessagesToContextBudget } = require('./context-budget');
 const { recordSlowModelResponse } = require('./observability');
 
@@ -24,7 +24,11 @@ async function callModelTextWithBudget({ modelCfg, user, messages, source = 'ai'
     const outputTokens = maxOutputTokensCap > 0
         ? Math.min(requestedOutputTokens, Number.parseInt(maxOutputTokensCap, 10) || requestedOutputTokens)
         : requestedOutputTokens;
-    const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: outputTokens });
+    // 仅 Qwen3.8 在预算前归并 system；其他模型维持原来的分段 system 语义。
+    const orderedInputMessages = requiresSingleLeadingSystemMessage(modelCfg)
+        ? coalesceSystemMessages(messages)
+        : messages;
+    const fitted = fitMessagesToContextBudget(orderedInputMessages, modelCfg, { maxOutputTokens: outputTokens });
     const payloadMessages = shouldDisableThinking(modelCfg) ? applyNoThinkSoftSwitch(fitted.messages) : fitted.messages;
     let endpointRelease = null;
     let globalAcquired = false;

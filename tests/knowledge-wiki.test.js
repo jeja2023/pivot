@@ -54,6 +54,20 @@ test('Wiki 编译候选必须把每个事实性段落绑定到本轮允许的来
     assert.equal(valid.sourceRefs.length, 1);
     assert.equal(valid.links[0].slug, 'invoice-policy');
 
+    const sourceByHandle = new Map([[`${source.documentId}:${source.versionId}:${source.blockId}:${source.chunkId}`, source]]);
+    sourceByHandle.sourceByHandle = new Map([['S1', source]]);
+    const qwenCompatible = normalizeWikiCandidate({
+        页面类型: '主题', 标题: '差旅制度中文字段', 正文: '## 适用范围\n适用员工。',
+        事实: [{ 段落: '适用范围', 陈述: '适用员工。', 来源: [{ 来源编号: 'S1', 支持类型: '支持' }] }]
+    }, sourceByHandle);
+    assert.equal(qwenCompatible.title, '差旅制度中文字段');
+    assert.equal(qwenCompatible.sourceRefs[0].documentId, 11);
+
+    const pageLevelSource = normalizeWikiCandidate({
+        title: '页面级来源兼容', markdown: '## 概览\n内容来自受控资料。', 来源: ['S1']
+    }, sourceByHandle);
+    assert.equal(pageLevelSource.claims[0].sectionAnchor, '综合页正文');
+
     const invalid = normalizeWikiCandidate({
         title: '越权来源', markdown: '没有可验证依据。',
         claims: [{ statement: '没有可验证依据。', sourceRefs: [{ documentId: 99, versionId: 98, blockId: 97 }] }]
@@ -76,6 +90,8 @@ test('Wiki 编译候选必须把每个事实性段落绑定到本轮允许的来
 test('Wiki 输出解析只接受结构化 JSON，来源变更会使已发布派生页失效', async () => {
     const output = parseWikiCompilerOutput('```json\n{"pages":[{"title":"概览"}]}\n```');
     assert.deepEqual(output, [{ title: '概览' }]);
+    const proseOutput = parseWikiCompilerOutput('以下是结果：\n```json\n{"页面":[{"标题":"中文字段页面"}]}\n```\n请审核。');
+    assert.deepEqual(proseOutput, [{ 标题: '中文字段页面' }]);
     const calls = [];
     const result = await markWikiPagesStaleForDocument({ legacyDocId: 71, reason: 'source_deleted' }, {
         queryOne: async (sql, params) => {

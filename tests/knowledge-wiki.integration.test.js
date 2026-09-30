@@ -78,6 +78,18 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
         assert.equal(retrieved.pages.length, 1);
         assert.match(retrieved.context, /原始依据/);
 
+        // 兼容 Qwen 常见的“说明文字 + Markdown JSON 围栏 + 中文字段 + S1 来源编号”
+        // 输出形态，但仍须在服务端映射回本轮受控原始区块。
+        const compatibleRun = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' }, {
+            getAccessibleModelAsync: async () => compilerModel
+        });
+        const compatible = await runWikiCompile({ runId: compatibleRun.run.id, user: owner, modelRef: 'fake-wiki-model' }, {
+            modelCfg: compilerModel,
+            callModelTextWithBudget: async () => ({ content: `以下为候选页面：\n\`\`\`json\n{"页面":[{"页面类型":"主题","标题":"差旅报销资料依据","摘要":"已按来源编号关联。","正文":"## 凭证要求\\n报销需保留发票。","事实":[{"段落":"凭证要求","陈述":"报销需保留发票。","来源":[{"来源编号":"S1","支持类型":"支持"}]}]}]}\n\`\`\`` })
+        });
+        assert.equal(compatible.status, 'completed');
+        assert.equal(compatible.pages.some(page => page.title === '差旅报销资料依据'), true);
+
         // 生成失败只能结束本次运行，不能把已审核发布的版本覆盖为失败输出。
         const invalidRun = await createWikiCompileRun({ spaceId: space.id, user: owner, modelRef: 'fake-wiki-model' }, {
             getAccessibleModelAsync: async () => compilerModel

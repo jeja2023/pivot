@@ -538,26 +538,532 @@ body.is-main-workspace-full .chat-container {
 }
 
 /* 派生 Wiki 页面由服务端来源映射约束；管理界面只使用文本节点渲染内容。 */
-.knowledge-wiki-modal { width: min(1040px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 40px)); display: flex; flex-direction: column; gap: 12px; }
-.knowledge-wiki-body { min-height: 180px; max-height: calc(min(760px, 100vh - 40px) - 150px); overflow: auto; }
-.knowledge-wiki-layout { display: grid; grid-template-columns: minmax(210px, .42fr) minmax(0, 1fr); gap: 12px; }
-.knowledge-wiki-spaces, .knowledge-wiki-pages { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
-.knowledge-wiki-spaces { padding-right: 10px; border-right: 1px solid var(--border); }
-.knowledge-wiki-space, .knowledge-wiki-page { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); text-align: left; }
+.knowledge-wiki-modal {
+    width: min(1080px, calc(100vw - 32px));
+    height: min(780px, calc(100vh - 40px));
+    max-height: min(780px, calc(100vh - 40px));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.knowledge-wiki-modal .rag-detail-header {
+    flex-shrink: 0;
+}
+.knowledge-wiki-modal .workspace-toolbar {
+    flex-shrink: 0;
+}
+.knowledge-wiki-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    box-sizing: border-box;
+}
+.knowledge-wiki-layout {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 16px;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.knowledge-wiki-spaces {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+    padding-right: 10px;
+    border-right: 1px solid var(--border);
+    box-sizing: border-box;
+}
+.knowledge-wiki-pages {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+    padding-right: 6px;
+    box-sizing: border-box;
+}
+.knowledge-wiki-pages.is-detail-mode {
+    gap: 8px;
+    padding-right: 2px;
+}
+
+/* 知识空间卡片 */
+.knowledge-wiki-space-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+.knowledge-wiki-space-card:hover {
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+    background: color-mix(in srgb, var(--primary) 3%, var(--surface));
+}
+.knowledge-wiki-space-card.active {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+    box-shadow: 0 0 0 1px var(--primary);
+}
+.knowledge-wiki-space-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    text-align: left;
+}
+.knowledge-wiki-space-info strong {
+    color: var(--text-main);
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+.knowledge-wiki-space-info small {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+.knowledge-wiki-space-card .space-config-btn {
+    align-self: flex-start;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.knowledge-wiki-space-card .space-config-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--surface);
+}
+.knowledge-wiki-space-card .space-config-btn.is-enabled {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+}
+
+/* 兼容旧选择器 */
+.knowledge-wiki-space, .knowledge-wiki-page {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    text-align: left;
+}
 .knowledge-wiki-space { display: grid; gap: 4px; padding: 10px; cursor: pointer; }
 .knowledge-wiki-space.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
 .knowledge-wiki-space strong, .knowledge-wiki-page strong { color: var(--text-main); }
 .knowledge-wiki-space small, .knowledge-wiki-page .muted-text { color: var(--text-muted); font-size: .75rem; }
+
+/* 页面卡片 */
+.knowledge-wiki-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.knowledge-wiki-section-title {
+    font-size: 0.94rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin: 0;
+}
+.knowledge-wiki-subhead {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin: 4px 0 0;
+}
+.knowledge-wiki-page-list-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.knowledge-wiki-page-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    text-align: left;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+.knowledge-wiki-page-card:hover {
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.knowledge-wiki-page-card.status-review {
+    border-left: 3px solid var(--primary);
+}
+.knowledge-wiki-page-card.status-stale {
+    border-left: 3px solid var(--warning, #f59e0b);
+}
+.knowledge-wiki-page-card.status-failed {
+    border-left: 3px solid var(--danger, #ef4444);
+}
+.knowledge-wiki-page-card.status-published {
+    border-left: 3px solid var(--success, #10b981);
+}
+.knowledge-wiki-page-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.knowledge-wiki-page-card-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.knowledge-wiki-badge-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.knowledge-wiki-page-card-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.wiki-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg-side, #f1f5f9);
+    border: 1px solid var(--border, #e2e8f0);
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    line-height: 1.25;
+}
+.wiki-meta-chip.chip-warning {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+    color: var(--warning, #d97706);
+    border-color: color-mix(in srgb, var(--warning, #f59e0b) 28%, transparent);
+    font-weight: 500;
+}
+.knowledge-wiki-page-card-desc {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+.knowledge-wiki-page-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+/* 兼容旧 .knowledge-wiki-page */
 .knowledge-wiki-page { display: grid; gap: 7px; padding: 11px; }
 .knowledge-wiki-page p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.45; }
 .knowledge-wiki-page.status-stale { border-left: 3px solid var(--warning); }
 .knowledge-wiki-page.status-review { border-left: 3px solid var(--primary); }
 .knowledge-wiki-page.status-failed { border-left: 3px solid var(--danger); }
-.knowledge-wiki-diagnostic { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-side); color: var(--text-muted); font-size: .76rem; line-height: 1.45; }
-.knowledge-wiki-diagnostic.is-ready { border-color: color-mix(in srgb, var(--success) 30%, var(--border)); color: var(--success); }
-.knowledge-wiki-diagnostic.is-error, .knowledge-wiki-run-error { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
-.knowledge-wiki-run-error { margin: 0; font-size: .76rem; line-height: 1.45; }
-.knowledge-wiki-markdown { max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-side); color: var(--text-main); font: inherit; line-height: 1.55; }
+
+/* 任务列表 */
+.knowledge-wiki-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.knowledge-wiki-task-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.78rem;
+    box-sizing: border-box;
+}
+.knowledge-wiki-task-card.status-failed {
+    border-left: 3px solid var(--danger, #ef4444);
+}
+.knowledge-wiki-task-card.status-completed {
+    border-left: 3px solid var(--success, #10b981);
+}
+.knowledge-wiki-task-card.status-running,
+.knowledge-wiki-task-card.status-queued {
+    border-left: 3px solid var(--primary);
+}
+.knowledge-wiki-task-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.knowledge-wiki-task-meta {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* 诊断条 */
+.knowledge-wiki-diagnostic {
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-side);
+    color: var(--text-muted);
+    font-size: .76rem;
+    line-height: 1.45;
+}
+.knowledge-wiki-diagnostic.is-ready {
+    border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 5%, var(--bg-side));
+}
+.knowledge-wiki-diagnostic.is-error,
+.knowledge-wiki-run-error {
+    border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 5%, var(--bg-side));
+}
+.knowledge-wiki-run-error {
+    margin: 0;
+    font-size: .76rem;
+    line-height: 1.45;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border));
+}
+
+/* 统一徽标 Tags */
+.wiki-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    padding: 0 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    border-radius: 4px;
+    line-height: 1;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+.wiki-tag.tag-primary {
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.wiki-tag.tag-success {
+    background: color-mix(in srgb, var(--success, #10b981) 12%, transparent);
+    color: var(--success, #10b981);
+    border: 1px solid color-mix(in srgb, var(--success, #10b981) 28%, transparent);
+}
+.wiki-tag.tag-warning {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+    color: var(--warning, #d97706);
+    border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 28%, transparent);
+}
+.wiki-tag.tag-danger {
+    background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+    color: var(--danger, #ef4444);
+    border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 28%, transparent);
+}
+.wiki-tag.tag-neutral {
+    background: var(--bg-side, #f1f5f9);
+    color: var(--text-muted, #64748b);
+    border: 1px solid var(--border, #e2e8f0);
+}
+
+/* 详情视图样式 */
+.knowledge-wiki-detail-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-sizing: border-box;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    flex-shrink: 0;
+}
+.knowledge-wiki-detail-nav-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+.knowledge-wiki-detail-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.knowledge-wiki-detail-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.knowledge-wiki-back-btn {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 0.76rem;
+    border-radius: 6px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.knowledge-wiki-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.knowledge-wiki-section.sources-section {
+    flex-shrink: 0;
+}
+.knowledge-wiki-summary-box {
+    padding: 6px 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.knowledge-wiki-summary-label {
+    font-weight: 600;
+    color: var(--text-main);
+}
+.knowledge-wiki-markdown-box {
+    max-height: 90px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-side, #f8fafc);
+    color: var(--text-main);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.knowledge-wiki-markdown {
+    max-height: 360px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-side);
+    color: var(--text-main);
+    font: inherit;
+    line-height: 1.55;
+}
+.knowledge-wiki-table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface, #ffffff);
+    width: 100%;
+    box-sizing: border-box;
+}
+.knowledge-wiki-table-wrap .table-container {
+    border: none;
+    border-radius: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    width: 100%;
+    box-sizing: border-box;
+}
+.knowledge-wiki-table-wrap .data-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+.knowledge-wiki-table-wrap .data-table th,
+.knowledge-wiki-table-wrap .data-table td {
+    height: 30px;
+    padding: 3px 6px;
+    box-sizing: border-box;
+    line-height: 1.25;
+}
+.knowledge-wiki-table-wrap .data-table th {
+    height: 30px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.knowledge-wiki-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 4px 0 0;
+    border-top: none;
+    flex-shrink: 0;
+}
+.knowledge-wiki-pagination button,
+.knowledge-wiki-pagination .btn-secondary {
+    height: 26px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+.knowledge-wiki-pagination span {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+.knowledge-wiki-detail-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 2px;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+    flex-shrink: 0;
+}
 .knowledge-wiki-setup-form {
     display: flex;
     flex-direction: column;
@@ -655,3 +1161,40 @@ body.is-main-workspace-full .chat-container {
     border-radius: 6px;
 }
 @media (max-width: 760px) { .knowledge-wiki-layout { grid-template-columns: 1fr; } .knowledge-wiki-spaces { padding-right: 0; padding-bottom: 10px; border-right: 0; border-bottom: 1px solid var(--border); } }
+
+/* 暗黑模式适配 */
+body.dark-mode .knowledge-wiki-table-wrap,
+.dark-mode .knowledge-wiki-table-wrap,
+body.dark-mode .knowledge-wiki-table-wrap .table-container,
+.dark-mode .knowledge-wiki-table-wrap .table-container {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .knowledge-wiki-table-wrap .data-table th,
+.dark-mode .knowledge-wiki-table-wrap .data-table th {
+    background: var(--bg-side, #0f172a);
+    color: var(--text-muted, #94a3b8);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .knowledge-wiki-table-wrap .data-table td,
+.dark-mode .knowledge-wiki-table-wrap .data-table td {
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+body.dark-mode .knowledge-wiki-table-wrap .data-table tbody tr:hover,
+.dark-mode .knowledge-wiki-table-wrap .data-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+body.dark-mode .wiki-meta-chip,
+.dark-mode .wiki-meta-chip {
+    background: var(--bg-side, #0f172a);
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+body.dark-mode .knowledge-wiki-space-card .space-config-btn,
+.dark-mode .knowledge-wiki-space-card .space-config-btn {
+    background: var(--bg-side, #0f172a);
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+

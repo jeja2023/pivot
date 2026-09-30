@@ -14,7 +14,8 @@ test('知识 Wiki 路由、问答融合和工作台入口保持来源优先契�
     assert.match(route, /compile-readiness/);
     assert.match(route, /retrieveWikiContext/);
     assert.match(route, /原始依据优先/);
-    assert.match(service, /sourceRefs 只能引用输入中的/);
+    assert.match(service, /sourceRefs 只能引用输入来源/);
+    assert.match(service, /sourceId.*S1/);
     assert.match(service, /待确认冲突/);
     assert.match(service, /createKnowledgeWikiCompileWorker/);
     assert.match(service, /cancelWikiCompileRun/);
@@ -32,6 +33,9 @@ test('知识 Wiki 路由、问答融合和工作台入口保持来源优先契�
     assert.match(wikiClient, /Array\.isArray\(data\) \? data/);
     assert.match(wikiClient, /关闭自动编译/);
     assert.match(wikiClient, /当前配置的模型已不可访问/);
+    assert.match(wikiClient, /scheduleActiveRunRefresh/);
+    assert.match(wikiClient, /wikiRunStageLabel/);
+    assert.match(wikiClient, /wikiValidationSummary/);
     assert.doesNotMatch(wikiClient, /window\.prompt/);
     const autoRoute = fs.readFileSync(path.join(root, 'client/chat/chat-auto-route.js'), 'utf8');
     const product = fs.readFileSync(path.join(root, 'client/chat/knowledge-product.js'), 'utf8');

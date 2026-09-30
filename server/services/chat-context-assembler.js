@@ -1,6 +1,7 @@
 const { getContext } = require('../llm');
 const { readTypedEnv } = require('../config/env-registry');
 const { shouldDisableChatThinking } = require('./models');
+const { coalesceSystemMessages, requiresSingleLeadingSystemMessage } = require('./model-response');
 const {
     ContextLengthExceededError,
     buildContextLengthExceededPayload,
@@ -483,6 +484,8 @@ async function assembleChatContext({
         req.log.warn({ sessionId, userId, err: error.message }, '聊天上下文窗口持久化失败，继续使用内存上下文');
     }
 
+    // 仅 Qwen3.8 严格要求唯一首条 system；其他模型保留原来的 system 分段。
+    if (requiresSingleLeadingSystemMessage(modelCfg)) visionHistory = coalesceSystemMessages(visionHistory);
     visionHistory = applyChatNoThinkSoftSwitch(visionHistory, modelCfg);
 
     try {
