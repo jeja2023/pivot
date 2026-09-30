@@ -5,7 +5,9 @@
     let available = true;
     let selections = [];
     let tools = [];
+    let wikiSpaces = [];
     let toolsLoading = null;
+    let wikiSpacesLoading = null;
     let mentionScope = '';
     let mentionSearchQuery = '';
     let mentionPage = 0;
@@ -41,7 +43,11 @@
         const current = String(prompt || input()?.value || '');
         const active = selections.filter(selection => current.includes(selection.token));
         return {
-            collections: active.filter(selection => selection.kind === 'collection').map(selection => selection.id),
+            // @Wiki Space 同时显式固定其底层专题库，服务端再以 wikiSpaces
+            // 选择综合页；两者都通过现有权限过滤，不能扩大可见范围。
+            collections: active.filter(selection => selection.kind === 'collection').map(selection => selection.id)
+                .concat(active.filter(selection => selection.kind === 'wiki').map(selection => selection.collectionId)),
+            wikiSpaces: active.filter(selection => selection.kind === 'wiki').map(selection => selection.id),
             tools: active.filter(selection => selection.kind === 'tool').map(selection => selection.fullName)
         };
     };
@@ -86,6 +92,11 @@
         .filter(item => !allowlist || allowlist.has(item.fullName))
         .filter(item => !query || `${item.name} ${item.detail} ${item.fullName} ${item.aliases.join(' ')}`.toLowerCase().includes(query));
     };
+    const wikiCandidates = query => wikiSpaces.map(space => ({
+        kind: 'wiki', id: Number(space.id), collectionId: Number(space.collectionId), name: String(space.name || 'Wiki 综合'),
+        detail: `Wiki 综合 · ${Number(space.publishedPages || 0)} 页已发布`
+    })).filter(item => Number.isSafeInteger(item.id) && item.id > 0 && Number.isSafeInteger(item.collectionId) && item.collectionId > 0)
+        .filter(item => !query || `${item.name} ${item.detail}`.toLowerCase().includes(query));
     const closeMentionMenu = () => {
         const menu = document.getElementById('chat-route-mention-menu');
         if (!menu) return;
@@ -104,9 +115,11 @@
         field.value = `${field.value.slice(0, start)}${token} ${field.value.slice(field.selectionEnd || field.value.length)}`;
         const next = selection.kind === 'collection'
             ? { kind: 'collection', id: selection.id, token }
-            : { kind: 'tool', fullName: selection.fullName, token };
+            : selection.kind === 'wiki'
+                ? { kind: 'wiki', id: selection.id, collectionId: selection.collectionId, token }
+                : { kind: 'tool', fullName: selection.fullName, token };
         selections = [...selections.filter(item => item.token !== token && (item.kind !== next.kind || (item.id || item.fullName) !== (next.id || next.fullName))), next].slice(-20);
-        if (selection.kind === 'collection') {
+        if (selection.kind === 'collection' || selection.kind === 'wiki') {
             setRagPreference('enabled');
         }
         field.focus();
@@ -130,11 +143,12 @@
         menu.appendChild(button);
     };
     const setMentionScope = scope => {
-        mentionScope = scope === 'tool' ? 'tool' : 'collection';
+        mentionScope = ['tool', 'wiki'].includes(scope) ? scope : 'collection';
         // 用户先输入 @关键词 再选择类别时，保留关键词继续搜索。
         mentionSearchQuery = mentionQuery(input()?.value || '') || '';
         mentionPage = 0;
         if (mentionScope === 'tool') ensureMentionTools().catch(() => {});
+        if (mentionScope === 'wiki') ensureMentionWikiSpaces().catch(() => {});
         renderMentionMenu({ focusSearch: true });
     };
     const appendScopeOption = (menu, scope, label, description) => {
@@ -167,10 +181,12 @@
             : '选择要引用的能力';
         menu.appendChild(hint);
         appendScopeOption(menu, 'collection', '知识库', '搜索有权访问的资料库');
+        appendScopeOption(menu, 'wiki', 'Wiki 综合', '搜索已发布综合页所属 Space');
         appendScopeOption(menu, 'tool', '工具', '搜索当前允许使用的工具');
     };
     const renderMentionSearch = (menu, { focusSearch = false } = {}) => {
         const isToolScope = mentionScope === 'tool';
+        const isWikiScope = mentionScope === 'wiki';
         const query = String(mentionSearchQuery || '').trim().toLowerCase();
         const header = document.createElement('div');
         header.className = 'chat-route-mention-search-header';
@@ -188,12 +204,12 @@
             input()?.focus();
         });
         const title = document.createElement('strong');
-        title.textContent = isToolScope ? '搜索工具' : '搜索知识库';
+        title.textContent = isToolScope ? '搜索工具' : isWikiScope ? '搜索 Wiki 综合' : '搜索知识库';
         header.append(back, title);
         const search = document.createElement('input');
         search.type = 'search';
         search.className = 'chat-route-mention-search';
-        search.placeholder = isToolScope ? '输入工具名称或服务' : '输入知识库名称';
+        search.placeholder = isToolScope ? '输入工具名称或服务' : isWikiScope ? '输入 Wiki Space 名称' : '输入知识库名称';
         search.value = mentionSearchQuery;
         search.setAttribute('aria-label', title.textContent);
         search.addEventListener('input', event => {
@@ -220,13 +236,13 @@
             }
         });
         menu.append(header, search);
-        if (isToolScope && toolsLoading) {
+        if ((isToolScope && toolsLoading) || (isWikiScope && wikiSpacesLoading)) {
             const loading = document.createElement('div');
             loading.className = 'chat-route-mention-empty';
-            loading.textContent = '正在加载当前可用工具...';
+            loading.textContent = isWikiScope ? '正在加载可访问 Wiki Space...' : '正在加载当前可用工具...';
             menu.appendChild(loading);
         } else {
-            const allCandidates = isToolScope ? toolCandidates(query) : collectionCandidates(query);
+            const allCandidates = isToolScope ? toolCandidates(query) : isWikiScope ? wikiCandidates(query) : collectionCandidates(query);
             const total = allCandidates.length;
             const pageCount = Math.max(1, Math.ceil(total / MENTION_PAGE_SIZE));
             const page = Math.min(Math.max(0, mentionPage), pageCount - 1);
@@ -237,8 +253,8 @@
                 const empty = document.createElement('div');
                 empty.className = 'chat-route-mention-empty';
                 empty.textContent = query
-                    ? `未找到匹配的${isToolScope ? '工具' : '知识库'}`
-                    : `暂无可引用的${isToolScope ? '工具' : '知识库'}`;
+                    ? `未找到匹配的${isToolScope ? '工具' : isWikiScope ? 'Wiki 综合' : '知识库'}`
+                    : `暂无可引用的${isToolScope ? '工具' : isWikiScope ? 'Wiki 综合' : '知识库'}`;
                 menu.appendChild(empty);
             } else {
                 const summary = document.createElement('div');
@@ -311,6 +327,21 @@
             renderMentionMenu({ focusSearch: true });
         });
         return toolsLoading;
+    };
+    const ensureMentionWikiSpaces = async () => {
+        if (wikiSpaces.length || wikiSpacesLoading || mentionScope !== 'wiki') return wikiSpacesLoading;
+        wikiSpacesLoading = (async () => {
+            const response = await apiFetch(`${API_BASE}/knowledge/wiki/spaces`, { headers: authHeaders() });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Wiki Space 目录加载失败');
+            wikiSpaces = Array.isArray(data.data) ? data.data : [];
+        })().catch(() => {
+            wikiSpaces = [];
+        }).finally(() => {
+            wikiSpacesLoading = null;
+            renderMentionMenu({ focusSearch: true });
+        });
+        return wikiSpacesLoading;
     };
     const enableMcpFromRouteTrace = async () => {
         try {

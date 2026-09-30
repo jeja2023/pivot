@@ -196,7 +196,7 @@ function renderRagCollectionCell(doc = {}) {
 
 function renderRagTagsCell(doc = {}) {
     const tags = getRagDocTags(doc);
-    if (!tags.length) return '<span class="knowledge-empty-meta">-</span>';
+    if (!tags.length) return '';
     return `<div class="knowledge-tag-list">${tags.map(tag => `<span class="knowledge-tag-pill" title="${window.Pivot.legacy.escapeRagAttr(tag)}">${window.Pivot.legacy.escapeRagHtml(tag)}</span>`).join('')}</div>`;
 }
 

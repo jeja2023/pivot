@@ -25,6 +25,7 @@
                         <button id="rag-refresh-btn" class="btn-secondary knowledge-refresh-btn" title="刷新知识库" aria-label="刷新知识库">刷新</button>
                         <button id="rag-upload-btn" class="btn-primary knowledge-upload-btn" type="button">上传文档</button>
                         <button id="knowledge-product-open" class="btn-secondary knowledge-product-open" type="button" data-knowledge-product-open data-knowledge-product-tab="search" aria-haspopup="dialog">知识使用与治理</button>
+                        <button id="knowledge-wiki-open" class="btn-secondary" type="button" aria-haspopup="dialog">Wiki 综合</button>
                         <details class="knowledge-action-menu">
                             <summary class="btn-secondary">内容管理</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="内容管理">
@@ -132,7 +133,7 @@
                         <button type="button" id="knowledge-product-new-article" class="btn-primary">新建知识文章</button>
                     </div>
                 </div>
-                <div id="knowledge-product-documents" class="knowledge-product-list"></div>
+                <div id="knowledge-product-documents" class="knowledge-product-table-wrap"></div>
             </div>
             <div id="knowledge-product-panel-sources" class="knowledge-product-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="knowledge-product-tab-sources" data-knowledge-product-panel="sources">
                 <div class="knowledge-product-toolbar">
@@ -146,7 +147,7 @@
                     <span>索引任务可恢复、可重试，并会在服务重启后继续处理。</span>
                     <button type="button" id="knowledge-product-refresh-jobs" class="btn-secondary">刷新任务</button>
                 </div>
-                <div id="knowledge-product-jobs" class="knowledge-product-list"></div>
+                <div id="knowledge-product-jobs" class="knowledge-product-table-wrap"></div>
             </div>
             <div id="knowledge-product-panel-evaluation" class="knowledge-product-panel hidden" role="tabpanel" tabindex="0" aria-labelledby="knowledge-product-tab-evaluation" data-knowledge-product-panel="evaluation">
                 <div class="knowledge-product-toolbar">
@@ -200,4 +201,3 @@
         </form>
     </div>
 </div>
-

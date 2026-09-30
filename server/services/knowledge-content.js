@@ -9,6 +9,7 @@ const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const { buildRagSearchContent } = require('./rag-tokenizer');
 const { hydrateManualKnowledgeArticleEmbeddings } = require('./knowledge-manual-embeddings');
+const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
 
 const DOCUMENT_STATUSES = new Set(['draft', 'review', 'published', 'expired', 'archived']);
 const PERMISSIONS = new Set(['owner', 'manager', 'editor', 'commenter', 'viewer']);
@@ -266,6 +267,7 @@ async function publishDocumentVersion({ versionId, actor }) {
         userId: detail.document.owner_user_id,
         user: actor
     }).catch(() => {});
+    void markWikiPagesStaleForDocument({ documentId: detail.document.id, reason: 'manual_version_published' }).catch(() => {});
     return { documentId: Number(detail.document.id), versionId: Number(detail.version.id), status: 'published', indexStatus: 'lexical_ready' };
 }
 
@@ -327,6 +329,7 @@ async function archiveDocument({ documentId, actor }) {
             WHERE id = ? AND user_id = ?
         `, [timestamp, document.legacy_doc_id, document.owner_user_id]);
     }
+    void markWikiPagesStaleForDocument({ documentId: document.id, reason: 'source_archived' }).catch(() => {});
     return { documentId: Number(document.id), status: 'archived' };
 }
 

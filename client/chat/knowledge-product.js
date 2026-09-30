@@ -34,6 +34,17 @@
         }).join('')}</div>`;
     }
 
+    function renderWikiPages(pages = [], citations = []) {
+        if (!pages.length) return '';
+        const sourceText = (Array.isArray(citations) ? citations : []).map(citation => {
+            const label = `${citation.pageTitle || 'Wiki 综合页'} → ${citation.title || '原始依据'}${citation.headingPath ? ` / ${citation.headingPath}` : ''}`;
+            return citation.citationKey
+                ? `<button type="button" class="btn-secondary knowledge-citation-card" data-knowledge-citation="${escapeAttr(citation.citationKey)}">${escapeHtml(label)}</button>`
+                : `<span>${escapeHtml(label)}</span>`;
+        }).join('');
+        return `<section class="knowledge-wiki-answer-sources"><strong>Wiki 综合（原始依据优先）</strong><div class="knowledge-wiki-page-list">${pages.map(page => `<span>${escapeHtml(page.title || 'Wiki 综合页')}（${Number(page.sourceCount || page.sourceCoverage?.sourceCount || 0)} 条来源）</span>`).join('')}</div>${sourceText ? `<div class="knowledge-citation-list">${sourceText}</div>` : ''}</section>`;
+    }
+
     function renderSearchResults(items = []) {
         const target = document.getElementById('knowledge-product-results');
         if (!target) return;
@@ -59,6 +70,7 @@
                 <div class="knowledge-answer-copy">${escapeHtml(data.answer || '')}</div>
                 ${warnings.length ? `<div class="knowledge-answer-warnings">${warnings.map(escapeHtml).join('；')}</div>` : ''}
                 <div class="knowledge-answer-sources"><strong>可验证来源</strong>${renderCitations(data.citations || [])}</div>
+                ${renderWikiPages(data.wikiPages || [], data.wikiCitations || [])}
             </article>`);
     }
 
@@ -89,7 +101,7 @@
                 });
                 renderSearchResults(evidence.results || []);
             } else {
-                if (answer) PivotSafeHtml.setHtml(answer, `<div class="knowledge-search-summary">已检索 ${Number(data.candidateCount || 0)} 个候选，当前模式：${escapeHtml(data.retrievalMode || '-')}</div>${renderCitations(data.citations || [])}`);
+                if (answer) PivotSafeHtml.setHtml(answer, `<div class="knowledge-search-summary">已检索 ${Number(data.candidateCount || 0)} 个候选，当前模式：${escapeHtml(data.retrievalMode || '-')}</div>${renderCitations(data.citations || [])}${renderWikiPages(data.wikiPages || [], data.wikiCitations || [])}`);
                 renderSearchResults(data.results || []);
             }
         } catch (error) {
@@ -101,6 +113,18 @@
         return ({ draft: '草稿', review: '审核中', published: '已发布', expired: '已过期', archived: '已归档' })[status] || status || '-';
     }
 
+    function verifiedStatusLabel(status) {
+        return ({ verified: '已验证', unverified: '待验证', expired: '已过期' })[status] || status || '待验证';
+    }
+
+    function lifecycleStatusClass(status) {
+        return ({ draft: 'is-draft', review: 'is-review', published: 'is-published', expired: 'is-expired', archived: 'is-archived' })[status] || 'is-draft';
+    }
+
+    function verifiedStatusClass(status) {
+        return ({ verified: 'is-verified', unverified: 'is-unverified', expired: 'is-expired' })[status] || 'is-unverified';
+    }
+
     function renderDocuments() {
         const target = document.getElementById('knowledge-product-documents');
         if (!target) return;
@@ -108,18 +132,43 @@
             PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">暂无产品化知识内容。上传资料完成索引后会自动形成文档版本。</div>');
             return;
         }
-        PivotSafeHtml.setHtml(target, productState.documents.map(item => `
-            <article class="knowledge-product-row">
-                <div><strong>${escapeHtml(item.title || '未命名文档')}</strong><span>${escapeHtml(documentStatusLabel(item.lifecycle_status))} · ${escapeHtml(item.verified_status || 'unverified')}${item.review_due_at ? ` · 复核 ${escapeHtml(item.review_due_at)}` : ''}</span></div>
-                <div class="knowledge-product-row-actions">
-                    <button type="button" class="btn-secondary" data-knowledge-document="${item.id}">版本</button>
-                    <button type="button" class="btn-secondary" data-knowledge-new-version="${item.id}">新草稿</button>
-                    <button type="button" class="btn-secondary" data-knowledge-governance="${item.id}">治理</button>
-                    ${item.verified_status !== 'verified' || item.lifecycle_status === 'expired' ? `<button type="button" class="btn-secondary" data-knowledge-verify="${item.id}">验证</button>` : ''}
-                    <button type="button" class="btn-secondary" data-knowledge-comments="${item.id}">评论</button>
-                    ${item.lifecycle_status !== 'archived' ? `<button type="button" class="btn-danger-outline" data-knowledge-archive="${item.id}">归档</button>` : ''}
-                </div>
-            </article>`).join(''));
+        PivotSafeHtml.setHtml(target, `
+            <div class="table-container workspace-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="text-center knowledge-column-index">序号</th>
+                            <th class="knowledge-column-document-title">文档名称</th>
+                            <th class="text-center knowledge-column-status">状态</th>
+                            <th class="text-center knowledge-column-verification">验证状态</th>
+                            <th class="text-center knowledge-column-review-date">复核时间</th>
+                            <th class="text-center knowledge-column-actions">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${productState.documents.map((item, index) => `
+                            <tr>
+                                <td class="text-center">${index + 1}</td>
+                                <td aria-label="文档名称：${escapeAttr(item.title || '未命名文档')}"><strong>${escapeHtml(item.title || '未命名文档')}</strong></td>
+                                <td class="text-center"><span class="status-badge ${lifecycleStatusClass(item.lifecycle_status)}">${escapeHtml(documentStatusLabel(item.lifecycle_status))}</span></td>
+                                <td class="text-center"><span class="status-badge ${verifiedStatusClass(item.verified_status)}">${escapeHtml(verifiedStatusLabel(item.verified_status))}</span></td>
+                                <td class="text-center">${item.review_due_at ? escapeHtml(item.review_due_at) : '<span class="text-muted">—</span>'}</td>
+                                <td class="text-center">
+                                    <div class="knowledge-product-table-actions">
+                                        <button type="button" class="btn-secondary" data-knowledge-document="${item.id}">版本</button>
+                                        <button type="button" class="btn-secondary" data-knowledge-new-version="${item.id}">新草稿</button>
+                                        <button type="button" class="btn-secondary" data-knowledge-governance="${item.id}">治理</button>
+                                        ${item.verified_status !== 'verified' || item.lifecycle_status === 'expired' ? `<button type="button" class="btn-secondary" data-knowledge-verify="${item.id}">验证</button>` : ''}
+                                        <button type="button" class="btn-secondary" data-knowledge-comments="${item.id}">评论</button>
+                                        ${item.lifecycle_status !== 'archived' ? `<button type="button" class="btn-danger-outline" data-knowledge-archive="${item.id}">归档</button>` : ''}
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `);
     }
 
     async function loadDocuments() {
@@ -172,6 +221,14 @@
         renderSources();
     }
 
+    function jobStatusLabel(status) {
+        return ({ completed: '已完成', running: '处理中', queued: '排队中', retry_wait: '等待重试', failed: '失败', cancelled: '已取消' })[status] || status || '-';
+    }
+
+    function jobStatusClass(status) {
+        return ({ completed: 'is-completed', running: 'is-running', queued: 'is-queued', retry_wait: 'is-retry', failed: 'is-failed', cancelled: 'is-cancelled' })[status] || 'is-queued';
+    }
+
     function renderJobs() {
         const target = document.getElementById('knowledge-product-jobs');
         if (!target) return;
@@ -179,11 +236,36 @@
             PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">暂无索引任务记录。</div>');
             return;
         }
-        PivotSafeHtml.setHtml(target, `<div class="knowledge-job-list">${productState.jobs.map(item => `
-            <article class="knowledge-product-row">
-                <div><strong>文档 #${Number(item.doc_id || 0)} · ${escapeHtml(item.status || '-')}</strong><span>${escapeHtml(item.stage || '-')} · 已尝试 ${Number(item.attempts || 0)}/${Number(item.max_attempts || 0)}${item.error_message ? ` · ${escapeHtml(item.error_message)}` : ''}</span></div>
-                <small>${escapeHtml(item.updated_at || '')}</small>
-            </article>`).join('')}</div>`);
+        PivotSafeHtml.setHtml(target, `
+            <div class="table-container workspace-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="text-center knowledge-column-index">序号</th>
+                            <th class="text-center knowledge-column-job-document">文档</th>
+                            <th class="text-center knowledge-column-status">状态</th>
+                            <th class="text-center knowledge-column-job-stage">阶段</th>
+                            <th class="text-center knowledge-column-job-attempts">尝试次数</th>
+                            <th class="knowledge-column-job-error">错误信息</th>
+                            <th class="text-center knowledge-column-updated-at">更新时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${productState.jobs.map((item, index) => `
+                            <tr>
+                                <td class="text-center">${index + 1}</td>
+                                <td class="text-center" aria-label="关联文档：${Number(item.doc_id || 0)}"><strong>文档 #${Number(item.doc_id || 0)}</strong></td>
+                                <td class="text-center"><span class="status-badge ${jobStatusClass(item.status)}">${escapeHtml(jobStatusLabel(item.status))}</span></td>
+                                <td class="text-center" aria-label="处理阶段：${escapeAttr(item.stage || '-')}"><code class="knowledge-stage-code">${escapeHtml(item.stage || '-')}</code></td>
+                                <td class="text-center">${Number(item.attempts || 0)} / ${Number(item.max_attempts || 0)}</td>
+                                <td>${item.error_message ? `<span class="knowledge-job-error" aria-label="错误信息：${escapeAttr(item.error_message)}">${escapeHtml(item.error_message)}</span>` : '<span class="text-muted">—</span>'}</td>
+                                <td class="text-center">${escapeHtml(item.updated_at || '—')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `);
     }
 
     async function loadJobs() {
@@ -248,6 +330,11 @@
     function switchTab(name, { focusPanel = false } = {}) {
         if (!tabs.includes(name)) return;
         activeTab = name;
+        const modal = getProductModal();
+        if (modal) {
+            modal.dataset.activeTab = name;
+            modal.querySelector('.knowledge-product-modal')?.setAttribute('data-active-tab', name);
+        }
         document.querySelectorAll('[data-knowledge-product-tab]').forEach(button => {
             const active = button.dataset.knowledgeProductTab === name;
             button.classList.toggle('is-active', active);

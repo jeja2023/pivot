@@ -8,6 +8,7 @@ const { getBeijingTimestamp } = require('../time');
 const { debugRetrieveContext } = require('./rag-index');
 const { getAccessibleModelAsync } = require('./models');
 const { callModelTextWithBudget } = require('./model-text-call');
+const { retrieveWikiContext } = require('./knowledge-wiki');
 
 function normalizeId(value) {
     const id = Number.parseInt(value, 10);
@@ -127,7 +128,7 @@ function computeAnswerPointCoverage(answer = '', expectedAnswerPoints = []) {
 
 function buildEvaluationAnswerMessages(query, context) {
     return [
-        { role: 'system', content: '你是知识库评测助手。只能依据提供的检索证据回答；证据不足时明确回答“知识库中未找到足够依据”。不要编造来源或事实。' },
+        { role: 'system', content: '你是知识库评测助手。只能依据提供的检索证据回答；证据不足时明确回答“知识库中未找到足够依据”。不要编造来源或事实。若上下文含 Wiki 综合页，它只作导航与总结，原始资料优先。' },
         { role: 'user', content: `【问题】\n${query}\n\n【检索证据】\n${context}` }
     ];
 }
@@ -304,12 +305,16 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
             const retrievedDocumentIds = await resolveSelectedDocumentIds(retrievedChunkIds);
             const expectedLegacyDocumentIds = await resolveExpectedLegacyDocumentIds(evaluationCase.expectedDocumentIds);
             const citationKeys = (retrieval.matches || []).filter(match => match.selected && match.citationKey).map(match => match.citationKey);
+            const wiki = config.includeWiki === true && normalizeId(config.wikiSpaceId)
+                ? await retrieveWikiContext({ user, queryText: evaluationCase.query, spaceId: config.wikiSpaceId, limit: config.wikiLimit || 3 })
+                : { context: '', pages: [], citations: [] };
+            const answerContext = `${retrieval.injectedContext || ''}${wiki.context ? `\n\n【Wiki 综合页】\n${wiki.context}` : ''}`;
             let answer = '';
             if (answerModel && retrieval.injectedContext) {
                 const completion = await callModel({
                     modelCfg: answerModel,
                     user,
-                    messages: buildEvaluationAnswerMessages(evaluationCase.query, retrieval.injectedContext),
+                    messages: buildEvaluationAnswerMessages(evaluationCase.query, answerContext),
                     source: 'knowledge_evaluation',
                     maxTokens: 1600,
                     temperature: 0
@@ -324,7 +329,9 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
                 retrievedChunkIds
                 }),
                 ...computeCitationMetrics({ expectedCitationKeys: evaluationCase.expectedCitationKeys, citationKeys }),
-                ...computeAnswerPointCoverage(answer, evaluationCase.expectedAnswerPoints)
+                ...computeAnswerPointCoverage(answer, evaluationCase.expectedAnswerPoints),
+                wikiPageCount: Number(wiki.pages?.length || 0),
+                wikiSourceCount: Number(wiki.citations?.length || 0)
             };
             await execute(`
                 INSERT INTO knowledge_eval_results (
@@ -367,7 +374,10 @@ async function startKnowledgeEvaluation(user, body = {}) {
             topK: body.topK,
             candidateLimit: body.candidateLimit,
             scoreThreshold: body.scoreThreshold,
-            modelId: body.modelId || null
+            modelId: body.modelId || null,
+            includeWiki: body.includeWiki === true,
+            wikiSpaceId: normalizeId(body.wikiSpaceId),
+            wikiLimit: Math.max(1, Math.min(Number.parseInt(body.wikiLimit, 10) || 3, 10))
         }),
         timestamp,
         timestamp

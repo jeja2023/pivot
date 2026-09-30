@@ -55,6 +55,8 @@ const migrationModules = [
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
     require('./knowledge-database-query-templates'),
+    require('./knowledge-llm-wiki-foundation'),
+    require('./knowledge-llm-wiki-external-compat'),
     require('./presentation-workbench'),
     require('./presentation-collaboration'),
     require('./presentation-product-governance'),

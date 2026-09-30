@@ -25,6 +25,11 @@ const {
     getOrCreateProductDocumentForLegacy
 } = require('./knowledge-content');
 const { getApprovedKnowledgeDatabaseQueryTemplate } = require('./knowledge-database-templates');
+const {
+    archiveMissingExternalWikiPages,
+    upsertExternalWikiMarkdownPage
+} = require('./knowledge-wiki-markdown');
+const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
 
 const SUPPORTED_EXTENSIONS = new Set([
     '.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm'
@@ -98,7 +103,11 @@ function normalizeLocalDirectoryConfig(config = {}, options = {}) {
 }
 
 function normalizeSourceConfig(kind, config = {}, options = {}) {
-    if (kind === 'local_dir') return normalizeLocalDirectoryConfig(config, options);
+    if (kind === 'local_dir' || kind === 'wiki_markdown') return normalizeLocalDirectoryConfig({
+        ...config,
+        // 外部 Wiki 仅接受 Markdown，避免把目录内其他资料误标为派生综合页。
+        ...(kind === 'wiki_markdown' ? { extensions: ['.md'] } : {})
+    }, options);
     if (kind === 'lan_http' || kind === 'internal_api') {
         const url = String(config.url || '').trim();
         if (!/^https?:\/\//i.test(url)) {
@@ -260,6 +269,12 @@ async function importSourceItem({
     if (existing && String(existing.current_source_hash || '') === String(sourceHash || '')) return { action: 'skipped' };
     const imported = await createDocument({ userId: source.user_id, file: staged, collectionId: source.collection_id, tags: [] });
     const product = await attachImportedDocument({ created: imported, source, canonicalUri });
+    if (source.kind === 'wiki_markdown') {
+        const markdown = await (deps.fsPromises || fs.promises).readFile(staged.path, 'utf8');
+        await (deps.upsertExternalWikiMarkdownPage || upsertExternalWikiMarkdownPage)({
+            sourceId: source.id, documentId: product?.id, canonicalUri, markdown
+        }, deps);
+    }
     const enqueueResult = await schedule({ docId: imported.docId, userId: source.user_id, user: actor, priority: 10 });
     return { action: existing ? 'changed' : 'created', queued: Boolean(enqueueResult.started), product, imported };
 }
@@ -291,7 +306,10 @@ async function archiveMissingSourceDocuments(source, seenUris, { enabled = false
             `, [timestamp, document.id]);
             return Number(changed || 0);
         });
-        if (Number(changedRows || 0) > 0) archived += 1;
+        if (Number(changedRows || 0) > 0) {
+            archived += 1;
+            void markWikiPagesStaleForDocument({ documentId: document.id, reason: 'source_sync_deleted' }).catch(() => {});
+        }
     }
     return archived;
 }
@@ -314,6 +332,16 @@ async function syncLocalDirectorySource(source, actor, deps = {}) {
         const digest = await hashFile(file.absolutePath);
         const current = byUri.get(file.canonicalUri);
         if (current && String(current.current_source_hash || '') === digest) {
+            if (source.kind === 'wiki_markdown') {
+                try {
+                    const markdown = await fsPromises.readFile(file.absolutePath, 'utf8');
+                    await (deps.upsertExternalWikiMarkdownPage || upsertExternalWikiMarkdownPage)({
+                        sourceId: source.id, documentId: current.id, canonicalUri: file.canonicalUri, markdown
+                    }, deps);
+                } catch (error) {
+                    failures.push({ path: file.canonicalUri, error: String(error.message || error).slice(0, 500) });
+                }
+            }
             skipped += 1;
             continue;
         }
@@ -340,7 +368,10 @@ async function syncLocalDirectorySource(source, actor, deps = {}) {
     }
 
     const archived = await archiveMissingSourceDocuments(source, seen, { enabled: config.syncDeletes });
-    return { kind: 'local_dir', scanned: files.length, created, changed, skipped, queued, archived, failures: failures.slice(0, 50), cursor: JSON.stringify({ scannedAt: getBeijingTimestamp(), files: files.length }) };
+    const archivedWikiPages = source.kind === 'wiki_markdown'
+        ? await (deps.archiveMissingExternalWikiPages || archiveMissingExternalWikiPages)({ sourceId: source.id, seenUris: [...seen] }, deps)
+        : 0;
+    return { kind: source.kind, scanned: files.length, created, changed, skipped, queued, archived, archivedWikiPages, failures: failures.slice(0, 50), cursor: JSON.stringify({ scannedAt: getBeijingTimestamp(), files: files.length }) };
 }
 
 function resolveManifestUrl(config) {
@@ -536,7 +567,7 @@ async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', dep
     `, [source.id, user?.id || null, String(triggerType || 'manual').slice(0, 32), timestamp, timestamp, timestamp]);
     try {
         let result;
-        if (source.kind === 'local_dir') result = await syncLocalDirectorySource(source, user, deps);
+        if (source.kind === 'local_dir' || source.kind === 'wiki_markdown') result = await syncLocalDirectorySource(source, user, deps);
         else if (source.kind === 'lan_http' || source.kind === 'internal_api') result = await syncHttpManifestSource(source, user, deps);
         else if (source.kind === 'database') result = await syncDatabaseSource(source, user, deps);
         else {
@@ -574,7 +605,7 @@ async function syncScheduledKnowledgeSources({ limit = 20, deps = {} } = {}) {
         JOIN users owner ON owner.id = source.user_id AND owner.deleted_at IS NULL
         WHERE source.deleted_at IS NULL AND source.status = 'active'
           AND source.sync_mode IN ('scheduled', 'watch')
-          AND source.kind IN ('local_dir', 'lan_http', 'internal_api', 'database')
+          AND source.kind IN ('local_dir', 'wiki_markdown', 'lan_http', 'internal_api', 'database')
         ORDER BY COALESCE(source.last_sync_at, source.created_at) ASC, source.id ASC
         LIMIT ?
     `, [safeLimit]);

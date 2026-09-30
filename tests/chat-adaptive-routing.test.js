@@ -53,10 +53,19 @@ test('自适应路由清理显式覆盖，禁止把非 MCP 名称传入工具覆
         excludedTools: ['mcp.4.viz.chart', 'mcp.4.viz.chart']
     }), {
         collections: [12],
+        wikiSpaces: [],
         tools: ['mcp.3.db.query'],
         excludedTools: ['mcp.4.viz.chart'],
         excludeRag: false,
         excludeTools: false
+    });
+});
+
+test('路由覆盖清理 Wiki Space 标识，@Wiki 会同时固定原始专题库范围', () => {
+    assert.deepEqual(normalizeRouteOverrides({
+        collections: [12], wikiSpaces: ['8', 'bad', 8, -1], tools: []
+    }), {
+        collections: [12], wikiSpaces: [8], tools: [], excludedTools: [], excludeRag: false, excludeTools: false
     });
 });
 

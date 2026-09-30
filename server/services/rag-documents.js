@@ -31,6 +31,7 @@ const {
     getOrCreateProductDocumentForLegacy,
     publishLegacyDocumentProjection
 } = require('./knowledge-content');
+const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
 const {
     createKnowledgeIngestionQueue,
     createKnowledgeIngestionWorker
@@ -517,6 +518,9 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
             indexStatus,
             embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId))
         });
+        // Wiki 页只能综合当前原始版本；资料重建后立即使已发布综合页失效，
+        // 重编译失败也不会影响原始资料索引与既有 RAG。
+        void markWikiPagesStaleForDocument({ legacyDocId: normalizedDocId, reason: 'source_reindexed' }).catch(() => {});
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(doc.collection_id);
         return {
@@ -911,6 +915,7 @@ async function deleteKnowledgeDocument({ docId, userId }) {
     `, [now, userId, now, normalizedDocId, userId]);
     const changed = Number(result || 0) > 0;
     if (changed) {
+        void markWikiPagesStaleForDocument({ legacyDocId: normalizedDocId, reason: 'source_deleted' }).catch(() => {});
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(doc.collection_id);
     }

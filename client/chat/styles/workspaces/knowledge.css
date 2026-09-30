@@ -1207,10 +1207,36 @@
     display: grid;
     gap: 12px;
     min-height: 100%;
+    box-sizing: border-box;
     padding: 16px;
     border: 1px solid var(--border-color, #dce3ec);
     border-radius: 12px;
     background: var(--panel-bg, #fff);
+}
+
+#knowledge-product-panel-content,
+#knowledge-product-panel-jobs {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+#knowledge-product-panel-content .knowledge-product-toolbar,
+#knowledge-product-panel-jobs .knowledge-product-toolbar {
+    flex: 0 0 auto;
+}
+
+#knowledge-product-panel-content .knowledge-product-table-wrap,
+#knowledge-product-panel-jobs .knowledge-product-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
 }
 
 .knowledge-product-panel.hidden { display: none; }
@@ -1287,6 +1313,20 @@
 }
 
 .knowledge-answer-sources { display: grid; gap: 8px; margin-top: 14px; }
+
+.knowledge-wiki-answer-sources {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+}
+
+.knowledge-wiki-page-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.knowledge-wiki-page-list span { padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-muted); font-size: 0.74rem; }
 
 .knowledge-citation-list,
 .knowledge-search-result-list,
@@ -1381,7 +1421,164 @@
     font-size: 0.8rem;
 }
 
-.knowledge-product-error { color: #b42318; background: #fff1f1; }
+.knowledge-product-error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+
+.knowledge-product-table-wrap {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    width: 100%;
+}
+
+.knowledge-product-modal .workspace-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+#knowledge-product-modal[data-active-tab="content"] .knowledge-product-modal-body,
+#knowledge-product-modal[data-active-tab="jobs"] .knowledge-product-modal-body,
+.knowledge-product-modal[data-active-tab="content"] .knowledge-product-modal-body,
+.knowledge-product-modal[data-active-tab="jobs"] .knowledge-product-modal-body,
+.knowledge-product-modal-body:has(#knowledge-product-panel-content:not(.hidden)),
+.knowledge-product-modal-body:has(#knowledge-product-panel-jobs:not(.hidden)) {
+    overflow: hidden;
+}
+
+.knowledge-product-modal .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.78rem;
+    line-height: 1.25;
+}
+
+.knowledge-product-modal .data-table th,
+.knowledge-product-modal .data-table td {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 6px 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-sizing: border-box;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.knowledge-product-modal .data-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-side);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.knowledge-product-modal .data-table tbody tr:hover {
+    background: color-mix(in srgb, var(--text-muted) 5%, transparent);
+}
+
+.knowledge-product-table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    vertical-align: middle;
+}
+
+.knowledge-product-table-actions .btn-secondary,
+.knowledge-product-table-actions .btn-danger-outline {
+    height: 22px;
+    min-height: 22px;
+    padding: 0 6px;
+    font-size: 0.66rem;
+    line-height: 1;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.knowledge-product-modal .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.knowledge-product-modal .status-badge.is-published,
+.knowledge-product-modal .status-badge.is-completed,
+.knowledge-product-modal .status-badge.is-verified {
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--success);
+}
+
+.knowledge-product-modal .status-badge.is-running {
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+}
+
+.knowledge-product-modal .status-badge.is-review,
+.knowledge-product-modal .status-badge.is-unverified,
+.knowledge-product-modal .status-badge.is-retry {
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    color: var(--warning);
+}
+
+.knowledge-product-modal .status-badge.is-failed,
+.knowledge-product-modal .status-badge.is-expired {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+}
+
+.knowledge-product-modal .status-badge.is-draft,
+.knowledge-product-modal .status-badge.is-queued,
+.knowledge-product-modal .status-badge.is-archived,
+.knowledge-product-modal .status-badge.is-cancelled {
+    background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+    color: var(--text-muted);
+}
+
+.knowledge-stage-code {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+    color: var(--text-main);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+}
+
+.knowledge-job-error {
+    color: var(--danger);
+}
+
+.knowledge-column-index { width: 50px; }
+.knowledge-column-document-title,
+.knowledge-column-job-error { width: auto; }
+.knowledge-column-status,
+.knowledge-column-verification,
+.knowledge-column-job-attempts { width: 90px; }
+.knowledge-column-job-document { width: 100px; }
+.knowledge-column-job-stage { width: 130px; }
+.knowledge-column-review-date { width: 140px; }
+.knowledge-column-updated-at { width: 160px; }
+.knowledge-column-actions { width: 290px; }
 
 @media (max-width: 900px) {
     .modal.knowledge-product-modal {

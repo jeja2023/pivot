@@ -68,6 +68,21 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 知识库 LLM Wiki
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_KNOWLEDGE_WIKI_ENABLED` | boolean | `true` | true / false | 是否启用知识库的派生 LLM Wiki Space、编译和只读检索能力；关闭后不执行新的 Wiki 编译任务。 |
+| `PIVOT_KNOWLEDGE_WIKI_MAX_SOURCE_BLOCKS` | integer | `12` | 1–30 | 单次 Wiki 编译最多提供给模型的已发布原始资料区块数，避免无界上下文。 |
+| `PIVOT_KNOWLEDGE_WIKI_MAX_PAGES_PER_RUN` | integer | `3` | 1–10 | 单次 Wiki 编译可生成的候选页面上限；页面仍需来源校验和审核发布。 |
+| `PIVOT_KNOWLEDGE_WIKI_MAX_OUTPUT_TOKENS` | integer | `2200` | 512–8000 | 单次 Wiki 编译模型输出 Token 上限。 |
+| `PIVOT_KNOWLEDGE_WIKI_TIMEOUT_MS` | integer | `120000` | 10000–600000 | 单次 Wiki 编译模型调用超时；失败时保留旧已发布页面。 |
+| `PIVOT_KNOWLEDGE_WIKI_AUTO_COMPILE` | boolean | `false` | true / false | 是否在资料变更后自动创建 Wiki 编译任务；默认关闭，先由管理员手动触发和审核。 |
+| `PIVOT_KNOWLEDGE_WIKI_REQUIRE_REVIEW` | boolean | `true` | true / false | Wiki 候选页面是否必须进入 review 后才能发布；建议生产保持 true。 |
+| `PIVOT_KNOWLEDGE_WIKI_SEARCH_LIMIT` | integer | `5` | 1–20 | 单次 Wiki 只读检索的最大页面数；原始资料仍保留独立检索与引用校验。 |
+| `PIVOT_KNOWLEDGE_WIKI_WORKER_ENABLED` | boolean | `true` | true / false | 是否启动可恢复的 Wiki 编译 Worker；关闭后仍可创建任务，但不会由后台自动领取。 |
+| `PIVOT_KNOWLEDGE_WIKI_WORKER_POLL_INTERVAL_MS` | integer | `2000` | 250–60000 | Wiki 编译 Worker 领取任务和恢复失效租约的轮询间隔。 |
+
 ## 智能决策与持续学习
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

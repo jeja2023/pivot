@@ -8,6 +8,7 @@ const { recoverKnowledgeEvaluationRuns } = require('./services/knowledge-evaluat
 const { createKnowledgeSourceSyncScheduler } = require('./services/knowledge-sources');
 const { backfillKnowledgeProductProjections, refreshKnowledgeFreshness } = require('./services/knowledge-content');
 const { recoverManualKnowledgeArticleEmbeddings } = require('./services/knowledge-manual-embeddings');
+const { createKnowledgeWikiCompileWorker } = require('./services/knowledge-wiki');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const {
@@ -87,6 +88,10 @@ function startBackgroundServices({
         refreshKnowledgeFreshness,
         backfillKnowledgeProductProjections,
         recoverManualKnowledgeArticleEmbeddings,
+        startKnowledgeWikiCompileWorker: () => {
+            const worker = createKnowledgeWikiCompileWorker({ logger });
+            return worker?.start?.() || null;
+        },
         startKnowledgeEmbeddingRecoveryRunner: () => createKnowledgeEmbeddingRecoveryRunner({
             recover: async () => {
                 const [lexical, mismatched, manual] = await Promise.all([
@@ -124,6 +129,9 @@ function startBackgroundServices({
         runBackgroundTask(dependencies.refreshKnowledgeFreshness, logger, '知识库文档新鲜度巡检失败');
         runBackgroundTask(dependencies.backfillKnowledgeProductProjections, logger, '知识库历史产品投影回填失败');
         runBackgroundTask(dependencies.recoverManualKnowledgeArticleEmbeddings, logger, '人工知识文章向量补齐失败');
+        if (typeof dependencies.startKnowledgeWikiCompileWorker === 'function') {
+            runBackgroundTask(dependencies.startKnowledgeWikiCompileWorker, logger, '知识 Wiki 编译 Worker 启动失败');
+        }
         runBackgroundTask(dependencies.startKnowledgeEmbeddingRecoveryRunner, logger, '知识库向量补齐巡检器启动失败');
         runBackgroundTask(dependencies.startKnowledgeSourceSyncScheduler, logger, '知识库局域网来源同步调度器启动失败');
         runBackgroundTask(dependencies.recoverAgentRuns, logger, '智能体任务恢复执行失败');

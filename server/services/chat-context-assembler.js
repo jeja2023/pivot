@@ -19,6 +19,7 @@ const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
 const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
+const { retrieveWikiContext } = require('./knowledge-wiki');
 const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
@@ -224,6 +225,7 @@ async function assembleChatContext({
     }
 
     const effectiveRagScope = routePlan.execution?.rag?.scope || ragScope || {};
+    const wikiSpaceId = Number(routePlan?.overrides?.wikiSpaces?.[0] || 0) || null;
     const routeQueryVector = Array.isArray(routePlan.execution?.rag?.queryVector)
         ? routePlan.execution.rag.queryVector
         : null;
@@ -345,6 +347,25 @@ async function assembleChatContext({
                 reason: requiresKnowledgeEvidence ? 'insufficient_evidence' : 'no_reliable_match',
                 scoped: ragScoped
             }));
+        }
+    }
+
+    // Wiki 是知识检索内部的辅助策略：原始资料已进入本轮上下文后，可按问题
+    // 自动检索来源仍有效的综合页；@Wiki Space 则将该检索限定到指定 Space。
+    // 它从不在原始资料未命中时单独回答，也不会触发工具授权。
+    if (!shouldClarify && shouldRetrieveRag) {
+        try {
+            const wiki = await retrieveWikiContext({ user: req.user, queryText: retrievalQuery, spaceId: wikiSpaceId, limit: 3 });
+            if (wiki.context) {
+                history = injectRagContextBeforeLatestUser(history, `PIVOT_WIKI_CONTEXT_BEGIN\n${wiki.context}\nPIVOT_WIKI_CONTEXT_END\nWiki 综合页只作导航与跨资料总结，原始证据优先；来源不足时不得补全。`);
+                writeSse(JSON.stringify({
+                    type: 'wiki', status: 'hit',
+                    message: `${wikiSpaceId ? '已关联' : '已自动关联'} ${wiki.pages.length} 个 Wiki 综合页，并保留原始依据。`,
+                    pages: wiki.pages.map(page => ({ id: page.id, title: page.title, sourceCount: page.sourceCount }))
+                }));
+            }
+        } catch (error) {
+            req.log.warn({ sessionId, userId, err: error.message, wikiSpaceId }, '知识 Wiki 检索失败，已继续使用原始资料检索');
         }
     }
 

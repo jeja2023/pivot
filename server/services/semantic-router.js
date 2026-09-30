@@ -18,6 +18,7 @@ const { getPrimaryTenantId } = require('./enterprise-access');
 
 const MAX_ROUTE_OVERRIDE_COLLECTIONS = 50;
 const MAX_ROUTE_OVERRIDE_TOOLS = 100;
+const MAX_ROUTE_OVERRIDE_WIKI_SPACES = 10;
 
 function normalizeBoolean(value, fallback = false) {
     if (value === undefined || value === null) return fallback;
@@ -48,6 +49,7 @@ function normalizeRouteOverrides(value = {}) {
     const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     return {
         collections: normalizeCollectionIds(raw.collections ?? raw.collectionIds),
+        wikiSpaces: normalizeCollectionIds(raw.wikiSpaces ?? raw.wikiSpaceIds ?? raw.wikiSpaceId, MAX_ROUTE_OVERRIDE_WIKI_SPACES),
         tools: normalizeToolNames(raw.tools ?? raw.toolNames),
         excludedTools: normalizeToolNames(raw.excludedTools ?? raw.excludeTools),
         excludeRag: normalizeBoolean(raw.excludeRag ?? raw.disableRag, false),

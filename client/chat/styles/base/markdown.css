@@ -145,6 +145,61 @@
 .chat-answer-trace-action:hover {
     background: rgba(15, 23, 42, 0.14);
 }
+.chat-route-feedback-form {
+    display: grid;
+    flex: 1 1 100%;
+    gap: 8px;
+    min-width: min(100%, 320px);
+    margin-top: 2px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+.chat-route-feedback-summary,
+.chat-route-feedback-status {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+.chat-route-feedback-status:not([hidden]) {
+    color: var(--primary);
+}
+.chat-route-feedback-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+.chat-route-feedback-fields label {
+    display: grid;
+    gap: 4px;
+    color: var(--text-main);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.chat-route-feedback-select {
+    width: 100%;
+    min-width: 0;
+    height: 30px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 0.72rem;
+}
+.chat-route-feedback-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.chat-route-feedback-actions .btn-primary,
+.chat-route-feedback-actions .btn-secondary {
+    min-height: 28px;
+    padding: 3px 9px;
+    font-size: 0.72rem;
+}
+@media (max-width: 560px) {
+    .chat-route-feedback-fields { grid-template-columns: 1fr; }
+}
 .chat-answer-trace-citations {
     display: inline-flex;
     flex: 0 0 auto;

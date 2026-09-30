@@ -536,3 +536,26 @@ body.is-main-workspace-full .chat-container {
         padding: 0 5px;
     }
 }
+
+/* 派生 Wiki 页面由服务端来源映射约束；管理界面只使用文本节点渲染内容。 */
+.knowledge-wiki-modal { width: min(1040px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 40px)); display: flex; flex-direction: column; gap: 12px; }
+.knowledge-wiki-body { min-height: 180px; max-height: calc(min(760px, 100vh - 40px) - 150px); overflow: auto; }
+.knowledge-wiki-layout { display: grid; grid-template-columns: minmax(210px, .42fr) minmax(0, 1fr); gap: 12px; }
+.knowledge-wiki-spaces, .knowledge-wiki-pages { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.knowledge-wiki-spaces { padding-right: 10px; border-right: 1px solid var(--border); }
+.knowledge-wiki-space, .knowledge-wiki-page { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); text-align: left; }
+.knowledge-wiki-space { display: grid; gap: 4px; padding: 10px; cursor: pointer; }
+.knowledge-wiki-space.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
+.knowledge-wiki-space strong, .knowledge-wiki-page strong { color: var(--text-main); }
+.knowledge-wiki-space small, .knowledge-wiki-page .muted-text { color: var(--text-muted); font-size: .75rem; }
+.knowledge-wiki-page { display: grid; gap: 7px; padding: 11px; }
+.knowledge-wiki-page p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.45; }
+.knowledge-wiki-page.status-stale { border-left: 3px solid var(--warning); }
+.knowledge-wiki-page.status-review { border-left: 3px solid var(--primary); }
+.knowledge-wiki-markdown { max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-side); color: var(--text-main); font: inherit; line-height: 1.55; }
+.knowledge-wiki-setup-form { display: grid; max-width: 680px; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.knowledge-wiki-setup-field { display: grid; gap: 6px; color: var(--text-main); font-size: .78rem; font-weight: 700; }
+.knowledge-wiki-setup-field .form-input { width: 100%; min-width: 0; margin: 0; }
+.knowledge-wiki-setup-status { min-height: 1.45em; margin: 0; color: var(--text-muted); font-size: .76rem; line-height: 1.45; }
+.knowledge-wiki-setup-status:not([hidden]) { color: var(--danger); }
+@media (max-width: 760px) { .knowledge-wiki-layout { grid-template-columns: 1fr; } .knowledge-wiki-spaces { padding-right: 0; padding-bottom: 10px; border-right: 0; border-bottom: 1px solid var(--border); } }

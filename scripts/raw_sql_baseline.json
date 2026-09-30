@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1936,
+  "total": 1954,
   "entries": [
     {
       "file": "server/auth.js",
@@ -193,6 +193,14 @@
     },
     {
       "file": "server/db/migrations/knowledge-database-query-templates.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-llm-wiki-external-compat.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-llm-wiki-foundation.js",
       "count": 1
     },
     {
@@ -878,6 +886,14 @@
     {
       "file": "server/services/knowledge-sources.js",
       "count": 15
+    },
+    {
+      "file": "server/services/knowledge-wiki-markdown.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/knowledge-wiki.js",
+      "count": 13
     },
     {
       "file": "server/services/long-term-memory/index.js",
