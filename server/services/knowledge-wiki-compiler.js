@@ -287,23 +287,12 @@ function normalizeWikiCandidate(value = {}, allowedSources = new Map(), diagnost
 }
 
 module.exports = {
-    canonicalizeWikiCandidate,
     contentHash,
     diffWikiMarkdown,
     normalizeId,
-    normalizeObjectKey,
-    normalizeSlug,
-    normalizeSourceRef,
     normalizeStatus,
-    normalizeSupportType,
     normalizeText,
     normalizeWikiCandidate,
     parseJson,
-    parseLooseJson,
-    parseSourceRefList,
-    parseWikiCompilerOutput,
-    pickObjectValue,
-    recordCandidateRejection,
-    resolveWikiSourceRef,
-    safeMarkdown
+    parseWikiCompilerOutput
 };
