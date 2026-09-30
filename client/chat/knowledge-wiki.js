@@ -160,16 +160,24 @@
         }
     }
 
-    function createSetupField(labelText, input) {
+    function createSetupField(labelText, input, fieldId = '') {
+        const field = document.createElement('div');
+        field.className = 'form-item knowledge-wiki-setup-field';
         const label = document.createElement('label');
-        label.className = 'knowledge-wiki-setup-field';
-        appendText(label, 'span', labelText);
-        label.appendChild(input);
-        return label;
+        label.className = 'knowledge-wiki-setup-label';
+        label.textContent = text(labelText);
+        const resolvedId = fieldId || input.id;
+        if (resolvedId) {
+            input.id = resolvedId;
+            label.htmlFor = resolvedId;
+        }
+        field.append(label, input);
+        return field;
     }
 
-    function createSetupInput({ type = 'text', placeholder = '', value = '' } = {}) {
+    function createSetupInput({ id = '', type = 'text', placeholder = '', value = '' } = {}) {
         const input = document.createElement('input');
+        if (id) input.id = id;
         input.type = type;
         input.className = 'form-input';
         input.placeholder = placeholder;
@@ -213,6 +221,7 @@
         const form = document.createElement('form');
         form.className = 'knowledge-wiki-setup-form';
         const collection = document.createElement('select');
+        collection.id = 'knowledge-wiki-setup-collection';
         collection.className = 'form-input';
         collection.setAttribute('aria-label', '绑定专题库');
         const currentCollectionId = Number(byId('rag-collection-filter')?.value || 0);
@@ -223,27 +232,31 @@
             option.selected = Number(item.id) === currentCollectionId;
             collection.appendChild(option);
         });
-        form.appendChild(createSetupField('绑定专题库', collection));
+        form.appendChild(createSetupField('绑定专题库', collection, 'knowledge-wiki-setup-collection'));
         const name = createSetupInput({
+            id: 'knowledge-wiki-setup-name',
             placeholder: isMarkdownImport ? '例如：研发手册 Markdown Wiki' : '例如：研发知识综合',
             value: isMarkdownImport ? '外部 Markdown Wiki' : ''
         });
-        form.appendChild(createSetupField(isMarkdownImport ? '数据源名称' : 'Wiki Space 名称', name));
+        form.appendChild(createSetupField(isMarkdownImport ? '数据源名称' : 'Wiki Space 名称', name, 'knowledge-wiki-setup-name'));
         let rootPath = null;
         if (isMarkdownImport) {
-            rootPath = createSetupInput({ placeholder: '已列入 KNOWLEDGE_LOCAL_SOURCE_ROOTS 白名单的目录' });
-            form.appendChild(createSetupField('只读目录', rootPath));
+            rootPath = createSetupInput({
+                id: 'knowledge-wiki-setup-root-path',
+                placeholder: '已列入 KNOWLEDGE_LOCAL_SOURCE_ROOTS 白名单的目录'
+            });
+            form.appendChild(createSetupField('只读目录', rootPath, 'knowledge-wiki-setup-root-path'));
         }
         const status = appendText(form, 'p', '', 'knowledge-wiki-setup-status');
         status.hidden = true;
         const actions = document.createElement('div');
-        actions.className = 'rag-actions';
-        const submit = document.createElement('button');
-        submit.type = 'submit'; submit.className = 'btn-primary'; submit.textContent = isMarkdownImport ? '导入并同步' : '创建 Wiki Space';
+        actions.className = 'knowledge-wiki-setup-actions';
         const cancel = document.createElement('button');
-        cancel.type = 'button'; cancel.className = 'btn-secondary'; cancel.textContent = '取消';
+        cancel.type = 'button'; cancel.className = 'btn-secondary knowledge-wiki-setup-cancel-btn'; cancel.textContent = '取消';
         cancel.addEventListener('click', () => void render());
-        actions.append(submit, cancel); form.appendChild(actions); body.appendChild(form);
+        const submit = document.createElement('button');
+        submit.type = 'submit'; submit.className = 'btn-primary knowledge-wiki-setup-submit-btn'; submit.textContent = isMarkdownImport ? '导入并同步' : '创建 Wiki Space';
+        actions.append(cancel, submit); form.appendChild(actions); body.appendChild(form);
         form.addEventListener('submit', async event => {
             event.preventDefault();
             const collectionId = Number(collection.value || 0);

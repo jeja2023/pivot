@@ -1328,6 +1328,103 @@
 .knowledge-wiki-page-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .knowledge-wiki-page-list span { padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-muted); font-size: 0.74rem; }
 
+.knowledge-wiki-setup-form {
+    display: flex;
+    flex-direction: column;
+    max-width: 580px;
+    gap: 14px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    text-align: left;
+    margin-top: 10px;
+    box-sizing: border-box;
+}
+.knowledge-wiki-setup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+}
+.knowledge-wiki-setup-label,
+.knowledge-wiki-setup-field > span,
+.knowledge-wiki-setup-field > label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.3;
+    margin-bottom: 2px;
+    display: block;
+}
+.knowledge-wiki-setup-field .form-input,
+.knowledge-wiki-setup-field select.form-input,
+.knowledge-wiki-setup-field input.form-input {
+    width: 100%;
+    min-width: 0;
+    height: 34px !important;
+    min-height: 34px !important;
+    max-height: 34px !important;
+    line-height: 32px;
+    padding: 0 10px !important;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-main);
+    font-family: inherit;
+    font-size: 0.8rem !important;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.knowledge-wiki-setup-field select.form-input {
+    cursor: pointer;
+}
+.knowledge-wiki-setup-field .form-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.12);
+}
+.knowledge-wiki-setup-field .form-input::placeholder {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    opacity: 0.75;
+}
+.knowledge-wiki-setup-status {
+    min-height: 1.45em;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+.knowledge-wiki-setup-status:not([hidden]) {
+    color: var(--danger);
+}
+.knowledge-wiki-setup-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding-top: 4px;
+}
+.knowledge-wiki-setup-cancel-btn {
+    min-width: 72px;
+    height: 32px;
+    min-height: 32px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 6px;
+}
+.knowledge-wiki-setup-submit-btn {
+    min-width: 84px;
+    height: 32px;
+    min-height: 32px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 6px;
+}
+
 .knowledge-citation-list,
 .knowledge-search-result-list,
 .knowledge-product-list,
