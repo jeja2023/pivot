@@ -89,8 +89,10 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.match(autoRoute, /const getAutoRouteEnabled = \(\) => true/);
     assert.match(autoRoute, /const enableMcpFromRouteTrace = async/);
     assert.doesNotMatch(autoRoute, /请重新发送这条消息/);
-    assert.match(autoRoute, /MENTION_PAGE_SIZE = 6/);
     assert.match(autoRoute, /chat-route-mention-scope/);
+    assert.match(autoRoute, /appendScopeOption\(menu, 'collection', '知识库'/);
+    assert.match(autoRoute, /appendScopeOption\(menu, 'wiki', 'Wiki 综合'/);
+    assert.match(autoRoute, /appendScopeOption\(menu, 'tool', '工具'/);
     assert.match(autoRoute, /chat-route-mention-result-summary/);
     assert.match(autoRoute, /chat-route-mention-pager/);
     assert.match(autoRoute, /已显示 \$\{start \+ 1\}–\$\{start \+ candidates\.length\} \/ \$\{total\}/);

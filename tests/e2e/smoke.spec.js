@@ -774,10 +774,13 @@ test.describe('Pivot browser smoke', () => {
        expect(attachmentMenuBounds.top).toBeGreaterThanOrEqual(11.5);
        expect(attachmentMenuBounds.bottom).toBeLessThanOrEqual(attachmentMenuBounds.viewportHeight - 11.5);
 
-        // 裸 @ 同时加载知识库和当前执行白名单内的工具；选中工具仅形成显式候选，
+        // 裸 @ 同时提供知识库、Wiki 综合和当前执行白名单内工具的能力范围选择；选中工具仅形成显式候选，
         // 不会绕过后续的本会话授权与重新发送步骤。
         await page.locator('#user-input').fill('@');
-        await expect(page.locator('[data-route-mention-scope]')).toHaveCount(2);
+        await expect(page.locator('[data-route-mention-scope]')).toHaveCount(3);
+        await expect(page.locator('[data-route-mention-scope="collection"]')).toBeVisible();
+        await expect(page.locator('[data-route-mention-scope="wiki"]')).toBeVisible();
+        await expect(page.locator('[data-route-mention-scope="tool"]')).toBeVisible();
         await expect(page.locator('.chat-route-mention-item')).toHaveCount(0);
         await page.locator('[data-route-mention-scope="tool"]').click();
         const mentionSearch = page.locator('.chat-route-mention-search');
