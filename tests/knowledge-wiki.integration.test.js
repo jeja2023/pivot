@@ -97,9 +97,23 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
         assert.equal(stale, null);
     } finally {
         if (space?.id) db.prepare('DELETE FROM knowledge_wiki_spaces WHERE id = ?').run(space.id);
-        if (article?.document?.id) db.prepare('DELETE FROM knowledge_documents WHERE id = ?').run(article.document.id);
-        db.prepare('DELETE FROM knowledge_collections WHERE id = ?').run(collectionId);
-        db.prepare('DELETE FROM knowledge_sources WHERE user_id IN (?, ?)').run(ownerId, reviewerId);
-        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(ownerId, reviewerId);
+        const productId = article?.document?.id;
+        if (productId) {
+            db.prepare("DELETE FROM knowledge_permissions WHERE resource_type = 'document' AND resource_id = ?").run(productId);
+            db.prepare('DELETE FROM knowledge_documents WHERE id = ?').run(productId);
+        }
+        [ownerId, reviewerId].forEach(userId => {
+            if (!userId) return;
+            const docRows = db.prepare('SELECT id FROM knowledge_docs WHERE user_id = ?').all(userId) || [];
+            docRows.forEach(row => {
+                db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(row.id);
+                db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(row.id);
+            });
+            db.prepare('DELETE FROM knowledge_sources WHERE user_id = ?').run(userId);
+        });
+        if (collectionId) db.prepare('DELETE FROM knowledge_collections WHERE id = ?').run(collectionId);
+        [ownerId, reviewerId].forEach(userId => {
+            if (userId) db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        });
     }
 });
