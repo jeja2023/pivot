@@ -58,7 +58,7 @@
     #rag-graph-modal.rag-detail-modal-overlay.hidden {
         display: none;
     }
-    .rag-detail-modal {
+    .rag-detail-modal:not(.knowledge-wiki-modal) {
         width: min(980px, calc(100vw - 36px));
         max-height: min(760px, calc(100vh - 36px));
         padding: 22px;
@@ -174,6 +174,7 @@
         white-space: nowrap;
     }
     .rag-graph-modal {
+        position: relative;
         width: 100vw;
         height: 100vh;
         max-width: none;
@@ -275,85 +276,361 @@
         white-space: nowrap;
     }
     .rag-graph-query-panel {
-        display: block;
+        position: absolute;
+        top: 122px;
+        right: 18px;
+        width: min(520px, calc(100vw - 36px));
+        max-height: calc(100vh - 142px);
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--border, rgba(203, 213, 225, 0.9));
+        border-radius: 12px;
+        background: var(--surface, #ffffff);
+        box-shadow: 0 20px 48px -10px var(--shadow-deep, rgba(15, 23, 42, 0.2)), 0 0 0 1px var(--shadow-ring, rgba(15, 23, 42, 0.04));
+        backdrop-filter: blur(12px);
+        overflow: hidden;
+        animation: rag-query-panel-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rag-graph-query-panel[hidden],
+    .rag-graph-query-panel.hidden {
+        display: none !important;
+    }
+    @keyframes rag-query-panel-in {
+        from {
+            opacity: 0;
+            transform: translateY(-8px) scale(0.985);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+    .rag-graph-query-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
         flex: 0 0 auto;
-        padding: 0 18px 10px;
-        background: #f8fafc;
+        padding: 10px 14px;
+        background: linear-gradient(180deg, var(--bg-secondary, #f8fafc) 0%, var(--bg-tertiary, #f1f5f9) 100%);
+        border-bottom: 1px solid var(--border-light, rgba(226, 232, 240, 0.85));
+    }
+    .rag-graph-query-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    .rag-graph-query-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: var(--primary-light, rgba(37, 99, 235, 0.1));
+        color: var(--primary-color, #2563eb);
+        flex: 0 0 auto;
+    }
+    .rag-graph-query-title {
+        font-size: 0.86rem;
+        font-weight: 750;
+        color: var(--text-main, #1e293b);
+        white-space: nowrap;
+    }
+    .rag-graph-query-counts {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: nowrap;
+    }
+    .rag-graph-query-count-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+    }
+    .rag-graph-query-count-badge.is-entity {
+        background: var(--success-light, rgba(16, 185, 129, 0.12));
+        color: var(--success-color, #047857);
+        border: 1px solid var(--success-border, rgba(16, 185, 129, 0.22));
+    }
+    .rag-graph-query-count-badge.is-path {
+        background: var(--primary-light, rgba(37, 99, 235, 0.1));
+        color: var(--primary-hover, #1d4ed8);
+        border: 1px solid var(--primary-border, rgba(37, 99, 235, 0.2));
+    }
+    .rag-graph-query-close {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-muted, #64748b);
+        font-size: 1.15rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .rag-graph-query-close:hover,
+    .rag-graph-query-close:focus-visible {
+        background: var(--bg-hover, rgba(226, 232, 240, 0.9));
+        border-color: var(--border-hover, rgba(203, 213, 225, 0.8));
+        color: var(--text-main, #0f172a);
+        outline: none;
     }
     .rag-graph-query-results {
-        display: grid;
-        gap: 6px;
-        max-height: 150px;
-        overflow: auto;
-        padding: 7px;
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 12px 14px;
+        max-height: calc(100vh - 200px);
+        background: var(--surface, #ffffff);
+    }
+    .rag-graph-query-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
         border-radius: 8px;
-        background: #fff;
-        box-shadow: 0 5px 14px rgba(15, 23, 42, 0.04);
+        background: var(--primary-subtle, rgba(59, 130, 246, 0.06));
+        border: 1px solid var(--primary-border, rgba(59, 130, 246, 0.16));
+        color: var(--primary-dark, #1e40af);
+        font-size: 0.74rem;
+        line-height: 1.45;
     }
-    .rag-graph-query-results:empty {
-        display: none;
+    .rag-graph-query-banner-icon {
+        flex: 0 0 auto;
+        color: var(--primary-color, #2563eb);
     }
-    .rag-graph-query-meta,
+    .rag-graph-query-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .rag-graph-query-group-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.72rem;
+        font-weight: 750;
+        color: var(--text-secondary, #475569);
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+    }
+    .rag-graph-query-group-label small {
+        color: var(--text-hint, #94a3b8);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
     .rag-graph-query-entities {
         display: flex;
         flex-wrap: wrap;
-        gap: 5px;
-        color: var(--text-muted);
-        font-size: 0.68rem;
-        line-height: 1.35;
+        gap: 6px;
     }
-    .rag-graph-query-entities span,
-    .rag-graph-query-meta span {
+    .rag-graph-query-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        padding: 4px 10px;
+        border: 1px solid var(--border, rgba(203, 213, 225, 0.85));
+        border-radius: 999px;
+        background: var(--bg-secondary, #f8fafc);
+        color: var(--text-main, #1e293b);
+        font-size: 0.74rem;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        box-shadow: 0 1px 2px var(--shadow-subtle, rgba(0, 0, 0, 0.02));
+    }
+    .rag-graph-query-chip:hover,
+    .rag-graph-query-chip:focus-visible {
+        border-color: var(--primary-color, #3b82f6);
+        background: var(--primary-subtle, #eff6ff);
+        color: var(--primary-hover, #1d4ed8);
+        transform: translateY(-1px);
+        box-shadow: 0 3px 8px var(--primary-shadow, rgba(59, 130, 246, 0.15));
+        outline: none;
+    }
+    .rag-graph-query-chip:active {
+        transform: scale(0.97);
+    }
+    .rag-graph-query-chip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+    .rag-graph-query-chip-type {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: var(--success-light, rgba(16, 185, 129, 0.12));
+        color: var(--success-color, #047857);
+        font-size: 0.65rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .rag-graph-query-paths {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+    .rag-graph-path-card {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 9px 11px;
+        border: 1px solid var(--border-light, rgba(226, 232, 240, 0.95));
+        border-radius: 9px;
+        background: var(--bg-card, #fbfdff);
+        box-shadow: 0 1px 3px var(--shadow-card, rgba(15, 23, 42, 0.03));
+        transition: all 0.15s ease;
+    }
+    .rag-graph-path-card:hover {
+        border-color: var(--primary-border, rgba(59, 130, 246, 0.4));
+        background: var(--surface, #ffffff);
+        box-shadow: 0 4px 12px var(--primary-shadow, rgba(59, 130, 246, 0.08));
+    }
+    .rag-graph-path-flow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        min-width: 0;
+    }
+    .rag-graph-path-node {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 5px 8px;
+        border: 1px solid var(--border, rgba(203, 213, 225, 0.7));
+        border-radius: 6px;
+        background: var(--surface, #ffffff);
+        color: var(--text-main, #0f172a);
+        font-size: 0.74rem;
+        font-weight: 650;
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .rag-graph-path-node:hover,
+    .rag-graph-path-node:focus-visible {
+        border-color: var(--primary-color, #3b82f6);
+        background: var(--primary-subtle, #eff6ff);
+        color: var(--primary-hover, #1d4ed8);
+        outline: none;
+    }
+    .rag-graph-path-node:active {
+        transform: scale(0.97);
+    }
+    .rag-graph-path-connector {
+        flex: 0 0 auto;
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        max-width: 100%;
-        padding: 2px 6px;
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        border-radius: 999px;
-        background: rgba(248, 250, 252, 0.9);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        padding: 0 2px;
     }
-    .rag-graph-query-entities small {
-        color: #047857;
-        font-weight: 800;
-    }
-    .rag-graph-path {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-        gap: 5px;
+    .rag-graph-path-pill {
+        display: inline-flex;
         align-items: center;
-        padding: 5px 6px;
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        border-radius: 7px;
-        background: #fbfdff;
-        color: var(--text-main);
-        font-size: 0.72rem;
-    }
-    .rag-graph-path strong {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .rag-graph-path b {
-        padding: 2px 6px;
+        padding: 2px 7px;
         border-radius: 999px;
-        background: rgba(37, 99, 235, 0.08);
-        color: #1d4ed8;
+        background: var(--primary-light, rgba(37, 99, 235, 0.09));
+        color: var(--primary-hover, #1d4ed8);
         font-size: 0.66rem;
-        line-height: 1;
+        font-weight: 700;
+        line-height: 1.2;
         white-space: nowrap;
     }
-    .rag-graph-path small {
-        grid-column: 1 / -1;
-        color: var(--text-muted);
+    .rag-graph-path-arrow {
+        color: var(--text-hint, #94a3b8);
+        font-size: 0.72rem;
+        line-height: 1;
+    }
+    .rag-graph-path-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.68rem;
+        color: var(--text-muted, #64748b);
+        padding-top: 4px;
+        border-top: 1px dashed var(--border-light, rgba(226, 232, 240, 0.8));
+    }
+    .rag-graph-path-doc {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: 320px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: var(--text-secondary, #475569);
+    }
+    .rag-graph-path-doc svg {
+        flex: 0 0 auto;
+        color: var(--text-hint, #94a3b8);
+    }
+    .rag-graph-path-conf {
+        flex: 0 0 auto;
+        color: var(--text-muted, #64748b);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+    .rag-graph-path-conf b {
+        color: var(--text-main, #0f172a);
+        font-weight: 700;
+    }
+    .rag-graph-path-desc {
+        font-size: 0.68rem;
+        color: var(--text-muted, #64748b);
+        line-height: 1.4;
+        padding: 4px 8px;
+        background: var(--bg-secondary, #f8fafc);
+        border-radius: 6px;
+        word-break: break-all;
+    }
+    .rag-graph-query-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 24px 14px;
+        color: var(--text-muted, #64748b);
+        text-align: center;
+        border: 1px dashed var(--border, rgba(203, 213, 225, 0.8));
+        border-radius: 8px;
+        background: var(--bg-secondary, #f8fafc);
+    }
+    .rag-graph-query-empty svg {
+        color: var(--text-hint, #94a3b8);
+    }
+    .rag-graph-query-empty span {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-secondary, #475569);
+    }
+    .rag-graph-query-empty small {
+        font-size: 0.7rem;
+        color: var(--text-hint, #94a3b8);
     }
     .rag-graph-layout {
         display: grid;

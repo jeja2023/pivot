@@ -136,7 +136,7 @@ async function countDocumentChunks(docId) {
 
 function listAllDocumentChunks(docId) {
     return query(
-        'SELECT id AS "chunkId", content FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC',
+        'SELECT id AS "chunkId", content, heading_path AS "headingPath", char_start AS "charStart", char_end AS "charEnd", chunk_index AS "chunkIndex" FROM knowledge_chunks WHERE doc_id = ? ORDER BY id ASC',
         [docId]
     );
 }

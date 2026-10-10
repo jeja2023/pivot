@@ -9,6 +9,8 @@ const { createKnowledgeSourceSyncScheduler } = require('./services/knowledge-sou
 const { backfillKnowledgeProductProjections, refreshKnowledgeFreshness } = require('./services/knowledge-content');
 const { recoverManualKnowledgeArticleEmbeddings } = require('./services/knowledge-manual-embeddings');
 const { createKnowledgeWikiCompileWorker } = require('./services/knowledge-wiki');
+const { createKnowledgeGraphMaintenanceRunner } = require('./services/knowledge-graph');
+const { createKnowledgeSourceLifecycleWorker } = require('./services/knowledge-source-lifecycle');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const {
@@ -92,6 +94,8 @@ function startBackgroundServices({
             const worker = createKnowledgeWikiCompileWorker({ logger });
             return worker?.start?.() || null;
         },
+        startKnowledgeSourceLifecycleWorker: () => createKnowledgeSourceLifecycleWorker({ logger }).start(),
+        startKnowledgeGraphMaintenanceRunner: () => createKnowledgeGraphMaintenanceRunner({ logger }).start(),
         startKnowledgeEmbeddingRecoveryRunner: () => createKnowledgeEmbeddingRecoveryRunner({
             recover: async () => {
                 const [lexical, mismatched, manual] = await Promise.all([
@@ -131,6 +135,12 @@ function startBackgroundServices({
         runBackgroundTask(dependencies.recoverManualKnowledgeArticleEmbeddings, logger, '人工知识文章向量补齐失败');
         if (typeof dependencies.startKnowledgeWikiCompileWorker === 'function') {
             runBackgroundTask(dependencies.startKnowledgeWikiCompileWorker, logger, '知识 Wiki 编译 Worker 启动失败');
+        }
+        if (typeof dependencies.startKnowledgeSourceLifecycleWorker === 'function') {
+            runBackgroundTask(dependencies.startKnowledgeSourceLifecycleWorker, logger, '知识来源生命周期 Worker 启动失败');
+        }
+        if (typeof dependencies.startKnowledgeGraphMaintenanceRunner === 'function') {
+            runBackgroundTask(dependencies.startKnowledgeGraphMaintenanceRunner, logger, '知识图谱自动维护任务启动失败');
         }
         runBackgroundTask(dependencies.startKnowledgeEmbeddingRecoveryRunner, logger, '知识库向量补齐巡检器启动失败');
         runBackgroundTask(dependencies.startKnowledgeSourceSyncScheduler, logger, '知识库局域网来源同步调度器启动失败');

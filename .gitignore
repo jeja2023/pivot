@@ -37,3 +37,6 @@ downloads/SHA256SUMS-*.txt
 # 本地临时验证脚本与产物目录
 .tmp/
 test-results/
+deliverables/
+qa_a11y.json
+

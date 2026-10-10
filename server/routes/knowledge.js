@@ -75,6 +75,7 @@ const {
     searchWikiPages,
     updateWikiSpace
 } = require('../services/knowledge-wiki');
+const { getKnowledgeSourceLifecycleMetrics } = require('../services/knowledge-source-lifecycle');
 
 const SOURCE_KINDS = new Set(['upload', 'local_dir', 'wiki_markdown', 'lan_http', 'database', 'internal_api', 'manual']);
 const SOURCE_SYNC_MODES = new Set(['manual', 'scheduled', 'watch']);
@@ -84,7 +85,8 @@ const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
     wiki_compile_model_required: '请先选择当前账号可访问的编译模型。',
     wiki_compile_model_not_found: '所选编译模型当前不可访问、已删除或不再可用。',
     wiki_compile_model_unavailable: '所选编译模型的凭据或运行状态异常，请在模型管理中修复后重试。',
-    wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。'
+    wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。',
+    wiki_compile_input_superseded: '编译输入资料已变化，系统已避免混用新旧版本并重新排队。'
 });
 
 function wikiCompileErrorMessage(code) {
@@ -767,6 +769,11 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
     router.get('/knowledge/wiki/spaces/:id/metrics', authMiddleware, asyncHandler(async (req, res) => {
         const metrics = await getWikiMetrics({ spaceId: req.params.id, user: req.user, lookbackDays: req.query.lookbackDays });
         if (!metrics) return res.status(404).json({ error: 'Wiki Space 不存在或无权访问。' });
+        return res.json({ success: true, metrics });
+    }));
+
+    router.get('/knowledge/lifecycle/metrics', authMiddleware, asyncHandler(async (req, res) => {
+        const metrics = await getKnowledgeSourceLifecycleMetrics(req.user.id, { lookbackDays: req.query.lookbackDays });
         return res.json({ success: true, metrics });
     }));
 

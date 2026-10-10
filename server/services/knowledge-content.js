@@ -9,7 +9,7 @@ const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const { buildRagSearchContent } = require('./rag-tokenizer');
 const { hydrateManualKnowledgeArticleEmbeddings } = require('./knowledge-manual-embeddings');
-const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
+const { enqueueKnowledgeSourceLifecycleEvent } = require('./knowledge-source-lifecycle');
 
 const DOCUMENT_STATUSES = new Set(['draft', 'review', 'published', 'expired', 'archived']);
 const PERMISSIONS = new Set(['owner', 'manager', 'editor', 'commenter', 'viewer']);
@@ -155,7 +155,6 @@ async function createKnowledgeArticle({ user, title, content, collectionId = nul
         return { document: { ...document, legacy_doc_id: legacy.id }, version, block, chunk, citationKey };
     });
 }
-
 async function getVersionForUser(versionId, user) {
     const id = normalizeId(versionId);
     if (!id) return null;
@@ -170,7 +169,6 @@ async function getVersionForUser(versionId, user) {
     const version = await queryOne('SELECT * FROM knowledge_document_versions WHERE id = ?', [id]);
     return { document, version };
 }
-
 function canEditDocument(document, user) {
     return Boolean(document && user && (isSuperAdmin(user)
         || Number(document.owner_user_id) === Number(user.id)
@@ -259,6 +257,10 @@ async function publishDocumentVersion({ versionId, actor }) {
             SET product_document_id = ?, status = 'lexical_ready', lifecycle_status = 'published', is_enabled = 1,
                 processed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?
         `, [detail.document.id, timestamp, timestamp, nextLegacyDocId, detail.document.owner_user_id]);
+        await enqueueKnowledgeSourceLifecycleEvent({
+            userId: detail.document.owner_user_id, documentId: detail.document.id, legacyDocId: nextLegacyDocId,
+            eventType: 'manual_version_published', payload: { versionId: detail.version.id, sourceHash: detail.version.source_hash }
+        }, { trx });
     });
     // 发布事务先把文章安全地切到关键词可检索，再异步补齐向量；模型不可用时
     // 不阻塞审核发布，恢复巡检会继续处理。
@@ -267,10 +269,8 @@ async function publishDocumentVersion({ versionId, actor }) {
         userId: detail.document.owner_user_id,
         user: actor
     }).catch(() => {});
-    void markWikiPagesStaleForDocument({ documentId: detail.document.id, reason: 'manual_version_published' }).catch(() => {});
     return { documentId: Number(detail.document.id), versionId: Number(detail.version.id), status: 'published', indexStatus: 'lexical_ready' };
 }
-
 async function createArticleDraftVersion({ documentId, actor, title, content, summary = '' }) {
     const document = await getProductDocumentForUser(documentId, actor);
     const safeTitle = normalizeText(title, 255);
@@ -320,16 +320,18 @@ async function archiveDocument({ documentId, actor }) {
     const document = await getProductDocumentForUser(documentId, actor);
     if (!document || !canEditDocument(document, actor)) return null;
     const timestamp = getBeijingTimestamp();
-    await execute(`
-        UPDATE knowledge_documents SET lifecycle_status = 'archived', updated_at = ? WHERE id = ?
-    `, [timestamp, document.id]);
-    if (normalizeId(document.legacy_doc_id)) {
-        await execute(`
-            UPDATE knowledge_docs SET is_enabled = 0, lifecycle_status = 'archived', updated_at = ?
-            WHERE id = ? AND user_id = ?
-        `, [timestamp, document.legacy_doc_id, document.owner_user_id]);
-    }
-    void markWikiPagesStaleForDocument({ documentId: document.id, reason: 'source_archived' }).catch(() => {});
+    await transaction(async trx => {
+        await trx.execute(`UPDATE knowledge_documents SET lifecycle_status = 'archived', updated_at = ? WHERE id = ?`, [timestamp, document.id]);
+        if (normalizeId(document.legacy_doc_id)) {
+            await trx.execute(`
+                UPDATE knowledge_docs SET is_enabled = 0, lifecycle_status = 'archived', updated_at = ?
+                WHERE id = ? AND user_id = ?
+            `, [timestamp, document.legacy_doc_id, document.owner_user_id]);
+        }
+        await enqueueKnowledgeSourceLifecycleEvent({
+            userId: document.owner_user_id, documentId: document.id, legacyDocId: document.legacy_doc_id, eventType: 'source_archived'
+        }, { trx });
+    });
     return { documentId: Number(document.id), status: 'archived' };
 }
 
@@ -363,7 +365,6 @@ async function getLegacyDocument(legacyDocId, userId = null) {
         SELECT * FROM knowledge_docs WHERE id = ?${ownerClause} AND deleted_at IS NULL
     `, params);
 }
-
 async function getOrCreateProductDocumentForLegacy({ legacyDocId, userId, sourceId = null }) {
     const safeLegacyId = normalizeId(legacyDocId);
     const legacy = await getLegacyDocument(safeLegacyId, userId);
@@ -450,7 +451,7 @@ async function attachLegacyDocumentToProduct({ legacyDocId, documentId, sourceId
     return await queryOne('SELECT * FROM knowledge_documents WHERE id = ?', [safeDocumentId]);
 }
 
-async function publishLegacyDocumentProjection({ legacyDocId, userId, indexStatus = 'ready', embeddingProfile = '' }) {
+async function publishLegacyDocumentProjection({ legacyDocId, userId, indexStatus = 'ready', embeddingProfile = '', enqueueLifecycle = null }) {
     const legacy = await getLegacyDocument(legacyDocId, userId);
     if (!legacy) return null;
     return await transaction(async trx => {
@@ -560,12 +561,14 @@ async function publishLegacyDocumentProjection({ legacyDocId, userId, indexStatu
             SET product_document_id = ?, lifecycle_status = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
         `, [product.id, lifecycle, timestamp, legacy.id, legacy.user_id]);
-        return {
+        const projection = {
             documentId: Number(product.id),
             versionId: Number(version.id),
             citations: chunks.length,
             status: indexStatus
         };
+        if (typeof enqueueLifecycle === 'function') await enqueueLifecycle(trx, projection);
+        return projection;
     });
 }
 
@@ -729,13 +732,23 @@ async function updateDocumentGovernance({ documentId, actor, contentOwnerUserId,
     const dueAt = reviewDueAt === undefined
         ? (freshnessPolicy === undefined ? document.review_due_at : dueAtForPolicy(policy))
         : normalizeDate(reviewDueAt);
-    await execute(`
-        UPDATE knowledge_documents
-        SET content_owner_user_id = ?, content_owner_unit = ?, verifier_user_id = ?,
-            verified_status = ?, verified_at = CASE WHEN ? = 'verified' THEN ? ELSE verified_at END,
-            review_due_at = ?, freshness_policy = ?, updated_at = ?
-        WHERE id = ?
-    `, [contentOwner, String(actor.unit || ''), verifier, status, status, timestamp, dueAt, policy, timestamp, document.id]);
+    await transaction(async trx => {
+        await trx.execute(`
+            UPDATE knowledge_documents
+            SET content_owner_user_id = ?, content_owner_unit = ?, verifier_user_id = ?,
+                verified_status = ?, verified_at = CASE WHEN ? = 'verified' THEN ? ELSE verified_at END,
+                review_due_at = ?, freshness_policy = ?, updated_at = ?
+            WHERE id = ?
+        `, [contentOwner, String(actor.unit || ''), verifier, status, status, timestamp, dueAt, policy, timestamp, document.id]);
+        if (status === 'expired') {
+            if (normalizeId(document.legacy_doc_id)) await trx.execute(`
+                UPDATE knowledge_docs SET is_enabled = 0, lifecycle_status = 'expired', updated_at = ? WHERE id = ?
+            `, [timestamp, document.legacy_doc_id]);
+            await enqueueKnowledgeSourceLifecycleEvent({
+                userId: document.owner_user_id, documentId: document.id, legacyDocId: document.legacy_doc_id, eventType: 'source_expired'
+            }, { trx });
+        }
+    });
     return await getProductDocumentForUser(document.id, actor);
 }
 
@@ -767,6 +780,16 @@ async function verifyKnowledgeDocument({ documentId, actor, status = 'verified' 
                 WHERE id = ? AND user_id = ?
             `, [indexStatus, timestamp, legacyDocId, document.owner_user_id]);
         }
+        if (legacyDocId && nextStatus !== 'verified') {
+            await trx.execute(`
+                UPDATE knowledge_docs SET is_enabled = 0, lifecycle_status = CASE WHEN ? = 'expired' THEN 'expired' ELSE lifecycle_status END, updated_at = ?
+                WHERE id = ? AND user_id = ?
+            `, [nextStatus, timestamp, legacyDocId, document.owner_user_id]);
+        }
+        await enqueueKnowledgeSourceLifecycleEvent({
+            userId: document.owner_user_id, documentId: document.id, legacyDocId,
+            eventType: nextStatus === 'verified' ? 'source_enabled' : (nextStatus === 'expired' ? 'source_expired' : 'source_disabled')
+        }, { trx });
     });
     return { documentId: Number(document.id), verifiedStatus: nextStatus, indexStatus, verifiedAt: timestamp };
 }
@@ -775,7 +798,7 @@ async function refreshKnowledgeFreshness({ limit = 500 } = {}) {
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 500, 5000));
     const timestamp = getBeijingTimestamp();
     const rows = await query(`
-        SELECT id, legacy_doc_id
+        SELECT id, legacy_doc_id, owner_user_id
         FROM knowledge_documents
         WHERE lifecycle_status = 'published' AND deleted_at IS NULL
           AND review_due_at IS NOT NULL AND review_due_at <= ?
@@ -783,19 +806,26 @@ async function refreshKnowledgeFreshness({ limit = 500 } = {}) {
     `, [timestamp, safeLimit]);
     let expired = 0;
     for (const row of rows) {
-        const changed = await execute(`
-            UPDATE knowledge_documents
-            SET lifecycle_status = 'expired', verified_status = 'expired', updated_at = ?
-            WHERE id = ? AND lifecycle_status = 'published'
-        `, [timestamp, row.id]);
-        if (Number(changed || 0) > 0) {
-            expired += 1;
+        const changed = await transaction(async trx => {
+            const updated = await trx.execute(`
+                UPDATE knowledge_documents
+                SET lifecycle_status = 'expired', verified_status = 'expired', updated_at = ?
+                WHERE id = ? AND lifecycle_status = 'published'
+            `, [timestamp, row.id]);
+            if (Number(updated || 0) <= 0) return 0;
             if (normalizeId(row.legacy_doc_id)) {
-                await execute(`
+                await trx.execute(`
                     UPDATE knowledge_docs SET is_enabled = 0, lifecycle_status = 'expired', updated_at = ?
                     WHERE id = ?
                 `, [timestamp, row.legacy_doc_id]);
             }
+            await enqueueKnowledgeSourceLifecycleEvent({
+                userId: row.owner_user_id, documentId: row.id, legacyDocId: row.legacy_doc_id, eventType: 'source_expired'
+            }, { trx });
+            return Number(updated || 0);
+        });
+        if (Number(changed || 0) > 0) {
+            expired += 1;
         }
     }
     return { scanned: rows.length, expired };

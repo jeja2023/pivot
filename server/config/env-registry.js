@@ -38,6 +38,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PIVOT_KNOWLEDGE_WIKI_MAX_SOURCE_BLOCKS: { group: '知识库 LLM Wiki', type: 'integer', defaultValue: 12, min: 1, max: 30, description: '单次 Wiki 编译最多提供给模型的已发布原始资料区块数，避免无界上下文。' },
     PIVOT_KNOWLEDGE_WIKI_MAX_PAGES_PER_RUN: { group: '知识库 LLM Wiki', type: 'integer', defaultValue: 3, min: 1, max: 10, description: '单次 Wiki 编译可生成的候选页面上限；页面仍需来源校验和审核发布。' },
     PIVOT_KNOWLEDGE_WIKI_MAX_OUTPUT_TOKENS: { group: '知识库 LLM Wiki', type: 'integer', defaultValue: 2200, min: 512, max: 8000, description: '单次 Wiki 编译模型输出 Token 上限。' },
+    PIVOT_KNOWLEDGE_WIKI_MAX_INPUT_TOKENS: { group: '知识库 LLM Wiki', type: 'integer', defaultValue: 12000, min: 2048, max: 64000, description: '单次 Wiki 编译可发送给模型的原始资料 Token 预算；按主题规划和来源配额裁剪。' },
     PIVOT_KNOWLEDGE_WIKI_TIMEOUT_MS: { group: '知识库 LLM Wiki', type: 'integer', defaultValue: 120000, min: 10000, max: 600000, description: '单次 Wiki 编译模型调用超时；失败时保留旧已发布页面。' },
     PIVOT_KNOWLEDGE_WIKI_AUTO_COMPILE: { group: '知识库 LLM Wiki', type: 'boolean', defaultValue: false, description: '是否在资料变更后自动创建 Wiki 编译任务；默认关闭，先由管理员手动触发和审核。' },
     PIVOT_KNOWLEDGE_WIKI_REQUIRE_REVIEW: { group: '知识库 LLM Wiki', type: 'boolean', defaultValue: true, description: 'Wiki 候选页面是否必须进入 review 后才能发布；建议生产保持 true。' },

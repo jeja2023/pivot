@@ -143,7 +143,6 @@ const WORKSPACE_PANEL_IDS = Object.freeze({
     settings: 'admin-container'
 });
 const AUTOMATION_WORKSPACES = Object.freeze(['agent', 'agent-dag']);
-let automationWorkspacePrewarmScheduled = false;
 
 function createWorkspaceStyleGate(panel) {
     if (!panel) return null;
@@ -233,20 +232,6 @@ function prewarmAutomationWorkspaces() {
     AUTOMATION_WORKSPACES.forEach(name => templateLoader?.preloadWorkspaceMarkup?.(name)?.catch?.(() => {}));
 }
 
-function scheduleAutomationWorkspacePrewarm() {
-    if (automationWorkspacePrewarmScheduled) return;
-    automationWorkspacePrewarmScheduled = true;
-    const run = () => {
-        automationWorkspacePrewarmScheduled = false;
-        prewarmAutomationWorkspaces();
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(run, { timeout: 1500 });
-    } else {
-        setTimeout(run, 700);
-    }
-}
-
 function isAutomationWorkspaceTrigger(target) {
     const trigger = target?.closest?.('[data-personal-action], [data-workspace-view], [data-automation-section], [data-automation-jump]');
     if (!trigger) return false;
@@ -266,7 +251,6 @@ if (typeof document !== 'undefined') {
     document.addEventListener('focusin', event => {
         if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
     });
-    document.addEventListener('pivot:app-shown', scheduleAutomationWorkspacePrewarm);
 }
 
 window.Pivot?.exposeModule?.('workspaces.styleLoader', {

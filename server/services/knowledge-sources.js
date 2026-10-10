@@ -29,7 +29,7 @@ const {
     archiveMissingExternalWikiPages,
     upsertExternalWikiMarkdownPage
 } = require('./knowledge-wiki-markdown');
-const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
+const { enqueueKnowledgeSourceLifecycleEvent } = require('./knowledge-source-lifecycle');
 
 const SUPPORTED_EXTENSIONS = new Set([
     '.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm'
@@ -304,11 +304,14 @@ async function archiveMissingSourceDocuments(source, seenUris, { enabled = false
                 SET is_enabled = 0, lifecycle_status = 'archived', updated_at = ?
                 WHERE product_document_id = ? AND deleted_at IS NULL
             `, [timestamp, document.id]);
+            await enqueueKnowledgeSourceLifecycleEvent({
+                userId: document.owner_user_id, documentId: document.id, legacyDocId: document.legacy_doc_id,
+                eventType: 'source_deleted', payload: { reason: 'source_sync_deleted' }
+            }, { trx });
             return Number(changed || 0);
         });
         if (Number(changedRows || 0) > 0) {
             archived += 1;
-            void markWikiPagesStaleForDocument({ documentId: document.id, reason: 'source_sync_deleted' }).catch(() => {});
         }
     }
     return archived;

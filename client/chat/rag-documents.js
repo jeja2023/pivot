@@ -86,11 +86,11 @@ if (!document.documentElement.dataset.knowledgeModalEscapeBound) {
     });
 }
 
-async function fetchKnowledgeJson(url, options = {}) {
-    const response = await apiFetch(url, options);
-    const data = await response.json().catch(() => null);
-    if (!response.ok || data?.error) {
-        throw new Error(data?.error || `请求失败（HTTP ${response.status}）`);
+async function fetchKnowledgeJson(url, options = {}) { const response = await apiFetch(url, options), data = await response.json().catch(() => null);
+    const errorPayload = data?.error, hasErrorPayload = typeof errorPayload === 'string' ? errorPayload.trim().length > 0 : Boolean(errorPayload && typeof errorPayload === 'object');
+    if (!response.ok || hasErrorPayload) {
+        const message = errorPayload && typeof errorPayload === 'object' ? (errorPayload.message || errorPayload.error) : errorPayload;
+        throw new Error(message || `请求失败（HTTP ${response.status}）`);
     }
     return data;
 }

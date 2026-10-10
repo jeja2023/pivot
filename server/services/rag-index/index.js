@@ -538,7 +538,7 @@ async function debugRetrieveContext(userId, query, {
         selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
         hasAccessibleChunks(userId, normalizedScope, user)
     ]);
-    if (!corpusAvailable && !graphContext.context) {
+    if (!corpusAvailable) {
         return {
             query: normalizedQuery,
             keywords,
@@ -550,6 +550,7 @@ async function debugRetrieveContext(userId, query, {
             scope: normalizedScope,
             hybrid: getHybridRetrievalConfig(),
             ranking: { mode: 'no_candidates', selectedChunkIds: [] },
+            // 图谱只用于扩展和重排原文候选，不能在没有可检索原文时独立回答。
             injectedContext: formatInjectedContext([])
         };
     }
@@ -680,22 +681,10 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             hasAccessibleChunks(userId, retrievalScope, options.user || null)
         ]);
 
-        if (!corpusAvailable && !graphContext.context) {
+        if (!corpusAvailable) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);
             recordRetrieval({ status: 'empty', durationMs: Date.now() - startedAt, candidates: 0, matches: 0 });
             return '';
-        }
-
-        if (!corpusAvailable && graphContext.context) {
-            setToCache(userId, normalizedQuery, config.topK, graphContext.context, cacheScope);
-            recordRetrieval({
-                status: 'graph_hit',
-                durationMs: Date.now() - startedAt,
-                candidates: 0,
-                matches: 0,
-                graphMatches: graphContext.relations.length
-            });
-            return graphContext.context;
         }
 
         const hybrid = getHybridRetrievalConfig();
@@ -850,7 +839,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             const insertedRows = await query(`
                 INSERT INTO knowledge_chunks (doc_id, content, search_content, heading_path, chunk_index, char_start, char_end, embedding, embedding_profile, embedding_dimensions)
                 VALUES ${results.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
-                RETURNING id, content
+                RETURNING id, content, heading_path, char_start, char_end, chunk_index
             `, results.flatMap(item => [
                 docId,
                 item.content,
@@ -865,7 +854,10 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             ]));
             const insertedChunks = insertedRows
                 .filter(item => item?.id)
-                .map(item => ({ chunkId: item.id, content: item.content }));
+                .map(item => ({
+                    chunkId: item.id, content: item.content, headingPath: item.heading_path || '',
+                    charStart: item.char_start, charEnd: item.char_end, chunkIndex: item.chunk_index
+                }));
             results.forEach(item => {
                 if (Array.isArray(item.vector) && item.vector.length > 0) indexedVectorDimensions.add(item.vector.length);
             });

@@ -11,6 +11,7 @@ const { canAccessSharedResource } = require('./unit-visibility');
 const { getAccessibleModelAsync } = require('./models');
 const { callModelTextWithBudget } = require('./model-text-call');
 const { readTypedEnv } = require('../config/env-registry');
+const { buildRagSearchTerms } = require('./rag-tokenizer');
 
 const PAGE_STATUSES = new Set(['draft', 'review', 'published', 'stale', 'superseded', 'deleted']);
 const SPACE_STATUSES = new Set(['draft', 'active', 'paused', 'deleted']);
@@ -24,7 +25,8 @@ const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
     wiki_compile_model_unavailable: '所选编译模型的凭据或运行状态异常，请在模型管理中修复后重试。',
     wiki_compile_no_published_sources: '该专题库没有可供编译的已发布、未过期且当前账号可访问的原始资料。',
     wiki_compile_no_valid_candidates: '模型输出未通过来源与结构校验，未创建任何候选页面。',
-    wiki_compile_requester_unavailable: '知识空间所有者已不可用，无法以其权限执行自动编译。'
+    wiki_compile_requester_unavailable: '知识空间所有者已不可用，无法以其权限执行自动编译。',
+    wiki_compile_input_superseded: '编译期间原始资料已变化，本次任务未使用新旧混合输入，已生成新的待执行任务。'
 });
 
 const {
@@ -37,6 +39,13 @@ const {
     parseJson,
     parseWikiCompilerOutput
 } = require('./knowledge-wiki-compiler');
+const {
+    buildWikiCompileManifestForSpace,
+    loadWikiCompileManifestSnapshot,
+    persistWikiCompileInputs,
+    selectWikiManifestSources
+} = require('./knowledge-wiki-manifest');
+const { filterVisibleWikiPageRows, getAccessibleProductDocuments } = require('./knowledge-wiki-access');
 
 function getKnowledgeWikiConfig(env = process.env) {
     return {
@@ -44,6 +53,7 @@ function getKnowledgeWikiConfig(env = process.env) {
         maxSourceBlocks: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_MAX_SOURCE_BLOCKS', env),
         maxPagesPerRun: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_MAX_PAGES_PER_RUN', env),
         maxOutputTokens: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_MAX_OUTPUT_TOKENS', env),
+        maxInputTokens: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_MAX_INPUT_TOKENS', env),
         timeoutMs: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_TIMEOUT_MS', env),
         autoCompile: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_AUTO_COMPILE', env),
         requireReview: readTypedEnv('PIVOT_KNOWLEDGE_WIKI_REQUIRE_REVIEW', env),
@@ -60,6 +70,7 @@ function defaultCompilePolicy(value = {}, env = process.env) {
         maxSourceBlocks: Math.max(1, Math.min(Number.parseInt(source.maxSourceBlocks, 10) || config.maxSourceBlocks || MAX_SOURCE_BLOCKS, 30)),
         maxPagesPerRun: Math.max(1, Math.min(Number.parseInt(source.maxPagesPerRun, 10) || config.maxPagesPerRun || 3, MAX_PAGES_PER_RUN)),
         maxOutputTokens: Math.max(512, Math.min(Number.parseInt(source.maxOutputTokens, 10) || config.maxOutputTokens || 2200, 8000)),
+        maxInputTokens: Math.max(2048, Math.min(Number.parseInt(source.maxInputTokens, 10) || config.maxInputTokens || 12000, 64000)),
         timeoutMs: Math.max(10000, Math.min(Number.parseInt(source.timeoutMs, 10) || config.timeoutMs || 120000, 600000)),
         autoCompile: source.autoCompile === undefined ? config.autoCompile === true : source.autoCompile === true,
         requireReview: source.requireReview === undefined ? config.requireReview !== false : source.requireReview !== false,
@@ -85,6 +96,7 @@ function publicPage(row = {}) {
         title: row.title, summary: row.summary || '', markdown: row.content_markdown || '',
         contentHash: row.content_hash || '', versionNo: Number(row.version_no || 0), status: row.status,
         confidence: Math.max(0, Math.min(1, Number(row.confidence) || 0)), sourceCoverage: coverage,
+        claims: Array.isArray(parseJson(row.claims_json, [])) ? parseJson(row.claims_json, []) : [],
         modelVersion: row.model_version || '', promptVersion: row.prompt_version || '',
         generatedBy: normalizeId(row.generated_by), publishedBy: normalizeId(row.published_by),
         publishedAt: row.published_at || null, createdAt: row.created_at, updatedAt: row.updated_at
@@ -238,12 +250,8 @@ async function listWikiPages({ spaceId, user, status = '', limit = 100 } = {}, d
         WHERE space_id = ? AND deleted_at IS NULL ${safeStatus ? 'AND status = ?' : ''}
         ORDER BY CASE status WHEN 'stale' THEN 0 WHEN 'review' THEN 1 ELSE 2 END, updated_at DESC, id DESC LIMIT ?
     `, safeStatus ? [space.id, safeStatus, safeLimit] : [space.id, safeLimit]);
-    const visible = [];
-    for (const row of rows) {
-        const detail = await getWikiPage({ pageId: row.id, user }, deps);
-        if (detail) visible.push(publicPage(row));
-    }
-    return visible;
+    const visibleRows = await filterVisibleWikiPageRows(rows, user, deps);
+    return visibleRows.map(publicPage);
 }
 
 async function getWikiPage({ pageId, user } = {}, deps = {}) {
@@ -261,6 +269,7 @@ async function getWikiPage({ pageId, user } = {}, deps = {}) {
         FROM knowledge_wiki_page_sources source
         JOIN knowledge_documents document ON document.id = source.document_id AND document.deleted_at IS NULL
           AND document.current_version_id = source.version_id AND document.lifecycle_status = 'published'
+          AND document.verified_status <> 'expired'
         JOIN knowledge_document_versions version ON version.id = source.version_id AND version.document_id = document.id
         LEFT JOIN knowledge_blocks block ON block.id = source.block_id AND block.version_id = version.id
         LEFT JOIN knowledge_citations citation ON citation.document_id = source.document_id
@@ -270,13 +279,10 @@ async function getWikiPage({ pageId, user } = {}, deps = {}) {
     // 共享 Space 不能把页面摘要暴露给无权访问任一原始来源的人；不能只是
     // 在响应中隐藏来源，因为这样仍会泄露派生结论。
     if (!sources.length) return null;
-    const canReadDocument = deps.getProductDocumentForUser || require('./knowledge-content').getProductDocumentForUser;
-    const visibleSources = [];
-    for (const source of sources) {
-        const document = await canReadDocument(source.document_id, user);
-        if (!document) return null;
-        visibleSources.push(source);
-    }
+    const sourceDocumentIds = [...new Set(sources.map(source => Number(source.document_id)))];
+    const readableDocuments = await getAccessibleProductDocuments(sourceDocumentIds, user, deps);
+    if (readableDocuments.size !== new Set(sources.map(source => Number(source.document_id))).size) return null;
+    const visibleSources = sources;
     const links = await (deps.query || query)(`
         SELECT link.relation_type, link.anchor, target.id, target.slug, target.title, target.status
         FROM knowledge_wiki_page_links link JOIN knowledge_wiki_pages target ON target.id = link.to_page_id
@@ -293,7 +299,6 @@ async function getWikiPage({ pageId, user } = {}, deps = {}) {
         links: links.map(link => ({ pageId: Number(link.id), slug: link.slug, title: link.title, status: link.status, relationType: link.relation_type, anchor: link.anchor || '' }))
     };
 }
-
 async function listWikiPageVersions({ pageId, user, limit = 50 } = {}, deps = {}) {
     const detail = await getWikiPage({ pageId, user }, deps);
     if (!detail) return null;
@@ -321,48 +326,21 @@ async function getWikiPageDiff({ pageId, fromPageId, toPageId, user } = {}, deps
     return { spaceId: current.page.spaceId, slug: current.page.slug, fromPageId: fromId, toPageId: toId, ...diffWikiMarkdown(before.content_markdown, after.content_markdown) };
 }
 
-async function buildWikiCompileManifest({ spaceId, user, maxSourceBlocks = MAX_SOURCE_BLOCKS } = {}, deps = {}) {
-    const space = await getWikiSpaceForUser(spaceId, user, deps);
-    if (!space) return null;
-    const safeLimit = Math.max(1, Math.min(Number.parseInt(maxSourceBlocks, 10) || MAX_SOURCE_BLOCKS, 30));
-    const rows = await (deps.query || query)(`
-        SELECT document.id AS document_id, document.title AS document_title, version.id AS version_id,
-               version.version_no, block.id AS block_id, block.heading_path, block.content,
-               block.source_locator_json, citation.legacy_chunk_id
-        FROM knowledge_documents document
-        JOIN knowledge_document_versions version ON version.id = document.current_version_id
-        JOIN knowledge_blocks block ON block.version_id = version.id
-        LEFT JOIN knowledge_citations citation ON citation.document_id = document.id
-          AND citation.version_id = version.id AND citation.block_id = block.id
-        WHERE document.collection_id = ? AND document.deleted_at IS NULL
-          AND document.lifecycle_status = 'published' AND document.verified_status <> 'expired'
-        ORDER BY document.updated_at DESC, document.id DESC, block.block_order ASC, block.id ASC LIMIT ?
-    `, [space.collection_id, safeLimit]);
-    // collection 是 Space 的范围上限，不等于每份产品文档的读权限。先执行
-    // 文档级 ACL，再把内容加入模型输入，避免编译任务借由共享专题库读取私有文档。
-    const canReadDocument = deps.getProductDocumentForUser || require('./knowledge-content').getProductDocumentForUser;
-    const readableDocumentIds = new Set();
-    for (const documentId of [...new Set(rows.map(row => normalizeId(row.document_id)).filter(Boolean))]) {
-        if (await canReadDocument(documentId, user)) readableDocumentIds.add(documentId);
-    }
-    const sources = rows.filter(row => readableDocumentIds.has(normalizeId(row.document_id))).map(row => ({
-        documentId: Number(row.document_id), documentTitle: row.document_title,
-        versionId: Number(row.version_id), versionNo: Number(row.version_no || 0), blockId: Number(row.block_id),
-        chunkId: normalizeId(row.legacy_chunk_id), headingPath: row.heading_path || '',
-        content: String(row.content || '').slice(0, 8000), locator: parseJson(row.source_locator_json, {})
-    }));
-    const manifest = {
-        spaceId: Number(space.id), collectionId: Number(space.collection_id), promptVersion: space.prompt_version,
-        sources: sources.map(source => ({ documentId: source.documentId, versionId: source.versionId, blockId: source.blockId, chunkId: source.chunkId, contentHash: contentHash(source.content) }))
-    };
-    return { space, sources, hash: contentHash(JSON.stringify(manifest)), manifest };
+async function buildWikiCompileManifest({
+    spaceId, user, maxSourceBlocks = MAX_SOURCE_BLOCKS, maxInputTokens = 12000, sourceDocumentIds = []
+} = {}, deps = {}) {
+    return await buildWikiCompileManifestForSpace({
+        spaceId, user, maxSourceBlocks, maxInputTokens, sourceDocumentIds, maxPages: MAX_PAGES_PER_RUN
+    }, { ...deps, getWikiSpaceForUser });
 }
 
 async function getWikiCompileReadiness({ spaceId, user, modelRef = null, requireModel = false } = {}, deps = {}) {
     const space = await getWikiSpaceForUser(spaceId, user, deps);
     if (!space) return null;
     const policy = defaultCompilePolicy(parseJson(space.compile_policy_json, {}), deps.env);
-    const manifest = await buildWikiCompileManifest({ spaceId: space.id, user, maxSourceBlocks: policy.maxSourceBlocks }, deps);
+    const manifest = await buildWikiCompileManifest({
+        spaceId: space.id, user, maxSourceBlocks: policy.maxSourceBlocks, maxInputTokens: policy.maxInputTokens
+    }, deps);
     const effectiveModelRef = normalizeText(modelRef, 180) || policy.modelRef;
     let model = null;
     if (effectiveModelRef) {
@@ -384,7 +362,7 @@ async function getWikiCompileReadiness({ spaceId, user, modelRef = null, require
     };
 }
 
-function buildWikiCompilerMessages({ space, sources, policy }) {
+function buildWikiCompilerMessages({ space, sources, policy, topicPlan = [], changeSummary = {} }) {
     const sourceText = sources.map((source, index) => [
         `【S${index + 1}】sourceId=S${index + 1};documentId=${source.documentId};versionId=${source.versionId};blockId=${source.blockId};chunkId=${source.chunkId || ''}`,
         `标题：${source.documentTitle}`,
@@ -407,19 +385,24 @@ function buildWikiCompilerMessages({ space, sources, policy }) {
         },
         {
             role: 'user',
-            content: `为 Wiki Space「${space.name}」生成最多 ${policy.maxPagesPerRun} 个待审核页面。\n\n${sourceText}`
+            content: [
+                `为 Wiki Space「${space.name}」生成最多 ${policy.maxPagesPerRun} 个待审核页面。`,
+                topicPlan.length ? `本轮受影响主题计划：${topicPlan.map(topic => topic.label).join('；')}。仅生成这些主题的更新页、必要的新主题页或变更摘要；不得重写无关页面。` : '',
+                Number(changeSummary.removedBlockCount || 0) ? `检测到 ${Number(changeSummary.removedBlockCount)} 个旧来源区块不再存在；应在适当时生成 change_digest，明确提示人工回查。` : '',
+                `本轮来源预算约 ${policy.maxInputTokens} tokens；每份来源后的 selectedReason 仅用于规划，不能作为事实依据。`,
+                sourceText
+            ].filter(Boolean).join('\n\n')
         }
     ];
 }
-
-
-
-async function createWikiCompileRun({ spaceId, user, triggerType = 'manual', modelRef = null } = {}, deps = {}) {
+async function createWikiCompileRun({ spaceId, user, triggerType = 'manual', modelRef = null, sourceDocumentIds = [] } = {}, deps = {}) {
     if ((deps.getKnowledgeWikiConfig || getKnowledgeWikiConfig)(deps.env).enabled !== true) return { error: 'wiki_disabled' };
     const space = await getWikiSpaceForUser(spaceId, user, deps);
     if (!space || !canManageSpace(space, user)) return null;
     const policy = defaultCompilePolicy(parseJson(space.compile_policy_json, {}), deps.env);
-    const manifest = await buildWikiCompileManifest({ spaceId, user, maxSourceBlocks: policy.maxSourceBlocks }, deps);
+    const manifest = await buildWikiCompileManifest({
+        spaceId, user, maxSourceBlocks: policy.maxSourceBlocks, maxInputTokens: policy.maxInputTokens, sourceDocumentIds
+    }, deps);
     if (!manifest) return null;
     if (manifest.space.status === 'paused') return { error: 'wiki_space_paused' };
     if (!manifest.sources.length) return { error: 'wiki_compile_no_published_sources', manifest };
@@ -430,12 +413,33 @@ async function createWikiCompileRun({ spaceId, user, triggerType = 'manual', mod
     if (model.secret_error) return { error: 'wiki_compile_model_unavailable', manifest };
     const now = getBeijingTimestamp();
     const runId = crypto.randomUUID();
-    const row = await (deps.queryOne || queryOne)(`
-        INSERT INTO knowledge_wiki_compile_runs (
-            id, space_id, requested_by, trigger_type, input_manifest_hash, status, stage, summary_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'queued', 'queued', ?::jsonb, ?, ?) RETURNING *
-    `, [runId, manifest.space.id, user.id, normalizeText(triggerType, 40) || 'manual', manifest.hash,
-        JSON.stringify({ sourceCount: manifest.sources.length, modelRef: effectiveModelRef }), now, now]);
+    const createRow = async db => {
+        const row = await db.queryOne(`
+            INSERT INTO knowledge_wiki_compile_runs (
+                id, space_id, requested_by, trigger_type, input_manifest_hash, status, stage, summary_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'queued', 'queued', ?::jsonb, ?, ?) RETURNING *
+        `, [runId, manifest.space.id, user.id, normalizeText(triggerType, 40) || 'manual', manifest.hash,
+            JSON.stringify({
+                sourceCount: manifest.sources.length, modelRef: effectiveModelRef,
+                tokenBudget: manifest.manifest.tokenBudget, usedTokens: manifest.manifest.usedTokens,
+                topicPlan: manifest.topicPlan, sourceDocumentIds: manifest.manifest.sourceDocumentIds,
+                changedBlockCount: manifest.manifest.changedBlockCount, removedBlockCount: manifest.manifest.removedBlockCount
+            }), now, now]);
+        if (row) await persistWikiCompileInputs({ runId: row.id, sources: manifest.sources }, { execute: db.execute.bind(db) });
+        return row;
+    };
+    const row = deps.queryOne && !deps.transaction
+        ? await (deps.queryOne || queryOne)(`
+            INSERT INTO knowledge_wiki_compile_runs (
+                id, space_id, requested_by, trigger_type, input_manifest_hash, status, stage, summary_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'queued', 'queued', ?::jsonb, ?, ?) RETURNING *
+        `, [runId, manifest.space.id, user.id, normalizeText(triggerType, 40) || 'manual', manifest.hash,
+            JSON.stringify({ sourceCount: manifest.sources.length, modelRef: effectiveModelRef, tokenBudget: manifest.manifest.tokenBudget, usedTokens: manifest.manifest.usedTokens, topicPlan: manifest.topicPlan, sourceDocumentIds: manifest.manifest.sourceDocumentIds, changedBlockCount: manifest.manifest.changedBlockCount, removedBlockCount: manifest.manifest.removedBlockCount }), now, now])
+        : await (deps.transaction || transaction)(createRow);
+    // 兼容注入 queryOne 的单元测试环境；真实运行始终在上述事务内保存快照。
+    if (row && deps.queryOne && !deps.transaction && typeof deps.execute === 'function') {
+        await persistWikiCompileInputs({ runId: row.id, sources: manifest.sources }, deps);
+    }
     return row ? { run: publicRun(row), manifest } : null;
 }
 
@@ -476,6 +480,14 @@ async function storeWikiCandidatePages({ space, user, candidates, allowedSources
                 WHERE space_id = ? AND slug = ? AND deleted_at IS NULL
                 ORDER BY version_no DESC, id DESC LIMIT 1 FOR UPDATE
             `, [space.id, normalized.slug]);
+            const touchesChangedEvidence = normalized.sourceRefs.some(ref => {
+                const source = allowedSources.get(`${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}`);
+                return source?.selectedReason === 'changed_block';
+            });
+            if (previous && !touchesChangedEvidence) {
+                if (validation) validation.skippedUnchangedCandidates = Number(validation.skippedUnchangedCandidates || 0) + 1;
+                continue;
+            }
             const versionNo = Number(previous?.version_no || 0) + 1;
             const coverage = {
                 sourceCount: normalized.sourceRefs.length,
@@ -487,11 +499,11 @@ async function storeWikiCandidatePages({ space, user, candidates, allowedSources
             const page = await trx.queryOne(`
                 INSERT INTO knowledge_wiki_pages (
                     space_id, page_type, slug, title, summary, content_markdown, content_hash, version_no,
-                    status, confidence, source_coverage_json, generated_by, model_version, prompt_version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?) RETURNING *
+                    status, confidence, source_coverage_json, claims_json, generated_by, model_version, prompt_version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?) RETURNING *
             `, [space.id, normalized.pageType, normalized.slug, normalized.title, normalized.summary, normalized.markdown,
                 contentHash(normalized.markdown), versionNo, policy.requireReview ? 'review' : 'draft', normalized.confidence,
-                JSON.stringify(coverage), user.id, normalizeText(modelVersion, 180), space.prompt_version, now, now]);
+                JSON.stringify(coverage), JSON.stringify(normalized.claims), user.id, normalizeText(modelVersion, 180), space.prompt_version, now, now]);
             for (const ref of normalized.sourceRefs) {
                 const source = allowedSources.get(`${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}`);
                 await trx.execute(`
@@ -534,11 +546,11 @@ async function storeWikiCandidatePages({ space, user, candidates, allowedSources
                 const conflictPage = await trx.queryOne(`
                     INSERT INTO knowledge_wiki_pages (
                         space_id, page_type, slug, title, summary, content_markdown, content_hash, version_no,
-                        status, confidence, source_coverage_json, generated_by, model_version, prompt_version, created_at, updated_at
-                    ) VALUES (?, 'conflict', ?, ?, ?, ?, ?, ?, 'review', 0, ?::jsonb, ?, ?, ?, ?, ?) RETURNING *
+                        status, confidence, source_coverage_json, claims_json, generated_by, model_version, prompt_version, created_at, updated_at
+                    ) VALUES (?, 'conflict', ?, ?, ?, ?, ?, ?, 'review', 0, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?) RETURNING *
                 `, [space.id, conflictSlug, `${normalized.title}：待确认冲突`, '存在待人工确认的来源冲突。', conflictMarkdown,
                     contentHash(conflictMarkdown), Number(previousConflict?.version_no || 0) + 1,
-                    JSON.stringify({ ...coverage, conflictCount: normalized.conflicts.length, sourceComplete: true, parentPageId: page.id }),
+                    JSON.stringify({ ...coverage, conflictCount: normalized.conflicts.length, sourceComplete: true, parentPageId: page.id }), JSON.stringify(normalized.claims),
                     user.id, normalizeText(modelVersion, 180), space.prompt_version, now, now]);
                 for (const ref of normalized.sourceRefs) {
                     const source = allowedSources.get(`${ref.documentId}:${ref.versionId}:${ref.blockId}:${ref.chunkId || ''}`);
@@ -577,25 +589,48 @@ async function runWikiCompile({ runId, user, modelRef = null, signal = null, wor
         await (deps.execute || execute)(`
             UPDATE knowledge_wiki_compile_runs
             SET stage = ?, status = ?, summary_json = ?::jsonb, error_code = ?, error_message = ?,
-                started_at = COALESCE(started_at, ?), completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END,
+                started_at = COALESCE(started_at, ?), completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled', 'superseded') THEN ? ELSE completed_at END,
                 updated_at = ? WHERE id = ?
         `, [stage, status, JSON.stringify(summary || {}), extra.errorCode || '', extra.errorMessage || '',
             getBeijingTimestamp(), status, getBeijingTimestamp(), getBeijingTimestamp(), safeRunId]);
     };
     try {
         await update('collecting_sources');
-        const manifest = await buildWikiCompileManifest({ spaceId: space.id, user, maxSourceBlocks: policy.maxSourceBlocks }, deps);
-        if (!manifest?.sources.length) throw Object.assign(new Error('wiki_compile_no_published_sources'), { code: 'wiki_compile_no_published_sources' });
-        const allowedSources = new Map(manifest.sources.map(source => [`${source.documentId}:${source.versionId}:${source.blockId}:${source.chunkId || ''}`, source]));
-        allowedSources.manifestHash = manifest.hash;
-        allowedSources.sourceByHandle = new Map(manifest.sources.map((source, index) => [`S${index + 1}`, source]));
-        await update('generating_candidate', 'running', { summary: { sourceCount: manifest.sources.length, inputManifestHash: manifest.hash } });
         const runSummary = parseJson(row.summary_json, {});
+        const snapshot = await loadWikiCompileManifestSnapshot({ runId: safeRunId, user }, deps);
+        if (!snapshot || snapshot.superseded) {
+            const replacement = await createWikiCompileRun({
+                spaceId: space.id, user, triggerType: 'superseded_input',
+                modelRef: modelRef || runSummary.modelRef || policy.modelRef,
+                sourceDocumentIds: runSummary.sourceDocumentIds || []
+            }, deps).catch(() => null);
+            await (deps.execute || execute)(`
+                UPDATE knowledge_wiki_compile_runs SET superseded_by = ?, updated_at = ? WHERE id = ?
+            `, [replacement?.run?.id || null, getBeijingTimestamp(), safeRunId]);
+            await update('superseded_input', 'superseded', {
+                summary: { ...latestSummary, inputManifestHash: row.input_manifest_hash, invalidSourceCount: snapshot?.invalidSourceCount || 0 },
+                errorCode: 'wiki_compile_input_superseded', errorMessage: WIKI_COMPILE_ERROR_MESSAGES.wiki_compile_input_superseded
+            });
+            if (replacement?.run) {
+                const schedule = deps.scheduleWikiCompile || scheduleWikiCompile;
+                schedule({ runId: replacement.run.id, user, modelRef: modelRef || runSummary.modelRef || policy.modelRef }, deps);
+            }
+            return { runId: safeRunId, status: 'superseded', replacementRunId: replacement?.run?.id || null };
+        }
+        const sources = snapshot.sources;
+        if (!sources.length) throw Object.assign(new Error('wiki_compile_no_published_sources'), { code: 'wiki_compile_no_published_sources' });
+        const allowedSources = new Map(sources.map(source => [`${source.documentId}:${source.versionId}:${source.blockId}:${source.chunkId || ''}`, source]));
+        allowedSources.manifestHash = row.input_manifest_hash;
+        allowedSources.sourceByHandle = new Map(sources.map(source => [source.sourceId, source]));
+        await update('generating_candidate', 'running', { summary: { sourceCount: sources.length, inputManifestHash: row.input_manifest_hash, topicPlan: snapshot.topicPlan } });
         const model = deps.modelCfg || await (deps.getAccessibleModelAsync || getAccessibleModelAsync)(modelRef || runSummary.modelRef || policy.modelRef, user);
         if (!model) throw Object.assign(new Error('wiki_compile_model_not_found'), { code: 'wiki_compile_model_not_found' });
         const invoke = deps.callModelTextWithBudget || callModelTextWithBudget;
         const completion = await invoke({
-            modelCfg: model, user, messages: buildWikiCompilerMessages({ space, sources: manifest.sources, policy }),
+            modelCfg: model, user, messages: buildWikiCompilerMessages({
+                space, sources, policy, topicPlan: snapshot.topicPlan,
+                changeSummary: { changedBlockCount: runSummary.changedBlockCount, removedBlockCount: runSummary.removedBlockCount }
+            }),
             source: 'knowledge_wiki_compile', maxTokens: policy.maxOutputTokens, temperature: 0, timeout: policy.timeoutMs, signal: controller.signal
         });
         const candidates = parseWikiCompilerOutput(completion?.content || completion);
@@ -608,7 +643,7 @@ async function runWikiCompile({ runId, user, modelRef = null, signal = null, wor
         }, deps);
         if (!pages.length) throw Object.assign(new Error('wiki_compile_no_valid_candidates'), { code: 'wiki_compile_no_valid_candidates', validation });
         await (deps.execute || execute)(`UPDATE knowledge_wiki_spaces SET last_compiled_at = ?, updated_at = ? WHERE id = ?`, [getBeijingTimestamp(), getBeijingTimestamp(), space.id]);
-        await update('awaiting_review', 'completed', { summary: { ...latestSummary, sourceCount: manifest.sources.length, pagesCreated: pages.length, pageIds: pages.map(page => page.id), inputManifestHash: manifest.hash, validation } });
+        await update('awaiting_review', 'completed', { summary: { ...latestSummary, sourceCount: sources.length, pagesCreated: pages.length, pageIds: pages.map(page => page.id), inputManifestHash: row.input_manifest_hash, validation } });
         return { runId: safeRunId, status: 'completed', pages };
     } catch (error) {
         const cancelled = controller.signal.aborted === true;
@@ -768,7 +803,10 @@ async function markWikiPagesStaleForDocument({ documentId = null, legacyDocId = 
             if (queued) continue;
             const modelRef = String(model.id || policy.modelRef);
             const createRun = deps.createWikiCompileRun || createWikiCompileRun;
-            const created = await createRun({ spaceId: candidate.id, user: actor, triggerType: reason, modelRef }, deps).catch(() => null);
+            const created = await createRun({
+                spaceId: candidate.id, user: actor, triggerType: reason, modelRef,
+                sourceDocumentIds: [safeDocumentId]
+            }, deps).catch(() => null);
             if (!created?.run) continue;
             queuedRuns += 1;
             const schedule = deps.scheduleWikiCompile || scheduleWikiCompile;
@@ -793,29 +831,36 @@ async function searchWikiPages({ user, queryText, spaceId = null, limit = 5 } = 
     const config = (deps.getKnowledgeWikiConfig || getKnowledgeWikiConfig)(deps.env);
     if (config.enabled !== true) return [];
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || config.searchLimit || 5, 20));
+    const terms = buildRagSearchTerms(safeText, 12)
+        .map(term => String(term || '').trim()).filter(Boolean).slice(0, 12);
+    if (!terms.length) return [];
+    const textColumn = "COALESCE(page.title, '') || ' ' || COALESCE(page.summary, '') || ' ' || COALESCE(page.content_markdown, '')";
+    const lexicalMatch = terms.map(() => `${textColumn} ILIKE ?`).join(' OR ');
+    const lexicalParams = terms.map(term => `%${term.replace(/[\\%_]/g, '\\$&')}%`);
+    const rankTermExpression = terms.map(() => `CASE WHEN ${textColumn} ILIKE ? THEN 0.25 ELSE 0 END`).join(' + ');
     const rows = await (deps.query || query)(`
         SELECT page.*, space.owner_user_id, space.collection_id,
-               (CASE WHEN page.title ILIKE '%' || ? || '%' THEN 3
-                     WHEN page.summary ILIKE '%' || ? || '%' THEN 2
-                     WHEN page.content_markdown ILIKE '%' || ? || '%' THEN 1 ELSE 0 END
-                + ts_rank_cd(to_tsvector('simple', page.title || ' ' || page.summary || ' ' || page.content_markdown), plainto_tsquery('simple', ?))) AS rank
+                (CASE WHEN page.title ILIKE '%' || ? || '%' THEN 3
+                      WHEN page.summary ILIKE '%' || ? || '%' THEN 2
+                      WHEN page.content_markdown ILIKE '%' || ? || '%' THEN 1 ELSE 0 END
+                 + ts_rank_cd(to_tsvector('simple', ${textColumn}), plainto_tsquery('simple', ?))
+                 + (${rankTermExpression})) AS rank
         FROM knowledge_wiki_pages page JOIN knowledge_wiki_spaces space ON space.id = page.space_id
         WHERE page.status = 'published' AND page.deleted_at IS NULL AND space.deleted_at IS NULL
           ${safeSpaceId ? 'AND space.id = ?' : ''}
+          AND (${lexicalMatch})
           AND NOT EXISTS (
               SELECT 1 FROM knowledge_wiki_page_sources source
               JOIN knowledge_documents document ON document.id = source.document_id
               WHERE source.wiki_page_id = page.id AND (document.deleted_at IS NOT NULL OR document.current_version_id <> source.version_id)
           )
         ORDER BY rank DESC, page.updated_at DESC LIMIT ?
-    `, [safeText, safeText, safeText, safeText, ...(safeSpaceId ? [safeSpaceId] : []), Math.max(safeLimit * 8, 40)]);
-    const visible = [];
-    for (const row of rows) {
-        const detail = await getWikiPage({ pageId: row.id, user }, deps);
-        if (detail) visible.push({ ...publicPage(row), rank: Number(row.rank || 0) });
-        if (visible.length >= safeLimit) break;
-    }
-    return visible;
+    `, [safeText, safeText, safeText, safeText, ...lexicalParams, ...(safeSpaceId ? [safeSpaceId] : []), ...lexicalParams, Math.max(safeLimit * 8, 40)]);
+    const visibleRows = await filterVisibleWikiPageRows(rows, user, deps);
+    return visibleRows
+        .filter(row => Number(row.rank || 0) > 0)
+        .slice(0, safeLimit)
+        .map(row => ({ ...publicPage(row), rank: Number(row.rank || 0) }));
 }
 
 async function retrieveWikiContext({ user, queryText, spaceId = null, limit = 3 } = {}, deps = {}) {
@@ -825,13 +870,14 @@ async function retrieveWikiContext({ user, queryText, spaceId = null, limit = 3 
         const detail = await getWikiPage({ pageId: page.id, user }, deps);
         if (!detail || detail.page.status !== 'published') continue;
         const supporting = detail.sources.filter(source => ['supports', 'defines'].includes(source.supportType) && source.verifiedStatus !== 'invalid');
-        if (!supporting.length) continue;
+        if (!supporting.length || !Array.isArray(detail.page.claims) || detail.page.claims.length === 0) continue;
         details.push({ page: detail.page, sources: supporting });
     }
     const context = details.map(item => [
         `【Wiki 综合页：${item.page.title}】`,
-        item.page.summary || item.page.markdown.slice(0, 3000),
-        `【原始依据】${item.sources.map(source => `${source.title} v${source.versionNo}${source.headingPath ? ` / ${source.headingPath}` : ''}`).join('；')}`
+        item.page.summary || '',
+        `【已核验声明】${item.page.claims.slice(0, 8).map(claim => String(claim.statement || '').slice(0, 400)).filter(Boolean).join('；') || '无可注入的声明。'}`,
+        `【原始依据】${item.sources.map(source => `${source.title} v${source.versionNo}${source.headingPath ? ` / ${source.headingPath}` : ''}${source.sectionAnchor ? ` / ${source.sectionAnchor}` : ''}`).join('；')}`
     ].join('\n')).join('\n\n');
     return {
         pages: details.map(item => ({ ...item.page, sourceCount: item.sources.length })),
@@ -855,7 +901,9 @@ async function getWikiMetrics({ spaceId, user, lookbackDays = 30 } = {}, deps = 
                COUNT(*) FILTER (WHERE status = 'stale') AS stale_pages,
                COUNT(*) FILTER (WHERE status = 'failed') AS failed_pages,
                AVG(COALESCE((source_coverage_json->>'sourceCount')::double precision, 0)) AS avg_source_count,
-               AVG(COALESCE((source_coverage_json->>'conflictCount')::double precision, 0)) AS avg_conflict_count
+               AVG(COALESCE((source_coverage_json->>'conflictCount')::double precision, 0)) AS avg_conflict_count,
+               AVG(CASE WHEN jsonb_typeof(claims_json) = 'array' THEN jsonb_array_length(claims_json) ELSE 0 END) AS avg_claim_count,
+               COUNT(*) FILTER (WHERE jsonb_typeof(claims_json) = 'array' AND jsonb_array_length(claims_json) > 0) AS sourced_claim_pages
         FROM knowledge_wiki_pages WHERE space_id = ? AND deleted_at IS NULL
     `, [space.id]);
     const runs = await (deps.query || query)(`
@@ -879,7 +927,8 @@ async function getWikiMetrics({ spaceId, user, lookbackDays = 30 } = {}, deps = 
         pages: {
             total: Number(summary?.pages || 0), published: Number(summary?.published_pages || 0), review: Number(summary?.review_pages || 0),
             stale: Number(summary?.stale_pages || 0), failed: Number(summary?.failed_pages || 0),
-            averageSourceCount: Number(summary?.avg_source_count || 0), averageConflictCount: Number(summary?.avg_conflict_count || 0)
+            averageSourceCount: Number(summary?.avg_source_count || 0), averageConflictCount: Number(summary?.avg_conflict_count || 0),
+            averageClaimCount: Number(summary?.avg_claim_count || 0), sourcedClaimPages: Number(summary?.sourced_claim_pages || 0)
         },
         compileRuns: Object.fromEntries(runs.map(row => [row.status, Number(row.count || 0)])),
         evaluation: {
@@ -907,13 +956,16 @@ module.exports = {
     listWikiCompileRuns,
     listWikiPages,
     listWikiSpaces,
+    loadWikiCompileManifestSnapshot,
     markWikiPagesStaleForDocument,
     normalizeWikiCandidate,
     parseWikiCompilerOutput,
     publishWikiPage,
+    persistWikiCompileInputs,
     runWikiCompile,
     scheduleWikiCompile,
     searchWikiPages,
     retrieveWikiContext,
+    selectWikiManifestSources,
     updateWikiSpace
 };

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1954,
+  "total": 1978,
   "entries": [
     {
       "file": "server/auth.js",
@@ -193,6 +193,18 @@
     },
     {
       "file": "server/db/migrations/knowledge-database-query-templates.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-derived-governance.js",
+      "count": 2
+    },
+    {
+      "file": "server/db/migrations/knowledge-derived-quality-repair.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-derived-quality.js",
       "count": 1
     },
     {
@@ -857,7 +869,7 @@
     },
     {
       "file": "server/services/knowledge-content.js",
-      "count": 98
+      "count": 100
     },
     {
       "file": "server/services/knowledge-database-templates.js",
@@ -872,8 +884,12 @@
       "count": 23
     },
     {
+      "file": "server/services/knowledge-graph-merge.js",
+      "count": 25
+    },
+    {
       "file": "server/services/knowledge-graph.js",
-      "count": 45
+      "count": 31
     },
     {
       "file": "server/services/knowledge-ingestion-jobs.js",
@@ -882,6 +898,14 @@
     {
       "file": "server/services/knowledge-manual-embeddings.js",
       "count": 7
+    },
+    {
+      "file": "server/services/knowledge-product-access.js",
+      "count": 1
+    },
+    {
+      "file": "server/services/knowledge-source-lifecycle.js",
+      "count": 4
     },
     {
       "file": "server/services/knowledge-sources.js",
@@ -893,7 +917,7 @@
     },
     {
       "file": "server/services/knowledge-wiki.js",
-      "count": 13
+      "count": 14
     },
     {
       "file": "server/services/long-term-memory/index.js",
@@ -1017,7 +1041,7 @@
     },
     {
       "file": "server/services/rag-index-staging.js",
-      "count": 12
+      "count": 13
     },
     {
       "file": "server/services/rag-index/index.js",

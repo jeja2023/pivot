@@ -22,7 +22,7 @@ async function discardKnowledgeIndexStage(stageId) {
     await execute('DELETE FROM knowledge_docs WHERE id = ?', [stageId]);
 }
 
-async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready' }) {
+async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready', enqueueLifecycle = null }) {
     const now = getBeijingTimestamp();
     await transaction(async trx => {
         const oldChunks = await trx.query('SELECT id FROM knowledge_chunks WHERE doc_id = ?', [docId]);
@@ -36,6 +36,7 @@ async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sou
         await trx.execute('UPDATE knowledge_chunks SET doc_id = ? WHERE doc_id = ?', [docId, stageId]);
         await trx.execute('UPDATE knowledge_entity_mentions SET doc_id = ? WHERE doc_id = ?', [docId, stageId]);
         await trx.execute('UPDATE knowledge_relations SET source_doc_id = ? WHERE source_doc_id = ?', [docId, stageId]);
+        await trx.execute('UPDATE knowledge_graph_claim_evidence SET source_doc_id = ? WHERE source_doc_id = ?', [docId, stageId]);
         await trx.execute('UPDATE knowledge_entities SET source_doc_id = ? WHERE source_doc_id = ?', [docId, stageId]);
         await trx.execute(`
             UPDATE knowledge_docs
@@ -44,6 +45,7 @@ async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sou
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
         `, [indexStatus === 'lexical_ready' ? 'lexical_ready' : 'ready', chunkCount, chunkCount, sourceHash || '', now, now, docId, userId]);
         await trx.execute('DELETE FROM knowledge_docs WHERE id = ?', [stageId]);
+        if (typeof enqueueLifecycle === 'function') await enqueueLifecycle(trx);
     });
 }
 

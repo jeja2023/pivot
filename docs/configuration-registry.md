@@ -76,6 +76,7 @@
 | `PIVOT_KNOWLEDGE_WIKI_MAX_SOURCE_BLOCKS` | integer | `12` | 1–30 | 单次 Wiki 编译最多提供给模型的已发布原始资料区块数，避免无界上下文。 |
 | `PIVOT_KNOWLEDGE_WIKI_MAX_PAGES_PER_RUN` | integer | `3` | 1–10 | 单次 Wiki 编译可生成的候选页面上限；页面仍需来源校验和审核发布。 |
 | `PIVOT_KNOWLEDGE_WIKI_MAX_OUTPUT_TOKENS` | integer | `2200` | 512–8000 | 单次 Wiki 编译模型输出 Token 上限。 |
+| `PIVOT_KNOWLEDGE_WIKI_MAX_INPUT_TOKENS` | integer | `12000` | 2048–64000 | 单次 Wiki 编译可发送给模型的原始资料 Token 预算；按主题规划和来源配额裁剪。 |
 | `PIVOT_KNOWLEDGE_WIKI_TIMEOUT_MS` | integer | `120000` | 10000–600000 | 单次 Wiki 编译模型调用超时；失败时保留旧已发布页面。 |
 | `PIVOT_KNOWLEDGE_WIKI_AUTO_COMPILE` | boolean | `false` | true / false | 是否在资料变更后自动创建 Wiki 编译任务；默认关闭，先由管理员手动触发和审核。 |
 | `PIVOT_KNOWLEDGE_WIKI_REQUIRE_REVIEW` | boolean | `true` | true / false | Wiki 候选页面是否必须进入 review 后才能发布；建议生产保持 true。 |

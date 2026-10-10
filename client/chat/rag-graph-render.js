@@ -48,7 +48,7 @@
 
     function buildGraphRelationTooltip(row = {}) {
         const relationText = graphRelationLabel(row.relation_type);
-        const chunkText = String(row.chunk_text || '').trim();
+        const chunkText = String(row.excerpt_text || row.chunk_text || '').trim();
         const lines = [
             `起点：${row.source_name || '-'}`,
             `关系：${relationText}${row.relation_type && row.relation_type !== relationText ? `（${row.relation_type}）` : ''}`,
@@ -198,7 +198,7 @@
             const sourceText = describeSource(row);
             const rawStatus = String(row.status || 'active');
             const status = ['active', 'pending', 'deleted'].includes(rawStatus) ? rawStatus : 'active';
-            const sourceSnippet = String(row.chunk_text || '').trim().slice(0, 180);
+            const sourceSnippet = String(row.excerpt_text || row.chunk_text || '').trim().slice(0, 180);
             return `
         <article class="rag-graph-relation ${layout.graphRelationTone(row.relation_type)} is-${escapeAttr(status)}" data-relation-id="${row.id}" data-graph-relation-tooltip="${escapeAttr(relationTooltip)}">
             <header>
@@ -265,32 +265,88 @@
 
     function buildGraphQueryResultHtml(result = {}, options = {}) {
         const escapeHtml = options.escapeHtml || (value => String(value ?? ''));
+        const escapeAttr = options.escapeAttr || (value => String(value ?? ''));
         const graphRelationLabel = options.graphRelationLabel || (value => String(value ?? ''));
+        const graphTypeLabel = options.graphTypeLabel || (value => String(value ?? ''));
         const messages = options.messages || {};
         const entities = Array.isArray(result.entities) ? result.entities : [];
         const paths = Array.isArray(result.paths) ? result.paths : [];
         if (!String(result.query || '').trim()) return '';
-        const entityHtml = entities.slice(0, 6)
-            .map(entity => `<span>${escapeHtml(entity.name)}<small>${escapeHtml(entity.type || 'concept')}</small></span>`)
-            .join('');
-        const pathHtml = paths.slice(0, 8)
-            .map(path => `
-                <div class="rag-graph-path">
-                    <strong>${escapeHtml(path.source || '')}</strong>
-                    <b>${escapeHtml(graphRelationLabel(path.relationType))}</b>
-                    <strong>${escapeHtml(path.target || '')}</strong>
-                    <small>${escapeHtml(path.docName || messages.defaultSource || '')} · ${Number(path.confidence || 0).toFixed(2)}</small>
-                </div>
+
+        const hintText = result.answerHint || (paths.length
+            ? (messages.defaultPathHint || '已找到关联关系路径，点击节点或路径可在画布中定位。')
+            : (messages.emptyPath || '未找到明确关系路径，建议更换关键词。'));
+
+        const entityChipsHtml = entities.slice(0, 8)
+            .map(entity => `
+                <button type="button" class="btn-secondary rag-graph-query-chip" data-entity-id="${escapeAttr(entity.id || '')}" data-entity-name="${escapeAttr(entity.name || '')}" title="在画布中定位此实体">
+                    <span class="rag-graph-query-chip-name">${escapeHtml(entity.name)}</span>
+                    <span class="rag-graph-query-chip-type">${escapeHtml(graphTypeLabel(entity.type || 'concept'))}</span>
+                </button>
             `)
             .join('');
+
+        const pathCardsHtml = paths.slice(0, 10)
+            .map(path => {
+                const docLabel = path.docName || messages.defaultSource || '知识图谱';
+                const sourceTitle = `在画布中定位「${path.source || ''}」`;
+                const targetTitle = `在画布中定位「${path.target || ''}」`;
+                return `
+                <div class="rag-graph-path-card" data-source="${escapeAttr(path.source || '')}" data-target="${escapeAttr(path.target || '')}" data-relation-id="${escapeAttr(path.relationId || '')}">
+                    <div class="rag-graph-path-flow">
+                        <button type="button" class="btn-secondary rag-graph-path-node source" data-entity-name="${escapeAttr(path.source || '')}" title="${escapeAttr(sourceTitle)}">
+                            ${escapeHtml(path.source || '')}
+                        </button>
+                        <div class="rag-graph-path-connector">
+                            <span class="rag-graph-path-pill">${escapeHtml(graphRelationLabel(path.relationType))}</span>
+                            <span class="rag-graph-path-arrow">➔</span>
+                        </div>
+                        <button type="button" class="btn-secondary rag-graph-path-node target" data-entity-name="${escapeAttr(path.target || '')}" title="${escapeAttr(targetTitle)}">
+                            ${escapeHtml(path.target || '')}
+                        </button>
+                    </div>
+                    <div class="rag-graph-path-meta">
+                        <span class="rag-graph-path-doc" title="${escapeAttr(docLabel)}">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                            <span>${escapeHtml(docLabel)}</span>
+                        </span>
+                        <span class="rag-graph-path-conf">可信度 <b>${Number(path.confidence || 0).toFixed(2)}</b></span>
+                    </div>
+                    ${path.description ? `<div class="rag-graph-path-desc">${escapeHtml(path.description)}</div>` : ''}
+                </div>
+            `;
+            })
+            .join('');
+
         return `
-            <div class="rag-graph-query-meta">
-                <span>${escapeHtml(messages.hintLabel || '')}${escapeHtml(result.answerHint || '')}</span>
-                <span>${escapeHtml(messages.entityLabel || '')}${entities.length}</span>
-                <span>${escapeHtml(messages.pathLabel || '')}${paths.length}</span>
+            <div class="rag-graph-query-banner">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="rag-graph-query-banner-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                <span>${escapeHtml(hintText)}</span>
             </div>
-            ${entityHtml ? `<div class="rag-graph-query-entities">${entityHtml}</div>` : ''}
-            ${pathHtml || `<div class="rag-debug-empty">${escapeHtml(messages.emptyPath || '')}</div>`}
+            ${entityChipsHtml ? `
+                <div class="rag-graph-query-group">
+                    <div class="rag-graph-query-group-label">
+                        <span>匹配实体</span>
+                        <small>${entities.length}</small>
+                    </div>
+                    <div class="rag-graph-query-entities">${entityChipsHtml}</div>
+                </div>
+            ` : ''}
+            <div class="rag-graph-query-group">
+                <div class="rag-graph-query-group-label">
+                    <span>关联路径</span>
+                    <small>${paths.length}</small>
+                </div>
+                ${pathCardsHtml ? `
+                    <div class="rag-graph-query-paths">${pathCardsHtml}</div>
+                ` : `
+                    <div class="rag-graph-query-empty">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                        <span>${escapeHtml(messages.emptyPath || '未找到关联关系路径')}</span>
+                        <small>建议缩短查询词或更换关键词</small>
+                    </div>
+                `}
+            </div>
         `;
     }
 
@@ -309,6 +365,8 @@
         const mergeCandidates = Array.isArray(options.mergeCandidates) ? options.mergeCandidates : [];
         const typeOptionsHtml = options.typeOptionsHtml || '';
         const messages = options.messages || {};
+        let aliases = [];
+        try { aliases = Array.isArray(entity.aliases) ? entity.aliases : JSON.parse(entity.aliases || '[]'); } catch (_) {}
         const mergeOptionsHtml = mergeCandidates
             .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.name)}（${escapeHtml(graphTypeLabel(item.type))}）</option>`)
             .join('');
@@ -316,9 +374,11 @@
         <div class="rag-graph-editor-grid">
             <label>${escapeHtml(messages.nameLabel || '')}<input id="rag-graph-edit-name" class="form-input" value="${escapeAttr(entity.name || '')}"></label>
             <label>${escapeHtml(messages.typeLabel || '')}<select id="rag-graph-edit-type" class="form-input">${typeOptionsHtml}</select></label>
+            <label>${escapeHtml(messages.aliasesLabel || '别名')}<input id="rag-graph-edit-aliases" class="form-input" value="${escapeAttr((Array.isArray(aliases) ? aliases : []).join('、'))}" placeholder="别名之间用顿号或逗号分隔"></label>
             <label>${escapeHtml(messages.mergeTargetLabel || '')}<input id="rag-graph-merge-target" class="form-input" list="rag-graph-merge-candidates" placeholder="${escapeAttr(messages.mergeTargetPlaceholder || '')}"></label>
             <datalist id="rag-graph-merge-candidates">${mergeOptionsHtml}</datalist>
             <label class="rag-graph-editor-wide">${escapeHtml(messages.descriptionLabel || '')}<textarea id="rag-graph-edit-description" class="form-input" rows="2">${escapeHtml(entity.description || '')}</textarea></label>
+            <label class="rag-graph-editor-wide"><input id="rag-graph-edit-frozen" type="checkbox" ${entity.frozen ? 'checked' : ''}> ${escapeHtml(messages.freezeLabel || '冻结人工校准，后续抽取不覆盖')}</label>
         </div>
         <div class="rag-graph-editor-actions">
             <button id="rag-graph-save-entity-btn" class="btn-secondary" data-entity-id="${escapeAttr(entity.id)}">${escapeHtml(messages.saveLabel || '')}</button>
@@ -338,7 +398,9 @@
             <label>${escapeHtml(messages.sourceLabel || '')}<input class="form-input" value="${escapeAttr(relation.source_name || '')}" readonly></label>
             <label>${escapeHtml(messages.typeLabel || '')}<select id="rag-graph-edit-relation-type" class="form-input">${relationOptionsHtml}</select></label>
             <label>${escapeHtml(messages.targetLabel || '')}<input class="form-input" value="${escapeAttr(relation.target_name || '')}" readonly></label>
+            <label>${escapeHtml(messages.stanceLabel || '证据立场')}<select id="rag-graph-edit-relation-stance" class="form-input"><option value="supports" ${relation.stance === 'contradicts' ? '' : 'selected'}>支持关系</option><option value="contradicts" ${relation.stance === 'contradicts' ? 'selected' : ''}>存在矛盾</option></select></label>
             <label class="rag-graph-editor-wide">${escapeHtml(messages.descriptionLabel || '')}<textarea id="rag-graph-edit-relation-description" class="form-input" rows="2">${escapeHtml(relation.description || '')}</textarea></label>
+            <label class="rag-graph-editor-wide"><input id="rag-graph-edit-relation-frozen" type="checkbox" ${relation.frozen ? 'checked' : ''}> ${escapeHtml(messages.freezeLabel || '冻结人工校准，后续抽取不覆盖')}</label>
         </div>
         <div class="rag-graph-editor-actions">
             <button id="rag-graph-save-relation-btn" class="btn-secondary" data-relation-id="${escapeAttr(relation.id)}">${escapeHtml(messages.saveLabel || '')}</button>
@@ -352,6 +414,7 @@
         const escapeAttr = options.escapeAttr || (value => String(value ?? ''));
         const messages = options.messages || {};
         const typeFilterOptionsHtml = options.typeFilterOptionsHtml || '';
+        const closeQueryLabel = messages.closeQueryLabel || '关闭查询结果';
         return `
         <div class="modal rag-graph-modal">
             <div class="rag-detail-header">
@@ -376,7 +439,17 @@
                     <button id="rag-graph-query-btn" class="btn-secondary">${escapeHtml(messages.queryLabel || '')}</button>
                 </div>
             </div>
-            <div class="rag-graph-query-panel">
+            <div id="rag-graph-query-panel" class="rag-graph-query-panel" hidden>
+                <div class="rag-graph-query-head">
+                    <div class="rag-graph-query-title-wrap">
+                        <span class="rag-graph-query-icon">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                        </span>
+                        <strong class="rag-graph-query-title">${escapeHtml(messages.queryResultsTitle || '图谱路径查询')}</strong>
+                        <div id="rag-graph-query-counts" class="rag-graph-query-counts"></div>
+                    </div>
+                    <button type="button" id="rag-graph-query-close-btn" class="workspace-modal-close btn-secondary rag-graph-query-close" title="${escapeAttr(closeQueryLabel)}" aria-label="${escapeAttr(closeQueryLabel)}">×</button>
+                </div>
                 <div id="rag-graph-query-results" class="rag-graph-query-results"></div>
             </div>
             <div class="rag-graph-layout">

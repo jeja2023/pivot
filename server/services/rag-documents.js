@@ -10,7 +10,7 @@ const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
 const { getRagConfig, getEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
-const { getGraphSummary } = require('./knowledge-graph');
+const { getGraphSummary, refreshGraphEntityEvidenceForDocument } = require('./knowledge-graph');
 const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeIndexStage } = require('./rag-index-staging');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
@@ -31,7 +31,7 @@ const {
     getOrCreateProductDocumentForLegacy,
     publishLegacyDocumentProjection
 } = require('./knowledge-content');
-const { markWikiPagesStaleForDocument } = require('./knowledge-wiki');
+const { enqueueKnowledgeSourceLifecycleEvent } = require('./knowledge-source-lifecycle');
 const {
     createKnowledgeIngestionQueue,
     createKnowledgeIngestionWorker
@@ -512,15 +512,21 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         const missingEmbeddings = Number(coverage?.missing || 0);
         const indexStatus = missingEmbeddings > 0 ? 'lexical_ready' : 'ready';
         await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus });
+        await refreshGraphEntityEvidenceForDocument(normalizedDocId).catch(error => {
+            logger.warn({ err: error.message, docId: normalizedDocId }, '知识图谱实体证据计数刷新失败');
+        });
         const projection = await publishLegacyDocumentProjection({
             legacyDocId: normalizedDocId,
             userId,
             indexStatus,
-            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId))
+            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId)),
+            enqueueLifecycle: async (trx, product) => await enqueueKnowledgeSourceLifecycleEvent({
+                userId, legacyDocId: normalizedDocId, documentId: product.documentId,
+                eventType: 'source_reindexed', payload: { sourceHash, versionId: product.versionId }
+            }, { trx })
         });
         // Wiki 页只能综合当前原始版本；资料重建后立即使已发布综合页失效，
         // 重编译失败也不会影响原始资料索引与既有 RAG。
-        void markWikiPagesStaleForDocument({ legacyDocId: normalizedDocId, reason: 'source_reindexed' }).catch(() => {});
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(doc.collection_id);
         return {
@@ -556,15 +562,23 @@ async function getKnowledgeDocumentDetail({ docId, userId, user = null, limit = 
 async function setKnowledgeDocumentEnabled({ docId, userId, enabled }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return false;
-    const result = await execute(`
-        UPDATE knowledge_docs
-        SET is_enabled = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [enabled ? 1 : 0, getBeijingTimestamp(), normalizedDocId, userId]);
-    const changed = Number(result || 0) > 0;
+    const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
+    if (!doc) return false;
+    const changed = await transaction(async trx => {
+        const result = await trx.execute(`
+            UPDATE knowledge_docs
+            SET is_enabled = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+        `, [enabled ? 1 : 0, getBeijingTimestamp(), normalizedDocId, userId]);
+        if (Number(result || 0) <= 0) return false;
+        await enqueueKnowledgeSourceLifecycleEvent({
+            userId, legacyDocId: normalizedDocId, documentId: doc.product_document_id,
+            eventType: enabled ? 'source_enabled' : 'source_disabled'
+        }, { trx });
+        return true;
+    });
     if (changed) clearRagCacheForUser(userId);
     if (changed) {
-        const doc = await getKnowledgeDocumentForUser(normalizedDocId, userId);
         invalidateKnowledgeCatalog(doc?.collection_id);
     }
     return changed;
@@ -908,14 +922,19 @@ async function deleteKnowledgeDocument({ docId, userId }) {
 
     await knowledgeIngestionQueue.cancelQueuedForDocument(normalizedDocId, userId);
     const now = getBeijingTimestamp();
-    const result = await execute(`
-        UPDATE knowledge_docs
-        SET deleted_at = ?, deleted_by_user = ?, is_enabled = 0, updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [now, userId, now, normalizedDocId, userId]);
-    const changed = Number(result || 0) > 0;
+    const changed = await transaction(async trx => {
+        const result = await trx.execute(`
+            UPDATE knowledge_docs
+            SET deleted_at = ?, deleted_by_user = ?, is_enabled = 0, updated_at = ?
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+        `, [now, userId, now, normalizedDocId, userId]);
+        if (Number(result || 0) <= 0) return false;
+        await enqueueKnowledgeSourceLifecycleEvent({
+            userId, legacyDocId: normalizedDocId, documentId: doc.product_document_id, eventType: 'source_deleted'
+        }, { trx });
+        return true;
+    });
     if (changed) {
-        void markWikiPagesStaleForDocument({ legacyDocId: normalizedDocId, reason: 'source_deleted' }).catch(() => {});
         clearRagCacheForUser(userId);
         invalidateKnowledgeCatalog(doc.collection_id);
     }

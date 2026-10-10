@@ -47,14 +47,17 @@ const {
 const { getEmbeddingConfig } = require('../services/rag-config');
 const {
     confirmRelation,
+    garbageCollectKnowledgeGraph,
     deleteRelation,
     getEntityGraph,
     getGraphSummaryAsync,
     listEntities,
+    listGraphMergeAudits,
     listRelations,
     mergeEntities,
     queryKnowledgeGraph,
     rebuildGraphForDocument,
+    revertEntityMerge,
     updateEntity,
     updateRelation
 } = require('../services/knowledge-graph');
@@ -62,6 +65,7 @@ const { normalizeAuditAction } = require('../audit-actions');
 const { isSuperAdmin } = require('../permissions');
 const { listRagDebugQueries, recordRagDebugQuery } = require('../services/rag-debug-history');
 const { recordObservabilityEvent, recordSlowRagRetrieval } = require('../services/observability');
+const { getKnowledgeGraphOntology } = require('../services/knowledge-graph-ontology');
 
 const ragRouter = express.Router();
 const debugQueryLimiter = rateLimit({
@@ -222,6 +226,16 @@ ragRouter.get('/graph/summary', authMiddleware, asyncHandler(async (req, res) =>
     res.json(await getGraphSummaryAsync(req.user, { docId: req.query.docId }));
 }));
 
+ragRouter.get('/graph/ontology', authMiddleware, asyncHandler(async (_req, res) => {
+    res.json({ success: true, ontology: getKnowledgeGraphOntology() });
+}));
+
+ragRouter.post('/graph/maintenance/gc', authMiddleware, asyncHandler(async (req, res) => {
+    const result = await garbageCollectKnowledgeGraph({ userId: req.user.id, limit: req.body?.limit });
+    auditRagAction(req, '知识图谱自动实体清理', result);
+    res.json({ success: true, ...result });
+}));
+
 ragRouter.get('/graph/entities', authMiddleware, asyncHandler(async (req, res) => {
     res.json(await listEntities({
         userId: req.user.id,
@@ -260,6 +274,11 @@ ragRouter.get('/graph/query', authMiddleware, asyncHandler(async (req, res) => {
     }));
 }));
 
+ragRouter.get('/graph/entities/merge-audits', authMiddleware, asyncHandler(async (req, res) => {
+    const audits = await listGraphMergeAudits({ userId: req.user.id, limit: req.query.limit });
+    return res.json({ success: true, data: audits });
+}));
+
 ragRouter.get('/graph/entities/:id', authMiddleware, asyncHandler(async (req, res) => {
     const graph = await getEntityGraph({
         userId: req.user.id,
@@ -268,6 +287,7 @@ ragRouter.get('/graph/entities/:id', authMiddleware, asyncHandler(async (req, re
         depth: req.query.depth,
         status: req.query.status,
         relationType: req.query.relationType,
+        minConfidence: req.query.minConfidence,
         scope: { docId: req.query.docId },
         limit: req.query.limit
     });
@@ -295,6 +315,14 @@ ragRouter.post('/graph/entities/merge', authMiddleware, asyncHandler(async (req,
         targetEntityId: req.body?.targetEntityId
     });
     return res.json({ success: true, graph });
+}));
+
+ragRouter.post('/graph/entities/merge-audits/:id/revert', authMiddleware, asyncHandler(async (req, res) => {
+    const result = await revertEntityMerge({ userId: req.user.id, auditId: req.params.id });
+    if (!result) return res.status(404).json({ error: '合并审计记录不存在、已回滚或无权操作。' });
+    clearRagCacheForUser(req.user.id);
+    auditRagAction(req, '知识图谱实体合并回滚', { auditId: req.params.id, sourceEntityId: result.sourceId, targetEntityId: result.targetId });
+    return res.json({ success: true, ...result });
 }));
 
 ragRouter.put('/graph/relations/:id', authMiddleware, asyncHandler(async (req, res) => {

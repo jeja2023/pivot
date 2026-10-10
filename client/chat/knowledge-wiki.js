@@ -90,7 +90,7 @@
         modal.id = 'knowledge-wiki-modal';
         modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
         const panel = document.createElement('section');
-        panel.className = 'modal rag-detail-modal knowledge-wiki-modal';
+        panel.className = 'modal knowledge-wiki-modal';
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
         const header = document.createElement('div');
@@ -191,11 +191,12 @@
             detail.className = 'knowledge-wiki-pages';
             const selectedSpace = spaces.find(space => Number(space.id) === selectedSpaceId) || null;
             const readinessQuery = selectedSpace?.compilePolicy?.autoCompile ? '?requireModel=true' : '';
-            const [pagesResult, metricsResult, runsResult, readinessResult] = await Promise.all([
+            const [pagesResult, metricsResult, runsResult, readinessResult, lifecycleResult] = await Promise.all([
                 request(`/knowledge/wiki/spaces/${selectedSpaceId}/pages?limit=100`),
                 request(`/knowledge/wiki/spaces/${selectedSpaceId}/metrics?lookbackDays=30`),
                 request(`/knowledge/wiki/spaces/${selectedSpaceId}/runs?limit=8`),
-                request(`/knowledge/wiki/spaces/${selectedSpaceId}/compile-readiness${readinessQuery}`)
+                request(`/knowledge/wiki/spaces/${selectedSpaceId}/compile-readiness${readinessQuery}`),
+                request('/knowledge/lifecycle/metrics?lookbackDays=30')
             ]);
             const pages = Array.isArray(pagesResult.data) ? pagesResult.data : [];
             const sectionHeader = document.createElement('div');
@@ -206,7 +207,17 @@
             const metrics = metricsResult.metrics || {};
             const metricsDesc = document.createElement('p');
             metricsDesc.className = 'muted-text';
-            metricsDesc.textContent = `已发布 ${Number(metrics.pages?.published || 0)} · 待审核 ${Number(metrics.pages?.review || 0)} · 已失效 ${Number(metrics.pages?.stale || 0)} · 近 30 天编译完成 ${Number(metrics.compileRuns?.completed || 0)} · 评测 ${Number(metrics.evaluation?.totalResults || 0)} 条`;
+            const lifecycle = lifecycleResult.metrics || {};
+            const p95 = Number(lifecycle.p95LatencySeconds || 0);
+            const lifecycleText = lifecycle.total
+                ? ` · 来源失效 P95 ${p95.toFixed(1)}s${p95 > 300 ? '（超出 5 分钟目标）' : ''}`
+                : '';
+            const citationPrecision = metrics.evaluation?.citationPrecision;
+            const answerCoverage = metrics.evaluation?.answerPointCoverage;
+            const qualityText = Number.isFinite(Number(citationPrecision)) || Number.isFinite(Number(answerCoverage))
+                ? ` · 引用准确率 ${Number.isFinite(Number(citationPrecision)) ? `${(Number(citationPrecision) * 100).toFixed(1)}%` : '—'} · 要点覆盖 ${Number.isFinite(Number(answerCoverage)) ? `${(Number(answerCoverage) * 100).toFixed(1)}%` : '—'}`
+                : '';
+            metricsDesc.textContent = `已发布 ${Number(metrics.pages?.published || 0)} · 待审核 ${Number(metrics.pages?.review || 0)} · 已失效 ${Number(metrics.pages?.stale || 0)} · 近 30 天编译完成 ${Number(metrics.compileRuns?.completed || 0)} · 评测 ${Number(metrics.evaluation?.totalResults || 0)} 条${qualityText}${lifecycleText}`;
             sectionHeader.append(sectionTitle, metricsDesc);
             detail.appendChild(sectionHeader);
 
@@ -740,7 +751,7 @@
                 const renderPagination = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination
                     || window.Pivot?.legacy?.renderWorkspacePagination;
 
-                const sourcesLimit = 6;
+                const sourcesLimit = 10;
                 let currentSourcesPage = 1;
 
                 function renderSourcesTablePage(page) {
@@ -860,24 +871,6 @@
                 detail.appendChild(diffSec);
             }
 
-            // 6. 底部操作栏
-            const footer = document.createElement('div');
-            footer.className = 'knowledge-wiki-detail-footer';
-            const backBottom = document.createElement('button');
-            backBottom.type = 'button';
-            backBottom.className = 'btn-secondary';
-            backBottom.textContent = '‹ 返回页面列表';
-            backBottom.addEventListener('click', () => void render());
-            footer.appendChild(backBottom);
-            if (data.page.status === 'review' || data.page.status === 'draft') {
-                const publishBottom = document.createElement('button');
-                publishBottom.type = 'button';
-                publishBottom.className = 'btn-primary';
-                publishBottom.textContent = '发布此页面';
-                publishBottom.addEventListener('click', () => void publishPage(data.page.id));
-                footer.appendChild(publishBottom);
-            }
-            detail.appendChild(footer);
         } catch (error) {
             showToast(error.message || '读取综合页面失败', 'error');
         }

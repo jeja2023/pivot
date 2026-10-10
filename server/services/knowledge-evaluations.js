@@ -330,6 +330,8 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
                 }),
                 ...computeCitationMetrics({ expectedCitationKeys: evaluationCase.expectedCitationKeys, citationKeys }),
                 ...computeAnswerPointCoverage(answer, evaluationCase.expectedAnswerPoints),
+                graphClaimCount: Number(retrieval.graph?.relations?.length || 0),
+                graphEvidenceChunkCount: new Set((retrieval.graph?.relations || []).map(item => item.source_chunk_id).filter(Boolean)).size,
                 wikiPageCount: Number(wiki.pages?.length || 0),
                 wikiSourceCount: Number(wiki.citations?.length || 0)
             };

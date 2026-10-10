@@ -218,6 +218,9 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(knowledgePartial, /召回测试/);
     assert.match(knowledgePartial, /检索配置/);
     assert.match(ragDocs, /系统会自动索引文档内容/);
+    assert.match(ragDocs, /const errorPayload = data\?\.error/);
+    assert.match(ragDocs, /typeof errorPayload === 'string'/);
+    assert.match(ragPanels, /if \(!summary\)/);
     assert.match(ragDebugPartial, /data-rag-debug-sample/);
     assert.match(ragDebugPartial, /知识库召回测试/);
     assert.match(ragDebugPartial, /阈值/);

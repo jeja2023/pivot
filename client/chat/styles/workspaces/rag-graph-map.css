@@ -428,19 +428,19 @@
         .rag-graph-topbar,
         .rag-graph-layout,
         .rag-graph-editor-grid { grid-template-columns: 1fr; }
-        .rag-graph-query-panel,
-        .rag-graph-filter-row,
-        .rag-graph-path {
+        .rag-graph-filter-row {
             grid-template-columns: 1fr;
         }
         .rag-graph-query-panel {
-            padding: 0 14px 10px;
+            top: auto;
+            bottom: 12px;
+            right: 12px;
+            left: 12px;
+            width: auto;
+            max-height: 55vh;
         }
         .rag-graph-query-results {
-            max-height: 210px;
-        }
-        .rag-graph-path b {
-            justify-self: start;
+            max-height: calc(55vh - 60px);
         }
         .rag-graph-layout { overflow: auto; }
         .rag-graph-panel { min-height: 280px; }

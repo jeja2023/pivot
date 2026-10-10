@@ -466,6 +466,13 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-query') {
         window.Pivot.legacy.debugKnowledgeGraphQuery().catch(e => showToast(e.message || '图谱查询失败', 'error'));
     }
+    if (event.key === 'Escape') {
+        const queryPanel = document.getElementById('rag-graph-query-panel');
+        if (queryPanel && !queryPanel.hidden) {
+            queryPanel.hidden = true;
+            return;
+        }
+    }
     if (event.key === 'Enter' && event.target?.id === 'rag-graph-min-confidence') {
         if (ragGraphState.selectedEntityId) {
             window.Pivot.legacy.selectKnowledgeGraphEntity(ragGraphState.selectedEntityId).catch(e => showToast(e.message || '关系筛选失败', 'error'));

@@ -177,7 +177,7 @@ window.Pivot.legacy.showKnowledgeDocAudit = async () => {
 const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const el = document.getElementById('rag-summary');
     if (!el) return;
-    if (!summary || summary.error) {
+    if (!summary) {
         PivotSafeHtml.setHtml(el, '');
         return;
     }

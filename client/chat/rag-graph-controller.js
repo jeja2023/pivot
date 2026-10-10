@@ -76,6 +76,7 @@ const closeKnowledgeGraphEditorModal = () => {
 const closeKnowledgeGraphModal = () => {
     closeKnowledgeGraphEditorModal();
     hideGraphNodeTooltip();
+    document.getElementById('rag-graph-query-panel')?.setAttribute('hidden', '');
     document.getElementById('rag-graph-modal')?.classList.add('hidden');
     setKnowledgeGraphRestoreState(false);
 };
@@ -176,7 +177,9 @@ const ensureRagGraphModal = () => {
             statusActiveLabel: '已确认',
             statusAllLabel: '全部状态',
             statusPendingLabel: '待确认',
-            title: '知识图谱'
+            title: '知识图谱',
+            closeQueryLabel: '关闭查询结果',
+            queryResultsTitle: '图谱路径查询'
         },
         relationFilterOptionsHtml: graphRelationFilterOptionsHtml(),
         typeFilterOptionsHtml: graphTypeFilterOptionsHtml()
@@ -185,6 +188,27 @@ const ensureRagGraphModal = () => {
     modal.addEventListener('click', (event) => {
         if (event.target === modal || event.target.closest('#rag-graph-close-btn')) {
             closeKnowledgeGraphModal();
+            return;
+        }
+        if (event.target.closest('#rag-graph-query-close-btn')) {
+            const panel = document.getElementById('rag-graph-query-panel');
+            if (panel) panel.hidden = true;
+            return;
+        }
+        const chip = event.target.closest('.rag-graph-query-chip');
+        if (chip) {
+            handleGraphQueryEntityClick(chip).catch(e => showToast(e.message || '定位实体失败', 'error'));
+            return;
+        }
+        const pathNode = event.target.closest('.rag-graph-path-node');
+        if (pathNode) {
+            handleGraphQueryNodeClick(pathNode).catch(e => showToast(e.message || '定位实体失败', 'error'));
+            return;
+        }
+        const pathCard = event.target.closest('.rag-graph-path-card');
+        if (pathCard && !event.target.closest('button')) {
+            handleGraphQueryCardClick(pathCard).catch(e => showToast(e.message || '定位实体失败', 'error'));
+            return;
         }
     });
     return modal;
@@ -302,7 +326,7 @@ const renderGraphRelations = (payload = {}) => {
         messages: {
             confirmLabel: '确认',
             deleteLabel: '删除',
-            describeSource: (row) => `来源：${row.doc_name || '知识图谱'}`,
+            describeSource: (row) => `来源：${row.doc_name || '知识图谱'}${Number(row.evidence_count || 0) ? ` · 证据 ${Number(row.evidence_count)}` : ''}${row.origin ? ` · ${row.origin === 'manual' ? '人工校准' : '自动抽取'}` : ''}`,
             editLabel: '编辑',
             emptyHtml: '<div class="rag-debug-empty">暂无关系</div>',
             formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`,
@@ -370,20 +394,98 @@ const refreshGraphSearch = async () => {
     return payload;
 };
 
+const handleGraphQueryEntityClick = async (chip) => {
+    const entityId = Number.parseInt(chip.dataset.entityId, 10);
+    const entityName = chip.dataset.entityName?.trim();
+    if (Number.isSafeInteger(entityId) && entityId > 0) {
+        await window.Pivot.legacy.selectKnowledgeGraphEntity(entityId);
+        showToast(`已在图谱中定位到实体「${entityName || entityId}」`);
+        return;
+    }
+    if (entityName) {
+        const found = (ragGraphState.entities || []).find(e => e.name === entityName);
+        if (found) {
+            await window.Pivot.legacy.selectKnowledgeGraphEntity(found.id);
+            showToast(`已在图谱中定位到实体「${entityName}」`);
+        } else {
+            const searchInput = document.getElementById('rag-graph-search');
+            if (searchInput) {
+                searchInput.value = entityName;
+                await refreshGraphSearch();
+                showToast(`已按「${entityName}」筛选实体`);
+            }
+        }
+    }
+};
+
+const handleGraphQueryNodeClick = async (nodeBtn) => {
+    const entityName = nodeBtn.dataset.entityName?.trim();
+    if (!entityName) return;
+    const found = (ragGraphState.entities || []).find(e => e.name === entityName);
+    if (found) {
+        await window.Pivot.legacy.selectKnowledgeGraphEntity(found.id);
+        showToast(`已在图谱中定位到实体「${entityName}」`);
+    } else {
+        const searchInput = document.getElementById('rag-graph-search');
+        if (searchInput) {
+            searchInput.value = entityName;
+            await refreshGraphSearch();
+            showToast(`已按「${entityName}」搜索实体`);
+        }
+    }
+};
+
+const handleGraphQueryCardClick = async (card) => {
+    const sourceName = card.dataset.source?.trim();
+    if (!sourceName) return;
+    const found = (ragGraphState.entities || []).find(e => e.name === sourceName);
+    if (found) {
+        await window.Pivot.legacy.selectKnowledgeGraphEntity(found.id);
+        showToast(`已在图谱中定位到起点实体「${sourceName}」`);
+    }
+};
+
 const renderGraphQueryResult = (result = {}) => {
+    const panel = document.getElementById('rag-graph-query-panel');
     const el = document.getElementById('rag-graph-query-results');
+    const countsEl = document.getElementById('rag-graph-query-counts');
     if (!el) return;
-    PivotSafeHtml.setHtml(el, buildGraphQueryResultHtml(result, {
+
+    const query = String(result.query || '').trim();
+    if (!query) {
+        if (panel) panel.hidden = true;
+        PivotSafeHtml.setHtml(el, '');
+        if (countsEl) PivotSafeHtml.setHtml(countsEl, '');
+        return;
+    }
+
+    const entities = Array.isArray(result.entities) ? result.entities : [];
+    const paths = Array.isArray(result.paths) ? result.paths : [];
+
+    if (countsEl) {
+        PivotSafeHtml.setHtml(countsEl, `
+            <span class="rag-graph-query-count-badge is-entity">实体 ${entities.length}</span>
+            <span class="rag-graph-query-count-badge is-path">路径 ${paths.length}</span>
+        `);
+    }
+
+    const buildQueryResult = window.Pivot?.ragGraphRender?.buildGraphQueryResultHtml || buildGraphQueryResultHtml;
+    PivotSafeHtml.setHtml(el, buildQueryResult(result, {
+        escapeAttr: window.Pivot.legacy.escapeRagAttr,
         escapeHtml: window.Pivot.legacy.escapeRagHtml,
         graphRelationLabel,
+        graphTypeLabel,
         messages: {
+            defaultPathHint: '已找到关联关系路径，点击节点或路径可在画布中定位。',
             defaultSource: '知识图谱',
-            emptyPath: '暂无路径',
+            emptyPath: '未找到明确关系路径',
             entityLabel: '实体 ',
             hintLabel: '',
             pathLabel: '路径 '
         }
     }));
+
+    if (panel) panel.hidden = false;
 };
 
 window.Pivot.legacy.openKnowledgeGraph = async (docId = null) => {
@@ -425,20 +527,19 @@ window.Pivot.legacy.selectKnowledgeGraphEntity = async (entityId) => {
     ragGraphState.selectedEntityId = Number(entityId);
     renderGraphEntities({ data: ragGraphState.entities, total: ragGraphState.entities.length });
     try {
-        const { status, relationType } = getGraphRelationFilters();
+        const { status, relationType, minConfidence } = getGraphRelationFilters();
         const graphParams = new URLSearchParams({ limit: '120' });
         const docId = document.getElementById('rag-graph-modal')?.dataset?.docId || '';
         if (status) graphParams.set('status', status);
         if (relationType) graphParams.set('relationType', relationType);
+        if (minConfidence) graphParams.set('minConfidence', minConfidence);
         if (docId) graphParams.set('docId', docId);
-        const [graphRes] = await Promise.all([
-            apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?${graphParams}`, { headers: authHeaders() }),
-            loadGraphRelations(entityId)
-        ]);
+        const graphRes = await apiFetch(`${API_BASE}/rag/graph/entities/${entityId}?${graphParams}`, { headers: authHeaders() });
         const graph = await graphRes.json().catch(() => ({}));
         if (!graphRes.ok || graph.error) throw new Error(graph.error || '实体关系加载失败');
         ragGraphState.selectedEntity = graph.center || null;
         renderGraphCanvas(graph);
+        renderGraphRelations({ data: graph.relations || [], total: (graph.relations || []).length });
     } catch (e) {
         ragGraphState.selectedEntity = null;
         document.getElementById('rag-graph-edit-entity-btn')?.classList.add('hidden');
@@ -466,11 +567,13 @@ window.Pivot.legacy.showKnowledgeGraphEntityEditor = (entity) => {
         typeOptionsHtml: graphTypeOptionsHtml(entity.type || 'concept'),
         messages: {
             cancelLabel: '取消',
+            aliasesLabel: '别名',
             descriptionLabel: '描述',
             mergeLabel: '合并实体',
             mergeTargetLabel: '合并到实体 ID',
             mergeTargetPlaceholder: '选择或输入目标 ID',
             nameLabel: '实体名称',
+            freezeLabel: '冻结人工校准，后续自动抽取不覆盖',
             saveLabel: '保存实体',
             typeLabel: '实体类型'
         }
@@ -482,7 +585,9 @@ window.Pivot.legacy.saveKnowledgeGraphEntity = async (entityId) => {
     const payload = {
         name: document.getElementById('rag-graph-edit-name')?.value,
         type: document.getElementById('rag-graph-edit-type')?.value,
-        description: document.getElementById('rag-graph-edit-description')?.value
+        description: document.getElementById('rag-graph-edit-description')?.value,
+        aliases: document.getElementById('rag-graph-edit-aliases')?.value,
+        frozen: document.getElementById('rag-graph-edit-frozen')?.checked === true
     };
     const res = await apiFetch(`${API_BASE}/rag/graph/entities/${entityId}`, {
         method: 'PUT',
@@ -540,8 +645,10 @@ window.Pivot.legacy.showKnowledgeGraphRelationEditor = (relation) => {
             descriptionLabel: '关系描述',
             saveLabel: '保存关系',
             sourceLabel: '起点',
+            stanceLabel: '证据立场',
             targetLabel: '终点',
-            typeLabel: '关系类型'
+            typeLabel: '关系类型',
+            freezeLabel: '冻结人工校准，后续自动抽取不覆盖'
         },
         relationOptionsHtml: graphRelationOptionsHtml(relation.relation_type || 'related_to')
     }));
@@ -553,10 +660,12 @@ window.Pivot.legacy.saveKnowledgeGraphRelation = async (relationId) => {
     if (!relation) return;
     const relationType = document.getElementById('rag-graph-edit-relation-type')?.value || relation.relation_type || 'related_to';
     const description = document.getElementById('rag-graph-edit-relation-description')?.value ?? relation.description;
+    const stance = document.getElementById('rag-graph-edit-relation-stance')?.value || 'supports';
+    const frozen = document.getElementById('rag-graph-edit-relation-frozen')?.checked === true;
     const res = await apiFetch(`${API_BASE}/rag/graph/relations/${relationId}`, {
         method: 'PUT',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relationType, description, confidence: relation.confidence })
+        body: JSON.stringify({ relationType, description, confidence: relation.confidence, frozen, stance })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || '关系保存失败');
