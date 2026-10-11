@@ -23,6 +23,7 @@ const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 const { startLongTermMemoryMaintenanceRunner } = require('./services/long-term-memory');
 const { startDecisionLearningMaintenanceRunner } = require('./services/decision-maintenance');
 const { createDecisionArtifactBreakerRunner } = require('./services/decision-artifact-breaker');
+const { startAnalysisRefreshRunner, startAsyncQueryRunner } = require('./services/data-analysis');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -115,6 +116,8 @@ function startBackgroundServices({
         startLongTermMemoryMaintenanceRunner,
         startDecisionLearningMaintenanceRunner,
         startDecisionArtifactBreakerRunner: () => createDecisionArtifactBreakerRunner().start(),
+        startAnalysisRefreshRunner,
+        startAsyncQueryRunner,
         startRuntimeDiagnostics
     }
 }) {
@@ -159,6 +162,8 @@ function startBackgroundServices({
         runBackgroundTask(dependencies.startLongTermMemoryMaintenanceRunner, logger, '长期记忆生命周期巡检器启动失败');
         runBackgroundTask(dependencies.startDecisionLearningMaintenanceRunner, logger, '智能决策学习维护巡检器启动失败');
         runBackgroundTask(dependencies.startDecisionArtifactBreakerRunner, logger, '智能决策模型制品熔断巡检器启动失败');
+        runBackgroundTask(dependencies.startAnalysisRefreshRunner, logger, '数据分析刷新与告警调度器启动失败');
+        runBackgroundTask(dependencies.startAsyncQueryRunner, logger, '数据分析异步查询 Worker 启动失败');
     });
 }
 

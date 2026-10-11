@@ -29,6 +29,7 @@ const {
     moveUploadedFile,
     serializeDataset,
     getDatasetForUser,
+    resolveAnalysisUser,
     getDatasetPaths,
     createDuckConnection,
     withAnalysisSlot,
@@ -37,6 +38,8 @@ const {
     getBeijingTimestamp
 } = require('./shared');
 const { profileViaSql } = require('./profile');
+const { normalizeShareSettings } = require('../unit-visibility');
+const { filterExistingShareUserIds } = require('../share-targets');
 
 function sanitizeRows(rows) {
     const sourceRows = Array.isArray(rows) ? rows : [];
@@ -405,31 +408,44 @@ async function importDataset({ user, file, name }) {
     }
 }
 
-async function listDatasets(userId) {
+async function listDatasets(userOrId) {
+    const user = await resolveAnalysisUser(userOrId);
+    if (!user) return [];
     const rows = await query(`
         SELECT datasets.*, cleaning.source_dataset_id AS derived_from_dataset_id, cleaning.id AS cleaning_run_id
         FROM analysis_datasets datasets
         LEFT JOIN analysis_cleaning_runs cleaning ON cleaning.output_dataset_id = datasets.id
-        WHERE datasets.user_id = ? AND datasets.deleted_at IS NULL
+        WHERE datasets.deleted_at IS NULL
         ORDER BY datasets.updated_at DESC, datasets.created_at DESC
-    `, [userId]);
-    return rows.map(serializeDataset);
+    `);
+    const visibleRows = rows.filter(row => Number(row.user_id) === Number(user.id) || require('../unit-visibility').canAccessSharedResource(row, user, false));
+    return await Promise.all(visibleRows.map(async row => {
+        const dataset = serializeDataset(row);
+        const allowedColumns = await require('./governance').getAccessibleDatasetColumns(user, row);
+        const allowedKeys = new Set(allowedColumns.map(column => column.key));
+        dataset.columns = allowedColumns;
+        dataset.profile = dataset.profile.filter(column => allowedKeys.has(column.key));
+        dataset.previewRows = dataset.previewRows.map(item => Object.fromEntries(Object.entries(item).filter(([key]) => allowedKeys.has(key))));
+        return dataset;
+    }));
 }
 
-async function getDatasetSummary(userId) {
-    const row = await queryOne(`
-        SELECT COUNT(*) AS count, COALESCE(SUM(row_count), 0) AS row_count
-        FROM analysis_datasets
-        WHERE user_id = ? AND deleted_at IS NULL
-    `, [userId]);
+async function getDatasetSummary(userOrId) {
+    const datasets = await listDatasets(userOrId);
     return {
-        count: Number(row?.count) || 0,
-        rowCount: Number(row?.row_count) || 0
+        count: datasets.length,
+        rowCount: datasets.reduce((sum, dataset) => sum + (Number(dataset.rowCount) || 0), 0)
     };
 }
 
 async function getDatasetDetail(userId, datasetId, options = {}) {
-    const row = await getDatasetForUser(userId, datasetId);
+    const actor = await resolveAnalysisUser(userId);
+    if (!actor) {
+        const err = new Error('当前账号不可用。');
+        err.status = 401;
+        throw err;
+    }
+    const row = await getDatasetForUser(actor, datasetId);
     const dataset = serializeDataset(row);
     const lineage = await queryOne(`
         SELECT source_dataset_id, id AS cleaning_run_id
@@ -437,7 +453,7 @@ async function getDatasetDetail(userId, datasetId, options = {}) {
         WHERE user_id = ? AND output_dataset_id = ?
         ORDER BY created_at DESC
         LIMIT 1
-    `, [userId, datasetId]);
+    `, [actor.id, datasetId]);
     if (lineage) {
         dataset.derivedFromDatasetId = lineage.source_dataset_id || '';
         dataset.cleaningRunId = lineage.cleaning_run_id || '';
@@ -455,7 +471,12 @@ async function getDatasetDetail(userId, datasetId, options = {}) {
     dataset.previewPageSize = pageSize;
     dataset.previewTotal = dataset.rowCount || 0;
     dataset.previewTotalPages = Math.max(Math.ceil((dataset.rowCount || 0) / pageSize), 1);
-    dataset.previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: pageSize, offset }));
+    const allowedColumns = await require('./governance').getAccessibleDatasetColumns(actor, row);
+    const allowedKeys = new Set(allowedColumns.map(column => column.key));
+    dataset.columns = allowedColumns;
+    dataset.profile = dataset.profile.filter(column => allowedKeys.has(column.key));
+    const previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: pageSize, offset }));
+    dataset.previewRows = previewRows.map(item => Object.fromEntries(Object.entries(item).filter(([key]) => allowedKeys.has(key))));
     return dataset;
 }
 
@@ -483,7 +504,7 @@ async function purgeDatasetArtifacts(userId, datasetId) {
 }
 
 async function softDeleteDataset(userId, datasetId) {
-    const row = await getDatasetForUser(userId, datasetId);
+    const row = await getDatasetForUser(userId, datasetId, { write: true });
     // 数据文件即将被移除，主动取消仍在运行的全量语义任务，避免 worker 对失效 Parquet 重试。
     await execute(`
         UPDATE analysis_semantic_jobs
@@ -512,8 +533,14 @@ async function softDeleteDataset(userId, datasetId) {
     return serializeDataset(row);
 }
 
-async function updateDataset(userId, datasetId, updates = {}) {
-    const row = await getDatasetForUser(userId, datasetId);
+async function updateDataset(userOrId, datasetId, updates = {}) {
+    const actor = await resolveAnalysisUser(userOrId);
+    if (!actor) {
+        const err = new Error('当前账号不可用。');
+        err.status = 401;
+        throw err;
+    }
+    const row = await getDatasetForUser(actor, datasetId, { write: true });
     let newName = row.name;
     if (typeof updates.name === 'string') {
         newName = normalizeDatasetName(updates.name);
@@ -527,14 +554,22 @@ async function updateDataset(userId, datasetId, updates = {}) {
         ? updates.originalName.trim().slice(0, 255)
         : (typeof updates.original_name === 'string' ? updates.original_name.trim().slice(0, 255) : row.original_name);
 
+    const hasSharingPatch = ['scope', 'share_scope', 'allowedUnits', 'allowed_units', 'allowedUserIds', 'allowed_user_ids']
+        .some(key => Object.prototype.hasOwnProperty.call(updates, key));
+    const share = hasSharingPatch ? normalizeShareSettings(updates, actor, row) : {
+        scope: row.scope || 'personal', allowedUnits: row.allowed_units || '', allowedUserIds: row.allowed_user_ids || ''
+    };
+    const allowedUserIds = hasSharingPatch
+        ? await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: actor.id })
+        : share.allowedUserIds;
     const now = getBeijingTimestamp();
     await execute(`
         UPDATE analysis_datasets
-        SET name = ?, original_name = ?, updated_at = ?
+        SET name = ?, original_name = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `, [newName, originalName, now, datasetId, userId]);
+    `, [newName, originalName, share.scope, share.allowedUnits, allowedUserIds, now, datasetId, actor.id]);
 
-    const updatedRow = await getDatasetForUser(userId, datasetId);
+    const updatedRow = await getDatasetForUser(actor, datasetId);
     return serializeDataset(updatedRow);
 }
 
@@ -714,6 +749,7 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
 }
 
 module.exports = {
+    ingestUpload,
     sanitizeRows,
     readSpreadsheet,
     importCsvToParquet,

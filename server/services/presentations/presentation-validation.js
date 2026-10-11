@@ -20,6 +20,10 @@ function hasPresentationSensitiveContent(value) {
     return hasSensitiveContent(text) || PRESENTATION_SENSITIVE_LABEL_RE.test(text);
 }
 
+function sourceHasEvidence(source) {
+    return Boolean(String(source?.digest || '').trim() || String(source?.locator || '').trim() || String(source?.excerpt || '').trim());
+}
+
 function makeIssue(level, code, slideId, elementId, message, suggestion) {
     return { level, code, slideId, elementId: elementId || null, message, suggestion: suggestion || '' };
 }
@@ -53,6 +57,7 @@ function estimatedTextLines(element) {
 function runPresentationValidation(input) {
     const presentation = normalizePresentation(input);
     const issues = [];
+    const sourcesById = new Map(presentation.sources.map(source => [source.id, source]));
     presentation.slides.forEach(slide => {
         if (!slide.elements.length) {
             issues.push(makeIssue('warning', 'EMPTY_SLIDE', slide.id, null, '页面为空。', '请添加内容或删除该页面。'));
@@ -67,6 +72,12 @@ function runPresentationValidation(input) {
         if (presentation.sources.length && !slideSourceRefs.size) {
             issues.push(makeIssue('warning', 'SOURCE_ATTRIBUTION_MISSING', slide.id, null, '页面使用了材料来源但没有保留页面或元素级来源引用。', '请将关键结论、数字或摘录关联到对应来源。'));
         }
+        slideSourceRefs.forEach(sourceId => {
+            const source = sourcesById.get(sourceId);
+            if (source && !sourceHasEvidence(source)) {
+                issues.push(makeIssue('info', 'SOURCE_EVIDENCE_MISSING', slide.id, null, `来源“${source.title}”缺少定位、内容摘要或证据摘录。`, '请补充来源定位或重新从原始材料生成，以便后续核验和 AI 改写继续使用该证据。'));
+            }
+        });
         if (slide.transition?.type && slide.transition.type !== 'none' && slide.transition.durationMs > 5000) {
             issues.push(makeIssue('warning', 'TRANSITION_TOO_LONG', slide.id, null, '页面转场时间过长。', '建议将转场控制在 5 秒以内。'));
         }

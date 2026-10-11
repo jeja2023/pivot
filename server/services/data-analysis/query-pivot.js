@@ -7,6 +7,7 @@ const {
     MAX_PIVOT_ROWS,
     MAX_PIVOT_COLS,
     jsonParse,
+    resolveAnalysisUser,
     getDatasetForUser,
     getColumn,
     normalizeAggregation,
@@ -93,12 +94,15 @@ async function readPivotRows(connection, sql) {
   }
 
 async function runPivot(userId, datasetId, input = {}) {
-    const row = await getDatasetForUser(userId, datasetId);
+    const actor = await resolveAnalysisUser(userId);
+    if (!actor) throw Object.assign(new Error('当前账号不可用。'), { status: 401 });
+    const row = await getDatasetForUser(actor, datasetId);
     const rowCol = getColumn(row, input.rowField);
     const colField = String(input.colField || '').trim();
     const colCol = colField ? getColumn(row, colField) : null;
     const valueField = String(input.valueField || '').trim();
     const valueCol = valueField ? getColumn(row, valueField) : null;
+    await require('./governance').assertDatasetFieldsAccessible(actor, row, [rowCol.key, colCol?.key, valueCol?.key]);
     const aggregation = normalizeAggregation(input.aggregation, Boolean(valueCol));
     if (aggregation !== 'count' && !valueCol) {
         const err = new Error('求和、平均、最小、最大聚合需要选择值字段。');
@@ -229,7 +233,7 @@ async function runPivot(userId, datasetId, input = {}) {
         }
     };
     await recordArtifact({
-        userId,
+        userId: actor.id,
         datasetId,
         type: 'pivot',
         title: `${rowCol.name}${colCol ? ` × ${colCol.name}` : ''} ${aggregation === 'count' ? '计数' : valueCol?.name || ''}`.trim(),
@@ -312,10 +316,13 @@ function formatQueryExecutionError(err) {
 }
 
 async function runUserQuery(userId, datasetId, input = {}) {
-    const row = await getDatasetForUser(userId, datasetId);
+    const actor = await resolveAnalysisUser(userId);
+    if (!actor) throw Object.assign(new Error('当前账号不可用。'), { status: 401 });
+    const row = await getDatasetForUser(actor, datasetId);
     const userSql = validateUserSql(input.sql);
     const limit = Math.min(Math.max(Number(input.limit) || MAX_PREVIEW_ROWS, 1), MAX_QUERY_LIMIT);
-    const columns = jsonParse(row.columns_json, []);
+    // 共享数据集上的敏感字段不会被物化到临时 data 表，即使调用者猜中底层 c_N 键也无法绕过字段权限。
+    const columns = await require('./governance').getAccessibleDatasetColumns(actor, row);
     const { parquetPath } = getDatasetPaths(row);
     const selectList = buildQuerySelectList(row, columns);
     const result = await withAnalysisSlot(async () => {
@@ -342,7 +349,7 @@ async function runUserQuery(userId, datasetId, input = {}) {
         ? Object.keys(rows[0])
         : (columns.length ? columns.map(column => column.name) : []);
     await recordArtifact({
-        userId,
+        userId: actor.id,
         datasetId,
         type: 'query',
         title: userSql.slice(0, 120),
@@ -355,5 +362,6 @@ async function runUserQuery(userId, datasetId, input = {}) {
 module.exports = {
     runPivot,
     runUserQuery,
-    validateUserSql
+    validateUserSql,
+    buildQuerySelectList
 };

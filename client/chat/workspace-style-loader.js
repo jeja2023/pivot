@@ -245,6 +245,9 @@ function isAutomationWorkspaceTrigger(target) {
 }
 
 if (typeof document !== 'undefined') {
+    // 自动化入口会在个人工作台、导航和快捷操作之间频繁切换。只预取其
+    // 样式（不挂载样式表）可避免首次打开时出现无样式框架，并保留其余工作区按需加载。
+    preloadWorkspaceStyles('agent').catch(() => {});
     document.addEventListener('pointerover', event => {
         if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
     }, { passive: true });

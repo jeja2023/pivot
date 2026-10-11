@@ -17,12 +17,20 @@
     const getStoredActiveTab = (...args) => app.getStoredActiveTab(...args);
 
     async function fetchJson(url, options = {}) {
-        const res = await apiFetch(url, options);
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            throw new Error(data?.error?.message || data?.error || `请求失败：${res.status}`);
+        try {
+            const res = await apiFetch(url, options);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data?.error?.message || data?.error || `请求失败：${res.status}`);
+            }
+            return data;
+        } catch (error) {
+            const message = String(error?.message || '');
+            if (error?.name === 'AbortError' || /network|failed to fetch|load failed|networkerror/i.test(message)) {
+                throw new Error('网络连接中断，请检查网络后重试。');
+            }
+            throw error;
         }
-        return data;
     }
 
     async function loadDatasets({ keepActive = true } = {}) {
@@ -140,10 +148,14 @@
     async function guardButton(buttonId, busyText, fn) {
         const btn = buttonId ? document.getElementById(buttonId) : null;
         if (btn && btn.disabled) return;
-        const original = btn ? btn.textContent : '';
+        const textSpan = btn ? btn.querySelector('span') : null;
+        const original = textSpan ? textSpan.textContent : (btn ? btn.textContent : '');
         if (btn) {
             btn.disabled = true;
-            if (busyText) btn.textContent = busyText;
+            if (busyText) {
+                if (textSpan) textSpan.textContent = busyText;
+                else btn.textContent = busyText;
+            }
         }
         try {
             await fn();
@@ -152,7 +164,10 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                if (busyText) btn.textContent = original;
+                if (busyText) {
+                    if (textSpan) textSpan.textContent = original;
+                    else btn.textContent = original;
+                }
             }
         }
     }
@@ -166,6 +181,9 @@
         renderQueryFields();
         renderPivotControls();
         renderSemanticControls();
+        app.renderAsyncQueryJobs?.();
+        app.renderGovernance?.();
+        app.renderDashboards?.();
     }
 
     app.showDataAnalysisApp = async function (options = {}) {
@@ -188,6 +206,12 @@
         await window.Pivot.legacy.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         await loadDatasets({ keepActive: true });
+        if (['governance', 'assets'].includes(requestedTab)) {
+            await app.loadGovernance?.(state.activeId, { silent: true });
+            await app.loadSemanticModels?.({ silent: true });
+        }
+        if (requestedTab === 'dashboards') await app.loadDashboards?.({ keepActive: true, silent: true });
+        if (requestedTab === 'query') await app.loadAsyncQueryJobs?.({ silent: true });
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
         if (requestedTab === 'cleaning') {
             await app.loadCleaningWorkspace?.(state.cleaningDatasetId || state.activeId, { resetPreview: true });

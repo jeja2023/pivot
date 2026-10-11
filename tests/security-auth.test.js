@@ -1377,6 +1377,24 @@ test('uploadSecurityMiddleware rejects mismatched magic bytes and removes the fi
     assert.match(res.body.error, /文件内容/);
     assert.equal(fs.existsSync(badPath), false);
 });
+
+test('uploadSecurityMiddleware accepts a SQLite file only when its database header is valid', async () => {
+    const { uploadSecurityMiddleware } = require('../server/upload');
+    const sqlitePath = path.join(uploadRoot, `valid-sqlite-${Date.now()}.sqlite`);
+    fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+    const header = Buffer.alloc(100);
+    Buffer.from('SQLite format 3\u0000', 'ascii').copy(header);
+    fs.writeFileSync(sqlitePath, header);
+    const req = { file: { path: sqlitePath, originalname: 'valid.sqlite' }, files: {} };
+    const res = { status() { return this; }, json() { return this; } };
+    let nextCalled = false;
+    try {
+        await uploadSecurityMiddleware(req, res, () => { nextCalled = true; });
+        assert.equal(nextCalled, true);
+    } finally {
+        fs.rmSync(sqlitePath, { force: true });
+    }
+});
 test('refresh tokens are hashed at rest and rotated once', async () => {
     const { hashRefreshToken, login, refreshTokens, register } = require('../server/auth');
     const suffix = Date.now().toString(36);

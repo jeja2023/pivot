@@ -3,7 +3,8 @@
     if (window.Pivot.legacy.PivotDataAnalysis?.state) return;
     const API = '/api/apps/data-analysis';
     const ACTIVE_TAB_STORAGE_KEY = 'pivot_data_analysis_active_tab';
-    const VALID_TABS = new Set(['overview', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'history']);
+    const SHARED_SCOPE = 'shared';
+    const VALID_TABS = new Set(['overview', 'governance', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'assets', 'dashboards', 'history']);
 
     function normalizeTab(tab) {
         const normalized = String(tab || '').trim();
@@ -77,7 +78,24 @@
         aiAbortController: null,
         aiWorkspaceEpoch: 0,
         queryMode: 'visual',
-        visualQuery: createVisualQuery()
+        visualQuery: createVisualQuery(),
+        governanceDatasetId: '',
+        fieldGovernance: [],
+        calculatedFields: [],
+        savedViews: [],
+        sourceState: null,
+        dashboards: [],
+        activeDashboardId: '',
+        activeDashboard: null,
+        refreshSchedules: [],
+        alerts: [],
+        metrics: [],
+        dataModels: [],
+        activeDataModelId: '',
+        activeDataModel: null,
+        asyncQueryJobs: [],
+        scalabilityDatasetId: '',
+        scalability: null
     };
 
     const html = window.Pivot.legacy.PivotSafeHtml || {
@@ -118,6 +136,7 @@
         esc,
         fmtNumber,
         activeDataset,
+        SHARED_SCOPE,
         normalizeTab,
         getStoredActiveTab,
         persistActiveTab,

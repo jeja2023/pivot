@@ -1,5 +1,9 @@
 /* global document, Event, sessionStorage, window -- Playwright 浏览器端执行上下文全局变量 */
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+const XLSX = require('@e965/xlsx');
+const Sqlite = require('better-sqlite3');
 const { expect, test } = require('@playwright/test');
 
 if (process.env.PIVOT_E2E_DEBUG === 'true') {
@@ -29,6 +33,27 @@ async function ensureBrowserSession(page) {
     await expect(page.locator('#auth-container')).toBeHidden({ timeout: 15_000 });
     await expect(app).toBeVisible({ timeout: 15_000 });
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+}
+
+async function expectDataAnalysisSidebarNavigationLayout(page) {
+    const menuItems = await page.locator('.data-analysis-tabs .data-analysis-tab').evaluateAll(items => items.map(item => {
+        const rect = item.getBoundingClientRect();
+        return {
+            tab: item.dataset.dataAnalysisTab,
+            left: rect.left,
+            width: rect.width,
+            display: window.getComputedStyle(item).display,
+            hasSecondaryButtonStyle: item.classList.contains('btn-secondary')
+        };
+    }));
+    const overviewMenuItem = menuItems.find(item => item.tab === 'overview');
+    expect(overviewMenuItem).toBeTruthy();
+    for (const item of menuItems) {
+        expect(item.display).toBe('flex');
+        expect(item.hasSecondaryButtonStyle).toBe(false);
+        expect(Math.abs(item.left - overviewMenuItem.left)).toBeLessThanOrEqual(1);
+        expect(Math.abs(item.width - overviewMenuItem.width)).toBeLessThanOrEqual(1);
+    }
 }
 
 test.describe('Pivot browser smoke', () => {
@@ -1098,5 +1123,254 @@ test.describe('Pivot browser smoke', () => {
         const uploadBody = await uploadResponse.json();
         expect(Number(uploadBody.docId)).toBeGreaterThan(0);
         await expect(page.locator('#knowledge-upload-modal')).toBeHidden();
+    });
+
+    test('数据分析侧边菜单保持等宽左对齐的导航布局', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+        await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(async () => {
+            await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+            await window.Pivot.legacy.showDataAnalysisApp({ tab: 'overview' });
+        });
+        await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
+        await expectDataAnalysisSidebarNavigationLayout(page);
+        for (const [tab, title] of [
+            ['governance', '字段治理'],
+            ['assets', '分析资产'],
+            ['dashboards', '仪表盘']
+        ]) {
+            await page.locator(`[data-data-analysis-tab="${tab}"]`).click();
+            await expect(page.locator('#data-analysis-title')).toHaveText(title);
+        }
+    });
+
+    test('数据分析完成上传、非破坏性清洗、图表、字段治理、计算字段、保存视图和仪表盘刷新闭环', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+        await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(async () => {
+            window.Pivot.legacy.showConfirm = async () => true;
+            await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+            await window.Pivot.legacy.showDataAnalysisApp({ tab: 'overview' });
+        });
+        await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
+        await expectDataAnalysisSidebarNavigationLayout(page);
+        await page.locator('#data-analysis-file').setInputFiles({
+            name: 'e2e-sales.csv',
+            mimeType: 'text/csv',
+            buffer: Buffer.from('区域,销售额,客户密钥\n华东,100,S-001\n华南,200,S-002\n华东,100,S-001\n', 'utf8')
+        });
+        await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-sales', { timeout: 15_000 });
+        await page.locator('[data-data-analysis-tab="cleaning"]').click();
+        await expect(page.locator('#data-analysis-cleaning-panel')).toBeVisible();
+        await page.locator('#data-cleaning-add-rule').click();
+        await page.locator('#data-cleaning-apply').click();
+        await expect(page.locator('#data-analysis-overview-panel')).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#data-analysis-dataset-table-body tr')).toHaveCount(2, { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="chart"]').click();
+        await page.locator('#data-analysis-chart-x').selectOption('c_1');
+        await page.locator('#data-analysis-chart-y').selectOption('c_2');
+        await page.locator('#data-analysis-build-chart').click();
+        await expect(page.locator('#data-analysis-chart-result')).toContainText(/区域|销售额/, { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="governance"]').click();
+        await expect(page.locator('#data-analysis-field-governance')).toContainText('区域', { timeout: 15_000 });
+        const amountRow = page.locator('[data-analysis-governance-field="c_2"]');
+        await amountRow.locator('[data-governance-input="displayName"]').fill('已确认销售额');
+        await amountRow.locator('[data-governance-input="isMetric"]').check();
+        await page.locator('#data-analysis-governance-save').click();
+        await page.locator('#data-analysis-open-calc-modal').click();
+        await page.locator('#data-analysis-calc-name').fill('含税销售额');
+        await page.locator('#data-analysis-calc-expression').fill('{{c_2}} * 1.13');
+        await page.locator('#data-analysis-calc-preview').click();
+        await expect(page.locator('#data-analysis-calc-preview-result')).toContainText('calculated_value', { timeout: 15_000 });
+
+        await page.locator('#data-analysis-open-scale-modal').click();
+        await expect(page.locator('#data-analysis-scalability-panel')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#data-analysis-scale-partition-field').selectOption('c_1');
+        const partitionResponse = page.waitForResponse(response => response.url().endsWith('/partitions') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-scale-partition').click();
+        await expect((await partitionResponse).status()).toBe(201);
+        await expect(page.locator('#data-analysis-scale-assets')).toContainText('分区', { timeout: 15_000 });
+        await page.locator('#data-analysis-scale-materialization-name').fill('区域销售额物化');
+        await page.locator('#data-analysis-scale-materialization-group').selectOption('c_1');
+        await page.locator('#data-analysis-scale-materialization-field').selectOption('c_2');
+        const materializationResponse = page.waitForResponse(response => response.url().endsWith('/materializations') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-scale-materialization-save').click();
+        await expect((await materializationResponse).status()).toBe(201);
+        await expect(page.locator('#data-analysis-scale-assets')).toContainText('区域销售额物化', { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="assets"]').click();
+        await page.locator('#data-analysis-open-save-view-modal').click();
+        await page.locator('#data-analysis-view-name').fill('区域销售额图表');
+        await page.locator('#data-analysis-view-type').selectOption('chart');
+        const saveViewResponse = page.waitForResponse(response => response.url().includes('/api/apps/data-analysis/datasets/') && response.url().endsWith('/views') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-save-view').click();
+        await expect((await saveViewResponse).status()).toBe(201);
+        await expect(page.locator('#data-analysis-saved-views')).toContainText('区域销售额图表', { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="dashboards"]').click();
+        await page.locator('#data-analysis-open-create-dashboard-modal').click();
+        await page.locator('#data-analysis-dashboard-name').fill('销售看板');
+        await page.locator('#data-analysis-dashboard-create').click();
+        await expect(page.locator('#data-analysis-dashboard-title')).toContainText('销售看板', { timeout: 15_000 });
+        await page.locator('#data-analysis-open-add-view-modal').click();
+        const savedViewId = await page.locator('#data-analysis-dashboard-view-select option').filter({ hasText: '区域销售额图表' }).getAttribute('value');
+        await page.locator('#data-analysis-dashboard-view-select').selectOption(String(savedViewId));
+        await page.locator('#data-analysis-dashboard-add-view').click();
+        await expect(page.locator('#data-analysis-dashboard-items')).toContainText('区域销售额图表', { timeout: 15_000 });
+        await page.locator('#data-analysis-dashboard-refresh').click();
+        await expect(page.locator('#data-analysis-dashboard-snapshot')).toContainText('已刷新', { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="query"]').click();
+        await page.locator('#data-analysis-query-mode-sql').click();
+        await page.locator('#data-analysis-query-sql').fill('SELECT COUNT(*) AS total FROM data');
+        await page.locator('#data-analysis-run-query-async').click();
+        await expect(page.locator('#data-analysis-async-query-jobs')).toContainText('后台查询', { timeout: 15_000 });
+    });
+
+    test('数据分析在浏览器中导入 XLSX 和 SQLite，并保留表格字段与记录计数', async ({ page }) => {
+        const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-analysis-e2e-import-'));
+        const workbookPath = path.join(fixtureDir, 'e2e-orders.xlsx');
+        const sqlitePath = path.join(fixtureDir, 'e2e-inventory.sqlite');
+        try {
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+                ['订单号', '金额'],
+                ['SO-001', 120],
+                ['SO-002', 260]
+            ]), '订单');
+            XLSX.writeFile(workbook, workbookPath);
+            const sqlite = new Sqlite(sqlitePath);
+            sqlite.exec('CREATE TABLE inventory (sku TEXT NOT NULL, stock INTEGER NOT NULL); INSERT INTO inventory VALUES (\'SKU-01\', 8), (\'SKU-02\', 13);');
+            sqlite.close();
+
+            await ensureBrowserSession(page);
+            await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+            await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+            await page.evaluate(async () => {
+                await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+                await window.Pivot.legacy.showDataAnalysisApp({ tab: 'overview' });
+            });
+            await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
+
+            const workbookUpload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
+            await page.locator('#data-analysis-file').setInputFiles(workbookPath);
+            expect((await workbookUpload).ok()).toBeTruthy();
+            await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-orders', { timeout: 15_000 });
+            await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('2 行');
+
+            const sqliteUpload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
+            await page.locator('#data-analysis-file').setInputFiles(sqlitePath);
+            const sqliteUploadResponse = await sqliteUpload;
+            expect(sqliteUploadResponse.ok(), await sqliteUploadResponse.text()).toBeTruthy();
+            await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-inventory', { timeout: 15_000 });
+            await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('2 行');
+        } finally {
+            fs.rmSync(fixtureDir, { recursive: true, force: true });
+        }
+    });
+
+    test('数据分析全量语义任务可启动、取消、重试并在刷新后恢复历史记录', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const modelName = `E2E semantic model ${Date.now()}`;
+        const createdModel = await page.request.post('/api/models', {
+            headers: { 'x-csrf-token': csrf },
+            data: { name: modelName, url: process.env.E2E_MODEL_URL, model_name: 'e2e-semantic-model' }
+        });
+        expect(createdModel.ok()).toBeTruthy();
+        const models = await page.request.get('/api/models?limit=100');
+        const model = (await models.json()).data.find(item => item.name === modelName);
+        expect(model).toBeTruthy();
+        const defaultModel = await page.request.put('/api/settings/default-model', {
+            headers: { 'x-csrf-token': csrf },
+            data: { default_model_id: model.id }
+        });
+        expect(defaultModel.ok()).toBeTruthy();
+
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+        await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(async () => {
+            window.Pivot.legacy.showConfirm = async () => true;
+            await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+            await window.Pivot.legacy.showDataAnalysisApp({ tab: 'overview' });
+        });
+        await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('#data-analysis-file')).toHaveCount(1, { timeout: 15_000 });
+        const upload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-file').setInputFiles({
+            name: 'e2e-semantic.csv',
+            mimeType: 'text/csv',
+            buffer: Buffer.from('编号,反馈\n1,物流速度需要改进\n2,客服响应及时\n', 'utf8')
+        });
+        expect((await upload).ok()).toBeTruthy();
+        await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-semantic', { timeout: 15_000 });
+
+        await page.locator('[data-data-analysis-tab="ai"]').click();
+        await page.locator('[data-ai-subtab="semantic"]').click();
+        await expect(page.locator('#data-analysis-ai-subpanel-semantic')).toBeVisible();
+        await page.locator('#data-analysis-semantic-field').selectOption('c_2');
+        await page.locator('#data-analysis-semantic-instruction').fill('E2E_SEMANTIC_DELAY：提取反馈主题');
+        const createJob = page.waitForResponse(response => response.url().includes('/semantic-analysis') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-semantic-run').click();
+        expect((await createJob).status()).toBe(202);
+        await expect(page.locator('#data-analysis-semantic-cancel')).toBeVisible({ timeout: 15_000 });
+
+        const cancelJob = page.waitForResponse(response => response.url().includes('/semantic-analysis/jobs/') && response.url().endsWith('/cancel') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-semantic-cancel').click();
+        expect((await cancelJob).ok()).toBeTruthy();
+        await expect(page.locator('#data-analysis-semantic-status')).toContainText('已取消');
+        await expect(page.locator('#data-analysis-semantic-retry')).toBeVisible();
+
+        const retryJob = page.waitForResponse(response => response.url().includes('/semantic-analysis/jobs/') && response.url().endsWith('/retry') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-semantic-retry').click();
+        expect((await retryJob).status()).toBe(202);
+        await expect(page.locator('#data-analysis-semantic-job option:not([value=""])')).toHaveCount(1);
+        const jobId = await page.locator('#data-analysis-semantic-job').inputValue();
+        expect(jobId).not.toBe('');
+        const datasetId = await page.evaluate(() => window.Pivot.legacy.PivotDataAnalysis.state.activeId);
+        expect(datasetId).not.toBe('');
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+        await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(async restoredDatasetId => {
+            window.Pivot.legacy.showConfirm = async () => true;
+            await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+            await window.Pivot.legacy.showDataAnalysisApp({ tab: 'ai', datasetId: restoredDatasetId });
+        }, datasetId);
+        await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
+        await page.locator('[data-ai-subtab="semantic"]').click();
+        await expect(page.locator('#data-analysis-semantic-job')).toHaveValue(jobId, { timeout: 15_000 });
+    });
+
+    test('数据分析对非法查询和网络中断提供中文可操作提示', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
+        await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(async () => {
+            window.Pivot.legacy.showConfirm = async () => true;
+            await window.Pivot.loadScriptOnce('/chat/apps-workbench-data-analysis.js');
+            await window.Pivot.legacy.showDataAnalysisApp({ tab: 'overview' });
+        });
+        const upload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-file').setInputFiles({ name: 'e2e-query-errors.csv', mimeType: 'text/csv', buffer: Buffer.from('地区,金额\n华东,100\n', 'utf8') });
+        expect((await upload).ok()).toBeTruthy();
+        await page.locator('[data-data-analysis-tab="query"]').click();
+        await page.locator('#data-analysis-query-mode-sql').click();
+        await page.locator('#data-analysis-query-sql').fill('SELECT * FROM data; DROP TABLE data');
+        const rejected = page.waitForResponse(response => response.url().includes('/query') && response.request().method() === 'POST');
+        await page.locator('#data-analysis-run-query').click();
+        expect((await rejected).status()).toBe(400);
+        await expect(page.locator('#toast-container')).toContainText(/单条查询|不允许/, { timeout: 10_000 });
+
+        await page.route('**/api/apps/data-analysis/datasets/*/query', route => route.abort('failed'));
+        await page.locator('#data-analysis-query-sql').fill('SELECT * FROM data');
+        await page.locator('#data-analysis-run-query').click();
+        await expect(page.locator('#toast-container')).toContainText('网络连接中断，请检查网络后重试。', { timeout: 10_000 });
     });
 });

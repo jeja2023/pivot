@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 1978,
+  "total": 2075,
   "entries": [
     {
       "file": "server/auth.js",
@@ -153,6 +153,18 @@
     },
     {
       "file": "server/db/migrations/agent-workflow-trigger-events.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/analysis-bi-product.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/analysis-scalability.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/analysis-semantic-models.js",
       "count": 1
     },
     {
@@ -825,15 +837,27 @@
     },
     {
       "file": "server/services/data-analysis/datasets.js",
-      "count": 12
+      "count": 11
+    },
+    {
+      "file": "server/services/data-analysis/governance.js",
+      "count": 51
+    },
+    {
+      "file": "server/services/data-analysis/scalability.js",
+      "count": 13
     },
     {
       "file": "server/services/data-analysis/semantic-analysis.js",
       "count": 32
     },
     {
+      "file": "server/services/data-analysis/semantic-models.js",
+      "count": 30
+    },
+    {
       "file": "server/services/data-analysis/shared.js",
-      "count": 2
+      "count": 3
     },
     {
       "file": "server/services/database-mcp/connection-policy.js",

@@ -1,0 +1,29 @@
+{
+  "kind": "pivot_data_analysis_capacity_benchmark",
+  "generatedAt": "2026-10-10T17:28:14.663Z",
+  "tiers": [
+    {
+      "rows": 10000000,
+      "generatedBytes": 536677825,
+      "parquetBytes": 18264539,
+      "exportBytes": 10536,
+      "aggregateRows": 100,
+      "pivotRows": 300,
+      "timings": {
+        "generateCsvMs": 40848.1495,
+        "importToParquetMs": 2374.8376,
+        "aggregateQueryMs": 32.6846,
+        "pivotQueryMs": 71.2077,
+        "exportCsvMs": 68.9851
+      }
+    }
+  ],
+  "ai": {
+    "measured": false,
+    "reason": "真实模型成本与时延需要显式传入实测 token、价格和时延；本地数据基准不会伪造该证据。"
+  },
+  "notes": [
+    "所有数据为本地生成的非敏感样本；结果仅代表当前主机与 DuckDB 配置。",
+    "千万行以上、跨节点、对象存储或专用 OLAP 的结论必须在目标生产架构上另行验证。"
+  ]
+}

@@ -7,8 +7,10 @@ const { createDocumentProcessingRouter } = require('./document-processing');
 const { createOcrRouter } = require('./ocr');
 const { createPdfToolsRouter } = require('./pdf-tools');
 const { createPresentationsRouter } = require('./presentations');
+const { registerDataAnalysisProductRoutes } = require('./data-analysis-product-routes');
 const { asyncHandler, normalizeLimit } = require('../../http');
 const { logger } = require('../../logger');
+const { createSafeUpload, uploadSecurityMiddleware } = require('../../upload');
 const { estimateTokens } = require('../../llm');
 const {
     getModelDailyUsageAsync,
@@ -59,7 +61,13 @@ const {
     createSemanticAnalysisJob, getSemanticJobDetail, listSemanticAnalysisJobs,
     retrySemanticAnalysisJob, cancelSemanticAnalysisJob,
     getCleaningQuality, previewCleaning, applyCleaning,
-    listCleaningRuns, getCleaningRun, replayCleaningRun
+    listCleaningRuns, getCleaningRun, replayCleaningRun,
+    listFieldGovernance, updateFieldGovernance, previewCalculatedField, materializeCalculatedField, listCalculatedFields,
+    listSavedViews, saveAnalysisView, getSavedView, runSavedView, deleteSavedView,
+    listDashboards, getDashboard, saveDashboard, saveDashboardItem, deleteDashboardItem, refreshDashboard,
+    listRefreshSchedules, saveRefreshSchedule, saveAlertRule, getAlertRule, listAlertRules,
+    getDatasetSourceState,
+    appendIncrementalDataset
 } = require('../../services/data-analysis');
 
 // 剥离推理型模型可能内联在正文里的思考块（<think>…</think>）。
@@ -116,7 +124,7 @@ function buildAnalysisAgentSystemPrompt(context) {
         '【可用工具】',
         '1) run_sql：对当前数据集执行只读 SQL。表名固定为 data，列名为下方字段名。仅支持 SELECT/WITH，会自动限制返回行数。',
         '   写 SQL 时中文字段名必须用双引号；上下文标为数值的字段可直接做 SUM/AVG/MAX/MIN 和加减运算，其他字段需要先 TRY_CAST("字段名" AS DOUBLE)。',
-        '2) make_chart：生成图表。参数 chartType(bar|line|area|pie)、xField(分类字段名)、yField(数值字段名，可选)、groupField(分组字段名，可选)、aggregation(sum|count|avg|min|max)。',
+        '2) make_chart：生成图表。参数 chartType(bar|stacked_bar|line|area|pie|scatter|funnel|heatmap|boxplot|dual_axis)、xField(分类或横轴字段)、yField(数值字段；散点/箱线/双轴必填)、y2Field(双轴图辅助数值字段)、groupField(堆叠或热力图分组字段)、aggregation(sum|count|avg|min|max)。',
         '',
         '【数据集上下文】',
         context,
@@ -308,6 +316,13 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
 
 function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
+    // 数据分析可安全导入 SQLite 文件；不要放宽通用附件上传白名单。
+    // SQLite 仍由上传魔数校验、只读打开和受限数据集导入链路共同保护。
+    const dataAnalysisUpload = createSafeUpload({
+        extensions: new Set(['.csv', '.xls', '.xlsx', '.sqlite', '.sqlite3', '.db']),
+        maxFields: 4,
+        errorMessage: '数据分析仅支持 CSV、XLS/XLSX 或 SQLite 数据库文件'
+    });
 
     router.use('/apps/regulations', createRegulationsRouter({
         authMiddleware,
@@ -335,13 +350,130 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
 
     router.use(createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
 
+    registerDataAnalysisProductRoutes(router, { authMiddleware, logAction });
+
     router.get('/apps/data-analysis/datasets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ datasets: await listDatasets(req.user.id) });
     }));
     router.get('/apps/data-analysis/datasets/summary', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ summary: await getDatasetSummary(req.user.id) });
     }));
-    router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
+    router.get('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ fields: await listFieldGovernance(req.user, req.params.id) });
+    }));
+    router.put('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await updateFieldGovernance({ user: req.user, datasetId: req.params.id, fields: req.body?.fields });
+        logAction(req, '数据分析-更新字段治理', `数据集: ${req.params.id}，字段数: ${result.fields.length}`);
+        res.json({ success: true, ...result });
+    }));
+    router.get('/apps/data-analysis/datasets/:id/source-state', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(await getDatasetSourceState(req.user, req.params.id));
+    }));
+    router.get('/apps/data-analysis/datasets/:id/calculated-fields', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ fields: await listCalculatedFields(req.user, req.params.id) });
+    }));
+    router.post('/apps/data-analysis/datasets/:id/calculated-fields/preview', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(await previewCalculatedField({ user: req.user, datasetId: req.params.id, input: req.body || {} }));
+    }));
+    router.post('/apps/data-analysis/datasets/:id/calculated-fields', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await materializeCalculatedField({ user: req.user, datasetId: req.params.id, input: req.body || {} });
+        logAction(req, '数据分析-创建计算字段', `源数据集: ${req.params.id}，派生数据集: ${result.dataset.id}`);
+        res.status(201).json({ success: true, ...result });
+    }));
+
+    router.get('/apps/data-analysis/views', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ views: await listSavedViews(req.user, { datasetId: req.query?.datasetId, limit: req.query?.limit }) });
+    }));
+    router.post('/apps/data-analysis/datasets/:id/views', authMiddleware, asyncHandler(async (req, res) => {
+        const view = await saveAnalysisView({ user: req.user, datasetId: req.params.id, body: req.body || {} });
+        logAction(req, '数据分析-保存分析视图', `数据集: ${req.params.id}，视图: ${view.id}`);
+        res.status(201).json({ success: true, view });
+    }));
+    router.put('/apps/data-analysis/datasets/:id/views/:viewId', authMiddleware, asyncHandler(async (req, res) => {
+        const view = await saveAnalysisView({ user: req.user, datasetId: req.params.id, viewId: req.params.viewId, body: req.body || {} });
+        logAction(req, '数据分析-更新分析视图', `数据集: ${req.params.id}，视图: ${view.id}`);
+        res.json({ success: true, view });
+    }));
+    router.get('/apps/data-analysis/views/:viewId', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ view: (await getSavedView(req.user, req.params.viewId)).view });
+    }));
+    router.post('/apps/data-analysis/views/:viewId/run', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await runSavedView(req.user, req.params.viewId);
+        logAction(req, '数据分析-运行分析视图', `视图: ${req.params.viewId}`);
+        res.json(result);
+    }));
+    router.delete('/apps/data-analysis/views/:viewId', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await deleteSavedView(req.user, req.params.viewId);
+        logAction(req, '数据分析-删除分析视图', `视图: ${req.params.viewId}`);
+        res.json({ success: true, ...result });
+    }));
+
+    router.get('/apps/data-analysis/dashboards', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ dashboards: await listDashboards(req.user, { limit: req.query?.limit }) });
+    }));
+    router.post('/apps/data-analysis/dashboards', authMiddleware, asyncHandler(async (req, res) => {
+        const dashboard = await saveDashboard({ user: req.user, body: req.body || {} });
+        logAction(req, '数据分析-创建仪表盘', `仪表盘: ${dashboard.id}`);
+        res.status(201).json({ success: true, dashboard });
+    }));
+    router.get('/apps/data-analysis/dashboards/:dashboardId', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ dashboard: (await getDashboard(req.user, req.params.dashboardId)).dashboard });
+    }));
+    router.put('/apps/data-analysis/dashboards/:dashboardId', authMiddleware, asyncHandler(async (req, res) => {
+        const dashboard = await saveDashboard({ user: req.user, dashboardId: req.params.dashboardId, body: req.body || {} });
+        logAction(req, '数据分析-更新仪表盘', `仪表盘: ${dashboard.id}`);
+        res.json({ success: true, dashboard });
+    }));
+    router.post('/apps/data-analysis/dashboards/:dashboardId/items', authMiddleware, asyncHandler(async (req, res) => {
+        const item = await saveDashboardItem({ user: req.user, dashboardId: req.params.dashboardId, body: req.body || {} });
+        logAction(req, '数据分析-添加仪表盘项目', `仪表盘: ${req.params.dashboardId}，项目: ${item.id}`);
+        res.status(201).json({ success: true, item });
+    }));
+    router.put('/apps/data-analysis/dashboards/:dashboardId/items/:itemId', authMiddleware, asyncHandler(async (req, res) => {
+        const item = await saveDashboardItem({ user: req.user, dashboardId: req.params.dashboardId, itemId: req.params.itemId, body: req.body || {} });
+        logAction(req, '数据分析-更新仪表盘项目', `仪表盘: ${req.params.dashboardId}，项目: ${item.id}`);
+        res.json({ success: true, item });
+    }));
+    router.delete('/apps/data-analysis/dashboards/:dashboardId/items/:itemId', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await deleteDashboardItem({ user: req.user, dashboardId: req.params.dashboardId, itemId: req.params.itemId });
+        logAction(req, '数据分析-删除仪表盘项目', `仪表盘: ${req.params.dashboardId}，项目: ${result.id}`);
+        res.json({ success: true, ...result });
+    }));
+    router.post('/apps/data-analysis/dashboards/:dashboardId/refresh', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await refreshDashboard({ user: req.user, dashboardId: req.params.dashboardId });
+        logAction(req, '数据分析-刷新仪表盘', `仪表盘: ${req.params.dashboardId}，运行: ${result.runId}`);
+        res.status(202).json({ success: true, ...result });
+    }));
+    router.get('/apps/data-analysis/refresh-schedules', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ schedules: await listRefreshSchedules(req.user, { dashboardId: req.query?.dashboardId }) });
+    }));
+    router.post('/apps/data-analysis/refresh-schedules', authMiddleware, asyncHandler(async (req, res) => {
+        const schedule = await saveRefreshSchedule({ user: req.user, body: req.body || {} });
+        logAction(req, '数据分析-创建刷新计划', `计划: ${schedule.id}`);
+        res.status(201).json({ success: true, schedule });
+    }));
+    router.put('/apps/data-analysis/refresh-schedules/:scheduleId', authMiddleware, asyncHandler(async (req, res) => {
+        const schedule = await saveRefreshSchedule({ user: req.user, scheduleId: req.params.scheduleId, body: req.body || {} });
+        logAction(req, '数据分析-更新刷新计划', `计划: ${schedule.id}`);
+        res.json({ success: true, schedule });
+    }));
+    router.get('/apps/data-analysis/alerts', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ alerts: await listAlertRules(req.user, { datasetId: req.query?.datasetId }) });
+    }));
+    router.post('/apps/data-analysis/alerts', authMiddleware, asyncHandler(async (req, res) => {
+        const alert = await saveAlertRule({ user: req.user, body: req.body || {} });
+        logAction(req, '数据分析-创建数据告警', `告警: ${alert.id}`);
+        res.status(201).json({ success: true, alert });
+    }));
+    router.put('/apps/data-analysis/alerts/:alertId', authMiddleware, asyncHandler(async (req, res) => {
+        const alert = await saveAlertRule({ user: req.user, alertId: req.params.alertId, body: req.body || {} });
+        logAction(req, '数据分析-更新数据告警', `告警: ${alert.id}`);
+        res.json({ success: true, alert });
+    }));
+    router.get('/apps/data-analysis/alerts/:alertId', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ alert: await getAlertRule(req.user, req.params.alertId) });
+    }));
+    router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
         try {
             const dataset = await importDataset({ user: req.user, file: req.file, name: req.body?.name });
             logAction(req, '数据分析-上传数据集', `数据集: ${dataset.name} (${dataset.rowCount} 行)`);
@@ -353,6 +485,16 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             throw e;
         }
     }));
+    router.post('/apps/data-analysis/datasets/:id/increments', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await appendIncrementalDataset({ user: req.user, datasetId: req.params.id, file: req.file });
+            logAction(req, '数据分析-增量导入', `数据集: ${req.params.id}，新增行: ${result.appendedRows}，版本: ${result.sourceVersion}`);
+            res.status(201).json({ success: true, ...result });
+        } catch (error) {
+            if (req.file?.path) await require('fs/promises').rm(req.file.path, { force: true }).catch(() => {});
+            throw error;
+        }
+    }));
 
     router.get('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
         const page = req.query.page !== undefined ? Math.max(parseInt(req.query.page, 10) || 1, 1) : undefined;
@@ -361,7 +503,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     }));
 
     router.patch('/apps/data-analysis/datasets/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const dataset = await updateDataset(req.user.id, req.params.id, req.body || {});
+        const dataset = await updateDataset(req.user, req.params.id, req.body || {});
         logAction(req, '数据分析-修改数据集', `数据集: ${dataset.name}`);
         res.json({ success: true, dataset });
     }));

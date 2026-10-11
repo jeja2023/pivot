@@ -8,6 +8,7 @@ const { queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
 const { analysisSemaphore } = require('../concurrency');
+const { canAccessSharedResource, normalizeShareScope } = require('../unit-visibility');
 
 const projectRoot = path.resolve(__dirname, '../../..');
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(__dirname, '../../../data');
@@ -238,16 +239,37 @@ function serializeDataset(row) {
         previewRows: jsonParse(row.preview_json, []),
         sheetName: row.sheet_name || '',
         derivedFromDatasetId: row.derived_from_dataset_id || '',
-        cleaningRunId: row.cleaning_run_id || ''
+        cleaningRunId: row.cleaning_run_id || '',
+        parentDatasetId: row.parent_dataset_id || '',
+        sourceVersion: Number(row.source_version || row.active_version || 1),
+        scope: normalizeShareScope(row.scope),
+        allowedUnits: String(row.allowed_units || ''),
+        allowedUserIds: String(row.allowed_user_ids || '')
     };
 }
 
-async function getDatasetForUser(userId, datasetId) {
+async function resolveAnalysisUser(userOrId) {
+    if (userOrId && typeof userOrId === 'object' && Number(userOrId.id) > 0) return userOrId;
+    const userId = Number.parseInt(userOrId, 10);
+    if (!Number.isSafeInteger(userId) || userId <= 0) return null;
+    return await queryOne(`
+        SELECT id, username, nickname, unit, role, status, deleted_at
+        FROM users WHERE id = ?
+    `, [userId]);
+}
+
+async function getDatasetForUser(userOrId, datasetId, { write = false } = {}) {
+    const user = await resolveAnalysisUser(userOrId);
+    if (!user || user.deleted_at || String(user.status || 'active') !== 'active') {
+        const err = new Error('数据集不存在或无权访问。');
+        err.status = 404;
+        throw err;
+    }
     const row = await queryOne(`
         SELECT * FROM analysis_datasets
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [datasetId, userId]);
-    if (!row) {
+        WHERE id = ? AND deleted_at IS NULL
+    `, [datasetId]);
+    if (!row || !canAccessSharedResource(row, user, write)) {
         const err = new Error('数据集不存在或无权访问。');
         err.status = 404;
         throw err;
@@ -438,6 +460,7 @@ module.exports = {
     bestEffortRemove,
     moveUploadedFile,
     serializeDataset,
+    resolveAnalysisUser,
     getDatasetForUser,
     getDatasetPaths,
     createDuckConnection,

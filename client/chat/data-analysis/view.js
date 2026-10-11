@@ -24,12 +24,15 @@
                 <aside class="data-analysis-sidebar">
                     <nav class="data-analysis-tabs" role="tablist" aria-label="数据分析视图" aria-orientation="vertical">
                         <button class="data-analysis-tab active" type="button" data-data-analysis-tab="overview">数据总览</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="governance">字段治理</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="cleaning">数据清洗</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="chart">图表生成</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="compare">数据比对</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="query">数据查询</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="pivot">数据透视</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="ai">智能分析</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="assets">分析资产</button>
+                        <button class="data-analysis-tab" type="button" data-data-analysis-tab="dashboards">仪表盘</button>
                         <button class="data-analysis-tab" type="button" data-data-analysis-tab="history">历史记录</button>
                     </nav>
                 </aside>
@@ -72,6 +75,7 @@
                         </div>
                         <div id="data-analysis-dataset-pagination" class="pagination workspace-pagination"></div>
                     </section>
+                    <section id="data-analysis-governance-panel" class="data-analysis-tab-panel hidden"></section>
                     <section id="data-analysis-cleaning-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-cleaning-header">
                             <div class="data-cleaning-header-left">
@@ -211,9 +215,10 @@
                             <label>分析数据集<select id="data-analysis-chart-dataset" class="form-input"></select></label>
                             <label>分类字段<select id="data-analysis-chart-x" class="form-input"></select></label>
                             <label>数值字段<select id="data-analysis-chart-y" class="form-input"></select></label>
+                            <label data-data-analysis-chart-control="secondary">辅助数值字段<select id="data-analysis-chart-y2" class="form-input"></select></label>
                             <label data-data-analysis-chart-control="group">分组字段<select id="data-analysis-chart-group" class="form-input"></select></label>
                             <label>聚合<select id="data-analysis-chart-aggregation" class="form-input"><option value="sum">求和</option><option value="count">计数</option><option value="avg">平均</option><option value="min">最小</option><option value="max">最大</option></select></label>
-                            <label>图表<select id="data-analysis-chart-type" class="form-input"><option value="bar">柱状图</option><option value="line">折线图</option><option value="area">面积图</option><option value="pie">饼图</option></select></label>
+                            <label>图表<select id="data-analysis-chart-type" class="form-input"><option value="bar">柱状图</option><option value="stacked_bar">堆叠柱状图</option><option value="line">折线图</option><option value="area">面积图</option><option value="pie">饼图</option><option value="scatter">散点图</option><option value="funnel">漏斗图</option><option value="heatmap">热力图</option><option value="boxplot">箱线图</option><option value="dual_axis">双轴图</option></select></label>
                             <label>显示前几位<input id="data-analysis-chart-limit" class="form-input" type="number" min="1" max="80" value="30"></label>
                             <label>排序<select id="data-analysis-chart-sort" class="form-input"><option value="value_desc">数值降序</option><option value="value_asc">数值升序</option><option value="label_asc">分类升序</option><option value="label_desc">分类降序</option></select></label>
                             <label>配色<select id="data-analysis-chart-palette" class="form-input"><option value="teal">经典青绿</option><option value="business">商务蓝绿</option><option value="soft">柔和多彩</option><option value="warm">暖色强调</option></select></label>
@@ -306,6 +311,7 @@
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                                     <span>运行查询</span>
                                 </button>
+                                <button id="data-analysis-run-query-async" class="btn-secondary data-analysis-query-run-btn" type="button" title="长耗时或较大结果集会在后台运行，可刷新、取消和下载受控结果">后台查询</button>
                             </div>
                             <textarea id="data-analysis-query-sql" class="form-input data-analysis-query-sql" spellcheck="false" placeholder="SELECT * FROM data LIMIT 100"></textarea>
                             <div class="data-analysis-query-sql-footer">
@@ -314,6 +320,7 @@
                         </div>
                         
                         <div id="data-analysis-query-result" class="data-analysis-query-result"></div>
+                        <div id="data-analysis-async-query-jobs" class="data-analysis-asset-list data-analysis-async-query-jobs"></div>
                     </section>
                     <section id="data-analysis-pivot-panel" class="data-analysis-tab-panel hidden">
                         <div class="data-analysis-pivot-workspace">
@@ -619,6 +626,8 @@
                         </div>
                         <div id="data-analysis-history-pagination" class="pagination workspace-pagination data-analysis-history-pagination"></div>
                     </section>
+                    <section id="data-analysis-assets-panel" class="data-analysis-tab-panel hidden"></section>
+                    <section id="data-analysis-dashboards-panel" class="data-analysis-tab-panel hidden"></section>
                 </main>
             </div>
 
@@ -646,22 +655,10 @@
                         <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">从服务器可访问数据库导入数据集</h3>
                     </div>
                     <form id="data-analysis-db-import-form" style="display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 4px; text-align: left;">
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">服务器可访问数据库</label>
-                            <select id="data-analysis-db-conn" class="form-input" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 10px; margin-bottom: 0;" required></select>
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">只读 SQL 查询 (可选)</label>
-                            <textarea id="data-analysis-db-sql" class="form-input" style="width: 100%; height: 75px; font-family: monospace; border-radius: 8px; font-size: 0.85rem; padding: 8px 12px; margin-bottom: 0; resize: vertical;" placeholder="例如: SELECT * FROM my_table LIMIT 100 (留空则从下方表名导入)"></textarea>
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据表名 (若未填写 SQL 查询)</label>
-                            <input id="data-analysis-db-table" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: my_table">
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">导入后的数据集名称 (可选)</label>
-                            <input id="data-analysis-db-name" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="留空则自动生成名称">
-                        </div>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">服务器可访问数据库<select id="data-analysis-db-conn" class="form-input" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 10px; margin-bottom: 0;" required></select></label>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">只读 SQL 查询 (可选)<textarea id="data-analysis-db-sql" class="form-input" style="width: 100%; height: 75px; font-family: monospace; border-radius: 8px; font-size: 0.85rem; padding: 8px 12px; margin-bottom: 0; resize: vertical;" placeholder="例如: SELECT * FROM my_table LIMIT 100 (留空则从下方表名导入)"></textarea></label>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据表名 (若未填写 SQL 查询)<input id="data-analysis-db-table" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: my_table"></label>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">导入后的数据集名称 (可选)<input id="data-analysis-db-name" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="留空则自动生成名称"></label>
                         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px;">
                             <button id="data-analysis-db-import-modal-cancel" class="btn-secondary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;" type="button">取消</button>
                             <button id="data-analysis-db-import-submit" class="btn-primary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;" type="button">开始导入</button>
@@ -677,8 +674,7 @@
                         <h3 id="data-analysis-compare-modal-title" style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">比对明细</h3>
                         <button id="data-analysis-compare-modal-close" class="btn-secondary" style="height: 32px; padding: 0 12px; border-radius: 7px; font-size: 0.8rem; border-color: rgba(148, 163, 184, 0.3); color: var(--text-main); font-weight: 700; cursor: pointer;" type="button">关闭</button>
                     </div>
-                    <div id="data-analysis-compare-modal-content" class="data-analysis-compare-modal-content" style="flex: 1; overflow-y: auto; max-height: 55vh; padding-right: 4px;">
-                    </div>
+                    <div id="data-analysis-compare-modal-content" class="data-analysis-compare-modal-content" style="flex: 1; overflow-y: auto; max-height: 55vh; padding-right: 4px;"></div>
                 </div>
             </div>
 
@@ -690,16 +686,9 @@
                     </div>
                     <form id="data-analysis-edit-dataset-form" style="display: flex; flex-direction: column; gap: 14px;">
                         <input id="data-analysis-edit-dataset-id" type="hidden">
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据集名称 <span style="color: #ef4444;">*</span></label>
-                            <input id="data-analysis-edit-dataset-name" class="form-input" type="text" maxlength="100" required style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="请输入数据集名称">
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">原始文件名 / 来源备注</label>
-                            <input id="data-analysis-edit-dataset-original-name" class="form-input" type="text" maxlength="255" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: 2026_Q1_sales.xlsx">
-                        </div>
-                        <div id="data-analysis-edit-dataset-meta" style="padding: 10px 12px; background: rgba(148, 163, 184, 0.08); border-radius: 8px; font-size: 0.78rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;">
-                        </div>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据集名称 <span style="color: #ef4444;">*</span><input id="data-analysis-edit-dataset-name" class="form-input" type="text" maxlength="100" required style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="请输入数据集名称"></label>
+                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">原始文件名 / 来源备注<input id="data-analysis-edit-dataset-original-name" class="form-input" type="text" maxlength="255" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: 2026_Q1_sales.xlsx"></label>
+                        <div id="data-analysis-edit-dataset-meta" style="padding: 10px 12px; background: rgba(148, 163, 184, 0.08); border-radius: 8px; font-size: 0.78rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;"></div>
                         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px;">
                             <button id="data-analysis-edit-dataset-cancel" class="btn-secondary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;" type="button">取消</button>
                             <button id="data-analysis-edit-dataset-save" class="btn-primary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;" type="submit">保存修改</button>
@@ -709,10 +698,10 @@
             </div>
         `);
         body.appendChild(view);
+        app.mountDataAnalysisExtraPanels?.();
         bindEvents(view);
         return view;
     }
-
     function updateToolbarHeader(tab) {
         const titleEl = document.getElementById('data-analysis-title');
         const metaEl = document.getElementById('data-analysis-meta');
@@ -723,6 +712,10 @@
             overview: {
                 title: '\u6570\u636e\u603b\u89c8',
                 desc: '\u4e0a\u4f20\u8868\u683c\u6570\u636e\uff0c\u5bfc\u5165\u6570\u636e\u96c6\uff0c\u5e76\u5bf9\u6570\u636e\u96c6\u8fdb\u884c\u9884\u89c8\u548c\u7ba1\u7406\u3002'
+            },
+            governance: {
+                title: '字段治理',
+                desc: '统一维护字段定义、敏感级别、计算字段、共享范围、指标口径和跨数据集模型。'
             },
             cleaning: {
                 title: '数据清洗',
@@ -748,6 +741,14 @@
                 title: '智能分析',
                 desc: '调用大语言模型智能分析数据集，提供分析方向、推荐图表与报告摘要等深度洞察。'
             },
+            assets: {
+                title: '分析资产',
+                desc: '保存、共享和复跑当前图表、透视表与查询结果，沉淀可复用的分析成果。'
+            },
+            dashboards: {
+                title: '仪表盘',
+                desc: '组合分析资产形成协作看板，并配置刷新计划、快照和阈值告警。'
+            },
             history: {
                 title: '历史记录',
                 desc: '查看当前数据集在图表生成、数据透视、数据比对、导出和 SQL 查询中的历史记录。'
@@ -768,13 +769,11 @@
             ` : '');
         }
     }
-
     function renderHeader() {
         const activeTabEl = document.querySelector('.data-analysis-tab.active');
         const activeTabName = activeTabEl?.dataset.dataAnalysisTab || 'overview';
         updateToolbarHeader(activeTabName);
     }
-
     function renderOverview() {
         const body = document.getElementById('data-analysis-dataset-table-body');
         const pager = document.getElementById('data-analysis-dataset-pagination');
@@ -830,7 +829,6 @@
         }
         PivotSafeHtml.setHtml(pager, '');
     }
-
     async function previewDataset(id, page = 1, { silent = false } = {}) {
         const isModalOpen = !document.getElementById('data-analysis-preview-modal')?.classList.contains('hidden');
         if (!silent && !isModalOpen) {
@@ -858,7 +856,6 @@
             }
         }
     }
-
     function renderPreviewModal(dataset, page = 1, pageSize = 25) {
         const modal = document.getElementById('data-analysis-preview-modal');
         const title = document.getElementById('data-analysis-preview-modal-title');
@@ -941,6 +938,7 @@
         const columns = dataset?.columns || [];
         setSelectOptions('data-analysis-chart-x', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分类字段' }));
         setSelectOptions('data-analysis-chart-y', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择数值字段' }));
+        setSelectOptions('data-analysis-chart-y2', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择辅助数值字段' }));
         setSelectOptions('data-analysis-chart-group', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分组字段' }));
         syncChartAggregationControls('auto');
         syncChartTypeControls('auto');

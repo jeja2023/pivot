@@ -7,6 +7,9 @@ const exportsService = require('./data-analysis/export');
 const databaseImport = require('./data-analysis/database-import');
 const semanticAnalysis = require('./data-analysis/semantic-analysis');
 const cleaning = require('./data-analysis/cleaning');
+const governance = require('./data-analysis/governance');
+const semanticModels = require('./data-analysis/semantic-models');
+const scalability = require('./data-analysis/scalability');
 
 module.exports = {
     MAX_PREVIEW_ROWS: shared.MAX_PREVIEW_ROWS,
@@ -23,5 +26,8 @@ module.exports = {
     ...exportsService,
     ...databaseImport,
     ...semanticAnalysis,
-    ...cleaning
+    ...cleaning,
+    ...governance,
+    ...semanticModels,
+    ...scalability
 };

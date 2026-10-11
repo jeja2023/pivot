@@ -1,0 +1,1161 @@
+/* 数据分析治理、资产与仪表盘：沿用工作区与全局统一视觉设计，支持卡片式布局与功能弹窗。 */
+
+.data-analysis-governance-layout,
+.data-analysis-dashboard-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    width: 100%;
+}
+
+/* 统一顶部标头与工具栏（与数据清洗/智能分析保持一致） */
+.data-analysis-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+
+.data-analysis-panel-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.data-analysis-header-icon-badge {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: color-mix(in srgb, var(--primary) 12%, #ffffff);
+    color: var(--primary);
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.data-analysis-panel-header-intro {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.data-analysis-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.data-analysis-title-row h5 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: -0.01em;
+}
+
+.data-analysis-badge-safe {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--primary, #059669) 10%, #ffffff);
+    color: var(--primary, #059669);
+    border: 1px solid color-mix(in srgb, var(--primary, #059669) 25%, transparent);
+}
+
+.data-analysis-panel-header-intro p {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.data-analysis-panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+/* 统一数据集选择器控件 */
+.data-analysis-dataset-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    transition: all 0.15s ease;
+}
+
+.data-analysis-dataset-picker:hover {
+    border-color: var(--primary);
+}
+
+.data-analysis-dataset-picker svg {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.data-analysis-picker-label {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    white-space: nowrap;
+}
+
+.data-analysis-picker-select {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 6px !important;
+    margin: 0 !important;
+    height: 100% !important;
+    font-size: 0.78rem !important;
+    color: var(--text-main) !important;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none !important;
+    min-width: 140px;
+    box-shadow: none !important;
+}
+
+/* 状态通知条 */
+.data-analysis-status-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, 0.06);
+    border: 1px dashed rgba(148, 163, 184, 0.22);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.data-analysis-status-strip-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.data-analysis-status-strip-left svg {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.data-analysis-status-strip-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 卡片容器与标题 */
+.data-analysis-governance-card {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    background: var(--surface, #ffffff);
+    padding: 16px 18px;
+    min-width: 0;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
+    transition: border-color 0.15s ease;
+}
+
+.data-analysis-governance-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.data-analysis-card-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.data-analysis-card-title-wrap svg {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.data-analysis-governance-card h5 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.94rem;
+    font-weight: 700;
+}
+
+.data-analysis-governance-card p,
+.data-analysis-form-hint {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.5;
+}
+
+.data-analysis-subheading {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-align: left !important;
+}
+
+/* 网格布局 */
+.data-analysis-governance-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.grid-span-full {
+    grid-column: 1 / -1 !important;
+}
+
+/* 字段治理主表格 */
+.data-analysis-field-governance-card {
+    overflow: hidden;
+}
+
+.data-analysis-field-governance {
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.data-analysis-field-source {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-top: 3px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-analysis-governance-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.data-analysis-governance-table th {
+    position: sticky;
+    top: 0;
+    background: rgba(248, 250, 252, 0.98);
+    backdrop-filter: blur(4px);
+    z-index: 2;
+    padding: 8px 10px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.data-analysis-governance-table td {
+    vertical-align: middle;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.data-analysis-governance-table tr:hover td {
+    background: color-mix(in srgb, var(--primary) 3%, transparent);
+}
+
+.data-analysis-governance-table input,
+.data-analysis-governance-table select {
+    min-width: 90px;
+    width: 100%;
+    font-size: 0.76rem;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    padding: 0 8px;
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.data-analysis-governance-table select {
+    padding-right: 20px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    cursor: pointer;
+}
+
+.data-analysis-governance-table input:focus,
+.data-analysis-governance-table select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+    outline: none;
+}
+
+.data-analysis-governance-table td label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    font-size: 0.74rem;
+    color: var(--text-main);
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+/* 列表展示项 */
+.data-analysis-asset-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.data-analysis-asset-row,
+.data-analysis-dashboard-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 9px;
+    padding: 10px 14px;
+    background: var(--surface, #ffffff);
+    transition: all 0.15s ease;
+}
+
+.data-analysis-asset-row:hover,
+.data-analysis-dashboard-item:hover {
+    border-color: color-mix(in srgb, var(--primary) 40%, rgba(148, 163, 184, 0.18));
+    background: color-mix(in srgb, var(--primary) 2%, #ffffff);
+}
+
+.data-analysis-asset-info {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.data-analysis-asset-title-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.data-analysis-asset-info strong,
+.data-analysis-dashboard-item strong {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.data-analysis-asset-info span,
+.data-analysis-dashboard-item span {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+/* 标签样式 */
+.data-analysis-type-badge,
+.data-analysis-scope-badge,
+.data-analysis-status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(148, 163, 184, 0.1);
+    color: var(--text-muted);
+}
+
+.data-analysis-scope-badge.is-shared {
+    background: color-mix(in srgb, var(--primary) 10%, #ffffff);
+    color: var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+.data-analysis-status-tag.is-success {
+    background: rgba(22, 163, 74, 0.1);
+    color: #16a34a;
+}
+
+.data-analysis-status-tag.is-danger {
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+}
+
+/* 仪表盘布局 */
+.data-analysis-dashboard-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
+    align-items: start;
+    gap: 14px;
+}
+
+.data-analysis-dashboard-sidebar-card {
+    height: 100%;
+}
+
+.data-analysis-dashboard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.data-analysis-dashboard-list-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 9px;
+    padding: 10px 12px;
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: all 0.15s ease;
+}
+
+.data-analysis-dashboard-list-item:hover {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 4%, #ffffff);
+}
+
+.data-analysis-dashboard-list-item.active {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, #ffffff);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+
+.data-analysis-dashboard-list-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.data-analysis-dashboard-list-item strong {
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.data-analysis-dashboard-list-item span {
+    font-size: 0.73rem;
+    color: var(--text-muted);
+}
+
+.data-analysis-dashboard-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 120px;
+}
+
+.data-analysis-dashboard-item.restricted {
+    border-style: dashed;
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.data-analysis-warning-text {
+    color: #b45309 !important;
+    font-size: 0.73rem;
+}
+
+.data-analysis-dashboard-snapshot {
+    margin-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    padding-top: 10px;
+}
+
+.data-analysis-dashboard-snapshot-head {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.data-analysis-dashboard-snapshot-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 0;
+    font-size: 0.76rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.data-analysis-dashboard-snapshot-row strong {
+    color: var(--text-main);
+}
+
+.data-analysis-dashboard-snapshot-row .is-success {
+    color: #16a34a;
+    font-weight: 600;
+}
+
+.data-analysis-dashboard-snapshot-row .is-error {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+/* 仪表盘主内容头部的操作区与视图选择器 */
+.data-analysis-dashboard-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+}
+
+.data-analysis-dashboard-view-picker {
+    height: 32px !important;
+    min-height: 32px !important;
+    width: 210px !important;
+    max-width: 250px !important;
+    padding: 0 28px 0 10px !important;
+    font-size: 0.78rem !important;
+    line-height: 30px !important;
+    font-weight: 500 !important;
+    border-radius: 7px !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+    background-color: var(--surface, #ffffff) !important;
+    color: var(--text-main) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    cursor: pointer;
+    box-sizing: border-box !important;
+    transition: all 0.15s ease !important;
+}
+
+.data-analysis-dashboard-view-picker:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent) !important;
+    outline: none !important;
+}
+
+.data-analysis-dashboard-actions .btn-secondary,
+.data-analysis-dashboard-actions .btn-primary {
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 0.78rem !important;
+    border-radius: 7px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+}
+
+/* 跨数据集模型 */
+.data-analysis-model-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 8px;
+    padding: 9px 12px;
+    background: var(--surface, #ffffff);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.data-analysis-model-row:hover {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 3%, #ffffff);
+}
+
+.data-analysis-model-row.active {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, #ffffff);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+
+.data-analysis-model-relation-panel {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.data-analysis-model-relation-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.data-analysis-model-relation-subhead h6 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+/* 规模化数据管道模块 */
+.data-analysis-scalability-panel {
+    margin-top: 14px;
+}
+
+.data-analysis-scale-subtoolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.data-analysis-pipe-box {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 10px;
+    padding: 14px;
+    background: rgba(248, 250, 252, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.data-analysis-pipe-box-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.data-analysis-pipe-box-head svg {
+    color: var(--primary);
+}
+
+.data-analysis-pipe-box-head h6 {
+    margin: 0;
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.data-analysis-pipe-box small {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+/* 规模化数据管道：文件选择组件与精细控件 */
+.data-analysis-file-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 6px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    background: var(--surface, #ffffff);
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.data-analysis-file-picker-row:hover {
+    border-color: rgba(148, 163, 184, 0.38);
+}
+
+.data-analysis-file-picker-row:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.data-analysis-file-btn {
+    height: 28px !important;
+    padding: 0 10px !important;
+    font-size: 0.74rem !important;
+    border-radius: 6px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin: 0 !important;
+    white-space: nowrap !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+}
+
+.data-analysis-file-chosen-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    user-select: none;
+}
+
+.data-analysis-file-chosen-text.has-file {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.data-analysis-hidden-file-input {
+    display: none !important;
+}
+
+/* 原生 file input 的回退重置，防止未封装的 file input 撑大 */
+input[type="file"].form-input {
+    height: 34px !important;
+    padding: 3px 8px !important;
+    font-size: 0.75rem !important;
+    display: flex !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+}
+
+input[type="file"].form-input::file-selector-button,
+input[type="file"].form-input::-webkit-file-upload-button {
+    height: 26px !important;
+    padding: 0 10px !important;
+    font-size: 0.74rem !important;
+    border-radius: 5px !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+    background: var(--bg-side, rgba(148, 163, 184, 0.1)) !important;
+    color: var(--text-main) !important;
+    cursor: pointer !important;
+    margin-right: 8px !important;
+}
+
+/* 管道卡片中的紧凑控件 */
+.data-analysis-pipe-select,
+.data-analysis-pipe-input {
+    height: 32px !important;
+    min-height: 32px !important;
+    font-size: 0.78rem !important;
+    line-height: 30px !important;
+    padding: 0 10px !important;
+    border-radius: 7px !important;
+    border: 1px solid rgba(148, 163, 184, 0.22) !important;
+    background-color: var(--surface, #ffffff) !important;
+    color: var(--text-main) !important;
+    transition: all 0.15s ease !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.data-analysis-pipe-select {
+    padding-right: 26px !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    cursor: pointer;
+}
+
+.data-analysis-pipe-select:focus,
+.data-analysis-pipe-input:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 12%, transparent) !important;
+    outline: none !important;
+}
+
+.data-analysis-pipe-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+/* 统一数据分析按钮与图标垂直对齐及间距 */
+.data-analysis-governance-layout button,
+.data-analysis-dashboard-layout button,
+.data-analysis-status-strip-actions button,
+.data-analysis-panel-header-actions button,
+.data-analysis-inline-actions button,
+.data-analysis-governance-card button,
+.data-analysis-dialog-modal button,
+.data-analysis-dialog-modal .btn-secondary,
+.data-analysis-dialog-modal .btn-primary,
+.data-analysis-file-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    vertical-align: middle !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    box-sizing: border-box !important;
+}
+
+.data-analysis-status-strip-actions .btn-sm,
+.data-analysis-panel-header-actions .btn-sm,
+.data-analysis-inline-actions .btn-sm,
+.data-analysis-governance-card .btn-sm,
+.data-analysis-dialog-modal .btn-sm,
+.data-analysis-file-btn {
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    border-radius: 7px !important;
+}
+
+.data-analysis-dialog-modal .data-analysis-modal-footer button {
+    height: 34px !important;
+    padding: 0 16px !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    border-radius: 7px !important;
+}
+
+/* 按钮内部 SVG 图标规整与居中 */
+.data-analysis-governance-layout button svg,
+.data-analysis-dashboard-layout button svg,
+.data-analysis-status-strip-actions button svg,
+.data-analysis-panel-header-actions button svg,
+.data-analysis-inline-actions button svg,
+.data-analysis-governance-card button svg,
+.data-analysis-dialog-modal button svg,
+.data-analysis-dialog-modal .btn-secondary svg,
+.data-analysis-dialog-modal .btn-primary svg,
+.data-analysis-file-btn svg {
+    flex-shrink: 0 !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    margin: 0 !important;
+}
+
+/* 按钮内部文字 span 居中 */
+.data-analysis-governance-layout button span,
+.data-analysis-dashboard-layout button span,
+.data-analysis-status-strip-actions button span,
+.data-analysis-panel-header-actions button span,
+.data-analysis-inline-actions button span,
+.data-analysis-governance-card button span,
+.data-analysis-dialog-modal button span,
+.data-analysis-dialog-modal .btn-secondary span,
+.data-analysis-dialog-modal .btn-primary span,
+.data-analysis-file-btn span {
+    display: inline-block !important;
+    line-height: 1 !important;
+    vertical-align: middle !important;
+}
+
+/* 通用弹窗模态样式 (Dialog Modals) */
+.data-analysis-dialog-modal {
+    width: min(540px, 92vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 24px;
+    border-radius: 14px;
+    background: var(--surface, #ffffff);
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.22);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    text-align: left !important;
+    animation: dataAnalysisModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dataAnalysisModalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.data-analysis-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    text-align: left !important;
+}
+
+.data-analysis-modal-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left !important;
+}
+
+.data-analysis-modal-title-group > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start !important;
+    text-align: left !important;
+}
+
+.data-analysis-modal-icon {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.data-analysis-modal-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main);
+    text-align: left !important;
+    line-height: 1.3;
+}
+
+.data-analysis-modal-header p {
+    margin: 2px 0 0;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-align: left !important;
+    line-height: 1.4;
+}
+
+.data-analysis-modal-close-btn {
+    display: none !important;
+}
+
+.data-analysis-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 0;
+    text-align: left !important;
+}
+
+.data-analysis-modal-body > * {
+    text-align: left !important;
+}
+
+.data-analysis-dialog-modal .data-analysis-subheading {
+    text-align: left !important;
+}
+
+.data-analysis-dialog-modal .data-analysis-asset-list {
+    text-align: left !important;
+}
+
+.data-analysis-dialog-modal .data-analysis-asset-item {
+    text-align: left !important;
+}
+
+.data-analysis-modal-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    text-align: left !important;
+}
+
+.data-analysis-modal-form-grid label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start !important;
+    text-align: left !important;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-main);
+    width: 100%;
+}
+
+.data-analysis-label-title {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    color: var(--text-main) !important;
+    line-height: 1.2 !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+}
+
+.data-analysis-label-title .required,
+.required {
+    color: #ef4444 !important;
+    margin-left: 2px !important;
+    display: inline !important;
+    font-size: 0.85rem !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    vertical-align: baseline !important;
+}
+
+.data-analysis-dialog-modal label {
+    text-align: left !important;
+}
+
+.data-analysis-dialog-modal .data-analysis-share-toggle {
+    display: flex !important;
+    align-items: center !important;
+    text-align: left !important;
+}
+
+.data-analysis-modal-form-grid input,
+.data-analysis-modal-form-grid select {
+    width: 100% !important;
+    height: 34px;
+    min-height: 34px;
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 32px;
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    padding: 0 10px;
+    background-color: var(--surface, #ffffff);
+    color: var(--text-main);
+    text-align: left !important;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.data-analysis-modal-form-grid select {
+    padding-right: 28px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    cursor: pointer;
+}
+
+.data-analysis-modal-form-grid textarea {
+    width: 100% !important;
+    min-height: 70px;
+    font-size: 0.8rem;
+    font-weight: 400;
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    padding: 8px 10px;
+    background-color: var(--surface, #ffffff);
+    color: var(--text-main);
+    text-align: left !important;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+    resize: vertical;
+}
+
+.data-analysis-modal-form-grid input:focus,
+.data-analysis-modal-form-grid select:focus,
+.data-analysis-modal-form-grid textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+    outline: none;
+}
+
+.data-analysis-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.data-analysis-calc-modal-dialog {
+    width: min(640px, 94vw);
+}
+
+.data-analysis-scalability-modal-dialog {
+    width: min(840px, 95vw);
+}
+
+.data-analysis-inline-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+
+.required {
+    color: #ef4444;
+}
+
+/* 暗黑模式色彩与图标适配 */
+body.dark-mode .data-analysis-dashboard-view-picker,
+.dark-mode .data-analysis-dashboard-view-picker,
+body.dark-mode .data-analysis-pipe-select,
+.dark-mode .data-analysis-pipe-select,
+body.dark-mode .data-analysis-modal-form-grid select,
+.dark-mode .data-analysis-modal-form-grid select,
+body.dark-mode .data-analysis-governance-table select,
+.dark-mode .data-analysis-governance-table select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
+body.dark-mode .data-analysis-file-picker-row,
+.dark-mode .data-analysis-file-picker-row {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+/* 响应式适配 */
+@media (max-width: 980px) {
+    .data-analysis-panel-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .data-analysis-panel-header-actions {
+        justify-content: flex-start;
+    }
+    .data-analysis-dashboard-layout {
+        grid-template-columns: 1fr;
+    }
+    .data-analysis-governance-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .data-analysis-dashboard-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    .data-analysis-dashboard-view-picker {
+        width: 100% !important;
+        max-width: none !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .data-analysis-modal-form-grid,
+    .data-analysis-pipe-form-grid {
+        grid-template-columns: 1fr;
+    }
+    .data-analysis-status-strip {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

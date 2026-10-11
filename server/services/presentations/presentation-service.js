@@ -6,6 +6,7 @@ const path = require('path');
 const { Worker } = require('worker_threads');
 const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
+const { canonicalJson } = require('../canonical-json');
 const { assertTenantContext } = require('../agent-tenant-context');
 const { createStandaloneArtifact, getAgentArtifactForUser } = require('../agent-artifacts');
 const { buildCasRef, incrementRefCount, parseCasRef, putBuffer, readBuffer, statObject } = require('../agent-artifact-cas');
@@ -24,6 +25,7 @@ const { createRemoteService } = require('./presentation-remote-service');
 const { createExportService } = require('./presentation-export-service');
 const { createPresentationTemplateService } = require('./presentation-template-service');
 const { createPresentationAssetService } = require('./presentation-asset-service');
+const { MAX_SOURCE_EXCERPT_CHARS, sha256 } = require('./presentation-evidence');
 
 const MAX_TITLE_LENGTH = 160;
 
@@ -54,6 +56,38 @@ function normalizeTitle(value) {
 function normalizeTags(value) {
     const raw = Array.isArray(value) ? value : String(value || '').split(/[，,]/);
     return [...new Set(raw.map(item => String(item || '').trim().replace(/\s+/g, ' ').slice(0, 32)).filter(Boolean))].slice(0, 12);
+}
+
+function attachApprovedOutline(content, planApproval, user) {
+    if (!planApproval?.outline || typeof planApproval.outline !== 'object') return content;
+    const outline = planApproval.outline;
+    const approval = {
+        status: 'approved',
+        approvalMethod: 'interactive_outline_review',
+        approvedAt: new Date().toISOString(),
+        approvedBy: String(user.id),
+        outlineDigest: crypto.createHash('sha256').update(canonicalJson(outline)).digest('hex'),
+        outline
+    };
+    return normalizePresentation({ ...content, metadata: { ...(content.metadata || {}), planApproval: approval } });
+}
+
+function withoutPlanApproval(content) {
+    return {
+        ...(content || {}),
+        metadata: { ...((content && content.metadata) || {}), planApproval: null }
+    };
+}
+
+function preserveSlideReviews(previousContent, submittedContent, { allowReviewMutation = false } = {}) {
+    const previous = new Map((previousContent?.slides || []).map(slide => [slide.id, slide.review || { status: 'draft', approvedAt: '', approvedBy: '' }]));
+    return {
+        ...(submittedContent || {}),
+        slides: (submittedContent?.slides || []).map(slide => ({
+            ...slide,
+            review: allowReviewMutation ? slide.review : (previous.get(slide.id) || { status: 'draft', approvedAt: '', approvedBy: '' })
+        }))
+    };
 }
 
 function normalizeDepartmentName(value) {
@@ -284,7 +318,7 @@ function presentationFromArtifactText({ title, template, text, artifactId }) {
             { id: 'body', type: 'text', x: 100, y: 165, width: 1040, height: 430, rotation: 0, zIndex: 9, locked: false, visible: true, sourceRefs: ['artifact_source'], content: { text: chunk.slice(0, 2400) }, style: { fontFamily: template.definition.theme.fonts.body, fontSize: 20, fontWeight: 400, color: template.definition.theme.colors.text, align: 'left', verticalAlign: 'top', lineHeight: 1.35, italic: false, underline: false, bullet: false, padding: 0 } }
         ], speakerNotes: '', sourceRefs: ['artifact_source']
     }));
-    return { title, aspectRatio: template.aspectRatio, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }, theme: template.definition.theme, slides: pages, sources: [{ id: 'artifact_source', title: '智能体产物 ' + artifactId, type: 'agent_artifact', locator: String(artifactId), digest: '' }], metadata: { aiGenerated: false, language: 'zh-CN' } };
+    return { title, aspectRatio: template.aspectRatio, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }, theme: template.definition.theme, slides: pages, sources: [{ id: 'artifact_source', title: '智能体产物 ' + artifactId, type: 'agent_artifact', locator: String(artifactId), digest: sha256(text), excerpt: text.slice(0, MAX_SOURCE_EXCERPT_CHARS), excerptTruncated: text.length > MAX_SOURCE_EXCERPT_CHARS }], metadata: { aiGenerated: false, language: 'zh-CN' } };
 }
 
 async function createPresentationFromArtifact(user, artifactId, body = {}) {
@@ -307,9 +341,10 @@ async function createPresentation(user, body = {}) {
     const requestedTemplateVersion = body.templateVersion || body.template_version || body.template?.version;
     const template = requestedTemplateVersion ? await resolveTemplateVersionForUser(user, requestedTemplateId, requestedTemplateVersion) : await resolveTemplateForUser(user, requestedTemplateId);
     if (!template) throw publicError('所选模板不存在或无权使用。', 404, 'PRESENTATION_TEMPLATE_NOT_FOUND');
-    let content = body.content ? normalizePresentation({ ...body.content, presentationId: clientId, title, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }, theme: body.content.theme || template.definition.theme }) : defaultPresentation({ presentationId: clientId, title, template, aspectRatio: body.aspectRatio || template.aspectRatio });
+    let content = body.content ? normalizePresentation({ ...withoutPlanApproval(body.content), presentationId: clientId, title, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }, theme: body.content.theme || template.definition.theme }) : defaultPresentation({ presentationId: clientId, title, template, aspectRatio: body.aspectRatio || template.aspectRatio });
     content = applyTemplateLayoutLayers(content, template, { reflow: true });
     content = applyTemplateBrandControls(content, template);
+    content = attachApprovedOutline(content, body.planApproval || body.plan_approval, user);
     await assertPresentationAssetOwnership(user, content);
     const validation = runPresentationValidation(content);
     const artifact = await createStandaloneArtifact(user, {
@@ -332,7 +367,7 @@ async function createPresentation(user, body = {}) {
     return await getPresentation(user, clientId);
 }
 
-async function savePresentationContent(user, clientId, body = {}) {
+async function savePresentationContent(user, clientId, body = {}, options = {}) {
     const current = await getPresentationRow(user, clientId, { includeContent: true });
     if (!current) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
     assertPresentationEditor(user, current);
@@ -360,7 +395,10 @@ async function savePresentationContent(user, clientId, body = {}) {
     }
     const activeTemplate = await resolveTemplateVersionForUser(user, templateId, templateVersion, { historical: true }) || await resolveTemplateForUser(user, templateId);
     if (!activeTemplate) throw publicError('所选模板不存在或无权使用。', 404, 'PRESENTATION_TEMPLATE_NOT_FOUND');
-    let content = normalizePresentation({ ...(body.content || {}), presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
+    const previousContent = parseJson(current.content_json, {});
+    const submittedMetadata = { ...((body.content && body.content.metadata) || {}), planApproval: previousContent.metadata?.planApproval || null };
+    const reviewSafeContent = preserveSlideReviews(previousContent, body.content || {}, { allowReviewMutation: options.allowReviewMutation === true });
+    let content = normalizePresentation({ ...reviewSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
     content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow' });
     content = applyTemplateBrandControls(content, activeTemplate);
     const trustedAssetRefs = collectPresentationAssetRefs(parseJson(current.content_json, {}));
@@ -477,6 +515,25 @@ async function rollbackPresentation(user, clientId, version, note = '') {
     return await savePresentationContent(user, clientId, { baseVersion: current.version, title: current.title, content: target.content, note: String(note || `恢复版本 ${target.version}`).slice(0, 500) });
 }
 
+async function reviewPresentationSlide(user, clientId, slideId, approved = true) {
+    const current = await getPresentation(user, clientId);
+    if (!current?.content) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
+    const editable = await getPresentationRow(user, clientId, { includeContent: false });
+    assertPresentationEditor(user, editable);
+    const content = JSON.parse(JSON.stringify(current.content));
+    const slide = content.slides.find(item => String(item.id) === String(slideId));
+    if (!slide) throw publicError('页面不存在。', 404, 'PRESENTATION_SLIDE_NOT_FOUND');
+    slide.review = approved
+        ? { status: 'approved', approvedAt: new Date().toISOString(), approvedBy: String(user.id) }
+        : { status: 'draft', approvedAt: '', approvedBy: '' };
+    return await savePresentationContent(user, clientId, {
+        baseVersion: current.version,
+        title: current.title,
+        content,
+        note: approved ? `批准页面 ${slide.index + 1}` : `解除页面 ${slide.index + 1} 的批准`
+    }, { allowReviewMutation: true });
+}
+
 const assetService = createPresentationAssetService({
     publicError,
     normalizeDepartmentName,
@@ -577,6 +634,7 @@ module.exports = {
     publishPresentationAsset,
     inferPresentationAssetType,
     getPresentationAssetByRef,
+    resolvePresentationAssets,
     getPresentationVersion,
     listPresentationCollaborators,
     listCollaboratorCandidates,
@@ -599,6 +657,7 @@ module.exports = {
     resolveTemplateForUser,
     resolveTemplateVersionForUser,
     resolvePresentationComment,
+    reviewPresentationSlide,
     rollbackPresentation,
     savePresentationContent,
     updatePresentationMetadata,

@@ -456,17 +456,30 @@
             const dataset = state.dataSets.find(item => String(item.id) === String(datasetId));
             const content = state.active?.content;
             if (content && !content.sources.some(source => source.id === sourceId)) {
-                content.sources.push({ id: sourceId, title: dataset?.name || `数据集 ${datasetId}`, type: 'data_analysis', locator: chart.binding?.queryDigest || '', digest: '' });
+                content.sources.push({ id: sourceId, title: dataset?.name || `数据集 ${datasetId}`, type: 'data_analysis', locator: chart.binding?.queryDigest || '', digest: '', excerpt: chart.binding?.queryDigest ? `查询口径：${chart.binding.queryDigest}` : '', excerptTruncated: false });
             }
             const slide = content?.slides?.find(s => s.id === state.selectedSlideId) || content?.slides?.[0];
             if (slide) {
-                slide.elements.push({ id, ...chart, x: 180, y: 210, width: 720, height: 360, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [sourceId] });
+                slide.elements.push({ id, ...chart, x: 180, y: 185, width: 720, height: 315, rotation: 0, zIndex: 7, locked: false, visible: true, sourceRefs: [sourceId] });
+                if (byId('presentation-chart-insert-narrative')?.checked !== false && chart.narrative?.annotation) {
+                    slide.elements.push({ id: `chart_note_${Date.now()}`, type: 'text', x: 180, y: 525, width: 720, height: 66, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [sourceId], content: { text: chart.narrative.annotation }, style: { fontFamily: content.theme?.fonts?.body || 'Microsoft YaHei', fontSize: 17, fontWeight: 400, color: content.theme?.colors?.text, align: 'left', verticalAlign: 'middle', lineHeight: 1.3, italic: false, underline: false, bullet: false, padding: 0 } });
+                    slide.speakerNotes = [slide.speakerNotes, chart.narrative.headline, `数据口径：${chart.binding?.queryDigest || '见数据来源引用'}`].filter(Boolean).join('\n');
+                }
+                if (byId('presentation-chart-create-backup')?.checked && chart.narrative?.backupRows?.length) {
+                    const index = content.slides.findIndex(item => item.id === slide.id);
+                    const backupId = `slide_backup_${Date.now()}`;
+                    content.slides.splice(index + 1, 0, { id: backupId, index: index + 1, type: 'appendix', layoutId: 'table', sectionId: slide.sectionId || '', background: { fill: content.theme?.colors?.background, imageAssetRef: '', opacity: 1 }, elements: [
+                        { id: 'title', type: 'text', x: 80, y: 58, width: 1120, height: 72, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [sourceId], content: { text: `${chart.title || '数据图表'} 数据明细` }, style: { fontFamily: content.theme?.fonts?.heading || 'Microsoft YaHei', fontSize: 30, fontWeight: 700, color: content.theme?.colors?.text, align: 'left', verticalAlign: 'middle', lineHeight: 1.2, italic: false, underline: false, bullet: false, padding: 0 } },
+                        { id: 'data_table', type: 'table', x: 80, y: 160, width: 1120, height: 420, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [sourceId], columns: chart.data.columns, rows: chart.narrative.backupRows, style: { headerFill: content.theme?.colors?.primary, cellColor: content.theme?.colors?.text, fontSize: 15 } }
+                    ], speakerNotes: `本页为“${chart.title || '数据图表'}”的数据明细与口径备份。`, sourceRefs: [sourceId], review: { status: 'draft', approvedAt: '', approvedBy: '' }, transition: { type: 'none', durationMs: 0, direction: '' } });
+                    content.slides.forEach((item, slideIndex) => { item.index = slideIndex; });
+                }
             }
             state.selectedElementId = id;
             byId('presentation-data-chart-modal')?.classList.add('hidden');
             recordHistory?.();
             renderEditor?.();
-            toast?.('数据图表已插入，来源引用已保留。');
+            toast?.(`数据图表已插入，来源引用已保留。推荐图表类型：${chart.narrative?.recommendation || chart.chartType}。`);
         } finally {
             button?.removeAttribute('disabled');
             if (button) button.textContent = '插入图表';
@@ -544,7 +557,7 @@
             await saveActive?.({ force: true });
             const options = state.exportOptions || {};
             const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({
-                format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
+                format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, allowSensitiveExport: options.allowSensitiveExport === true, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
                 ...(format === 'png' ? { slideIndex: activeSlide?.()?.index || 0 } : {})
             }));
             const rendition = created.rendition;
@@ -816,6 +829,127 @@
         return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId));
     }
 
+    function renderEvidence(state) {
+        const list = byId('presentation-evidence-list'); if (!list) return;
+        list.replaceChildren();
+        const content = state.active?.content; const sources = content?.sources || [];
+        const approvedOutline = content?.metadata?.planApproval;
+        if (approvedOutline?.status === 'approved') {
+            const plan = document.createElement('article'); plan.className = 'presentation-evidence-card';
+            const title = document.createElement('strong'); title.textContent = '已确认演示大纲';
+            const sectionCount = approvedOutline.outline?.sections?.length || 0;
+            const slideCount = (approvedOutline.outline?.sections || []).reduce((total, section) => total + (section.slides || []).length, 0);
+            const meta = document.createElement('span'); meta.textContent = `${sectionCount} 个章节 · ${slideCount} 页 · ${approvedOutline.approvedAt || '已记录确认时间'}`;
+            plan.append(title, meta); list.appendChild(plan);
+        }
+        if (!sources.length) {
+            const empty = document.createElement('div'); empty.className = 'presentation-empty-note'; empty.textContent = '当前文稿没有可展示的来源证据。生成时添加材料，或为关键结论关联数据来源。'; list.appendChild(empty); return;
+        }
+        sources.forEach(source => {
+            const references = (content.slides || []).reduce((count, slide) => count + (slide.sourceRefs || []).filter(ref => ref === source.id).length + (slide.elements || []).reduce((elementCount, element) => elementCount + (element.sourceRefs || []).filter(ref => ref === source.id).length, 0), 0);
+            const card = document.createElement('article'); card.className = 'presentation-evidence-card';
+            const title = document.createElement('strong'); title.textContent = source.title || source.id;
+            const meta = document.createElement('span'); meta.textContent = `${source.locator || source.type || '材料'} · 已引用 ${references} 处`;
+            card.append(title, meta);
+            if (source.digest) { const digest = document.createElement('code'); digest.textContent = 'SHA-256 ' + String(source.digest).slice(0, 16) + '…'; card.appendChild(digest); }
+            if (source.excerpt) { const excerpt = document.createElement('p'); excerpt.textContent = source.excerpt + (source.excerptTruncated ? '…' : ''); card.appendChild(excerpt); }
+            list.appendChild(card);
+        });
+    }
+
+    function formatChangeImpact(impact = {}) {
+        const counts = impact.counts || {};
+        const details = (impact.changes || []).slice(0, 6).map(change => {
+            const label = change.kind === 'added' ? '新增' : change.kind === 'removed' ? '移除' : '修改';
+            const description = change.after || change.before || change.elementType || '元素';
+            return `${label}“${description}”${change.fields?.length ? `（${change.fields.join('、')}）` : ''}`;
+        });
+        return `${impact.summary || `当前页将新增 ${counts.added || 0} 项、修改 ${counts.updated || 0} 项、移除 ${counts.removed || 0} 项。`}${details.length ? ` 变更明细：${details.join('；')}。` : ''}`;
+    }
+
+    async function reviewActiveSlide(state, approved, { renderEditor, resetHistory, toast } = {}) {
+        const presentationId = state.active?.id;
+        const slideId = state.selectedSlideId || state.active?.content?.slides?.[0]?.id;
+        if (!presentationId || !slideId) return;
+        const data = await requestJson(`${API}/${encodeURIComponent(presentationId)}/slides/${encodeURIComponent(slideId)}/review`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved })
+        });
+        state.active = data.presentation;
+        state.selectedSlideId = slideId;
+        state.selectedElementId = '';
+        state.selectedElementIds = [];
+        state.dirty = false;
+        resetHistory?.();
+        renderEditor?.();
+        toast?.(approved ? '当前页面已批准并锁定编辑。' : '当前页面已解除批准，可继续编辑。');
+    }
+
+    async function loadDeliveryGuide(state, { toast } = {}) {
+        if (!state.active?.id) return;
+        const target = byId('presentation-delivery-guide');
+        if (target) { target.classList.remove('hidden'); target.textContent = '正在生成演讲交付建议…'; }
+        try {
+            const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/delivery-guide`);
+            const guide = data.guide || {};
+            if (!target) return;
+            target.replaceChildren();
+            const heading = document.createElement('strong'); heading.textContent = `预计讲解 ${guide.estimatedMinutes || 1} 分钟`;
+            const summary = document.createElement('p'); summary.textContent = `共 ${guide.perSlide?.length || 0} 页，建议预留提问与过渡时间。`;
+            target.append(heading, summary);
+            if (guide.questions?.length) {
+                const questionTitle = document.createElement('b'); questionTitle.textContent = '可能被问到的问题'; const list = document.createElement('div'); list.className = 'presentation-delivery-guide-questions';
+                guide.questions.forEach(question => { const item = document.createElement('p'); item.textContent = question; list.appendChild(item); }); target.append(questionTitle, list);
+            }
+            if (guide.backupSlides?.length) {
+                const backup = document.createElement('p'); backup.textContent = `建议准备备份页：${guide.backupSlides.map(item => item.title).join('；')}`; target.appendChild(backup);
+            }
+        } catch (error) {
+            if (target) target.textContent = '未能生成演讲交付建议，请稍后重试。';
+            toast?.(error.message || '未能生成演讲交付建议。', 'error');
+        }
+    }
+
+    function renderLayoutVariants(state) {
+        const target = byId('presentation-layout-variants'); if (!target) return;
+        const variants = state.layoutVariantSlideId === state.selectedSlideId ? (state.layoutVariants || []) : [];
+        target.replaceChildren(); target.classList.toggle('hidden', variants.length === 0);
+        variants.forEach(variant => {
+            const card = document.createElement('article'); card.className = 'presentation-layout-variant';
+            const title = document.createElement('strong'); title.textContent = variant.name;
+            const description = document.createElement('p'); description.textContent = variant.description;
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary'; button.dataset.presentationLayoutVariant = variant.id; button.textContent = '应用此方案';
+            card.append(title, description, button); target.appendChild(card);
+        });
+    }
+
+    async function generateLayoutVariants(state, { renderEditor, toast } = {}) {
+        const slide = state.active?.content?.slides?.find(item => item.id === state.selectedSlideId) || state.active?.content?.slides?.[0];
+        if (!state.active?.id || !slide) return;
+        const target = byId('presentation-layout-variants');
+        if (target) { target.classList.remove('hidden'); target.textContent = '正在生成原生版式方案…'; }
+        try {
+            const data = await requestJson(`${API}/layout-variants`, jsonOptions({ presentationId: state.active.id, aspectRatio: state.active.content.aspectRatio, slide }));
+            state.layoutVariantSlideId = slide.id;
+            state.layoutVariants = data.variants || [];
+            renderLayoutVariants(state);
+        } catch (error) {
+            if (target) { target.classList.remove('hidden'); target.textContent = '未能生成版式方案，请稍后重试。'; }
+            toast?.(error.message || '未能生成版式方案。', 'error');
+        }
+    }
+
+    function applyLayoutVariant(variantId, state, { recordHistory, renderEditor, toast } = {}) {
+        const variant = (state.layoutVariants || []).find(item => item.id === variantId);
+        const content = state.active?.content;
+        const current = content?.slides?.find(item => item.id === state.selectedSlideId);
+        if (!variant?.slide || !current || state.layoutVariantSlideId !== current.id || current.review?.status === 'approved') return;
+        const replacement = JSON.parse(JSON.stringify(variant.slide));
+        replacement.id = current.id; replacement.index = current.index; replacement.review = current.review;
+        const index = content.slides.findIndex(item => item.id === current.id);
+        content.slides[index] = replacement;
+        recordHistory?.(); renderEditor?.(); toast?.(`已应用“${variant.name}”版式方案。`);
+    }
+
     window.Pivot?.exposeModule?.('apps.presentations.presenter', {
         ready: true,
         startRemotePresentation,
@@ -850,6 +984,13 @@
         renderTableElement,
         renderChartElement,
         renderOutlineReview,
-        collectOutlineFromReview
+        collectOutlineFromReview,
+        renderEvidence,
+        formatChangeImpact,
+        reviewActiveSlide,
+        loadDeliveryGuide,
+        renderLayoutVariants,
+        generateLayoutVariants,
+        applyLayoutVariant
     });
 })();

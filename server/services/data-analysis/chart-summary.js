@@ -35,7 +35,7 @@ function normalizeChartSort(input, chartType) {
     return { sortBy, sortOrder };
 }
 
-function buildChartOption({ chartType, title, labels, series, xName, yName, colors = CHART_COLORS }) {
+function buildChartOption({ chartType, title, labels, series, xName, yName, secondaryYName = '', colors = CHART_COLORS }) {
     if (chartType === 'pie') {
         return {
             title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
@@ -51,7 +51,50 @@ function buildChartOption({ chartType, title, labels, series, xName, yName, colo
             }]
         };
     }
-    const normalizedType = chartType === 'area' ? 'line' : chartType;
+    if (chartType === 'funnel') {
+        return {
+            title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+            color: colors,
+            tooltip: { trigger: 'item' },
+            series: [{ name: yName, type: 'funnel', left: '10%', top: 62, bottom: 26, width: '80%', minSize: '12%', maxSize: '100%', sort: 'descending', data: labels.map((label, index) => ({ name: label, value: series[0]?.data?.[index] || 0 })) }]
+        };
+    }
+    if (chartType === 'scatter') {
+        return {
+            title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+            color: colors,
+            tooltip: { trigger: 'axis', confine: true },
+            grid: { left: 68, right: 32, top: 76, bottom: 64, containLabel: true },
+            xAxis: { type: 'value', name: xName, nameLocation: 'middle', nameGap: 38 },
+            yAxis: { type: 'value', name: yName, nameLocation: 'middle', nameRotate: 90, nameGap: 56 },
+            series: series.map(item => ({ name: item.name, type: 'scatter', symbolSize: 8, data: item.data }))
+        };
+    }
+    if (chartType === 'heatmap') {
+        const rowLabels = series?.[0]?.rowLabels || [];
+        return {
+            title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+            tooltip: { position: 'top' },
+            grid: { left: 92, right: 50, top: 92, bottom: 64, containLabel: true },
+            xAxis: { type: 'category', name: xName, data: labels, splitArea: { show: true } },
+            yAxis: { type: 'category', name: secondaryYName || '分组', data: rowLabels, splitArea: { show: true } },
+            visualMap: { min: 0, max: Math.max(1, ...((series?.[0]?.data || []).map(item => Number(item[2]) || 0))), calculable: true, orient: 'horizontal', left: 'center', bottom: 10 },
+            series: [{ name: yName, type: 'heatmap', data: series?.[0]?.data || [], label: { show: false }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,.25)' } } }]
+        };
+    }
+    if (chartType === 'boxplot') {
+        return {
+            title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
+            color: colors,
+            tooltip: { trigger: 'item', confine: true },
+            grid: { left: 68, right: 32, top: 76, bottom: 64, containLabel: true },
+            xAxis: { type: 'category', name: xName, data: labels, axisLabel: { hideOverlap: true } },
+            yAxis: { type: 'value', name: yName, nameLocation: 'middle', nameRotate: 90, nameGap: 56 },
+            series: [{ name: yName, type: 'boxplot', data: series?.[0]?.data || [] }]
+        };
+    }
+    const normalizedType = chartType === 'area' ? 'line' : (chartType === 'stacked_bar' || chartType === 'dual_axis' ? 'bar' : chartType);
+    const dualAxis = chartType === 'dual_axis';
     return {
         title: { text: title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } },
         color: colors,
@@ -66,37 +109,139 @@ function buildChartOption({ chartType, title, labels, series, xName, yName, colo
             axisLabel: { hideOverlap: true, margin: 12 },
             data: labels
         },
-        yAxis: {
-            type: 'value',
-            name: yName,
-            nameLocation: 'middle',
-            nameRotate: 90,
-            nameGap: 56
-        },
+        yAxis: dualAxis ? [{ type: 'value', name: yName, nameLocation: 'middle', nameRotate: 90, nameGap: 56 }, { type: 'value', name: secondaryYName, nameLocation: 'middle', nameRotate: 90, nameGap: 56 }] : { type: 'value', name: yName, nameLocation: 'middle', nameRotate: 90, nameGap: 56 },
         series: series.map(item => ({
             name: item.name,
-            type: normalizedType,
+            type: dualAxis && item.axis === 1 ? 'line' : normalizedType,
             data: item.data,
-            smooth: normalizedType === 'line',
+            yAxisIndex: dualAxis ? (item.axis || 0) : undefined,
+            stack: chartType === 'stacked_bar' ? 'total' : undefined,
+            smooth: normalizedType === 'line' || (dualAxis && item.axis === 1),
             areaStyle: chartType === 'area' ? {} : undefined
         }))
     };
 }
 
+function percentile(values, ratio) {
+    if (!values.length) return 0;
+    const position = (values.length - 1) * ratio;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    return values[lower] + (values[upper] - values[lower]) * (position - lower);
+}
+
+async function recordAdvancedChart({ actor, datasetId, chart, metadata }) {
+    await recordArtifact({ userId: actor.id, datasetId, type: 'chart', title: chart.title, content: JSON.stringify(chart), metadata });
+}
+
+async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCol, yCol, y2Col, groupCol, aggregation, limit, colorPalette, colors, sortBy, sortOrder }) {
+    const { parquetPath } = getDatasetPaths(row);
+    const title = String(input.title || `${xCol.name}${chartType === 'scatter' ? `与${yCol?.name || ''}` : `${aggregation === 'count' ? '数量' : yCol?.name || ''}分析`}`).slice(0, 120);
+    const metadata = { chartType, xField: xCol.key, yField: yCol?.key || '', y2Field: y2Col?.key || '', groupField: groupCol?.key || '', aggregation, limit, sortBy, sortOrder, colorPalette };
+    if (chartType === 'scatter') {
+        const rows = await withAnalysisSlot(() => duckReadAll(`
+            SELECT TRY_CAST(${sqlIdent(xCol.key)} AS DOUBLE) AS x, TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) AS y
+            FROM read_parquet(${sqlLiteral(parquetPath)})
+            WHERE TRY_CAST(${sqlIdent(xCol.key)} AS DOUBLE) IS NOT NULL AND TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) IS NOT NULL
+            LIMIT ${Math.min(limit * 100, 5000)}
+        `));
+        const series = [{ name: yCol.name, data: rows.map(item => [Number(item.x), Number(item.y)]) }];
+        const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation: 'raw' }, labels: [], series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
+        chart.echartsOption = buildChartOption({ chartType, title, labels: [], series, xName: xCol.name, yName: yCol.name, colors });
+        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        return { chart, rows };
+    }
+    if (chartType === 'boxplot') {
+        const raw = await withAnalysisSlot(() => duckReadAll(`
+            SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label,
+                   TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) AS value
+            FROM read_parquet(${sqlLiteral(parquetPath)})
+            WHERE TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) IS NOT NULL
+            LIMIT 20000
+        `));
+        const groups = new Map();
+        raw.forEach(item => { const values = groups.get(String(item.label)) || []; values.push(Number(item.value)); groups.set(String(item.label), values); });
+        const entries = [...groups.entries()].map(([label, values]) => ({ label, values: values.sort((a, b) => a - b) })).sort((a, b) => b.values.length - a.values.length).slice(0, limit);
+        const labels = entries.map(item => item.label);
+        const series = [{ name: yCol.name, data: entries.map(item => [item.values[0], percentile(item.values, .25), percentile(item.values, .5), percentile(item.values, .75), item.values.at(-1)]) }];
+        const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation: 'distribution' }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: raw.length, sampled: raw.length >= 20000 } };
+        chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol.name, colors });
+        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        return { chart, rows: entries };
+    }
+    const valueExpr = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE))`;
+    const groupExpression = groupCol ? `, COALESCE(NULLIF(CAST(${sqlIdent(groupCol.key)} AS VARCHAR), ''), '(empty)') AS group_label` : '';
+    const groupBy = groupCol ? 'GROUP BY label, group_label' : 'GROUP BY label';
+    if (chartType === 'dual_axis') {
+        const secondExpr = `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(y2Col.key)} AS DOUBLE))`;
+        const rows = await withAnalysisSlot(() => duckReadAll(`
+            SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label, ${valueExpr} AS primary_value, ${secondExpr} AS secondary_value
+            FROM read_parquet(${sqlLiteral(parquetPath)}) GROUP BY label ORDER BY ${sortBy === 'label' ? 'label' : 'primary_value'} ${sortOrder.toUpperCase()} LIMIT ${limit}
+        `));
+        const labels = rows.map(item => String(item.label));
+        const series = [{ name: yCol.name, axis: 0, data: rows.map(item => Number(item.primary_value) || 0) }, { name: y2Col.name, axis: 1, data: rows.map(item => Number(item.secondary_value) || 0) }];
+        const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation }, secondaryYAxis: { field: y2Col.key, label: y2Col.name, aggregation }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
+        chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol.name, secondaryYName: y2Col.name, colors });
+        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        return { chart, rows };
+    }
+    const rows = await withAnalysisSlot(() => duckReadAll(`
+        SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label${groupExpression}, ${valueExpr} AS value
+        FROM read_parquet(${sqlLiteral(parquetPath)}) ${groupBy}
+        ORDER BY ${sortBy === 'label' ? 'label' : 'value'} ${sortOrder.toUpperCase()} LIMIT ${limit * (groupCol ? 20 : 1)}
+    `));
+    const labels = Array.from(new Set(rows.map(item => String(item.label)))).slice(0, limit);
+    if (chartType === 'heatmap') {
+        const rowLabels = Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 30);
+        const values = rows.filter(item => labels.includes(String(item.label)) && rowLabels.includes(String(item.group_label))).map(item => [labels.indexOf(String(item.label)), rowLabels.indexOf(String(item.group_label)), Number(item.value) || 0]);
+        const series = [{ name: yCol?.name || '数量', rowLabels, data: values }];
+        const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol?.key || '__count__', label: yCol?.name || '数量', aggregation }, groupBy: { field: groupCol.key, label: groupCol.name }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
+        chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol?.name || '数量', secondaryYName: groupCol.name, colors });
+        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        return { chart, rows };
+    }
+    const groups = groupCol && chartType === 'stacked_bar' ? Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 12) : ['value'];
+    const series = groups.map(group => ({ name: groupCol ? group : (aggregation === 'count' ? '数量' : yCol?.name || '数值'), data: labels.map(label => Number(rows.find(item => String(item.label) === label && (!groupCol || String(item.group_label) === group))?.value) || 0) }));
+    const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol?.key || '__count__', label: aggregation === 'count' ? '数量' : yCol?.name || '数值', aggregation }, groupBy: groupCol ? { field: groupCol.key, label: groupCol.name } : null, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
+    chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: chart.yAxis.label, colors });
+    await recordAdvancedChart({ actor, datasetId, chart, metadata });
+    return { chart, rows };
+}
+
 async function buildChart(userId, datasetId, input = {}) {
-    const row = await getDatasetForUser(userId, datasetId);
+    const actor = await require('./shared').resolveAnalysisUser(userId);
+    if (!actor) throw Object.assign(new Error('当前账号不可用。'), { status: 401 });
+    const row = await getDatasetForUser(actor, datasetId);
     const xCol = getColumn(row, input.xField || input.xAxis);
     const yField = String(input.yField || input.yAxis || '').trim();
     const yCol = yField ? getColumn(row, yField) : null;
+    const y2Field = String(input.y2Field || input.secondaryYField || input.secondary_y_field || '').trim();
+    const y2Col = y2Field ? getColumn(row, y2Field) : null;
     const groupField = String(input.groupField || input.groupBy || '').trim();
     let groupCol = groupField ? getColumn(row, groupField) : null;
-    const chartType = ['bar', 'line', 'area', 'pie'].includes(String(input.chartType || '').toLowerCase())
+    const chartType = ['bar', 'line', 'area', 'pie', 'scatter', 'stacked_bar', 'funnel', 'heatmap', 'boxplot', 'dual_axis'].includes(String(input.chartType || '').toLowerCase())
         ? String(input.chartType).toLowerCase()
         : 'bar';
-    if (chartType === 'pie') groupCol = null;
+    if (['pie', 'funnel', 'scatter', 'boxplot', 'dual_axis'].includes(chartType)) groupCol = null;
+    await require('./governance').assertDatasetFieldsAccessible(actor, row, [xCol.key, yCol?.key, y2Col?.key, groupCol?.key]);
     const aggregation = normalizeAggregation(input.aggregation, Boolean(yCol));
     if (aggregation !== 'count' && !yCol) {
         const err = new Error('生成求和、平均、最小值或最大值图表时，请先选择数值字段；如果只统计数量，请使用“计数”。');
+        err.status = 400;
+        throw err;
+    }
+    if (['scatter', 'boxplot'].includes(chartType) && !yCol) {
+        const err = new Error('散点图和箱线图需要选择数值字段。');
+        err.status = 400;
+        throw err;
+    }
+    if (chartType === 'heatmap' && !groupCol) {
+        const err = new Error('热力图需要选择分组字段。');
+        err.status = 400;
+        throw err;
+    }
+    if (chartType === 'dual_axis' && !y2Col) {
+        const err = new Error('双轴图需要选择辅助指标字段。');
         err.status = 400;
         throw err;
     }
@@ -105,6 +250,9 @@ async function buildChart(userId, datasetId, input = {}) {
     const colors = CHART_PALETTES[colorPalette] || CHART_COLORS;
     const { sortBy, sortOrder } = normalizeChartSort(input, chartType);
     const { parquetPath } = getDatasetPaths(row);
+    if (['scatter', 'stacked_bar', 'funnel', 'heatmap', 'boxplot', 'dual_axis'].includes(chartType)) {
+        return await buildAdvancedChart({ actor, row, datasetId, input, chartType, xCol, yCol, y2Col, groupCol, aggregation, limit, colorPalette, colors, sortBy, sortOrder });
+    }
     const valueExpr = aggregation === 'count'
         ? 'COUNT(*)'
         : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE))`;
@@ -153,7 +301,7 @@ async function buildChart(userId, datasetId, input = {}) {
         colors
     });
     await recordArtifact({
-        userId,
+        userId: actor.id,
         datasetId,
         type: 'chart',
         title,
@@ -218,7 +366,11 @@ async function runSummary(userId, datasetId) {
 async function buildAiContext(userId, datasetId) {
     const summary = await runSummary(userId, datasetId);
     const dataset = summary.dataset;
-    const profile = Array.isArray(dataset.profile) ? dataset.profile : [];
+    const sourceRow = await getDatasetForUser(userId, datasetId);
+    const allowedColumns = await require('./governance').getAccessibleDatasetColumns(userId, sourceRow);
+    const allowedKeys = new Set(allowedColumns.map(column => column.key));
+    dataset.columns = allowedColumns;
+    const profile = (Array.isArray(dataset.profile) ? dataset.profile : []).filter(column => allowedKeys.has(column.key));
     const typeLabel = { number: '数值', text: '文本', date: '日期', boolean: '布尔', empty: '空' };
     const fieldProfiles = profile.map(column => {
         const isMetric = isMetricNumericColumn(column);
@@ -243,7 +395,7 @@ async function buildAiContext(userId, datasetId) {
         `可直接数值计算字段：${numericFields.join('、') || '暂无'}` ,
         'SQL 提示：表名固定为 data；中文字段名请使用双引号；字段画像为“数值”的列在 data 表中已经按 DOUBLE 物化，可直接 SUM/AVG/加减计算；不确定类型时使用 TRY_CAST("字段名" AS DOUBLE)。',
         `画像：${summary.highlights.join('；')}` ,
-        `建议图表：${summary.suggestions.map(item => item.title).join('；') || '暂无'}`
+        `建议图表：${summary.suggestions.filter(item => allowedKeys.has(item.xField) && (!item.yField || allowedKeys.has(item.yField))).map(item => item.title).join('；') || '暂无'}`
     ].join('\n');
 }
 

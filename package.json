@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.1.202",
+  "version": "0.2.5",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -54,6 +54,7 @@
     "test": "npm run check && npm run lint && npm run test:all",
     "verify": "npm test",
     "backup": "node scripts/backup_db.js",
+    "benchmark:data-analysis": "node scripts/benchmark_data_analysis.js",
     "clean:workspace": "node scripts/clean_workspace.js",
     "desktop": "node scripts/run_desktop.js",
     "pack:win": "node scripts/package_desktop.js --dir",
@@ -80,6 +81,9 @@
     "check:decision-evaluation-set": "node scripts/verify_decision_evaluation_set.js",
     "import:decision-evaluation-set": "node scripts/import_decision_evaluation_set.js",
     "review:decision-evaluation-case": "node scripts/review_decision_evaluation_case.js",
+    "review:decision-pre": "node scripts/run_decision_pre_review.js",
+    "review:decision-merge": "node scripts/merge_decision_pre_review_reports.js",
+    "review:decision-packet": "node scripts/generate_decision_review_packet.js",
     "list:decision-evaluation-review-queue": "node scripts/list_decision_evaluation_review_queue.js",
     "generate:config-docs": "node scripts/generate_config_registry_docs.js",
     "precheck": "node scripts/build_chat_css.js",

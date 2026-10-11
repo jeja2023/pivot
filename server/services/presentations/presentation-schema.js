@@ -10,6 +10,7 @@
 const crypto = require('crypto');
 const { canonicalJson } = require('../canonical-json');
 const { readTypedEnv } = require('../../config/env-registry');
+const { MAX_SOURCE_EXCERPT_CHARS } = require('./presentation-evidence');
 
 const PRESENTATION_IR_VERSION = '1.0';
 const ASPECT_RATIOS = Object.freeze({
@@ -25,6 +26,7 @@ const CHART_TYPES = Object.freeze(['bar', 'line', 'area', 'pie']);
 const SHAPE_TYPES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right', 'justify']);
 const V_ALIGNMENTS = Object.freeze(['top', 'middle', 'bottom']);
+const SLIDE_REVIEW_STATUSES = Object.freeze(['draft', 'approved']);
 const MAX_SLIDES = 100;
 const MAX_ELEMENTS_PER_SLIDE = 100;
 const MAX_TEXT_LENGTH = 16000;
@@ -94,6 +96,17 @@ function normalizeAnimation(input = {}) {
     const type = String(source.type || 'none');
     if (!ANIMATION_TYPES.includes(type)) throw presentationError('不支持的元素动画类型。', 400, 'PRESENTATION_ANIMATION_INVALID');
     return { type, durationMs: type === 'none' ? 0 : normalizeNumber(source.durationMs ?? source.duration_ms, 500, 100, 10000, '动画时长'), delayMs: type === 'none' ? 0 : normalizeNumber(source.delayMs ?? source.delay_ms, 0, 0, 10000, '动画延迟'), direction: normalizeBoundedText(source.direction, '', 24, '动画方向', { allowEmpty: true }) };
+}
+
+function normalizeSlideReview(input = {}) {
+    const source = isPlainObject(input) ? input : {};
+    const status = String(source.status || 'draft');
+    if (!SLIDE_REVIEW_STATUSES.includes(status)) throw presentationError('页面审核状态无效。', 400, 'PRESENTATION_SLIDE_REVIEW_INVALID');
+    return {
+        status,
+        approvedAt: status === 'approved' ? normalizeBoundedText(source.approvedAt, '', 64, '页面批准时间', { allowEmpty: true }) : '',
+        approvedBy: status === 'approved' ? normalizeBoundedText(source.approvedBy, '', 96, '页面批准人', { allowEmpty: true }) : ''
+    };
 }
 
 function normalizeBounds(input = {}, canvas = ASPECT_RATIOS['16:9']) {
@@ -285,6 +298,7 @@ function normalizeSlide(input, canvas, index) {
         elements,
         speakerNotes: normalizeBoundedText(input.speakerNotes, '', 12000, '演讲者备注', { allowEmpty: true, trim: false }),
         sourceRefs: normalizeStringArray(input.sourceRefs, 100, 160, '页面来源引用'),
+        review: normalizeSlideReview(input.review || { status: input.reviewStatus, approvedAt: input.approvedAt, approvedBy: input.approvedBy }),
         transition
     };
 }
@@ -309,6 +323,40 @@ function normalizeTheme(input = {}) {
             body: input.fontAssets?.body ? (() => { const ref = String(input.fontAssets.body).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('正文字体必须引用受控字体素材。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : ''
         },
         chartPalette: normalizeStringArray(input.chartPalette, 12, 7, '图表色板').map(color => normalizeColor(color))
+    };
+}
+
+function normalizeApprovedOutline(input = {}) {
+    if (!isPlainObject(input)) return null;
+    const outlineSource = isPlainObject(input.outline) ? input.outline : {};
+    const rawSections = Array.isArray(outlineSource.outline)
+        ? outlineSource.outline
+        : (Array.isArray(outlineSource.sections) ? outlineSource.sections : []);
+    const sections = rawSections.slice(0, 30).map((section, sectionIndex) => {
+        const rawSlides = Array.isArray(section?.slides) ? section.slides : [];
+        return {
+            section: normalizeBoundedText(section?.section, `第 ${sectionIndex + 1} 部分`, 120, '大纲章节'),
+            slides: rawSlides.slice(0, MAX_SLIDES).map((slide, slideIndex) => ({
+                title: normalizeBoundedText(slide?.title, `第 ${slideIndex + 1} 页`, 160, '大纲页面标题'),
+                purpose: normalizeBoundedText(slide?.purpose, '', 500, '大纲页面目的', { allowEmpty: true }),
+                layoutHint: normalizeBoundedText(slide?.layoutHint, 'title-content', 96, '大纲布局提示'),
+                keyPoints: normalizeStringArray(slide?.keyPoints, 12, 500, '大纲关键要点'),
+                sourceRefs: normalizeStringArray(slide?.sourceRefs, 50, 160, '大纲来源引用')
+            }))
+        };
+    }).filter(section => section.slides.length);
+    const slideCount = sections.reduce((total, section) => total + section.slides.length, 0);
+    if (!sections.length || slideCount > MAX_SLIDES) throw presentationError('已确认大纲必须包含 1 至 100 页。', 400, 'PRESENTATION_OUTLINE_INVALID');
+    return {
+        status: 'approved',
+        approvalMethod: normalizeBoundedText(input.approvalMethod, 'interactive_outline_review', 64, '大纲确认方式'),
+        approvedAt: normalizeBoundedText(input.approvedAt, '', 64, '大纲确认时间', { allowEmpty: true }),
+        approvedBy: normalizeBoundedText(input.approvedBy, '', 96, '大纲确认人', { allowEmpty: true }),
+        outlineDigest: normalizeBoundedText(input.outlineDigest, '', 160, '大纲摘要', { allowEmpty: true }),
+        outline: {
+            title: normalizeBoundedText(outlineSource.title, '未命名演示文稿', 160, '大纲标题'),
+            sections
+        }
     };
 }
 
@@ -347,14 +395,17 @@ function normalizePresentation(input, options = {}) {
                 title: normalizeBoundedText(source.title, '未命名来源', 240, '来源标题'),
                 type: normalizeBoundedText(source.type, 'material', 48, '来源类型'),
                 locator: normalizeBoundedText(source.locator, '', 500, '来源定位', { allowEmpty: true }),
-                digest: normalizeBoundedText(source.digest, '', 160, '来源摘要', { allowEmpty: true })
+                digest: normalizeBoundedText(source.digest, '', 160, '来源摘要', { allowEmpty: true }),
+                excerpt: normalizeBoundedText(source.excerpt, '', MAX_SOURCE_EXCERPT_CHARS, '来源证据摘录', { allowEmpty: true, trim: false }),
+                excerptTruncated: normalizeBoolean(source.excerptTruncated ?? source.excerpt_truncated)
             };
         }) : [],
         metadata: {
             aiGenerated: normalizeBoolean(input.metadata?.aiGenerated),
             coverAssetRef: input.metadata?.coverAssetRef ? (() => { const ref = String(input.metadata.coverAssetRef).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('封面图片必须引用受控素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : '',
             language: normalizeBoundedText(input.metadata?.language, 'zh-CN', 24, '语言'),
-            updatedAt: normalizeBoundedText(input.metadata?.updatedAt, '', 64, '更新时间', { allowEmpty: true })
+            updatedAt: normalizeBoundedText(input.metadata?.updatedAt, '', 64, '更新时间', { allowEmpty: true }),
+            planApproval: input.metadata?.planApproval ? normalizeApprovedOutline(input.metadata.planApproval) : null
         }
     };
     const sourceIds = new Set();
@@ -362,6 +413,11 @@ function normalizePresentation(input, options = {}) {
         if (sourceIds.has(source.id)) throw presentationError('演示文稿存在重复来源标识。', 400, 'PRESENTATION_SOURCE_ID_DUPLICATE');
         sourceIds.add(source.id);
     });
+    result.metadata.planApproval?.outline.sections.forEach(section => section.slides.forEach(slide => {
+        slide.sourceRefs.forEach(ref => {
+            if (ref && !sourceIds.has(ref)) throw presentationError(`大纲引用了不存在的来源：${ref}。`, 400, 'PRESENTATION_OUTLINE_SOURCE_REF_INVALID');
+        });
+    }));
     result.slides.forEach(slide => {
         [...slide.sourceRefs, ...slide.elements.flatMap(element => element.sourceRefs || [])].forEach(ref => {
             if (ref && !sourceIds.has(ref)) throw presentationError(`页面引用了不存在的来源：${ref}。`, 400, 'PRESENTATION_SOURCE_REF_INVALID');

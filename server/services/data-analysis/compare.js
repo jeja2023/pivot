@@ -2,6 +2,7 @@
 const XLSX = require('@e965/xlsx');
 const {
     getDatasetForUser,
+    resolveAnalysisUser,
     getColumn,
     getDatasetPaths,
     sqlIdent,
@@ -12,13 +13,19 @@ const {
 } = require('./shared');
 
 async function compareDatasets(userId, input = {}) {
-    const left = await getDatasetForUser(userId, input.leftDatasetId);
-    const right = await getDatasetForUser(userId, input.rightDatasetId);
+    const actor = await resolveAnalysisUser(userId);
+    if (!actor) throw Object.assign(new Error('当前账号不可用。'), { status: 401 });
+    const left = await getDatasetForUser(actor, input.leftDatasetId);
+    const right = await getDatasetForUser(actor, input.rightDatasetId);
     const leftKey = getColumn(left, input.leftKey);
     const rightKey = getColumn(right, input.rightKey);
     const compareField = String(input.compareField || '').trim();
     const leftCompare = compareField ? getColumn(left, compareField) : null;
     const rightCompare = compareField ? getColumn(right, String(input.rightCompareField || input.compareField || compareField)) : null;
+    await Promise.all([
+        require('./governance').assertDatasetFieldsAccessible(actor, left, [leftKey.key, leftCompare?.key]),
+        require('./governance').assertDatasetFieldsAccessible(actor, right, [rightKey.key, rightCompare?.key])
+    ]);
     const leftPath = getDatasetPaths(left).parquetPath;
     const rightPath = getDatasetPaths(right).parquetPath;
     const leftValueExpr = leftCompare
@@ -127,7 +134,7 @@ async function compareDatasets(userId, input = {}) {
         compareField: leftCompare ? leftCompare.name : ''
     };
     await recordArtifact({
-        userId,
+        userId: actor.id,
         datasetId: left.id,
         type: 'comparison',
         title: `${left.name} vs ${right.name}`,

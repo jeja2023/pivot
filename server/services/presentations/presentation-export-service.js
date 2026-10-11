@@ -13,6 +13,7 @@ const { runPresentationValidation } = require('./presentation-validation');
 const { PRESENTATION_RENDERER_VERSION, renderPresentation } = require('./presentation-renderer');
 
 const EXPORT_FORMATS = new Set(['pptx', 'pdf', 'png']);
+const SENSITIVE_ISSUE_CODES = new Set(['SENSITIVE_CONTENT', 'SENSITIVE_NOTES']);
 
 function publicError(message, status = 400, code = 'PRESENTATION_INVALID') {
     const error = new Error(message);
@@ -34,9 +35,18 @@ function normalizeExportOptions(options = {}) {
         includeNotes: options.includeNotes !== false,
         includePageNumbers: options.includePageNumbers !== false,
         showSourceRefs: options.showSourceRefs !== false,
+        allowSensitiveExport: options.allowSensitiveExport === true,
         imageQuality: ['standard', 'high'].includes(String(options.imageQuality || '')) ? String(options.imageQuality) : 'standard',
         fontStrategy: ['embed', 'fallback'].includes(String(options.fontStrategy || '')) ? String(options.fontStrategy) : 'embed'
     };
+}
+
+function assertSensitiveExportAllowed(validation, options = {}) {
+    const sensitiveIssues = (validation?.issues || []).filter(issue => SENSITIVE_ISSUE_CODES.has(String(issue.code || '')));
+    if (sensitiveIssues.length && options.allowSensitiveExport !== true) {
+        throw publicError('文稿包含可能的敏感内容。请在导出选项中确认已人工核对，或先移除相关内容。', 409, 'PRESENTATION_SENSITIVE_EXPORT_CONFIRMATION_REQUIRED');
+    }
+    return sensitiveIssues;
 }
 
 function exportRendererVersion(format, options = {}) {
@@ -97,6 +107,7 @@ function createExportService(deps) {
         const normalizedOptions = normalizeExportOptions(options);
         const exportContent = preparePresentationForExport(current.content, normalizedOptions);
         const exportValidation = runPresentationValidation(exportContent);
+        const sensitiveIssues = assertSensitiveExportAllowed(exportValidation, normalizedOptions);
         const irDigest = computePresentationDigest(exportContent);
         // PPTX 备注、PNG 页码与清晰度不会改变文稿 IR，需通过确定性渲染配置区分缓存。
         const rendererVersion = exportRendererVersion(normalizedFormat, normalizedOptions);
@@ -127,7 +138,9 @@ function createExportService(deps) {
             ON CONFLICT (presentation_id, version, format, renderer_version) DO UPDATE SET rendition_id = EXCLUDED.rendition_id, status = 'ready', updated_at = NOW()
             RETURNING *
         `, [currentRow.id, current.version, rendition.id, normalizedFormat, rendererVersion, user.id]);
-        const validationDecision = exportValidation.status === 'blocked'
+        const validationDecision = sensitiveIssues.length
+            ? `用户已确认 ${sensitiveIssues.length} 项可能的敏感内容后导出。`
+            : exportValidation.status === 'blocked'
             ? `用户在 ${Number(exportValidation.summary?.blocking || 0)} 个阻断级版式问题仍存在时发起导出。`
             : exportValidation.status === 'warning'
                 ? `用户在 ${Number(exportValidation.summary?.warnings || 0)} 个建议修复项仍存在时发起导出。`
@@ -159,6 +172,7 @@ function createExportService(deps) {
 
 module.exports = {
     createExportService,
+    assertSensitiveExportAllowed,
     exportRendererVersion,
     normalizeExportOptions,
     preparePresentationForExport

@@ -37,12 +37,17 @@
     function syncChartTypeControls(source = 'auto') {
         const typeEl = document.getElementById('data-analysis-chart-type');
         const groupEl = document.getElementById('data-analysis-chart-group');
+        const y2El = document.getElementById('data-analysis-chart-y2');
         const sortEl = document.getElementById('data-analysis-chart-sort');
         const groupControl = document.querySelector('[data-data-analysis-chart-control="group"]');
+        const secondaryControl = document.querySelector('[data-data-analysis-chart-control="secondary"]');
         const chartType = typeEl?.value || 'bar';
-        const isPie = chartType === 'pie';
-        groupControl?.classList.toggle('hidden', isPie);
-        if (isPie && groupEl) groupEl.value = '';
+        const hidesGroup = ['pie', 'funnel', 'scatter', 'boxplot', 'dual_axis'].includes(chartType);
+        const needsSecondary = chartType === 'dual_axis';
+        groupControl?.classList.toggle('hidden', hidesGroup);
+        secondaryControl?.classList.toggle('hidden', !needsSecondary);
+        if (hidesGroup && groupEl) groupEl.value = '';
+        if (!needsSecondary && y2El) y2El.value = '';
         if (!sortEl || !['auto', 'type'].includes(source)) return;
 
         const isTrendChart = chartType === 'line' || chartType === 'area';
@@ -72,6 +77,7 @@
             const payload = {
                 xField: document.getElementById('data-analysis-chart-x')?.value || '',
                 yField: document.getElementById('data-analysis-chart-y')?.value || '',
+                y2Field: document.getElementById('data-analysis-chart-y2')?.value || '',
                 groupField: document.getElementById('data-analysis-chart-group')?.value || '',
                 aggregation: document.getElementById('data-analysis-chart-aggregation')?.value || 'sum',
                 chartType: document.getElementById('data-analysis-chart-type')?.value || 'bar',

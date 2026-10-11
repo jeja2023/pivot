@@ -68,6 +68,15 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 数据分析
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `DATA_ANALYSIS_REFRESH_INTERVAL_MS` | integer | `60000` | 10000–900000 | 数据分析仪表盘刷新与阈值告警调度器的轮询间隔；计划执行仍受数据库状态和单次运行幂等保护。 |
+| `DATA_ANALYSIS_ASYNC_QUERY_POLL_INTERVAL_MS` | integer | `3000` | 1000–60000 | 可恢复异步查询 Worker 的任务领取间隔；查询仍受用户、数据集、字段和输出行数边界保护。 |
+| `DATA_ANALYSIS_ASYNC_QUERY_MAX_ROWS` | integer | `200000` | 5000–1000000 | 单个异步查询任务可物化的最大结果行数；超过该范围应采用分区、聚合或专用 OLAP 服务。 |
+| `DATA_ANALYSIS_ASYNC_QUERY_TIMEOUT_MS` | integer | `300000` | 10000–1800000 | 单个异步查询任务的 DuckDB 执行超时；超时后任务进入有上限退避重试。 |
+
 ## 知识库 LLM Wiki
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

@@ -8,6 +8,7 @@ const {
     MAX_QUERY_LIMIT,
     ensureAnalysisDirs,
     getDatasetForUser,
+    resolveAnalysisUser,
     jsonParse,
     getDatasetPaths,
     resolveInside,
@@ -108,10 +109,13 @@ async function exportDataset(userId, datasetId, format = 'csv') {
         err.status = 400;
         throw err;
     }
-    const row = await getDatasetForUser(userId, datasetId);
-    const columns = jsonParse(row.columns_json, []);
+    const actor = await resolveAnalysisUser(userId);
+    if (!actor) throw Object.assign(new Error('当前账号不可用。'), { status: 401 });
+    const row = await getDatasetForUser(actor, datasetId);
+    // 共享数据集导出只能包含调用者获授权的字段，机密/受限字段不会被导出到临时文件。
+    const columns = await require('./governance').getAccessibleDatasetColumns(actor, row);
     const { parquetPath } = getDatasetPaths(row);
-    const exportDir = resolveInside(exportRoot, String(userId));
+    const exportDir = resolveInside(exportRoot, String(actor.id));
     await fs.promises.mkdir(exportDir, { recursive: true });
     const baseName = row.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
     const ext = EXPORT_FORMATS[fmt].ext;
@@ -133,7 +137,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
         }
     });
     await recordArtifact({
-        userId,
+        userId: actor.id,
         datasetId,
         type: 'export',
         title: fileName,

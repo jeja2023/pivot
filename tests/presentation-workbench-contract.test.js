@@ -26,11 +26,18 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-submit-template-review-btn"/);
     assert.match(workspace, /id="presentation-review-template-btn"/);
     assert.match(workspace, /id="presentation-ai-continue-btn"/);
+    assert.match(workspace, /id="presentation-ai-layout-variants-btn"/);
+    assert.match(workspace, /id="presentation-layout-variants"/);
     assert.match(workspace, /id="presentation-ai-validate-btn"/);
     assert.match(workspace, /id="presentation-ai-stop-btn"/);
     assert.match(workspace, /id="presentation-create-stop-btn"/);
     assert.match(workspace, /id="presentation-outline-stop-btn"/);
     assert.match(workspace, /id="presentation-speaker-notes"/);
+    assert.match(workspace, /id="presentation-delivery-guide-btn"/);
+    assert.match(workspace, /id="presentation-chart-insert-narrative"/);
+    assert.match(workspace, /id="presentation-chart-create-backup"/);
+    assert.match(workspace, /id="presentation-evidence-panel"/);
+    assert.match(workspace, /id="presentation-evidence-list"/);
     assert.match(workspace, /id="presentation-presenter-modal"/);
     assert.match(workspace, /id="presentation-presenter-btn"/);
     assert.match(workspace, /id="presentation-assets-panel"/);
@@ -42,6 +49,7 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-element-animation"/);
     assert.match(workspace, /id="presentation-sync-btn"/);
     assert.match(workspace, /id="presentation-outline-markdown"/);
+    assert.match(workspace, /id="presentation-toggle-slide-review-btn"/);
     assert.match(workspace, /演示大纲预览/);
     assert.doesNotMatch(workspace, /id="presentation-outline-editor"/);
     assert.doesNotMatch(workspace, /id="presentation-outline-title-input"/);
@@ -52,6 +60,9 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.doesNotMatch(presenter, /createElement\('ul'\)/);
     assert.doesNotMatch(presenter, /presentation-outline-page-number/);
     assert.match(editor, /function renderOutlineReview/);
+    assert.match(presenter, /function renderEvidence/);
+    assert.match(editor, /materials: content\.sources \|\| \[\]/);
+    assert.match(editor, /planApproval: \{ outline \}/);
     assert.match(editor, /function collectOutlineFromReview/);
     assert.doesNotMatch(editor, /JSON\.parse\(byId\('presentation-outline-editor'\)/);
     assert.match(editor, /exposeModule\?\.\('apps\.presentations'/);
@@ -81,12 +92,16 @@ test('PPT API 提供文稿、版本、素材、模板包、AI、检查与导出�
         'post:/apps/presentations/ai/outline',
         'post:/apps/presentations/ai/slides',
         'post:/apps/presentations/ai/continue',
+        'post:/apps/presentations/layout-variants',
         'post:/apps/presentations/ai/rewrite',
         'post:/apps/presentations/ai/validate',
+        'put:/apps/presentations/:id/slides/:slideId/review',
         'post:/apps/presentations/data-chart',
         'put:/apps/presentations/:id/content',
         'post:/apps/presentations/:id/rollback',
         'post:/apps/presentations/:id/export',
+        'get:/apps/presentations/:id/delivery-guide',
+        'get:/apps/presentations/:id/render-quality',
         'put:/apps/presentations/:id/favorite',
         'get:/apps/presentations/metrics',
         'get:/apps/presentations/remote/:token/state',
@@ -160,6 +175,7 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(editor, /toggleFavoriteDocument/);
     assert.match(editor, /startPresentationSync/);
     const presentationService = source('server/services/presentations/presentation-service.js');
+    const presentationPresenter = source('client/chat/apps-workbench-presentations-presenter.js');
     assert.match(presentationService, /PRESENTATION_EDIT_FORBIDDEN/);
     assert.match(presentationService, /PRESENTATION_COMMENT_FORBIDDEN/);
     assert.match(presentationService, /assertPresentationEditor\(user, (?:current|currentRow)\)/);
@@ -176,6 +192,20 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(remotePresenting, /presentation_remote_sessions/);
     assert.match(source('server/services/presentations/presentation-vba.js'), /VBA_RISK_DETECTED/);
     assert.match(presentationService, /createPresentationFromArtifact/);
+    assert.match(presentationService, /attachApprovedOutline/);
+    assert.match(presentationService, /withoutPlanApproval/);
+    assert.match(presentationService, /reviewPresentationSlide/);
+    assert.match(presentationRoutes, /PRESENTATION_SLIDE_APPROVED/);
+    assert.match(presentationRoutes, /buildPresentationDataNarrative/);
+    assert.match(presentationRoutes, /buildPresentationDeliveryGuide/);
+    assert.match(presentationRoutes, /runRenderedPresentationQuality/);
+    assert.match(presentationRoutes, /buildSlideLayoutVariants/);
+    assert.match(editor, /presentation-toggle-slide-review-btn/);
+    assert.match(presentationPresenter, /function formatChangeImpact/);
+    assert.match(presentationPresenter, /function reviewActiveSlide/);
+    assert.match(presentationPresenter, /function loadDeliveryGuide/);
+    assert.match(presentationPresenter, /function generateLayoutVariants/);
+    assert.match(presentationPresenter, /function applyLayoutVariant/);
     assert.match(presentationService, /createPresentationRemoteSession/);
     assert.match(presentationService, /inferPresentationAssetType/);
     assert.match(editor, /startPresentationRealtime/);
@@ -193,7 +223,7 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     const exporter = source('server/services/presentations/presentation-export-service.js');
     const renderer = source('server/services/presentations/presentation-renderer.js');
     const qualityMigration = source('server/db/migrations/presentation-quality-metadata.js');
-    ['presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-create-duration', 'presentation-create-language', 'presentation-create-needs-charts', 'presentation-create-retain-sources', 'presentation-create-must-include', 'presentation-create-prohibited-content', 'presentation-copy-element-btn', 'presentation-group-elements-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-export-options-modal'].forEach(id => assert.ok(workspace.includes('id="' + id + '"'), id));
+    ['presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-create-duration', 'presentation-create-language', 'presentation-create-needs-charts', 'presentation-create-retain-sources', 'presentation-create-must-include', 'presentation-create-prohibited-content', 'presentation-copy-element-btn', 'presentation-group-elements-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-export-options-modal', 'presentation-export-allow-sensitive'].forEach(id => assert.ok(workspace.includes('id="' + id + '"'), id));
     ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage', 'saveExportOptions'].forEach(name => assert.ok(editor.includes('function ' + name), name));
     assert.ok(presenter.includes('aspectRatio: options.aspectRatio'));
     assert.match(source('server/routes/apps/presentations.js'), /aspectRatio: req\.body\?\.aspectRatio/);
@@ -203,7 +233,13 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     assert.ok(service.includes('updated_at >= ?::date'));
     ['SOURCE_ATTRIBUTION_MISSING', 'FONT_FALLBACK_RISK', 'IMAGE_LOW_RESOLUTION', 'DATA_SOURCE_MISSING'].forEach(code => assert.ok(validation.includes(code), code));
     assert.ok(exporter.includes('preparePresentationForExport'));
+    assert.ok(exporter.includes('PRESENTATION_SENSITIVE_EXPORT_CONFIRMATION_REQUIRED'));
     assert.ok(exporter.includes('includePageNumbers'));
     assert.ok(renderer.includes('LAYOUT_4x3'));
     assert.ok(qualityMigration.includes('pixel_width'));
+    assert.match(editor, /zoom: 1/);
+    assert.match(editor, /zoomSelect\.value = String\(state\.zoom\)/);
+    assert.match(workspace, /option value="1" selected>100%/);
+    assert.match(workspace, /option value="1\.1">110%/);
+    assert.match(source('client/chat/styles/workspaces/apps/presentations.css'), /\.presentation-stage-scroll\{padding:16px 20px\}/);
 });

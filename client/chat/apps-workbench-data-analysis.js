@@ -2,14 +2,21 @@
     const scripts = [
         '/chat/data-analysis/context.js',
         '/chat/data-analysis/view.js',
+        '/chat/data-analysis/extra-panels.js',
         '/chat/data-analysis/core.js',
         '/chat/data-analysis/query.js',
+        '/chat/data-analysis/async-query.js',
         '/chat/data-analysis/pivot.js',
         '/chat/data-analysis/chart.js',
         '/chat/data-analysis/compare-history.js',
         '/chat/data-analysis/cleaning.js',
         '/chat/data-analysis/ai.js',
         '/chat/data-analysis/database-import.js',
+        '/chat/data-analysis/governance.js',
+        '/chat/data-analysis/semantic-models.js',
+        '/chat/data-analysis/dashboards.js',
+        '/chat/data-analysis/scalability.js',
+        '/chat/data-analysis/extensions.js',
         '/chat/data-analysis/events.js'
     ];
 

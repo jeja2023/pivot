@@ -529,13 +529,13 @@
                             <div class="presentation-editor-layout">
                                 <aside class="presentation-slide-rail">
                                     <div class="presentation-rail-head"><strong>页面</strong><div><button id="presentation-add-slide-btn" class="btn-secondary" type="button">+ 页面</button><button id="presentation-duplicate-slide-btn" class="btn-secondary" type="button" title="复制当前页">复制</button></div></div>
-                                    <div class="presentation-page-actions"><button id="presentation-move-slide-up-btn" class="btn-secondary" type="button">上移</button><button id="presentation-move-slide-down-btn" class="btn-secondary" type="button">下移</button><button id="presentation-delete-slide-btn" class="btn-secondary" type="button">删除</button></div>
+                                    <div class="presentation-page-actions"><button id="presentation-move-slide-up-btn" class="btn-secondary" type="button">上移</button><button id="presentation-move-slide-down-btn" class="btn-secondary" type="button">下移</button><button id="presentation-delete-slide-btn" class="btn-secondary" type="button">删除</button><button id="presentation-toggle-slide-review-btn" class="btn-secondary" type="button">批准页面</button></div>
                                     <div id="presentation-slide-list" class="presentation-slide-list" aria-label="幻灯片列表"></div>
                                 </aside>
                                 <main class="presentation-stage-wrap">
                                     <div class="presentation-stage-toolbar">
                                         <label>布局 <select id="presentation-layout-select" class="form-input"></select></label>
-                                        <label>缩放 <select id="presentation-zoom-select" class="form-input"><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="1">100%</option></select></label><label>转场 <select id="presentation-transition-select" class="form-input"><option value="none">无</option><option value="fade">淡入淡出</option><option value="push">推进</option><option value="wipe">擦除</option><option value="split">分割</option><option value="cover">覆盖</option><option value="uncover">揭开</option></select></label>
+                                        <label>缩放 <select id="presentation-zoom-select" class="form-input"><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="0.9">90%</option><option value="1" selected>100%</option><option value="1.1">110%</option></select></label><label>转场 <select id="presentation-transition-select" class="form-input"><option value="none">无</option><option value="fade">淡入淡出</option><option value="push">推进</option><option value="wipe">擦除</option><option value="split">分割</option><option value="cover">覆盖</option><option value="uncover">揭开</option></select></label>
                                         <span id="presentation-slide-meta" class="presentation-slide-meta"></span>
                                     </div>
                                     <div id="presentation-stage-scroll" class="presentation-stage-scroll">
@@ -550,6 +550,7 @@
                                         <button type="button" data-presentation-panel="ai">AI 助手</button>
                                         <button type="button" data-presentation-panel="metrics">运营</button>
                                         <button type="button" data-presentation-panel="notes">备注</button>
+                                        <button class="btn-secondary" type="button" data-presentation-panel="evidence">证据</button>
                                         <button type="button" data-presentation-panel="comments">评论<span id="presentation-comments-badge" class="presentation-comments-badge hidden"></span></button>
                                         <button type="button" data-presentation-panel="issues">检查</button>
                                         <button type="button" data-presentation-panel="versions">版本</button>
@@ -703,7 +704,9 @@
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 5px;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                                                 打开演示者模式 (Presenter View)
                                             </button>
+                                            <button id="presentation-delivery-guide-btn" class="btn-secondary" type="button">生成演讲交付建议</button>
                                         </div>
+                                        <div id="presentation-delivery-guide" class="presentation-delivery-guide hidden" aria-live="polite"></div>
                                         <div class="presentation-info-card">
                                             <div class="presentation-info-card-icon">
                                                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -713,6 +716,15 @@
                                                 <p>连接投影仪或外接显示器时，演示者模式可独立展示计时器、备忘提词与下一页缩略图，大屏仅展示幻灯片正文。</p>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div id="presentation-evidence-panel" class="presentation-inspector-panel hidden">
+                                        <div class="presentation-inspector-section-head">
+                                            <div class="presentation-panel-title-group">
+                                                <strong>来源与证据</strong>
+                                                <small class="presentation-panel-subtitle">关键结论可回溯到已授权材料，后续 AI 改写也会使用这些摘录</small>
+                                            </div>
+                                        </div>
+                                        <div id="presentation-evidence-list" class="presentation-evidence-list"></div>
                                     </div>
                                     <div id="presentation-ai-panel" class="presentation-inspector-panel hidden">
                                         <div class="presentation-inspector-section-head">
@@ -729,7 +741,8 @@
                                                 <button type="button" class="presentation-ai-chip" onclick="document.getElementById('presentation-ai-instruction').value='检查当前页逻辑流、事实数据与错别字，提出修改建议。'">检查逻辑与错别字</button>
                                             </div>
                                         </div>
-                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
+                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
+                                        <div id="presentation-layout-variants" class="presentation-layout-variants hidden" aria-live="polite"></div>
                                         <p class="presentation-ai-note">AI 改写先生成建议，确认后才会替换当前页面；内容检查仅提出可核实的问题。</p>
                                     </div>
                                     <div id="presentation-comments-panel" class="presentation-inspector-panel hidden">
@@ -1096,6 +1109,13 @@
                                                     <p>保留页脚学术引用、数据溯源与研究报告出处标注</p>
                                                 </div>
                                             </label>
+                                            <label class="presentation-export-checkbox-card" for="presentation-export-allow-sensitive">
+                                                <input id="presentation-export-allow-sensitive" type="checkbox">
+                                                <div class="presentation-export-checkbox-content">
+                                                    <strong>已人工核对可能的敏感内容</strong>
+                                                    <p>仅在质量检查提示敏感信息时允许导出，并会记录本次确认</p>
+                                                </div>
+                                            </label>
                                         </div>
                                     </div>
 
@@ -1164,6 +1184,8 @@
                                         <label>聚合方式<select id="presentation-chart-aggregation" class="form-input"><option value="sum">求和</option><option value="count">计数</option><option value="avg">平均值</option><option value="max">最大值</option><option value="min">最小值</option></select></label>
                                     </div>
                                     <label>图表标题<input id="presentation-chart-title" class="form-input" maxlength="120" placeholder="留空则根据字段自动生成"></label>
+                                    <label class="presentation-checkbox-pill"><input id="presentation-chart-insert-narrative" type="checkbox" checked><span>插入数据结论与演讲提示</span></label>
+                                    <label class="presentation-checkbox-pill"><input id="presentation-chart-create-backup" type="checkbox" checked><span>创建含原始数值的数据备份页</span></label>
                                     <div class="presentation-create-actions"><button id="presentation-data-chart-cancel-btn" class="btn-secondary" type="button">取消</button><button id="presentation-data-chart-submit-btn" class="btn-primary" type="submit">插入图表</button></div>
                                 </form>
                             </div>

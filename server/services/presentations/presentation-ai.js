@@ -2,10 +2,15 @@
 
 const { normalizePresentation, presentationError } = require('./presentation-schema');
 const { getBuiltInTemplate } = require('./presentation-templates');
+const { MAX_SOURCE_EXCERPT_CHARS } = require('./presentation-evidence');
 
 function clamp(value, max) {
     const text = String(value ?? '').trim();
     return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function materialText(item) {
+    return String(item?.text ?? item?.excerpt ?? '').trim();
 }
 
 function presentationAiSystemPrompt() {
@@ -57,7 +62,7 @@ function buildOutlineMessages(body = {}) {
     const template = templateForAi(body);
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
     const summaryLayoutId = preferredTemplateLayoutId(template, 'summary', coverLayoutId);
-    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `- ${clamp(item?.title || '材料', 120)}：${clamp(item?.text || '', 6000)}`).join('\n') : '';
+    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `- ${clamp(item?.title || '材料', 120)}：${clamp(materialText(item), 6000)}`).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         {
@@ -89,7 +94,7 @@ function buildSlidesMessages(body = {}) {
     const template = templateForAi(body);
     const layouts = templateLayoutSummary(template);
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
-    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${clamp(item.text || '', 5000)}`).join('\n') : '';
+    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${clamp(materialText(item), 5000)}`).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         {
@@ -120,7 +125,7 @@ function buildContinueMessages(body = {}) {
     const contentLayoutId = preferredTemplateLayoutId(template, 'title-content');
     const additionalSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
     const existing = (presentation.slides || []).slice(-12).map(slide => ({ title: (slide.elements || []).filter(item => item.type === 'text').sort((a, b) => Number(b.style?.fontSize || 0) - Number(a.style?.fontSize || 0))[0]?.content?.text || '', layoutId: slide.layoutId || '' }));
-    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => '来源 ' + (item.id || '') + ' / ' + clamp(item.title || '', 120) + '：' + clamp(item.text || '', 5000)).join('\n') : '';
+    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => '来源 ' + (item.id || '') + ' / ' + clamp(item.title || '', 120) + '：' + clamp(materialText(item), 5000)).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         { role: 'user', content: [
@@ -352,7 +357,12 @@ function normalizeAiSources(sources) {
     const usedIds = new Set();
     return (Array.isArray(sources) ? sources : []).slice(0, 500).map((source, index) => ({
         id: uniqueAiId(source?.id, 'source_' + (index + 1), usedIds),
-        title: normalizeAiText(source?.title, '材料', 240), type: normalizeAiText(source?.type, 'material', 48), locator: normalizeAiText(source?.locator, '', 500), digest: normalizeAiText(source?.digest, '', 160)
+        title: normalizeAiText(source?.title, '材料', 240),
+        type: normalizeAiText(source?.type, 'material', 48),
+        locator: normalizeAiText(source?.locator, '', 500),
+        digest: normalizeAiText(source?.digest, '', 160),
+        excerpt: normalizeAiText(source?.excerpt, '', MAX_SOURCE_EXCERPT_CHARS),
+        excerptTruncated: source?.excerptTruncated === true || source?.excerpt_truncated === true
     }));
 }
 

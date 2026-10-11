@@ -37,6 +37,7 @@ const {
     listPresentationAssets,
     publishPresentationAsset,
     getPresentationAssetByRef,
+    resolvePresentationAssets,
     getPresentationVersion,
     listPresentationCollaborators,
     listCollaboratorCandidates,
@@ -54,6 +55,7 @@ const {
     resolveTemplateForUser,
     resolveTemplateVersionForUser,
     resolvePresentationComment,
+    reviewPresentationSlide,
     rollbackPresentation,
     savePresentationContent,
     updatePresentationMetadata,
@@ -72,8 +74,14 @@ const { buildChart } = require('../../services/data-analysis');
 const { normalizePresentation } = require('../../services/presentations/presentation-schema');
 const { getPresentationMetricsSnapshot, recordPresentationOutcome } = require('../../services/presentations/presentation-metrics');
 const { isAdmin } = require('../../permissions');
+const { MAX_MATERIAL_TEXT_CHARS, materialToPresentationSource, normalizeMaterials: normalizePresentationMaterials } = require('../../services/presentations/presentation-evidence');
+const { buildSlideChangeImpact, mergeLockedElements } = require('../../services/presentations/presentation-change-impact');
+const { buildPresentationDataNarrative } = require('../../services/presentations/presentation-data-narrative');
+const { buildPresentationDeliveryGuide } = require('../../services/presentations/presentation-delivery-guide');
+const { runRenderedPresentationQuality } = require('../../services/presentations/presentation-render-quality');
+const { buildSlideLayoutVariants } = require('../../services/presentations/presentation-layout-variants');
 
-const MAX_MATERIAL_TEXT = 120000;
+const MAX_MATERIAL_TEXT = MAX_MATERIAL_TEXT_CHARS;
 const SOURCE_FORMAT_PIVOT = 'pivot';
 
 function contentDisposition(filename) {
@@ -87,20 +95,7 @@ async function removeUpload(file) {
 }
 
 function normalizeMaterials(body) {
-    if (!Array.isArray(body?.materials)) return [];
-    const usedIds = new Set();
-    return body.materials.slice(0, 20).map((item, index) => ({
-        id: String(item?.id || `source_${index + 1}`).trim().slice(0, 96),
-        title: String(item?.title || '材料').trim().slice(0, 240),
-        text: String(item?.text || '').trim().slice(0, MAX_MATERIAL_TEXT)
-    })).filter(item => item.text).map((item, index) => {
-        const base = String(item.id || 'source_' + (index + 1)).trim().slice(0, 96).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^_+/, '') || 'source_' + (index + 1);
-        let id = /^[A-Za-z0-9]/.test(base) ? base : 'source_' + base;
-        let suffix = 2;
-        while (usedIds.has(id)) { id = base.slice(0, 90) + '_' + suffix; suffix += 1; }
-        usedIds.add(id);
-        return { ...item, id };
-    });
+    return normalizePresentationMaterials(body?.materials);
 }
 
 async function withResolvedAiTemplate(user, body = {}) {
@@ -368,7 +363,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             const text = truncateExtractedText(await extractDocumentText(req.file.path, req.file.mimetype, req.file.originalname, { maxChars: MAX_MATERIAL_TEXT }), MAX_MATERIAL_TEXT);
             if (!text.trim()) return res.status(422).json({ error: '未能从材料中提取可用文本，请检查文件内容或先进行 OCR。', code: 'PRESENTATION_MATERIAL_EMPTY' });
             writeLog(req, '提取PPT材料', `文件: ${String(req.file.originalname || '').slice(0, 120)}`);
-            return res.json({ material: { id: `source_${Date.now()}`, title: String(req.file.originalname || '材料').slice(0, 240), text, truncated: text.length >= MAX_MATERIAL_TEXT } });
+            return res.json({ material: { id: `source_${Date.now()}`, title: String(req.file.originalname || '材料').slice(0, 240), type: '文件材料', locator: `文件 ${String(req.file.originalname || '材料').slice(0, 240)}`, text, truncated: text.length >= MAX_MATERIAL_TEXT } });
         } finally {
             await removeUpload(req.file);
         }
@@ -461,7 +456,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             if (proposal.presentation) {
                 const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                 proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
-                proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: body.materials.map((item, index) => ({ id: item.id || 'source_' + (index + 1), title: item.title || '材料', type: 'material', locator: '', digest: '' })) });
+                proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: body.materials.map(materialToPresentationSource) });
             }
             return { proposal, validation: runPresentationValidation(proposal.presentation) };
         }});
@@ -479,11 +474,39 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             return { proposal, validation: runPresentationValidation(proposal.presentation) };
         } });
     }));
+    router.post('/apps/presentations/layout-variants', authMiddleware, asyncHandler(async (req, res) => {
+        const body = req.body || {};
+        if (!body.slide || typeof body.slide !== 'object') return res.status(400).json({ error: '请提供需要排版的页面。', code: 'PRESENTATION_SLIDE_REQUIRED' });
+        let slide = body.slide;
+        if (body.presentationId) {
+            const current = await getPresentation(req.user, body.presentationId);
+            slide = current?.content?.slides?.find(item => item.id === body.slide.id);
+            if (!slide) return res.status(404).json({ error: '页面不存在或无权访问。', code: 'PRESENTATION_SLIDE_NOT_FOUND' });
+            if (slide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成版式方案。', code: 'PRESENTATION_SLIDE_APPROVED' });
+        }
+        return res.json({ variants: buildSlideLayoutVariants(slide, { aspectRatio: body.aspectRatio }) });
+    }));
 
     router.post('/apps/presentations/ai/rewrite', authMiddleware, asyncHandler(async (req, res) => {
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!body.slide || typeof body.slide !== 'object') return res.status(400).json({ error: '请提供要改写的页面。', code: 'PRESENTATION_SLIDE_REQUIRED' });
-        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => ({ proposal: parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials }) }) });
+        if (body.presentationId) {
+            const current = await getPresentation(req.user, body.presentationId);
+            const storedSlide = current?.content?.slides?.find(slide => slide.id === body.slide.id);
+            if (!storedSlide) return res.status(404).json({ error: '待改写页面不存在或无权访问。', code: 'PRESENTATION_SLIDE_NOT_FOUND' });
+            if (storedSlide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成改写建议。', code: 'PRESENTATION_SLIDE_APPROVED' });
+            body.slide = storedSlide;
+        }
+        if (body.slide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成改写建议。', code: 'PRESENTATION_SLIDE_APPROVED' });
+        return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => {
+            const proposal = parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+            const proposed = proposal.presentation?.slides?.[0];
+            if (!proposed) throw new Error('AI 未返回可改写页面。');
+            const merged = mergeLockedElements(body.slide, proposed);
+            proposal.presentation.slides[0] = merged;
+            proposal.presentation = normalizePresentation(proposal.presentation);
+            return { proposal, changeImpact: buildSlideChangeImpact(body.slide, merged) };
+        } });
     }));
 
     router.post('/apps/presentations/ai/validate', authMiddleware, asyncHandler(async (req, res) => {
@@ -502,13 +525,17 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const columns = ['分类', ...(chart.series || []).map(item => String(item.name || '数值'))];
         const rows = (chart.labels || []).map((label, index) => [String(label), ...(chart.series || []).map(series => Number(series.data?.[index]) || 0)]);
         writeLog(req, '插入数据分析图表到PPT', `数据集: ${datasetId}，图表: ${chart.chartType}`);
+        const presentationChart = {
+            type: 'chart', chartType: chart.chartType, title: chart.title,
+            data: { columns, rows },
+            options: { showLegend: (chart.series || []).length > 1, showLabels: false, colors },
+            binding: { datasetId, queryDigest: `${chart.xAxis?.field || ''}:${chart.yAxis?.field || ''}:${chart.yAxis?.aggregation || ''}` },
+            source: chart.source
+        };
         return res.json({
             chart: {
-                type: 'chart', chartType: chart.chartType, title: chart.title,
-                data: { columns, rows },
-                options: { showLegend: (chart.series || []).length > 1, showLabels: false, colors },
-                binding: { datasetId, queryDigest: `${chart.xAxis?.field || ''}:${chart.yAxis?.field || ''}:${chart.yAxis?.aggregation || ''}` },
-                source: chart.source
+                ...presentationChart,
+                narrative: buildPresentationDataNarrative(presentationChart)
             }
         });
     }));
@@ -536,6 +563,11 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             writeLog(req, '保存PPT演示文稿', `文稿: ${presentation.id}，版本: ${presentation.version}`);
             res.json({ success: true, presentation });
         } catch (error) { recordPresentationOutcome('save', { outcome: 'failed', durationMs: Date.now() - startedAt }); throw error; }
+    }));
+    router.put('/apps/presentations/:id/slides/:slideId/review', authMiddleware, asyncHandler(async (req, res) => {
+        const presentation = await reviewPresentationSlide(req.user, req.params.id, req.params.slideId, req.body?.approved !== false);
+        writeLog(req, req.body?.approved === false ? '解除PPT页面批准' : '批准PPT页面', `文稿: ${presentation.id}，页面: ${req.params.slideId}`);
+        res.json({ success: true, presentation });
     }));
     router.delete('/apps/presentations/:id', authMiddleware, asyncHandler(async (req, res) => {
         const deleted = await deletePresentation(req.user, req.params.id);
@@ -566,6 +598,18 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const presentation = await getPresentation(req.user, req.params.id);
         if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
         res.json({ validation: runPresentationValidation(presentation.content) });
+    }));
+    router.get('/apps/presentations/:id/render-quality', authMiddleware, asyncHandler(async (req, res) => {
+        const presentation = await getPresentation(req.user, req.params.id);
+        if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
+        const assets = await resolvePresentationAssets(req.user, presentation.content, { presentationId: presentation.id });
+        const validation = await runRenderedPresentationQuality(presentation.content, { assetResolver: async ref => assets.get(ref) || null });
+        res.json({ validation });
+    }));
+    router.get('/apps/presentations/:id/delivery-guide', authMiddleware, asyncHandler(async (req, res) => {
+        const presentation = await getPresentation(req.user, req.params.id);
+        if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
+        res.json({ guide: buildPresentationDeliveryGuide(presentation.content) });
     }));
     router.get('/apps/presentations/:id/versions', authMiddleware, asyncHandler(async (req, res) => {
         const versions = await listPresentationVersions(req.user, req.params.id);

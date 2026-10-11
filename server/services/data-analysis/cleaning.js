@@ -331,7 +331,7 @@ function serializeCleaningRun(row) {
 }
 
 async function getCleaningQuality(userId, datasetId) {
-    const dataset = await getDatasetForUser(userId, datasetId);
+    const dataset = await getDatasetForUser(userId, datasetId, { write: true });
     const columns = jsonParse(dataset.columns_json, []);
     const profile = jsonParse(dataset.profile_json, []);
     const { parquetPath } = getDatasetPaths(dataset);
@@ -409,7 +409,7 @@ async function getCleaningQuality(userId, datasetId) {
 }
 
 async function previewCleaning(userId, datasetId, rawRules) {
-    const dataset = await getDatasetForUser(userId, datasetId);
+    const dataset = await getDatasetForUser(userId, datasetId, { write: true });
     const sourceColumns = jsonParse(dataset.columns_json, []);
     const rules = normalizeRules(rawRules, sourceColumns);
     const { parquetPath } = getDatasetPaths(dataset);
@@ -451,7 +451,7 @@ async function previewCleaning(userId, datasetId, rawRules) {
 }
 
 async function applyCleaning({ user, datasetId, rules: rawRules, name }) {
-    const dataset = await getDatasetForUser(user.id, datasetId);
+    const dataset = await getDatasetForUser(user, datasetId, { write: true });
     const sourceColumns = jsonParse(dataset.columns_json, []);
     const rules = normalizeRules(rawRules, sourceColumns);
     const { parquetPath } = getDatasetPaths(dataset);

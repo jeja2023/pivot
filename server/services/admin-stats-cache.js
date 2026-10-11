@@ -75,6 +75,7 @@ const EMPTY_GLOBAL_COUNTS = {
 let globalCounts = null;
 let globalCountsExpiresAt = 0;
 let globalCountsRefresh = null;
+let globalCountsGeneration = 0;
 
 async function computeGlobalCounts() {
     const { queryOne } = require('../db/client');
@@ -101,18 +102,21 @@ async function computeGlobalCounts() {
 
 function refreshGlobalCounts() {
     if (globalCountsRefresh) return globalCountsRefresh;
+    const generation = globalCountsGeneration;
     globalCountsRefresh = computeGlobalCounts()
         .then(next => {
+            if (generation !== globalCountsGeneration) return globalCounts || EMPTY_GLOBAL_COUNTS;
             globalCounts = next;
             globalCountsExpiresAt = Date.now() + GLOBAL_COUNTS_TTL_MS;
             return next;
         })
         .catch(() => {
+            if (generation !== globalCountsGeneration) return globalCounts || EMPTY_GLOBAL_COUNTS;
             // 失败时短退避重试，同时保留上一次的可用数值，避免面板直接归零
             globalCountsExpiresAt = Date.now() + GLOBAL_COUNTS_ERROR_TTL_MS;
             return globalCounts || EMPTY_GLOBAL_COUNTS;
         })
-        .finally(() => { globalCountsRefresh = null; });
+        .finally(() => { if (generation === globalCountsGeneration) globalCountsRefresh = null; });
     return globalCountsRefresh;
 }
 
@@ -132,6 +136,7 @@ function invalidateGlobalCountsCache() {
 }
 
 function resetGlobalCountsCacheForTests() {
+    globalCountsGeneration += 1;
     globalCounts = null;
     globalCountsExpiresAt = 0;
     globalCountsRefresh = null;

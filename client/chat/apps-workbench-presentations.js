@@ -5,14 +5,13 @@
         templates: [], documents: [], assets: [], pendingAssetType: '', fontFaceUrls: new Map(), coverUrls: new Map(), imageUrls: new Map(), dataSets: [], versions: [],
         libraryFilters: { search: '', tag: '', favorite: false, templateId: '', status: '', createdBy: '', updatedFrom: '', updatedTo: '' }, libraryFilterTimer: null,
         libraryPage: 1, libraryLimit: 10,
-        active: null, selectedSlideId: '', selectedElementId: '', selectedElementIds: [], elementClipboard: null, panel: 'properties', zoom: 0.65,
+        active: null, selectedSlideId: '', selectedElementId: '', selectedElementIds: [], elementClipboard: null, panel: 'properties', zoom: 1,
         history: [], historyIndex: -1, saveTimer: null, savePromise: null, saving: false, dirty: false, editRevision: 0, syncing: false, remoteVersionAvailable: false, remoteSession: null, drag: null,
         pendingOutline: null, pendingCreate: null, aiAbortController: null, aiRequestKey: '', templateImportReportExpanded: false, templateImportTaskId: '', pendingTemplateApplyMode: '',
         presenterIndex: 0, presenterStartedAt: 0, presenterTimer: null, syncTimer: null, realtimeSource: null,
-        exportOptions: { aspectRatio: '', includeNotes: true, includePageNumbers: true, showSourceRefs: true, imageQuality: 'standard', fontStrategy: 'embed' }
+        exportOptions: { aspectRatio: '', includeNotes: true, includePageNumbers: true, showSourceRefs: true, allowSensitiveExport: false, imageQuality: 'standard', fontStrategy: 'embed' }
     };
-    const byId = id => document.getElementById(id);
-    const deepClone = value => JSON.parse(JSON.stringify(value));
+    const byId = id => document.getElementById(id); const deepClone = value => JSON.parse(JSON.stringify(value));
     function toast(message, type = 'success') { if (typeof showToast === 'function') showToast(message, type); }
     async function requestJson(url, options = {}) {
         const res = await apiFetch(url, options); const data = await res.clone().json().catch(() => ({}));
@@ -50,14 +49,14 @@
         const notes = byId('presentation-export-include-notes'); if (notes) notes.checked = options.includeNotes !== false;
         const pages = byId('presentation-export-include-page-numbers'); if (pages) pages.checked = options.includePageNumbers !== false;
         const refs = byId('presentation-export-show-source-refs'); if (refs) refs.checked = options.showSourceRefs !== false;
+        const sensitive = byId('presentation-export-allow-sensitive'); if (sensitive) sensitive.checked = options.allowSensitiveExport === true;
         setInput('presentation-export-image-quality', options.imageQuality || 'standard'); setInput('presentation-export-font-strategy', options.fontStrategy || 'embed');
     }
     function saveExportOptions() {
-        state.exportOptions = { aspectRatio: byId('presentation-export-aspect-ratio')?.value || activeContent()?.aspectRatio || '16:9', includeNotes: Boolean(byId('presentation-export-include-notes')?.checked), includePageNumbers: Boolean(byId('presentation-export-include-page-numbers')?.checked), showSourceRefs: Boolean(byId('presentation-export-show-source-refs')?.checked), imageQuality: byId('presentation-export-image-quality')?.value || 'standard', fontStrategy: byId('presentation-export-font-strategy')?.value || 'embed' };
+        state.exportOptions = { aspectRatio: byId('presentation-export-aspect-ratio')?.value || activeContent()?.aspectRatio || '16:9', includeNotes: Boolean(byId('presentation-export-include-notes')?.checked), includePageNumbers: Boolean(byId('presentation-export-include-page-numbers')?.checked), showSourceRefs: Boolean(byId('presentation-export-show-source-refs')?.checked), allowSensitiveExport: Boolean(byId('presentation-export-allow-sensitive')?.checked), imageQuality: byId('presentation-export-image-quality')?.value || 'standard', fontStrategy: byId('presentation-export-font-strategy')?.value || 'embed' };
         byId('presentation-export-options-modal')?.classList.add('hidden'); toast('导出选项已保存。');
     }
-    function activeContent() { return state.active?.content || null; }
-    function activeSlide() { const content = activeContent(); return content?.slides?.find(slide => slide.id === state.selectedSlideId) || content?.slides?.[0] || null; }
+    function activeContent() { return state.active?.content || null; } function activeSlide() { const content = activeContent(); return content?.slides?.find(slide => slide.id === state.selectedSlideId) || content?.slides?.[0] || null; }
     function selectedElement() { return activeSlide()?.elements?.find(element => element.id === state.selectedElementId) || null; }
     function resetHistory() { state.history = state.active?.content ? [deepClone(state.active.content)] : []; state.historyIndex = state.history.length - 1; updateUndoRedo(); }
     function updateUndoRedo() { byId('presentation-undo-btn')?.toggleAttribute('disabled', state.historyIndex <= 0); byId('presentation-redo-btn')?.toggleAttribute('disabled', state.historyIndex >= state.history.length - 1); }
@@ -401,19 +400,19 @@
         const titleInput = byId('presentation-title-input');
         if (titleInput && document.activeElement !== titleInput) titleInput.value = state.active.content.title || state.active.title;
         ensureThemeFonts().catch(() => {});
-        renderSlideList(); renderStage(); renderProperties(); renderSpeakerNotes(); renderTemplatePanel(); renderIssues(); updateUndoRedo();
-        const editable = canEditActivePresentation();
+        renderSlideList(); renderStage(); renderProperties(); renderSpeakerNotes(); presenter()?.renderEvidence?.(state); renderTemplatePanel(); renderIssues(); updateUndoRedo();
+        const editable = canEditActivePresentation(); const slideApproved = activeSlide()?.review?.status === 'approved';
         const admin = typeof isAdminUser === 'function' && isAdminUser();
         document.querySelector('[data-presentation-panel="metrics"]')?.classList.toggle('hidden', !admin);
         byId('presentation-title-input')?.toggleAttribute('readonly', !editable);
-        byId('presentation-speaker-notes')?.toggleAttribute('disabled', !editable);
-        ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-check-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-copy-element-btn', 'presentation-paste-element-btn', 'presentation-group-elements-btn', 'presentation-ungroup-elements-btn', 'presentation-align-left-btn', 'presentation-align-center-btn', 'presentation-distribute-horizontal-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-table-remove-row-btn', 'presentation-table-add-column-btn', 'presentation-table-remove-column-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable));
+        byId('presentation-speaker-notes')?.toggleAttribute('disabled', !editable || slideApproved);
+        ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-check-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-copy-element-btn', 'presentation-paste-element-btn', 'presentation-group-elements-btn', 'presentation-ungroup-elements-btn', 'presentation-align-left-btn', 'presentation-align-center-btn', 'presentation-distribute-horizontal-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-table-remove-row-btn', 'presentation-table-add-column-btn', 'presentation-table-remove-column-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-layout-variants-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable || slideApproved));
         const canExport = state.active?.isOwner !== false || (typeof isAdminUser === 'function' && isAdminUser());
         ['presentation-export-pptx-btn', 'presentation-export-pdf-btn', 'presentation-export-png-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !canExport));
         byId('presentation-remote-start-btn')?.toggleAttribute('disabled', !canExport);
         byId('presentation-remote-start-btn')?.classList.toggle('hidden', Boolean(state.remoteSession?.id));
         byId('presentation-remote-stop-btn')?.classList.toggle('hidden', !state.remoteSession?.id);
-        document.querySelectorAll('#presentation-properties-form input, #presentation-properties-form textarea, #presentation-properties-form select').forEach(input => input.toggleAttribute('disabled', !editable));
+        document.querySelectorAll('#presentation-properties-form input, #presentation-properties-form textarea, #presentation-properties-form select').forEach(input => input.toggleAttribute('disabled', !editable || slideApproved));
         collab()?.renderPresenceBar();
         collab()?.renderComments();
     }
@@ -488,7 +487,7 @@
         const meta = byId('presentation-slide-meta');
         if (meta) meta.textContent = `第 ${slide.index + 1} / ${content.slides.length} 页 · ${presentationLayoutLabel(slide.layoutId)}`;
         populateLayoutSelect(slide);
-        const transitionSelect = byId('presentation-transition-select'); if (transitionSelect) transitionSelect.value = slide.transition?.type || 'none';
+        const zoomSelect = byId('presentation-zoom-select'); if (zoomSelect && document.activeElement !== zoomSelect) zoomSelect.value = String(state.zoom); const transitionSelect = byId('presentation-transition-select'); if (transitionSelect) transitionSelect.value = slide.transition?.type || 'none'; const reviewButton = byId('presentation-toggle-slide-review-btn'); if (reviewButton) { reviewButton.textContent = slide.review?.status === 'approved' ? '解除批准' : '批准页面'; reviewButton.toggleAttribute('disabled', !canEditActivePresentation()); }
     }
     function renderDiagramElement(node, element) {
         node.classList.add('presentation-diagram-element');
@@ -558,10 +557,10 @@
     function switchPanel(name) {
         state.panel = name;
         document.querySelectorAll('[data-presentation-panel]').forEach(button => button.classList.toggle('is-active', button.dataset.presentationPanel === name));
-        ['properties', 'template', 'ai', 'assets', 'metrics', 'notes', 'comments', 'issues', 'versions'].forEach(panel => byId(`presentation-${panel}-panel`)?.classList.toggle('hidden', panel !== name));
+        ['properties', 'template', 'ai', 'assets', 'metrics', 'notes', 'evidence', 'comments', 'issues', 'versions'].forEach(panel => byId(`presentation-${panel}-panel`)?.classList.toggle('hidden', panel !== name));
         if (name === 'versions') loadVersions().catch(error => toast(error.message, 'error'));
         if (name === 'comments') collab()?.loadComments(state.active?.id);
-        if (name === 'notes') renderSpeakerNotes();
+        if (name === 'notes') renderSpeakerNotes(); else if (name === 'evidence') presenter()?.renderEvidence?.(state);
         if (name === 'assets') loadAssets().catch(error => toast(error.message, 'error'));
         if (name === 'metrics') loadPresentationMetrics().catch(error => toast(error.message, 'error'));
     }
@@ -667,7 +666,7 @@ function setSelectedImageAsCover() {
             duration: byId('presentation-create-duration')?.value ? byId('presentation-create-duration').value + ' 分钟' : '', language: byId('presentation-create-language')?.value || 'zh-CN', style: byId('presentation-create-style')?.value || '', templateId: byId('presentation-create-template')?.value || 'business-blue', templateVersion: templateById(byId('presentation-create-template')?.value || 'business-blue')?.version, model: getPresentationAiModelId(),
             needsCharts: Boolean(byId('presentation-create-needs-charts')?.checked), retainSourceRefs: Boolean(byId('presentation-create-retain-sources')?.checked),
             mustInclude: byId('presentation-create-must-include')?.value.trim() || '', prohibitedContent: byId('presentation-create-prohibited-content')?.value.trim() || '',
-            materials: byId('presentation-create-material')?.value.trim() ? [{ id: 'source_1', title: '用户提供的材料', text: byId('presentation-create-material').value.trim() }] : []
+            materials: byId('presentation-create-material')?.value.trim() ? [{ id: 'source_1', title: '用户提供的材料', type: '用户输入', locator: '创建表单中的材料文本', text: byId('presentation-create-material').value.trim() }] : []
         };
     }
     function renderOutlineReview(input) { return presenter()?.renderOutlineReview?.(input, state, { labels: PRESENTATION_LAYOUT_LABELS, templateById }); }
@@ -702,7 +701,7 @@ function setSelectedImageAsCover() {
         try {
             const request = { ...state.pendingCreate, outline, title: outline.title || state.pendingCreate.topic };
             const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
-            const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, templateVersion: request.templateVersion, content: data.proposal.presentation }));
+            const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, templateVersion: request.templateVersion, content: data.proposal.presentation, planApproval: { outline } }));
             byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id);
             const warnings = Array.isArray(data.proposal?.warnings) ? data.proposal.warnings.filter(Boolean) : [];
             toast(warnings.length ? 'AI 初稿已生成；' + warnings.length + ' 项数据或元素提示已安全处理，可在画布中补充。' : 'AI 初稿已生成，可继续在画布中编辑。', warnings.length ? 'warning' : 'success');
@@ -718,9 +717,9 @@ function setSelectedImageAsCover() {
         const button = byId('presentation-ai-rewrite-btn'); const controller = beginAiRequest();
         button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成建议…';
         try {
-            const data = await requestJson(API + '/ai/rewrite', aiJsonOptions({ title: state.active.content.title, topic: state.active.content.title, templateId: state.active.template?.id, model, slide, instruction, materials: state.active.content.sources || [] }, controller));
+            const data = await requestJson(API + '/ai/rewrite', aiJsonOptions({ presentationId: state.active.id, title: state.active.content.title, topic: state.active.content.title, templateId: state.active.template?.id, model, slide, instruction, materials: state.active.content.sources || [] }, controller));
             const proposed = data.proposal.presentation?.slides?.[0]; if (!proposed) throw new Error('AI 未返回可用页面。');
-            const accepted = await window.Pivot.legacy.showConfirm?.('应用 AI 页面建议', 'AI 将替换当前页面内容。你可以通过“撤销”恢复原页面。');
+            const accepted = await window.Pivot.legacy.showConfirm?.('应用 AI 页面建议', (presenter()?.formatChangeImpact?.(data.changeImpact) || 'AI 将替换当前页面内容。') + ' 你可以通过“撤销”恢复原页面。');
             if (accepted) { const index = state.active.content.slides.findIndex(item => item.id === slide.id); proposed.id = slide.id; proposed.index = index; state.active.content.slides[index] = proposed; state.selectedElementId = ''; recordHistory(); renderEditor(); toast('已应用 AI 页面建议。'); }
         } catch (error) {
             if (isAiAbort(error, controller)) { toast('AI 页面改写已取消。', 'warning'); return; }
@@ -741,7 +740,7 @@ function setSelectedImageAsCover() {
         const button = byId('presentation-ai-continue-btn'); const controller = beginAiRequest();
         button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成…';
         try {
-            const data = await requestJson(API + '/ai/continue', aiJsonOptions({ title: content.title, topic: content.title, templateId: content.template?.id, model, presentation: content, additionalSlideCount, instruction, materials: [] }, controller));
+            const data = await requestJson(API + '/ai/continue', aiJsonOptions({ title: content.title, topic: content.title, templateId: content.template?.id, model, presentation: content, additionalSlideCount, instruction, materials: content.sources || [] }, controller));
             const generated = data.proposal?.presentation?.slides || [];
             if (generated.length !== additionalSlideCount) throw new Error('AI 未返回请求数量的新增页面。');
             const accepted = await window.Pivot.legacy.showConfirm?.('插入 AI 新增页面', '将把 ' + generated.length + ' 页插入当前页之后；可通过“撤销”恢复。');
@@ -776,7 +775,7 @@ function setSelectedImageAsCover() {
     }
     async function runCheck() {
         if (!state.active?.id) return; setSaveState('正在检查…', 'saving');
-        try { await saveActive({ force: true }); const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/validation`); state.active.validation = data.validation; switchPanel('issues'); renderIssues(); const label = data.validation.status === 'passed' ? '未发现阻断问题' : `发现 ${data.validation.issues?.length || 0} 项检查结果`; toast(label, data.validation.status === 'blocked' ? 'warning' : 'success'); }
+        try { await saveActive({ force: true }); const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/render-quality`); state.active.validation = data.validation; switchPanel('issues'); renderIssues(); const label = data.validation.status === 'passed' ? `已完成 ${data.validation.summary?.renderedSlides || 0} 页渲染检查` : `发现 ${data.validation.issues?.length || 0} 项检查结果`; toast(label, Number(data.validation.summary?.blocking || 0) > 0 ? 'warning' : 'success'); }
         finally { setSaveState('已保存', 'saved'); }
     }
     async function applyTemplate(templateId) {
@@ -919,7 +918,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-upload-font-btn')) { state.pendingAssetType = 'font'; byId('presentation-rich-asset-input')?.click(); return; }
             if (event.target.closest('#presentation-assets-refresh-btn')) { loadAssets().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-metrics-refresh-btn')) { loadPresentationMetrics().catch(error => toast(error.message, 'error')); return; }
-            const assetAction = event.target.closest('[data-presentation-asset-action]'); if (assetAction) { const asset = assetByRef(assetAction.dataset.presentationAssetRef); if (!asset) return; if (assetAction.dataset.presentationAssetAction === 'insert') insertAssetFromLibrary(asset); else if (assetAction.dataset.presentationAssetAction === 'font-heading') applyFontAsset(asset, 'heading'); else if (assetAction.dataset.presentationAssetAction === 'font-body') applyFontAsset(asset, 'body'); return; }
+            const layoutVariant = event.target.closest('[data-presentation-layout-variant]'); if (layoutVariant) { presenter()?.applyLayoutVariant?.(layoutVariant.dataset.presentationLayoutVariant, state, { recordHistory, renderEditor, toast }); return; } const assetAction = event.target.closest('[data-presentation-asset-action]'); if (assetAction) { const asset = assetByRef(assetAction.dataset.presentationAssetRef); if (!asset) return; if (assetAction.dataset.presentationAssetAction === 'insert') insertAssetFromLibrary(asset); else if (assetAction.dataset.presentationAssetAction === 'font-heading') applyFontAsset(asset, 'heading'); else if (assetAction.dataset.presentationAssetAction === 'font-body') applyFontAsset(asset, 'body'); return; }
             if (event.target.closest('#presentation-set-cover-btn')) { setSelectedImageAsCover(); return; }
             if (event.target.closest('#presentation-delete-element-btn')) { const slide = activeSlide(); const element = selectedElement(); if (element?.locked) { toast('该元素由组织品牌模板锁定，不能删除。', 'warning'); return; } if (slide && state.selectedElementId) { slide.elements = slide.elements.filter(item => item.id !== state.selectedElementId); state.selectedElementId = ''; recordHistory(); renderEditor(); } return; }
             if (event.target.closest('#presentation-copy-element-btn')) { copySelectedElements(); return; }
@@ -936,8 +935,8 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-replace-image-btn')) { byId('presentation-replace-image-input')?.click(); return; }
             if (event.target.closest('#presentation-layer-up-btn')) { changeLayer(1); return; }
             if (event.target.closest('#presentation-layer-down-btn')) { changeLayer(-1); return; }
-            if (event.target.closest('#presentation-check-btn')) { runCheck().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-presenter-btn') || event.target.closest('#presentation-notes-presenter-btn')) { openPresenterMode().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-check-btn')) { runCheck().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-toggle-slide-review-btn')) { presenter()?.reviewActiveSlide?.(state, activeSlide()?.review?.status !== 'approved', { renderEditor, resetHistory, toast }).catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-presenter-btn') || event.target.closest('#presentation-notes-presenter-btn')) { openPresenterMode().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-delivery-guide-btn')) { presenter()?.loadDeliveryGuide?.(state, { toast }); return; }
             if (event.target.closest('#presentation-remote-start-btn')) { startRemotePresentation().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-remote-stop-btn')) { stopRemotePresentation().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-presenter-prev-btn')) { movePresenterSlide(-1); return; }
@@ -950,7 +949,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-export-pdf-btn')) { exportPresentation('pdf').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-png-btn')) { exportPresentation('png').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-ai-rewrite-btn')) { rewriteCurrentSlide().catch(error => toast(error.message, 'error')); return; }
-        if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-ai-layout-variants-btn')) { presenter()?.generateLayoutVariants?.(state, { renderEditor, toast }); return; }
         if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-ai-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-create-cancel-btn') || event.target.id === 'presentation-create-modal') { closeCreateModal(); return; }
@@ -970,7 +969,7 @@ function setSelectedImageAsCover() {
             if (event.target?.id === 'presentation-data-chart-form') { event.preventDefault(); importDataChart().catch(error => toast(error.message, 'error')); }
         });
         view.addEventListener('input', event => { if (['presentation-library-search', 'presentation-library-tag', 'presentation-library-created-by'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-title-input' && state.active?.content) { state.active.content.title = event.target.value.slice(0, 160); state.active.title = state.active.content.title; recordHistory(); } if (event.target?.id === 'presentation-speaker-notes') { const slide = activeSlide(); if (slide) { slide.speakerNotes = event.target.value.slice(0, 8000); scheduleSave(); } } if (event.target?.closest('#presentation-properties-form') && event.target?.id !== 'presentation-element-data') updateElementFromForm(); });
-        view.addEventListener('change', event => { if (['presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-library-favorite-only') { state.libraryPage = 1; state.libraryFilters.favorite = Boolean(event.target.checked); loadDocuments().catch(error => toast(error.message, 'error')); return; } if (event.target?.id === 'presentation-speaker-notes') { recordHistory(); return; } if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-replace-image-input') replaceSelectedImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-rich-asset-input') uploadRichAsset(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 0.65; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
+        view.addEventListener('change', event => { if (['presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to'].includes(event.target?.id)) { scheduleLibraryFilter(); return; } if (event.target?.id === 'presentation-library-favorite-only') { state.libraryPage = 1; state.libraryFilters.favorite = Boolean(event.target.checked); loadDocuments().catch(error => toast(error.message, 'error')); return; } if (event.target?.id === 'presentation-speaker-notes') { recordHistory(); return; } if (event.target?.id === 'presentation-image-input') uploadImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-replace-image-input') replaceSelectedImage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-template-package-input') importTemplatePackage(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-rich-asset-input') uploadRichAsset(event.target.files?.[0]).catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-layout-select') { const slide = activeSlide(); if (slide) { applyLayoutToSlide(event.target.value); recordHistory(); renderEditor(); } } if (event.target?.id === 'presentation-zoom-select') { state.zoom = Number(event.target.value) || 1; renderStage(); } if (event.target?.id === 'presentation-chart-dataset') loadChartDatasetFields().catch(error => toast(error.message, 'error')); if (event.target?.id === 'presentation-element-data') { try { const parsed = JSON.parse(event.target.value); const element = selectedElement(); if (element?.type === 'table') { element.columns = parsed.columns; element.rows = parsed.rows; } if (element?.type === 'chart') { element.title = parsed.title || ''; element.chartType = parsed.chartType || 'bar'; element.data = parsed.data; element.options = parsed.options || element.options; } recordHistory(); renderEditor(); } catch (_) { toast('表格或图表数据必须是有效 JSON；当前修改尚未应用。', 'error'); } } });
         view.addEventListener('pointerdown', event => { const node = event.target.closest('[data-presentation-element-id]'); const element = selectedElement(); if (node && element && node.dataset.presentationElementId === element.id) startDrag(event, element); });
         window.addEventListener('pointermove', moveDrag); window.addEventListener('pointerup', endDrag);
         view.addEventListener('keydown', event => {

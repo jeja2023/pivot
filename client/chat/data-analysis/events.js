@@ -27,7 +27,8 @@
     function activateTab(tab) {
         const previousTab = document.querySelector('.data-analysis-tab.active')?.dataset.dataAnalysisTab;
         const targetTab = normalizeTab(tab);
-        if (previousTab && previousTab !== targetTab) clearTabData(previousTab);
+        const preservesAnalysisContext = ['governance', 'assets', 'dashboards'].includes(targetTab);
+        if (previousTab && previousTab !== targetTab && !preservesAnalysisContext) clearTabData(previousTab);
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
             button.classList.toggle('active', button.dataset.dataAnalysisTab === targetTab);
         });
@@ -35,6 +36,7 @@
             panel.classList.toggle('hidden', panel.id !== `data-analysis-${targetTab}-panel`);
         });
         if (targetTab === 'ai') resumeAiWorkspace();
+        app.onDataAnalysisTabActivated?.(targetTab);
         // 切换 Tab 时同步更新顶部标题和简介
         updateToolbarHeader(targetTab);
         persistActiveTab(targetTab);
@@ -61,7 +63,7 @@
         case 'chart':
             state.chart = null;
             resetInputs({
-                'data-analysis-chart-x': '', 'data-analysis-chart-y': '', 'data-analysis-chart-group': '',
+                'data-analysis-chart-x': '', 'data-analysis-chart-y': '', 'data-analysis-chart-y2': '', 'data-analysis-chart-group': '',
                 'data-analysis-chart-aggregation': 'sum', 'data-analysis-chart-type': 'bar',
                 'data-analysis-chart-limit': '30', 'data-analysis-chart-sort': 'value_desc', 'data-analysis-chart-palette': 'teal'
             });
@@ -979,6 +981,8 @@
         document.addEventListener('scroll', () => {
             hideCellTooltip();
         }, true);
+
+        app.bindDataAnalysisExtensionEvents?.(root);
     }
 
     Object.assign(app, {

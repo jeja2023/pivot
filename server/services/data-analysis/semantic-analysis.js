@@ -189,7 +189,7 @@ async function getSemanticSourceStats(datasetRow, textColumn) {
 }
 
 async function createSemanticAnalysisJob({ user, datasetId, textField, idField = '', instruction, modelId = null, batchTokens, maxOutputTokens } = {}) {
-    const dataset = await getDatasetForUser(user.id, datasetId);
+    const dataset = await getDatasetForUser(user, datasetId, { write: true });
     const textColumn = getColumn(dataset, textField);
     const idColumn = idField ? getColumn(dataset, idField) : null;
     const safeInstruction = String(instruction || '').trim().slice(0, 6000);

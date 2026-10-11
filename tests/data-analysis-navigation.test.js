@@ -143,3 +143,20 @@ test('数据分析入口未指定页签时使用已保存的页签', () => {
 
     assert.match(core, /const requestedTab = normalizeTab\(explicitTab \|\| getStoredActiveTab\(\)\);/);
 });
+
+test('数据分析侧边菜单统一采用导航样式，不混入通用操作按钮样式', () => {
+    const view = read('client/chat/data-analysis/view.js');
+
+    for (const tab of ['governance', 'assets', 'dashboards']) {
+        assert.match(view, new RegExp(`<button class="data-analysis-tab" type="button" data-data-analysis-tab="${tab}"`));
+        assert.doesNotMatch(view, new RegExp(`<button class="[^\"]*btn-secondary[^\"]*" type="button" data-data-analysis-tab="${tab}"`));
+    }
+});
+
+test('字段治理、分析资产和仪表盘拥有独立的工作台标题与说明', () => {
+    const view = read('client/chat/data-analysis/view.js');
+
+    assert.match(view, /governance:\s*\{\s*title:\s*'字段治理',\s*desc:\s*'统一维护字段定义/);
+    assert.match(view, /assets:\s*\{\s*title:\s*'分析资产',\s*desc:\s*'保存、共享和复跑当前图表/);
+    assert.match(view, /dashboards:\s*\{\s*title:\s*'仪表盘',\s*desc:\s*'组合分析资产形成协作看板/);
+});

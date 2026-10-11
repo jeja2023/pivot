@@ -180,13 +180,11 @@ async function loadWikiCompileManifestSnapshot({ runId, user } = {}, deps = {}) 
         WHERE input.run_id = ? ORDER BY input.source_ordinal ASC
     `, [safeRunId]);
     if (!rows.length) return { sources: [], superseded: true, reason: 'missing_snapshot' };
-    const getDocuments = deps.getProductDocumentsForUser || require('./knowledge-content').getProductDocumentsForUser;
     const invalid = [];
     const snapshotDocumentIds = [...new Set(rows.map(row => Number(row.document_id)))];
-    const readableDocuments = deps.getProductDocumentForUser && !deps.getProductDocumentsForUser
-        ? new Map((await Promise.all(snapshotDocumentIds.map(async id => [id, await deps.getProductDocumentForUser(id, user)])))
-            .filter(([, document]) => Boolean(document)))
-        : await getDocuments(snapshotDocumentIds, user);
+    const getDocument = deps.getProductDocumentForUser || require('./knowledge-content').getProductDocumentForUser;
+    const readableDocuments = new Map((await Promise.all(snapshotDocumentIds.map(async id => [id, await getDocument(id, user)])))
+        .filter(([, document]) => Boolean(document)));
     for (const row of rows) {
         const isCurrent = Number(row.current_version_id) === Number(row.version_id)
             && Number(row.current_block_version_id) === Number(row.version_id)

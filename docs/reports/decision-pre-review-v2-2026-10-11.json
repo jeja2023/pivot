@@ -1,0 +1,228 @@
+{
+  "kind": "pivot_decision_pre_review_report",
+  "generatedAt": "2026-10-10T16:29:18.684Z",
+  "evaluationSetVersion": "v2",
+  "model": {
+    "id": 18,
+    "name": "chatgpt-5.6-luna",
+    "modelName": "gpt-5.6-luna"
+  },
+  "caseCount": 15,
+  "results": [
+    {
+      "caseId": "rag-zh-short-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "retrieve",
+      "scores": {
+        "retrieve": 0,
+        "skip": 0
+      },
+      "durationMs": 20411,
+      "error": "Request failed with status code 522",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "rag-zh-negative-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "rag-long-context-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-data-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "allowedActionIds": [
+        "propose",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-consent-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "allowedActionIds": [
+        "candidate_only",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-browser-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "allowedActionIds": [
+        "propose",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-report-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "allowedActionIds": [
+        "propose",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "rag-cross-unit-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-high-risk-001",
+      "scenario": "chat.tools",
+      "language": "zh",
+      "allowedActionIds": [
+        "propose",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "rag-rare-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "tools-en-001",
+      "scenario": "chat.tools",
+      "language": "en",
+      "allowedActionIds": [
+        "propose",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "rag-conversation-001",
+      "scenario": "chat.rag",
+      "language": "zh",
+      "allowedActionIds": [
+        "retrieve",
+        "skip"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "next-step-direct-zh-001",
+      "scenario": "chat.next_step",
+      "language": "zh",
+      "allowedActionIds": [
+        "direct_answer",
+        "clarify"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "next-step-clarify-zh-001",
+      "scenario": "chat.next_step",
+      "language": "zh",
+      "allowedActionIds": [
+        "direct_answer",
+        "clarify"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    },
+    {
+      "caseId": "workflow-published-zh-001",
+      "scenario": "agent.workflow",
+      "language": "zh",
+      "allowedActionIds": [
+        "direct_answer",
+        "clarify",
+        "workflow:101"
+      ],
+      "selectedActionId": "",
+      "scores": {},
+      "durationMs": 0,
+      "error": "未运行：模型端点已不可用（Request failed with status code 522）",
+      "providerVersion": "gpt-5.6-luna"
+    }
+  ],
+  "reviewNotice": "此报告只记录模型对脱敏冻结案例的候选选择，不构成人工审核标签，也不能用于训练、发布或开启 active 灰度。"
+}

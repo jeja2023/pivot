@@ -19,6 +19,8 @@ const server = http.createServer((req, res) => {
         }
         let payload = {};
         try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (_) {}
+        const semanticDelayMs = JSON.stringify(payload).includes('E2E_SEMANTIC_DELAY') ? 1_500 : 0;
+        const respond = () => {
         if (payload.stream === false) {
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({
@@ -33,6 +35,12 @@ const server = http.createServer((req, res) => {
         res.write('data: {"id":"e2e-completion","choices":[{"index":0,"delta":{"role":"assistant","content":"真实 E2E 流式回答"},"finish_reason":null}]}\n\n');
         res.write('data: {"id":"e2e-completion","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":5,"total_tokens":10}}\n\n');
         res.end('data: [DONE]\n\n');
+        };
+        if (semanticDelayMs > 0) {
+            setTimeout(respond, semanticDelayMs);
+        } else {
+            respond();
+        }
     });
 });
 

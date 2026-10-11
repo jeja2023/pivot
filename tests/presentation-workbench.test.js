@@ -16,7 +16,7 @@ const {
     validatePresentation
 } = require('../server/services/presentations/presentation-schema');
 const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('../server/services/presentations/presentation-templates');
-const { exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
+const { assertSensitiveExportAllowed, exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
 const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
@@ -25,6 +25,12 @@ const { scanVbaSource } = require('../server/services/presentations/presentation
 const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
 const { importPptxTemplatePackage } = require('../server/services/presentations/presentation-pptx-template-import');
 const { buildOutlineMessages, buildSlidesMessages } = require('../server/services/presentations/presentation-ai');
+const { normalizeMaterials, sha256 } = require('../server/services/presentations/presentation-evidence');
+const { buildSlideChangeImpact, mergeLockedElements } = require('../server/services/presentations/presentation-change-impact');
+const { buildPresentationDataNarrative } = require('../server/services/presentations/presentation-data-narrative');
+const { buildPresentationDeliveryGuide } = require('../server/services/presentations/presentation-delivery-guide');
+const { runRenderedPresentationQuality } = require('../server/services/presentations/presentation-render-quality');
+const { buildSlideLayoutVariants } = require('../server/services/presentations/presentation-layout-variants');
 
 function testPresentation() {
     return defaultPresentation({ title: '季度项目汇报', template: getBuiltInTemplate('business-blue') });
@@ -72,6 +78,110 @@ test('PPT IR 仅允许存在的结构化材料来源被页面和元素引用', (
     assert.match(checked.errors.join('\n'), /不存在的来源/);
 });
 
+test('PPT 材料证据在 IR 中保留摘要、定位和内容指纹，供后续 AI 改写继续使用', () => {
+    const raw = '第一季度收入增长 10%，客户续约率为 92%。';
+    const [material] = normalizeMaterials([{ id: '经营材料', title: '一季度经营报告', type: 'file', locator: '文件 Q1-经营报告.docx', text: raw }]);
+    assert.equal(material.digest, sha256(raw));
+    assert.equal(material.excerpt, raw);
+    const proposal = parsePresentationProposal(JSON.stringify({
+        title: '经营复盘',
+        slides: [{ id: 'slide_1', type: 'content', layoutId: 'title-content', sourceRefs: [material.id], elements: [{ id: 'title', type: 'text', x: 80, y: 80, width: 900, height: 100, content: { text: '一季度经营复盘' }, style: { fontSize: 32, color: '#1F2937' }, sourceRefs: [material.id] }], speakerNotes: '' }]
+    }), { title: '经营复盘', sources: [material] });
+    const source = proposal.presentation.sources[0];
+    assert.equal(source.locator, '文件 Q1-经营报告.docx');
+    assert.equal(source.digest, sha256(raw));
+    assert.equal(source.excerpt, raw);
+    const rewrite = buildRewriteMessages({ title: '经营复盘', slide: proposal.presentation.slides[0], instruction: '保留数据', materials: proposal.presentation.sources }).at(-1).content;
+    assert.match(rewrite, /客户续约率为 92%/);
+    assert.equal(runPresentationValidation(proposal.presentation).issues.some(issue => issue.code === 'SOURCE_EVIDENCE_MISSING'), false);
+});
+
+test('PPT IR 保存已确认大纲及其来源关联，供版本审计和后续追溯', () => {
+    const presentation = testPresentation();
+    presentation.sources = [{ id: 'source_1', title: '经营材料', type: 'material', locator: '第 2 页', digest: 'a'.repeat(64), excerpt: '经营数据摘录' }];
+    presentation.metadata.planApproval = {
+        approvalMethod: 'interactive_outline_review', approvedAt: '2026-10-11T01:00:00.000Z', approvedBy: '1001', outlineDigest: 'b'.repeat(64),
+        outline: { title: '季度项目汇报', outline: [{ section: '结论', slides: [{ title: '经营结论', purpose: '确认行动事项', layoutHint: 'summary', keyPoints: ['收入增长'], sourceRefs: ['source_1'] }] }] }
+    };
+    const normalized = normalizePresentation(presentation);
+    assert.equal(normalized.metadata.planApproval.status, 'approved');
+    assert.equal(normalized.metadata.planApproval.outline.sections[0].slides[0].sourceRefs[0], 'source_1');
+    presentation.metadata.planApproval.outline.outline[0].slides[0].sourceRefs = ['unknown'];
+    assert.throws(() => normalizePresentation(presentation), /大纲引用了不存在的来源/);
+});
+
+test('质量检查提示已引用但没有可回溯证据的旧来源', () => {
+    const presentation = testPresentation();
+    presentation.sources = [{ id: 'legacy_source', title: '历史材料', type: 'material', locator: '', digest: '', excerpt: '' }];
+    presentation.slides[0].sourceRefs = ['legacy_source'];
+    const result = runPresentationValidation(presentation);
+    assert.ok(result.issues.some(issue => issue.code === 'SOURCE_EVIDENCE_MISSING'));
+});
+
+test('AI 页面改写差异会汇总增删改，并保留锁定品牌元素', () => {
+    const presentation = testPresentation();
+    const current = presentation.slides[0];
+    current.elements.push({ id: 'locked_logo', type: 'shape', x: 40, y: 40, width: 80, height: 40, rotation: 0, zIndex: 20, locked: true, visible: true, sourceRefs: [], shapeType: 'rect', style: { fill: '#1769AA', stroke: '#1769AA', strokeWidth: 1, opacity: 1, radius: 0 } });
+    const proposal = JSON.parse(JSON.stringify(current));
+    proposal.elements = proposal.elements.filter(element => element.id !== 'locked_logo');
+    proposal.elements.find(element => element.id === 'title').content.text = 'AI 改写标题';
+    proposal.elements.push({ id: 'new_body', type: 'text', x: 120, y: 520, width: 600, height: 80, rotation: 0, zIndex: 8, locked: false, visible: true, sourceRefs: [], content: { text: '新增结论' }, style: { fontSize: 20, color: '#1F2937' } });
+    const merged = mergeLockedElements(current, proposal);
+    const impact = buildSlideChangeImpact(current, merged);
+    assert.ok(merged.elements.some(element => element.id === 'locked_logo' && element.locked));
+    assert.equal(impact.counts.protectedLocked, 1);
+    assert.equal(impact.counts.added, 1);
+    assert.ok(impact.changes.some(change => change.elementId === 'title' && change.kind === 'updated' && change.fields.includes('文字内容')));
+});
+
+test('页面审核状态只能使用草稿或批准，并会被规范化保留', () => {
+    const presentation = testPresentation();
+    presentation.slides[0].review = { status: 'approved', approvedAt: '2026-10-11T01:00:00.000Z', approvedBy: '1001' };
+    assert.equal(normalizePresentation(presentation).slides[0].review.status, 'approved');
+    presentation.slides[0].review = { status: 'unknown' };
+    assert.throws(() => normalizePresentation(presentation), /页面审核状态无效/);
+});
+
+test('数据图表可生成可编辑的结论注释与备份页数据，演讲指南可估算时长和问题', () => {
+    const chart = { chartType: 'bar', title: '季度收入', data: { columns: ['季度', '收入'], rows: [['Q1', 100], ['Q2', 130], ['Q3', 150]] } };
+    const narrative = buildPresentationDataNarrative(chart);
+    assert.equal(narrative.recommendation, 'line');
+    assert.match(narrative.headline, /Q3/);
+    assert.match(narrative.annotation, /增加 50/);
+    assert.deepEqual(narrative.backupRows, [['Q1', '100'], ['Q2', '130'], ['Q3', '150']]);
+    const presentation = testPresentation();
+    presentation.slides[0].elements.push({ id: 'chart_guide', type: 'chart', x: 100, y: 400, width: 600, height: 200, rotation: 0, zIndex: 6, locked: false, visible: true, sourceRefs: [], ...chart, options: { showLegend: false, showLabels: true, colors: ['#1769AA'] } });
+    const guide = buildPresentationDeliveryGuide(normalizePresentation(presentation));
+    assert.ok(guide.estimatedMinutes >= 1);
+    assert.ok(guide.questions.some(item => /数据来源/.test(item)));
+    assert.equal(guide.backupSlides.length, 1);
+});
+
+test('渲染质检逐页走真实 PNG 输出，并保留结构化版式问题', async () => {
+    const presentation = testPresentation();
+    const second = JSON.parse(JSON.stringify(presentation.slides[0]));
+    second.id = 'slide_2'; second.index = 1; second.elements = second.elements.map((element, index) => ({ ...element, id: `${element.id}_2_${index}` }));
+    presentation.slides.push(second);
+    const result = await runRenderedPresentationQuality(presentation);
+    assert.equal(result.summary.renderedSlides, 2);
+    assert.equal(result.issues.some(issue => issue.code === 'RENDER_FAILED'), false);
+});
+
+test('页面版式探索生成三种可编辑候选，并保持锁定元素坐标不变', () => {
+    const presentation = testPresentation();
+    const slide = presentation.slides[0];
+    slide.elements.push({ id: 'hero_chart', type: 'chart', x: 120, y: 320, width: 500, height: 250, rotation: 0, zIndex: 5, locked: false, visible: true, sourceRefs: [], chartType: 'bar', title: '趋势', data: { columns: ['阶段', '数值'], rows: [['Q1', 1], ['Q2', 2]] }, options: { showLegend: false, showLabels: true, colors: ['#1769AA'] } });
+    slide.elements.push({ id: 'locked_logo', type: 'shape', x: 20, y: 20, width: 50, height: 30, rotation: 0, zIndex: 20, locked: true, visible: true, sourceRefs: [], shapeType: 'rect', style: { fill: '#1769AA', stroke: '#1769AA', strokeWidth: 1, opacity: 1, radius: 0 } });
+    const variants = buildSlideLayoutVariants(slide);
+    assert.deepEqual(variants.map(item => item.id), ['executive-summary', 'evidence-focus', 'balanced-comparison']);
+    variants.forEach(variant => {
+        const logo = variant.slide.elements.find(element => element.id === 'locked_logo');
+        assert.equal(logo.x, 20);
+        assert.equal(logo.y, 20);
+        assert.equal(variant.slide.elements.find(element => element.id === 'title').y, 58);
+    });
+});
+
 test('质量检查识别文本溢出、占位符和内容密度', () => {
     const presentation = testPresentation();
     const body = presentation.slides[0].elements[1];
@@ -90,6 +200,8 @@ test('质量检查提示页面和演讲者备注中的敏感信息', () => {
     const result = runPresentationValidation(presentation);
     assert.ok(result.issues.some(issue => issue.code === 'SENSITIVE_CONTENT'));
     assert.ok(result.issues.some(issue => issue.code === 'SENSITIVE_NOTES'));
+    assert.throws(() => assertSensitiveExportAllowed(result, { allowSensitiveExport: false }), /敏感内容/);
+    assert.equal(assertSensitiveExportAllowed(result, { allowSensitiveExport: true }).length, 2);
 });
 
 test('模板包必须具备版本、类型和受控主题/布局定义', () => {

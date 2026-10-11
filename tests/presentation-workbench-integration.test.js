@@ -14,6 +14,7 @@ const {
     getPresentation,
     listPresentationExports,
     listPresentationVersions,
+    reviewPresentationSlide,
     savePresentationContent
 } = require('../server/services/presentations/presentation-service');
 
@@ -42,10 +43,15 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
     const { tenantId, user } = await createTenantScopedUser();
     let presentation;
     try {
-        presentation = await createPresentation(user, { title: 'PPT 服务集成验证', templateId: 'business-blue' });
+        presentation = await createPresentation(user, {
+            title: 'PPT 服务集成验证', templateId: 'business-blue',
+            planApproval: { outline: { title: 'PPT 服务集成验证', outline: [{ section: '概览', slides: [{ title: '封面', purpose: '说明主题', layoutHint: 'cover', keyPoints: [], sourceRefs: [] }] }] } }
+        });
         assert.equal(presentation.title, 'PPT 服务集成验证');
         assert.equal(presentation.version, 1);
         assert.ok(presentation.artifactId);
+        assert.equal(presentation.content.metadata.planApproval.status, 'approved');
+        assert.equal(presentation.content.metadata.planApproval.approvedBy, String(user.id));
 
         const changed = JSON.parse(JSON.stringify(presentation.content));
         changed.slides[0].elements[1].content.text = '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围';
@@ -61,6 +67,15 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         assert.deepEqual(versions.map(item => item.version), [2, 1]);
         const loaded = await getPresentation(user, presentation.id);
         assert.equal(loaded.content.slides[0].elements[1].content.text, '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围');
+        assert.equal(loaded.content.metadata.planApproval.approvedBy, String(user.id));
+
+        const slideId = loaded.content.slides[0].id;
+        const reviewed = await reviewPresentationSlide(user, presentation.id, slideId, true);
+        assert.equal(reviewed.content.slides[0].review.status, 'approved');
+        const tampered = JSON.parse(JSON.stringify(reviewed.content));
+        tampered.slides[0].review = { status: 'draft', approvedAt: '', approvedBy: '' };
+        const resaved = await savePresentationContent(user, presentation.id, { baseVersion: reviewed.version, title: reviewed.title, content: tampered, note: '普通保存不得解除批准' });
+        assert.equal(resaved.content.slides[0].review.status, 'approved');
 
         const exported = await createPresentationExport(user, presentation.id, 'pptx');
         assert.equal(exported.reused, false);
@@ -73,7 +88,7 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         const presentationRow = await pool().query('SELECT tenant_id, owner_user_id, current_version FROM presentation_documents WHERE client_id = $1', [presentation.id]);
         assert.equal(Number(presentationRow.rows[0].tenant_id), tenantId);
         assert.equal(Number(presentationRow.rows[0].owner_user_id), user.id);
-        assert.equal(Number(presentationRow.rows[0].current_version), 2);
+        assert.equal(Number(presentationRow.rows[0].current_version), 3);
         const renditionRow = await pool().query('SELECT format, storage_ref, ir_ref FROM agent_artifact_renditions WHERE id = $1', [exported.rendition.id]);
         assert.equal(renditionRow.rows[0].format, 'pptx');
         assert.match(renditionRow.rows[0].storage_ref, /^artifact-cas:\/\/[0-9a-f]{16,64}$/);
