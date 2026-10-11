@@ -1156,6 +1156,7 @@ test.describe('Pivot browser smoke', () => {
         });
         await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
         await expectDataAnalysisSidebarNavigationLayout(page);
+        const initialDatasetCount = await page.locator('#data-analysis-dataset-table-body .data-analysis-dataset-name').count();
         await page.locator('#data-analysis-file').setInputFiles({
             name: 'e2e-sales.csv',
             mimeType: 'text/csv',
@@ -1167,7 +1168,7 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#data-cleaning-add-rule').click();
         await page.locator('#data-cleaning-apply').click();
         await expect(page.locator('#data-analysis-overview-panel')).toBeVisible({ timeout: 15_000 });
-        await expect(page.locator('#data-analysis-dataset-table-body tr')).toHaveCount(2, { timeout: 15_000 });
+        await expect(page.locator('#data-analysis-dataset-table-body .data-analysis-dataset-name')).toHaveCount(initialDatasetCount + 2, { timeout: 15_000 });
 
         await page.locator('[data-data-analysis-tab="chart"]').click();
         await page.locator('#data-analysis-chart-x').selectOption('c_1');
@@ -1186,6 +1187,8 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#data-analysis-calc-expression').fill('{{c_2}} * 1.13');
         await page.locator('#data-analysis-calc-preview').click();
         await expect(page.locator('#data-analysis-calc-preview-result')).toContainText('calculated_value', { timeout: 15_000 });
+        await page.locator('#data-analysis-calc-modal [data-analysis-modal-close="data-analysis-calc-modal"]').first().click();
+        await expect(page.locator('#data-analysis-calc-modal')).toBeHidden();
 
         await page.locator('#data-analysis-open-scale-modal').click();
         await expect(page.locator('#data-analysis-scalability-panel')).toBeVisible({ timeout: 15_000 });
@@ -1201,6 +1204,8 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#data-analysis-scale-materialization-save').click();
         await expect((await materializationResponse).status()).toBe(201);
         await expect(page.locator('#data-analysis-scale-assets')).toContainText('区域销售额物化', { timeout: 15_000 });
+        await page.locator('#data-analysis-scalability-modal [data-analysis-modal-close="data-analysis-scalability-modal"]').first().click();
+        await expect(page.locator('#data-analysis-scalability-modal')).toBeHidden();
 
         await page.locator('[data-data-analysis-tab="assets"]').click();
         await page.locator('#data-analysis-open-save-view-modal').click();

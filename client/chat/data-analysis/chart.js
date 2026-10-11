@@ -113,13 +113,27 @@
             ` : '<div class="data-analysis-empty">选择字段后生成图表</div>');
             return;
         }
+        const chartTitle = state.chart?.title || '图表分析';
+        const xLabel = state.chart?.xAxis?.label || '';
+        const yLabel = state.chart?.yAxis?.label || '';
+        const metaParts = [];
+        if (xLabel) metaParts.push(`分类: ${esc(xLabel)}`);
+        if (yLabel) metaParts.push(`指标: ${esc(yLabel)}`);
+        const metaHtml = metaParts.length ? `<div class="data-analysis-chart-meta-text">${metaParts.join(' | ')}</div>` : '';
+
         PivotSafeHtml.setHtml(box, `
-            <div class="data-analysis-chart-actions">
-                <button id="data-analysis-chart-png" class="btn-secondary" type="button">保存为图片</button>
-                <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button">导出图表数据 (CSV)</button>
+            <div class="data-analysis-chart-header">
+                <div class="data-analysis-chart-heading">
+                    <h5 class="data-analysis-chart-title">${esc(chartTitle)}</h5>
+                    ${metaHtml}
+                </div>
+                <div class="data-analysis-chart-actions">
+                    <button id="data-analysis-chart-png" class="btn-secondary" type="button">保存为图片</button>
+                    <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button">导出图表数据 (CSV)</button>
+                </div>
             </div>
             <div class="pivot-echart-block" data-pivot-echart="${html.escapeAttr(JSON.stringify(state.chart))}">
-                <div class="pivot-echart-title">图表预览</div>
+                <div class="pivot-echart-title">${esc(chartTitle)}</div>
                 <div class="pivot-echart-canvas"></div>
                 <canvas height="300"></canvas>
                 <pre class="pivot-echart-error-text"></pre>

@@ -3,6 +3,9 @@
     if (!app) throw new Error('数据分析上下文模块未加载');
 
     function openModal(modalId) {
+        document.querySelectorAll('.data-analysis-modal-overlay:not(.hidden)').forEach(m => {
+            if (m.id !== modalId) m.classList.add('hidden');
+        });
         const el = document.getElementById(modalId);
         if (el) {
             el.classList.remove('hidden');

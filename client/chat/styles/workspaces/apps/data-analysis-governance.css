@@ -1443,3 +1443,35 @@ body.dark-mode .data-analysis-file-picker-row,
     font-weight: 700 !important;
     box-shadow: none !important;
 }
+
+/* 图表结果头部信息与指标说明 */
+.data-analysis-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.data-analysis-chart-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.data-analysis-chart-title {
+    margin: 0;
+    font-size: 0.96rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.data-analysis-chart-meta-text {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
