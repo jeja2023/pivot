@@ -617,7 +617,7 @@
                     </section>
 
                     <section id="data-analysis-history-panel" class="data-analysis-tab-panel hidden">
-                        <div class="data-analysis-dataset-selector-wrap" style="margin-bottom: 12px;">
+                        <div class="data-analysis-dataset-selector-wrap data-analysis-modal-mb-12">
                             <span>分析数据集</span>
                             <select id="data-analysis-history-dataset" class="form-input"></select>
                         </div>
@@ -632,7 +632,7 @@
             </div>
 
             <!-- 数据预览模态弹窗 -->
-            <div id="data-analysis-preview-modal" class="modal-overlay hidden" style="z-index: 8000;">
+            <div id="data-analysis-preview-modal" class="modal-overlay data-analysis-modal-overlay hidden">
                 <div class="modal data-analysis-preview-modal-dialog">
                     <div class="data-analysis-preview-modal-header">
                         <div class="data-analysis-preview-title-group">
@@ -649,49 +649,49 @@
             </div>
 
             <!-- 数据库导入模态弹窗 -->
-            <div id="data-analysis-db-import-modal" class="modal-overlay hidden" style="z-index: 8000;">
-                <div class="modal" style="width: min(500px, 92vw); max-height: 85vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
-                    <div style="display: flex; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
-                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">从服务器可访问数据库导入数据集</h3>
+            <div id="data-analysis-db-import-modal" class="modal-overlay data-analysis-modal-overlay hidden">
+                <div class="modal data-analysis-db-modal-dialog">
+                    <div class="data-analysis-db-modal-header">
+                        <h3>从服务器可访问数据库导入数据集</h3>
                     </div>
-                    <form id="data-analysis-db-import-form" style="display: flex; flex-direction: column; gap: 14px; overflow: auto; padding: 4px; text-align: left;">
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">服务器可访问数据库<select id="data-analysis-db-conn" class="form-input" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 10px; margin-bottom: 0;" required></select></label>
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">只读 SQL 查询 (可选)<textarea id="data-analysis-db-sql" class="form-input" style="width: 100%; height: 75px; font-family: monospace; border-radius: 8px; font-size: 0.85rem; padding: 8px 12px; margin-bottom: 0; resize: vertical;" placeholder="例如: SELECT * FROM my_table LIMIT 100 (留空则从下方表名导入)"></textarea></label>
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据表名 (若未填写 SQL 查询)<input id="data-analysis-db-table" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: my_table"></label>
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">导入后的数据集名称 (可选)<input id="data-analysis-db-name" class="form-input" type="text" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="留空则自动生成名称"></label>
-                        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px;">
-                            <button id="data-analysis-db-import-modal-cancel" class="btn-secondary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;" type="button">取消</button>
-                            <button id="data-analysis-db-import-submit" class="btn-primary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;" type="button">开始导入</button>
+                    <form id="data-analysis-db-import-form" class="data-analysis-db-modal-form">
+                        <label class="data-analysis-db-modal-field">服务器可访问数据库<select id="data-analysis-db-conn" class="form-input" required></select></label>
+                        <label class="data-analysis-db-modal-field">只读 SQL 查询 (可选)<textarea id="data-analysis-db-sql" class="form-input" placeholder="例如: SELECT * FROM my_table LIMIT 100 (留空则从下方表名导入)"></textarea></label>
+                        <label class="data-analysis-db-modal-field">数据表名 (若未填写 SQL 查询)<input id="data-analysis-db-table" class="form-input" type="text" placeholder="例如: my_table"></label>
+                        <label class="data-analysis-db-modal-field">导入后的数据集名称 (可选)<input id="data-analysis-db-name" class="form-input" type="text" placeholder="留空则自动生成名称"></label>
+                        <div class="data-analysis-db-modal-actions">
+                            <button id="data-analysis-db-import-modal-cancel" class="btn-secondary" type="button">取消</button>
+                            <button id="data-analysis-db-import-submit" class="btn-primary" type="button">开始导入</button>
                         </div>
                     </form>
                 </div>
             </div>
 
             <!-- 比对列表放大模态弹窗 -->
-            <div id="data-analysis-compare-modal" class="modal-overlay hidden" style="z-index: 8000;">
-                <div class="modal" style="width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; padding: 24px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
-                        <h3 id="data-analysis-compare-modal-title" style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">比对明细</h3>
-                        <button id="data-analysis-compare-modal-close" class="btn-secondary" style="height: 32px; padding: 0 12px; border-radius: 7px; font-size: 0.8rem; border-color: rgba(148, 163, 184, 0.3); color: var(--text-main); font-weight: 700; cursor: pointer;" type="button">关闭</button>
+            <div id="data-analysis-compare-modal" class="modal-overlay data-analysis-modal-overlay hidden">
+                <div class="modal data-analysis-compare-modal-dialog">
+                    <div class="data-analysis-compare-modal-header">
+                        <h3 id="data-analysis-compare-modal-title">比对明细</h3>
+                        <button id="data-analysis-compare-modal-close" class="btn-secondary" type="button">关闭</button>
                     </div>
-                    <div id="data-analysis-compare-modal-content" class="data-analysis-compare-modal-content" style="flex: 1; overflow-y: auto; max-height: 55vh; padding-right: 4px;"></div>
+                    <div id="data-analysis-compare-modal-content" class="data-analysis-compare-modal-content"></div>
                 </div>
             </div>
 
             <!-- 编辑数据集信息弹窗 -->
-            <div id="data-analysis-edit-dataset-modal" class="modal-overlay hidden" style="z-index: 8000;">
-                <div class="modal" style="width: min(500px, 92vw); padding: 22px; border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 40px rgba(0,0,0,0.15); border: 1px solid rgba(148, 163, 184, 0.2);">
-                    <div style="margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); padding-bottom: 10px;">
-                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-main);">编辑数据集</h3>
+            <div id="data-analysis-edit-dataset-modal" class="modal-overlay data-analysis-modal-overlay hidden">
+                <div class="modal data-analysis-edit-dataset-modal-dialog">
+                    <div class="data-analysis-db-modal-header">
+                        <h3>编辑数据集</h3>
                     </div>
-                    <form id="data-analysis-edit-dataset-form" style="display: flex; flex-direction: column; gap: 14px;">
+                    <form id="data-analysis-edit-dataset-form" class="data-analysis-db-modal-form">
                         <input id="data-analysis-edit-dataset-id" type="hidden">
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">数据集名称 <span style="color: #ef4444;">*</span><input id="data-analysis-edit-dataset-name" class="form-input" type="text" maxlength="100" required style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="请输入数据集名称"></label>
-                        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--text-main);">原始文件名 / 来源备注<input id="data-analysis-edit-dataset-original-name" class="form-input" type="text" maxlength="255" style="width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; padding: 0 12px; margin-bottom: 0;" placeholder="例如: 2026_Q1_sales.xlsx"></label>
-                        <div id="data-analysis-edit-dataset-meta" style="padding: 10px 12px; background: rgba(148, 163, 184, 0.08); border-radius: 8px; font-size: 0.78rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;"></div>
-                        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.16); padding-top: 12px;">
-                            <button id="data-analysis-edit-dataset-cancel" class="btn-secondary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; cursor: pointer;" type="button">取消</button>
-                            <button id="data-analysis-edit-dataset-save" class="btn-primary" style="height: 34px; padding: 0 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer;" type="submit">保存修改</button>
+                        <label class="data-analysis-db-modal-field">数据集名称 <span class="data-analysis-required-star">*</span><input id="data-analysis-edit-dataset-name" class="form-input" type="text" maxlength="100" required placeholder="请输入数据集名称"></label>
+                        <label class="data-analysis-db-modal-field">原始文件名 / 来源备注<input id="data-analysis-edit-dataset-original-name" class="form-input" type="text" maxlength="255" placeholder="例如: 2026_Q1_sales.xlsx"></label>
+                        <div id="data-analysis-edit-dataset-meta" class="data-analysis-edit-dataset-meta-box"></div>
+                        <div class="data-analysis-db-modal-actions">
+                            <button id="data-analysis-edit-dataset-cancel" class="btn-secondary" type="button">取消</button>
+                            <button id="data-analysis-edit-dataset-save" class="btn-primary" type="submit">保存修改</button>
                         </div>
                     </form>
                 </div>

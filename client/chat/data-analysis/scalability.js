@@ -16,16 +16,15 @@
         if (!host) return;
         const modal = document.createElement('div');
         modal.id = 'data-analysis-scalability-modal';
-        modal.className = 'modal-overlay hidden';
-        modal.style.zIndex = '8000';
+        modal.className = 'modal-overlay data-analysis-modal-overlay hidden';
         PivotSafeHtml.setHtml(modal, `
-            <div class="modal data-analysis-dialog-modal data-analysis-scalability-modal-dialog" style="width: min(840px, 95vw); max-height: 90vh;">
+            <div class="modal data-analysis-dialog-modal data-analysis-scalability-modal-dialog data-analysis-modal-size-840-90">
                 <div class="data-analysis-modal-header">
                     <div class="data-analysis-modal-title-group">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
                         <div>
                             <h3>规模化数据管道</h3>
-                            <p style="margin: 2px 0 0; font-size: 0.74rem; color: var(--text-muted);">开发环境使用受控本地存储：增量导入生成可回放版本，分区 Parquet 与物化聚合均绑定字段权限。</p>
+                            <p class="data-analysis-modal-subtitle">开发环境使用受控本地存储：增量导入生成可回放版本，分区 Parquet 与物化聚合均绑定字段权限。</p>
                         </div>
                     </div>
                     <div class="data-analysis-inline-actions">
@@ -36,7 +35,7 @@
                     </div>
                 </div>
                 <div class="data-analysis-modal-body" id="data-analysis-scalability-panel">
-                    <div class="data-analysis-scale-subtoolbar" style="margin-bottom: 14px;">
+                    <div class="data-analysis-scale-subtoolbar data-analysis-modal-mb-14">
                         <label class="data-analysis-dataset-picker">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
                             <span class="data-analysis-picker-label">目标数据集</span>
@@ -77,7 +76,7 @@
                             <small>分区副本保留在受控数据集目录，原始查询边界不变。</small>
                         </div>
                     </div>
-                    <div class="data-analysis-governance-grid" style="margin-top: 12px;">
+                    <div class="data-analysis-governance-grid data-analysis-modal-mt-12">
                         <div class="data-analysis-pipe-box">
                             <div class="data-analysis-pipe-box-head">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
