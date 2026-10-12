@@ -33,6 +33,8 @@ test('个人工作台接入主模板、当前用户聚合接口与持久化快�
     assert.match(template, /data-personal-action="open-user-profile"/);
     assert.match(template, /data-personal-action="open-automation"/);
     assert.match(template, /data-personal-action="open-manual"/);
+    assert.doesNotMatch(template, /personal-top-icon/);
+    assert.doesNotMatch(template, /class="personal-workbench-header-actions"[\s\S]*?data-personal-action="open-manual"/);
     assert.match(client, /openUserProfileModal/);
     assert.match(client, /action === 'open-automation'/);
     assert.match(client, /action === 'open-manual'/);
@@ -57,6 +59,7 @@ test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡�
     assert.match(template, /class="personal-command-row"/);
     assert.match(template, /personal-command-submit/);
     assert.doesNotMatch(template, /personal-hero-pulse|personal-workbench-stats/);
+    assert.doesNotMatch(styles, /\.personal-top-icon/);
     assert.doesNotMatch(client, /function renderStats|function renderHeroPulse|personal-stat-attention/);
     assert.match(styles, /grid-template-areas:\s*'attention goals assistant'/);
     assert.match(styles, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
