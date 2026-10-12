@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 2088,
+  "total": 2147,
   "entries": [
     {
       "file": "server/auth.js",
@@ -372,7 +372,27 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/regulations-ai-audit.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/regulations-batch-audit.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/regulations-bookmarks.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/regulations-collaboration.js",
+      "count": 1
+    },
+    {
       "file": "server/db/migrations/regulations-governance-foundation.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/regulations-index-retries.js",
       "count": 1
     },
     {
@@ -1092,24 +1112,48 @@
       "count": 4
     },
     {
+      "file": "server/services/regulations/ai-audit.js",
+      "count": 3
+    },
+    {
       "file": "server/services/regulations/analysis.js",
       "count": 9
     },
     {
+      "file": "server/services/regulations/bookmarks.js",
+      "count": 3
+    },
+    {
       "file": "server/services/regulations/catalog.js",
-      "count": 11
+      "count": 16
     },
     {
       "file": "server/services/regulations/collaboration.js",
       "count": 9
     },
     {
+      "file": "server/services/regulations/document-batch.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/regulations/governance.js",
+      "count": 16
+    },
+    {
+      "file": "server/services/regulations/import-jobs.js",
+      "count": 12
+    },
+    {
       "file": "server/services/regulations/links.js",
       "count": 6
     },
     {
+      "file": "server/services/regulations/locations.js",
+      "count": 2
+    },
+    {
       "file": "server/services/regulations/mutations.js",
-      "count": 16
+      "count": 24
     },
     {
       "file": "server/services/regulations/search.js",
@@ -1129,7 +1173,7 @@
     },
     {
       "file": "server/services/storage-gc.js",
-      "count": 9
+      "count": 11
     },
     {
       "file": "server/services/system-health.js",

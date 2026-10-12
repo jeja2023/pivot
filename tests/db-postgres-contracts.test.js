@@ -137,6 +137,14 @@ test('PostgreSQL schema snapshot produces complete native table DDL', () => {
     assert.ok(plan.comments.some(c => c.includes('COMMENT ON COLUMN "messages"."content"')), 'Must generate messages.content column comment');
 });
 
+test('PostgreSQL schema can identify migration-owned deferred index names', () => {
+    assert.equal(
+        pgSchema.getPgIndexName('CREATE INDEX IF NOT EXISTS idx_regulation_versions_index_retry ON regulation_versions(index_status, index_next_retry_at, index_attempts)'),
+        'idx_regulation_versions_index_retry'
+    );
+    assert.equal(pgSchema.getPgIndexName('SELECT 1'), '');
+});
+
 test('PostgreSQL startup applies schema comments after versioned migrations', async () => {
     const { initializePostgresStructure } = require('../server/db');
     const calls = [];

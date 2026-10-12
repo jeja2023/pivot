@@ -12,6 +12,11 @@ const { logger } = require('../../logger');
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
 const PG_SCHEMA_VERSION = '20261012.5';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
+// 这类索引依赖“已部署旧库尚未拥有”的迁移字段。初始化快照会先于版本迁移运行，
+// 因而在旧库上应安静地延后到对应迁移创建；其他未知字段缺失仍须保留告警。
+const MIGRATION_OWNED_DEFERRED_INDEXES = new Set([
+    'idx_regulation_versions_index_retry'
+]);
 
 const PG_HELPER_FUNCTIONS = [
     `
@@ -41,6 +46,10 @@ function getPgSchemaName() {
 
 function quotePgIdentifier(value) {
     return `"${String(value || '').replace(/"/g, '""')}"`;
+}
+
+function getPgIndexName(sql) {
+    return String(sql || '').match(/\bINDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z0-9_]+)/i)?.[1] || '';
 }
 
 function qualifiedPgTable(tableName) {
@@ -217,7 +226,11 @@ async function initSchemaPg() {
             try { await client.query(sql); }
             catch (error) {
                 if (error.code === '42501' || error.code === '42P07') logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 当前用户非属主或索引已存在，跳过索引补建');
-                else if (error.code === '42703') logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 索引依赖字段尚不存在，跳过当前初始化阶段索引建立（由版本迁移补齐）');
+                else if (error.code === '42703' && MIGRATION_OWNED_DEFERRED_INDEXES.has(getPgIndexName(sql))) {
+                    logger.debug({ index: getPgIndexName(sql) }, '[PG] 索引等待对应版本迁移补齐字段后创建');
+                } else if (error.code === '42703') {
+                    logger.warn({ sql: sql.slice(0, 200), err: error.message }, '[PG] 索引依赖字段尚不存在，跳过当前初始化阶段索引建立（由版本迁移补齐）');
+                }
                 else throw new Error(`[PG Schema] 建索引失败: ${error.message}\nSQL: ${sql.slice(0, 300)}`);
             }
         }
@@ -238,6 +251,7 @@ module.exports = {
     applyPgSchemaComments,
     buildPgSchemaStatements,
     getPgSchemaName,
+    getPgIndexName,
     getPgSchemaTableNames,
     initSchemaPg,
     isPgSchemaCurrent,
