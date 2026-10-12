@@ -72,6 +72,16 @@ test('系统监控固定在设置画布内，只有慢查询与异常告警列�
     assert.doesNotMatch(monitor, /const isToday = fullStr\.startsWith/);
 });
 
+test('热点接口详情始终显示中文接口名称，原始路由仅用于排障定位', () => {
+    const monitorUtils = read('client/chat/stats-monitor-utils.js');
+    assert.match(monitorUtils, /'\/api\/agents\/local-devices\/challenge': '本机设备身份挑战'/);
+    assert.match(monitorUtils, /'\/api\/mcp\/local-device\/connector\/tasks\/claim': '本机连接器任务领取'/);
+    assert.match(monitorUtils, /'\/api\/agents\/deliveries\/claim': '本机交付任务领取'/);
+    assert.match(monitorUtils, /'unmatched': '未匹配请求'/);
+    assert.match(monitorUtils, /if \(key\.startsWith\('\/api\/'\)\) return '未登记的业务接口'/);
+    assert.match(monitorUtils, /if \(key\.startsWith\('\/'\)\) return '未登记的静态资源'/);
+});
+
 test('后台调度轮询具备防重入保护', () => {
     const schedules = read('server/services/agent-schedules.js');
     assert.match(schedules, /let running = false/);

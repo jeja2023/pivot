@@ -187,12 +187,24 @@ test('显式 toolRef release 必须属于对应工具服务，不能静默回退
 });
 
 test('tool-library 路由安全初始化且不出现 path-to-regexp 异常', () => {
-    const { createToolLibraryRouter } = require('../server/routes/tool-library');
+    const { createManualToolStepId, createToolLibraryRouter } = require('../server/routes/tool-library');
     const router = createToolLibraryRouter({
         authMiddleware: (req, res, next) => next(),
         logAction: () => {}
     });
     assert.ok(router);
+    const first = createManualToolStepId(7);
+    const second = createManualToolStepId(7);
+    assert.match(first, /^manual-tool:7:[0-9a-f-]{36}$/);
+    assert.notEqual(first, second);
+    assert.throws(() => createManualToolStepId(0), /有效用户标识/);
+});
+
+test('工具库手动执行将服务端生成的步骤标识传给内置文档渲染工具', () => {
+    const source = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../server/routes/tool-library.js'), 'utf8');
+    assert.match(source, /const manualStepId = createManualToolStepId\(req\.user\?\.id\)/);
+    assert.match(source, /stepId: manualStepId/);
+    assert.doesNotMatch(source, /stepId:\s*req\.body\?\.toolCallId/);
 });
 
 test('工具库目录卡片全面中文化且能力中文检索生效', () => {

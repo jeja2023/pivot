@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const { asyncHandler } = require('../http');
 const { callMcpJsonRpc, getAccessibleMcpServer, executeMcpTool } = require('../services/mcp-client');
@@ -34,6 +35,14 @@ const { isSuperAdmin } = require('../permissions');
 
 function safeLimit(value, fallback = 60, maximum = 300) {
     return Math.min(Math.max(Number.parseInt(value, 10) || fallback, 1), maximum);
+}
+
+// 工具库手动执行没有 Agent run/step，但渲染等受控工具仍必须带有可追溯的
+// 步骤标识。服务端生成随机 ID，不能信任浏览器提供的审计关联值。
+function createManualToolStepId(userId) {
+    const safeUserId = Number.parseInt(userId, 10);
+    if (!Number.isSafeInteger(safeUserId) || safeUserId <= 0) throw new TypeError('手动工具调用缺少有效用户标识。');
+    return `manual-tool:${safeUserId}:${crypto.randomUUID()}`;
 }
 
 function compactCatalogItem(item = {}) {
@@ -250,12 +259,18 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
         const described = await describeToolForUser(req.user, { ...(req.body?.toolRef || {}), toolName: requestedName });
         const name = described.name;
         if (!name) return res.status(400).json({ error: '请指定工具。' });
+        const manualStepId = createManualToolStepId(req.user?.id);
         const policyRequest = {
             actor: req.user,
             toolName: name,
             input: req.body?.input || {},
             source: 'mcp_manual',
-            options: { releaseId: described.toolRef?.releaseId, connectionAccountId: req.body?.connectionAccountId, entrypoint: 'tool_library' }
+            options: {
+                releaseId: described.toolRef?.releaseId,
+                connectionAccountId: req.body?.connectionAccountId,
+                entrypoint: 'tool_library',
+                stepId: manualStepId
+            }
         };
         if (req.body?.background === true) {
             // 后台任务只自动执行明确声明为只读且幂等的工具。写工具和未声明
@@ -279,7 +294,9 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
                     const asyncPolicyRequest = { ...policyRequest, options: { ...policyRequest.options, signal: controller.signal } };
                     const detailed = await defaultToolPolicyEngine.invokeDetailed(asyncPolicyRequest, async effective => (name.startsWith('mcp.')
                         ? await executeMcpTool(name, effective.input, req.user, { source: 'mcp_manual', signal: controller.signal, connectionAccountId: effective.connection?.id || null })
-                        : await executeBuiltInTool(name, effective.input, req.user, { entrypoint: 'tool_library_task', signal: controller.signal })));
+                        : await executeBuiltInTool(name, effective.input, req.user, {
+                            entrypoint: 'tool_library_task', stepId: manualStepId, signal: controller.signal
+                        })));
                     await toolTasks.complete(task.id, req.user, detailed.output, { invocationEventId: detailed.invocationEventId });
                 } catch (error) {
                     await toolTasks.complete(task.id, req.user, {}, { failed: true, errorCode: error.code || 'TOOL_TASK_FAILED', errorMessage: error.message });
@@ -292,7 +309,9 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
         }
         const output = await defaultToolPolicyEngine.invoke(policyRequest, async evaluation => (name.startsWith('mcp.')
             ? await executeMcpTool(name, evaluation.input, req.user, { source: 'mcp_manual', connectionAccountId: evaluation.connection?.id || null })
-            : await executeBuiltInTool(name, evaluation.input, req.user, { entrypoint: 'tool_library' })));
+            : await executeBuiltInTool(name, evaluation.input, req.user, {
+                entrypoint: 'tool_library', stepId: manualStepId
+            })));
         logAction(req, '工具库调用工具', name);
         res.json({ success: true, result: output });
     }));
@@ -376,4 +395,4 @@ function createToolLibraryRouter({ authMiddleware, logAction }) {
     return router;
 }
 
-module.exports = { createToolLibraryRouter };
+module.exports = { createManualToolStepId, createToolLibraryRouter };

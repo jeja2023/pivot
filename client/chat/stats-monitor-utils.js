@@ -179,6 +179,23 @@ const ROUTE_NAME_MAP = {
     '/api/settings/password': '用户自主修改密码',
     '/api/settings/default-model': '设置个人默认模型',
     '/api/settings/rag': 'RAG 检索增强参数配置',
+
+    // 本机设备、连接器与受控交付
+    '/api/agents/local-devices': '本机设备管理',
+    '/api/agents/local-devices/challenge': '本机设备身份挑战',
+    '/api/agents/deliveries': '本机交付意图管理',
+    '/api/agents/deliveries/claim': '本机交付任务领取',
+    '/api/mcp/local-device/heartbeat': '本机设备心跳',
+    '/api/mcp/local-device/tasks/next': '本机设备任务获取',
+    '/api/mcp/local-device/connector/heartbeat': '本机连接器心跳',
+    '/api/mcp/local-device/connector/status': '本机连接器状态查询',
+    '/api/mcp/local-device/connector/tasks/claim': '本机连接器任务领取',
+
+    // 公告、应用与版本信息
+    '/api/announcements/active': '获取当前生效公告',
+    '/api/apps/presentations/:id': '读取指定演示文稿',
+    '/version.json': '获取客户端版本信息',
+    'unmatched': '未匹配请求',
     
     // 核心静态资源
     '/': '系统主入口',
@@ -302,5 +319,7 @@ function describeMonitorRoute(routePath) {
     if (key.startsWith('/chat/') && key.endsWith('.js')) return `聊天脚本 · ${raw.replace(/^\/chat\//i, '')}`;
     if (key.startsWith('/chat/') && key.endsWith('.css')) return `聊天样式 · ${raw.replace(/^\/chat\//i, '')}`;
     if (key.startsWith('/common/styles/') && key.endsWith('.css')) return `公共样式 · ${raw.replace(/^\/common\/styles\//i, '')}`;
-    return raw;
+    if (key.startsWith('/api/')) return '未登记的业务接口';
+    if (key.startsWith('/')) return '未登记的静态资源';
+    return '未匹配请求';
 }
