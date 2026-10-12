@@ -2,6 +2,7 @@
 
 // 目标 PostgreSQL 环境的发布后验收：确认两批知识派生迁移、关键表和索引均已
 // 生效。脚本只读，不修改数据库；适合作为部署流水线或人工升级后的证据采集。
+require('dotenv').config();
 const { getPgPool, closePgPool } = require('../server/db/pg-connection');
 
 const MIGRATIONS = [

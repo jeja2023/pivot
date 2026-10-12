@@ -1,7 +1,7 @@
 # Pivot 生产环境 PostgreSQL 主库运行与升级说明
 
 适用版本：v0.1.155 及后续 PostgreSQL-only 主库版本  
-更新日期：2026-09-22（大型历史知识库无阻塞升级说明）
+更新日期：2026-10-12（知识别名迁移兼容性修复说明）
 
 ## 1. 适用范围与不可变边界
 
@@ -69,6 +69,21 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 6. 以管理员账号抽查知识库来源、审核/发布、索引任务和质量评测；以普通账号抽查集合权限、引用预览、原件下载和聊天/Agent 知识检索。
 7. 对桌面端抽查一次已授权目录/数据库、SQLite 文件数据分析导入和本机 SQLite 只读工具，确认主库收敛未破坏本机能力。
+
+### v0.2.8 知识别名迁移失败恢复
+
+`v0.2.8` 修复 `202610100002_knowledge_derived_quality` 在部分历史库中执行时的类型兼容性问题。旧版迁移假定 `knowledge_entities.aliases` 为 JSONB；若已部署数据库仍为 `TEXT`，回填别名时会报 `COALESCE types text and jsonb cannot be matched`，服务因迁移事务失败而无法启动。
+
+- 升级前按本章常规流程备份数据库与上传目录，确认 `pg_trgm` 扩展和 DDL 权限仍可用。
+- 部署 `v0.2.8` 服务端镜像或代码并重启。不要手工修改 `knowledge_entities.aliases` 类型、删除实体数据，或在 `schema_migrations` 中写入该迁移 ID。
+- 本迁移在事务中运行；先前失败的尝试已完整回滚且未登记迁移记录。修复版会自动重试，并安全跳过空值、无效 JSON 和非数组的历史别名值。
+- 服务恢复后，在受控运维环境执行以下只读验收：
+
+  ```powershell
+  npm run verify:knowledge-derived-governance
+  ```
+
+  预期 `202610100001_knowledge_derived_governance`、`202610100002_knowledge_derived_quality`、`202610100003_knowledge_derived_quality_repair` 均已登记，且 `knowledge_entity_aliases` 表、`idx_knowledge_entity_aliases_lookup` 索引及 claim/evidence 质量字段存在。
 
 ### 4.1 大型历史 `knowledge_chunks` 的升级处理
 

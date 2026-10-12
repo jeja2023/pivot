@@ -7,6 +7,30 @@ module.exports = [{
     description: 'Add entity alias dictionary and evidence-aware graph claim quality metadata.',
     async upPg(client) {
         await client.query(`
+            -- aliases 曾以 TEXT 保存；历史数据中还可能有空值、无效 JSON 或非数组 JSON。
+            -- 使用当前连接的临时函数保证任意单条旧数据都不会中断整批迁移。
+            CREATE OR REPLACE FUNCTION pg_temp.pivot_knowledge_aliases_to_jsonb(input TEXT)
+            RETURNS JSONB
+            LANGUAGE plpgsql
+            IMMUTABLE
+            AS $$
+            DECLARE parsed JSONB;
+            BEGIN
+                IF input IS NULL OR btrim(input) = '' THEN
+                    RETURN '[]'::jsonb;
+                END IF;
+                BEGIN
+                    parsed := input::jsonb;
+                EXCEPTION WHEN invalid_text_representation THEN
+                    RETURN '[]'::jsonb;
+                END;
+                IF jsonb_typeof(parsed) <> 'array' THEN
+                    RETURN '[]'::jsonb;
+                END IF;
+                RETURN parsed;
+            END;
+            $$;
+
             CREATE TABLE IF NOT EXISTS knowledge_entity_aliases (
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -51,9 +75,13 @@ module.exports = [{
                    lower(regexp_replace(trim(alias.value), '[^[:alnum:]一-龥_.-]+', '', 'g')),
                    'auto', entity.confidence, entity.created_at, entity.updated_at
             FROM knowledge_entities entity
-            CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(entity.aliases, '[]'::jsonb)) AS alias(value)
+            CROSS JOIN LATERAL jsonb_array_elements_text(
+                pg_temp.pivot_knowledge_aliases_to_jsonb(entity.aliases::text)
+            ) AS alias(value)
             WHERE entity.deleted_at IS NULL AND trim(alias.value) <> ''
             ON CONFLICT (user_id, normalized_alias) DO NOTHING;
+
+            DROP FUNCTION IF EXISTS pg_temp.pivot_knowledge_aliases_to_jsonb(TEXT);
         `);
     }
 }];

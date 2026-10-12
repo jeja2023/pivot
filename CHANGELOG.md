@@ -1,4 +1,15 @@
 
+## [v0.2.8] - 2026-10-12
+
+### PostgreSQL 知识别名迁移兼容性修复
+
+- **修复历史 `TEXT` 别名字段升级失败**：`202610100002_knowledge_derived_quality` 回填写入实体别名时，不再将历史 `TEXT` 列与 JSONB 空数组直接混用，消除 `COALESCE types text and jsonb cannot be matched` 启动失败。
+- **安全兼容异常历史数据**：迁移在当前连接中以临时函数解析别名；空值、空白、无效 JSON 和非数组 JSON 会被视为空别名列表，不会因单条旧数据中断整个迁移事务。当前 JSONB 列保持原生支持。
+- **自动重试与零手工修复**：失败迁移会在事务中回滚且不会写入 `schema_migrations`；部署修复版本并重启即可重试，不需要手工改表、删除数据或插入迁移记录。
+- **验收与回归保障**：已在本机 PostgreSQL 18.3 中分别以 TEXT、JSONB 模式运行完整迁移并回滚验证；新增真实 PostgreSQL 回归用例，覆盖空值、无效 JSON、非数组、正常别名与重复执行。`verify:knowledge-derived-governance` 现会自动加载项目 `.env`，可直接用于部署后只读验收。
+
+详细说明见 [v0.2.8 发布记录](docs/releases/v0.2.8-PostgreSQL知识别名迁移兼容性修复.md)。
+
 ## [v0.2.7] - 2026-10-12
 
 ### 历史工作流 MCP 输出契约兼容性修复
