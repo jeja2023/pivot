@@ -44,6 +44,10 @@ test('路由反馈核验表格采用全局统一 compact-table 紧凑表格与�
     assert.match(reviewQueueSource, /col-index/);
     assert.match(adminLayoutCss, /\.route-feedback-table th,\s*\.route-feedback-table td\s*\{\s*height:\s*38px;/);
     assert.match(adminLayoutCss, /\.route-feedback-table \.col-index/);
+    assert.match(reviewQueueSource, /exposeModule(?:\?\.)?\(\s*['"]decision\.feedbackReview['"]/);
+    assert.doesNotMatch(reviewQueueSource, /window\.Pivot\.legacy\s*=/);
+    assert.doesNotMatch(reviewQueueSource, /window\.showToast/);
+    assert.doesNotMatch(reviewQueueSource, /window\.formatDateToCN/);
 });
 
 

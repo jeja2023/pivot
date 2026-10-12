@@ -53,7 +53,7 @@
     }
 
     function formatTime(value) {
-        if (typeof window.formatDateToCN === 'function') return window.formatDateToCN(value);
+        if (typeof formatDateToCN === 'function') return formatDateToCN(value);
         return String(value || '-');
     }
 
@@ -177,7 +177,7 @@
         } catch (error) {
             feedbackState.items = [];
             renderFeedbackPage();
-            window.showToast?.(error.message || '加载路由反馈失败', 'error');
+            if (typeof showToast === 'function') showToast(error.message || '加载路由反馈失败', 'error');
             return false;
         }
     }
@@ -204,11 +204,12 @@
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || payload.error) throw new Error(payload.error || '核验路由反馈失败');
-            window.showToast?.(reviewStatus === 'accepted' ? '已采纳，并加入待训练的已核验样本。' : '已标记为未采纳。', 'success');
+            const toastMessage = reviewStatus === 'accepted' ? '已采纳，并加入待训练的已核验样本。' : '已标记为未采纳。';
+            if (typeof showToast === 'function') showToast(toastMessage, 'success');
             await loadRouteFeedbackReviewQueue();
         } catch (error) {
             siblingButtons.forEach(control => { control.disabled = false; });
-            window.showToast?.(error.message || '核验路由反馈失败', 'error');
+            if (typeof showToast === 'function') showToast(error.message || '核验路由反馈失败', 'error');
         }
     }
 
@@ -231,14 +232,12 @@
 
     window.Pivot?.exposeModule?.('decision.feedbackReview', {
         bindRouteFeedbackReviewQueue,
-        loadRouteFeedbackReviewQueue,
+        loadRouteFeedbackReviewQueue: async (targetPage) => {
+            bindRouteFeedbackReviewQueue();
+            return await loadRouteFeedbackReviewQueue(targetPage);
+        },
         renderFeedbackPage,
         renderQueue,
         getState: () => ({ ...feedbackState })
     });
-    window.Pivot.legacy.bindRouteFeedbackReviewQueue = bindRouteFeedbackReviewQueue;
-    window.Pivot.legacy.loadRouteFeedbackReviewQueue = async (targetPage) => {
-        bindRouteFeedbackReviewQueue();
-        return await loadRouteFeedbackReviewQueue(targetPage);
-    };
 }());

@@ -458,7 +458,7 @@ async function loadTabDataInternal(tab, page = 1) {
             }
             if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
             if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
-            if (tab === 'route-feedback' && window.Pivot.legacy.loadRouteFeedbackReviewQueue) await window.Pivot.legacy.loadRouteFeedbackReviewQueue(page);
+            if (tab === 'route-feedback') await window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);
