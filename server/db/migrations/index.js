@@ -52,6 +52,7 @@ const migrationModules = [
     require('./decision-learning-foundations'),
     require('./decision-evaluation-governance'),
     require('./decision-artifact-governance'),
+    require('./decision-feedback-review-governance'),
     require('./knowledge-product-foundation'),
     require('./knowledge-product-governance'),
     require('./knowledge-database-query-templates'),

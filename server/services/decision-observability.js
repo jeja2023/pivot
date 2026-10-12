@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { execute, query, queryOne } = require('../db/client');
+const { execute, query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { sanitizeDecisionContext, normalizeActionId } = require('./decision-provider');
 const { logger } = require('../logger');
@@ -19,11 +19,11 @@ const UPSERT_DECISION_SQL = [
     'ON CONFLICT (decision_id) DO UPDATE SET provider_outputs = EXCLUDED.provider_outputs, policy_outcome = EXCLUDED.policy_outcome, selected_action_id = EXCLUDED.selected_action_id, updated_at = EXCLUDED.updated_at'
 ].join(' ');
 
-const GET_DECISION_RECORD_SQL = 'SELECT decision_id, candidate_actions FROM decision_records WHERE decision_id = ?';
+const GET_DECISION_RECORD_SQL = 'SELECT decision_id, candidate_actions, selected_action_id FROM decision_records WHERE decision_id = ?';
 
 const INSERT_OUTCOME_SQL = [
-    'INSERT INTO decision_outcomes (id, decision_id, event_type, source, status, selected_action_id, verified_action_id, is_verified, duration_ms, reason_code, result_reference, metadata, occurred_at, created_at)',
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)',
+    'INSERT INTO decision_outcomes (id, decision_id, event_type, source, status, selected_action_id, verified_action_id, is_verified, duration_ms, reason_code, result_reference, metadata, occurred_at, created_at, review_status)',
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)',
     'ON CONFLICT (id) DO NOTHING'
 ].join(' ');
 
@@ -157,7 +157,72 @@ function candidateAllowsVerifiedAction(candidateActions, actionId) {
     return Array.isArray(candidates) && candidates.some(candidate => candidate?.allowed !== false && normalizeActionId(candidate?.id) === actionId);
 }
 
-const OWNED_DECISION_SQL = 'SELECT decision_id, user_id, session_id, candidate_actions FROM decision_records WHERE decision_id = ?';
+const OWNED_DECISION_SQL = 'SELECT decision_id, user_id, session_id, candidate_actions, selected_action_id FROM decision_records WHERE decision_id = ?';
+
+const USER_FEEDBACK_REASON_CODES = new Set([
+    'intent_mismatch',
+    'missing_evidence',
+    'tool_not_suitable',
+    'preference_mismatch',
+    'other'
+]);
+
+const UPSERT_USER_FEEDBACK_SQL = [
+    'INSERT INTO decision_outcomes (id, decision_id, event_type, source, status, selected_action_id, verified_action_id, is_verified, duration_ms, reason_code, result_reference, metadata, occurred_at, created_at, review_status)',
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)',
+    "ON CONFLICT (decision_id) WHERE event_type = 'feedback' AND source = 'user' AND review_status = 'pending'",
+    'DO UPDATE SET status = EXCLUDED.status, selected_action_id = EXCLUDED.selected_action_id, verified_action_id = EXCLUDED.verified_action_id, reason_code = EXCLUDED.reason_code, result_reference = EXCLUDED.result_reference, metadata = EXCLUDED.metadata, occurred_at = EXCLUDED.occurred_at',
+    'RETURNING id, review_status'
+].join(' ');
+
+const LIST_USER_FEEDBACK_SQL = [
+    'SELECT o.id AS feedback_id, o.decision_id, d.scenario, d.tenant_id, d.session_id,',
+    'o.selected_action_id, o.verified_action_id AS corrected_action_id, o.status, o.reason_code, o.metadata,',
+    'o.review_status, o.reviewed_by, o.reviewed_at, o.review_note, o.occurred_at,',
+    'u.username, u.nickname',
+    'FROM decision_outcomes o',
+    'JOIN decision_records d ON d.decision_id = o.decision_id',
+    'LEFT JOIN users u ON u.id = d.user_id',
+    "WHERE o.event_type = 'feedback' AND o.source = 'user' AND o.review_status = ?",
+    'ORDER BY o.occurred_at DESC, o.id DESC LIMIT ?'
+].join(' ');
+
+const USER_SESSION_FEEDBACK_STATUS_SQL = [
+    'SELECT DISTINCT ON (o.decision_id) o.decision_id, o.verified_action_id AS corrected_action_id,',
+    'o.review_status, o.reviewed_at, o.occurred_at',
+    'FROM decision_outcomes o JOIN decision_records d ON d.decision_id = o.decision_id',
+    "WHERE d.user_id = ? AND d.session_id = ? AND o.event_type = 'feedback' AND o.source = 'user'",
+    'ORDER BY o.decision_id, o.occurred_at DESC, o.id DESC'
+].join(' ');
+
+const PENDING_USER_FEEDBACK_SQL = [
+    'SELECT o.id AS feedback_id, o.decision_id, o.verified_action_id AS corrected_action_id,',
+    'd.selected_action_id, d.candidate_actions',
+    'FROM decision_outcomes o JOIN decision_records d ON d.decision_id = o.decision_id',
+    "WHERE o.id = ? AND o.event_type = 'feedback' AND o.source = 'user' AND o.review_status = 'pending'",
+    'FOR UPDATE'
+].join(' ');
+
+const REVIEW_USER_FEEDBACK_SQL = [
+    "UPDATE decision_outcomes SET review_status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?",
+    "WHERE id = ? AND event_type = 'feedback' AND source = 'user' AND review_status = 'pending'",
+    'RETURNING id, decision_id, review_status, reviewed_at'
+].join(' ');
+
+function outcomeSqlParams(item, reviewStatus = null) {
+    const resolvedReviewStatus = reviewStatus || (item.eventType === 'feedback' && item.source === 'user' ? 'pending' : 'not_required');
+    return [item.id, item.decisionId, item.eventType, item.source, item.status, item.selectedActionId, item.verifiedActionId, item.isVerified, item.durationMs, item.reasonCode, item.resultReference, JSON.stringify(item.metadata), item.occurredAt, item.createdAt, resolvedReviewStatus];
+}
+
+function normalizeFeedbackReason(value) {
+    const reason = String(value || '').trim().toLowerCase();
+    return USER_FEEDBACK_REASON_CODES.has(reason) ? reason : 'other';
+}
+
+function normalizeReviewStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    return ['accepted', 'rejected'].includes(status) ? status : '';
+}
 
 async function recordUserDecisionFeedback(value = {}, deps = {}) {
     const decisionId = safeText(value.decisionId, 128);
@@ -166,17 +231,92 @@ async function recordUserDecisionFeedback(value = {}, deps = {}) {
     const sessionId = safeText(value.sessionId, 128);
     if (!decisionId || !correctedActionId || !Number.isSafeInteger(userId) || userId <= 0 || !sessionId) return null;
     const row = await (deps.queryOne || queryOne)(OWNED_DECISION_SQL, [decisionId]);
-    if (!row || Number(row.user_id) !== userId || String(row.session_id || '') !== sessionId || !candidateAllowsVerifiedAction(row.candidate_actions, correctedActionId)) return null;
-    return recordDecisionOutcome({
+    if (!row || Number(row.user_id) !== userId || String(row.session_id || '') !== sessionId
+        || normalizeActionId(row.selected_action_id) === correctedActionId
+        || !candidateAllowsVerifiedAction(row.candidate_actions, correctedActionId)) return null;
+    const outcome = serializeOutcome({
         decisionId,
         eventType: 'feedback',
         source: 'user',
-        status: value.status,
-        selectedActionId: value.selectedActionId,
+        // 原路由仅以持久化决策记录为准，不能信任浏览器传参以免污染核验上下文。
+        status: 'partial',
+        selectedActionId: row.selected_action_id,
         verifiedActionId: correctedActionId,
-        reasonCode: 'user_action_correction',
-        resultReference: sessionId
-    }, { persist: deps.persist !== false });
+        reasonCode: `user_action_correction.${normalizeFeedbackReason(value.reason)}`,
+        resultReference: sessionId,
+        metadata: {
+            feedbackReason: normalizeFeedbackReason(value.reason),
+            note: safeText(value.note, 500)
+        }
+    });
+    if (!outcome) return null;
+    if (deps.persist === false) return { ...outcome, reviewStatus: 'pending' };
+
+    // 用户提交属于可审核操作，需同步落库；同一决策只保留一条待核验建议，避免重试产生矛盾标签。
+    const persisted = await (deps.queryOne || queryOne)(UPSERT_USER_FEEDBACK_SQL, outcomeSqlParams(outcome, 'pending'));
+    return {
+        ...outcome,
+        id: safeText(persisted?.id, 128) || outcome.id,
+        reviewStatus: safeText(persisted?.review_status, 24) || 'pending'
+    };
+}
+
+async function listUserDecisionFeedback({ reviewStatus = 'pending', limit = 50 } = {}, deps = {}) {
+    const status = ['pending', 'accepted', 'rejected', 'superseded'].includes(String(reviewStatus || '').trim().toLowerCase())
+        ? String(reviewStatus).trim().toLowerCase()
+        : 'pending';
+    const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200));
+    return await (deps.query || query)(LIST_USER_FEEDBACK_SQL, [status, safeLimit]);
+}
+
+async function listUserDecisionFeedbackStatuses({ userId, sessionId } = {}, deps = {}) {
+    const safeUserId = Number.parseInt(userId, 10);
+    const safeSessionId = safeText(sessionId, 128);
+    if (!Number.isSafeInteger(safeUserId) || safeUserId <= 0 || !safeSessionId) return [];
+    return await (deps.query || query)(USER_SESSION_FEEDBACK_STATUS_SQL, [safeUserId, safeSessionId]);
+}
+
+async function reviewUserDecisionFeedback(value = {}, deps = {}) {
+    const feedbackId = safeText(value.feedbackId, 128);
+    const reviewerId = Number.parseInt(value.reviewerId, 10);
+    const reviewStatus = normalizeReviewStatus(value.reviewStatus);
+    const reviewNote = safeText(value.reviewNote, 500);
+    if (!feedbackId || !Number.isSafeInteger(reviewerId) || reviewerId <= 0 || !reviewStatus) return null;
+
+    const transactionFn = deps.transaction || transaction;
+    return await transactionFn(async trx => {
+        const feedback = await trx.queryOne(PENDING_USER_FEEDBACK_SQL, [feedbackId]);
+        if (!feedback || (reviewStatus === 'accepted' && !candidateAllowsVerifiedAction(feedback.candidate_actions, feedback.corrected_action_id))) return null;
+
+        const reviewedAt = getBeijingTimestamp();
+        const reviewed = await trx.queryOne(REVIEW_USER_FEEDBACK_SQL, [reviewStatus, reviewerId, reviewedAt, reviewNote, feedbackId]);
+        if (!reviewed) return null;
+
+        let verification = null;
+        if (reviewStatus === 'accepted') {
+            verification = serializeOutcome({
+                decisionId: feedback.decision_id,
+                eventType: 'verification',
+                source: 'admin',
+                status: 'partial',
+                selectedActionId: feedback.selected_action_id,
+                verifiedActionId: feedback.corrected_action_id,
+                reasonCode: 'accepted_user_route_feedback',
+                resultReference: feedbackId,
+                metadata: { feedbackId }
+            });
+            if (!verification) return null;
+            await trx.execute(INSERT_OUTCOME_SQL, outcomeSqlParams(verification));
+        }
+
+        return {
+            feedbackId: reviewed.id,
+            decisionId: reviewed.decision_id,
+            reviewStatus: reviewed.review_status,
+            reviewedAt: reviewed.reviewed_at,
+            verification
+        };
+    });
 }
 
 async function recordVerifiedDecisionOutcome(value = {}, deps = {}) {
@@ -219,7 +359,7 @@ async function flushPendingDecisionObservability(deps = {}) {
         }
         for (const item of outcomes) {
             try {
-                await executeFn(INSERT_OUTCOME_SQL, [item.id, item.decisionId, item.eventType, item.source, item.status, item.selectedActionId, item.verifiedActionId, item.isVerified, item.durationMs, item.reasonCode, item.resultReference, JSON.stringify(item.metadata), item.occurredAt, item.createdAt]);
+                await executeFn(INSERT_OUTCOME_SQL, outcomeSqlParams(item));
                 outcomeCount += 1;
             } catch (error) {
                 if (pendingOutcomes.length < MAX_PENDING) pendingOutcomes.push(item);
@@ -301,9 +441,12 @@ module.exports = {
     flushPendingDecisionObservability,
     getDecisionOperationalMetrics,
     listVerifiedDecisionSamples,
+    listUserDecisionFeedback,
+    listUserDecisionFeedbackStatuses,
     recordDecision,
     recordDecisionOutcome,
     recordUserDecisionFeedback,
     recordVerifiedDecisionOutcome,
+    reviewUserDecisionFeedback,
     serializeOutcome
 };

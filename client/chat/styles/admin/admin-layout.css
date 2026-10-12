@@ -1684,6 +1684,12 @@ body.dark-mode #memory-evaluations-modal .highlight-icon,
     padding-top: 10px;
     border-top-color: rgba(148, 163, 184, 0.16);
 }
+.settings-workspace-view .pagination:empty {
+    display: none;
+    margin: 0;
+    padding: 0;
+    border: none;
+}
 .settings-workspace-view .admin-tab-content > .table-container + .pagination {
     margin-top: 10px;
     padding-top: 10px;
@@ -1870,4 +1876,190 @@ body.dark-mode .settings-workspace-view .memories-table th,
 body.dark-mode .settings-workspace-view .memories-table td,
 .dark-mode .settings-workspace-view .memories-table td {
     color: #cbd5e1;
+}
+
+/* 路由反馈核验：保持审核上下文可扫读，操作不依赖颜色。 */
+.route-feedback-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.route-feedback-filter .form-input {
+    width: 112px;
+    height: 34px;
+    margin: 0;
+}
+.route-feedback-table-wrap {
+    max-height: min(620px, calc(100vh - 250px));
+}
+.route-feedback-table {
+    min-width: 900px;
+    table-layout: fixed;
+}
+.route-feedback-table .col-index,
+.route-feedback-table th:nth-child(1) { width: 56px; text-align: center; }
+.route-feedback-table .col-feedback-time,
+.route-feedback-table th:nth-child(2) { width: 140px; }
+.route-feedback-table .col-feedback-scenario,
+.route-feedback-table th:nth-child(3) { width: 110px; }
+.route-feedback-table .col-feedback-actions,
+.route-feedback-table th:nth-child(4) { width: 190px; }
+.route-feedback-table .col-feedback-reason,
+.route-feedback-table th:nth-child(5) { width: auto; }
+.route-feedback-table .col-feedback-status,
+.route-feedback-table th:nth-child(6) { width: 96px; text-align: center; }
+.route-feedback-table .col-feedback-review,
+.route-feedback-table th:nth-child(7) { width: 140px; text-align: center; }
+.route-feedback-table .col-index {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+.route-feedback-table th,
+.route-feedback-table td {
+    height: 38px;
+    min-height: 38px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+.route-feedback-table tbody tr:hover td {
+    background: var(--bg-hover, color-mix(in srgb, var(--text-main) 4%, transparent));
+}
+.route-feedback-time {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.route-feedback-scenario {
+    color: var(--text-main);
+    font-size: 0.8rem;
+}
+.route-feedback-action {
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+.route-feedback-reason {
+    min-width: 0;
+    line-height: 1.35;
+}
+.route-feedback-reason strong {
+    display: block;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+.route-feedback-reason span {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+.route-feedback-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    min-height: 22px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: 999px;
+    background: var(--bg-side);
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 20px;
+    white-space: nowrap;
+}
+.route-feedback-status.is-pending {
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+    color: var(--warning);
+}
+.route-feedback-status.is-accepted {
+    border-color: color-mix(in srgb, var(--success) 28%, transparent);
+    background: color-mix(in srgb, var(--success) 8%, var(--surface));
+    color: var(--success);
+}
+.route-feedback-status.is-rejected,
+.route-feedback-status.is-superseded {
+    border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    background: var(--bg-side);
+    color: var(--text-muted);
+}
+.route-feedback-actions-cell {
+    white-space: nowrap;
+    text-align: center;
+}
+.route-feedback-actions-cell .btn-primary,
+.route-feedback-actions-cell .btn-secondary {
+    height: 26px;
+    min-height: 26px;
+    margin: 0 2px;
+    padding: 0 8px;
+    font-size: 0.75rem;
+    line-height: 24px;
+    border-radius: 6px;
+    vertical-align: middle;
+}
+.route-feedback-actions-cell .btn-primary:first-child,
+.route-feedback-actions-cell .btn-secondary:first-child {
+    margin-left: 0;
+}
+.route-feedback-reviewed-time {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+}
+.route-feedback-empty {
+    padding: 32px !important;
+    color: var(--text-muted);
+}
+body.dark-mode .route-feedback-status,
+.dark-mode .route-feedback-status {
+    background: var(--bg-side);
+    border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    color: var(--text-muted);
+}
+body.dark-mode .route-feedback-status.is-pending,
+.dark-mode .route-feedback-status.is-pending {
+    background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+    color: var(--warning);
+}
+body.dark-mode .route-feedback-status.is-accepted,
+.dark-mode .route-feedback-status.is-accepted {
+    background: color-mix(in srgb, var(--success) 16%, var(--surface));
+    color: var(--success);
+}
+body.dark-mode .route-feedback-status.is-rejected,
+.dark-mode .route-feedback-status.is-rejected,
+body.dark-mode .route-feedback-status.is-superseded,
+.dark-mode .route-feedback-status.is-superseded {
+    background: var(--bg-side);
+    border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    color: var(--text-muted);
+}
+body.dark-mode .route-feedback-reason strong,
+.dark-mode .route-feedback-reason strong {
+    color: var(--text-main);
+}
+body.dark-mode .route-feedback-table tbody tr:hover td,
+.dark-mode .route-feedback-table tbody tr:hover td {
+    background: color-mix(in srgb, var(--text-main) 6%, transparent);
+}
+@media (max-width: 760px) {
+    .settings-workspace-view #tab-content-route-feedback .settings-page-head { align-items: stretch; flex-direction: column; }
+    .settings-workspace-view #tab-content-route-feedback .settings-page-actions { justify-content: space-between; }
+    .route-feedback-filter { flex: 1 1 auto; }
+    .route-feedback-filter .form-input { flex: 1 1 auto; }
 }

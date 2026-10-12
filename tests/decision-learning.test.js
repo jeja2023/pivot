@@ -8,7 +8,17 @@ const {
 } = require('../server/services/decision-provider');
 const { applyDecisionPolicy } = require('../server/services/decision-policy');
 const { resolveBusinessDecision } = require('../server/services/decision-runtime');
-const { flushPendingDecisionObservability, getDecisionOperationalMetrics, listVerifiedDecisionSamples, recordDecision, recordDecisionOutcome, recordUserDecisionFeedback } = require('../server/services/decision-observability');
+const {
+    flushPendingDecisionObservability,
+    getDecisionOperationalMetrics,
+    listUserDecisionFeedback,
+    listUserDecisionFeedbackStatuses,
+    listVerifiedDecisionSamples,
+    recordDecision,
+    recordDecisionOutcome,
+    recordUserDecisionFeedback,
+    reviewUserDecisionFeedback
+} = require('../server/services/decision-observability');
 const { getDecisionPreference, saveDecisionPreference } = require('../server/services/decision-preferences');
 const {
     buildVerifiedDecisionDataset,
@@ -190,21 +200,107 @@ test('active 模式仅在稳定灰度范围内改变路由，并支持租户和�
     assert.equal(first, second);
 });
 
-test('用户修正必须与其所属会话和当时允许的动作相匹配，且不会直接成为训练标签', async () => {
+test('用户修正必须与其所属会话和当时允许的动作相匹配，采用数据库中的原路由，且不会直接成为训练标签', async () => {
     const feedback = await recordUserDecisionFeedback({
-        decisionId: 'decision-user-feedback', userId: 8, sessionId: 'session-1', correctedActionId: 'skip', selectedActionId: 'retrieve', status: 'partial'
+        decisionId: 'decision-user-feedback', userId: 8, sessionId: 'session-1', correctedActionId: 'skip', selectedActionId: 'forged-action', reason: 'intent_mismatch', status: 'partial'
     }, {
         persist: false,
-        queryOne: async () => ({ user_id: 8, session_id: 'session-1', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] })
+        queryOne: async () => ({ user_id: 8, session_id: 'session-1', selected_action_id: 'retrieve', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] })
     });
     assert.equal(feedback.eventType, 'feedback');
     assert.equal(feedback.source, 'user');
     assert.equal(feedback.isVerified, false);
+    assert.equal(feedback.selectedActionId, 'retrieve');
+    assert.equal(feedback.metadata.feedbackReason, 'intent_mismatch');
+    const unchanged = await recordUserDecisionFeedback({ decisionId: 'decision-user-feedback', userId: 8, sessionId: 'session-1', correctedActionId: 'retrieve' }, {
+        persist: false,
+        queryOne: async () => ({ user_id: 8, session_id: 'session-1', selected_action_id: 'retrieve', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] })
+    });
+    assert.equal(unchanged, null);
     const rejected = await recordUserDecisionFeedback({ decisionId: 'decision-user-feedback', userId: 9, sessionId: 'session-1', correctedActionId: 'skip' }, {
         persist: false,
-        queryOne: async () => ({ user_id: 8, session_id: 'session-1', candidate_actions: [{ id: 'skip', allowed: true }] })
+        queryOne: async () => ({ user_id: 8, session_id: 'session-1', selected_action_id: 'retrieve', candidate_actions: [{ id: 'skip', allowed: true }] })
     });
     assert.equal(rejected, null);
+});
+
+test('待核验的用户路由建议按决策幂等写入，并保留受限的原因和说明', async () => {
+    const calls = [];
+    const feedback = await recordUserDecisionFeedback({
+        decisionId: 'decision-pending-feedback', userId: 8, sessionId: 'session-1', correctedActionId: 'skip',
+        selectedActionId: 'forged-action', reason: 'tool_not_suitable', note: '工具会给出不稳定结果'
+    }, {
+        queryOne: async (sql, params) => {
+            calls.push({ sql, params });
+            if (sql.includes('FROM decision_records')) {
+                return { user_id: 8, session_id: 'session-1', selected_action_id: 'retrieve', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] };
+            }
+            return { id: 'feedback-1', review_status: 'pending' };
+        }
+    });
+    assert.equal(feedback.id, 'feedback-1');
+    assert.equal(feedback.reviewStatus, 'pending');
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].sql, /ON CONFLICT \(decision_id\)/);
+    assert.equal(calls[1].params[5], 'retrieve');
+    assert.match(calls[1].params[9], /tool_not_suitable/);
+    assert.deepEqual(JSON.parse(calls[1].params[11]), { feedbackReason: 'tool_not_suitable', note: '工具会给出不稳定结果' });
+});
+
+test('管理员采纳待核验路由建议时生成已核验样本；不采纳时不会生成', async () => {
+    const writes = [];
+    const review = await reviewUserDecisionFeedback({ feedbackId: 'feedback-accept', reviewerId: 3, reviewStatus: 'accepted' }, {
+        transaction: async fn => await fn({
+            queryOne: async sql => sql.includes('FOR UPDATE')
+                ? { feedback_id: 'feedback-accept', decision_id: 'decision-accept', corrected_action_id: 'skip', selected_action_id: 'retrieve', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] }
+                : { id: 'feedback-accept', decision_id: 'decision-accept', review_status: 'accepted', reviewed_at: '2026-10-12T01:00:00Z' },
+            execute: async (sql, params) => { writes.push({ sql, params }); return 1; }
+        })
+    });
+    assert.equal(review.reviewStatus, 'accepted');
+    assert.equal(review.verification.isVerified, true);
+    assert.equal(review.verification.selectedActionId, 'retrieve');
+    assert.equal(writes.length, 1);
+
+    const rejectedWrites = [];
+    const rejected = await reviewUserDecisionFeedback({ feedbackId: 'feedback-reject', reviewerId: 3, reviewStatus: 'rejected' }, {
+        transaction: async fn => await fn({
+            queryOne: async sql => sql.includes('FOR UPDATE')
+                ? { feedback_id: 'feedback-reject', decision_id: 'decision-reject', corrected_action_id: 'skip', selected_action_id: 'retrieve', candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] }
+                : { id: 'feedback-reject', decision_id: 'decision-reject', review_status: 'rejected', reviewed_at: '2026-10-12T01:00:00Z' },
+            execute: async (sql, params) => { rejectedWrites.push({ sql, params }); return 1; }
+        })
+    });
+    assert.equal(rejected.reviewStatus, 'rejected');
+    assert.equal(rejected.verification, null);
+    assert.equal(rejectedWrites.length, 0);
+});
+
+test('路由反馈核验队列默认限制为待核验且限制查询规模', async () => {
+    let captured = null;
+    const rows = await listUserDecisionFeedback({}, {
+        query: async (sql, params) => {
+            captured = { sql, params };
+            return [];
+        }
+    });
+    assert.deepEqual(rows, []);
+    assert.match(captured.sql, /review_status = \?/);
+    assert.deepEqual(captured.params, ['pending', 50]);
+});
+
+test('用户仅能读取自己当前会话的路由建议核验状态', async () => {
+    let captured = null;
+    const rows = await listUserDecisionFeedbackStatuses({ userId: 8, sessionId: 'session-1' }, {
+        query: async (sql, params) => {
+            captured = { sql, params };
+            return [{ decision_id: 'decision-1', review_status: 'accepted' }];
+        }
+    });
+    assert.deepEqual(rows, [{ decision_id: 'decision-1', review_status: 'accepted' }]);
+    assert.match(captured.sql, /d\.user_id = \? AND d\.session_id = \?/);
+    assert.deepEqual(captured.params, [8, 'session-1']);
+    assert.deepEqual(await listUserDecisionFeedbackStatuses({ userId: 0, sessionId: '' }, { query: async () => { throw new Error('不应查询'); } }), []);
 });
 
 test('决策运行指标聚合提供按提供器的延迟和错误率，不读取请求原文', async () => {

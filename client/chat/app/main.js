@@ -241,7 +241,7 @@ bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
 bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
+['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'route-feedback', 'usage', 'keys', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
 });
 document.querySelectorAll('[data-usage-subtab]').forEach(button => {
@@ -294,7 +294,7 @@ function bindMountedWorkspaceControls(name) {
     bind('api-call-logs-open-btn', () => window.Pivot.legacy.openApiCallLogsModal?.());
     bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
     bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
-    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
+    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'route-feedback', 'usage', 'keys', 'account'].forEach(tab => {
         bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
     });
     document.querySelectorAll('[data-usage-subtab]').forEach(button => {

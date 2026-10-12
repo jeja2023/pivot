@@ -1,0 +1,46 @@
+<section id="tab-content-route-feedback" class="admin-tab-content admin-only hidden" aria-labelledby="route-feedback-title">
+    <div class="settings-page-head">
+        <div>
+            <h3 id="route-feedback-title">反馈核验</h3>
+            <p>审核用户对检索、工具和回复方式的建议；只有采纳后的建议才会成为可训练样本。</p>
+        </div>
+        <div class="settings-page-actions">
+            <label class="route-feedback-filter" for="route-feedback-status-filter">
+                <span>状态</span>
+                <select id="route-feedback-status-filter" class="form-input">
+                    <option value="pending">待核验</option>
+                    <option value="accepted">已采纳</option>
+                    <option value="rejected">未采纳</option>
+                    <option value="superseded">已替换</option>
+                </select>
+            </label>
+            <button id="route-feedback-refresh-btn" type="button" class="btn-secondary">刷新</button>
+        </div>
+    </div>
+    <div class="table-container route-feedback-table-wrap">
+        <table class="data-table compact-table route-feedback-table">
+            <colgroup>
+                <col class="col-index">
+                <col class="col-feedback-time">
+                <col class="col-feedback-scenario">
+                <col class="col-feedback-actions">
+                <col class="col-feedback-reason">
+                <col class="col-feedback-status">
+                <col class="col-feedback-review">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="text-center col-index">序号</th>
+                    <th>提交时间</th>
+                    <th>路由场景</th>
+                    <th>当前 → 建议</th>
+                    <th>原因与补充说明</th>
+                    <th class="text-center">状态</th>
+                    <th class="text-center">核验</th>
+                </tr>
+            </thead>
+            <tbody id="route-feedback-review-list"></tbody>
+        </table>
+    </div>
+    <div id="pagination-route-feedback" class="pagination"></div>
+</section>

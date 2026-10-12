@@ -5,7 +5,7 @@ const { asyncHandler } = require('../http');
 function registerDecisionObservabilityRoutes(router, dependencies = {}) {
     const {
         authMiddleware, adminMiddleware, logAction,
-        getDecisionOperationalMetrics, recordVerifiedDecisionOutcome,
+        getDecisionOperationalMetrics, recordVerifiedDecisionOutcome, listUserDecisionFeedback, reviewUserDecisionFeedback,
         buildVerifiedDecisionDatasetFromStore, evaluateDecisionSamples,
         activateDecisionModelArtifact, listDecisionModelArtifacts, rollbackDecisionModelArtifact,
         listDecisionPreferences, saveDecisionPreference, registerDecisionPolicyArtifact,
@@ -64,6 +64,25 @@ function registerDecisionObservabilityRoutes(router, dependencies = {}) {
         const dataset = await buildVerifiedDecisionDatasetFromStore({ scenario: req.query?.scenario, tenantId: req.query?.tenantId, limit: req.query?.limit });
         const metrics = evaluateDecisionSamples(dataset.samples);
         res.json({ dataVersion: dataset.version, sampleCount: dataset.sampleCount, generatedAt: dataset.generatedAt, splitPolicy: 'time_ordered_no_random_shuffle', metrics });
+    }));
+
+    router.get('/observability/decision-feedback', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listUserDecisionFeedback({
+            reviewStatus: req.query?.reviewStatus,
+            limit: req.query?.limit
+        }) });
+    }));
+
+    router.post('/observability/decision-feedback/:id/review', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        const review = await reviewUserDecisionFeedback({
+            feedbackId: req.params.id,
+            reviewStatus: req.body?.reviewStatus,
+            reviewNote: req.body?.reviewNote,
+            reviewerId: req.user.id
+        });
+        if (!review) return res.status(409).json({ error: '反馈不存在、已核验，或建议动作已不再可用。' });
+        logAction(req, '核验用户路由反馈', `反馈ID: ${review.feedbackId}，结论: ${review.reviewStatus}`);
+        res.json({ success: true, review });
     }));
 
     router.post('/observability/decision-outcomes', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {

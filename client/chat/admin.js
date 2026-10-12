@@ -106,9 +106,9 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'announcements']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
 
@@ -209,6 +209,7 @@ const adminFeatureScripts = [
     '/chat/stats.js',
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
+    '/chat/decision-feedback-review.js',
     '/chat/admin-settings.js',
     '/chat/admin-settings-memory.js',
     '/chat/admin-stealth.js',
@@ -457,6 +458,7 @@ async function loadTabDataInternal(tab, page = 1) {
             }
             if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
             if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
+            if (tab === 'route-feedback' && window.Pivot.legacy.loadRouteFeedbackReviewQueue) await window.Pivot.legacy.loadRouteFeedbackReviewQueue(page);
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);

@@ -11,7 +11,7 @@ const { getMaintenanceStatus } = require('../services/maintenance');
 const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getRagOperationsOverview } = require('../services/rag-operations-observability');
 const { getChatRouteMetricBuckets } = require('../services/chat-route-observability');
-const { getDecisionOperationalMetrics, recordVerifiedDecisionOutcome } = require('../services/decision-observability');
+const { getDecisionOperationalMetrics, recordVerifiedDecisionOutcome, listUserDecisionFeedback, reviewUserDecisionFeedback } = require('../services/decision-observability');
 const { buildVerifiedDecisionDatasetFromStore, evaluateDecisionSamples } = require('../services/decision-learning');
 const { activateDecisionModelArtifact, listDecisionModelArtifacts, rollbackDecisionModelArtifact } = require('../services/decision-model-registry');
 const { listDecisionPreferences, saveDecisionPreference } = require('../services/decision-preferences');
@@ -283,7 +283,7 @@ function createAdminStatsRouter({
 
     registerDecisionObservabilityRoutes(router, {
         authMiddleware, adminMiddleware, logAction,
-        getDecisionOperationalMetrics, recordVerifiedDecisionOutcome,
+        getDecisionOperationalMetrics, recordVerifiedDecisionOutcome, listUserDecisionFeedback, reviewUserDecisionFeedback,
         buildVerifiedDecisionDatasetFromStore, evaluateDecisionSamples,
         activateDecisionModelArtifact, listDecisionModelArtifacts, rollbackDecisionModelArtifact,
         listDecisionPreferences, saveDecisionPreference, registerDecisionPolicyArtifact,

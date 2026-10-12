@@ -36,6 +36,21 @@ const ROUTE_FEEDBACK_ACTION_LABELS = {
     clarify: '请求补充信息'
 };
 
+const ROUTE_FEEDBACK_REASON_LABELS = {
+    intent_mismatch: '误判任务意图',
+    missing_evidence: '缺少必要依据',
+    tool_not_suitable: '工具或检索不适用',
+    preference_mismatch: '不符合使用偏好',
+    other: '其他原因'
+};
+
+const ROUTE_FEEDBACK_REVIEW_STATUS_LABELS = {
+    pending: '待核验',
+    accepted: '已采纳',
+    rejected: '未采纳',
+    superseded: '已替换'
+};
+
 function routeFeedbackScenarioLabel(value = '') {
     const scenario = String(value || '').trim();
     return ROUTE_FEEDBACK_SCENARIO_LABELS[scenario] || '本轮路由';
@@ -56,6 +71,31 @@ function getCorrectableRouteDecisions(value) {
             .map(action => String(action || '').trim().toLowerCase()).filter(Boolean))]
     })).filter(decision => decision.decisionId && decision.selectedActionId
         && decision.allowedActionIds.some(action => action !== decision.selectedActionId));
+}
+
+async function hydrateRouteFeedbackStatuses({ action, correctable, decisionSelect, form, sessionId }) {
+    try {
+        const response = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/decision-feedback`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.error || !form.isConnected) return;
+        const statuses = new Map((Array.isArray(payload.data) ? payload.data : [])
+            .map(item => [String(item?.decision_id || '').trim(), String(item?.review_status || '').trim().toLowerCase()])
+            .filter(([decisionId, reviewStatus]) => decisionId && ROUTE_FEEDBACK_REVIEW_STATUS_LABELS[reviewStatus]));
+        const submitted = new Set(String(action.dataset.routeFeedbackSubmittedIds || '').split(',').filter(Boolean));
+        correctable.forEach((decision, index) => {
+            const reviewStatus = statuses.get(decision.decisionId);
+            if (!reviewStatus) return;
+            submitted.add(decision.decisionId);
+            const option = decisionSelect.querySelector(`option[value="${index}"]`);
+            if (option && !option.textContent.includes(ROUTE_FEEDBACK_REVIEW_STATUS_LABELS[reviewStatus])) {
+                option.textContent += `（${ROUTE_FEEDBACK_REVIEW_STATUS_LABELS[reviewStatus]}）`;
+            }
+        });
+        action.dataset.routeFeedbackSubmittedIds = [...submitted].join(',');
+        action.dataset.routeFeedbackSubmittedCount = String(submitted.size);
+    } catch (_) {
+        // 状态恢复失败不影响继续提交新的建议。
+    }
 }
 
 function getAssistantTraceMcpActionName(event = {}) {
@@ -119,11 +159,11 @@ function getAssistantTraceEventCopy(event = {}) {
         return {
             tool: 'decision-feedback',
             placement: 'footer',
-            label: '路由反馈',
+            label: '路由优化建议',
             tone: 'quiet',
-            text: '若本轮检索、工具或处理方式不合适，可提交修正供后续人工核验。',
+            text: '记录对后续处理方式的建议，需经人工核验；不会重新生成本次回答。',
             action: 'decision-feedback',
-            actionLabel: '修正本轮路由',
+            actionLabel: '提交路由建议',
             decisions
         };
     }
@@ -323,17 +363,23 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
 
     const form = document.createElement('form');
     form.className = 'chat-route-feedback-form';
-    form.setAttribute('aria-label', '修正本轮路由');
+    form.setAttribute('aria-label', '提交路由优化建议');
     const summary = document.createElement('p');
     summary.className = 'chat-route-feedback-summary';
-    summary.textContent = '选择需要修正的路由与替代方式；提交后仅作为待核验反馈，不会重跑本轮对话。';
+    summary.textContent = '建议只用于后续优化，需要人工核验；不会重跑或改变本次对话。';
     const fields = document.createElement('div');
     fields.className = 'chat-route-feedback-fields';
     const decisionField = document.createElement('label');
-    decisionField.textContent = '需要修正的路由';
+    decisionField.textContent = '需要反馈的路由';
     const decisionSelect = document.createElement('select');
     decisionSelect.className = 'form-input chat-route-feedback-select';
-    decisionSelect.setAttribute('aria-label', '需要修正的路由');
+    decisionSelect.setAttribute('aria-label', '需要反馈的路由');
+    const decisionPlaceholder = document.createElement('option');
+    decisionPlaceholder.value = '';
+    decisionPlaceholder.disabled = true;
+    decisionPlaceholder.selected = true;
+    decisionPlaceholder.textContent = '请选择需要反馈的路由';
+    decisionSelect.appendChild(decisionPlaceholder);
     correctable.forEach((decision, index) => {
         const option = document.createElement('option');
         option.value = String(index);
@@ -341,47 +387,105 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
         decisionSelect.appendChild(option);
     });
     decisionField.appendChild(decisionSelect);
+
     const actionField = document.createElement('label');
-    actionField.textContent = '调整为';
+    actionField.textContent = '建议改为';
     const actionSelect = document.createElement('select');
     actionSelect.className = 'form-input chat-route-feedback-select';
-    actionSelect.setAttribute('aria-label', '调整后的路由方式');
+    actionSelect.setAttribute('aria-label', '建议采用的路由方式');
+    actionSelect.disabled = true;
     actionField.appendChild(actionSelect);
     fields.append(decisionField, actionField);
+
+    const currentRoute = document.createElement('p');
+    currentRoute.className = 'chat-route-feedback-current';
+    currentRoute.hidden = true;
+
+    const details = document.createElement('div');
+    details.className = 'chat-route-feedback-details';
+    const reasonField = document.createElement('label');
+    reasonField.textContent = '问题原因（可选）';
+    const reasonSelect = document.createElement('select');
+    reasonSelect.className = 'form-input chat-route-feedback-select';
+    reasonSelect.setAttribute('aria-label', '问题原因（可选）');
+    const reasonPlaceholder = document.createElement('option');
+    reasonPlaceholder.value = '';
+    reasonPlaceholder.textContent = '请选择问题原因（可选）';
+    reasonSelect.appendChild(reasonPlaceholder);
+    Object.entries(ROUTE_FEEDBACK_REASON_LABELS).forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        reasonSelect.appendChild(option);
+    });
+    reasonField.appendChild(reasonSelect);
+    const noteField = document.createElement('label');
+    noteField.textContent = '补充说明（可选）';
+    const note = document.createElement('textarea');
+    note.className = 'form-input chat-route-feedback-note';
+    note.maxLength = 500;
+    note.rows = 2;
+    note.placeholder = '请勿填写敏感信息；最多 500 字';
+    note.setAttribute('aria-label', '补充说明（可选）');
+    noteField.appendChild(note);
+    details.append(reasonField, noteField);
+
     const status = document.createElement('p');
     status.className = 'chat-route-feedback-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
     status.hidden = true;
     const actions = document.createElement('div');
     actions.className = 'chat-route-feedback-actions';
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.className = 'btn-primary chat-route-feedback-submit';
-    submit.textContent = '提交修正';
+    submit.textContent = '提交建议';
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'btn-secondary chat-route-feedback-cancel';
     cancel.textContent = '取消';
     actions.append(submit, cancel);
-    form.append(summary, fields, status, actions);
+    form.append(summary, fields, currentRoute, details, status, actions);
 
     const renderActionOptions = () => {
-        const decision = correctable[Number.parseInt(decisionSelect.value, 10)] || correctable[0];
+        const index = Number.parseInt(decisionSelect.value, 10);
+        const decision = Number.isInteger(index) ? correctable[index] : null;
         PivotSafeHtml.setHtml(actionSelect, '');
-        decision.allowedActionIds.filter(actionId => actionId !== decision.selectedActionId).forEach(actionId => {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        placeholder.textContent = decision ? '请选择建议路由' : '请先选择需要反馈的路由';
+        actionSelect.appendChild(placeholder);
+        if (decision) decision.allowedActionIds.filter(actionId => actionId !== decision.selectedActionId).forEach(actionId => {
             const option = document.createElement('option');
             option.value = actionId;
             option.textContent = routeFeedbackActionLabel(actionId);
             actionSelect.appendChild(option);
         });
-        submit.disabled = actionSelect.options.length === 0;
+        actionSelect.disabled = !decision;
+        currentRoute.hidden = !decision;
+        currentRoute.textContent = decision
+            ? `当前路由：${routeFeedbackScenarioLabel(decision.scenario)} · ${routeFeedbackActionLabel(decision.selectedActionId)}`
+            : '';
+        submit.disabled = true;
     };
     const close = () => {
         form.remove();
         action.hidden = false;
         action.disabled = false;
+        const submittedCount = Number.parseInt(action.dataset.routeFeedbackSubmittedCount || '0', 10) || 0;
+        action.textContent = submittedCount ? `已提交 ${submittedCount} 项 · 继续反馈` : '提交路由建议';
         delete action.dataset.routeFeedbackOpen;
     };
-    decisionSelect.addEventListener('change', renderActionOptions);
+    decisionSelect.addEventListener('change', () => {
+        status.hidden = true;
+        renderActionOptions();
+    });
+    actionSelect.addEventListener('change', () => {
+        submit.disabled = !actionSelect.value;
+    });
     cancel.addEventListener('click', close);
     form.addEventListener('submit', async submitEvent => {
         submitEvent.preventDefault();
@@ -390,6 +494,7 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
         if (!decision || !correctedActionId || !decision.allowedActionIds.includes(correctedActionId)
             || correctedActionId === decision.selectedActionId) {
             status.hidden = false;
+            status.dataset.tone = 'error';
             status.textContent = '请选择与当前路由不同的允许方式。';
             return;
         }
@@ -397,7 +502,10 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
         cancel.disabled = true;
         decisionSelect.disabled = true;
         actionSelect.disabled = true;
+        reasonSelect.disabled = true;
+        note.disabled = true;
         status.hidden = false;
+        delete status.dataset.tone;
         status.textContent = '正在提交修正…';
         try {
             const response = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/decision-feedback`, {
@@ -405,24 +513,37 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     decisionId: decision.decisionId,
-                    selectedActionId: decision.selectedActionId,
                     correctedActionId,
-                    status: 'partial'
+                    reason: String(reasonSelect.value || '').trim().toLowerCase(),
+                    note: String(note.value || '').trim()
                 })
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || payload.error) throw new Error(payload.error || '路由反馈提交失败');
-            form.remove();
-            action.hidden = false;
-            action.disabled = true;
-            action.textContent = '已提交修正';
-            delete action.dataset.routeFeedbackOpen;
-            showToast('路由修正已提交，需结合实际结果或人工核验后才会用于训练。', 'success');
+            const submitted = new Set(String(action.dataset.routeFeedbackSubmittedIds || '').split(',').filter(Boolean));
+            submitted.add(decision.decisionId);
+            action.dataset.routeFeedbackSubmittedIds = [...submitted].join(',');
+            action.dataset.routeFeedbackSubmittedCount = String(submitted.size);
+            const selectedOption = decisionSelect.options[decisionSelect.selectedIndex];
+            if (selectedOption && !selectedOption.textContent.includes('已提交')) selectedOption.textContent += '（已提交，可修改）';
+            status.hidden = false;
+            status.dataset.tone = 'success';
+            status.textContent = '建议已记录，等待人工核验。可继续反馈其他路由，或重新选择本项修改建议。';
+            submit.disabled = true;
+            cancel.disabled = false;
+            decisionSelect.disabled = false;
+            actionSelect.disabled = false;
+            reasonSelect.disabled = false;
+            note.disabled = false;
+            showToast('路由建议已记录，需通过人工核验后才会用于训练。', 'success');
         } catch (error) {
             submit.disabled = false;
             cancel.disabled = false;
             decisionSelect.disabled = false;
             actionSelect.disabled = false;
+            reasonSelect.disabled = false;
+            note.disabled = false;
+            status.dataset.tone = 'error';
             status.textContent = error.message || '路由反馈提交失败';
         }
     });
@@ -431,6 +552,7 @@ function showRouteFeedbackForm(action, decisions, sessionId) {
     action.disabled = false;
     action.dataset.routeFeedbackOpen = 'true';
     action.insertAdjacentElement('afterend', form);
+    void hydrateRouteFeedbackStatuses({ action, correctable, decisionSelect, form, sessionId });
     decisionSelect.focus();
 }
 

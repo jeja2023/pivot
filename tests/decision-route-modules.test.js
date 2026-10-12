@@ -19,7 +19,7 @@ test('智能决策管理路由完整注册审核、观测、模型和回滚端�
     const noop = async () => ({});
     registerDecisionObservabilityRoutes(router, {
         authMiddleware: (_req, _res, next) => next(), adminMiddleware: (_req, _res, next) => next(), logAction() {},
-        getDecisionOperationalMetrics: noop, recordVerifiedDecisionOutcome: noop,
+        getDecisionOperationalMetrics: noop, recordVerifiedDecisionOutcome: noop, listUserDecisionFeedback: noop, reviewUserDecisionFeedback: noop,
         buildVerifiedDecisionDatasetFromStore: noop, evaluateDecisionSamples: () => ({}),
         activateDecisionModelArtifact: noop, listDecisionModelArtifacts: noop, rollbackDecisionModelArtifact: noop,
         listDecisionPreferences: noop, saveDecisionPreference: noop, registerDecisionPolicyArtifact: noop,
@@ -30,6 +30,8 @@ test('智能决策管理路由完整注册审核、观测、模型和回滚端�
     assert.equal(endpoints.has('post /observability/decision-evaluation-sets/import'), true);
     assert.equal(endpoints.has('post /observability/decision-evaluation-sets/:version/cases/:caseId/review'), true);
     assert.equal(endpoints.has('get /observability/decision-maintenance'), true);
+    assert.equal(endpoints.has('get /observability/decision-feedback'), true);
+    assert.equal(endpoints.has('post /observability/decision-feedback/:id/review'), true);
     assert.equal(endpoints.has('post /observability/decision-models/:id/activate'), true);
     assert.equal(endpoints.has('post /observability/decision-models/:id/rollback'), true);
 });

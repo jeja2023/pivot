@@ -15,7 +15,7 @@ const {
     listChatContextSnapshotsForUser,
     listChatContextWindowsForUser
 } = require('../services/chat-context-state-store');
-const { recordUserDecisionFeedback } = require('../services/decision-observability');
+const { listUserDecisionFeedbackStatuses, recordUserDecisionFeedback } = require('../services/decision-observability');
 const { listDecisionPreferences, saveDecisionPreference } = require('../services/decision-preferences');
 
 const normalizeTags = (value) => String(value || '')
@@ -244,14 +244,26 @@ function createSessionsRouter({
         const outcome = await recordUserDecisionFeedback({
             decisionId: req.body?.decisionId,
             correctedActionId: req.body?.correctedActionId,
-            selectedActionId: req.body?.selectedActionId,
-            status: req.body?.status,
+            reason: req.body?.reason,
+            note: req.body?.note,
             userId: req.user.id,
             sessionId: req.params.id
         });
         if (!outcome) return res.status(400).json({ error: '决策不存在、无权访问，或修正动作不在当时允许的候选中。' });
         logAction(req, '提交路由修正反馈', '会话: ' + req.params.id + '，决策: ' + outcome.decisionId);
-        res.status(202).json({ success: true, outcome: { id: outcome.id, decisionId: outcome.decisionId, correctedActionId: outcome.verifiedActionId } });
+        res.status(202).json({ success: true, outcome: {
+            id: outcome.id,
+            decisionId: outcome.decisionId,
+            correctedActionId: outcome.verifiedActionId,
+            reviewStatus: outcome.reviewStatus
+        } });
+    }));
+
+    router.get('/sessions/:id/decision-feedback', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await listUserDecisionFeedbackStatuses({
+            userId: req.user.id,
+            sessionId: req.params.id
+        }) });
     }));
 
     router.get('/sessions/tags/list', authMiddleware, asyncHandler(async (req, res) => {
