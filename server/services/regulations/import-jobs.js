@@ -11,9 +11,6 @@ const {
 } = require('./mutations');
 const { normalizeRegulationId, uploadRoot } = require('./shared');
 
-const JOB_ACTIVE_STATUSES = new Set(['queued', 'running', 'retry_wait']);
-const JOB_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
-
 function normalizePositiveInt(value, fallback = null, maximum = Number.MAX_SAFE_INTEGER) {
     const number = Number.parseInt(value, 10);
     if (!Number.isSafeInteger(number) || number <= 0) return fallback;
@@ -330,17 +327,18 @@ function createRegulationImportWorker({
         if (!started || running) return;
         running = true;
         try {
-            const job = await claimNextRegulationImportJob({ workerId });
-            if (!job) return;
-            try {
-                await processRegulationImportJob(job);
-            } catch (error) {
-                const result = await failRegulationImportJob(job, error);
-                logger.warn({ err: error.message, jobId: job.id, status: result.status }, '法规导入任务执行失败');
+            while (started) {
+                const job = await claimNextRegulationImportJob({ workerId });
+                if (!job) break;
+                try {
+                    await processRegulationImportJob(job);
+                } catch (error) {
+                    const result = await failRegulationImportJob(job, error);
+                    logger.warn({ err: error.message, jobId: job.id, status: result.status }, '法规导入任务执行失败');
+                }
             }
         } finally {
             running = false;
-            if (started) void drain();
         }
     }
     async function start() {
@@ -367,19 +365,13 @@ async function startRegulationImportWorker() {
 }
 
 module.exports = {
-    JOB_ACTIVE_STATUSES,
-    JOB_TERMINAL_STATUSES,
     cancelRegulationImportJob,
     claimNextRegulationImportJob,
-    completeRegulationImportJob,
-    createRegulationImportWorker,
     enqueueRegulationImportJob,
     failRegulationImportJob,
     listRegulationImportJobs,
     processRegulationImportJob,
     retryRegulationImportJob,
-    recoverRegulationImportJobs,
-    serializeRegulationImportJob,
     startRegulationImportWorker,
     updateRegulationImportJob
 };

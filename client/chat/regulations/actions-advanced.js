@@ -1,3 +1,4 @@
+/* global atob */
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
@@ -236,7 +237,7 @@
                                 blob = new Blob([resp.markdown || ''], { type: 'text/markdown;charset=utf-8' });
                                 fileName = `法规查询报告_${Date.now()}.md`;
                             } else {
-                                const raw = window.atob(String(resp.contentBase64 || ''));
+                                const raw = atob(String(resp.contentBase64 || ''));
                                 const bytes = new Uint8Array(raw.length);
                                 for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
                                 blob = new Blob([bytes], { type: resp.mimeType || 'application/octet-stream' });

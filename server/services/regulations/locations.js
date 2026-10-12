@@ -81,7 +81,6 @@ async function getRegulationArticleLocation({ articleId }) {
 module.exports = {
     deriveArticleLocations,
     getRegulationArticleLocation,
-    inferRegulationPageNumber,
     listRegulationArticleLocations,
     saveRegulationArticleLocations
 };
