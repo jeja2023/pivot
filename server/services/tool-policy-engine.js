@@ -93,7 +93,9 @@ async function resolveInvocationTool({ safeName, suppliedTool = null, toolList =
                     title: cached.displayTitle || cached.title || shortName,
                     description: cached.displayDescription || cached.description || shortName,
                     input_schema: cached.input_schema || cached.inputSchema || { type: 'object' },
-                    output_schema: cached.output_schema || cached.outputSchema || { type: 'object' },
+                    // 旧 MCP 缓存只保存输入 Schema。缺失输出 Schema 代表“未声明”，
+                    // 不能擅自收窄为 object，否则数组/文本型查询结果会在 PEP 被拒绝。
+                    output_schema: cached.output_schema || cached.outputSchema || {},
                     source: 'mcp',
                     risk: cached.governance?.riskLevel || cached.risk || (managedReadSource ? 'medium' : 'high'),
                     approvalRequired: cached.governance?.approvalRequired || cached.requiresApproval,

@@ -99,6 +99,41 @@ test('统一 PEP 在执行前拒绝无效输入，并验证工具输出', async 
     assert.equal(events.some(event => event.status === 'success'), true);
 });
 
+test('旧 MCP 工具未声明输出契约时保留数组和文本结果', async () => {
+    const engine = createToolPolicyEngine({
+        formatToolList: async () => [],
+        listCachedMcpTools: async () => [{
+            name: 'legacy.query',
+            fullName: 'mcp.18.legacy.query',
+            input_schema: { type: 'object' }
+        }],
+        activeRelease: async () => null,
+        getCapabilityToolGovernance: async () => ({ enabled: true }),
+        buildToolExecutionPlan: async ({ tool, input }) => ({
+            tool: tool.name,
+            input,
+            policy: { decision: 'allow', reasons: [], reasonCodes: [] },
+            approval: { required: false }, network: { preflight: 'not_applicable' }, retry: { retryable: true }
+        }),
+        recordToolInvocationEvent: async () => 'event-1'
+    });
+    const result = await engine.invoke({
+        actor: { id: 7 },
+        toolName: 'mcp.18.legacy.query',
+        input: {}
+    }, async () => ({
+        content: [{ type: 'text', text: '[{"id":1}]' }],
+        structuredContent: [{ id: 1 }]
+    }));
+    assert.deepEqual(result.structuredContent, [{ id: 1 }]);
+    const textResult = await engine.invoke({
+        actor: { id: 7 },
+        toolName: 'mcp.18.legacy.query',
+        input: {}
+    }, async () => 'legacy plain-text result');
+    assert.equal(textResult, 'legacy plain-text result');
+});
+
 test('连接账户公开投影永不返回秘密，工具任务 ID 不可预测且带前缀', () => {
     const account = publicConnectionAccount({ id: 1, encrypted_secret_ref: 'mcp_servers:1:api_key', scopes: '["orders.read"]', metadata: '{"provider":"erp"}' });
     assert.equal(account.encrypted_secret_ref, 'configured');

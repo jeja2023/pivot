@@ -113,7 +113,10 @@ function normalizeToolContract(definition = {}) {
             max_seconds: Math.max(Number(timeout.max_seconds ?? timeout.maxSeconds ?? 120) || 120, 1)
         },
         input_schema: inputSchema,
-        output_schema: normalizeJsonSchema(definition.output_schema || definition.outputSchema || { type: 'object' }),
+        // 输出 Schema 只有在工具作者明确声明时才是可执行契约。把缺省值设为
+        // `{ type: 'object' }` 会把历史 MCP 工具的数组或文本结果误判为违约，
+        // 即使工具本身从未承诺返回对象。
+        output_schema: normalizeJsonSchema(definition.output_schema || definition.outputSchema || {}),
         handler: definition.handler
     };
 }
