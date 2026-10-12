@@ -570,6 +570,7 @@
       "user_id": "所属用户 ID（关联 users.id）",
       "token": "刷新令牌 Token 密文",
       "expires_at": "过期失效时间",
+      "login_ip": "登录会话绑定的来源 IP 地址",
       "created_at": "记录创建时间（东八区）"
     },
     "api_keys": {

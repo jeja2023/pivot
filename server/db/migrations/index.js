@@ -30,6 +30,7 @@ const migrationModules = [
     require('./agent-run-retry-schedule'),
     require('./drop-redundant-log-indexes'),
     require('./refresh-token-device-binding'),
+    require('./refresh-token-single-ip-binding'),
     require('./message-context-token-count'),
     require('./agent-channel-delivery-claims'),
     require('./refresh-token-reuse-detection'),

@@ -1,11 +1,11 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 2076,
+  "total": 2083,
   "entries": [
     {
       "file": "server/auth.js",
-      "count": 22
+      "count": 28
     },
     {
       "file": "server/db/client.js",
@@ -365,6 +365,10 @@
     },
     {
       "file": "server/db/migrations/refresh-token-reuse-detection.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/refresh-token-single-ip-binding.js",
       "count": 1
     },
     {

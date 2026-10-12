@@ -1402,33 +1402,34 @@ test('refresh tokens are hashed at rest and rotated once', async () => {
     const password = 'Pivot-Test-123!';
     const user = await register(username, password, 'Refresh Token Test', 'QA');
     try {
-        const signedIn = await login(username, password);
+        const sessionOptions = { clientIp: '127.0.0.1' };
+        const signedIn = await login(username, password, sessionOptions);
         const stored = db.prepare('SELECT token FROM refresh_tokens WHERE user_id = ?').get(user.id);
         assert.ok(stored);
         assert.equal(stored.token, hashRefreshToken(signedIn.refreshToken));
         assert.notEqual(stored.token, signedIn.refreshToken);
 
-        const rotated = await refreshTokens(signedIn.refreshToken);
+        const rotated = await refreshTokens(signedIn.refreshToken, sessionOptions);
         const consumed = db.prepare('SELECT token, consumed_at FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(signedIn.refreshToken));
         assert.ok(consumed);
         assert.ok(consumed.consumed_at);
         assert.ok(db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(hashRefreshToken(rotated.refreshToken)));
-        await assert.rejects(() => refreshTokens(signedIn.refreshToken), /refresh|token|令牌/i);
+        await assert.rejects(() => refreshTokens(signedIn.refreshToken, sessionOptions), /refresh|token|令牌/i);
         assert.equal(db.prepare('SELECT COUNT(*) AS count FROM refresh_tokens WHERE user_id = ?').get(user.id).count, 0);
 
-        const concurrentSession = await login(username, password);
+        const concurrentSession = await login(username, password, sessionOptions);
         const concurrent = await Promise.allSettled([
-            refreshTokens(concurrentSession.refreshToken),
-            refreshTokens(concurrentSession.refreshToken)
+            refreshTokens(concurrentSession.refreshToken, sessionOptions),
+            refreshTokens(concurrentSession.refreshToken, sessionOptions)
         ]);
         assert.equal(concurrent.filter(item => item.status === 'fulfilled').length, 1);
         assert.equal(concurrent.filter(item => item.status === 'rejected').length, 1);
 
         const boundDeviceId = 'd'.repeat(24);
         const otherDeviceId = 'e'.repeat(24);
-        const boundSession = await login(username, password, { deviceId: boundDeviceId });
+        const boundSession = await login(username, password, { deviceId: boundDeviceId, clientIp: '127.0.0.1' });
         await assert.rejects(
-            () => refreshTokens(boundSession.refreshToken, { deviceId: otherDeviceId }),
+            () => refreshTokens(boundSession.refreshToken, { deviceId: otherDeviceId, clientIp: '127.0.0.1' }),
             /设备绑定|重新登录/
         );
     } finally {

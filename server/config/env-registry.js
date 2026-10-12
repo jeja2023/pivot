@@ -18,6 +18,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PG_ANALYZE_TIMEOUT_MS: { group: 'PostgreSQL 维护', type: 'integer', defaultValue: 60_000, min: 1_000, max: 120_000, description: '单张表 ANALYZE 的执行超时。' },
     PG_ANALYZE_TOTAL_TIMEOUT_MS: { group: 'PostgreSQL 维护', type: 'integer', defaultValue: 600_000, min: 60_000, max: 3_600_000, description: '单轮 ANALYZE 的总时限；到期后从进度游标继续。' },
     PIVOT_EMBED_ALLOWED_ORIGINS: { group: '安全', type: 'csv', defaultValue: '', description: '工作流页面、媒体和 iframe 可使用的外部 Origin 白名单；留空时仅允许同源资源。' },
+    PIVOT_SINGLE_IP_SESSION_MODE: { group: '安全', type: 'boolean', defaultValue: true, description: '同一账号仅允许一个来源 IP 的网页登录会话；新 IP 成功登录会撤销旧 IP 的访问令牌和刷新令牌。反向代理必须通过 TRUSTED_PROXY_IPS 配置可信地址。' },
     PIVOT_PRESENTATION_MAX_BYTES: { group: 'PPT 制作', type: 'integer', defaultValue: 8_388_608, min: 262_144, max: 67_108_864, description: '单份演示文稿结构化 IR 的最大字节数，限制页面、文本和内嵌表格数据，避免编辑与渲染耗尽内存。' },
     PIVOT_PRESENTATION_ASSET_MAX_BYTES: { group: 'PPT 制作', type: 'integer', defaultValue: 20_971_520, min: 1_048_576, max: 67_108_864, description: '单个 PPT 图片素材允许上传的最大字节数；素材仍受安全上传 MIME、真实文件头与 CAS 归属校验。' },
     PIVOT_ELECTRON_LOCALES: { group: '桌面交付', type: 'csv', defaultValue: 'zh-CN,en-US', itemPattern: /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/, description: '桌面安装包保留的 Electron 语言包。' },

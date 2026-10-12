@@ -36,6 +36,7 @@
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
 | --- | --- | --- | --- | --- |
 | `PIVOT_EMBED_ALLOWED_ORIGINS` | csv | `` | 逗号分隔的语言标记 | 工作流页面、媒体和 iframe 可使用的外部 Origin 白名单；留空时仅允许同源资源。 |
+| `PIVOT_SINGLE_IP_SESSION_MODE` | boolean | `true` | true / false | 同一账号仅允许一个来源 IP 的网页登录会话；新 IP 成功登录会撤销旧 IP 的访问令牌和刷新令牌。反向代理必须通过 TRUSTED_PROXY_IPS 配置可信地址。 |
 
 ## PPT 制作
 

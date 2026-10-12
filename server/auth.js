@@ -8,6 +8,7 @@ const { parsePositiveInt } = require('./number');
 const { normalizeRole, withPermissionFlags } = require('./permissions');
 const { getApiAccessSetting } = require('./services/api-access-settings');
 const { PASSWORD_RULE_DESCRIPTION, getPasswordValidationMessage } = require('./password-policy');
+const { getClientIp, isTrustedProxyIp, normalizeIpAddress } = require('./http');
 
 function apiKeyAllowsRequest(req, apiKeyData) {
     const path = String(req?.originalUrl || req?.url || '').split('?')[0];
@@ -112,7 +113,21 @@ function generateCsrfToken() {
     return crypto.randomBytes(24).toString('base64url');
 }
 
-function generateAccessToken(user) {
+function singleIpSessionModeEnabled(env = process.env) {
+    return String(env.PIVOT_SINGLE_IP_SESSION_MODE ?? 'true').trim().toLowerCase() !== 'false';
+}
+
+function getSessionClientIp(req = {}) {
+    const remoteIp = normalizeIpAddress(req.socket?.remoteAddress || req.connection?.remoteAddress || '');
+    const forwardedFor = String(req.headers?.['x-forwarded-for'] || '').trim();
+    // 代理转发头只能由明确登记的代理提供；否则 IP 绑定会被伪造或退化为
+    // 所有用户共用一个代理地址，宁可拒绝登录也不能制造“已绑定”的假象。
+    if (forwardedFor && !isTrustedProxyIp(remoteIp)) return '';
+    return getClientIp(req);
+}
+
+function generateAccessToken(user, options = {}) {
+    const sessionIp = normalizeIpAddress(options.sessionIp || options.clientIp || '');
     return jwt.sign(
         {
             id: user.id,
@@ -120,7 +135,8 @@ function generateAccessToken(user) {
             nickname: user.nickname || '',
             unit: user.unit || '',
             role: normalizeRole(user.role),
-            tv: Math.max(Number(user.token_version ?? user.tokenVersion ?? 0) || 0, 0)
+            tv: Math.max(Number(user.token_version ?? user.tokenVersion ?? 0) || 0, 0),
+            ...(sessionIp ? { sip: sessionIp } : {})
         },
         JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRES }
@@ -140,17 +156,17 @@ function generateDeviceId() {
     return crypto.randomBytes(24).toString('base64url');
 }
 
-async function generateRefreshToken(userId, deviceId = '') {
-    return issueRefreshToken({ execute }, userId, crypto.randomUUID(), deviceId);
+async function generateRefreshToken(userId, deviceId = '', loginIp = '') {
+    return issueRefreshToken({ execute }, userId, crypto.randomUUID(), deviceId, loginIp);
 }
 
-async function issueRefreshToken(executor, userId, familyId = crypto.randomUUID(), deviceId = '') {
+async function issueRefreshToken(executor, userId, familyId = crypto.randomUUID(), deviceId = '', loginIp = '') {
     const token = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
     
-    await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at, family_id, device_id) VALUES (?, ?, ?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr, familyId, normalizeDeviceId(deviceId)]);
+    await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at, family_id, device_id, login_ip) VALUES (?, ?, ?, ?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr, familyId, normalizeDeviceId(deviceId), normalizeIpAddress(loginIp)]);
     return token;
 }
 
@@ -201,6 +217,12 @@ async function resolveAuthenticatedUserAsync(req) {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
+        if (singleIpSessionModeEnabled()) {
+            const tokenIp = normalizeIpAddress(decoded.sip || '');
+            const requestIp = getSessionClientIp(req);
+            if (!tokenIp || !requestIp) return { user: null, token, code: 'AUTH_IP_BINDING_REQUIRED' };
+            if (tokenIp !== requestIp) return { user: null, token, code: 'AUTH_IP_MISMATCH' };
+        }
         const user = await queryOne(
             'SELECT id, username, nickname, unit, role, status, created_at, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
             [decoded.id]
@@ -281,12 +303,39 @@ async function login(username, password, options = {}) {
             .then(hash => execute('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [hash, user.id, user.password_hash]))
             .catch(error => logger.warn({ err: error.message, userId: user.id }, '登录后密码哈希升级失败'));
     }
-    const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user.id, options.deviceId);
-    await execute('UPDATE users SET last_login_at = ? WHERE id = ?', [getBeijingTimestamp(), user.id]);
+    const sessionIp = normalizeIpAddress(options.clientIp || '');
+    if (singleIpSessionModeEnabled() && !sessionIp) throw new Error('无法确定登录来源 IP，已拒绝建立会话。请检查反向代理 TRUSTED_PROXY_IPS 配置。');
+    const result = await transaction(async trx => {
+        const lockedUser = await trx.queryOne('SELECT * FROM users WHERE id = ? FOR UPDATE', [user.id]);
+        if (!lockedUser || lockedUser.status === 'disabled') throw new Error('用户状态异常');
+        let sessionReplaced = false;
+        if (singleIpSessionModeEnabled()) {
+            const existingIps = await trx.query(`
+                SELECT DISTINCT NULLIF(login_ip, '') AS login_ip
+                FROM refresh_tokens
+                WHERE user_id = ? AND expires_at > ? AND consumed_at IS NULL
+            `, [user.id, getBeijingTimestamp()]);
+            const hasDifferentOrLegacySession = existingIps.some(row => {
+                const existingIp = normalizeIpAddress(row.login_ip || '');
+                return !existingIp || existingIp !== sessionIp;
+            });
+            if (hasDifferentOrLegacySession) {
+                await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
+                await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [user.id]);
+                lockedUser.token_version = Number(lockedUser.token_version || 0) + 1;
+                sessionReplaced = true;
+            }
+        }
+        const refreshToken = await issueRefreshToken(trx, user.id, crypto.randomUUID(), options.deviceId, sessionIp);
+        await trx.execute('UPDATE users SET last_login_at = ? WHERE id = ?', [getBeijingTimestamp(), user.id]);
+        return {
+            accessToken: generateAccessToken(lockedUser, { sessionIp }),
+            refreshToken,
+            sessionReplaced
+        };
+    });
     return { 
-        accessToken, 
-        refreshToken, 
+        ...result,
         user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active', created_at: user.created_at })
     };
 }
@@ -315,6 +364,14 @@ async function refreshTokens(token, options = {}) {
             return null;
         }
         const requestedDeviceId = normalizeDeviceId(options.deviceId);
+        const requestedIp = normalizeIpAddress(options.clientIp || '');
+        const boundIp = normalizeIpAddress(refreshTokenData.login_ip || '');
+        if (singleIpSessionModeEnabled() && (!boundIp || !requestedIp || boundIp !== requestedIp)) {
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [refreshTokenData.user_id]);
+            await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            terminalError = new Error('刷新令牌来源 IP 不匹配，当前账号会话已全部撤销，请重新登录。');
+            return null;
+        }
         const boundDeviceId = normalizeDeviceId(refreshTokenData.device_id);
         if (boundDeviceId && boundDeviceId !== requestedDeviceId) {
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ? AND family_id = ?', [refreshTokenData.user_id, refreshTokenData.family_id || '']);
@@ -332,8 +389,8 @@ async function refreshTokens(token, options = {}) {
             terminalError = new Error('刷新令牌已被使用或已失效，请重新登录。');
             return null;
         }
-        const accessToken = generateAccessToken(user);
-        const newRefreshToken = await issueRefreshToken(trx, user.id, refreshTokenData.family_id || crypto.randomUUID(), requestedDeviceId || boundDeviceId);
+        const accessToken = generateAccessToken(user, { sessionIp: boundIp });
+        const newRefreshToken = await issueRefreshToken(trx, user.id, refreshTokenData.family_id || crypto.randomUUID(), requestedDeviceId || boundDeviceId, boundIp);
         return { accessToken, refreshToken: newRefreshToken };
     });
     if (terminalError) throw terminalError;
@@ -351,6 +408,10 @@ async function authMiddleware(req, res, next) {
 
         if (auth.code === 'TOKEN_EXPIRED') {
             return res.status(401).json({ error: 'Token 已过期', code: 'TOKEN_EXPIRED' });
+        }
+
+        if (auth.code === 'AUTH_IP_BINDING_REQUIRED' || auth.code === 'AUTH_IP_MISMATCH') {
+            return res.status(401).json({ error: '当前会话的来源 IP 已变更，请重新登录。', code: auth.code });
         }
 
         if (auth.code === 'API_ACCESS_DISABLED') {
@@ -422,5 +483,7 @@ module.exports = {
     hashRefreshToken,
     rotateRefreshToken,
     generateRefreshToken,
-    generateAccessToken
+    generateAccessToken,
+    getSessionClientIp,
+    singleIpSessionModeEnabled
 };

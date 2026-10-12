@@ -20,7 +20,8 @@ const {
     generateCsrfToken,
     generateDeviceId,
     resolveAuthenticatedUserAsync,
-    hashRefreshToken
+    hashRefreshToken,
+    getSessionClientIp
 } = require('../auth');
 const { asyncHandler } = require('../http');
 const { query, queryOne, execute, transaction } = require('../db/client');
@@ -75,7 +76,7 @@ function createAuthRouter({
     router.post('/auth/login', loginLimiter, effectiveLoginAccountLimiter, asyncHandler(async (req, res) => {
         try {
             const deviceId = getCookie(req, DEVICE_COOKIE_NAME) || generateDeviceId();
-            const data = await login(req.body.username, req.body.password, { deviceId });
+            const data = await login(req.body.username, req.body.password, { deviceId, clientIp: getSessionClientIp(req) });
             req.user = data.user;
             logAction(req, '用户登录', '登录成功');
             
@@ -110,7 +111,7 @@ function createAuthRouter({
 
         try {
             const deviceId = getCookie(req, DEVICE_COOKIE_NAME) || generateDeviceId();
-            const data = await refreshTokens(refreshToken, { deviceId });
+            const data = await refreshTokens(refreshToken, { deviceId, clientIp: getSessionClientIp(req) });
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
