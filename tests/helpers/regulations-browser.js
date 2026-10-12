@@ -227,7 +227,7 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
         };
     });
     const modules = ['render-base', 'render-batch', 'render-shell', 'render-documents', 'render-results', 'actions-core', 'actions-batch', 'actions-batch-edit'];
-    if (includeAdvanced) modules.push('actions-import', 'actions-advanced');
+    if (includeAdvanced) modules.push('actions-import', 'actions-governance', 'actions-advanced');
     modules.push('events');
     for (const file of modules) {
         await page.addScriptTag({ path: path.join(root, 'client/chat/regulations', `${file}.js`) });
